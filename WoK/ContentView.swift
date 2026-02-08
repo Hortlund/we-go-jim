@@ -1,61 +1,88 @@
-//
-//  ContentView.swift
-//  WoK
-//
-//  Created by Andreas Hortlund on 2026-02-06.
-//
-
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    @Environment(\.scenePhase) private var scenePhase
+
+    @State private var appPhase: AppPhase = .splash
+    @State private var activeWorkoutCoordinator = ActiveWorkoutCoordinator()
+    @State private var catalogSyncCoordinator = CatalogSyncCoordinator()
 
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
+        Group {
+            switch appPhase {
+            case .splash:
+                SplashView()
+                    .task {
+                        await transitionFromSplashIfNeeded()
+                    }
+            case .login:
+                LoginGateView {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        appPhase = .main
                     }
                 }
-                .onDelete(perform: deleteItems)
+            case .main:
+                MainTabView()
             }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
-            }
-        } detail: {
-            Text("Select an item")
+        }
+        .environment(activeWorkoutCoordinator)
+        .environment(catalogSyncCoordinator)
+        .tint(WoKTheme.accent)
+        .preferredColorScheme(.dark)
+        .task {
+            activeWorkoutCoordinator.restoreActiveSessionIfNeeded(modelContext: modelContext)
+            catalogSyncCoordinator.primeLocalCatalogIfNeeded(modelContext: modelContext)
+            catalogSyncCoordinator.scheduleStaleSyncIfNeeded(modelContext: modelContext, reason: .appLaunch)
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
+            activeWorkoutCoordinator.restoreActiveSessionIfNeeded(modelContext: modelContext)
+            catalogSyncCoordinator.primeLocalCatalogIfNeeded(modelContext: modelContext)
+            catalogSyncCoordinator.scheduleStaleSyncIfNeeded(modelContext: modelContext, reason: .appForeground)
+        }
+        .onChange(of: appPhase) { _, newPhase in
+            guard newPhase == .main else { return }
+            activeWorkoutCoordinator.restoreActiveSessionIfNeeded(modelContext: modelContext)
+            catalogSyncCoordinator.primeLocalCatalogIfNeeded(modelContext: modelContext)
         }
     }
 
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
-    }
+    private func transitionFromSplashIfNeeded() async {
+        guard appPhase == .splash else { return }
+        try? await Task.sleep(for: .seconds(1.1))
 
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
-            }
+        guard appPhase == .splash else { return }
+        withAnimation(.easeInOut(duration: 0.2)) {
+            appPhase = .login
         }
     }
 }
 
+private enum AppPhase {
+    case splash
+    case login
+    case main
+}
+
 #Preview {
     ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
+        .modelContainer(for: [
+            ExerciseCatalogItem.self,
+            MuscleGroup.self,
+            ExerciseImageAsset.self,
+            ExerciseAlias.self,
+            ExerciseAttribution.self,
+            ExerciseCatalogSyncState.self,
+            UserProfile.self,
+            ProfileWidgetConfig.self,
+            TemplateFolder.self,
+            WorkoutTemplate.self,
+            TemplateExercise.self,
+            TemplateExerciseSet.self,
+            WorkoutSession.self,
+            WorkoutSessionExercise.self,
+            WorkoutSessionSet.self,
+        ], inMemory: true)
 }
