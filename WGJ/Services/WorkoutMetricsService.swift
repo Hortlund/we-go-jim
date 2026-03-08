@@ -72,7 +72,7 @@ final class WorkoutMetricsService {
             for exercise in orderedSessionExercises(session) where exercise.catalogExerciseUUID == catalogExerciseUUID {
                 for set in orderedSessionSets(exercise) where set.isCompleted {
                     guard let value = metricInput(from: set) else { continue }
-                    let oneRM = estimatedOneRepMax(weight: value.weight, reps: value.reps)
+                    let oneRM = comparisonOneRepMax(weight: value.weight, reps: value.reps, unit: value.unit)
                     best = max(best ?? 0, oneRM)
                 }
             }
@@ -94,7 +94,7 @@ final class WorkoutMetricsService {
 
             for set in orderedSessionSets(exercise) where set.isCompleted {
                 guard let value = metricInput(from: set) else { continue }
-                let oneRM = estimatedOneRepMax(weight: value.weight, reps: value.reps)
+                let oneRM = comparisonOneRepMax(weight: value.weight, reps: value.reps, unit: value.unit)
                 if oneRM > runningBest {
                     hits += 1
                     runningBest = oneRM
@@ -122,9 +122,10 @@ final class WorkoutMetricsService {
             for set in orderedSessionSets(exercise) where set.isCompleted {
                 guard let value = metricInput(from: set) else { continue }
                 let oneRM = estimatedOneRepMax(weight: value.weight, reps: value.reps)
-                guard oneRM > runningBest else { continue }
+                let comparisonOneRM = normalizedLoadForComparison(oneRM, unit: value.unit)
+                guard comparisonOneRM > runningBest else { continue }
 
-                runningBest = oneRM
+                runningBest = comparisonOneRM
                 let achievement = SessionPRAchievement(
                     id: "\(session.id.uuidString.lowercased())_\(exercise.catalogExerciseUUID.lowercased())",
                     catalogExerciseUUID: exercise.catalogExerciseUUID,
@@ -216,21 +217,23 @@ final class WorkoutMetricsService {
                         achievedAt: achievedAt
                     )
 
-                    if let existing = bestByExercise[exercise.catalogExerciseUUID] {
-                        if record.estimatedOneRepMax > existing.estimatedOneRepMax {
-                            bestByExercise[exercise.catalogExerciseUUID] = record
-                        }
-                    } else {
+                if let existing = bestByExercise[exercise.catalogExerciseUUID] {
+                    if isBetterPRRecord(record, than: existing) {
                         bestByExercise[exercise.catalogExerciseUUID] = record
                     }
+                } else {
+                    bestByExercise[exercise.catalogExerciseUUID] = record
+                }
                 }
             }
         }
 
         let personalRecords = bestByExercise.values
             .sorted { lhs, rhs in
-                if lhs.estimatedOneRepMax != rhs.estimatedOneRepMax {
-                    return lhs.estimatedOneRepMax > rhs.estimatedOneRepMax
+                let lhsValue = normalizedLoadForComparison(lhs.estimatedOneRepMax, unit: lhs.loadUnit)
+                let rhsValue = normalizedLoadForComparison(rhs.estimatedOneRepMax, unit: rhs.loadUnit)
+                if lhsValue != rhsValue {
+                    return lhsValue > rhsValue
                 }
                 return lhs.exerciseName.localizedStandardCompare(rhs.exerciseName) == .orderedAscending
             }
@@ -297,5 +300,31 @@ final class WorkoutMetricsService {
     private func weekStart(for date: Date) -> Date {
         let components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
         return calendar.date(from: components) ?? date
+    }
+
+    private func comparisonOneRepMax(weight: Double, reps: Int, unit: TemplateLoadUnit) -> Double {
+        normalizedLoadForComparison(estimatedOneRepMax(weight: weight, reps: reps), unit: unit)
+    }
+
+    private func normalizedLoadForComparison(_ value: Double, unit: TemplateLoadUnit) -> Double {
+        switch unit {
+        case .kg:
+            return value
+        case .lb:
+            return value * 0.45359237
+        case .bodyweight:
+            return value
+        }
+    }
+
+    private func isBetterPRRecord(_ candidate: WorkoutPRRecord, than existing: WorkoutPRRecord) -> Bool {
+        let candidateValue = normalizedLoadForComparison(candidate.estimatedOneRepMax, unit: candidate.loadUnit)
+        let existingValue = normalizedLoadForComparison(existing.estimatedOneRepMax, unit: existing.loadUnit)
+
+        if candidateValue != existingValue {
+            return candidateValue > existingValue
+        }
+
+        return candidate.achievedAt > existing.achievedAt
     }
 }

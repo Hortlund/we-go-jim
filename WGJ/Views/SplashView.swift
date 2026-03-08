@@ -3,67 +3,69 @@ import SwiftUI
 struct SplashView: View {
     var body: some View {
         ZStack {
-            WGJTheme.screenBackgroundGradient
+            LinearGradient(
+                colors: [
+                    Color(red: 0.03, green: 0.07, blue: 0.11),
+                    Color(red: 0.05, green: 0.11, blue: 0.18),
+                    Color(red: 0.03, green: 0.07, blue: 0.12),
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
                 .ignoresSafeArea()
 
             RadialGradient(
                 colors: [
-                    WGJTheme.accentBlue.opacity(0.14),
+                    WGJTheme.accentBlue.opacity(0.20),
                     Color.clear,
                 ],
                 center: .topLeading,
                 startRadius: 10,
-                endRadius: 340
+                endRadius: 420
             )
             .ignoresSafeArea()
 
-            VStack(spacing: 16) {
+            RadialGradient(
+                colors: [
+                    WGJTheme.accentCyan.opacity(0.14),
+                    Color.clear,
+                ],
+                center: .bottomTrailing,
+                startRadius: 40,
+                endRadius: 360
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 24) {
+                Spacer()
+
                 ZStack {
                     Circle()
-                        .fill(.thinMaterial)
-                        .overlay {
-                            Circle()
-                                .fill(WGJTheme.appHeroGradient.opacity(0.95))
-                        }
-                        .overlay {
-                            Circle()
-                                .stroke(WGJTheme.outlineStrong, lineWidth: 1)
-                        }
-                        .frame(width: 120, height: 120)
+                        .fill(WGJTheme.accentBlue.opacity(0.18))
+                        .blur(radius: 40)
+                        .frame(width: 220, height: 220)
 
                     Image("SplashIcon")
                         .resizable()
                         .scaledToFit()
-                        .frame(width: 82, height: 82)
-                        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                        .frame(width: 176, height: 176)
+                        .shadow(color: WGJTheme.shadowStrong.opacity(0.34), radius: 26, x: 0, y: 18)
                 }
 
-                Text("We Go Jim")
-                    .font(.system(size: 40, weight: .bold, design: .rounded))
-                    .foregroundStyle(WGJTheme.textPrimary)
+                VStack(spacing: 10) {
+                    Text("We Go Jim")
+                        .font(.system(size: 40, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color.white.opacity(0.96))
 
-                Text("Train together. Lift harder.")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(WGJTheme.textSecondary)
-                
-                WGJMetricPill(systemImage: "sparkles", value: "Liquid Glass")
-                    .padding(.top, 4)
+                    Text("Train together. Lift harder.")
+                        .font(.system(size: 16, weight: .medium, design: .rounded))
+                        .foregroundStyle(WGJTheme.textSecondary)
+                }
+
+                Spacer()
             }
-            .padding(28)
-            .background {
-                RoundedRectangle(cornerRadius: 30, style: .continuous)
-                    .fill(.regularMaterial)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 30, style: .continuous)
-                            .fill(WGJTheme.headerOverlayGradient.opacity(0.68))
-                    }
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 30, style: .continuous)
-                            .stroke(WGJTheme.outlineStrong, lineWidth: 1)
-                    }
-                    .shadow(color: WGJTheme.shadowStrong, radius: 28, x: 0, y: 16)
-            }
-            .padding(20)
+            .padding(.horizontal, 32)
+            .padding(.vertical, 40)
         }
     }
 }

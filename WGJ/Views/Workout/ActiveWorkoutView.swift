@@ -2,6 +2,7 @@ import Combine
 import Foundation
 import SwiftData
 import SwiftUI
+import UIKit
 
 struct ActiveWorkoutView: View {
     @Environment(\.dismiss) private var dismiss
@@ -118,6 +119,7 @@ struct ActiveWorkoutView: View {
                 value: coordinator.restTimerPopup?.id
             )
         }
+        .scrollDismissesKeyboard(.interactively)
         .wgjScreenBackground()
         .wgjNavigationChrome()
         .navigationTitle("Active Workout")
@@ -133,13 +135,11 @@ struct ActiveWorkoutView: View {
 
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button("Finish") {
+                    dismissKeyboard()
                     showingCancelConfirmation = false
                     showingFinishConfirmation = true
                 }
                 .disabled(session == nil || sessionExercises.isEmpty)
-                .popover(isPresented: $showingFinishConfirmation, arrowEdge: .top) {
-                    finishConfirmationPopover
-                }
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -171,6 +171,22 @@ struct ActiveWorkoutView: View {
         } message: {
             Text(errorMessage)
         }
+        .confirmationDialog("Finish Workout?", isPresented: $showingFinishConfirmation, titleVisibility: .visible) {
+            Button("Finish and Save") {
+                finishWorkout()
+            }
+            Button("Not yet", role: .cancel) { }
+        } message: {
+            Text("This will close the active workout and add it to your history.")
+        }
+        .confirmationDialog("Cancel Workout?", isPresented: $showingCancelConfirmation, titleVisibility: .visible) {
+            Button("Discard Workout", role: .destructive) {
+                cancelWorkout()
+            }
+            Button("Keep Workout", role: .cancel) { }
+        } message: {
+            Text("Cancel removes this active workout and all logged sets.")
+        }
     }
 
     private var session: WorkoutSession? {
@@ -194,6 +210,7 @@ struct ActiveWorkoutView: View {
             }
 
             Button {
+                dismissKeyboard()
                 showingFinishConfirmation = false
                 showingCancelConfirmation = true
             } label: {
@@ -212,9 +229,6 @@ struct ActiveWorkoutView: View {
                     )
             }
             .buttonStyle(.plain)
-            .popover(isPresented: $showingCancelConfirmation, arrowEdge: .bottom) {
-                cancelConfirmationPopover
-            }
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
@@ -335,70 +349,6 @@ struct ActiveWorkoutView: View {
         .buttonStyle(WGJGhostButtonStyle())
     }
 
-    private var finishConfirmationPopover: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Finish Workout?")
-                .font(.headline)
-                .foregroundStyle(WGJTheme.textPrimary)
-
-            Text("This will close the active workout and add it to your history.")
-                .font(.subheadline)
-                .foregroundStyle(WGJTheme.textSecondary)
-
-            HStack(spacing: 8) {
-                Button("Not yet") {
-                    showingFinishConfirmation = false
-                }
-                .buttonStyle(WGJGhostButtonStyle())
-
-                Button("Finish and Save") {
-                    showingFinishConfirmation = false
-                    finishWorkout()
-                }
-                .buttonStyle(WGJPrimaryButtonStyle())
-            }
-        }
-        .padding(14)
-        .frame(width: 290, alignment: .leading)
-        .wgjCardContainer(strong: true, cornerRadius: 14)
-        .presentationCompactAdaptation(.popover)
-    }
-
-    private var cancelConfirmationPopover: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Cancel Workout?")
-                .font(.headline)
-                .foregroundStyle(WGJTheme.textPrimary)
-
-            Text("Cancel removes this active workout and all logged sets.")
-                .font(.subheadline)
-                .foregroundStyle(WGJTheme.textSecondary)
-
-            HStack(spacing: 8) {
-                Button("Keep Workout") {
-                    showingCancelConfirmation = false
-                }
-                .buttonStyle(WGJGhostButtonStyle())
-                .lineLimit(1)
-                .minimumScaleFactor(0.9)
-
-                Button(role: .destructive) {
-                    showingCancelConfirmation = false
-                    cancelWorkout()
-                } label: {
-                    Text("Discard Workout")
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.84)
-                }
-                .buttonStyle(WGJPrimaryButtonStyle())
-            }
-        }
-        .padding(14)
-        .frame(width: 320, alignment: .leading)
-        .wgjCardContainer(strong: true, cornerRadius: 14)
-        .presentationCompactAdaptation(.popover)
-    }
-
     private func headerCard(_ session: WorkoutSession) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             WGJSectionHeader("Session")
@@ -436,42 +386,46 @@ struct ActiveWorkoutView: View {
 
     private var saveTemplateSheet: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 14) {
-                WGJSectionHeader("Save as Template", subtitle: "Use this workout as a reusable plan")
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    WGJSectionHeader("Save as Template", subtitle: "Use this workout as a reusable plan")
 
-                TextField("Template name", text: $templateNameDraft)
-                    .textInputAutocapitalization(.words)
-                    .wgjPillField()
+                    TextField("Template name", text: $templateNameDraft)
+                        .textInputAutocapitalization(.words)
+                        .wgjPillField()
 
-                Picker("Folder", selection: $templateFolderID) {
-                    Text("Unfiled").tag(Optional<UUID>.none)
-                    ForEach(folders) { folder in
-                        Text(folder.name).tag(Optional.some(folder.id))
+                    Picker("Folder", selection: $templateFolderID) {
+                        Text("Unfiled").tag(Optional<UUID>.none)
+                        ForEach(folders) { folder in
+                            Text(folder.name).tag(Optional.some(folder.id))
+                        }
                     }
+                    .pickerStyle(.menu)
+                    .wgjPillField()
                 }
-                .pickerStyle(.menu)
-                .wgjPillField()
-
-                HStack {
+                .padding(16)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .wgjSheetSurface()
+            .navigationTitle("Complete Workout")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
                     Button("Skip") {
                         finalizeCompletion()
                     }
-                    .buttonStyle(WGJGhostButtonStyle())
+                }
 
-                    Spacer()
-
-                    Button("Save Template") {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
                         saveSessionAsTemplate()
                     }
-                    .buttonStyle(WGJPrimaryButtonStyle())
                     .disabled(templateNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
-            .padding(16)
-            .wgjSheetSurface()
-            .navigationTitle("Complete Workout")
         }
-        .presentationDetents([.height(300)])
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
     }
 
     @MainActor
@@ -800,6 +754,7 @@ struct ActiveWorkoutView: View {
     }
 
     private func finishWorkout() {
+        dismissKeyboard()
         persistSessionMeta()
         flushPendingSaves()
         coordinator.clearRestTimer()
@@ -817,6 +772,7 @@ struct ActiveWorkoutView: View {
     }
 
     private func saveSessionAsTemplate() {
+        dismissKeyboard()
         do {
             _ = try templateRepository.createTemplate(
                 fromSessionID: sessionID,
@@ -830,6 +786,7 @@ struct ActiveWorkoutView: View {
     }
 
     private func finalizeCompletion() {
+        dismissKeyboard()
         showingSaveTemplateSheet = false
         coordinator.clearActiveWorkout()
         coordinator.selectedTab = .history
@@ -837,11 +794,13 @@ struct ActiveWorkoutView: View {
     }
 
     private func minimizeWorkout() {
+        dismissKeyboard()
         coordinator.collapseActiveWorkout()
         dismiss()
     }
 
     private func cancelWorkout() {
+        dismissKeyboard()
         persistSessionMeta()
         flushPendingSaves()
         coordinator.clearRestTimer()
@@ -864,6 +823,10 @@ struct ActiveWorkoutView: View {
         let mins = max(0, seconds) / 60
         let secs = max(0, seconds) % 60
         return String(format: "%d:%02d", mins, secs)
+    }
+
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 }
 

@@ -8,8 +8,11 @@ struct HistoryOverviewView: View {
     @Query(sort: [SortDescriptor(\WorkoutSession.startedAt, order: .reverse)])
     private var sessions: [WorkoutSession]
 
-    @State private var selectedMonthFilter: Date?
-    @State private var showingMonthPicker = false
+    @State private var selectedDayFilter: Date?
+    @State private var showingWorkoutCalendar = false
+    @State private var displayedCalendarMonth = Calendar.current.date(
+        from: Calendar.current.dateComponents([.year, .month], from: Date())
+    ) ?? Date()
     @State private var renderedSections: [HistoryMonthSection] = []
     @State private var errorMessage = ""
     @State private var showingError = false
@@ -23,21 +26,21 @@ struct HistoryOverviewView: View {
             VStack(alignment: .leading, spacing: 16) {
                 WGJRootHeader("History", subtitle: "Review completed sessions, volume, and best sets.") {
                     Button("Calendar") {
-                        showingMonthPicker = true
+                        openWorkoutCalendar()
                     }
                     .buttonStyle(WGJGhostButtonStyle())
                 }
 
-                if let selectedMonthFilter {
-                    Text(selectedMonthFilter.formatted(.dateTime.year().month(.wide)).uppercased())
-                        .font(.headline.weight(.semibold))
-                        .foregroundStyle(WGJTheme.textSecondary)
+                if let selectedDayFilter {
+                    selectedDayFilterCard(selectedDayFilter)
                 }
 
                 if renderedSections.isEmpty {
                     WGJEmptyStateCard(
-                        title: "No completed workouts yet",
-                        message: "Finish an active session to build up your history.",
+                        title: selectedDayFilter == nil ? "No completed workouts yet" : "No workouts on this day",
+                        message: selectedDayFilter == nil
+                            ? "Finish an active session to build up your history."
+                            : "Pick another logged day in the calendar or clear the filter.",
                         icon: "clock.arrow.trianglehead.counterclockwise.rotate.90"
                     )
                 }
@@ -59,13 +62,13 @@ struct HistoryOverviewView: View {
         }
         .wgjScreenBackground()
         .toolbar(.hidden, for: .navigationBar)
-        .sheet(isPresented: $showingMonthPicker) {
-            monthPickerSheet
+        .sheet(isPresented: $showingWorkoutCalendar) {
+            workoutCalendarSheet
         }
         .task(id: sessionsVersionKey) {
             recomputeMonthSections()
         }
-        .onChange(of: selectedMonthFilter) { _, _ in
+        .onChange(of: selectedDayFilter) { _, _ in
             recomputeMonthSections()
         }
         .alert("History Error", isPresented: $showingError) {
@@ -75,45 +78,16 @@ struct HistoryOverviewView: View {
         }
     }
 
-    private var monthPickerSheet: some View {
+    private var workoutCalendarSheet: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    WGJSectionHeader("Filter by Month")
-
-                    DatePicker(
-                        "Month",
-                        selection: Binding(
-                            get: { selectedMonthFilter ?? Date() },
-                            set: { selectedMonthFilter = startOfMonth(for: $0) }
-                        ),
-                        displayedComponents: [.date]
-                    )
-                    .datePickerStyle(.graphical)
-                    .labelsHidden()
-
-                    HStack {
-                        Button("Show All") {
-                            selectedMonthFilter = nil
-                            showingMonthPicker = false
-                        }
-                        .buttonStyle(WGJGhostButtonStyle())
-
-                        Spacer()
-
-                        Button("Apply") {
-                            showingMonthPicker = false
-                        }
-                        .buttonStyle(WGJPrimaryButtonStyle())
-                    }
-                }
-                .padding(16)
-            }
-            .wgjSheetSurface()
-            .navigationTitle("Calendar")
-            .navigationBarTitleDisplayMode(.inline)
+            HistoryWorkoutCalendarSheet(
+                displayedMonth: $displayedCalendarMonth,
+                selectedDay: $selectedDayFilter,
+                workoutCountsByDay: workoutCountsByDay,
+                onClose: { showingWorkoutCalendar = false }
+            )
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.large])
     }
 
     private func historyCard(_ card: HistorySessionCardData) -> some View {
@@ -202,11 +176,23 @@ struct HistoryOverviewView: View {
         }
     }
 
+    private var completedSessions: [WorkoutSession] {
+        sessions.filter { $0.status == .completed }
+    }
+
+    private var workoutCountsByDay: [Date: Int] {
+        var counts: [Date: Int] = [:]
+        for session in completedSessions {
+            let day = startOfDay(for: session.endedAt ?? session.startedAt)
+            counts[day, default: 0] += 1
+        }
+        return counts
+    }
+
     private func recomputeMonthSections() {
-        let completedSessions = sessions.filter { $0.status == .completed }
         let filtered = completedSessions.filter { session in
-            guard let selectedMonthFilter else { return true }
-            return startOfMonth(for: session.endedAt ?? session.startedAt) == selectedMonthFilter
+            guard let selectedDayFilter else { return true }
+            return startOfDay(for: session.endedAt ?? session.startedAt) == startOfDay(for: selectedDayFilter)
         }
 
         let grouped = Dictionary(grouping: filtered) { session in
@@ -242,7 +228,7 @@ struct HistoryOverviewView: View {
 
     private func formattedSessionDate(_ session: WorkoutSession) -> String {
         let value = session.endedAt ?? session.startedAt
-        return value.formatted(date: .complete, time: .omitted)
+        return value.formatted(date: .abbreviated, time: .shortened)
     }
 
     private func formattedDuration(_ seconds: Int) -> String {
@@ -306,10 +292,45 @@ struct HistoryOverviewView: View {
         WGJFormatters.decimalString(value)
     }
 
+    private func openWorkoutCalendar() {
+        let referenceDate = selectedDayFilter
+            ?? completedSessions.first.map { $0.endedAt ?? $0.startedAt }
+            ?? Date()
+        displayedCalendarMonth = startOfMonth(for: referenceDate)
+        showingWorkoutCalendar = true
+    }
+
+    private func selectedDayFilterCard(_ day: Date) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(day.formatted(date: .complete, time: .omitted))
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(WGJTheme.textPrimary)
+
+                Text("\(workoutCountsByDay[startOfDay(for: day), default: 0]) logged workout\(workoutCountsByDay[startOfDay(for: day), default: 0] == 1 ? "" : "s")")
+                    .font(.caption)
+                    .foregroundStyle(WGJTheme.textSecondary)
+            }
+
+            Spacer()
+
+            Button("Show All") {
+                selectedDayFilter = nil
+            }
+            .buttonStyle(WGJGhostButtonStyle())
+        }
+        .padding(14)
+        .wgjCardContainer()
+    }
+
     private func startOfMonth(for date: Date) -> Date {
         let calendar = Calendar.current
         let components = calendar.dateComponents([.year, .month], from: date)
         return calendar.date(from: components) ?? date
+    }
+
+    private func startOfDay(for date: Date) -> Date {
+        Calendar.current.startOfDay(for: date)
     }
 
     private func deleteSession(_ id: UUID) {
@@ -338,6 +359,229 @@ private struct HistorySessionCardData: Identifiable {
     let prsText: String
     let exerciseRows: [String]
     let bestSetRows: [String]
+}
+
+private struct HistoryWorkoutCalendarSheet: View {
+    @Binding var displayedMonth: Date
+    @Binding var selectedDay: Date?
+
+    let workoutCountsByDay: [Date: Int]
+    let onClose: () -> Void
+
+    private let calendar = Calendar.current
+
+    private var orderedWeekdaySymbols: [String] {
+        let symbols = calendar.veryShortStandaloneWeekdaySymbols
+        let startIndex = max(0, calendar.firstWeekday - 1)
+        return Array(symbols[startIndex...]) + Array(symbols[..<startIndex])
+    }
+
+    private var monthTitle: String {
+        displayedMonth.formatted(.dateTime.year().month(.wide))
+    }
+
+    private var gridDays: [HistoryCalendarDay] {
+        guard let monthInterval = calendar.dateInterval(of: .month, for: displayedMonth) else { return [] }
+
+        let monthStart = monthInterval.start
+        let dayCount = calendar.range(of: .day, in: .month, for: monthStart)?.count ?? 0
+        let firstWeekday = calendar.component(.weekday, from: monthStart)
+        let leadingSlots = (firstWeekday - calendar.firstWeekday + 7) % 7
+
+        var days = (0..<leadingSlots).map { index in
+            HistoryCalendarDay.placeholder("leading-\(displayedMonth.timeIntervalSinceReferenceDate)-\(index)")
+        }
+
+        for offset in 0..<dayCount {
+            guard let date = calendar.date(byAdding: .day, value: offset, to: monthStart) else { continue }
+            let dayStart = calendar.startOfDay(for: date)
+            days.append(
+                HistoryCalendarDay(
+                    id: dayStart.formatted(date: .numeric, time: .omitted),
+                    date: dayStart,
+                    workoutCount: workoutCountsByDay[dayStart, default: 0],
+                    isToday: calendar.isDateInToday(dayStart),
+                    isSelected: selectedDay.map { calendar.isDate($0, inSameDayAs: dayStart) } ?? false
+                )
+            )
+        }
+
+        while !days.isEmpty && days.count % 7 != 0 {
+            days.append(.placeholder(UUID().uuidString))
+        }
+
+        return days
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack {
+                    Button {
+                        moveMonth(by: -1)
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .frame(width: 36, height: 36)
+                    }
+                    .buttonStyle(WGJGhostButtonStyle())
+
+                    Spacer()
+
+                    VStack(spacing: 2) {
+                        Text("Workout Calendar")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(WGJTheme.textSecondary)
+
+                        Text(monthTitle)
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(WGJTheme.textPrimary)
+                    }
+
+                    Spacer()
+
+                    Button {
+                        moveMonth(by: 1)
+                    } label: {
+                        Image(systemName: "chevron.right")
+                            .frame(width: 36, height: 36)
+                    }
+                    .buttonStyle(WGJGhostButtonStyle())
+                }
+
+                Text("Select a day to filter history. Badges show how many workouts were logged on that date.")
+                    .font(.subheadline)
+                    .foregroundStyle(WGJTheme.textSecondary)
+
+                VStack(spacing: 10) {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 7), spacing: 8) {
+                        ForEach(Array(orderedWeekdaySymbols.enumerated()), id: \.offset) { _, symbol in
+                            Text(symbol.uppercased())
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(WGJTheme.textSecondary)
+                                .frame(maxWidth: .infinity)
+                        }
+
+                        ForEach(gridDays) { day in
+                            calendarDayButton(day)
+                        }
+                    }
+                }
+                .padding(14)
+                .wgjCardContainer(strong: true)
+
+                HStack {
+                    Button("Show All") {
+                        selectedDay = nil
+                    }
+                    .buttonStyle(WGJGhostButtonStyle())
+
+                    Spacer()
+
+                    Button("Done") {
+                        onClose()
+                    }
+                    .buttonStyle(WGJPrimaryButtonStyle())
+                }
+            }
+            .padding(16)
+        }
+        .wgjSheetSurface()
+        .navigationTitle("Calendar")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Close") {
+                    onClose()
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func calendarDayButton(_ day: HistoryCalendarDay) -> some View {
+        if let date = day.date {
+            Button {
+                if let selectedDay, calendar.isDate(selectedDay, inSameDayAs: date) {
+                    self.selectedDay = nil
+                } else {
+                    selectedDay = date
+                }
+            } label: {
+                VStack(spacing: 6) {
+                    Text("\(calendar.component(.day, from: date))")
+                        .font(.subheadline.weight(day.isSelected ? .bold : .semibold))
+                        .foregroundStyle(day.isSelected ? WGJTheme.textInverse : WGJTheme.textPrimary)
+
+                    if day.workoutCount > 0 {
+                        Text(day.workoutCount == 1 ? "1 workout" : "\(day.workoutCount) workouts")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(day.isSelected ? WGJTheme.textInverse : WGJTheme.accentBlue)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                    } else {
+                        Circle()
+                            .fill(Color.clear)
+                            .frame(width: 4, height: 4)
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 58)
+                .padding(.vertical, 6)
+                .background {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(dayBackground(for: day))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(dayBorder(for: day), lineWidth: day.isToday ? 1.4 : 1)
+                        }
+                }
+            }
+            .buttonStyle(.plain)
+        } else {
+            Color.clear
+                .frame(maxWidth: .infinity, minHeight: 58)
+        }
+    }
+
+    private func dayBackground(for day: HistoryCalendarDay) -> Color {
+        if day.isSelected {
+            return WGJTheme.accentBlue.opacity(0.92)
+        }
+        if day.workoutCount > 0 {
+            return WGJTheme.accentBlue.opacity(0.12)
+        }
+        return WGJTheme.field.opacity(0.54)
+    }
+
+    private func dayBorder(for day: HistoryCalendarDay) -> Color {
+        if day.isSelected {
+            return Color.white.opacity(0.18)
+        }
+        if day.isToday {
+            return WGJTheme.accentCyan.opacity(0.42)
+        }
+        if day.workoutCount > 0 {
+            return WGJTheme.accentBlue.opacity(0.28)
+        }
+        return WGJTheme.outline.opacity(0.68)
+    }
+
+    private func moveMonth(by value: Int) {
+        guard let moved = calendar.date(byAdding: .month, value: value, to: displayedMonth) else { return }
+        let components = calendar.dateComponents([.year, .month], from: moved)
+        displayedMonth = calendar.date(from: components) ?? moved
+    }
+}
+
+private struct HistoryCalendarDay: Identifiable {
+    let id: String
+    let date: Date?
+    let workoutCount: Int
+    let isToday: Bool
+    let isSelected: Bool
+
+    static func placeholder(_ id: String) -> HistoryCalendarDay {
+        HistoryCalendarDay(id: id, date: nil, workoutCount: 0, isToday: false, isSelected: false)
+    }
 }
 
 #Preview {

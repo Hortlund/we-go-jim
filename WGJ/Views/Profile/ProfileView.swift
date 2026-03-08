@@ -7,6 +7,13 @@ import UIKit
 struct ProfileView: View {
     @Environment(\.modelContext) private var modelContext
 
+    @Query(sort: [SortDescriptor(\WorkoutSession.updatedAt, order: .reverse)])
+    private var trackedSessions: [WorkoutSession]
+    @Query(sort: [SortDescriptor(\ProfileWidgetConfig.updatedAt, order: .reverse)])
+    private var widgetConfigs: [ProfileWidgetConfig]
+    @Query(sort: [SortDescriptor(\UserProfile.updatedAt, order: .reverse)])
+    private var storedProfiles: [UserProfile]
+
     @State private var displayName = ""
     @State private var avatarImageData: Data?
     @State private var selectedAvatarItem: PhotosPickerItem?
@@ -127,7 +134,7 @@ struct ProfileView: View {
         .task {
             await loadProfileIfNeeded()
         }
-        .onAppear {
+        .task(id: widgetStateVersionKey) {
             loadWidgetState()
         }
         .onChange(of: selectedAvatarItem) { _, newItem in
@@ -149,6 +156,17 @@ struct ProfileView: View {
         } message: {
             Text(errorMessage)
         }
+    }
+
+    private var widgetStateVersionKey: [String] {
+        let sessionKeys = trackedSessions
+            .filter { $0.status == .completed }
+            .map { "session:\($0.id.uuidString)|\($0.updatedAt.timeIntervalSinceReferenceDate)|\($0.status.rawValue)" }
+        let widgetKeys = widgetConfigs
+            .map { "widget:\($0.id.uuidString)|\($0.updatedAt.timeIntervalSinceReferenceDate)|\($0.isEnabled)|\($0.sortOrder)" }
+        let profileKeys = storedProfiles
+            .map { "profile:\($0.id.uuidString)|\($0.updatedAt.timeIntervalSinceReferenceDate)|\($0.weeklyWorkoutGoal)" }
+        return sessionKeys + widgetKeys + profileKeys
     }
 
     @ViewBuilder

@@ -151,7 +151,7 @@ struct ProfileWidgetManagerView: View {
     private func description(for kind: ProfileWidgetKind) -> String {
         switch kind {
         case .prs:
-            return "Show your latest personal records."
+            return "Show your strongest logged PRs."
         case .weeklyGoals:
             return "Track progress toward your workout goal."
         }
