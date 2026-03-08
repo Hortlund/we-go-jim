@@ -1,0 +1,78 @@
+import SwiftData
+import SwiftUI
+
+struct CatalogCreditsView: View {
+    @Query(sort: [SortDescriptor(\ExerciseAttribution.sourceName, order: .forward)]) private var attributions: [ExerciseAttribution]
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                WGJEmptyStateCard(
+                    title: "Exercise Data",
+                    message: "Exercise data is imported from wger, the open-source exercise database.",
+                    icon: "text.book.closed"
+                )
+
+                ForEach(deduplicatedAttributions, id: \.id) { entry in
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(entry.sourceName)
+                            .font(.headline)
+                            .foregroundStyle(WGJTheme.textPrimary)
+
+                        Text("License: \(entry.licenseName)")
+                            .font(.subheadline)
+                            .foregroundStyle(WGJTheme.textSecondary)
+
+                        if !entry.authorName.isEmpty {
+                            Text("Author: \(entry.authorName)")
+                                .font(.subheadline)
+                                .foregroundStyle(WGJTheme.textSecondary)
+                        }
+
+                        if let sourceURL = URL(string: entry.sourceURL), !entry.sourceURL.isEmpty {
+                            Link("Source URL", destination: sourceURL)
+                        }
+
+                        if let licenseURL = URL(string: entry.licenseURL), !entry.licenseURL.isEmpty {
+                            Link("License URL", destination: licenseURL)
+                        }
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .wgjCardContainer()
+                }
+            }
+            .padding(16)
+        }
+        .wgjScreenBackground()
+        .wgjNavigationChrome()
+        .navigationTitle("Catalog Credits")
+    }
+
+    private var deduplicatedAttributions: [CreditsAttributionRow] {
+        let mapped = attributions.map {
+            CreditsAttributionRow(
+                sourceName: $0.sourceName,
+                sourceURL: $0.sourceURL,
+                licenseName: $0.licenseName,
+                licenseURL: $0.licenseURL,
+                authorName: $0.authorName
+            )
+        }
+
+        var seen = Set<CreditsAttributionRow>()
+        return mapped.filter { seen.insert($0).inserted }
+    }
+}
+
+private struct CreditsAttributionRow: Hashable {
+    let sourceName: String
+    let sourceURL: String
+    let licenseName: String
+    let licenseURL: String
+    let authorName: String
+
+    var id: String {
+        [sourceName, sourceURL, licenseName, licenseURL, authorName].joined(separator: "|")
+    }
+}

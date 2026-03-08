@@ -1,0 +1,248 @@
+import SwiftUI
+import SwiftData
+
+struct LoginGateView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
+
+    private let accountService: any AccountStatusProviding
+    private let onAuthenticated: () -> Void
+
+    @State private var accountStatus: AccountStatus = .checking
+    @State private var isSeedingDemoData = false
+    @State private var seedErrorMessage = ""
+    @State private var showingSeedError = false
+
+    init(
+        accountService: any AccountStatusProviding = AccountStatusService(),
+        onAuthenticated: @escaping () -> Void
+    ) {
+        self.accountService = accountService
+        self.onAuthenticated = onAuthenticated
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.clear.wgjScreenBackground()
+
+                VStack(spacing: 18) {
+                    WGJRootHeader("We Go Jim", subtitle: "Lift solo or with bros, synced with iCloud when available.")
+
+                    VStack(spacing: 10) {
+                        Image(systemName: "person.crop.circle.badge.checkmark")
+                            .font(.system(size: 50, weight: .semibold))
+                            .foregroundStyle(WGJTheme.accentBlue)
+                            .frame(width: 78, height: 78)
+                            .background {
+                                Circle()
+                                    .fill(.thinMaterial)
+                                    .overlay {
+                                        Circle()
+                                            .fill(WGJTheme.headerOverlayGradient.opacity(0.8))
+                                    }
+                                    .overlay {
+                                        Circle()
+                                            .stroke(WGJTheme.outlineStrong, lineWidth: 1)
+                                    }
+                            }
+
+                        Text("Sign In With iCloud")
+                            .font(.title2.weight(.semibold))
+                            .foregroundStyle(WGJTheme.textPrimary)
+
+                        Text(statusDescription)
+                            .font(.subheadline)
+                            .foregroundStyle(WGJTheme.textSecondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(16)
+                    .wgjCardContainer(strong: true)
+
+                    if cloudSyncEnabled {
+                        cloudEnabledActions
+                    } else {
+                        cloudDisabledActions
+                    }
+
+                    Spacer()
+                }
+                .padding(.top, 8)
+                .padding(16)
+            }
+            .toolbar(.hidden, for: .navigationBar)
+            .task {
+                if cloudSyncEnabled {
+                    await refreshAccountStatus()
+                } else {
+                    accountStatus = .available
+                }
+            }
+            .alert("Demo Seed Failed", isPresented: $showingSeedError) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(seedErrorMessage)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var cloudEnabledActions: some View {
+        switch accountStatus {
+        case .checking:
+            ProgressView("Checking iCloud account...")
+
+        case .available:
+            VStack(spacing: 10) {
+                Button {
+                    onAuthenticated()
+                } label: {
+                    Label("Continue", systemImage: "arrow.right.circle.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(WGJPrimaryButtonStyle())
+
+#if DEBUG
+                Button {
+                    Task {
+                        await seedDemoData()
+                    }
+                } label: {
+                    if isSeedingDemoData {
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        Label("Seed Demo Data", systemImage: "sparkles")
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(WGJGhostButtonStyle())
+                .disabled(isSeedingDemoData)
+#endif
+            }
+
+        case .unavailable:
+            VStack(spacing: 10) {
+                Text(unavailableDescription)
+                    .font(.subheadline)
+                    .foregroundStyle(WGJTheme.textSecondary)
+                    .multilineTextAlignment(.center)
+
+                Button {
+                    onAuthenticated()
+                } label: {
+                    Label("Continue for Now", systemImage: "arrow.right.circle.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(WGJPrimaryButtonStyle())
+
+                Button {
+                    Task {
+                        await refreshAccountStatus()
+                    }
+                } label: {
+                    Label("Retry", systemImage: "arrow.clockwise")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(WGJGhostButtonStyle())
+            }
+        }
+    }
+
+    private var cloudDisabledActions: some View {
+        WGJEmptyStateCard(
+            title: "Local Mode",
+            message: "CloudKit could not initialize for this build or device environment. Data will be stored locally.",
+            icon: "internaldrive"
+        ) {
+            Button {
+                onAuthenticated()
+            } label: {
+                Label("Continue in Local Mode", systemImage: "arrow.right.circle.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(WGJPrimaryButtonStyle())
+        }
+    }
+
+    private var statusDescription: String {
+        if !cloudSyncEnabled {
+            return "Cloud sync could not be initialized. You can continue locally."
+        }
+
+        switch accountStatus {
+        case .checking:
+            return "Checking your iCloud account status."
+        case .available:
+            return "Your account is ready. Continue to your templates."
+        case .unavailable(let reason):
+            switch reason {
+            case .noAccount:
+                return "No iCloud account is signed in on this device."
+            case .restricted:
+                return "iCloud is restricted on this device."
+            case .temporarilyUnavailable:
+                return "iCloud is temporarily unavailable."
+            case .unknown:
+                return "Unable to verify iCloud account status right now."
+            }
+        }
+    }
+
+    private var unavailableDescription: String {
+        switch accountStatus {
+        case .unavailable(let reason):
+            switch reason {
+            case .noAccount:
+                return "Sign into iCloud in device settings or continue locally."
+            case .restricted:
+                return "iCloud is restricted on this device. Continue locally and sync later."
+            case .temporarilyUnavailable:
+                return "iCloud appears temporarily unavailable. Continue locally now and retry later."
+            case .unknown:
+                return "Status could not be verified. Continue locally and retry later."
+            }
+        default:
+            return "iCloud is unavailable right now."
+        }
+    }
+
+    private func refreshAccountStatus() async {
+        accountStatus = .checking
+        accountStatus = await accountService.fetchAccountStatus()
+    }
+
+#if DEBUG
+    private func seedDemoData() async {
+        guard case .available = accountStatus else { return }
+
+        isSeedingDemoData = true
+        defer { isSeedingDemoData = false }
+
+        do {
+            let seeder = DemoSeedService(modelContext: modelContext)
+            try seeder.seedDemoDataIfEmpty()
+        } catch {
+            seedErrorMessage = String(describing: error)
+            showingSeedError = true
+        }
+    }
+#endif
+}
+
+#Preview {
+    LoginGateView(onAuthenticated: { })
+        .modelContainer(for: [
+            ExerciseCatalogItem.self,
+            MuscleGroup.self,
+            ExerciseImageAsset.self,
+            ExerciseAlias.self,
+            ExerciseAttribution.self,
+            ExerciseCatalogSyncState.self,
+            UserProfile.self,
+            TemplateFolder.self,
+            WorkoutTemplate.self,
+            TemplateExercise.self,
+            TemplateExerciseSet.self,
+        ], inMemory: true)
+}

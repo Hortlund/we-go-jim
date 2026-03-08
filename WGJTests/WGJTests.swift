@@ -1,0 +1,588 @@
+import CloudKit
+import Foundation
+import SwiftData
+import Testing
+@testable import WGJ
+
+@MainActor
+struct WGJTests {
+    @Test
+    func wgjFormattersParseLocalizedDecimals() {
+        let parsedDot = WGJFormatters.parseLocalizedDecimal("123.45")
+        let parsedComma = WGJFormatters.parseLocalizedDecimal("123,45")
+
+        #expect(parsedDot != nil)
+        #expect(parsedComma != nil)
+        #expect(abs((parsedDot ?? 0) - 123.45) < 0.001)
+        #expect(abs((parsedComma ?? 0) - 123.45) < 0.001)
+        #expect(!WGJFormatters.decimalString(123.45).isEmpty)
+        #expect(!WGJFormatters.oneDecimalString(123.45).isEmpty)
+        #expect(!WGJFormatters.integerString(123.45).isEmpty)
+    }
+
+    @Test
+    func durationFormatterBuildsElapsedLabels() {
+        let reference = Date(timeIntervalSinceReferenceDate: 1_000)
+        let oneMinuteFive = Date(timeIntervalSinceReferenceDate: 1_065)
+        let oneHourThree = Date(timeIntervalSinceReferenceDate: 4_603)
+
+        #expect(WGJDurationFormatter.elapsedString(since: reference, now: oneMinuteFive) == "01:05")
+        #expect(WGJDurationFormatter.elapsedString(since: reference, now: oneHourThree) == "01:00:03")
+    }
+
+    @Test
+    func templateRepositoryCreatesMultipleFoldersAndTemplates() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+
+        try repository.createFolder(name: "Push")
+        try repository.createFolder(name: "Pull")
+
+        let folders = try repository.folders()
+        #expect(folders.count == 2)
+
+        guard let pushFolder = folders.first(where: { $0.name == "Push" }) else {
+            Issue.record("Expected Push folder")
+            return
+        }
+
+        _ = try repository.createTemplate(folderID: pushFolder.id, name: "Push A", notes: "Heavy compounds")
+        _ = try repository.createTemplate(folderID: pushFolder.id, name: "Push B", notes: "Hypertrophy")
+
+        let templates = try repository.templates(in: pushFolder.id)
+        #expect(templates.count == 2)
+        #expect(templates.map(\.name).contains("Push A"))
+        #expect(templates.map(\.name).contains("Push B"))
+    }
+
+    @Test
+    func templateRepositoryDeleteFolderCascadesTemplates() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+
+        try repository.createFolder(name: "Legs")
+        guard let folder = try repository.folders().first else {
+            Issue.record("Expected folder")
+            return
+        }
+
+        let template = try repository.createTemplate(folderID: folder.id, name: "Leg Day", notes: "Squat focus")
+        let catalogExercise = ExerciseCatalogItem(
+            remoteUUID: "seed-back-squat",
+            displayName: "Barbell Back Squat",
+            categoryName: "Legs",
+            equipmentSummary: "Barbell,Rack",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(catalogExercise)
+        try repository.addExercise(templateID: template.id, catalogItem: catalogExercise)
+
+        try repository.deleteFolder(id: folder.id)
+
+        #expect(try repository.folders().isEmpty)
+        #expect(try context.fetch(FetchDescriptor<WorkoutTemplate>()).isEmpty)
+        #expect(try context.fetch(FetchDescriptor<TemplateExercise>()).isEmpty)
+    }
+
+    @Test
+    func templateRepositoryAddRemoveAndReorderExercises() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+
+        try repository.createFolder(name: "Pull")
+        guard let folder = try repository.folders().first else {
+            Issue.record("Expected folder")
+            return
+        }
+
+        let template = try repository.createTemplate(folderID: folder.id, name: "Pull A", notes: "")
+
+        let first = ExerciseCatalogItem(
+            remoteUUID: "seed-deadlift",
+            displayName: "Conventional Deadlift",
+            categoryName: "Back",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        let second = ExerciseCatalogItem(
+            remoteUUID: "seed-pull-up",
+            displayName: "Pull Up",
+            categoryName: "Back",
+            equipmentSummary: "Pull-up bar",
+            isCurated: true,
+            sourceName: "seed"
+        )
+
+        context.insert(first)
+        context.insert(second)
+
+        try repository.addExercise(templateID: template.id, catalogItem: first)
+        try repository.addExercise(templateID: template.id, catalogItem: second)
+
+        var templateExercises = try repository.exercises(in: template.id)
+        #expect(templateExercises.count == 2)
+        #expect(templateExercises[0].catalogExerciseUUID == "seed-deadlift")
+
+        try repository.moveExercise(templateID: template.id, fromOffsets: IndexSet(integer: 0), toOffset: 2)
+
+        templateExercises = try repository.exercises(in: template.id)
+        #expect(templateExercises[0].catalogExerciseUUID == "seed-pull-up")
+
+        if let firstExerciseID = templateExercises.first?.id {
+            try repository.removeExercise(templateID: template.id, templateExerciseID: firstExerciseID)
+        }
+
+        templateExercises = try repository.exercises(in: template.id)
+        #expect(templateExercises.count == 1)
+    }
+
+    @Test
+    func templateRepositoryAddExerciseCreatesDefaultSetPlans() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+
+        let template = try repository.createTemplate(name: "Upper", notes: "")
+        let catalogExercise = ExerciseCatalogItem(
+            remoteUUID: "seed-row",
+            displayName: "Barbell Row",
+            categoryName: "Back",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(catalogExercise)
+
+        try repository.addExercise(templateID: template.id, catalogItem: catalogExercise)
+
+        guard let exercise = try repository.exercises(in: template.id).first else {
+            Issue.record("Expected template exercise")
+            return
+        }
+
+        let setDrafts = try repository.setDrafts(for: exercise.id)
+        #expect(setDrafts.count == 3)
+        #expect(setDrafts.allSatisfy { $0.loadUnit == .kg })
+        #expect(setDrafts.allSatisfy { $0.targetReps == nil })
+        #expect(setDrafts.allSatisfy { $0.targetWeight == nil })
+        #expect(setDrafts.allSatisfy { $0.restSeconds == 120 })
+        #expect(setDrafts.first?.isWarmup == true)
+        #expect(setDrafts.dropFirst().allSatisfy { !$0.isWarmup })
+        #expect(setDrafts.allSatisfy { !$0.isLocked })
+    }
+
+    @Test
+    func templateRepositoryPersistsRepRangeOnSetExercises() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+
+        let template = try repository.createTemplate(name: "Back", notes: "")
+        let draft = TemplateExerciseDraft(
+            catalogExerciseUUID: "seed-row",
+            exerciseNameSnapshot: "Row",
+            categorySnapshot: "Back",
+            muscleSummarySnapshot: "Lats",
+            targetRepMin: 12,
+            targetRepMax: 8,
+            setDrafts: [TemplateExerciseSetDraft(targetReps: 10, targetWeight: 60, loadUnit: .kg)]
+        )
+
+        try repository.setExercises(templateID: template.id, drafts: [draft])
+
+        guard let exercise = try repository.exercises(in: template.id).first else {
+            Issue.record("Expected persisted exercise")
+            return
+        }
+
+        #expect(exercise.targetRepMin == 12)
+        #expect(exercise.targetRepMax == 8)
+    }
+
+    @Test
+    func templateRepositorySetExercisesPersistsSetDraftsAndOrder() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+
+        let template = try repository.createTemplate(name: "Push", notes: "")
+        let exerciseDraft = TemplateExerciseDraft(
+            catalogExerciseUUID: "seed-bench",
+            exerciseNameSnapshot: "Bench Press",
+            categorySnapshot: "Chest",
+            muscleSummarySnapshot: "Pectoralis major",
+            setDrafts: [
+                TemplateExerciseSetDraft(targetReps: 5, targetWeight: 100, loadUnit: .kg),
+                TemplateExerciseSetDraft(targetReps: 8, targetWeight: 225, loadUnit: .lb),
+                TemplateExerciseSetDraft(targetReps: 12, targetWeight: nil, loadUnit: .bodyweight),
+            ]
+        )
+
+        try repository.setExercises(templateID: template.id, drafts: [exerciseDraft])
+
+        guard let persistedExercise = try repository.exercises(in: template.id).first else {
+            Issue.record("Expected persisted template exercise")
+            return
+        }
+
+        let setDrafts = try repository.setDrafts(for: persistedExercise.id)
+        #expect(setDrafts.count == 3)
+        #expect(setDrafts[0].targetReps == 5)
+        #expect(setDrafts[0].targetWeight == 100)
+        #expect(setDrafts[0].loadUnit == .kg)
+        #expect(setDrafts[1].targetReps == 8)
+        #expect(setDrafts[1].targetWeight == 225)
+        #expect(setDrafts[1].loadUnit == .lb)
+        #expect(setDrafts[2].targetReps == 12)
+        #expect(setDrafts[2].targetWeight == nil)
+        #expect(setDrafts[2].loadUnit == .bodyweight)
+    }
+
+    @Test
+    func templateRepositoryAddRemoveAndReorderSets() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+
+        let template = try repository.createTemplate(name: "Legs", notes: "")
+        let catalogExercise = ExerciseCatalogItem(
+            remoteUUID: "seed-squat",
+            displayName: "Back Squat",
+            categoryName: "Legs",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(catalogExercise)
+        try repository.addExercise(templateID: template.id, catalogItem: catalogExercise)
+
+        guard let exercise = try repository.exercises(in: template.id).first else {
+            Issue.record("Expected template exercise")
+            return
+        }
+
+        var setDrafts = try repository.setDrafts(for: exercise.id)
+        #expect(setDrafts.count == 3)
+
+        try repository.addSet(templateExerciseID: exercise.id)
+        setDrafts = try repository.setDrafts(for: exercise.id)
+        #expect(setDrafts.count == 4)
+
+        if let firstSet = setDrafts.first {
+            try repository.removeSet(templateExerciseID: exercise.id, setID: firstSet.id)
+        }
+        setDrafts = try repository.setDrafts(for: exercise.id)
+        #expect(setDrafts.count == 3)
+
+        let beforeMoveIDs = setDrafts.map(\.id)
+        try repository.moveSet(templateExerciseID: exercise.id, fromOffsets: IndexSet(integer: 0), toOffset: 3)
+        let afterMoveIDs = try repository.setDrafts(for: exercise.id).map(\.id)
+
+        #expect(afterMoveIDs.count == beforeMoveIDs.count)
+        #expect(afterMoveIDs.last == beforeMoveIDs.first)
+    }
+
+    @Test
+    func templateRepositorySaveSetDraftsSnapshotsPreviousTargets() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+
+        let template = try repository.createTemplate(name: "Upper", notes: "")
+        let draft = TemplateExerciseDraft(
+            catalogExerciseUUID: "seed-bench",
+            exerciseNameSnapshot: "Bench Press",
+            categorySnapshot: "Chest",
+            muscleSummarySnapshot: "Pectoralis major",
+            setDrafts: [TemplateExerciseSetDraft(targetReps: 5, targetWeight: 100, loadUnit: .kg)]
+        )
+        try repository.setExercises(templateID: template.id, drafts: [draft])
+
+        guard let exercise = try repository.exercises(in: template.id).first else {
+            Issue.record("Expected persisted exercise")
+            return
+        }
+
+        var drafts = try repository.setDrafts(for: exercise.id)
+        #expect(drafts.count == 1)
+        #expect(drafts[0].previousTargetReps == nil)
+        #expect(drafts[0].previousTargetWeight == nil)
+
+        drafts[0].targetReps = 6
+        drafts[0].targetWeight = 105
+        drafts[0].loadUnit = .kg
+        try repository.saveSetDrafts(templateExerciseID: exercise.id, drafts: drafts)
+
+        let updated = try repository.setDrafts(for: exercise.id)
+        #expect(updated[0].targetReps == 6)
+        #expect(updated[0].targetWeight == 105)
+        #expect(updated[0].previousTargetReps == 5)
+        #expect(updated[0].previousTargetWeight == 100)
+        #expect(updated[0].previousLoadUnit == .kg)
+    }
+
+    @Test
+    func templateRepositoryApplyRestSecondsToAllSets() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+
+        let template = try repository.createTemplate(name: "Legs", notes: "")
+        let exerciseDraft = TemplateExerciseDraft(
+            catalogExerciseUUID: "seed-squat",
+            exerciseNameSnapshot: "Back Squat",
+            categorySnapshot: "Legs",
+            muscleSummarySnapshot: "Quads",
+            setDrafts: [
+                TemplateExerciseSetDraft(restSeconds: 90),
+                TemplateExerciseSetDraft(restSeconds: 120),
+                TemplateExerciseSetDraft(restSeconds: 150),
+            ]
+        )
+        try repository.setExercises(templateID: template.id, drafts: [exerciseDraft])
+
+        guard let exercise = try repository.exercises(in: template.id).first else {
+            Issue.record("Expected persisted exercise")
+            return
+        }
+
+        try repository.applyRestSecondsToAllSets(templateExerciseID: exercise.id, restSeconds: 165)
+        let refreshed = try repository.setDrafts(for: exercise.id)
+        #expect(refreshed.count == 3)
+        #expect(refreshed.allSatisfy { $0.restSeconds == 165 })
+    }
+
+    @Test
+    func templateRepositoryDeleteExerciseCascadesSetPlans() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+
+        let template = try repository.createTemplate(name: "Pull", notes: "")
+        let catalogExercise = ExerciseCatalogItem(
+            remoteUUID: "seed-deadlift",
+            displayName: "Deadlift",
+            categoryName: "Back",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(catalogExercise)
+        try repository.addExercise(templateID: template.id, catalogItem: catalogExercise)
+
+        guard let exercise = try repository.exercises(in: template.id).first else {
+            Issue.record("Expected template exercise")
+            return
+        }
+
+        #expect((exercise.prescribedSets ?? []).count == 3)
+        try repository.removeExercise(templateID: template.id, templateExerciseID: exercise.id)
+
+        let remainingSets = try context.fetch(FetchDescriptor<TemplateExerciseSet>())
+        #expect(remainingSets.isEmpty)
+    }
+
+    @Test
+    func templateRepositorySupportsTemplatesWithoutFolder() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+
+        _ = try repository.createTemplate(name: "Upper Day", notes: "No folder template")
+        _ = try repository.createTemplate(name: "Lower Day", notes: "Another root template")
+
+        let rootTemplates = try repository.templatesWithoutFolder()
+
+        #expect(rootTemplates.count == 2)
+        #expect(rootTemplates.allSatisfy { $0.folder == nil })
+        #expect(rootTemplates.allSatisfy { $0.folderID == TemplateRepository.unfiledFolderID })
+    }
+
+    @Test
+    func templateRepositoryMovesTemplatesBetweenFoldersAndUnfiled() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+
+        try repository.createFolder(name: "Push")
+        try repository.createFolder(name: "Pull")
+
+        let createdFolders = try repository.folders()
+        guard
+            let pushID = createdFolders.first(where: { $0.name == "Push" })?.id,
+            let pullID = createdFolders.first(where: { $0.name == "Pull" })?.id
+        else {
+            Issue.record("Expected Push and Pull folders")
+            return
+        }
+
+        let rootTemplate = try repository.createTemplate(name: "Upper Day", notes: "")
+        var folderTemplate = try repository.createTemplate(folderID: pushID, name: "Push A", notes: "")
+
+        let customDraft = TemplateExerciseDraft(
+            catalogExerciseUUID: "seed-bench",
+            exerciseNameSnapshot: "Bench Press",
+            categorySnapshot: "Chest",
+            muscleSummarySnapshot: "Pectoralis major",
+            setDrafts: [
+                TemplateExerciseSetDraft(targetReps: 5, targetWeight: 95, loadUnit: .kg),
+                TemplateExerciseSetDraft(targetReps: 8, targetWeight: 85, loadUnit: .kg),
+                TemplateExerciseSetDraft(targetReps: 10, targetWeight: 75, loadUnit: .kg),
+            ]
+        )
+        try repository.setExercises(templateID: folderTemplate.id, drafts: [customDraft])
+        guard let reloadedFolderTemplate = try repository.template(id: folderTemplate.id) else {
+            Issue.record("Expected folder template to be reloadable")
+            return
+        }
+        folderTemplate = reloadedFolderTemplate
+
+        try repository.moveTemplate(id: rootTemplate.id, toFolderID: pushID)
+        #expect(try repository.template(id: rootTemplate.id)?.folderID == pushID)
+        #expect(try repository.templates(in: pushID).contains(where: { $0.id == rootTemplate.id }))
+
+        try repository.moveTemplate(id: folderTemplate.id, toFolderID: pullID)
+        #expect(try repository.template(id: folderTemplate.id)?.folderID == pullID)
+        #expect(!(try repository.templates(in: pushID)).contains(where: { $0.id == folderTemplate.id }))
+        #expect(try repository.templates(in: pullID).contains(where: { $0.id == folderTemplate.id }))
+
+        try repository.moveTemplate(id: folderTemplate.id, toFolderID: nil)
+        #expect(try repository.template(id: folderTemplate.id)?.folderID == TemplateRepository.unfiledFolderID)
+        #expect(try repository.templatesWithoutFolder().contains(where: { $0.id == folderTemplate.id }))
+
+        guard let movedTemplateExercise = try repository.exercises(in: folderTemplate.id).first else {
+            Issue.record("Expected template exercise to remain after moving template")
+            return
+        }
+        let movedSets = try repository.setDrafts(for: movedTemplateExercise.id)
+        #expect(movedSets.count == 3)
+        #expect(movedSets[0].targetReps == 5)
+        #expect(movedSets[0].targetWeight == 95)
+    }
+
+    @Test
+    func templateRepositoryEnsureDefaultSetPlansBackfillsLegacyExercises() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+
+        let template = try repository.createTemplate(name: "Legacy", notes: "")
+        let legacyExercise = TemplateExercise(
+            templateID: template.id,
+            catalogExerciseUUID: "legacy-1",
+            exerciseNameSnapshot: "Legacy Exercise",
+            categorySnapshot: "Misc",
+            muscleSummarySnapshot: "",
+            sortOrder: 0,
+            template: template
+        )
+
+        context.insert(legacyExercise)
+        template.exercises = [legacyExercise]
+        try context.save()
+
+        #expect((legacyExercise.prescribedSets ?? []).isEmpty)
+
+        try repository.ensureDefaultSetPlans(templateID: template.id)
+
+        let backfilled = try repository.setDrafts(for: legacyExercise.id)
+        #expect(backfilled.count == 3)
+        #expect(backfilled.allSatisfy { $0.targetReps == nil })
+        #expect(backfilled.allSatisfy { $0.targetWeight == nil })
+        #expect(backfilled.allSatisfy { $0.loadUnit == .kg })
+    }
+
+    @Test
+    func profileRepositoryCreatesAndUpdatesProfile() throws {
+        let context = try makeInMemoryContext()
+        let repository = ProfileRepository(modelContext: context)
+
+        let created = try repository.loadOrCreateProfile()
+        #expect(created.displayName == "Athlete")
+
+        try repository.updateDisplayName("Demo Lifter")
+        let avatarData = Data([0x01, 0x02, 0x03, 0x04])
+        try repository.updateAvatar(imageData: avatarData)
+
+        let updated = try repository.currentProfile()
+        #expect(updated?.displayName == "Demo Lifter")
+        #expect(updated?.avatarImageData == avatarData)
+    }
+
+    @Test
+    func accountStatusServiceMapsProviderResponses() async {
+        let availableService = AccountStatusService(client: MockCloudAccountStatusClient(status: .available, error: nil))
+        let noAccountService = AccountStatusService(client: MockCloudAccountStatusClient(status: .noAccount, error: nil))
+        let failingService = AccountStatusService(client: MockCloudAccountStatusClient(status: .couldNotDetermine, error: NSError(domain: "test", code: 1)))
+
+        let available = await availableService.fetchAccountStatus()
+        let noAccount = await noAccountService.fetchAccountStatus()
+        let failed = await failingService.fetchAccountStatus()
+
+        #expect(available == .available)
+        #expect(noAccount == .unavailable(.noAccount))
+        #expect(failed == .unavailable(.unknown))
+    }
+
+#if DEBUG
+    @Test
+    func demoSeedServiceSeedsProfileAndTemplatesIdempotently() throws {
+        let context = try makeInMemoryContext()
+        let service = DemoSeedService(modelContext: context)
+
+        try service.seedDemoDataIfEmpty()
+
+        let profilesFirstPass = try context.fetch(FetchDescriptor<UserProfile>())
+        let foldersFirstPass = try context.fetch(FetchDescriptor<TemplateFolder>())
+        let templatesFirstPass = try context.fetch(FetchDescriptor<WorkoutTemplate>())
+
+        #expect(profilesFirstPass.count == 1)
+        #expect(profilesFirstPass.first?.displayName == "Demo Lifter")
+        #expect(foldersFirstPass.count == 3)
+        #expect(templatesFirstPass.count >= 3)
+
+        try service.seedDemoDataIfEmpty()
+
+        let profilesSecondPass = try context.fetch(FetchDescriptor<UserProfile>())
+        let foldersSecondPass = try context.fetch(FetchDescriptor<TemplateFolder>())
+        let templatesSecondPass = try context.fetch(FetchDescriptor<WorkoutTemplate>())
+
+        #expect(profilesSecondPass.count == profilesFirstPass.count)
+        #expect(foldersSecondPass.count == foldersFirstPass.count)
+        #expect(templatesSecondPass.count == templatesFirstPass.count)
+    }
+#endif
+
+    private func makeInMemoryContext() throws -> ModelContext {
+        let schema = Schema([
+            ExerciseCatalogItem.self,
+            MuscleGroup.self,
+            ExerciseImageAsset.self,
+            ExerciseAlias.self,
+            ExerciseAttribution.self,
+            ExerciseCatalogSyncState.self,
+            UserProfile.self,
+            ProfileWidgetConfig.self,
+            TemplateFolder.self,
+            WorkoutTemplate.self,
+            TemplateExercise.self,
+            TemplateExerciseSet.self,
+            WorkoutSession.self,
+            WorkoutSessionExercise.self,
+            WorkoutSessionSet.self,
+            SocialOutboxItem.self,
+        ])
+
+        let configuration = ModelConfiguration(
+            schema: schema,
+            isStoredInMemoryOnly: true,
+            cloudKitDatabase: .none
+        )
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        return ModelContext(container)
+    }
+}
+
+private struct MockCloudAccountStatusClient: CloudAccountStatusClient {
+    let status: CKAccountStatus
+    let error: Error?
+
+    func accountStatus() async throws -> CKAccountStatus {
+        if let error {
+            throw error
+        }
+        return status
+    }
+}
