@@ -19,9 +19,10 @@ struct ProfileView: View {
     @State private var selectedAvatarItem: PhotosPickerItem?
     @State private var hasLoadedProfile = false
     @State private var weeklyGoal = 4
-    @State private var enabledWidgetKinds: [ProfileWidgetKind] = []
+    @State private var enabledWidgets: [ProfileWidgetConfig] = []
     @State private var prRecords: [WorkoutPRRecord] = []
     @State private var weeklyProgress: [WeeklyWorkoutProgressPoint] = []
+    @State private var trendSeriesByKind: [ProfileWidgetKind: ExerciseMetricSeries] = [:]
     @State private var showingWidgetManager = false
 
     @State private var errorMessage = ""
@@ -89,20 +90,36 @@ struct ProfileView: View {
                         .buttonStyle(WGJGhostButtonStyle())
                     }
 
-                    if enabledWidgetKinds.isEmpty {
+                    if enabledWidgets.isEmpty {
                         WGJEmptyStateCard(
                             title: "No widgets enabled",
-                            message: "Enable widgets to show PRs and weekly goals on your profile.",
+                            message: "Enable widgets to show PRs, weekly progress, and exercise graphs on your profile.",
                             icon: "square.grid.2x2"
                         )
                     }
 
-                    ForEach(enabledWidgetKinds, id: \.self) { kind in
-                        switch kind {
+                    ForEach(enabledWidgets) { config in
+                        switch config.kind {
                         case .prs:
                             prWidget
                         case .weeklyGoals:
                             weeklyGoalsWidget
+                        case .exerciseOneRMTrend:
+                            exerciseTrendWidget(
+                                title: "1RM Trend",
+                                subtitle: "Best estimated 1RM for \(config.selectedExerciseNameSnapshot ?? "your lift")",
+                                accent: WGJTheme.accentCyan,
+                                series: trendSeriesByKind[config.kind],
+                                emptyMessage: "Log weighted sets for this exercise to start the line."
+                            )
+                        case .exerciseVolumeTrend:
+                            exerciseTrendWidget(
+                                title: "Volume Trend",
+                                subtitle: "Weighted volume for \(config.selectedExerciseNameSnapshot ?? "your lift")",
+                                accent: WGJTheme.accentBlue,
+                                series: trendSeriesByKind[config.kind],
+                                emptyMessage: "Complete weighted sets for this exercise to populate volume."
+                            )
                         }
                     }
                 }
@@ -163,7 +180,9 @@ struct ProfileView: View {
             .filter { $0.status == .completed }
             .map { "session:\($0.id.uuidString)|\($0.updatedAt.timeIntervalSinceReferenceDate)|\($0.status.rawValue)" }
         let widgetKeys = widgetConfigs
-            .map { "widget:\($0.id.uuidString)|\($0.updatedAt.timeIntervalSinceReferenceDate)|\($0.isEnabled)|\($0.sortOrder)" }
+            .map {
+                "widget:\($0.id.uuidString)|\($0.updatedAt.timeIntervalSinceReferenceDate)|\($0.isEnabled)|\($0.sortOrder)|\($0.selectedCatalogExerciseUUID ?? "")"
+            }
         let profileKeys = storedProfiles
             .map { "profile:\($0.id.uuidString)|\($0.updatedAt.timeIntervalSinceReferenceDate)|\($0.weeklyWorkoutGoal)" }
         return sessionKeys + widgetKeys + profileKeys
@@ -257,6 +276,107 @@ struct ProfileView: View {
         .wgjCardContainer()
     }
 
+    private func exerciseTrendWidget(
+        title: String,
+        subtitle: String,
+        accent: Color,
+        series: ExerciseMetricSeries?,
+        emptyMessage: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            WGJSectionHeader(title, subtitle: subtitle)
+
+            if let series {
+                if series.points.count >= 2 {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text("Latest")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(WGJTheme.textSecondary)
+
+                            Spacer()
+
+                            Text("\(formatWeight(series.points.last?.value ?? 0)) \(series.loadUnit.shortLabel)")
+                                .font(.headline.weight(.semibold))
+                                .foregroundStyle(accent)
+                        }
+
+                        if let deltaText = trendDeltaText(for: series) {
+                            Text(deltaText)
+                                .font(.caption)
+                                .foregroundStyle(WGJTheme.textSecondary)
+                        }
+
+                        Chart(series.points) { point in
+                            AreaMark(
+                                x: .value("Workout", point.completedAt),
+                                y: .value(title, point.value)
+                            )
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [accent.opacity(0.22), accent.opacity(0.02)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+
+                            LineMark(
+                                x: .value("Workout", point.completedAt),
+                                y: .value(title, point.value)
+                            )
+                            .interpolationMethod(.catmullRom)
+                            .foregroundStyle(accent)
+                            .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+
+                            PointMark(
+                                x: .value("Workout", point.completedAt),
+                                y: .value(title, point.value)
+                            )
+                            .foregroundStyle(accent)
+                        }
+                        .chartXAxis {
+                            AxisMarks(values: .automatic(desiredCount: min(max(series.points.count, 2), 4))) { _ in
+                                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
+                                    .foregroundStyle(WGJTheme.outlineStrong.opacity(0.35))
+                                AxisValueLabel(format: .dateTime.month(.abbreviated).day())
+                                    .foregroundStyle(WGJTheme.textSecondary)
+                            }
+                        }
+                        .chartYAxis {
+                            AxisMarks(position: .leading) { _ in
+                                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
+                                    .foregroundStyle(WGJTheme.outlineStrong.opacity(0.35))
+                                AxisValueLabel()
+                                    .foregroundStyle(WGJTheme.textSecondary)
+                            }
+                        }
+                        .frame(height: 170)
+                    }
+                } else if let latest = series.points.last {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("\(formatWeight(latest.value)) \(series.loadUnit.shortLabel)")
+                            .font(.title3.weight(.bold))
+                            .foregroundStyle(accent)
+
+                        Text("Log one more weighted session for this exercise to unlock the chart.")
+                            .font(.subheadline)
+                            .foregroundStyle(WGJTheme.textSecondary)
+                    }
+                } else {
+                    Text(emptyMessage)
+                        .font(.subheadline)
+                        .foregroundStyle(WGJTheme.textSecondary)
+                }
+            } else {
+                Text(emptyMessage)
+                    .font(.subheadline)
+                    .foregroundStyle(WGJTheme.textSecondary)
+            }
+        }
+        .padding(14)
+        .wgjCardContainer()
+    }
+
     private func loadProfileIfNeeded() async {
         guard !hasLoadedProfile else { return }
         hasLoadedProfile = true
@@ -315,9 +435,33 @@ struct ProfileView: View {
         do {
             let enabled = try widgetRepository.enabledConfigurations()
             let dashboard = try metricsService.profileDashboardSnapshot(prLimit: 8, weeks: 8)
-            enabledWidgetKinds = enabled.map(\.kind)
+            var nextTrendSeries: [ProfileWidgetKind: ExerciseMetricSeries] = [:]
+
+            for config in enabled {
+                guard let selectedExerciseUUID = config.selectedCatalogExerciseUUID else { continue }
+
+                switch config.kind {
+                case .exerciseOneRMTrend:
+                    nextTrendSeries[config.kind] = try metricsService.exerciseOneRepMaxTrend(
+                        for: selectedExerciseUUID,
+                        preferredExerciseName: config.selectedExerciseNameSnapshot,
+                        limit: 8
+                    )
+                case .exerciseVolumeTrend:
+                    nextTrendSeries[config.kind] = try metricsService.exerciseVolumeTrend(
+                        for: selectedExerciseUUID,
+                        preferredExerciseName: config.selectedExerciseNameSnapshot,
+                        limit: 8
+                    )
+                case .prs, .weeklyGoals:
+                    break
+                }
+            }
+
+            enabledWidgets = enabled
             prRecords = dashboard.personalRecords
             weeklyProgress = dashboard.weeklyProgress
+            trendSeriesByKind = nextTrendSeries
             weeklyGoal = max(1, dashboard.weeklyGoal)
         } catch {
             errorMessage = String(describing: error)
@@ -327,6 +471,20 @@ struct ProfileView: View {
 
     private func formatWeight(_ value: Double) -> String {
         WGJFormatters.oneDecimalString(value)
+    }
+
+    private func trendDeltaText(for series: ExerciseMetricSeries) -> String? {
+        guard let first = series.points.first, let last = series.points.last, series.points.count >= 2 else {
+            return nil
+        }
+
+        let delta = last.value - first.value
+        guard abs(delta) >= 0.1 else {
+            return "Holding steady across the last \(series.points.count) logged workouts."
+        }
+
+        let direction = delta > 0 ? "up" : "down"
+        return "\(formatWeight(abs(delta))) \(series.loadUnit.shortLabel) \(direction) across your last \(series.points.count) logged workouts."
     }
 }
 

@@ -92,18 +92,7 @@ struct ExercisesCatalogView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         if !isPickerMode {
-                            WGJRootHeader("Exercises", subtitle: "Search, filter, and add movements to a workout.") {
-                                Button {
-                                    startEmptyWorkout()
-                                } label: {
-                                    Label("New Workout", systemImage: "plus.circle.fill")
-                                        .font(.subheadline.weight(.semibold))
-                                        .labelStyle(.titleAndIcon)
-                                        .wgjSingleLineText(scale: 0.82)
-                                        .fixedSize(horizontal: true, vertical: false)
-                                }
-                                .buttonStyle(WGJGhostButtonStyle())
-                            }
+                            WGJRootHeader("Exercises", subtitle: "Search, filter, and add movements to a workout.")
 
                             EmptyView()
                         }
@@ -466,16 +455,6 @@ struct ExercisesCatalogView: View {
             try workoutRepository.addExercise(sessionID: created.id, catalogItem: pendingExerciseForAdd)
             coordinator.selectedTab = .startWorkout
             self.pendingExerciseForAdd = nil
-        } catch {
-            showError(error)
-        }
-    }
-
-    private func startEmptyWorkout() {
-        do {
-            let created = try workoutRepository.createEmptySession()
-            coordinator.present(sessionID: created.id)
-            coordinator.selectedTab = .startWorkout
         } catch {
             showError(error)
         }

@@ -275,6 +275,9 @@ struct WorkoutMetricsServiceTests {
         let context = try makeInMemoryContext()
         let repository = ProfileWidgetRepository(modelContext: context)
 
+        let allConfigs = try repository.configurations()
+        #expect(allConfigs.count == 4)
+
         var enabled = try repository.enabledConfigurations()
         #expect(enabled.count == 2)
 
@@ -287,6 +290,201 @@ struct WorkoutMetricsServiceTests {
         try repository.moveEnabledWidget(fromOffsets: IndexSet(integer: 0), toOffset: 1)
         enabled = try repository.enabledConfigurations()
         #expect(enabled.count == 2)
+    }
+
+    @Test
+    func widgetRepositoryGraphWidgetsStartDisabledUntilConfigured() throws {
+        let context = try makeInMemoryContext()
+        let repository = ProfileWidgetRepository(modelContext: context)
+
+        let configs = try repository.configurations()
+        let oneRMConfig = try #require(configs.first { $0.kind == .exerciseOneRMTrend })
+        let volumeConfig = try #require(configs.first { $0.kind == .exerciseVolumeTrend })
+
+        #expect(!oneRMConfig.isEnabled)
+        #expect(oneRMConfig.selectedCatalogExerciseUUID == nil)
+        #expect(!volumeConfig.isEnabled)
+        #expect(volumeConfig.selectedCatalogExerciseUUID == nil)
+    }
+
+    @Test
+    func widgetRepositoryPersistsExerciseSelectionForGraphWidgets() throws {
+        let context = try makeInMemoryContext()
+        let repository = ProfileWidgetRepository(modelContext: context)
+
+        try repository.updateExerciseSelection(
+            kind: .exerciseOneRMTrend,
+            catalogExerciseUUID: "bench-history",
+            exerciseName: "Bench Press"
+        )
+        try repository.setEnabled(kind: .exerciseOneRMTrend, isEnabled: true)
+
+        let configs = try repository.configurations()
+        let config = try #require(configs.first { $0.kind == .exerciseOneRMTrend })
+        #expect(config.selectedCatalogExerciseUUID == "bench-history")
+        #expect(config.selectedExerciseNameSnapshot == "Bench Press")
+        #expect(config.isEnabled)
+    }
+
+    @Test
+    func widgetRepositoryRejectsEnablingGraphWidgetWithoutExerciseSelection() throws {
+        let context = try makeInMemoryContext()
+        let repository = ProfileWidgetRepository(modelContext: context)
+
+        #expect(throws: ProfileWidgetRepositoryError.self) {
+            try repository.setEnabled(kind: .exerciseOneRMTrend, isEnabled: true)
+        }
+    }
+
+    @Test
+    func exerciseOneRepMaxTrendReturnsLastEightPointsOldestToNewest() throws {
+        let context = try makeInMemoryContext()
+        let sessionRepository = WorkoutSessionRepository(modelContext: context)
+        let metrics = WorkoutMetricsService(modelContext: context)
+
+        let exercise = ExerciseCatalogItem(
+            remoteUUID: "trend-bench",
+            displayName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(exercise)
+
+        let baseDate = Date(timeIntervalSinceReferenceDate: 1_000_000)
+
+        for offset in 0..<9 {
+            let session = try sessionRepository.createEmptySession(name: "Session \(offset)")
+            try sessionRepository.addExercise(sessionID: session.id, catalogItem: exercise)
+            let sessionExercise = try sessionRepository.sessionExercises(sessionID: session.id).first!
+            var drafts = try sessionRepository.setDrafts(sessionExerciseID: sessionExercise.id)
+            drafts[0].actualWeight = 80 + Double(offset)
+            drafts[0].actualReps = 5
+            drafts[0].actualLoadUnit = .kg
+            drafts[0].isCompleted = true
+            try sessionRepository.saveSetDrafts(sessionExerciseID: sessionExercise.id, drafts: drafts)
+            try sessionRepository.finishSession(sessionID: session.id)
+
+            let stored = try #require(try sessionRepository.session(id: session.id))
+            stored.startedAt = baseDate.addingTimeInterval(Double(offset) * 86_400)
+            stored.endedAt = stored.startedAt.addingTimeInterval(1_800)
+            try context.save()
+        }
+
+        let series = try metrics.exerciseOneRepMaxTrend(for: exercise.remoteUUID, limit: 8)
+        #expect(series.points.count == 8)
+        #expect(series.points == series.points.sorted { $0.completedAt < $1.completedAt })
+        #expect(abs(series.points.first!.value - metrics.estimatedOneRepMax(weight: 81, reps: 5)) < 0.01)
+        #expect(abs(series.points.last!.value - metrics.estimatedOneRepMax(weight: 88, reps: 5)) < 0.01)
+    }
+
+    @Test
+    func exerciseVolumeTrendUsesMostRecentUnitAndIgnoresBodyweightSets() throws {
+        let context = try makeInMemoryContext()
+        let sessionRepository = WorkoutSessionRepository(modelContext: context)
+        let metrics = WorkoutMetricsService(modelContext: context)
+
+        let exercise = ExerciseCatalogItem(
+            remoteUUID: "volume-bench",
+            displayName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(exercise)
+
+        let first = try sessionRepository.createEmptySession(name: "KG Day")
+        try sessionRepository.addExercise(sessionID: first.id, catalogItem: exercise)
+        let firstExercise = try sessionRepository.sessionExercises(sessionID: first.id).first!
+        var firstDrafts = try sessionRepository.setDrafts(sessionExerciseID: firstExercise.id)
+        firstDrafts[0].actualWeight = 100
+        firstDrafts[0].actualReps = 5
+        firstDrafts[0].actualLoadUnit = .kg
+        firstDrafts[0].isCompleted = true
+        try sessionRepository.saveSetDrafts(sessionExerciseID: firstExercise.id, drafts: firstDrafts)
+        try sessionRepository.finishSession(sessionID: first.id)
+
+        let second = try sessionRepository.createEmptySession(name: "Bodyweight Day")
+        try sessionRepository.addExercise(sessionID: second.id, catalogItem: exercise)
+        let secondExercise = try sessionRepository.sessionExercises(sessionID: second.id).first!
+        var secondDrafts = try sessionRepository.setDrafts(sessionExerciseID: secondExercise.id)
+        secondDrafts[0].actualWeight = 1
+        secondDrafts[0].actualReps = 12
+        secondDrafts[0].actualLoadUnit = .bodyweight
+        secondDrafts[0].isCompleted = true
+        try sessionRepository.saveSetDrafts(sessionExerciseID: secondExercise.id, drafts: secondDrafts)
+        try sessionRepository.finishSession(sessionID: second.id)
+
+        let third = try sessionRepository.createEmptySession(name: "LB Day")
+        try sessionRepository.addExercise(sessionID: third.id, catalogItem: exercise)
+        let thirdExercise = try sessionRepository.sessionExercises(sessionID: third.id).first!
+        var thirdDrafts = try sessionRepository.setDrafts(sessionExerciseID: thirdExercise.id)
+        thirdDrafts[0].actualWeight = 220
+        thirdDrafts[0].actualReps = 5
+        thirdDrafts[0].actualLoadUnit = .lb
+        thirdDrafts[0].isCompleted = true
+        try sessionRepository.saveSetDrafts(sessionExerciseID: thirdExercise.id, drafts: thirdDrafts)
+        try sessionRepository.finishSession(sessionID: third.id)
+
+        let series = try metrics.exerciseVolumeTrend(for: exercise.remoteUUID, limit: 8)
+        #expect(series.points.count == 2)
+        #expect(series.loadUnit == .lb)
+        #expect(abs(series.points.last!.value - 1_100) < 0.01)
+        #expect(abs(series.points.first!.value - (500 / 0.45359237)) < 0.1)
+    }
+
+    @Test
+    func exerciseHistoryOptionsReturnsLatestWeightedExercises() throws {
+        let context = try makeInMemoryContext()
+        let sessionRepository = WorkoutSessionRepository(modelContext: context)
+        let metrics = WorkoutMetricsService(modelContext: context)
+
+        let bench = ExerciseCatalogItem(
+            remoteUUID: "history-bench",
+            displayName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        let pullUp = ExerciseCatalogItem(
+            remoteUUID: "history-pullup",
+            displayName: "Pull Up",
+            categoryName: "Back",
+            equipmentSummary: "Bodyweight",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(bench)
+        context.insert(pullUp)
+
+        let first = try sessionRepository.createEmptySession(name: "Weighted")
+        try sessionRepository.addExercise(sessionID: first.id, catalogItem: bench)
+        let firstExercise = try sessionRepository.sessionExercises(sessionID: first.id).first!
+        var firstDrafts = try sessionRepository.setDrafts(sessionExerciseID: firstExercise.id)
+        firstDrafts[0].actualWeight = 90
+        firstDrafts[0].actualReps = 5
+        firstDrafts[0].actualLoadUnit = .kg
+        firstDrafts[0].isCompleted = true
+        try sessionRepository.saveSetDrafts(sessionExerciseID: firstExercise.id, drafts: firstDrafts)
+        try sessionRepository.finishSession(sessionID: first.id)
+
+        let second = try sessionRepository.createEmptySession(name: "Bodyweight")
+        try sessionRepository.addExercise(sessionID: second.id, catalogItem: pullUp)
+        let secondExercise = try sessionRepository.sessionExercises(sessionID: second.id).first!
+        var secondDrafts = try sessionRepository.setDrafts(sessionExerciseID: secondExercise.id)
+        secondDrafts[0].actualWeight = 1
+        secondDrafts[0].actualReps = 10
+        secondDrafts[0].actualLoadUnit = .bodyweight
+        secondDrafts[0].isCompleted = true
+        try sessionRepository.saveSetDrafts(sessionExerciseID: secondExercise.id, drafts: secondDrafts)
+        try sessionRepository.finishSession(sessionID: second.id)
+
+        let options = try metrics.exerciseHistoryOptions()
+        #expect(options.count == 1)
+        #expect(options.first?.catalogExerciseUUID == bench.remoteUUID)
     }
 
     private func makeInMemoryContext() throws -> ModelContext {

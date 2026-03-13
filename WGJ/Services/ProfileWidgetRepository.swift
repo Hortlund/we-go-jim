@@ -1,6 +1,17 @@
 import Foundation
 import SwiftData
 
+enum ProfileWidgetRepositoryError: LocalizedError {
+    case missingExerciseSelection(ProfileWidgetKind)
+
+    var errorDescription: String? {
+        switch self {
+        case .missingExerciseSelection(let kind):
+            return "\(kind.title) needs an exercise before it can be enabled."
+        }
+    }
+}
+
 @MainActor
 final class ProfileWidgetRepository {
     private let modelContext: ModelContext
@@ -21,7 +32,23 @@ final class ProfileWidgetRepository {
     func setEnabled(kind: ProfileWidgetKind, isEnabled: Bool) throws {
         try ensureDefaultConfigsIfNeeded()
         let config = try config(for: kind)
+        if isEnabled, kind.requiresExerciseSelection, config.selectedCatalogExerciseUUID == nil {
+            throw ProfileWidgetRepositoryError.missingExerciseSelection(kind)
+        }
         config.isEnabled = isEnabled
+        config.updatedAt = .now
+        try modelContext.save()
+    }
+
+    func updateExerciseSelection(
+        kind: ProfileWidgetKind,
+        catalogExerciseUUID: String,
+        exerciseName: String
+    ) throws {
+        try ensureDefaultConfigsIfNeeded()
+        let config = try config(for: kind)
+        config.selectedCatalogExerciseUUID = catalogExerciseUUID
+        config.selectedExerciseNameSnapshot = exerciseName
         config.updatedAt = .now
         try modelContext.save()
     }
@@ -84,10 +111,12 @@ final class ProfileWidgetRepository {
             existing = try fetchConfigurations()
         }
 
-        if existing.count == ProfileWidgetKind.allCases.count {
-            return
+        if try normalizeExerciseSelections(from: existing) {
+            existing = try fetchConfigurations()
         }
 
+        var didInsert = false
+        var nextSortOrder = (existing.map(\.sortOrder).max() ?? -1) + 1
         for kind in ProfileWidgetKind.allCases {
             if existing.contains(where: { $0.kind == kind }) {
                 continue
@@ -95,13 +124,17 @@ final class ProfileWidgetRepository {
 
             let created = ProfileWidgetConfig(
                 kind: kind,
-                isEnabled: true,
-                sortOrder: existing.count + kind.defaultSortOrder
+                isEnabled: kind.defaultEnabled,
+                sortOrder: nextSortOrder
             )
             modelContext.insert(created)
+            nextSortOrder += 1
+            didInsert = true
         }
 
-        try modelContext.save()
+        if didInsert {
+            try modelContext.save()
+        }
     }
 
     private func removeDuplicateConfigurations(from configs: [ProfileWidgetConfig]) throws -> Bool {
@@ -130,10 +163,34 @@ final class ProfileWidgetRepository {
             return found
         }
 
-        let created = ProfileWidgetConfig(kind: kind, isEnabled: true, sortOrder: kind.defaultSortOrder)
+        let created = ProfileWidgetConfig(
+            kind: kind,
+            isEnabled: kind.defaultEnabled,
+            sortOrder: (try fetchConfigurations().map(\.sortOrder).max() ?? -1) + 1
+        )
         modelContext.insert(created)
         try modelContext.save()
         return created
+    }
+
+    private func normalizeExerciseSelections(from configs: [ProfileWidgetConfig]) throws -> Bool {
+        var didChange = false
+
+        for config in configs where config.kind.requiresExerciseSelection {
+            if config.selectedCatalogExerciseUUID == nil || config.selectedExerciseNameSnapshot?.isEmpty != false {
+                if config.isEnabled {
+                    config.isEnabled = false
+                    config.updatedAt = .now
+                    didChange = true
+                }
+            }
+        }
+
+        if didChange {
+            try modelContext.save()
+        }
+
+        return didChange
     }
 
     private func fetchConfigurations() throws -> [ProfileWidgetConfig] {
@@ -151,6 +208,19 @@ private extension ProfileWidgetKind {
             return 0
         case .weeklyGoals:
             return 1
+        case .exerciseOneRMTrend:
+            return 2
+        case .exerciseVolumeTrend:
+            return 3
+        }
+    }
+
+    var defaultEnabled: Bool {
+        switch self {
+        case .prs, .weeklyGoals:
+            return true
+        case .exerciseOneRMTrend, .exerciseVolumeTrend:
+            return false
         }
     }
 }

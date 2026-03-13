@@ -26,9 +26,11 @@ enum WorkoutSessionStatus: String, Codable, CaseIterable, Equatable {
     case cancelled
 }
 
-enum ProfileWidgetKind: String, Codable, CaseIterable, Equatable, Identifiable {
+enum ProfileWidgetKind: String, Codable, CaseIterable, Equatable, Hashable, Identifiable {
     case prs
     case weeklyGoals
+    case exerciseOneRMTrend
+    case exerciseVolumeTrend
 
     var id: String { rawValue }
 
@@ -38,6 +40,19 @@ enum ProfileWidgetKind: String, Codable, CaseIterable, Equatable, Identifiable {
             return "PRs"
         case .weeklyGoals:
             return "Weekly Goal"
+        case .exerciseOneRMTrend:
+            return "1RM Trend"
+        case .exerciseVolumeTrend:
+            return "Volume Trend"
+        }
+    }
+
+    var requiresExerciseSelection: Bool {
+        switch self {
+        case .exerciseOneRMTrend, .exerciseVolumeTrend:
+            return true
+        case .prs, .weeklyGoals:
+            return false
         }
     }
 }
@@ -174,6 +189,8 @@ final class ProfileWidgetConfig {
     var id: UUID = UUID()
     var kindRaw: String = ProfileWidgetKind.prs.rawValue
     var isEnabled: Bool = true
+    var selectedCatalogExerciseUUID: String?
+    var selectedExerciseNameSnapshot: String?
     var sortOrder: Int = 0
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
@@ -187,6 +204,8 @@ final class ProfileWidgetConfig {
         id: UUID = UUID(),
         kind: ProfileWidgetKind,
         isEnabled: Bool = true,
+        selectedCatalogExerciseUUID: String? = nil,
+        selectedExerciseNameSnapshot: String? = nil,
         sortOrder: Int = 0,
         createdAt: Date = .now,
         updatedAt: Date = .now
@@ -194,6 +213,8 @@ final class ProfileWidgetConfig {
         self.id = id
         self.kindRaw = kind.rawValue
         self.isEnabled = isEnabled
+        self.selectedCatalogExerciseUUID = selectedCatalogExerciseUUID
+        self.selectedExerciseNameSnapshot = selectedExerciseNameSnapshot
         self.sortOrder = sortOrder
         self.createdAt = createdAt
         self.updatedAt = updatedAt
