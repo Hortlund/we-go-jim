@@ -337,6 +337,7 @@ struct HistoryDetailView: View {
                 previousBySetIndex: previousByExerciseID[exercise.id] ?? [:],
                 restSeconds: restBinding(for: exercise),
                 setDrafts: setDraftsBinding(for: exercise),
+                initiallyExpanded: true,
                 onSetDraftsChanged: { drafts in
                     setDraftsByExerciseID[exercise.id] = drafts
                 },

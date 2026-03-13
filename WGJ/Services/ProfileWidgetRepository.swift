@@ -79,7 +79,11 @@ final class ProfileWidgetRepository {
     }
 
     private func ensureDefaultConfigsIfNeeded() throws {
-        let existing = try fetchConfigurations()
+        var existing = try fetchConfigurations()
+        if try removeDuplicateConfigurations(from: existing) {
+            existing = try fetchConfigurations()
+        }
+
         if existing.count == ProfileWidgetKind.allCases.count {
             return
         }
@@ -98,6 +102,27 @@ final class ProfileWidgetRepository {
         }
 
         try modelContext.save()
+    }
+
+    private func removeDuplicateConfigurations(from configs: [ProfileWidgetConfig]) throws -> Bool {
+        var seen: Set<ProfileWidgetKind> = []
+        var didChange = false
+
+        for config in configs {
+            if seen.contains(config.kind) {
+                modelContext.delete(config)
+                didChange = true
+                continue
+            }
+
+            seen.insert(config.kind)
+        }
+
+        if didChange {
+            try modelContext.save()
+        }
+
+        return didChange
     }
 
     private func config(for kind: ProfileWidgetKind) throws -> ProfileWidgetConfig {

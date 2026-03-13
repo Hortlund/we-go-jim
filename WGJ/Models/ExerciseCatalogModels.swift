@@ -209,6 +209,38 @@ struct CustomExerciseDraft: Equatable {
         secondaryMuscleIDs: [],
         instructionText: ""
     )
+
+    init(
+        name: String,
+        categoryName: String,
+        equipmentSummary: String,
+        aliases: [String],
+        primaryMuscleIDs: [Int],
+        secondaryMuscleIDs: [Int],
+        instructionText: String
+    ) {
+        self.name = name
+        self.categoryName = categoryName
+        self.equipmentSummary = equipmentSummary
+        self.aliases = aliases
+        self.primaryMuscleIDs = primaryMuscleIDs
+        self.secondaryMuscleIDs = secondaryMuscleIDs
+        self.instructionText = instructionText
+    }
+
+    init(exercise: ExerciseCatalogItem) {
+        self.init(
+            name: exercise.displayName,
+            categoryName: exercise.categoryName,
+            equipmentSummary: exercise.equipmentSummary,
+            aliases: exercise.aliases.map(\.value).sorted {
+                $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
+            },
+            primaryMuscleIDs: exercise.primaryMuscles.map(\.remoteID).sorted(),
+            secondaryMuscleIDs: exercise.secondaryMuscles.map(\.remoteID).sorted(),
+            instructionText: exercise.instructionTextValue
+        )
+    }
 }
 
 struct ExerciseMuscleGroupSection: Identifiable {
@@ -252,5 +284,72 @@ extension ExerciseCatalogItem {
 
     var instructionTextValue: String {
         instructionText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    var instructionSteps: [String] {
+        Self.instructionSteps(from: instructionTextValue)
+    }
+
+    private static func instructionSteps(from rawValue: String) -> [String] {
+        let normalized = rawValue
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !normalized.isEmpty else {
+            return []
+        }
+
+        let explicitLineSteps = normalized
+            .split(separator: "\n")
+            .map { cleanedInstructionStep(String($0)) }
+            .filter { !$0.isEmpty }
+
+        if explicitLineSteps.count > 1 {
+            return explicitLineSteps
+        }
+
+        let sentenceSteps = normalized
+            .split(whereSeparator: { $0 == ";" || $0 == "." || $0 == "\n" })
+            .flatMap { sentenceStepSegments(from: String($0)) }
+            .map(cleanedInstructionStep)
+            .filter { !$0.isEmpty }
+
+        if sentenceSteps.count > 1 {
+            return sentenceSteps
+        }
+
+        let fallback = cleanedInstructionStep(normalized)
+        return fallback.isEmpty ? [] : [fallback]
+    }
+
+    private static func sentenceStepSegments(from rawValue: String) -> [String] {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return []
+        }
+
+        let commaSeparated = trimmed.split(separator: ",").map(String.init)
+        return commaSeparated.isEmpty ? [trimmed] : commaSeparated
+    }
+
+    private static func cleanedInstructionStep(_ rawValue: String) -> String {
+        let withoutStepPrefix = rawValue
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(
+                of: #"^(?:step\s*)?\d+\s*[:.)-]?\s*"#,
+                with: "",
+                options: [.regularExpression, .caseInsensitive]
+            )
+            .replacingOccurrences(of: #"^[-*]\s*"#, with: "", options: [.regularExpression])
+            .replacingOccurrences(of: #"^(?:and|then)\s+"#, with: "", options: [.regularExpression, .caseInsensitive])
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard let firstCharacter = withoutStepPrefix.first, firstCharacter.isLowercase else {
+            return withoutStepPrefix
+        }
+
+        return String(firstCharacter).uppercased() + withoutStepPrefix.dropFirst()
     }
 }

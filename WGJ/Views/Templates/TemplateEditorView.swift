@@ -6,12 +6,17 @@ struct TemplateEditorView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    @Query private var profiles: [UserProfile]
+
     private let folderID: UUID?
     private let templateID: UUID?
+    private let guidanceService = TrainingGuidanceService()
 
     @State private var templateName = ""
     @State private var templateNotes = ""
     @State private var exerciseDrafts: [TemplateExerciseDraft] = []
+    @State private var catalogByUUID: [String: ExerciseCatalogItem] = [:]
+    @State private var isExpandedByDraftID: [UUID: Bool] = [:]
 
     @State private var hasLoadedInitialData = false
     @State private var showingExercisePicker = false
@@ -75,6 +80,9 @@ struct TemplateEditorView: View {
             .task {
                 await loadInitialDataIfNeeded()
             }
+            .task(id: exerciseDrafts.map(\.catalogExerciseUUID)) {
+                await loadCatalogMatches()
+            }
         }
     }
 
@@ -96,18 +104,23 @@ struct TemplateEditorView: View {
 
     private var exercisesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            WGJActionHeader(
-                "Exercises",
-                subtitle: exerciseDrafts.isEmpty
-                    ? "Build your workout with cleaner set targets."
-                    : "Swipe from the top of a card to delete, or use the card menu to reorder."
-            ) {
-                Button {
-                    showingExercisePicker = true
-                } label: {
-                    Label("Add", systemImage: "plus")
+            if exerciseDrafts.isEmpty {
+                WGJActionHeader(
+                    "Exercises",
+                    subtitle: "Build your workout with cleaner set targets."
+                )
+            } else {
+                WGJActionHeader(
+                    "Exercises",
+                    subtitle: "Swipe from the top of a card to delete, or use the card menu to reorder."
+                ) {
+                    Button {
+                        showingExercisePicker = true
+                    } label: {
+                        Label("Add", systemImage: "plus")
+                    }
+                    .buttonStyle(WGJPrimaryButtonStyle())
                 }
-                .buttonStyle(WGJPrimaryButtonStyle())
             }
 
             if exerciseDrafts.isEmpty {
@@ -136,6 +149,9 @@ struct TemplateEditorView: View {
                         exerciseName: draft.exerciseNameSnapshot,
                         muscleSummary: draft.muscleSummarySnapshot,
                         category: draft.categorySnapshot,
+                        recommendation: templateRecommendation(for: draft),
+                        initiallyExpanded: false,
+                        isExpanded: isExpandedBinding(for: draft.id),
                         exerciseIndexTitle: "Exercise \(index + 1)",
                         canMoveUp: index > 0,
                         canMoveDown: index < exerciseDrafts.count - 1,
@@ -157,14 +173,6 @@ struct TemplateEditorView: View {
                 .id(draft.id)
                 .transition(exerciseCardTransition)
             }
-
-            Button {
-                showingExercisePicker = true
-            } label: {
-                Label(exerciseDrafts.isEmpty ? "Add your first exercise" : "Add another exercise", systemImage: "plus.circle.fill")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(WGJGhostButtonStyle())
         }
     }
 
@@ -224,9 +232,12 @@ struct TemplateEditorView: View {
         guard !exerciseDrafts.contains(where: { $0.catalogExerciseUUID == catalogItem.remoteUUID }) else {
             return
         }
+
+        let draft = TemplateExerciseDraft(catalogItem: catalogItem)
         withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
-            exerciseDrafts.append(TemplateExerciseDraft(catalogItem: catalogItem))
+            exerciseDrafts.append(draft)
         }
+        isExpandedByDraftID[draft.id] = true
     }
 
     private func removeExercise(at index: Int) {
@@ -235,6 +246,7 @@ struct TemplateEditorView: View {
         withAnimation(WGJMotion.quickAnimation(reduceMotion: reduceMotion)) {
             _ = exerciseDrafts.remove(at: index)
         }
+        isExpandedByDraftID[removedID] = nil
         clearExerciseSwipeState(for: removedID)
     }
 
@@ -286,6 +298,43 @@ struct TemplateEditorView: View {
             }
             try templateRepository.ensureDefaultSetPlans(templateID: templateID)
             exerciseDrafts = try templateRepository.exercises(in: templateID).map(TemplateExerciseDraft.init(model:))
+            isExpandedByDraftID = Dictionary(uniqueKeysWithValues: exerciseDrafts.map { ($0.id, false) })
+        } catch {
+            errorMessage = String(describing: error)
+            showingError = true
+        }
+    }
+
+    private var isTrainingGuidanceEnabled: Bool {
+        profiles.first?.isTrainingGuidanceEnabled ?? true
+    }
+
+    private func isExpandedBinding(for draftID: UUID) -> Binding<Bool> {
+        Binding(
+            get: { isExpandedByDraftID[draftID] ?? false },
+            set: { isExpandedByDraftID[draftID] = $0 }
+        )
+    }
+
+    private func templateRecommendation(for draft: TemplateExerciseDraft) -> TemplateExerciseRecommendation? {
+        guard isTrainingGuidanceEnabled else { return nil }
+        if let catalogExercise = catalogByUUID[draft.catalogExerciseUUID] {
+            return guidanceService.templateRecommendation(for: catalogExercise)
+        }
+
+        return guidanceService.templateRecommendation(
+            for: TrainingGuidanceCatalogSnapshot(
+                exerciseName: draft.exerciseNameSnapshot,
+                categoryName: draft.categorySnapshot,
+                equipmentSummary: "",
+                primaryMuscleNames: draft.muscleSummarySnapshot
+            )
+        )
+    }
+
+    private func loadCatalogMatches() async {
+        do {
+            catalogByUUID = try catalogRepository.exerciseMap(for: exerciseDrafts.map(\.catalogExerciseUUID))
         } catch {
             errorMessage = String(describing: error)
             showingError = true

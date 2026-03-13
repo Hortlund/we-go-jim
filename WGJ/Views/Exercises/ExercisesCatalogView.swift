@@ -82,6 +82,10 @@ struct ExercisesCatalogView: View {
         syncStates.first?.lastSuccessfulSyncAt?.timeIntervalSinceReferenceDate ?? 0
     }
 
+    private var catalogRevisionStamp: [TimeInterval] {
+        catalogExercises.map { $0.updatedAt.timeIntervalSinceReferenceDate }
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
             ZStack(alignment: .trailing) {
@@ -206,6 +210,9 @@ struct ExercisesCatalogView: View {
             rebuildCatalogCache()
         }
         .onChange(of: catalogExercises.count) { _, _ in
+            catalogDataToken &+= 1
+        }
+        .onChange(of: catalogRevisionStamp) { _, _ in
             catalogDataToken &+= 1
         }
         .onChange(of: syncStateStamp) { _, _ in
@@ -638,10 +645,20 @@ private struct ExercisesSectionSnapshot: Identifiable, Equatable {
 }
 
 struct ExerciseDetailDestinationView: View {
+    @Query(sort: [SortDescriptor(\MuscleGroup.name, order: .forward)])
+    private var muscleGroups: [MuscleGroup]
+    @Query(sort: [SortDescriptor(\ExerciseCatalogItem.categoryName, order: .forward)])
+    private var catalogExercises: [ExerciseCatalogItem]
+
     let exercise: ExerciseCatalogItem
     let repository: ExerciseCatalogRepository
     var actionTitle: String?
     var onSelect: (() -> Void)?
+
+    @State private var showingCustomExerciseEditor = false
+    @State private var customExerciseDraft = CustomExerciseDraft.empty
+    @State private var errorMessage = ""
+    @State private var showingError = false
 
     var body: some View {
         ScrollView {
@@ -677,8 +694,8 @@ struct ExerciseDetailDestinationView: View {
                     detailInfoRow(title: "Secondary muscles", value: exercise.secondaryMuscleNames)
                 }
 
-                if !exercise.instructionTextValue.isEmpty {
-                    detailInfoRow(title: "How to perform", value: exercise.instructionTextValue)
+                if !exercise.instructionSteps.isEmpty {
+                    detailStepList(title: "How to perform", steps: exercise.instructionSteps)
                 }
 
                 if let attribution = detailAttribution {
@@ -718,6 +735,39 @@ struct ExerciseDetailDestinationView: View {
         .wgjNavigationChrome()
         .navigationTitle("Exercise")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if exercise.isCustomExercise {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        presentCustomExerciseEditor()
+                    } label: {
+                        Label("Edit", systemImage: "pencil")
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showingCustomExerciseEditor) {
+            NavigationStack {
+                CustomExerciseEditorView(
+                    draft: $customExerciseDraft,
+                    availableMuscles: muscleGroups,
+                    suggestedCategories: suggestedCategories,
+                    title: "Edit Exercise",
+                    subtitle: "Update your custom movement.",
+                    saveButtonTitle: "Save Changes",
+                    onCancel: {
+                        showingCustomExerciseEditor = false
+                    },
+                    onSave: saveCustomExerciseChanges
+                )
+            }
+            .wgjSheetSurface()
+        }
+        .alert("Exercise Error", isPresented: $showingError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(errorMessage)
+        }
     }
 
     private func detailInfoRow(title: String, value: String) -> some View {
@@ -727,6 +777,28 @@ struct ExerciseDetailDestinationView: View {
                 .foregroundStyle(WGJTheme.textPrimary)
             Text(value)
                 .foregroundStyle(WGJTheme.textSecondary)
+        }
+    }
+
+    private func detailStepList(title: String, steps: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(WGJTheme.textPrimary)
+
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Step \(index + 1)")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(WGJTheme.accentBlue)
+
+                        Text(step)
+                            .foregroundStyle(WGJTheme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
         }
     }
 
@@ -741,6 +813,33 @@ struct ExerciseDetailDestinationView: View {
 
         return isBundledWGJAttribution ? nil : attribution
     }
+
+    private var suggestedCategories: [String] {
+        Array(
+            Set(
+                catalogExercises
+                    .filter { !$0.isHidden }
+                    .map(\.categoryName)
+                    .filter { !$0.isEmpty }
+            )
+        )
+        .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    private func presentCustomExerciseEditor() {
+        customExerciseDraft = CustomExerciseDraft(exercise: exercise)
+        showingCustomExerciseEditor = true
+    }
+
+    private func saveCustomExerciseChanges() {
+        do {
+            try repository.updateCustomExercise(exercise, draft: customExerciseDraft)
+            showingCustomExerciseEditor = false
+        } catch {
+            errorMessage = String(describing: error)
+            showingError = true
+        }
+    }
 }
 
 private struct CustomExerciseEditorView: View {
@@ -748,8 +847,31 @@ private struct CustomExerciseEditorView: View {
 
     let availableMuscles: [MuscleGroup]
     let suggestedCategories: [String]
+    let title: String
+    let subtitle: String
+    let saveButtonTitle: String
     let onCancel: () -> Void
     let onSave: () -> Void
+
+    init(
+        draft: Binding<CustomExerciseDraft>,
+        availableMuscles: [MuscleGroup],
+        suggestedCategories: [String],
+        title: String = "New Exercise",
+        subtitle: String = "Add a movement to your local library.",
+        saveButtonTitle: String = "Save",
+        onCancel: @escaping () -> Void,
+        onSave: @escaping () -> Void
+    ) {
+        self._draft = draft
+        self.availableMuscles = availableMuscles
+        self.suggestedCategories = suggestedCategories
+        self.title = title
+        self.subtitle = subtitle
+        self.saveButtonTitle = saveButtonTitle
+        self.onCancel = onCancel
+        self.onSave = onSave
+    }
 
     var body: some View {
         ScrollView {
@@ -761,7 +883,7 @@ private struct CustomExerciseEditorView: View {
         }
         .wgjScreenBackground()
         .wgjNavigationChrome()
-        .navigationTitle("New Exercise")
+        .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
@@ -771,7 +893,7 @@ private struct CustomExerciseEditorView: View {
             }
 
             ToolbarItem(placement: .confirmationAction) {
-                Button("Save") {
+                Button(saveButtonTitle) {
                     onSave()
                 }
                 .disabled(!canSave)
@@ -781,7 +903,7 @@ private struct CustomExerciseEditorView: View {
 
     private var formCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            WGJSectionHeader("Exercise", subtitle: "Add a movement to your local library.")
+            WGJSectionHeader("Exercise", subtitle: subtitle)
 
             TextField("Name", text: $draft.name)
                 .textInputAutocapitalization(.words)
@@ -820,6 +942,10 @@ private struct CustomExerciseEditorView: View {
                 .lineLimit(4...8)
                 .textInputAutocapitalization(.sentences)
                 .wgjPillField()
+
+            Text("Use commas or line breaks if you want the exercise to show as separate steps.")
+                .font(.footnote)
+                .foregroundStyle(WGJTheme.textSecondary)
         }
         .padding(14)
         .wgjCardContainer(strong: true)

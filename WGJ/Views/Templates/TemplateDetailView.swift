@@ -7,6 +7,7 @@ struct TemplateDetailView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let templateID: UUID
+    private let guidanceService = TrainingGuidanceService()
 
     @Query private var templates: [WorkoutTemplate]
     @Query(sort: [
@@ -15,6 +16,7 @@ struct TemplateDetailView: View {
     ])
     private var folders: [TemplateFolder]
     @Query private var templateExercises: [TemplateExercise]
+    @Query private var profiles: [UserProfile]
 
     @State private var showingEditor = false
 
@@ -30,6 +32,9 @@ struct TemplateDetailView: View {
     @State private var pendingRestSaveTasks: [UUID: Task<Void, Never>] = [:]
 
     @State private var loadedTemplateExerciseIDs: [UUID] = []
+    @State private var hasLoadedExerciseStateOnce = false
+    @State private var catalogByUUID: [String: ExerciseCatalogItem] = [:]
+    @State private var isExpandedByExerciseID: [UUID: Bool] = [:]
     @State private var errorMessage = ""
     @State private var showingError = false
     @State private var exerciseSwipeOffsets: [UUID: CGFloat] = [:]
@@ -123,6 +128,9 @@ struct TemplateDetailView: View {
         }
         .task(id: templateExercises.map(\.id)) {
             await loadSetDraftsIfNeeded()
+        }
+        .task(id: templateExercises.map(\.catalogExerciseUUID)) {
+            await loadCatalogMatches()
         }
         .onDisappear {
             flushPendingSaves()
@@ -221,7 +229,9 @@ struct TemplateDetailView: View {
                 infoDestination: AnyView(
                     TemplateExerciseDetailDestinationView(templateExercise: templateExercise)
                 ),
-                initiallyExpanded: true,
+                recommendation: templateRecommendation(for: templateExercise),
+                initiallyExpanded: false,
+                isExpanded: isExpandedBinding(for: templateExercise.id),
                 exerciseIndexTitle: "Exercise \(index + 1)",
                 targetRepMin: targetRepMinBinding(for: templateExercise),
                 targetRepMax: targetRepMaxBinding(for: templateExercise),
@@ -249,6 +259,7 @@ struct TemplateDetailView: View {
         withAnimation(WGJMotion.quickAnimation(reduceMotion: reduceMotion)) {
             do {
                 try repository.removeExercise(templateID: templateID, templateExerciseID: templateExerciseID)
+                isExpandedByExerciseID[templateExerciseID] = nil
                 clearExerciseSwipeState(for: templateExerciseID)
             } catch {
                 capturedError = error
@@ -421,7 +432,12 @@ struct TemplateDetailView: View {
     @MainActor
     private func loadSetDraftsIfNeeded() async {
         let currentIDs = templateExercises.map(\.id)
-        guard currentIDs != loadedTemplateExerciseIDs else { return }
+        guard currentIDs != loadedTemplateExerciseIDs else {
+            if !hasLoadedExerciseStateOnce {
+                hasLoadedExerciseStateOnce = true
+            }
+            return
+        }
 
         do {
             try repository.ensureDefaultSetPlans(templateID: templateID)
@@ -446,7 +462,15 @@ struct TemplateDetailView: View {
             lastPersistedRepRangeByExerciseID = loadedRanges
             restSecondsByExerciseID = loadedRests
             lastPersistedRestSecondsByExerciseID = loadedRests
+            let previousIDs = Set(loadedTemplateExerciseIDs)
+            let currentIDSet = Set(currentIDs)
+            isExpandedByExerciseID = isExpandedByExerciseID.filter { currentIDSet.contains($0.key) }
+            for exerciseID in currentIDs where isExpandedByExerciseID[exerciseID] == nil {
+                let isNewExercise = previousIDs.contains(exerciseID) == false
+                isExpandedByExerciseID[exerciseID] = hasLoadedExerciseStateOnce && isNewExercise
+            }
             loadedTemplateExerciseIDs = currentIDs
+            hasLoadedExerciseStateOnce = true
         } catch {
             showError(error)
         }
@@ -515,6 +539,42 @@ struct TemplateDetailView: View {
 
     private func destinationFolders(for template: WorkoutTemplate) -> [TemplateFolder] {
         folders.filter { $0.id != template.folderID }
+    }
+
+    private var isTrainingGuidanceEnabled: Bool {
+        profiles.first?.isTrainingGuidanceEnabled ?? true
+    }
+
+    private func isExpandedBinding(for exerciseID: UUID) -> Binding<Bool> {
+        Binding(
+            get: { isExpandedByExerciseID[exerciseID] ?? false },
+            set: { isExpandedByExerciseID[exerciseID] = $0 }
+        )
+    }
+
+    private func templateRecommendation(for exercise: TemplateExercise) -> TemplateExerciseRecommendation? {
+        guard isTrainingGuidanceEnabled else { return nil }
+        if let catalogExercise = catalogByUUID[exercise.catalogExerciseUUID] {
+            return guidanceService.templateRecommendation(for: catalogExercise)
+        }
+
+        return guidanceService.templateRecommendation(
+            for: TrainingGuidanceCatalogSnapshot(
+                exerciseName: exercise.exerciseNameSnapshot,
+                categoryName: exercise.categorySnapshot,
+                equipmentSummary: "",
+                primaryMuscleNames: exercise.muscleSummarySnapshot
+            )
+        )
+    }
+
+    private func loadCatalogMatches() async {
+        do {
+            catalogByUUID = try ExerciseCatalogRepository(modelContext: modelContext)
+                .exerciseMap(for: templateExercises.map(\.catalogExerciseUUID))
+        } catch {
+            showError(error)
+        }
     }
 
     @MainActor

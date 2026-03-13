@@ -38,11 +38,12 @@ struct ExerciseCatalogSyncServiceTests {
         )
 
         #expect(exercises.count == 2)
-        #expect(exercises[0].displayName == "Bench Press")
-        #expect(exercises[0].instructionTextValue == "Set your shoulders, lower with control, and press back up smoothly.")
-        #expect(exercises[0].primaryMuscles.map(\.name) == ["Chest"])
-        #expect(exercises[0].secondaryMuscles.map(\.name) == ["Triceps"])
-        #expect(exercises[0].primaryAttribution?.sourceName == "WGJ Library")
+        let bench = try #require(exercises.first(where: { $0.remoteUUID == "seed-bench" }))
+        #expect(bench.displayName == "Bench Press")
+        #expect(bench.instructionTextValue == "Set your shoulders, lower with control, and press back up smoothly.")
+        #expect(bench.primaryMuscles.map(\.name) == ["Chest"])
+        #expect(bench.secondaryMuscles.map(\.name) == ["Triceps"])
+        #expect(bench.primaryAttribution?.sourceName == "WGJ Library")
 
         let syncState = try #require(context.fetch(FetchDescriptor<ExerciseCatalogSyncState>()).first)
         #expect(syncState.seedVersion == 1)
@@ -142,6 +143,109 @@ struct ExerciseCatalogSyncServiceTests {
                     primaryMuscleIDs: [1],
                     secondaryMuscleIDs: [],
                     instructionText: ""
+                )
+            )
+        }
+    }
+
+    @Test
+    func customExerciseUpdatePersistsChangesAndRefreshesTemplateSnapshots() throws {
+        let context = try makeInMemoryContext()
+        let service = ExerciseCatalogSyncService(
+            modelContext: context,
+            seedLoader: StaticSeedLoader(payload: SeedFixtures.initialPayload)
+        )
+        try service.ensureSeedImportedIfNeeded()
+
+        let repository = ExerciseCatalogRepository(
+            modelContext: context,
+            seedLoader: StaticSeedLoader(payload: SeedFixtures.initialPayload)
+        )
+
+        let created = try repository.createCustomExercise(
+            draft: CustomExerciseDraft(
+                name: "Custom Cable Fly",
+                categoryName: "Chest",
+                equipmentSummary: "Cable",
+                aliases: ["Cable Fly Variation"],
+                primaryMuscleIDs: [1],
+                secondaryMuscleIDs: [3],
+                instructionText: "Keep a soft bend in the elbows and bring the handles together under full control."
+            )
+        )
+
+        let template = WorkoutTemplate(folderID: UUID(), name: "Upper A")
+        context.insert(template)
+
+        let templateExercise = TemplateExercise(
+            templateID: template.id,
+            catalogExerciseUUID: created.remoteUUID,
+            exerciseNameSnapshot: created.displayName,
+            categorySnapshot: created.categoryName,
+            muscleSummarySnapshot: created.primaryMuscleNames,
+            template: template
+        )
+        context.insert(templateExercise)
+        template.exercises = [templateExercise]
+        try context.save()
+
+        try repository.updateCustomExercise(
+            created,
+            draft: CustomExerciseDraft(
+                name: "Standing Cable Fly",
+                categoryName: "Upper Chest",
+                equipmentSummary: "Dual Cable",
+                aliases: ["Mid Cable Fly", "Mid Cable Fly"],
+                primaryMuscleIDs: [2],
+                secondaryMuscleIDs: [1],
+                instructionText: "Step 1: Set your stance.\n2. Sweep the handles together.\n3. Return under control."
+            )
+        )
+
+        #expect(created.remoteUUID.hasPrefix("custom-"))
+        #expect(created.displayName == "Standing Cable Fly")
+        #expect(created.categoryName == "Upper Chest")
+        #expect(created.equipmentSummary == "Dual Cable")
+        #expect(created.aliases.map(\.value) == ["Mid Cable Fly"])
+        #expect(created.primaryMuscles.map(\.name) == ["Back"])
+        #expect(created.secondaryMuscles.map(\.name) == ["Chest"])
+        #expect(created.instructionSteps == ["Set your stance.", "Sweep the handles together.", "Return under control."])
+
+        let refreshedTemplate = try #require(
+            context.fetch(FetchDescriptor<TemplateExercise>()).first(where: { $0.id == templateExercise.id })
+        )
+        #expect(refreshedTemplate.exerciseNameSnapshot == "Standing Cable Fly")
+        #expect(refreshedTemplate.categorySnapshot == "Upper Chest")
+        #expect(refreshedTemplate.muscleSummarySnapshot == "Back")
+    }
+
+    @Test
+    func seedExercisesCannotBeEditedThroughCustomUpdateFlow() throws {
+        let context = try makeInMemoryContext()
+        let service = ExerciseCatalogSyncService(
+            modelContext: context,
+            seedLoader: StaticSeedLoader(payload: SeedFixtures.initialPayload)
+        )
+        try service.ensureSeedImportedIfNeeded()
+
+        let repository = ExerciseCatalogRepository(
+            modelContext: context,
+            seedLoader: StaticSeedLoader(payload: SeedFixtures.initialPayload)
+        )
+        let exercises = try context.fetch(FetchDescriptor<ExerciseCatalogItem>())
+        let bench = try #require(exercises.first(where: { $0.remoteUUID == "seed-bench" }))
+
+        #expect(throws: ExerciseCatalogRepositoryError.self) {
+            try repository.updateCustomExercise(
+                bench,
+                draft: CustomExerciseDraft(
+                    name: "Bench Press v2",
+                    categoryName: "Chest",
+                    equipmentSummary: "Barbell",
+                    aliases: [],
+                    primaryMuscleIDs: [1],
+                    secondaryMuscleIDs: [3],
+                    instructionText: "Press."
                 )
             )
         }

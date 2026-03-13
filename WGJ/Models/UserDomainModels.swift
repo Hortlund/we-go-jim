@@ -60,6 +60,7 @@ final class UserProfile {
     var displayName: String = ""
     var avatarImageData: Data?
     var weeklyWorkoutGoal: Int = 4
+    var isTrainingGuidanceEnabled: Bool = true
     var brosCircleID: String?
     var brosMembershipID: String?
     var brosUserRecordName: String?
@@ -83,6 +84,7 @@ final class UserProfile {
         displayName: String,
         avatarImageData: Data? = nil,
         weeklyWorkoutGoal: Int = 4,
+        isTrainingGuidanceEnabled: Bool = true,
         brosCircleID: String? = nil,
         brosMembershipID: String? = nil,
         brosUserRecordName: String? = nil,
@@ -95,6 +97,7 @@ final class UserProfile {
         self.displayName = displayName
         self.avatarImageData = avatarImageData
         self.weeklyWorkoutGoal = max(1, min(14, weeklyWorkoutGoal))
+        self.isTrainingGuidanceEnabled = isTrainingGuidanceEnabled
         self.brosCircleID = brosCircleID
         self.brosMembershipID = brosMembershipID
         self.brosUserRecordName = brosUserRecordName
@@ -169,7 +172,7 @@ final class SocialOutboxItem {
 @Model
 final class ProfileWidgetConfig {
     var id: UUID = UUID()
-    @Attribute(.unique) var kindRaw: String = ProfileWidgetKind.prs.rawValue
+    var kindRaw: String = ProfileWidgetKind.prs.rawValue
     var isEnabled: Bool = true
     var sortOrder: Int = 0
     var createdAt: Date = Date()

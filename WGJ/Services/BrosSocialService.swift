@@ -325,7 +325,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
         let membersByRecordName = Dictionary(uniqueKeysWithValues: members.map { ($0.userRecordName, $0) })
 
         let eventRecords = try await feedEvents(circleID: circle.circleID)
-        let reactionRecords = try await reactions(circleID: circle.circleID)
+        let reactionRecords = try await reactionRecords(circleID: circle.circleID)
         let reactionsByEventID = Dictionary(grouping: reactionRecords.compactMap(reactionSummary(from:)), by: \.eventID)
 
         let visibleEvents = eventRecords.compactMap { record -> BroFeedEvent? in
@@ -451,11 +451,11 @@ final class CloudKitBrosSocialService: BrosSocialService {
 
     func leaveCircle() async throws {
         let userRecordName = try await currentUserRecordName()
-        guard
-            let membershipRecord = try await membershipRecord(forUserRecordName: userRecordName),
-            let currentMember = try await optionalMemberSummary(from: membershipRecord),
-            let circleRecord = try await circleRecord(circleID: currentMember.circleID)
-        else {
+        guard let membershipRecord = try await membershipRecord(forUserRecordName: userRecordName) else {
+            throw BrosSocialServiceError.notInCircle
+        }
+        let currentMember = try await memberSummary(from: membershipRecord)
+        guard let circleRecord = try await circleRecord(circleID: currentMember.circleID) else {
             throw BrosSocialServiceError.notInCircle
         }
 
@@ -493,12 +493,10 @@ final class CloudKitBrosSocialService: BrosSocialService {
 
     func removeMember(membershipID: String) async throws {
         let userRecordName = try await currentUserRecordName()
-        guard
-            let currentMembershipRecord = try await membershipRecord(forUserRecordName: userRecordName),
-            let currentMember = try await optionalMemberSummary(from: currentMembershipRecord)
-        else {
+        guard let currentMembershipRecord = try await membershipRecord(forUserRecordName: userRecordName) else {
             throw BrosSocialServiceError.notInCircle
         }
+        let currentMember = try await memberSummary(from: currentMembershipRecord)
 
         guard currentMember.isOwner else {
             throw BrosSocialServiceError.permissions
@@ -760,10 +758,6 @@ final class CloudKitBrosSocialService: BrosSocialService {
         )
     }
 
-    private func reactions(circleID: String) async throws -> [CKRecord] {
-        try await reactionRecords(circleID: circleID)
-    }
-
     private func reactionRecords(circleID: String) async throws -> [CKRecord] {
         try await queryRecords(
             recordType: RecordType.reaction,
@@ -802,62 +796,66 @@ final class CloudKitBrosSocialService: BrosSocialService {
         sortDescriptors: [NSSortDescriptor] = [],
         resultsLimit: Int = CKQueryOperation.maximumResults
     ) async throws -> [CKRecord] {
-        try await withCheckedThrowingContinuation { continuation in
-            var fetched: [CKRecord] = []
-            let query = CKQuery(recordType: recordType, predicate: predicate)
-            query.sortDescriptors = sortDescriptors
+        let query = CKQuery(recordType: recordType, predicate: predicate)
+        query.sortDescriptors = sortDescriptors
 
-            let operation = CKQueryOperation(query: query)
-            operation.resultsLimit = resultsLimit
-            operation.recordFetchedBlock = { record in
-                fetched.append(record)
+        var fetched: [CKRecord] = []
+        var cursor: CKQueryOperation.Cursor?
+
+        repeat {
+            let result: (matchResults: [(CKRecord.ID, Result<CKRecord, any Error>)], queryCursor: CKQueryOperation.Cursor?)
+            if let cursor {
+                result = try await database.records(
+                    continuingMatchFrom: cursor,
+                    resultsLimit: resultsLimit
+                )
+            } else {
+                result = try await database.records(
+                    matching: query,
+                    resultsLimit: resultsLimit
+                )
             }
-            operation.queryCompletionBlock = { _, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume(returning: fetched)
-                }
+
+            for (_, recordResult) in result.matchResults {
+                fetched.append(try recordResult.get())
             }
-            self.database.add(operation)
-        }
+
+            cursor = result.queryCursor
+        } while cursor != nil
+
+        return fetched
     }
 
     private func fetchRecord(recordType: String, recordName: String) async throws -> CKRecord? {
         let recordID = CKRecord.ID(recordName: recordName)
-        return try await withCheckedThrowingContinuation { continuation in
-            database.fetch(withRecordID: recordID) { record, error in
-                if let ckError = error as? CKError, ckError.code == .unknownItem {
-                    continuation.resume(returning: nil)
-                    return
-                }
-                if let error {
-                    continuation.resume(throwing: error)
-                } else if let record, record.recordType == recordType {
-                    continuation.resume(returning: record)
-                } else {
-                    continuation.resume(returning: nil)
-                }
+        do {
+            let results = try await database.records(for: [recordID])
+            guard let result = results[recordID] else {
+                return nil
             }
+
+            switch result {
+            case let .success(record):
+                return record.recordType == recordType ? record : nil
+            case let .failure(error as CKError) where error.code == .unknownItem:
+                return nil
+            case let .failure(error):
+                throw error
+            }
+        } catch let error as CKError where error.code == .unknownItem {
+            return nil
         }
     }
 
     private func save(records: [CKRecord], deleting recordIDs: [CKRecord.ID] = []) async throws {
         guard !records.isEmpty || !recordIDs.isEmpty else { return }
 
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            let operation = CKModifyRecordsOperation(recordsToSave: records, recordIDsToDelete: recordIDs)
-            operation.savePolicy = .allKeys
-            operation.isAtomic = false
-            operation.modifyRecordsCompletionBlock = { _, _, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume(returning: ())
-                }
-            }
-            self.database.add(operation)
-        }
+        _ = try await database.modifyRecords(
+            saving: records,
+            deleting: recordIDs,
+            savePolicy: .allKeys,
+            atomically: false
+        )
     }
 
     private func memberSummary(from record: CKRecord) async throws -> BroMemberSummary {
@@ -871,10 +869,6 @@ final class CloudKitBrosSocialService: BrosSocialService {
             joinedAt: record[Field.joinedAt] as? Date ?? .now,
             role: BroMembershipRole(rawValue: record[Field.role] as? String ?? "") ?? .member
         )
-    }
-
-    private func optionalMemberSummary(from record: CKRecord) async throws -> BroMemberSummary? {
-        try await memberSummary(from: record)
     }
 
     private func circleSummary(from record: CKRecord) -> BroCircleSummary {

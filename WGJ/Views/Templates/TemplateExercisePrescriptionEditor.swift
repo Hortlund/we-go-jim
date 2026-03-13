@@ -9,6 +9,7 @@ struct TemplateExercisePrescriptionEditor: View {
     let exerciseIndexTitle: String?
     let canMoveUp: Bool
     let canMoveDown: Bool
+    let recommendation: TemplateExerciseRecommendation?
 
     @Binding var targetRepMin: Int?
     @Binding var targetRepMax: Int?
@@ -22,7 +23,8 @@ struct TemplateExercisePrescriptionEditor: View {
     var onMoveDown: (() -> Void)?
     var onExerciseDelete: (() -> Void)?
 
-    @State private var isExpanded: Bool
+    private let externalIsExpanded: Binding<Bool>?
+    @State private var localIsExpanded: Bool
     @State private var setSwipeOffsets: [UUID: CGFloat] = [:]
     @State private var setSwipeRemoving: [UUID: Bool] = [:]
 
@@ -33,7 +35,9 @@ struct TemplateExercisePrescriptionEditor: View {
         muscleSummary: String,
         category: String,
         infoDestination: AnyView? = nil,
-        initiallyExpanded: Bool = true,
+        recommendation: TemplateExerciseRecommendation? = nil,
+        initiallyExpanded: Bool = false,
+        isExpanded: Binding<Bool>? = nil,
         exerciseIndexTitle: String? = nil,
         canMoveUp: Bool = false,
         canMoveDown: Bool = false,
@@ -52,6 +56,7 @@ struct TemplateExercisePrescriptionEditor: View {
         self.muscleSummary = muscleSummary
         self.category = category
         self.infoDestination = infoDestination
+        self.recommendation = recommendation
         self.exerciseIndexTitle = exerciseIndexTitle
         self.canMoveUp = canMoveUp
         self.canMoveDown = canMoveDown
@@ -59,20 +64,29 @@ struct TemplateExercisePrescriptionEditor: View {
         self._targetRepMax = targetRepMax
         self._restSeconds = restSeconds
         self._setDrafts = setDrafts
+        self.externalIsExpanded = isExpanded
         self.onSetDraftsChanged = onSetDraftsChanged
         self.onRepRangeChanged = onRepRangeChanged
         self.onRestChanged = onRestChanged
         self.onMoveUp = onMoveUp
         self.onMoveDown = onMoveDown
         self.onExerciseDelete = onExerciseDelete
-        self._isExpanded = State(initialValue: initiallyExpanded)
+        self._localIsExpanded = State(initialValue: isExpanded?.wrappedValue ?? initiallyExpanded)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 14) {
             header
 
             if isExpanded {
+                if let recommendation {
+                    TrainingGuidanceBannerView(
+                        title: recommendation.title,
+                        message: recommendation.summary,
+                        tone: recommendation.tone
+                    )
+                }
+
                 controlsSection
                 setsSection
             }
@@ -95,28 +109,20 @@ struct TemplateExercisePrescriptionEditor: View {
                 Text(summaryLine)
                     .font(.subheadline)
                     .foregroundStyle(WGJTheme.textSecondary)
-                    .wgjSingleLineText(scale: 0.8)
+                    .lineLimit(2)
 
-                HStack(spacing: 8) {
-                    infoChip("\(setDrafts.count) planned", tint: WGJTheme.accentBlue)
-
-                    if !category.isEmpty {
-                        infoChip(category, tint: WGJTheme.accentCyan)
-                    }
-                }
+                headerSummaryChips
             }
 
             Spacer(minLength: 12)
 
-            HStack(spacing: 8) {
+            VStack(spacing: 8) {
                 if hasHeaderMenu {
                     headerMenu
                 }
 
                 Button {
-                    withAnimation(.snappy(duration: 0.2, extraBounce: 0.02)) {
-                        isExpanded.toggle()
-                    }
+                    toggleExpanded()
                 } label: {
                     headerIcon(symbol: isExpanded ? "chevron.up.circle.fill" : "chevron.down.circle.fill")
                 }
@@ -148,12 +154,12 @@ struct TemplateExercisePrescriptionEditor: View {
 
     private var controlsSection: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
                 repRangeControl
                 restControl
             }
 
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
                 repRangeControl
                 restControl
             }
@@ -161,11 +167,11 @@ struct TemplateExercisePrescriptionEditor: View {
     }
 
     private var repRangeControl: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Target Range")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(WGJTheme.textSecondary)
-
+        compactControlCard(
+            title: "Rep Range",
+            subtitle: "Default target for each working set.",
+            tint: WGJTheme.accentGold
+        ) {
             HStack(spacing: 10) {
                 TextField("Min", text: repMinTextBinding)
                     .keyboardType(.numberPad)
@@ -183,85 +189,59 @@ struct TemplateExercisePrescriptionEditor: View {
                     .wgjPillField()
                     .frame(maxWidth: .infinity)
             }
-
-            Text("This becomes the default rep target for each set.")
-                .font(.caption2)
-                .foregroundStyle(WGJTheme.textSecondary)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(WGJTheme.accentGold.opacity(0.12))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(WGJTheme.accentGold.opacity(0.32), lineWidth: 1)
-                )
-        )
     }
 
     private var restControl: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Exercise Rest")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(WGJTheme.textSecondary)
-
-            Menu {
-                ForEach(restPresets, id: \.self) { value in
-                    Button(formattedRest(value)) {
-                        updateRest(value)
+        compactControlCard(
+            title: "Default Rest",
+            subtitle: "Applies to every planned set unless you override it.",
+            tint: WGJTheme.accentBlue
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                Menu {
+                    ForEach(restPresets, id: \.self) { value in
+                        Button(formattedRest(value)) {
+                            updateRest(value)
+                        }
                     }
+                } label: {
+                    HStack(spacing: 8) {
+                        Label(formattedRest(restSeconds), systemImage: "timer")
+                            .monospacedDigit()
+
+                        Spacer()
+
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption.weight(.bold))
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(WGJTheme.accentBlue)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(WGJTheme.field)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(WGJTheme.accentBlue.opacity(0.24), lineWidth: 1)
+                            )
+                    )
                 }
-            } label: {
+
                 HStack(spacing: 8) {
-                    Label(formattedRest(restSeconds), systemImage: "timer")
-                        .monospacedDigit()
+                    restAdjustButton(symbol: "minus.circle", action: {
+                        updateRest(restSeconds - 15)
+                    })
 
-                    Spacer()
+                    restAdjustButton(symbol: "plus.circle.fill", action: {
+                        updateRest(restSeconds + 15)
+                    })
 
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.caption.weight(.bold))
+                    Spacer(minLength: 8)
                 }
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(WGJTheme.accentBlue)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(WGJTheme.field)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(WGJTheme.accentBlue.opacity(0.24), lineWidth: 1)
-                        )
-                )
-            }
-
-            HStack(spacing: 8) {
-                restAdjustButton(symbol: "minus.circle", action: {
-                    updateRest(restSeconds - 15)
-                })
-
-                restAdjustButton(symbol: "plus.circle.fill", action: {
-                    updateRest(restSeconds + 15)
-                })
-
-                Spacer(minLength: 8)
-
-                Text("Applies to every planned set.")
-                    .font(.caption2)
-                    .foregroundStyle(WGJTheme.textSecondary)
             }
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(WGJTheme.field.opacity(0.56))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(WGJTheme.accentBlue.opacity(0.22), lineWidth: 1)
-                )
-        )
     }
 
     private var setsSection: some View {
@@ -325,22 +305,35 @@ struct TemplateExercisePrescriptionEditor: View {
                 setBadge(for: index)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(setTitle(for: index))
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(WGJTheme.textPrimary)
-                        .wgjSingleLineText(scale: 0.84)
+                    HStack(spacing: 6) {
+                        Text(setTitle(for: index))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(WGJTheme.textPrimary)
+                            .wgjSingleLineText(scale: 0.84)
+
+                        if set.isLocked {
+                            Image(systemName: "lock.fill")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(WGJTheme.accentGold)
+                        }
+                    }
 
                     Text(previousSummary(for: set))
                         .font(.caption)
                         .foregroundStyle(WGJTheme.textSecondary)
                         .lineLimit(2)
                         .monospacedDigit()
+
+                    if let metadata = setMetadataLine(for: index) {
+                        Text(metadata)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(WGJTheme.textSecondary)
+                            .lineLimit(1)
+                    }
                 }
 
                 Spacer(minLength: 8)
 
-                setRestMenu(at: index)
-                lockButton(at: index)
                 setMenu(at: index)
             }
 
@@ -457,73 +450,10 @@ struct TemplateExercisePrescriptionEditor: View {
         .buttonStyle(.plain)
     }
 
-    private func setRestMenu(at index: Int) -> some View {
+    private func setMenu(at index: Int) -> some View {
         let currentRest = setDrafts[index].restSeconds
-        let isDefaultRest = currentRest == restSeconds
 
         return Menu {
-            ForEach(restPresets, id: \.self) { value in
-                Button(formattedRest(value)) {
-                    updateSetRest(value, at: index)
-                }
-            }
-
-            Divider()
-
-            Button("Use exercise default (\(formattedRest(restSeconds)))") {
-                updateSetRest(restSeconds, at: index)
-            }
-
-            Button("-15 sec") {
-                updateSetRest(currentRest - 15, at: index)
-            }
-
-            Button("+15 sec") {
-                updateSetRest(currentRest + 15, at: index)
-            }
-
-            Button("No rest") {
-                updateSetRest(0, at: index)
-            }
-        } label: {
-            Label(restLabel(for: currentRest), systemImage: "timer")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(isDefaultRest ? WGJTheme.textSecondary : WGJTheme.accentBlue)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(
-                    Capsule()
-                        .fill(WGJTheme.field)
-                        .overlay(
-                            Capsule()
-                                .stroke(
-                                    (isDefaultRest ? WGJTheme.textSecondary : WGJTheme.accentBlue).opacity(0.22),
-                                    lineWidth: 1
-                                )
-                        )
-                )
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func lockButton(at index: Int) -> some View {
-        Button {
-            toggleLock(at: index)
-        } label: {
-            Image(systemName: setDrafts[index].isLocked ? "lock.fill" : "lock.open")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(setDrafts[index].isLocked ? WGJTheme.accentGold : WGJTheme.textSecondary)
-                .frame(width: 34, height: 34)
-                .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(WGJTheme.field)
-                )
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func setMenu(at index: Int) -> some View {
-        Menu {
             Button {
                 insertSet(after: index)
             } label: {
@@ -549,6 +479,40 @@ struct TemplateExercisePrescriptionEditor: View {
                 Label("Move down", systemImage: "arrow.down")
             }
             .disabled(index == setDrafts.count - 1)
+
+            Menu {
+                ForEach(restPresets, id: \.self) { value in
+                    Button(formattedRest(value)) {
+                        updateSetRest(value, at: index)
+                    }
+                }
+
+                Divider()
+
+                Button("Use exercise default (\(formattedRest(restSeconds)))") {
+                    updateSetRest(restSeconds, at: index)
+                }
+
+                Button("-15 sec") {
+                    updateSetRest(currentRest - 15, at: index)
+                }
+
+                Button("+15 sec") {
+                    updateSetRest(currentRest + 15, at: index)
+                }
+
+                Button("No rest") {
+                    updateSetRest(0, at: index)
+                }
+            } label: {
+                Label("Set rest", systemImage: "timer")
+            }
+
+            Button {
+                toggleLock(at: index)
+            } label: {
+                Label(setDrafts[index].isLocked ? "Unlock set" : "Lock set", systemImage: setDrafts[index].isLocked ? "lock.open" : "lock")
+            }
 
             if setDrafts[index].restSeconds != restSeconds {
                 Button {
@@ -611,6 +575,20 @@ struct TemplateExercisePrescriptionEditor: View {
         onMoveUp != nil || onMoveDown != nil || onExerciseDelete != nil
     }
 
+    private var headerSummaryChips: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                infoChip(repRangeSummary, tint: WGJTheme.accentGold)
+                infoChip(setPlanSummary, tint: WGJTheme.accentBlue)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                infoChip(repRangeSummary, tint: WGJTheme.accentGold)
+                infoChip(setPlanSummary, tint: WGJTheme.accentBlue)
+            }
+        }
+    }
+
     private func infoChip(_ title: String, tint: Color) -> some View {
         Text(title)
             .font(.caption.weight(.semibold))
@@ -657,6 +635,73 @@ struct TemplateExercisePrescriptionEditor: View {
         }
 
         return "Plan weight, reps, and rest for each set."
+    }
+
+    private var isExpanded: Bool {
+        expansionBinding.wrappedValue
+    }
+
+    private var expansionBinding: Binding<Bool> {
+        externalIsExpanded ?? $localIsExpanded
+    }
+
+    private var repRangeSummary: String {
+        switch (targetRepMin, targetRepMax) {
+        case let (min?, max?):
+            return min == max ? "\(min) reps" : "\(min)-\(max) reps"
+        case let (min?, nil):
+            return "\(min)+ reps"
+        case let (nil, max?):
+            return "Up to \(max)"
+        case (nil, nil):
+            return "No rep range"
+        }
+    }
+
+    private var setPlanSummary: String {
+        let warmups = setDrafts.filter(\.isWarmup).count
+        let workingSets = max(0, setDrafts.count - warmups)
+
+        if warmups > 0 {
+            return "\(workingSets) working • \(warmups) warmup"
+        }
+
+        return "\(workingSets) working sets"
+    }
+
+    private func toggleExpanded() {
+        withAnimation(.snappy(duration: 0.2, extraBounce: 0.02)) {
+            expansionBinding.wrappedValue.toggle()
+        }
+    }
+
+    private func compactControlCard<Content: View>(
+        title: String,
+        subtitle: String,
+        tint: Color,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(WGJTheme.textSecondary)
+
+            content()
+
+            Text(subtitle)
+                .font(.caption2)
+                .foregroundStyle(WGJTheme.textSecondary)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(tint.opacity(0.10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(tint.opacity(0.20), lineWidth: 1)
+                )
+        )
     }
 
     private var repMinTextBinding: Binding<String> {
@@ -806,6 +851,23 @@ struct TemplateExercisePrescriptionEditor: View {
     private func previousSummary(for set: TemplateExerciseSetDraft) -> String {
         let previous = previousText(for: set)
         return previous == "-" ? "No previous target saved." : "Last target \(previous)"
+    }
+
+    private func setMetadataLine(for index: Int) -> String? {
+        guard setDrafts.indices.contains(index) else { return nil }
+        let set = setDrafts[index]
+        var parts: [String] = []
+
+        if set.isLocked {
+            parts.append("Locked")
+        }
+
+        if set.restSeconds != restSeconds {
+            parts.append("Rest \(restLabel(for: set.restSeconds))")
+        }
+
+        guard !parts.isEmpty else { return nil }
+        return parts.joined(separator: " • ")
     }
 
     private func setTitle(for index: Int) -> String {

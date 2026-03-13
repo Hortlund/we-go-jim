@@ -260,8 +260,28 @@ final class WorkoutSessionRepository {
             throw WorkoutSessionRepositoryError.sessionExerciseNotFound
         }
 
-        exercise.restSeconds = sanitizedRest(restSeconds)
+        let previousDefaultRest = exercise.restSeconds
+        let normalizedRest = sanitizedRest(restSeconds)
+        exercise.restSeconds = normalizedRest
+        for set in exercise.sets ?? [] where set.restSeconds == previousDefaultRest {
+            set.restSeconds = normalizedRest
+            set.updatedAt = .now
+        }
         exercise.updatedAt = .now
+        exercise.session?.updatedAt = .now
+        try modelContext.save()
+    }
+
+    func updateExerciseRepRange(sessionExerciseID: UUID, minReps: Int?, maxReps: Int?) throws {
+        guard let exercise = try sessionExercise(id: sessionExerciseID) else {
+            throw WorkoutSessionRepositoryError.sessionExerciseNotFound
+        }
+
+        let normalized = sanitizedRepRange(min: minReps, max: maxReps)
+        exercise.targetRepMin = normalized.min
+        exercise.targetRepMax = normalized.max
+        exercise.updatedAt = .now
+        exercise.session?.updatedAt = .now
         try modelContext.save()
     }
 
@@ -605,6 +625,10 @@ final class WorkoutSessionRepository {
     private func sanitizedWeight(_ weight: Double?) -> Double? {
         guard let weight else { return nil }
         return min(5000, max(0, weight))
+    }
+
+    private func sanitizedRepRange(min minReps: Int?, max maxReps: Int?) -> (min: Int?, max: Int?) {
+        (sanitizedReps(minReps), sanitizedReps(maxReps))
     }
 
     private func sanitizedRest(_ seconds: Int) -> Int {

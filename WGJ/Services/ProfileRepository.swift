@@ -53,4 +53,11 @@ final class ProfileRepository {
         profile.updatedAt = .now
         try modelContext.save()
     }
+
+    func updateTrainingGuidanceEnabled(_ isEnabled: Bool) throws {
+        let profile = try loadOrCreateProfile()
+        profile.isTrainingGuidanceEnabled = isEnabled
+        profile.updatedAt = .now
+        try modelContext.save()
+    }
 }

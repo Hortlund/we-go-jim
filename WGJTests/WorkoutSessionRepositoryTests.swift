@@ -188,6 +188,62 @@ struct WorkoutSessionRepositoryTests {
     }
 
     @Test
+    func updateExerciseRestPreservesCustomSetOverrides() throws {
+        let context = try makeInMemoryContext()
+        let repository = WorkoutSessionRepository(modelContext: context)
+
+        let item = ExerciseCatalogItem(
+            remoteUUID: "rest-override-1",
+            displayName: "Incline Press",
+            categoryName: "Chest",
+            equipmentSummary: "Dumbbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(item)
+
+        let session = try repository.createEmptySession()
+        try repository.addExercise(sessionID: session.id, catalogItem: item)
+        let exercise = try repository.sessionExercises(sessionID: session.id).first!
+        var drafts = try repository.setDrafts(sessionExerciseID: exercise.id)
+        drafts[1].restSeconds = 180
+        try repository.saveSetDrafts(sessionExerciseID: exercise.id, drafts: drafts)
+
+        try repository.updateExerciseRest(sessionExerciseID: exercise.id, restSeconds: 150)
+
+        let updatedDrafts = try repository.setDrafts(sessionExerciseID: exercise.id)
+        #expect(updatedDrafts[0].restSeconds == 150)
+        #expect(updatedDrafts[1].restSeconds == 180)
+        #expect(updatedDrafts[2].restSeconds == 150)
+    }
+
+    @Test
+    func updateExerciseRepRangePersists() throws {
+        let context = try makeInMemoryContext()
+        let repository = WorkoutSessionRepository(modelContext: context)
+
+        let item = ExerciseCatalogItem(
+            remoteUUID: "rep-range-1",
+            displayName: "Lat Pulldown",
+            categoryName: "Back",
+            equipmentSummary: "Cable",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(item)
+
+        let session = try repository.createEmptySession()
+        try repository.addExercise(sessionID: session.id, catalogItem: item)
+        let exercise = try repository.sessionExercises(sessionID: session.id).first!
+
+        try repository.updateExerciseRepRange(sessionExerciseID: exercise.id, minReps: 8, maxReps: 12)
+
+        let refreshed = try repository.sessionExercises(sessionID: session.id).first
+        #expect(refreshed?.targetRepMin == 8)
+        #expect(refreshed?.targetRepMax == 12)
+    }
+
+    @Test
     func deleteSessionRemovesFromHistory() throws {
         let context = try makeInMemoryContext()
         let repository = WorkoutSessionRepository(modelContext: context)

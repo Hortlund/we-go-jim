@@ -491,6 +491,7 @@ struct WGJTests {
 
         let created = try repository.loadOrCreateProfile()
         #expect(created.displayName == "Athlete")
+        #expect(created.isTrainingGuidanceEnabled)
 
         try repository.updateDisplayName("Demo Lifter")
         let avatarData = Data([0x01, 0x02, 0x03, 0x04])
@@ -499,6 +500,18 @@ struct WGJTests {
         let updated = try repository.currentProfile()
         #expect(updated?.displayName == "Demo Lifter")
         #expect(updated?.avatarImageData == avatarData)
+    }
+
+    @Test
+    func profileRepositoryPersistsTrainingGuidancePreference() throws {
+        let context = try makeInMemoryContext()
+        let repository = ProfileRepository(modelContext: context)
+
+        _ = try repository.loadOrCreateProfile()
+        try repository.updateTrainingGuidanceEnabled(false)
+
+        let updated = try repository.currentProfile()
+        #expect(updated?.isTrainingGuidanceEnabled == false)
     }
 
     @Test

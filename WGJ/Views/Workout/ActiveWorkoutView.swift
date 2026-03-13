@@ -11,6 +11,7 @@ struct ActiveWorkoutView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let sessionID: UUID
+    private let guidanceService = TrainingGuidanceService()
 
     @Query private var sessions: [WorkoutSession]
     @Query private var sessionExercises: [WorkoutSessionExercise]
@@ -19,6 +20,7 @@ struct ActiveWorkoutView: View {
         SortDescriptor(\TemplateFolder.name, order: .forward),
     ])
     private var folders: [TemplateFolder]
+    @Query private var profiles: [UserProfile]
 
     @State private var hasBootstrapped = false
     @State private var setDraftsByExerciseID: [UUID: [WorkoutSessionSetDraft]] = [:]
@@ -31,6 +33,8 @@ struct ActiveWorkoutView: View {
 
     @State private var previousByExerciseID: [UUID: [Int: WorkoutPreviousSetSnapshot]] = [:]
     @State private var loadedExerciseIDs: [UUID] = []
+    @State private var catalogByUUID: [String: ExerciseCatalogItem] = [:]
+    @State private var cardStateController = ActiveWorkoutExerciseCardStateController()
     @State private var exerciseSwipeOffsets: [UUID: CGFloat] = [:]
     @State private var exerciseSwipeRemoving: [UUID: Bool] = [:]
 
@@ -38,8 +42,10 @@ struct ActiveWorkoutView: View {
     @State private var notesDraft = ""
     @State private var showingExercisePicker = false
     @State private var showingFinishConfirmation = false
-    @State private var showingCancelConfirmation = false
+    @State private var isCancelArmed = false
     @State private var showingSaveTemplateSheet = false
+    @State private var exerciseSettingsDraft: ActiveWorkoutExerciseSettingsDraft?
+    @State private var pendingTemplateUpdatePreview: WorkoutTemplateSyncPreview?
     @State private var templateNameDraft = ""
     @State private var templateFolderID: UUID?
 
@@ -54,6 +60,10 @@ struct ActiveWorkoutView: View {
 
     private var templateRepository: TemplateRepository {
         TemplateRepository(modelContext: modelContext)
+    }
+
+    private var templateSyncService: WorkoutTemplateSyncService {
+        WorkoutTemplateSyncService(modelContext: modelContext)
     }
 
     private var catalogRepository: ExerciseCatalogRepository {
@@ -136,7 +146,7 @@ struct ActiveWorkoutView: View {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button("Finish") {
                     dismissKeyboard()
-                    showingCancelConfirmation = false
+                    isCancelArmed = false
                     showingFinishConfirmation = true
                 }
                 .disabled(session == nil || sessionExercises.isEmpty)
@@ -151,6 +161,13 @@ struct ActiveWorkoutView: View {
             }
             .wgjSheetSurface()
         }
+        .sheet(item: $exerciseSettingsDraft) { draft in
+            ActiveWorkoutExerciseSettingsSheet(
+                draft: draft,
+                onSave: saveExerciseSettings
+            )
+            .wgjSheetSurface()
+        }
         .sheet(isPresented: $showingSaveTemplateSheet) {
             saveTemplateSheet
         }
@@ -161,6 +178,7 @@ struct ActiveWorkoutView: View {
             await loadExerciseStateIfNeeded()
         }
         .onDisappear {
+            isCancelArmed = false
             flushPendingSaves()
         }
         .onReceive(restTimerTick) { date in
@@ -179,13 +197,16 @@ struct ActiveWorkoutView: View {
         } message: {
             Text("This will close the active workout and add it to your history.")
         }
-        .confirmationDialog("Cancel Workout?", isPresented: $showingCancelConfirmation, titleVisibility: .visible) {
-            Button("Discard Workout", role: .destructive) {
-                cancelWorkout()
+        .alert("Update Template?", isPresented: templateUpdatePromptBinding, presenting: pendingTemplateUpdatePreview) { preview in
+            Button("Update Template") {
+                applyTemplateUpdate(preview)
             }
-            Button("Keep Workout", role: .cancel) { }
+            Button("Keep Template", role: .cancel) {
+                pendingTemplateUpdatePreview = nil
+                finalizeCompletion()
+            }
         } message: {
-            Text("Cancel removes this active workout and all logged sets.")
+            Text($0.summary)
         }
     }
 
@@ -209,26 +230,64 @@ struct ActiveWorkoutView: View {
                 activityTimerDock(session)
             }
 
-            Button {
-                dismissKeyboard()
-                showingFinishConfirmation = false
-                showingCancelConfirmation = true
-            } label: {
-                Label("Cancel Workout", systemImage: "xmark.circle.fill")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .foregroundStyle(WGJTheme.danger)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(WGJTheme.field.opacity(0.74))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .stroke(WGJTheme.danger.opacity(0.38), lineWidth: 1)
-                            )
-                    )
+            if isCancelArmed {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(WGJTheme.danger)
+
+                        Text("Discard this workout and all logged sets?")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(WGJTheme.textPrimary)
+
+                        Spacer(minLength: 8)
+                    }
+
+                    HStack(spacing: 10) {
+                        Button("Keep Workout") {
+                            isCancelArmed = false
+                        }
+                        .buttonStyle(WGJGhostButtonStyle())
+
+                        Button("Discard Workout") {
+                            cancelWorkout()
+                        }
+                        .buttonStyle(WGJPrimaryButtonStyle())
+                        .tint(WGJTheme.danger)
+                    }
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(WGJTheme.field.opacity(0.82))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(WGJTheme.danger.opacity(0.32), lineWidth: 1)
+                        )
+                )
+            } else {
+                Button {
+                    dismissKeyboard()
+                    showingFinishConfirmation = false
+                    isCancelArmed = true
+                } label: {
+                    Label("Cancel Workout", systemImage: "xmark.circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .foregroundStyle(WGJTheme.danger)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(WGJTheme.field.opacity(0.74))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .stroke(WGJTheme.danger.opacity(0.38), lineWidth: 1)
+                                )
+                        )
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
@@ -494,6 +553,7 @@ struct ActiveWorkoutView: View {
         var loadedPrevious: [UUID: [Int: WorkoutPreviousSetSnapshot]] = [:]
         let startedAt = session?.startedAt ?? .now
         let requestedExerciseUUIDs = Array(Set(sessionExercises.map(\.catalogExerciseUUID)))
+        let loadedCatalog = (try? catalogRepository.exerciseMap(for: requestedExerciseUUIDs)) ?? [:]
         let previousMaps = (try? sessionRepository.previousSetMaps(
             forExercises: requestedExerciseUUIDs,
             before: startedAt,
@@ -515,6 +575,20 @@ struct ActiveWorkoutView: View {
         restByExerciseID = loadedRests
         lastPersistedRestByExerciseID = loadedRests
         previousByExerciseID = loadedPrevious
+        catalogByUUID = loadedCatalog
+        let completedExerciseIDs = Set(
+            loadedDrafts.compactMap { exerciseID, drafts in
+                isExerciseCompleted(drafts) ? exerciseID : nil
+            }
+        )
+        cardStateController.sync(
+            exerciseIDs: currentIDs,
+            completedExerciseIDs: completedExerciseIDs,
+            firstIncompleteExerciseID: firstIncompleteExerciseID(
+                from: sessionExercises,
+                draftsByExerciseID: loadedDrafts
+            )
+        )
         loadedExerciseIDs = currentIDs
     }
 
@@ -583,10 +657,19 @@ struct ActiveWorkoutView: View {
                 targetRepMin: exercise.targetRepMin,
                 targetRepMax: exercise.targetRepMax,
                 previousBySetIndex: previousByExerciseID[exercise.id] ?? [:],
+                overloadFeedback: overloadFeedback(for: exercise),
                 restSeconds: restBinding(for: exercise),
                 setDrafts: setDraftsBinding(for: exercise),
+                isExpanded: expansionBinding(for: exercise.id),
+                showsInlineExerciseControls: false,
+                showsSetProgressChip: false,
                 manualCompletionMode: true,
                 onSetDraftsChanged: { drafts in
+                    setDraftsByExerciseID[exercise.id] = drafts
+                    cardStateController.updateCompletion(
+                        for: exercise.id,
+                        isCompleted: isExerciseCompleted(drafts)
+                    )
                     persistDrafts(sessionExerciseID: exercise.id, drafts: drafts)
                 },
                 onRestChanged: { rest in
@@ -603,6 +686,9 @@ struct ActiveWorkoutView: View {
                     } else {
                         coordinator.clearRestTimer(sourceSetID: setID)
                     }
+                },
+                onExerciseSettings: {
+                    showExerciseSettings(for: exercise)
                 },
                 onExerciseDelete: {
                     removeExercise(exerciseID: exercise.id)
@@ -631,7 +717,7 @@ struct ActiveWorkoutView: View {
 
             do {
                 try sessionRepository.updateExerciseRest(sessionExerciseID: sessionExerciseID, restSeconds: latest)
-                lastPersistedRestByExerciseID[sessionExerciseID] = latest
+                reloadExerciseState(sessionExerciseID: sessionExerciseID)
                 pendingRestTasks[sessionExerciseID] = nil
             } catch {
                 showError(error)
@@ -665,7 +751,7 @@ struct ActiveWorkoutView: View {
             guard lastPersistedRestByExerciseID[exerciseID] != rest else { continue }
             do {
                 try sessionRepository.updateExerciseRest(sessionExerciseID: exerciseID, restSeconds: rest)
-                lastPersistedRestByExerciseID[exerciseID] = rest
+                reloadExerciseState(sessionExerciseID: exerciseID)
             } catch {
                 showError(error)
             }
@@ -742,6 +828,67 @@ struct ActiveWorkoutView: View {
         )
     }
 
+    private var templateUpdatePromptBinding: Binding<Bool> {
+        Binding(
+            get: { pendingTemplateUpdatePreview != nil },
+            set: { isPresented in
+                if !isPresented {
+                    pendingTemplateUpdatePreview = nil
+                }
+            }
+        )
+    }
+
+    private var isTrainingGuidanceEnabled: Bool {
+        profiles.first?.isTrainingGuidanceEnabled ?? true
+    }
+
+    private func expansionBinding(for exerciseID: UUID) -> Binding<Bool> {
+        Binding(
+            get: { cardStateController.isExpanded(for: exerciseID) },
+            set: { cardStateController.setExpanded($0, for: exerciseID) }
+        )
+    }
+
+    @MainActor
+    private func overloadFeedback(for exercise: WorkoutSessionExercise) -> ActiveWorkoutProgressiveOverloadPresentation? {
+        guard isTrainingGuidanceEnabled else { return nil }
+        guard let catalogExercise = catalogByUUID[exercise.catalogExerciseUUID] else { return nil }
+
+        let drafts = setDraftsByExerciseID[exercise.id]
+            ?? (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }.map(WorkoutSessionSetDraft.init(model:))
+
+        let cue = guidanceService.progressiveOverloadCue(
+            for: catalogExercise,
+            targetRepMin: exercise.targetRepMin,
+            targetRepMax: exercise.targetRepMax,
+            setDrafts: drafts
+        )
+        return ActiveWorkoutProgressiveOverloadPresentation.make(
+            from: cue,
+            isExerciseCompleted: isExerciseCompleted(drafts)
+        )
+    }
+
+    private func isExerciseCompleted(_ drafts: [WorkoutSessionSetDraft]) -> Bool {
+        !drafts.isEmpty && drafts.allSatisfy(\.isCompleted)
+    }
+
+    @MainActor
+    private func firstIncompleteExerciseID(
+        from exercises: [WorkoutSessionExercise],
+        draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
+    ) -> UUID? {
+        for exercise in exercises {
+            let drafts = draftsByExerciseID[exercise.id]
+                ?? (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }.map(WorkoutSessionSetDraft.init(model:))
+            if !isExerciseCompleted(drafts) {
+                return exercise.id
+            }
+        }
+        return nil
+    }
+
     private func exerciseRemovingBinding(for exerciseID: UUID) -> Binding<Bool> {
         Binding(
             get: { exerciseSwipeRemoving[exerciseID] ?? false },
@@ -753,8 +900,61 @@ struct ActiveWorkoutView: View {
         WGJMotion.cardTransition(reduceMotion: reduceMotion)
     }
 
+    private func showExerciseSettings(for exercise: WorkoutSessionExercise) {
+        dismissKeyboard()
+        exerciseSettingsDraft = ActiveWorkoutExerciseSettingsDraft(
+            exerciseID: exercise.id,
+            exerciseName: exercise.exerciseNameSnapshot,
+            minRepsText: exercise.targetRepMin.map(String.init) ?? "",
+            maxRepsText: exercise.targetRepMax.map(String.init) ?? "",
+            restSeconds: restByExerciseID[exercise.id] ?? exercise.restSeconds
+        )
+    }
+
+    private func saveExerciseSettings(_ draft: ActiveWorkoutExerciseSettingsDraft) {
+        do {
+            pendingRestTasks[draft.exerciseID]?.cancel()
+            pendingRestTasks[draft.exerciseID] = nil
+            let minReps = parsedRepValue(from: draft.minRepsText)
+            let maxReps = parsedRepValue(from: draft.maxRepsText)
+            try sessionRepository.updateExerciseRepRange(
+                sessionExerciseID: draft.exerciseID,
+                minReps: minReps,
+                maxReps: maxReps
+            )
+            try sessionRepository.updateExerciseRest(
+                sessionExerciseID: draft.exerciseID,
+                restSeconds: draft.restSeconds
+            )
+            reloadExerciseState(sessionExerciseID: draft.exerciseID)
+            exerciseSettingsDraft = nil
+        } catch {
+            showError(error)
+        }
+    }
+
+    private func reloadExerciseState(sessionExerciseID: UUID) {
+        do {
+            let drafts = try sessionRepository.setDrafts(sessionExerciseID: sessionExerciseID)
+            setDraftsByExerciseID[sessionExerciseID] = drafts
+            lastPersistedDraftsByExerciseID[sessionExerciseID] = drafts
+            cardStateController.updateCompletion(
+                for: sessionExerciseID,
+                isCompleted: isExerciseCompleted(drafts)
+            )
+
+            if let exercise = try sessionRepository.sessionExercises(sessionID: sessionID).first(where: { $0.id == sessionExerciseID }) {
+                restByExerciseID[sessionExerciseID] = exercise.restSeconds
+                lastPersistedRestByExerciseID[sessionExerciseID] = exercise.restSeconds
+            }
+        } catch {
+            showError(error)
+        }
+    }
+
     private func finishWorkout() {
         dismissKeyboard()
+        isCancelArmed = false
         persistSessionMeta()
         flushPendingSaves()
         coordinator.clearRestTimer()
@@ -763,6 +963,8 @@ struct ActiveWorkoutView: View {
             try sessionRepository.finishSession(sessionID: sessionID, notes: notesDraft)
             if session?.templateID == nil {
                 showingSaveTemplateSheet = true
+            } else if let preview = try templateSyncService.previewTemplateUpdate(forSessionID: sessionID) {
+                pendingTemplateUpdatePreview = preview
             } else {
                 finalizeCompletion()
             }
@@ -787,7 +989,10 @@ struct ActiveWorkoutView: View {
 
     private func finalizeCompletion() {
         dismissKeyboard()
+        isCancelArmed = false
         showingSaveTemplateSheet = false
+        exerciseSettingsDraft = nil
+        pendingTemplateUpdatePreview = nil
         coordinator.clearActiveWorkout()
         coordinator.selectedTab = .history
         dismiss()
@@ -795,12 +1000,14 @@ struct ActiveWorkoutView: View {
 
     private func minimizeWorkout() {
         dismissKeyboard()
+        isCancelArmed = false
         coordinator.collapseActiveWorkout()
         dismiss()
     }
 
     private func cancelWorkout() {
         dismissKeyboard()
+        isCancelArmed = false
         persistSessionMeta()
         flushPendingSaves()
         coordinator.clearRestTimer()
@@ -825,8 +1032,167 @@ struct ActiveWorkoutView: View {
         return String(format: "%d:%02d", mins, secs)
     }
 
+    private func parsedRepValue(from text: String) -> Int? {
+        let cleaned = text.filter(\.isNumber)
+        return cleaned.isEmpty ? nil : Int(cleaned)
+    }
+
+    private func applyTemplateUpdate(_ preview: WorkoutTemplateSyncPreview) {
+        pendingTemplateUpdatePreview = nil
+        do {
+            try templateSyncService.applyTemplateUpdate(preview)
+            finalizeCompletion()
+        } catch {
+            showError(error)
+        }
+    }
+
     private func dismissKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+}
+
+private struct ActiveWorkoutExerciseSettingsDraft: Identifiable, Equatable {
+    let exerciseID: UUID
+    var exerciseName: String
+    var minRepsText: String
+    var maxRepsText: String
+    var restSeconds: Int
+
+    var id: UUID { exerciseID }
+}
+
+private struct ActiveWorkoutExerciseSettingsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var draft: ActiveWorkoutExerciseSettingsDraft
+
+    private let restPresets = [45, 60, 75, 90, 120, 150, 180, 210, 240]
+    private let onSave: (ActiveWorkoutExerciseSettingsDraft) -> Void
+
+    init(
+        draft: ActiveWorkoutExerciseSettingsDraft,
+        onSave: @escaping (ActiveWorkoutExerciseSettingsDraft) -> Void
+    ) {
+        self._draft = State(initialValue: draft)
+        self.onSave = onSave
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    WGJSectionHeader("Exercise Settings", subtitle: draft.exerciseName)
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Rep Range")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(WGJTheme.textSecondary)
+
+                        HStack(spacing: 10) {
+                            TextField("Min", text: $draft.minRepsText)
+                                .keyboardType(.numberPad)
+                                .multilineTextAlignment(.center)
+                                .wgjPillField()
+
+                            Text("to")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(WGJTheme.accentGold)
+
+                            TextField("Max", text: $draft.maxRepsText)
+                                .keyboardType(.numberPad)
+                                .multilineTextAlignment(.center)
+                                .wgjPillField()
+                        }
+                    }
+                    .padding(14)
+                    .wgjCardContainer()
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Default Rest")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(WGJTheme.textSecondary)
+
+                        Menu {
+                            ForEach(restPresets, id: \.self) { value in
+                                Button(formattedRest(value)) {
+                                    draft.restSeconds = value
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Label(formattedRest(draft.restSeconds), systemImage: "timer")
+                                    .monospacedDigit()
+                                Spacer()
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.caption.weight(.bold))
+                            }
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(WGJTheme.accentBlue)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(WGJTheme.field)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .stroke(WGJTheme.accentBlue.opacity(0.24), lineWidth: 1)
+                                    )
+                            )
+                        }
+
+                        HStack(spacing: 8) {
+                            restAdjustButton(symbol: "minus.circle") {
+                                draft.restSeconds = max(0, draft.restSeconds - 15)
+                            }
+
+                            restAdjustButton(symbol: "plus.circle.fill") {
+                                draft.restSeconds = min(3600, draft.restSeconds + 15)
+                            }
+
+                            Spacer(minLength: 8)
+                        }
+                    }
+                    .padding(14)
+                    .wgjCardContainer()
+                }
+                .padding(16)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .navigationTitle("Exercise Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        onSave(draft)
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func formattedRest(_ seconds: Int) -> String {
+        let mins = max(0, seconds) / 60
+        let secs = max(0, seconds) % 60
+        return String(format: "%d:%02d", mins, secs)
+    }
+
+    private func restAdjustButton(symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.subheadline.weight(.semibold))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(WGJTheme.textSecondary)
     }
 }
 

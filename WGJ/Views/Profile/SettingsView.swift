@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var isReloadingLibrary = false
     @State private var libraryStatusText = "Not loaded yet"
     @State private var weeklyGoal = 4
+    @State private var isTrainingGuidanceEnabled = true
     @State private var hasLoadedProfile = false
 
     @State private var errorMessage = ""
@@ -68,6 +69,24 @@ struct SettingsView: View {
                 .wgjCardContainer()
 
                 VStack(alignment: .leading, spacing: 10) {
+                    WGJSectionHeader("Training Guidance", subtitle: "Show overload cues and evidence-informed set, rep, and warmup suggestions.")
+
+                    Toggle(isOn: $isTrainingGuidanceEnabled) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Enable training guidance")
+                                .foregroundStyle(WGJTheme.textPrimary)
+
+                            Text("Advice stays optional everywhere and never rewrites your workout for you.")
+                                .font(.caption)
+                                .foregroundStyle(WGJTheme.textSecondary)
+                        }
+                    }
+                    .tint(WGJTheme.accentBlue)
+                }
+                .padding(14)
+                .wgjCardContainer()
+
+                VStack(alignment: .leading, spacing: 10) {
                     WGJSectionHeader("Credits", subtitle: "Reference the data-source licenses.")
 
                     NavigationLink {
@@ -119,6 +138,10 @@ struct SettingsView: View {
             await bootstrapCatalog()
             await loadProfileIfNeeded()
         }
+        .onChange(of: isTrainingGuidanceEnabled) { _, newValue in
+            guard hasLoadedProfile else { return }
+            saveTrainingGuidancePreference(newValue)
+        }
         .alert("Settings Error", isPresented: $showingError) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -154,6 +177,7 @@ struct SettingsView: View {
         do {
             let profile = try profileRepository.loadOrCreateProfile()
             weeklyGoal = profile.weeklyWorkoutGoal
+            isTrainingGuidanceEnabled = profile.isTrainingGuidanceEnabled
         } catch {
             showError(error)
         }
@@ -221,6 +245,14 @@ struct SettingsView: View {
     private func saveWeeklyGoal() {
         do {
             try profileRepository.updateWeeklyWorkoutGoal(weeklyGoal)
+        } catch {
+            showError(error)
+        }
+    }
+
+    private func saveTrainingGuidancePreference(_ isEnabled: Bool) {
+        do {
+            try profileRepository.updateTrainingGuidanceEnabled(isEnabled)
         } catch {
             showError(error)
         }

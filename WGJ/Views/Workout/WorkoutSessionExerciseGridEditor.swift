@@ -9,17 +9,22 @@ struct WorkoutSessionExerciseGridEditor: View {
     let targetRepMin: Int?
     let targetRepMax: Int?
     let previousBySetIndex: [Int: WorkoutPreviousSetSnapshot]
+    let overloadFeedback: ActiveWorkoutProgressiveOverloadPresentation?
 
     @Binding var restSeconds: Int
     @Binding var setDrafts: [WorkoutSessionSetDraft]
 
+    var showsInlineExerciseControls: Bool
+    var showsSetProgressChip: Bool
     var manualCompletionMode: Bool
     var onSetDraftsChanged: (([WorkoutSessionSetDraft]) -> Void)?
     var onRestChanged: ((Int) -> Void)?
     var onSetCompletionChange: ((UUID, String, Int, Bool) -> Void)?
+    var onExerciseSettings: (() -> Void)?
     var onExerciseDelete: (() -> Void)?
 
-    @State private var isExpanded = true
+    private let externalIsExpanded: Binding<Bool>?
+    @State private var localIsExpanded: Bool
     @State private var setSwipeOffsets: [UUID: CGFloat] = [:]
     @State private var setSwipeRemoving: [UUID: Bool] = [:]
 
@@ -33,12 +38,18 @@ struct WorkoutSessionExerciseGridEditor: View {
         targetRepMin: Int? = nil,
         targetRepMax: Int? = nil,
         previousBySetIndex: [Int: WorkoutPreviousSetSnapshot],
+        overloadFeedback: ActiveWorkoutProgressiveOverloadPresentation? = nil,
         restSeconds: Binding<Int>,
         setDrafts: Binding<[WorkoutSessionSetDraft]>,
+        initiallyExpanded: Bool = false,
+        isExpanded: Binding<Bool>? = nil,
+        showsInlineExerciseControls: Bool = true,
+        showsSetProgressChip: Bool = true,
         manualCompletionMode: Bool = false,
         onSetDraftsChanged: (([WorkoutSessionSetDraft]) -> Void)? = nil,
         onRestChanged: ((Int) -> Void)? = nil,
         onSetCompletionChange: ((UUID, String, Int, Bool) -> Void)? = nil,
+        onExerciseSettings: (() -> Void)? = nil,
         onExerciseDelete: (() -> Void)? = nil
     ) {
         self.exerciseName = exerciseName
@@ -48,21 +59,29 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.targetRepMin = targetRepMin
         self.targetRepMax = targetRepMax
         self.previousBySetIndex = previousBySetIndex
+        self.overloadFeedback = overloadFeedback
         self._restSeconds = restSeconds
         self._setDrafts = setDrafts
+        self.externalIsExpanded = isExpanded
+        self.showsInlineExerciseControls = showsInlineExerciseControls
+        self.showsSetProgressChip = showsSetProgressChip
         self.manualCompletionMode = manualCompletionMode
         self.onSetDraftsChanged = onSetDraftsChanged
         self.onRestChanged = onRestChanged
         self.onSetCompletionChange = onSetCompletionChange
+        self.onExerciseSettings = onExerciseSettings
         self.onExerciseDelete = onExerciseDelete
+        self._localIsExpanded = State(initialValue: isExpanded?.wrappedValue ?? initiallyExpanded)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 14) {
             header
 
             if isExpanded {
-                controlsSection
+                if showsInlineExerciseControls {
+                    controlsSection
+                }
                 setsSection
             }
         }
@@ -93,35 +112,37 @@ struct WorkoutSessionExerciseGridEditor: View {
                 Text(summaryLine)
                     .font(.subheadline)
                     .foregroundStyle(WGJTheme.textSecondary)
-                    .wgjSingleLineText(scale: 0.8)
+                    .lineLimit(2)
 
-                HStack(spacing: 8) {
-                    infoChip(
-                        "\(completedSetCount)/\(setDrafts.count) done",
-                        tint: completedSetCount == setDrafts.count && !setDrafts.isEmpty
-                            ? WGJTheme.success
-                            : WGJTheme.accentBlue
-                    )
-
-                    if isExerciseCompleted {
-                        infoChip("Exercise done", tint: WGJTheme.success)
-                    }
-
-                    if !category.isEmpty {
-                        infoChip(category, tint: WGJTheme.accentGold)
-                    }
+                if let overloadFeedback {
+                    Text(overloadFeedback.text)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(feedbackTint(for: overloadFeedback.tone))
+                        .lineLimit(2)
                 }
+
+                headerSummaryChips
             }
 
             Spacer(minLength: 12)
 
-            HStack(spacing: 8) {
-                if let onExerciseDelete {
+            VStack(spacing: 8) {
+                if onExerciseSettings != nil || onExerciseDelete != nil {
                     Menu {
-                        Button(role: .destructive) {
-                            onExerciseDelete()
-                        } label: {
-                            Label("Delete exercise", systemImage: "trash")
+                        if let onExerciseSettings {
+                            Button {
+                                onExerciseSettings()
+                            } label: {
+                                Label("Exercise Settings", systemImage: "slider.horizontal.3")
+                            }
+                        }
+
+                        if let onExerciseDelete {
+                            Button(role: .destructive) {
+                                onExerciseDelete()
+                            } label: {
+                                Label("Delete exercise", systemImage: "trash")
+                            }
                         }
                     } label: {
                         headerIcon(symbol: "ellipsis.circle")
@@ -130,9 +151,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                 }
 
                 Button {
-                    withAnimation(.snappy(duration: 0.2, extraBounce: 0.02)) {
-                        isExpanded.toggle()
-                    }
+                    toggleExpanded()
                 } label: {
                     headerIcon(symbol: isExpanded ? "chevron.up.circle.fill" : "chevron.down.circle.fill")
                 }
@@ -143,7 +162,7 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private var controlsSection: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
                 if shouldShowRepRange {
                     repRangeControl
                 }
@@ -151,7 +170,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                 restControl
             }
 
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
                 if shouldShowRepRange {
                     repRangeControl
                 }
@@ -162,11 +181,11 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private var repRangeControl: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Target Range")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(WGJTheme.textSecondary)
-
+        compactControlCard(
+            title: "Rep Range",
+            subtitle: "Template guide for the set entries below.",
+            tint: WGJTheme.accentGold
+        ) {
             HStack(spacing: 10) {
                 rangeValuePill(displayRepRange.min.map(String.init) ?? "Min")
 
@@ -176,21 +195,7 @@ struct WorkoutSessionExerciseGridEditor: View {
 
                 rangeValuePill(displayRepRange.max.map(String.init) ?? "Max")
             }
-
-            Text("Template guide for the set entries below.")
-                .font(.caption2)
-                .foregroundStyle(WGJTheme.textSecondary)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(WGJTheme.accentGold.opacity(0.12))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(WGJTheme.accentGold.opacity(0.32), lineWidth: 1)
-                )
-        )
     }
 
     private func rangeValuePill(_ title: String) -> some View {
@@ -207,67 +212,55 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private var restControl: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Default Rest")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(WGJTheme.textSecondary)
-
-            Menu {
-                ForEach(restPresets, id: \.self) { value in
-                    Button(formattedRest(value)) {
-                        updateRest(value)
+        compactControlCard(
+            title: "Default Rest",
+            subtitle: "Used when you reset a set timer.",
+            tint: WGJTheme.accentBlue
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                Menu {
+                    ForEach(restPresets, id: \.self) { value in
+                        Button(formattedRest(value)) {
+                            updateRest(value)
+                        }
                     }
+                } label: {
+                    HStack(spacing: 8) {
+                        Label(formattedRest(restSeconds), systemImage: "timer")
+                            .monospacedDigit()
+
+                        Spacer()
+
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption.weight(.bold))
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(WGJTheme.accentBlue)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(WGJTheme.field)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(WGJTheme.accentBlue.opacity(0.24), lineWidth: 1)
+                            )
+                    )
                 }
-            } label: {
+
                 HStack(spacing: 8) {
-                    Label(formattedRest(restSeconds), systemImage: "timer")
-                        .monospacedDigit()
+                    restAdjustButton(symbol: "minus.circle", action: {
+                        updateRest(restSeconds - 15)
+                    })
 
-                    Spacer()
+                    restAdjustButton(symbol: "plus.circle.fill", action: {
+                        updateRest(restSeconds + 15)
+                    })
 
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.caption.weight(.bold))
+                    Spacer(minLength: 8)
                 }
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(WGJTheme.accentBlue)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(WGJTheme.field)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(WGJTheme.accentBlue.opacity(0.24), lineWidth: 1)
-                        )
-                )
-            }
-
-            HStack(spacing: 8) {
-                restAdjustButton(symbol: "minus.circle", action: {
-                    updateRest(restSeconds - 15)
-                })
-
-                restAdjustButton(symbol: "plus.circle.fill", action: {
-                    updateRest(restSeconds + 15)
-                })
-
-                Spacer(minLength: 8)
-
-                Text("Use this when you reset a set timer.")
-                    .font(.caption2)
-                    .foregroundStyle(WGJTheme.textSecondary)
             }
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(WGJTheme.field.opacity(0.56))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(WGJTheme.accentBlue.opacity(0.22), lineWidth: 1)
-                )
-        )
     }
 
     private var setsSection: some View {
@@ -331,22 +324,35 @@ struct WorkoutSessionExerciseGridEditor: View {
                 setBadge(for: index)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(setTitle(for: index))
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(WGJTheme.textPrimary)
-                        .wgjSingleLineText(scale: 0.84)
+                    HStack(spacing: 6) {
+                        Text(setTitle(for: index))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(WGJTheme.textPrimary)
+                            .wgjSingleLineText(scale: 0.84)
+
+                        if set.isLocked {
+                            Image(systemName: "lock.fill")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(WGJTheme.accentGold)
+                        }
+                    }
 
                     Text(previousSummary(for: index))
                         .font(.caption)
                         .foregroundStyle(WGJTheme.textSecondary)
                         .lineLimit(2)
                         .monospacedDigit()
+
+                    if let metadata = setMetadataLine(for: index) {
+                        Text(metadata)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(WGJTheme.textSecondary)
+                            .lineLimit(1)
+                    }
                 }
 
                 Spacer(minLength: 8)
 
-                setRestMenu(at: index)
-                lockButton(at: index)
                 setMenu(at: index)
             }
 
@@ -477,73 +483,10 @@ struct WorkoutSessionExerciseGridEditor: View {
         .buttonStyle(.plain)
     }
 
-    private func setRestMenu(at index: Int) -> some View {
+    private func setMenu(at index: Int) -> some View {
         let currentRest = setDrafts[index].restSeconds
-        let isDefaultRest = currentRest == restSeconds
 
         return Menu {
-            ForEach(restPresets, id: \.self) { value in
-                Button(formattedRest(value)) {
-                    updateSetRest(value, at: index)
-                }
-            }
-
-            Divider()
-
-            Button("Use exercise default (\(formattedRest(restSeconds)))") {
-                updateSetRest(restSeconds, at: index)
-            }
-
-            Button("-15 sec") {
-                updateSetRest(currentRest - 15, at: index)
-            }
-
-            Button("+15 sec") {
-                updateSetRest(currentRest + 15, at: index)
-            }
-
-            Button("No rest") {
-                updateSetRest(0, at: index)
-            }
-        } label: {
-            Label(restLabel(for: currentRest), systemImage: "timer")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(isDefaultRest ? WGJTheme.textSecondary : WGJTheme.accentBlue)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(
-                    Capsule()
-                        .fill(WGJTheme.field)
-                        .overlay(
-                            Capsule()
-                                .stroke(
-                                    (isDefaultRest ? WGJTheme.textSecondary : WGJTheme.accentBlue).opacity(0.22),
-                                    lineWidth: 1
-                                )
-                        )
-                )
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func lockButton(at index: Int) -> some View {
-        Button {
-            toggleLock(at: index)
-        } label: {
-            Image(systemName: setDrafts[index].isLocked ? "lock.fill" : "lock.open")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(setDrafts[index].isLocked ? WGJTheme.accentGold : WGJTheme.textSecondary)
-                .frame(width: 34, height: 34)
-                .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(WGJTheme.field)
-                )
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func setMenu(at index: Int) -> some View {
-        Menu {
             Button {
                 insertSet(after: index)
             } label: {
@@ -569,6 +512,40 @@ struct WorkoutSessionExerciseGridEditor: View {
                 Label("Move down", systemImage: "arrow.down")
             }
             .disabled(index == setDrafts.count - 1)
+
+            Menu {
+                ForEach(restPresets, id: \.self) { value in
+                    Button(formattedRest(value)) {
+                        updateSetRest(value, at: index)
+                    }
+                }
+
+                Divider()
+
+                Button("Use exercise default (\(formattedRest(restSeconds)))") {
+                    updateSetRest(restSeconds, at: index)
+                }
+
+                Button("-15 sec") {
+                    updateSetRest(currentRest - 15, at: index)
+                }
+
+                Button("+15 sec") {
+                    updateSetRest(currentRest + 15, at: index)
+                }
+
+                Button("No rest") {
+                    updateSetRest(0, at: index)
+                }
+            } label: {
+                Label("Set rest", systemImage: "timer")
+            }
+
+            Button {
+                toggleLock(at: index)
+            } label: {
+                Label(setDrafts[index].isLocked ? "Unlock set" : "Lock set", systemImage: setDrafts[index].isLocked ? "lock.open" : "lock")
+            }
 
             if setDrafts[index].actualReps != nil || setDrafts[index].actualWeight != nil {
                 Button {
@@ -645,6 +622,17 @@ struct WorkoutSessionExerciseGridEditor: View {
         .foregroundStyle(WGJTheme.textSecondary)
     }
 
+    private func feedbackTint(for tone: TrainingGuidanceTone) -> Color {
+        switch tone {
+        case .accent:
+            return WGJTheme.accentBlue
+        case .success:
+            return WGJTheme.success
+        case .caution:
+            return WGJTheme.accentGold
+        }
+    }
+
     private var summaryLine: String {
         if !muscleSummary.isEmpty {
             return muscleSummary
@@ -655,6 +643,84 @@ struct WorkoutSessionExerciseGridEditor: View {
         }
 
         return "Log the set values separately from the template target."
+    }
+
+    private var headerSummaryChips: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                infoChip(repRangeSummary, tint: WGJTheme.accentGold)
+                if showsSetProgressChip {
+                    infoChip(setProgressSummary, tint: isExerciseCompleted ? WGJTheme.success : WGJTheme.accentBlue)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                infoChip(repRangeSummary, tint: WGJTheme.accentGold)
+                if showsSetProgressChip {
+                    infoChip(setProgressSummary, tint: isExerciseCompleted ? WGJTheme.success : WGJTheme.accentBlue)
+                }
+            }
+        }
+    }
+
+    private var isExpanded: Bool {
+        expansionBinding.wrappedValue
+    }
+
+    private var expansionBinding: Binding<Bool> {
+        externalIsExpanded ?? $localIsExpanded
+    }
+
+    private var repRangeSummary: String {
+        switch (targetRepMin, targetRepMax) {
+        case let (min?, max?):
+            return min == max ? "\(min) reps" : "\(min)-\(max) reps"
+        case let (min?, nil):
+            return "\(min)+ reps"
+        case let (nil, max?):
+            return "Up to \(max)"
+        case (nil, nil):
+            return "Open reps"
+        }
+    }
+
+    private var setProgressSummary: String {
+        "\(completedSetCount)/\(setDrafts.count) sets done"
+    }
+
+    private func toggleExpanded() {
+        withAnimation(.snappy(duration: 0.2, extraBounce: 0.02)) {
+            expansionBinding.wrappedValue.toggle()
+        }
+    }
+
+    private func compactControlCard<Content: View>(
+        title: String,
+        subtitle: String,
+        tint: Color,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(WGJTheme.textSecondary)
+
+            content()
+
+            Text(subtitle)
+                .font(.caption2)
+                .foregroundStyle(WGJTheme.textSecondary)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(tint.opacity(0.10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(tint.opacity(0.20), lineWidth: 1)
+                )
+        )
     }
 
     private var shouldShowRepRange: Bool {
@@ -826,6 +892,23 @@ struct WorkoutSessionExerciseGridEditor: View {
     private func previousSummary(for index: Int) -> String {
         let previous = previousText(for: index)
         return previous == "-" ? "No previous log for this slot." : "Previous \(previous)"
+    }
+
+    private func setMetadataLine(for index: Int) -> String? {
+        guard setDrafts.indices.contains(index) else { return nil }
+        let set = setDrafts[index]
+        var parts: [String] = []
+
+        if set.isLocked {
+            parts.append("Locked")
+        }
+
+        if set.restSeconds != restSeconds {
+            parts.append("Rest \(restLabel(for: set.restSeconds))")
+        }
+
+        guard !parts.isEmpty else { return nil }
+        return parts.joined(separator: " • ")
     }
 
     private func targetWeightText(for index: Int) -> String? {
