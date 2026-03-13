@@ -35,7 +35,6 @@ struct ContentView: View {
             activeWorkoutCoordinator.restoreActiveSessionIfNeeded(modelContext: modelContext)
             activeWorkoutCoordinator.clearExpiredRestTimerIfNeeded()
             catalogSyncCoordinator.primeLocalCatalogIfNeeded(modelContext: modelContext)
-            catalogSyncCoordinator.scheduleStaleSyncIfNeeded(modelContext: modelContext, reason: .appLaunch)
             await runSocialMaintenance()
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -43,7 +42,6 @@ struct ContentView: View {
             activeWorkoutCoordinator.restoreActiveSessionIfNeeded(modelContext: modelContext)
             activeWorkoutCoordinator.clearExpiredRestTimerIfNeeded()
             catalogSyncCoordinator.primeLocalCatalogIfNeeded(modelContext: modelContext)
-            catalogSyncCoordinator.scheduleStaleSyncIfNeeded(modelContext: modelContext, reason: .appForeground)
             Task {
                 await runSocialMaintenance()
             }

@@ -8,8 +8,8 @@ struct CatalogCreditsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 WGJEmptyStateCard(
-                    title: "Exercise Data",
-                    message: "Exercise data is imported from wger, the open-source exercise database.",
+                    title: "Exercise Library",
+                    message: "The bundled WGJ exercise library ships on-device. Custom exercises stay private to your app data and are not listed here.",
                     icon: "text.book.closed"
                 )
 
@@ -56,12 +56,15 @@ struct CatalogCreditsView: View {
                 sourceURL: $0.sourceURL,
                 licenseName: $0.licenseName,
                 licenseURL: $0.licenseURL,
-                authorName: $0.authorName
+                authorName: $0.authorName,
+                catalogSourceName: $0.exercise?.sourceName ?? ""
             )
         }
 
         var seen = Set<CreditsAttributionRow>()
-        return mapped.filter { seen.insert($0).inserted }
+        return mapped
+            .filter { $0.catalogSourceName != "custom" }
+            .filter { seen.insert($0).inserted }
     }
 }
 
@@ -71,6 +74,7 @@ private struct CreditsAttributionRow: Hashable {
     let licenseName: String
     let licenseURL: String
     let authorName: String
+    let catalogSourceName: String
 
     var id: String {
         [sourceName, sourceURL, licenseName, licenseURL, authorName].joined(separator: "|")

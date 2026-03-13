@@ -56,6 +56,7 @@ struct SeedExercise: Decodable, Sendable {
     let aliases: [String]
     let categoryName: String
     let equipmentSummary: String
+    let instructions: String?
     let primaryMuscleIDs: [Int]
     let secondaryMuscleIDs: [Int]
     let imageURL: String?
@@ -72,6 +73,7 @@ struct SeedExercise: Decodable, Sendable {
         case aliases
         case categoryName = "category"
         case equipmentSummary = "equipment"
+        case instructions
         case primaryMuscleIDs = "primary_muscles"
         case secondaryMuscleIDs = "secondary_muscles"
         case imageURL = "image_url"
@@ -104,13 +106,14 @@ private let fallbackSeedJSON = #"""
       "aliases": ["Squat"],
       "category": "Legs",
       "equipment": "Barbell,Rack",
+      "instructions": "Brace your torso, sit between your hips, keep the bar over mid-foot, and drive up without letting your knees cave in.",
       "primary_muscles": [5],
       "secondary_muscles": [7,6],
       "image_url": "",
-      "source_url": "https://wger.de",
-      "license_name": "CC BY-SA",
-      "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
-      "license_author": "wger community",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
       "is_curated": true
     }
   ]

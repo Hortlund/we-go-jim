@@ -6,8 +6,8 @@ struct SettingsView: View {
 
     @Query private var catalogExercises: [ExerciseCatalogItem]
 
-    @State private var isSyncing = false
-    @State private var syncStatusText = "Not synced yet"
+    @State private var isReloadingLibrary = false
+    @State private var libraryStatusText = "Not loaded yet"
     @State private var weeklyGoal = 4
     @State private var hasLoadedProfile = false
 
@@ -26,26 +26,26 @@ struct SettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 10) {
-                    WGJSectionHeader("Catalog", subtitle: "Sync and inspect the local exercise database.")
+                    WGJSectionHeader("Library", subtitle: "Inspect and reload the bundled exercise database.")
 
                     infoRow("Visible exercises", value: "\(catalogExercises.filter { !$0.isHidden }.count)")
-                    infoRow("Sync status", value: syncStatusText)
+                    infoRow("Library status", value: libraryStatusText)
 
                     Button {
                         Task {
                             await refreshCatalog(force: true)
                         }
                     } label: {
-                        if isSyncing {
+                        if isReloadingLibrary {
                             ProgressView()
                                 .frame(maxWidth: .infinity)
                         } else {
-                            Label("Sync Catalog Now", systemImage: "arrow.clockwise")
+                            Label("Reload Library", systemImage: "arrow.clockwise")
                                 .frame(maxWidth: .infinity)
                         }
                     }
                     .buttonStyle(WGJPrimaryButtonStyle())
-                    .disabled(isSyncing)
+                    .disabled(isReloadingLibrary)
                 }
                 .padding(14)
                 .wgjCardContainer(strong: true)
@@ -141,7 +141,7 @@ struct SettingsView: View {
     private func bootstrapCatalog() async {
         do {
             try catalogRepository.ensureSeedImportedIfNeeded()
-            refreshSyncStatusText()
+            refreshLibraryStatusText()
         } catch {
             showError(error)
         }
@@ -160,35 +160,42 @@ struct SettingsView: View {
     }
 
     private func refreshCatalog(force: Bool) async {
-        isSyncing = true
-        defer { isSyncing = false }
+        isReloadingLibrary = true
+        defer { isReloadingLibrary = false }
 
         do {
             try catalogRepository.ensureSeedImportedIfNeeded()
             try await catalogRepository.refreshCatalog(force: force)
-            refreshSyncStatusText()
+            refreshLibraryStatusText()
         } catch {
             showError(error)
         }
     }
 
-    private func refreshSyncStatusText() {
+    private func refreshLibraryStatusText() {
         guard let state = catalogRepository.syncState() else {
-            syncStatusText = "Not synced yet"
+            libraryStatusText = "Not loaded yet"
             return
         }
 
-        if let lastSync = state.lastSuccessfulSyncAt {
-            syncStatusText = "Last sync: \(lastSync.formatted(date: .abbreviated, time: .shortened))"
+        if let lastReload = state.lastSuccessfulSyncAt {
+            let versionText = state.seedVersion > 0 ? "v\(state.seedVersion)" : "unknown version"
+            libraryStatusText = "\(versionText), reloaded \(lastReload.formatted(date: .abbreviated, time: .shortened))"
             return
         }
 
         if let error = state.lastErrorMessage, !error.isEmpty {
-            syncStatusText = "Sync failed"
+            libraryStatusText = "Reload failed"
             return
         }
 
-        syncStatusText = "Seed imported"
+        if let importedAt = state.seedImportedAt {
+            let versionText = state.seedVersion > 0 ? "v\(state.seedVersion)" : "unknown version"
+            libraryStatusText = "\(versionText), imported \(importedAt.formatted(date: .abbreviated, time: .shortened))"
+            return
+        }
+
+        libraryStatusText = "Bundled library ready"
     }
 
 #if DEBUG
@@ -222,7 +229,7 @@ struct SettingsView: View {
     private func showError(_ error: Error) {
         errorMessage = String(describing: error)
         showingError = true
-        refreshSyncStatusText()
+        refreshLibraryStatusText()
     }
 }
 

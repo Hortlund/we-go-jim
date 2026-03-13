@@ -13,7 +13,7 @@ The app is built around a simple idea: start lifting quickly, keep your data org
 - Start an empty workout in one tap or launch straight from a saved template
 - Organize training plans into folders and edit exercises, set targets, loads, and rest times
 - Log active workouts with rest timers, resumable state, and fast set completion flows
-- Browse a searchable exercise catalog seeded on-device and refreshed from wger data
+- Browse a searchable exercise catalog bundled on-device, with support for your own custom exercises
 - Review workout history with duration, volume, PR counts, best sets, and monthly filtering
 - Track personal records and weekly workout goals from the profile dashboard
 - Create or join a private "Bros" circle to share workout and PR snapshots through CloudKit
@@ -51,7 +51,7 @@ The workout flow supports both quick-start sessions and template-driven sessions
 
 ### Exercise Catalog
 
-The exercise catalog is bootstrapped from bundled seed data and then refreshed through a remote sync service. That gives the app a usable catalog on first launch while still allowing later updates and attribution tracking.
+The exercise catalog is bootstrapped from bundled seed data and can be reloaded locally from the shipped library. Users can also create their own custom exercises without leaving the app.
 
 ### History and Progress
 
@@ -90,8 +90,8 @@ xcodebuild test -project WGJ.xcodeproj -scheme WGJ -destination 'platform=iOS Si
 ## Data and Sync Notes
 
 - User data is stored with SwiftData.
-- The exercise catalog is imported from bundled seed data and refreshed by the catalog sync service.
-- Exercise attribution is preserved in-app through the catalog credits screen.
+- The exercise catalog is imported from bundled seed data and can be reloaded locally from Settings.
+- Exercise attribution for the bundled library is preserved in-app through the catalog credits screen.
 - CloudKit powers shared user data and the Bros feed when the container is available.
 - The app is designed to keep working in local mode when cloud services are unavailable.
 

@@ -6,251 +6,145 @@ import Testing
 @MainActor
 struct ExerciseCatalogSyncServiceTests {
     @Test
-    func normalizesRelativeImageURLs() async throws {
-        let context = try makeInMemoryContext()
-        let remoteClient = MockRemoteClient()
-        remoteClient.muscles = [
-            RemoteMuscle(id: 1, name: "Biceps", nameEn: "Biceps"),
-        ]
-        remoteClient.categories = [
-            RemoteCategory(id: 10, name: "Arms"),
-        ]
-        remoteClient.images = [
-            RemoteExerciseImage(
-                id: 11,
-                exerciseBaseID: 101,
-                imageURL: "/media/exercise-images/curl-primary.jpg",
-                licenseName: "CC BY-SA",
-                licenseURL: "https://creativecommons.org/licenses/by-sa/4.0/",
-                licenseAuthor: "wger"
-            ),
-        ]
-        remoteClient.exercises = [
-            RemoteExercise(
-                id: 101,
-                exerciseBaseID: nil,
-                uuid: "curl-101",
-                lastUpdateGlobal: Date(timeIntervalSince1970: 1_700_000_000),
-                name: "Dumbbell Curl",
-                aliases: [],
-                categoryID: 10,
-                categoryName: nil,
-                primaryMuscleIDs: [1],
-                secondaryMuscleIDs: [],
-                equipmentIDs: [],
-                inlineImageURLs: ["//cdn.wger.de/media/exercise-images/curl-alt.jpg", "/media/exercise-images/curl-inline.jpg"]
-            ),
-        ]
+    func bundledSeedDecodesOfflineWithInstructions() throws {
+        let seedURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("WGJ/Resources/ExercisesSeed.json")
 
+        let data = try Data(contentsOf: seedURL)
+        let payload = try JSONDecoder().decode(ExerciseSeedPayload.self, from: data)
+
+        #expect(payload.muscles.count >= 10)
+        #expect(payload.exercises.count >= 150)
+        #expect(payload.exercises.allSatisfy { !($0.instructions ?? "").isEmpty })
+    }
+
+    @Test
+    func importsSeedInstructionsAndMuscles() throws {
+        let context = try makeInMemoryContext()
         let service = ExerciseCatalogSyncService(
             modelContext: context,
-            remoteClient: remoteClient,
-            seedLoader: EmptySeedLoader(),
-            syncInterval: 0,
+            seedLoader: StaticSeedLoader(payload: SeedFixtures.initialPayload),
+            nowProvider: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+
+        try service.ensureSeedImportedIfNeeded()
+
+        let exercises = try context.fetch(
+            FetchDescriptor<ExerciseCatalogItem>(
+                sortBy: [SortDescriptor(\.displayName, order: .forward)]
+            )
+        )
+
+        #expect(exercises.count == 2)
+        #expect(exercises[0].displayName == "Bench Press")
+        #expect(exercises[0].instructionText == "Set your shoulders, lower with control, and press back up smoothly.")
+        #expect(exercises[0].primaryMuscles.map(\.name) == ["Chest"])
+        #expect(exercises[0].secondaryMuscles.map(\.name) == ["Triceps"])
+        #expect(exercises[0].primaryAttribution?.sourceName == "WGJ Library")
+
+        let syncState = try #require(context.fetch(FetchDescriptor<ExerciseCatalogSyncState>()).first)
+        #expect(syncState.seedVersion == 1)
+        #expect(syncState.seedImportedAt != nil)
+    }
+
+    @Test
+    func refreshCatalogUpdatesSeedAndPreservesCustomExercises() async throws {
+        let context = try makeInMemoryContext()
+        let initialService = ExerciseCatalogSyncService(
+            modelContext: context,
+            seedLoader: StaticSeedLoader(payload: SeedFixtures.initialPayload),
+            nowProvider: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+        try initialService.ensureSeedImportedIfNeeded()
+
+        let repository = ExerciseCatalogRepository(
+            modelContext: context,
+            seedLoader: StaticSeedLoader(payload: SeedFixtures.initialPayload)
+        )
+        _ = try repository.createCustomExercise(
+            draft: CustomExerciseDraft(
+                name: "My Custom Row",
+                categoryName: "Back",
+                equipmentSummary: "Cable",
+                aliases: ["Custom Cable Row"],
+                primaryMuscleIDs: [2],
+                secondaryMuscleIDs: [1],
+                instructionText: "Brace hard and row with a smooth elbow path."
+            )
+        )
+
+        let refreshService = ExerciseCatalogSyncService(
+            modelContext: context,
+            seedLoader: StaticSeedLoader(payload: SeedFixtures.updatedPayload),
             nowProvider: { Date(timeIntervalSince1970: 1_700_000_100) }
         )
+        try await refreshService.refreshCatalog(force: true)
 
-        try await service.refreshCatalog(force: true)
+        let exercises = try context.fetch(
+            FetchDescriptor<ExerciseCatalogItem>(
+                sortBy: [SortDescriptor(\.displayName, order: .forward)]
+            )
+        )
+        let bench = try #require(exercises.first(where: { $0.remoteUUID == "seed-bench" }))
+        let squat = try #require(exercises.first(where: { $0.remoteUUID == "seed-squat" }))
+        let custom = try #require(exercises.first(where: { $0.sourceName == "custom" }))
 
-        let exercises = try context.fetch(FetchDescriptor<ExerciseCatalogItem>())
-        let imageURLs = Set((exercises.first?.images ?? []).map(\.remoteURL))
-
-        #expect(imageURLs.contains("https://wger.de/media/exercise-images/curl-primary.jpg"))
-        #expect(imageURLs.contains("https://wger.de/media/exercise-images/curl-inline.jpg"))
-        #expect(imageURLs.contains("https://cdn.wger.de/media/exercise-images/curl-alt.jpg"))
-        #expect(imageURLs.allSatisfy { $0.hasPrefix("http://") || $0.hasPrefix("https://") })
+        #expect(bench.displayName == "Bench Press Updated")
+        #expect(bench.instructionText == "Keep your shoulder blades tucked, touch low on the chest, and press in a stable bar path.")
+        #expect(!bench.isHidden)
+        #expect(squat.isHidden)
+        #expect(!custom.isHidden)
+        #expect(custom.displayName == "My Custom Row")
     }
 
     @Test
-    func matchesImagesWhenExerciseInfoIDDiffersFromExerciseBaseID() async throws {
+    func customExerciseCreationValidatesAndPersistsMuscles() throws {
         let context = try makeInMemoryContext()
-        let remoteClient = MockRemoteClient()
-        remoteClient.muscles = [
-            RemoteMuscle(id: 4, name: "Back", nameEn: "Back"),
-        ]
-        remoteClient.images = [
-            RemoteExerciseImage(
-                id: 22,
-                exerciseBaseID: 201,
-                imageURL: "https://wger.de/media/exercise-images/pullup.jpg",
-                licenseName: "CC BY-SA",
-                licenseURL: "https://creativecommons.org/licenses/by-sa/4.0/",
-                licenseAuthor: "wger"
-            ),
-        ]
-        remoteClient.exercises = [
-            RemoteExercise(
-                id: 999,
-                exerciseBaseID: 201,
-                uuid: "pull-up-201",
-                lastUpdateGlobal: Date(timeIntervalSince1970: 1_700_000_200),
-                name: "Pull Up",
-                aliases: [],
-                categoryID: nil,
-                categoryName: "Back",
-                primaryMuscleIDs: [4],
-                secondaryMuscleIDs: [],
-                equipmentIDs: [],
-                inlineImageURLs: []
-            ),
-        ]
-
         let service = ExerciseCatalogSyncService(
             modelContext: context,
-            remoteClient: remoteClient,
-            seedLoader: EmptySeedLoader(),
-            syncInterval: 0,
-            nowProvider: { Date(timeIntervalSince1970: 1_700_000_300) }
+            seedLoader: StaticSeedLoader(payload: SeedFixtures.initialPayload)
         )
+        try service.ensureSeedImportedIfNeeded()
 
-        try await service.refreshCatalog(force: true)
-
-        let exercises = try context.fetch(FetchDescriptor<ExerciseCatalogItem>())
-        #expect(exercises.count == 1)
-        #expect(exercises[0].remoteID == 201)
-        #expect(exercises[0].images.count == 1)
-        #expect(exercises[0].images.first?.remoteURL == "https://wger.de/media/exercise-images/pullup.jpg")
-    }
-
-    @Test
-    func repairsExistingBrokenCatalogOnNextSyncWithoutForce() async throws {
-        let context = try makeInMemoryContext()
-
-        let existing = ExerciseCatalogItem(
-            remoteUUID: "deadlift-301",
-            remoteID: 301,
-            displayName: "Deadlift",
-            categoryName: "Back",
-            equipmentSummary: "Barbell",
-            isCurated: true,
-            isHidden: false,
-            sourceName: "wger"
-        )
-        context.insert(existing)
-
-        let syncState = ExerciseCatalogSyncState(
-            key: "global",
-            seedVersion: 1,
-            seedImportedAt: Date(timeIntervalSince1970: 1_700_000_000),
-            lastSuccessfulSyncAt: Date(timeIntervalSince1970: 1_700_000_000),
-            lastUpdateCursor: Date(timeIntervalSince1970: 1_700_000_010)
-        )
-        context.insert(syncState)
-        try context.save()
-
-        let remoteClient = MockRemoteClient()
-        remoteClient.muscles = [
-            RemoteMuscle(id: 4, name: "Back", nameEn: "Back"),
-        ]
-        remoteClient.images = [
-            RemoteExerciseImage(
-                id: 31,
-                exerciseBaseID: 301,
-                imageURL: "https://wger.de/media/exercise-images/deadlift.jpg",
-                licenseName: "CC BY-SA",
-                licenseURL: "https://creativecommons.org/licenses/by-sa/4.0/",
-                licenseAuthor: "wger"
-            ),
-        ]
-        remoteClient.exercises = [
-            RemoteExercise(
-                id: 301,
-                exerciseBaseID: 301,
-                uuid: "deadlift-301",
-                lastUpdateGlobal: Date(timeIntervalSince1970: 1_700_000_020),
-                name: "Deadlift",
-                aliases: [],
-                categoryID: nil,
-                categoryName: "Back",
-                primaryMuscleIDs: [4],
-                secondaryMuscleIDs: [],
-                equipmentIDs: [],
-                inlineImageURLs: []
-            ),
-        ]
-
-        let service = ExerciseCatalogSyncService(
+        let repository = ExerciseCatalogRepository(
             modelContext: context,
-            remoteClient: remoteClient,
-            seedLoader: EmptySeedLoader(),
-            syncInterval: 0,
-            nowProvider: { Date(timeIntervalSince1970: 1_700_000_200) }
+            seedLoader: StaticSeedLoader(payload: SeedFixtures.initialPayload)
         )
 
-        try await service.refreshCatalog(force: false)
-
-        #expect(remoteClient.exerciseFetchCursors.count == 1)
-        #expect(remoteClient.exerciseFetchCursors[0] == nil)
-
-        let exercises = try context.fetch(FetchDescriptor<ExerciseCatalogItem>())
-        #expect(exercises.count == 1)
-        #expect(exercises[0].images.count == 1)
-        #expect(exercises[0].images.first?.remoteURL == "https://wger.de/media/exercise-images/deadlift.jpg")
-    }
-
-    @Test
-    func ignoresMalformedImageURLs() async throws {
-        let context = try makeInMemoryContext()
-        let remoteClient = MockRemoteClient()
-        remoteClient.muscles = [
-            RemoteMuscle(id: 3, name: "Chest", nameEn: "Chest"),
-        ]
-        remoteClient.images = [
-            RemoteExerciseImage(
-                id: 41,
-                exerciseBaseID: 401,
-                imageURL: "ht!tp://broken",
-                licenseName: "CC BY-SA",
-                licenseURL: "https://creativecommons.org/licenses/by-sa/4.0/",
-                licenseAuthor: "wger"
-            ),
-            RemoteExerciseImage(
-                id: 42,
-                exerciseBaseID: 401,
-                imageURL: "javascript:alert(1)",
-                licenseName: "CC BY-SA",
-                licenseURL: "https://creativecommons.org/licenses/by-sa/4.0/",
-                licenseAuthor: "wger"
-            ),
-            RemoteExerciseImage(
-                id: 43,
-                exerciseBaseID: 401,
-                imageURL: "ftp://example.com/exercise.jpg",
-                licenseName: "CC BY-SA",
-                licenseURL: "https://creativecommons.org/licenses/by-sa/4.0/",
-                licenseAuthor: "wger"
-            ),
-        ]
-        remoteClient.exercises = [
-            RemoteExercise(
-                id: 401,
-                exerciseBaseID: nil,
-                uuid: "bench-401",
-                lastUpdateGlobal: Date(timeIntervalSince1970: 1_700_000_400),
-                name: "Bench Press",
-                aliases: [],
-                categoryID: nil,
+        let created = try repository.createCustomExercise(
+            draft: CustomExerciseDraft(
+                name: "Custom Cable Fly",
                 categoryName: "Chest",
-                primaryMuscleIDs: [3],
-                secondaryMuscleIDs: [],
-                equipmentIDs: [],
-                inlineImageURLs: ["http://"]
-            ),
-        ]
-
-        let service = ExerciseCatalogSyncService(
-            modelContext: context,
-            remoteClient: remoteClient,
-            seedLoader: EmptySeedLoader(),
-            syncInterval: 0,
-            nowProvider: { Date(timeIntervalSince1970: 1_700_000_500) }
+                equipmentSummary: "Cable",
+                aliases: ["Cable Fly Variation", "Cable Fly Variation"],
+                primaryMuscleIDs: [1],
+                secondaryMuscleIDs: [3, 1],
+                instructionText: "Keep a soft bend in the elbows and bring the handles together under full control."
+            )
         )
 
-        try await service.refreshCatalog(force: true)
+        #expect(created.sourceName == "custom")
+        #expect(created.remoteUUID.hasPrefix("custom-"))
+        #expect(created.primaryMuscles.map(\.remoteID) == [1])
+        #expect(created.secondaryMuscles.map(\.remoteID) == [3])
+        #expect(created.aliases.count == 1)
+        #expect(created.instructionText.contains("soft bend"))
 
-        let exercises = try context.fetch(FetchDescriptor<ExerciseCatalogItem>())
-        #expect(exercises.count == 1)
-        #expect(exercises[0].images.isEmpty)
+        #expect(throws: ExerciseCatalogRepositoryError.self) {
+            _ = try repository.createCustomExercise(
+                draft: CustomExerciseDraft(
+                    name: "custom cable fly",
+                    categoryName: "Chest",
+                    equipmentSummary: "",
+                    aliases: [],
+                    primaryMuscleIDs: [1],
+                    secondaryMuscleIDs: [],
+                    instructionText: ""
+                )
+            )
+        }
     }
 
     private func makeInMemoryContext() throws -> ModelContext {
@@ -283,44 +177,83 @@ struct ExerciseCatalogSyncServiceTests {
     }
 }
 
-private struct EmptySeedLoader: ExerciseSeedLoading {
+private struct StaticSeedLoader: ExerciseSeedLoading {
+    let payload: ExerciseSeedPayload
+
     func loadSeed() throws -> ExerciseSeedPayload {
-        ExerciseSeedPayload(version: 1, generatedAt: nil, muscles: [], exercises: [])
+        payload
     }
 }
 
-private final class MockRemoteClient: ExerciseCatalogRemoteClient {
-    var muscles: [RemoteMuscle] = []
-    var categories: [RemoteCategory] = []
-    var equipment: [RemoteEquipment] = []
-    var images: [RemoteExerciseImage] = []
-    var exercises: [RemoteExercise] = []
-    var deletions: RemoteDeletionBatch = .empty
+private enum SeedFixtures {
+    static let initialPayload = ExerciseSeedPayload(
+        version: 1,
+        generatedAt: nil,
+        muscles: [
+            SeedMuscle(id: 1, name: "Chest", nameEn: "Chest"),
+            SeedMuscle(id: 2, name: "Back", nameEn: "Back"),
+            SeedMuscle(id: 3, name: "Triceps", nameEn: "Triceps"),
+        ],
+        exercises: [
+            SeedExercise(
+                remoteID: 1,
+                uuid: "seed-bench",
+                name: "Bench Press",
+                aliases: ["Flat Bench"],
+                categoryName: "Chest",
+                equipmentSummary: "Barbell,Bench",
+                instructions: "Set your shoulders, lower with control, and press back up smoothly.",
+                primaryMuscleIDs: [1],
+                secondaryMuscleIDs: [3],
+                imageURL: nil,
+                sourceURL: "",
+                licenseName: "Bundled with WGJ",
+                licenseURL: "",
+                licenseAuthor: "WGJ",
+                isCurated: true
+            ),
+            SeedExercise(
+                remoteID: 2,
+                uuid: "seed-squat",
+                name: "Back Squat",
+                aliases: [],
+                categoryName: "Legs",
+                equipmentSummary: "Barbell,Rack",
+                instructions: "Brace hard, stay over mid-foot, and drive out of the bottom without losing your torso.",
+                primaryMuscleIDs: [2],
+                secondaryMuscleIDs: [1],
+                imageURL: nil,
+                sourceURL: "",
+                licenseName: "Bundled with WGJ",
+                licenseURL: "",
+                licenseAuthor: "WGJ",
+                isCurated: true
+            ),
+        ]
+    )
 
-    private(set) var exerciseFetchCursors: [Date?] = []
-
-    func fetchMuscles() async throws -> [RemoteMuscle] {
-        muscles
-    }
-
-    func fetchCategories() async throws -> [RemoteCategory] {
-        categories
-    }
-
-    func fetchEquipment() async throws -> [RemoteEquipment] {
-        equipment
-    }
-
-    func fetchExerciseImages() async throws -> [RemoteExerciseImage] {
-        images
-    }
-
-    func fetchExercises(updatedAfter: Date?) async throws -> [RemoteExercise] {
-        exerciseFetchCursors.append(updatedAfter)
-        return exercises
-    }
-
-    func fetchDeletedExercises(deletedAfter: Date?) async throws -> RemoteDeletionBatch {
-        deletions
-    }
+    static let updatedPayload = ExerciseSeedPayload(
+        version: 2,
+        generatedAt: nil,
+        muscles: initialPayload.muscles,
+        exercises: [
+            SeedExercise(
+                remoteID: 1,
+                uuid: "seed-bench",
+                name: "Bench Press Updated",
+                aliases: ["Competition Bench"],
+                categoryName: "Chest",
+                equipmentSummary: "Barbell,Bench",
+                instructions: "Keep your shoulder blades tucked, touch low on the chest, and press in a stable bar path.",
+                primaryMuscleIDs: [1],
+                secondaryMuscleIDs: [3],
+                imageURL: nil,
+                sourceURL: "",
+                licenseName: "Bundled with WGJ",
+                licenseURL: "",
+                licenseAuthor: "WGJ",
+                isCurated: true
+            ),
+        ]
+    )
 }

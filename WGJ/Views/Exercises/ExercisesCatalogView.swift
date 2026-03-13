@@ -13,6 +13,8 @@ struct ExercisesCatalogView: View {
 
     @Query(sort: [SortDescriptor(\ExerciseCatalogItem.displayName, order: .forward)])
     private var catalogExercises: [ExerciseCatalogItem]
+    @Query(sort: [SortDescriptor(\MuscleGroup.name, order: .forward)])
+    private var muscleGroups: [MuscleGroup]
     @Query(filter: #Predicate<ExerciseCatalogSyncState> { $0.key == "global" })
     private var syncStates: [ExerciseCatalogSyncState]
 
@@ -30,6 +32,8 @@ struct ExercisesCatalogView: View {
     @State private var hasAttemptedBootstrap = false
     @State private var catalogDataToken = 0
     @State private var loadState: CatalogLoadState = .idle
+    @State private var showingCustomExerciseSheet = false
+    @State private var customExerciseDraft = CustomExerciseDraft.empty
 
     @State private var showingCreateSessionPrompt = false
     @State private var pendingExerciseForAdd: ExerciseCatalogItem?
@@ -102,6 +106,7 @@ struct ExercisesCatalogView: View {
 
                         searchField
                         filterRow
+                        createExerciseButton
 
                         if viewModel.sections.isEmpty {
                             emptyState
@@ -178,6 +183,20 @@ struct ExercisesCatalogView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(errorMessage)
+        }
+        .sheet(isPresented: $showingCustomExerciseSheet) {
+            NavigationStack {
+                CustomExerciseEditorView(
+                    draft: $customExerciseDraft,
+                    availableMuscles: muscleGroups,
+                    suggestedCategories: viewModel.availableCategories,
+                    onCancel: {
+                        showingCustomExerciseSheet = false
+                    },
+                    onSave: saveCustomExercise
+                )
+            }
+            .wgjSheetSurface()
         }
         .toolbar(isPickerMode ? .visible : .hidden, for: .navigationBar)
         .task {
@@ -268,6 +287,20 @@ struct ExercisesCatalogView: View {
         }
     }
 
+    private var createExerciseButton: some View {
+        Button {
+            customExerciseDraft = .empty
+            showingCustomExerciseSheet = true
+        } label: {
+            Label(
+                isPickerMode ? "Create Custom Exercise" : "Create Exercise",
+                systemImage: "square.and.pencil"
+            )
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(WGJGhostButtonStyle())
+    }
+
     private func compactFilterPill(_ title: String) -> some View {
         Text(title)
             .font(.subheadline.weight(.semibold))
@@ -349,19 +382,19 @@ struct ExercisesCatalogView: View {
             return "Loading exercises"
         }
         if catalogExercises.isEmpty {
-            return loadState == .failed ? "Exercises unavailable" : "Exercises still loading"
+            return loadState == .failed ? "Library unavailable" : "Exercises still loading"
         }
         return "No exercises match"
     }
 
     private var emptyStateMessage: String {
         if loadState == .loading || isBootstrappingCatalog {
-            return "Pulling the exercise catalog into the app."
+            return "Loading the bundled exercise library."
         }
         if catalogExercises.isEmpty {
             return loadState == .failed
-                ? "The exercise catalog could not be loaded yet."
-                : "The exercise catalog has not finished loading."
+                ? "The bundled exercise library could not be loaded yet."
+                : "The bundled exercise library has not finished loading."
         }
         return "Try changing the search text or relaxing the current filters."
     }
@@ -371,7 +404,7 @@ struct ExercisesCatalogView: View {
             return "dumbbell.fill"
         }
         if catalogExercises.isEmpty {
-            return "wifi.exclamationmark"
+            return "tray.full"
         }
         return "line.3.horizontal.decrease.circle"
     }
@@ -470,8 +503,30 @@ struct ExercisesCatalogView: View {
         rebuildCatalogCache()
     }
 
+    private func saveCustomExercise() {
+        do {
+            let created = try catalogRepository.createCustomExercise(draft: customExerciseDraft)
+            showingCustomExerciseSheet = false
+            customExerciseDraft = .empty
+
+            if let pickerSelectAction {
+                pickerSelectAction(created)
+                return
+            }
+
+            selectedPrimaryMuscleID = nil
+            selectedCategory = nil
+            sortDescending = false
+            query = created.displayName
+            debouncedQuery = created.displayName
+            catalogDataToken &+= 1
+            recomputeSections()
+        } catch {
+            showError(error)
+        }
+    }
+
     private func showError(_ error: Error) {
-        loadState = .failed
         errorMessage = String(describing: error)
         showingError = true
     }
@@ -622,6 +677,10 @@ struct ExerciseDetailDestinationView: View {
                     detailInfoRow(title: "Secondary muscles", value: exercise.secondaryMuscleNames)
                 }
 
+                if !exercise.instructionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    detailInfoRow(title: "How to perform", value: exercise.instructionText)
+                }
+
                 if let attribution = exercise.primaryAttribution {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Attribution")
@@ -669,6 +728,205 @@ struct ExerciseDetailDestinationView: View {
             Text(value)
                 .foregroundStyle(WGJTheme.textSecondary)
         }
+    }
+}
+
+private struct CustomExerciseEditorView: View {
+    @Binding var draft: CustomExerciseDraft
+
+    let availableMuscles: [MuscleGroup]
+    let suggestedCategories: [String]
+    let onCancel: () -> Void
+    let onSave: () -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                formCard
+                categorySuggestions
+            }
+            .padding(16)
+        }
+        .wgjScreenBackground()
+        .wgjNavigationChrome()
+        .navigationTitle("New Exercise")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") {
+                    onCancel()
+                }
+            }
+
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save") {
+                    onSave()
+                }
+                .disabled(!canSave)
+            }
+        }
+    }
+
+    private var formCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            WGJSectionHeader("Exercise", subtitle: "Add a movement to your local library.")
+
+            TextField("Name", text: $draft.name)
+                .textInputAutocapitalization(.words)
+                .wgjPillField()
+
+            TextField("Category", text: $draft.categoryName)
+                .textInputAutocapitalization(.words)
+                .wgjPillField()
+
+            TextField("Equipment (optional)", text: $draft.equipmentSummary)
+                .textInputAutocapitalization(.words)
+                .wgjPillField()
+
+            TextField("Aliases (comma separated)", text: aliasesBinding)
+                .textInputAutocapitalization(.words)
+                .wgjPillField()
+
+            muscleSelector(
+                title: "Primary muscles",
+                summary: selectionSummary(for: draft.primaryMuscleIDs, emptyTitle: "Required"),
+                selectedIDs: draft.primaryMuscleIDs
+            ) { muscleID in
+                togglePrimaryMuscle(muscleID)
+            }
+
+            muscleSelector(
+                title: "Secondary muscles",
+                summary: selectionSummary(for: draft.secondaryMuscleIDs, emptyTitle: "Optional"),
+                selectedIDs: draft.secondaryMuscleIDs,
+                availableIDs: availableMuscles.map(\.remoteID).filter { !draft.primaryMuscleIDs.contains($0) }
+            ) { muscleID in
+                toggleSecondaryMuscle(muscleID)
+            }
+
+            TextField("How to perform (optional)", text: $draft.instructionText, axis: .vertical)
+                .lineLimit(4...8)
+                .textInputAutocapitalization(.sentences)
+                .wgjPillField()
+        }
+        .padding(14)
+        .wgjCardContainer(strong: true)
+    }
+
+    private var categorySuggestions: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            WGJSectionHeader("Common Categories", subtitle: "Tap a category to fill the field above.")
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(suggestedCategories, id: \.self) { category in
+                        Button(category) {
+                            draft.categoryName = category
+                        }
+                        .buttonStyle(WGJGhostButtonStyle())
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+        }
+        .padding(14)
+        .wgjCardContainer()
+    }
+
+    private func muscleSelector(
+        title: String,
+        summary: String,
+        selectedIDs: [Int],
+        availableIDs: [Int]? = nil,
+        onToggle: @escaping (Int) -> Void
+    ) -> some View {
+        let allowedIDs = Set(availableIDs ?? availableMuscles.map(\.remoteID))
+
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(WGJTheme.textPrimary)
+
+            Menu {
+                ForEach(availableMuscles.filter { allowedIDs.contains($0.remoteID) }, id: \.remoteID) { muscle in
+                    Button {
+                        onToggle(muscle.remoteID)
+                    } label: {
+                        Label(
+                            muscle.name,
+                            systemImage: selectedIDs.contains(muscle.remoteID) ? "checkmark.circle.fill" : "circle"
+                        )
+                    }
+                }
+            } label: {
+                HStack {
+                    Text(summary)
+                        .foregroundStyle(WGJTheme.textPrimary)
+                        .multilineTextAlignment(.leading)
+
+                    Spacer(minLength: 12)
+
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(WGJTheme.accentBlue)
+                }
+                .padding(.horizontal, 12)
+                .frame(minHeight: 48)
+                .wgjCardContainer(cornerRadius: WGJRadius.control)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var aliasesBinding: Binding<String> {
+        Binding(
+            get: { draft.aliases.joined(separator: ", ") },
+            set: { newValue in
+                draft.aliases = newValue
+                    .split(separator: ",")
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+            }
+        )
+    }
+
+    private var canSave: Bool {
+        !draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !draft.categoryName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !draft.primaryMuscleIDs.isEmpty
+    }
+
+    private func selectionSummary(for muscleIDs: [Int], emptyTitle: String) -> String {
+        let names = availableMuscles
+            .filter { muscleIDs.contains($0.remoteID) }
+            .map(\.name)
+
+        if names.isEmpty {
+            return emptyTitle
+        }
+
+        return names.joined(separator: ", ")
+    }
+
+    private func togglePrimaryMuscle(_ muscleID: Int) {
+        if draft.primaryMuscleIDs.contains(muscleID) {
+            draft.primaryMuscleIDs.removeAll { $0 == muscleID }
+        } else {
+            draft.primaryMuscleIDs.append(muscleID)
+        }
+        draft.primaryMuscleIDs = Array(Set(draft.primaryMuscleIDs)).sorted()
+        draft.secondaryMuscleIDs.removeAll { draft.primaryMuscleIDs.contains($0) }
+    }
+
+    private func toggleSecondaryMuscle(_ muscleID: Int) {
+        guard !draft.primaryMuscleIDs.contains(muscleID) else { return }
+
+        if draft.secondaryMuscleIDs.contains(muscleID) {
+            draft.secondaryMuscleIDs.removeAll { $0 == muscleID }
+        } else {
+            draft.secondaryMuscleIDs.append(muscleID)
+        }
+        draft.secondaryMuscleIDs = Array(Set(draft.secondaryMuscleIDs)).sorted()
     }
 }
 

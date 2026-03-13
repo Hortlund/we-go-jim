@@ -8,6 +8,7 @@ final class ExerciseCatalogItem {
     var displayName: String
     var categoryName: String
     var equipmentSummary: String
+    var instructionText: String
     var isCurated: Bool
     var isHidden: Bool
     var sourceName: String
@@ -26,9 +27,10 @@ final class ExerciseCatalogItem {
         displayName: String,
         categoryName: String = "Unknown",
         equipmentSummary: String = "",
+        instructionText: String = "",
         isCurated: Bool = false,
         isHidden: Bool = false,
-        sourceName: String = "wger",
+        sourceName: String = "seed",
         lastUpdateGlobal: Date? = nil,
         updatedAt: Date = .now
     ) {
@@ -37,6 +39,7 @@ final class ExerciseCatalogItem {
         self.displayName = displayName
         self.categoryName = categoryName
         self.equipmentSummary = equipmentSummary
+        self.instructionText = instructionText
         self.isCurated = isCurated
         self.isHidden = isHidden
         self.sourceName = sourceName
@@ -87,7 +90,7 @@ final class ExerciseImageAsset {
         localPath: String? = nil,
         licenseName: String = "Unknown",
         licenseAuthor: String = "",
-        sourceName: String = "wger",
+        sourceName: String = "seed",
         lastAccessedAt: Date = .now,
         fileSizeBytes: Int = 0,
         exercise: ExerciseCatalogItem? = nil
@@ -188,6 +191,26 @@ struct ExerciseFilters: Equatable {
     )
 }
 
+struct CustomExerciseDraft: Equatable {
+    var name: String
+    var categoryName: String
+    var equipmentSummary: String
+    var aliases: [String]
+    var primaryMuscleIDs: [Int]
+    var secondaryMuscleIDs: [Int]
+    var instructionText: String
+
+    static let empty = CustomExerciseDraft(
+        name: "",
+        categoryName: "",
+        equipmentSummary: "",
+        aliases: [],
+        primaryMuscleIDs: [],
+        secondaryMuscleIDs: [],
+        instructionText: ""
+    )
+}
+
 struct ExerciseMuscleGroupSection: Identifiable {
     let id: String
     let title: String
@@ -221,5 +244,9 @@ extension ExerciseCatalogItem {
 
     var primaryAttribution: ExerciseAttribution? {
         attributions.first
+    }
+
+    var isCustomExercise: Bool {
+        sourceName == "custom"
     }
 }

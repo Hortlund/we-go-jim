@@ -72,7 +72,7 @@ final class ExerciseSearchService {
         let descriptor = FetchDescriptor<ExerciseCatalogItem>()
         let exercises = try modelContext.fetch(descriptor)
         let categories = exercises
-            .filter { !$0.isHidden && (includeUncurated || $0.isCurated) }
+            .filter { isVisibleInCatalog($0, includeUncurated: includeUncurated) }
             .map(\.categoryName)
             .filter { !$0.isEmpty }
         return Array(Set(categories)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
@@ -83,14 +83,14 @@ final class ExerciseSearchService {
         let exercises = try modelContext.fetch(descriptor)
 
         let tokens = exercises
-            .filter { !$0.isHidden && (includeUncurated || $0.isCurated) }
+            .filter { isVisibleInCatalog($0, includeUncurated: includeUncurated) }
             .flatMap(\.equipmentTokens)
 
         return Array(Set(tokens)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
     private func matchesVisibility(exercise: ExerciseCatalogItem, filters: ExerciseFilters) -> Bool {
-        !exercise.isHidden && (filters.includeUncurated || exercise.isCurated)
+        isVisibleInCatalog(exercise, includeUncurated: filters.includeUncurated)
     }
 
     private func matchesFilters(exercise: ExerciseCatalogItem, filters: ExerciseFilters) -> Bool {
@@ -145,5 +145,17 @@ final class ExerciseSearchService {
         }
 
         return deduplicated
+    }
+
+    private func isVisibleInCatalog(_ exercise: ExerciseCatalogItem, includeUncurated: Bool) -> Bool {
+        guard !exercise.isHidden else {
+            return false
+        }
+
+        if exercise.isCustomExercise {
+            return true
+        }
+
+        return includeUncurated || exercise.isCurated
     }
 }
