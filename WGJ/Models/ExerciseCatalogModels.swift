@@ -8,7 +8,7 @@ final class ExerciseCatalogItem {
     var displayName: String
     var categoryName: String
     var equipmentSummary: String
-    var instructionText: String
+    var instructionText: String?
     var isCurated: Bool
     var isHidden: Bool
     var sourceName: String
@@ -27,7 +27,7 @@ final class ExerciseCatalogItem {
         displayName: String,
         categoryName: String = "Unknown",
         equipmentSummary: String = "",
-        instructionText: String = "",
+        instructionText: String? = nil,
         isCurated: Bool = false,
         isHidden: Bool = false,
         sourceName: String = "seed",
@@ -248,5 +248,9 @@ extension ExerciseCatalogItem {
 
     var isCustomExercise: Bool {
         sourceName == "custom"
+    }
+
+    var instructionTextValue: String {
+        instructionText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 }

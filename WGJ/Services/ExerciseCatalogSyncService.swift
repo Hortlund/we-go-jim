@@ -29,24 +29,29 @@ final class ExerciseCatalogSyncService {
     }
 
     func ensureSeedImportedIfNeeded() throws {
+        let payload = try seedLoader.loadSeed()
         let state = try syncState()
         let existingExercises = try modelContext.fetch(FetchDescriptor<ExerciseCatalogItem>())
-        guard existingExercises.isEmpty || state.seedImportedAt == nil else {
+        guard shouldImportSeed(
+            payload: payload,
+            state: state,
+            existingExercises: existingExercises
+        ) else {
             return
         }
 
-        try importSeed(markAsRefresh: false)
+        try importSeed(payload: payload)
     }
 
     func refreshCatalog(force _: Bool) async throws {
-        try importSeed(markAsRefresh: true)
+        let payload = try seedLoader.loadSeed()
+        try importSeed(payload: payload)
     }
 
-    private func importSeed(markAsRefresh: Bool) throws {
+    private func importSeed(payload: ExerciseSeedPayload) throws {
         let state = try syncState()
 
         do {
-            let payload = try seedLoader.loadSeed()
             let now = nowProvider()
             let musclesByID = upsertSeedMuscles(payload.muscles)
             let existing = try modelContext.fetch(FetchDescriptor<ExerciseCatalogItem>())
@@ -62,7 +67,7 @@ final class ExerciseCatalogSyncService {
                     displayName: seed.name,
                     categoryName: seed.categoryName,
                     equipmentSummary: seed.equipmentSummary,
-                    instructionText: seed.instructions?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+                    instructionText: normalizedInstructionText(seed.instructions),
                     isCurated: seed.isCurated,
                     isHidden: false,
                     sourceName: "seed",
@@ -80,7 +85,7 @@ final class ExerciseCatalogSyncService {
                 exercise.displayName = seed.name
                 exercise.categoryName = seed.categoryName
                 exercise.equipmentSummary = seed.equipmentSummary
-                exercise.instructionText = seed.instructions?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                exercise.instructionText = normalizedInstructionText(seed.instructions)
                 exercise.isCurated = seed.isCurated
                 exercise.isHidden = false
                 exercise.sourceName = "seed"
@@ -106,7 +111,7 @@ final class ExerciseCatalogSyncService {
             }
 
             state.seedVersion = payload.version
-            state.seedImportedAt = state.seedImportedAt ?? now
+            state.seedImportedAt = now
             state.lastSuccessfulSyncAt = now
             state.lastUpdateCursor = nil
             state.lastRefreshAttemptAt = now
@@ -130,6 +135,36 @@ final class ExerciseCatalogSyncService {
         modelContext.insert(created)
         try modelContext.save()
         return created
+    }
+
+    private func shouldImportSeed(
+        payload: ExerciseSeedPayload,
+        state: ExerciseCatalogSyncState,
+        existingExercises: [ExerciseCatalogItem]
+    ) -> Bool {
+        if existingExercises.isEmpty || state.seedImportedAt == nil {
+            return true
+        }
+
+        if state.seedVersion < payload.version {
+            return true
+        }
+
+        let visibleSeedCount = existingExercises.filter { !$0.isHidden && $0.sourceName == "seed" }.count
+        if visibleSeedCount < payload.exercises.count {
+            return true
+        }
+
+        if payload.exercises.contains(where: { seed in
+            guard let existing = existingExercises.first(where: { $0.remoteUUID == seed.uuid }) else {
+                return true
+            }
+            return existing.sourceName != "seed" || existing.isHidden
+        }) {
+            return true
+        }
+
+        return false
     }
 
     private func upsertSeedMuscles(_ muscles: [SeedMuscle]) -> [Int: MuscleGroup] {
@@ -172,6 +207,11 @@ final class ExerciseCatalogSyncService {
             modelContext.insert(model)
             exercise.aliases.append(model)
         }
+    }
+
+    private func normalizedInstructionText(_ rawValue: String?) -> String? {
+        let trimmed = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private func replaceImages(on exercise: ExerciseCatalogItem, imageURL: String?) {

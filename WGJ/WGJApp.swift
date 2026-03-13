@@ -5,6 +5,9 @@ import UIKit
 
 @main
 struct WGJApp: App {
+    private static let preReleaseStoreResetVersion = 1
+    private static let preReleaseStoreResetKey = "wgj.preReleaseStoreResetVersion"
+
     private let bootstrap = WGJApp.makeContainerBootstrap()
 
     init() {
@@ -22,6 +25,8 @@ struct WGJApp: App {
     }
 
     private static func makeContainerBootstrap() -> ModelContainerBootstrap {
+        performPreReleaseStoreResetIfNeeded()
+
         do {
             let container = try makeCloudBackedContainer()
             return ModelContainerBootstrap(
@@ -36,7 +41,21 @@ struct WGJApp: App {
             do {
                 fallbackContainer = try makeLocalFallbackContainer()
             } catch {
-                fatalError("Could not create fallback ModelContainer: \(describe(error))")
+                do {
+                    try resetLocalStores()
+
+                    if let recoveredCloudContainer = try? makeCloudBackedContainer() {
+                        return ModelContainerBootstrap(
+                            container: recoveredCloudContainer,
+                            cloudSyncEnabled: true,
+                            cloudSyncErrorDescription: nil
+                        )
+                    }
+
+                    fallbackContainer = try makeLocalFallbackContainer()
+                } catch {
+                    fatalError("Could not create fallback ModelContainer after resetting local stores: \(describe(error))")
+                }
             }
 
             #if DEBUG
@@ -49,6 +68,16 @@ struct WGJApp: App {
                 cloudSyncErrorDescription: cloudError
             )
         }
+    }
+
+    private static func performPreReleaseStoreResetIfNeeded() {
+        let defaults = UserDefaults.standard
+        guard defaults.integer(forKey: preReleaseStoreResetKey) < preReleaseStoreResetVersion else {
+            return
+        }
+
+        try? resetLocalStores()
+        defaults.set(preReleaseStoreResetVersion, forKey: preReleaseStoreResetKey)
     }
 
     private static func makeCloudBackedContainer() throws -> ModelContainer {
@@ -136,6 +165,34 @@ struct WGJApp: App {
             WorkoutSessionSet.self,
             SocialOutboxItem.self,
         ])
+    }
+
+    private static func resetLocalStores() throws {
+        let fileManager = FileManager.default
+        guard let appSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            return
+        }
+
+        let knownStorePrefixes = [
+            "default.store",
+            "LocalCatalog.store",
+            "UserData.store",
+            "SocialOutbox.store",
+        ]
+
+        let existingItems = try? fileManager.contentsOfDirectory(
+            at: appSupportURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )
+
+        for itemURL in existingItems ?? [] {
+            let fileName = itemURL.lastPathComponent
+            guard knownStorePrefixes.contains(where: { fileName == $0 || fileName.hasPrefix("\($0)-") }) else {
+                continue
+            }
+            try? fileManager.removeItem(at: itemURL)
+        }
     }
 
     private static func describe(_ error: Error) -> String {

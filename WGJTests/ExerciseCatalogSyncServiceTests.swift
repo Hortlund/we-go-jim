@@ -39,7 +39,7 @@ struct ExerciseCatalogSyncServiceTests {
 
         #expect(exercises.count == 2)
         #expect(exercises[0].displayName == "Bench Press")
-        #expect(exercises[0].instructionText == "Set your shoulders, lower with control, and press back up smoothly.")
+        #expect(exercises[0].instructionTextValue == "Set your shoulders, lower with control, and press back up smoothly.")
         #expect(exercises[0].primaryMuscles.map(\.name) == ["Chest"])
         #expect(exercises[0].secondaryMuscles.map(\.name) == ["Triceps"])
         #expect(exercises[0].primaryAttribution?.sourceName == "WGJ Library")
@@ -92,7 +92,7 @@ struct ExerciseCatalogSyncServiceTests {
         let custom = try #require(exercises.first(where: { $0.sourceName == "custom" }))
 
         #expect(bench.displayName == "Bench Press Updated")
-        #expect(bench.instructionText == "Keep your shoulder blades tucked, touch low on the chest, and press in a stable bar path.")
+        #expect(bench.instructionTextValue == "Keep your shoulder blades tucked, touch low on the chest, and press in a stable bar path.")
         #expect(!bench.isHidden)
         #expect(squat.isHidden)
         #expect(!custom.isHidden)
@@ -130,7 +130,7 @@ struct ExerciseCatalogSyncServiceTests {
         #expect(created.primaryMuscles.map(\.remoteID) == [1])
         #expect(created.secondaryMuscles.map(\.remoteID) == [3])
         #expect(created.aliases.count == 1)
-        #expect(created.instructionText.contains("soft bend"))
+        #expect(created.instructionTextValue.contains("soft bend"))
 
         #expect(throws: ExerciseCatalogRepositoryError.self) {
             _ = try repository.createCustomExercise(

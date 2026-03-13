@@ -115,7 +115,7 @@ final class ExerciseCatalogRepository: ExerciseCatalogRepositoryProtocol {
             displayName: name,
             categoryName: categoryName,
             equipmentSummary: equipmentSummary,
-            instructionText: instructionText,
+            instructionText: instructionText.isEmpty ? nil : instructionText,
             isCurated: false,
             isHidden: false,
             sourceName: "custom",

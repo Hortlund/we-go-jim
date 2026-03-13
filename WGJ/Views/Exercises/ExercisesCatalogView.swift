@@ -677,11 +677,11 @@ struct ExerciseDetailDestinationView: View {
                     detailInfoRow(title: "Secondary muscles", value: exercise.secondaryMuscleNames)
                 }
 
-                if !exercise.instructionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    detailInfoRow(title: "How to perform", value: exercise.instructionText)
+                if !exercise.instructionTextValue.isEmpty {
+                    detailInfoRow(title: "How to perform", value: exercise.instructionTextValue)
                 }
 
-                if let attribution = exercise.primaryAttribution {
+                if let attribution = detailAttribution {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Attribution")
                             .font(.headline)
@@ -728,6 +728,18 @@ struct ExerciseDetailDestinationView: View {
             Text(value)
                 .foregroundStyle(WGJTheme.textSecondary)
         }
+    }
+
+    private var detailAttribution: ExerciseAttribution? {
+        guard let attribution = exercise.primaryAttribution else {
+            return nil
+        }
+
+        let isBundledWGJAttribution = attribution.sourceName == "WGJ Library"
+            && attribution.sourceURL.isEmpty
+            && attribution.licenseURL.isEmpty
+
+        return isBundledWGJAttribution ? nil : attribution
     }
 }
 
