@@ -78,8 +78,8 @@ final class WorkoutSessionRepository {
     }
 
     func createEmptySession(name: String = "Empty Workout") throws -> WorkoutSession {
-        let cleanedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let created = WorkoutSession(name: cleanedName.isEmpty ? "Empty Workout" : cleanedName)
+        let cleanedName = ReviewModerationService.sanitizedForSharing(name, kind: .workoutName)
+        let created = WorkoutSession(name: cleanedName)
         modelContext.insert(created)
         try modelContext.save()
         return created
@@ -90,7 +90,10 @@ final class WorkoutSessionRepository {
             throw WorkoutSessionRepositoryError.templateNotFound
         }
 
-        let session = WorkoutSession(templateID: template.id, name: template.name)
+        let session = WorkoutSession(
+            templateID: template.id,
+            name: ReviewModerationService.sanitizedForSharing(template.name, kind: .workoutName)
+        )
         modelContext.insert(session)
 
         let orderedExercises = (template.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
@@ -186,8 +189,7 @@ final class WorkoutSessionRepository {
             throw WorkoutSessionRepositoryError.sessionNotFound
         }
 
-        let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleaned.isEmpty else { return }
+        let cleaned = try ReviewModerationService.validateUserInput(name, kind: .workoutName)
 
         session.name = cleaned
         session.updatedAt = .now
@@ -530,7 +532,7 @@ final class WorkoutSessionRepository {
         session.updatedAt = .now
 
         try modelContext.save()
-        try? CloudKitBrosSocialService(modelContext: modelContext).queueCompletedSessionPublish(sessionID: sessionID)
+        try? CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)?.queueCompletedSessionPublish(sessionID: sessionID)
     }
 
     func cancelSession(sessionID: UUID) throws {
@@ -568,7 +570,7 @@ final class WorkoutSessionRepository {
             throw WorkoutSessionRepositoryError.sessionNotFound
         }
 
-        try? CloudKitBrosSocialService(modelContext: modelContext).queueDeletedSession(sessionID: id)
+        try? CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)?.queueDeletedSession(sessionID: id)
         modelContext.delete(session)
         try modelContext.save()
     }

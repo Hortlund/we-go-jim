@@ -25,8 +25,8 @@ protocol CloudAccountStatusClient {
 struct CKContainerAccountStatusClient: CloudAccountStatusClient {
     let container: CKContainer
 
-    init(container: CKContainer = .default()) {
-        self.container = container
+    init(container: CKContainer? = nil) {
+        self.container = container ?? CKContainer(identifier: AppRuntimeConfig.cloudKitContainerIdentifier)
     }
 
     func accountStatus() async throws -> CKAccountStatus {

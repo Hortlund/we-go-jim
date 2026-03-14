@@ -27,7 +27,7 @@ struct LoginGateView: View {
                 Color.clear.wgjScreenBackground()
 
                 VStack(spacing: 18) {
-                    WGJRootHeader("We Go Jim", subtitle: "Lift solo or with bros, synced with iCloud when available.")
+                    WGJRootHeader("We Go Jim", subtitle: "Lift solo or with a private bro circle, with iCloud sync when available.")
 
                     VStack(spacing: 10) {
                         Image(systemName: "person.crop.circle.badge.checkmark")
@@ -47,7 +47,7 @@ struct LoginGateView: View {
                                     }
                             }
 
-                        Text("Sign In With iCloud")
+                        Text("Continue with iCloud")
                             .font(.title2.weight(.semibold))
                             .foregroundStyle(WGJTheme.textPrimary)
 
@@ -93,11 +93,11 @@ struct LoginGateView: View {
             ProgressView("Checking iCloud account...")
 
         case .available:
-            VStack(spacing: 10) {
+                    VStack(spacing: 10) {
                 Button {
                     onAuthenticated()
                 } label: {
-                    Label("Continue", systemImage: "arrow.right.circle.fill")
+                    Label("Continue with iCloud", systemImage: "arrow.right.circle.fill")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(WGJPrimaryButtonStyle())
@@ -131,7 +131,7 @@ struct LoginGateView: View {
                 Button {
                     onAuthenticated()
                 } label: {
-                    Label("Continue for Now", systemImage: "arrow.right.circle.fill")
+                    Label("Continue Locally", systemImage: "arrow.right.circle.fill")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(WGJPrimaryButtonStyle())
@@ -158,7 +158,7 @@ struct LoginGateView: View {
             Button {
                 onAuthenticated()
             } label: {
-                Label("Continue in Local Mode", systemImage: "arrow.right.circle.fill")
+                Label("Continue Locally", systemImage: "arrow.right.circle.fill")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(WGJPrimaryButtonStyle())
@@ -174,7 +174,7 @@ struct LoginGateView: View {
         case .checking:
             return "Checking your iCloud account status."
         case .available:
-            return "Your account is ready. Continue to your templates."
+            return "iCloud is available for sync and Bros. You can also keep using the app locally."
         case .unavailable(let reason):
             switch reason {
             case .noAccount:
@@ -194,7 +194,7 @@ struct LoginGateView: View {
         case .unavailable(let reason):
             switch reason {
             case .noAccount:
-                return "Sign into iCloud in device settings or continue locally."
+                return "Sign into iCloud in Settings to enable sync and Bros, or continue locally now."
             case .restricted:
                 return "iCloud is restricted on this device. Continue locally and sync later."
             case .temporarilyUnavailable:

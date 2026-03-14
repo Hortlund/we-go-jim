@@ -105,6 +105,47 @@ struct SettingsView: View {
                     .buttonStyle(.plain)
                 }
 
+                VStack(alignment: .leading, spacing: 10) {
+                    WGJSectionHeader("Legal & Support", subtitle: "Review privacy details, moderation info, and account deletion controls.")
+
+                    navigationTile(
+                        title: "Privacy",
+                        systemImage: "hand.raised.fill"
+                    ) {
+                        PrivacyOverviewView()
+                    }
+
+                    navigationTile(
+                        title: "Support",
+                        systemImage: "envelope.fill"
+                    ) {
+                        SupportView()
+                    }
+
+                    navigationTile(
+                        title: "Community Guidelines",
+                        systemImage: "person.3.sequence.fill"
+                    ) {
+                        CommunityGuidelinesView()
+                    }
+
+                    navigationTile(
+                        title: "Blocked Bros",
+                        systemImage: "person.crop.circle.badge.xmark"
+                    ) {
+                        BlockedBrosView()
+                    }
+
+                    navigationTile(
+                        title: "Delete My Data",
+                        systemImage: "trash.fill"
+                    ) {
+                        DeleteMyDataView()
+                    }
+                }
+                .padding(14)
+                .wgjCardContainer()
+
 #if DEBUG
                 VStack(alignment: .leading, spacing: 10) {
                     WGJSectionHeader("Debug", subtitle: "Developer-only utilities for local testing.")
@@ -159,6 +200,27 @@ struct SettingsView: View {
                 .foregroundStyle(WGJTheme.textSecondary)
         }
         .font(.subheadline)
+    }
+
+    private func navigationTile<Destination: View>(
+        title: String,
+        systemImage: String,
+        @ViewBuilder destination: @escaping () -> Destination
+    ) -> some View {
+        NavigationLink {
+            destination()
+        } label: {
+            HStack {
+                Label(title, systemImage: systemImage)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+            }
+            .foregroundStyle(WGJTheme.textPrimary)
+            .padding(12)
+            .wgjCardContainer()
+        }
+        .buttonStyle(.plain)
     }
 
     private func bootstrapCatalog() async {
@@ -278,6 +340,7 @@ struct SettingsView: View {
         ExerciseCatalogSyncState.self,
         UserProfile.self,
         ProfileWidgetConfig.self,
+        BlockedBro.self,
         TemplateFolder.self,
         WorkoutTemplate.self,
         TemplateExercise.self,

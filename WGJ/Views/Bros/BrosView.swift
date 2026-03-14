@@ -40,8 +40,20 @@ final class BrosViewModel {
         cloudSyncEnabled: Bool,
         cloudSyncErrorDescription: String?
     ) async {
-        _ = cloudSyncEnabled
-        _ = cloudSyncErrorDescription
+        guard AppRuntimeConfig.reviewPolicy.brosEnabled else {
+            state = .unavailable("Bros is disabled for this build.")
+            return
+        }
+
+        guard cloudSyncEnabled else {
+            state = .unavailable(localModeMessage(cloudSyncErrorDescription))
+            return
+        }
+
+        guard let service = CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext) else {
+            state = .unavailable(localModeMessage(cloudSyncErrorDescription))
+            return
+        }
 
         let accountStatus = await AccountStatusService().fetchAccountStatus()
         switch accountStatus {
@@ -55,7 +67,6 @@ final class BrosViewModel {
             return
         }
 
-        let service = CloudKitBrosSocialService(modelContext: modelContext)
         state = .loading
         await service.refreshLocalMembershipState()
         await service.flushOutbox()
@@ -73,7 +84,7 @@ final class BrosViewModel {
 
     func createCircle(modelContext: ModelContext) async {
         await runMutation { [self] in
-            let snapshot = try await CloudKitBrosSocialService(modelContext: modelContext).createCircle()
+            let snapshot = try await service(modelContext: modelContext).createCircle()
             self.state = .active(snapshot)
             self.joinCode = ""
         }
@@ -81,7 +92,7 @@ final class BrosViewModel {
 
     func joinCircle(modelContext: ModelContext) async {
         await runMutation { [self] in
-            let snapshot = try await CloudKitBrosSocialService(modelContext: modelContext)
+            let snapshot = try await service(modelContext: modelContext)
                 .joinCircle(inviteCode: self.joinCode)
             self.state = .active(snapshot)
             self.joinCode = ""
@@ -90,7 +101,7 @@ final class BrosViewModel {
 
     func leaveCircle(modelContext: ModelContext) async {
         await runMutation { [self] in
-            let service = CloudKitBrosSocialService(modelContext: modelContext)
+            let service = try service(modelContext: modelContext)
             try await service.leaveCircle()
             self.state = .onboarding
             self.joinCode = ""
@@ -99,7 +110,7 @@ final class BrosViewModel {
 
     func removeMember(membershipID: String, modelContext: ModelContext) async {
         await runMutation { [self] in
-            let service = CloudKitBrosSocialService(modelContext: modelContext)
+            let service = try service(modelContext: modelContext)
             try await service.removeMember(membershipID: membershipID)
             if let snapshot = try await service.fetchSnapshot() {
                 self.state = .active(snapshot)
@@ -111,7 +122,7 @@ final class BrosViewModel {
 
     func toggleReaction(eventID: String, emoji: BroReactionKind, modelContext: ModelContext) async {
         await runMutation { [self] in
-            let service = CloudKitBrosSocialService(modelContext: modelContext)
+            let service = try service(modelContext: modelContext)
             try await service.setReaction(eventID: eventID, kind: emoji)
             if let snapshot = try await service.fetchSnapshot() {
                 self.state = .active(snapshot)
@@ -138,14 +149,29 @@ final class BrosViewModel {
     private func message(for reason: AccountUnavailableReason) -> String {
         switch reason {
         case .noAccount:
-            return "Sign into iCloud to create or join a bro circle."
+            return "Sign into iCloud to create or join a bro circle. The rest of the app still works locally."
         case .restricted:
-            return "iCloud access is restricted on this device."
+            return "iCloud access is restricted on this device, so Bros cannot load right now."
         case .temporarilyUnavailable:
             return "iCloud is temporarily unavailable. Try again in a moment."
         case .unknown:
             return "Bros could not reach iCloud right now."
         }
+    }
+
+    private func service(modelContext: ModelContext) throws -> CloudKitBrosSocialService {
+        guard let service = CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext) else {
+            throw BrosSocialServiceError.unavailable
+        }
+        return service
+    }
+
+    private func localModeMessage(_ cloudSyncErrorDescription: String?) -> String {
+        let base = "Bros needs iCloud and CloudKit. This run is currently using local-only mode, but the rest of the app still works."
+        guard let cloudSyncErrorDescription, !cloudSyncErrorDescription.isEmpty else {
+            return base
+        }
+        return "\(base)\n\n\(cloudSyncErrorDescription)"
     }
 }
 
@@ -153,8 +179,23 @@ struct BrosView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
     @Environment(\.cloudSyncErrorDescription) private var cloudSyncErrorDescription
+    @Environment(\.openURL) private var openURL
+
+    @Query(sort: [SortDescriptor(\BlockedBro.blockedAt, order: .reverse)])
+    private var blockedBros: [BlockedBro]
 
     @State private var viewModel = BrosViewModel()
+    @State private var supportNoticeTitle = ""
+    @State private var supportNoticeMessage = ""
+    @State private var showingSupportNotice = false
+
+    private var blockedRepository: BlockedBroRepository {
+        BlockedBroRepository(modelContext: modelContext)
+    }
+
+    private var blockedUserRecordNames: Set<String> {
+        Set(blockedBros.map(\.userRecordName))
+    }
 
     var body: some View {
         ScrollView {
@@ -171,6 +212,8 @@ struct BrosView: View {
                 case .active(let snapshot):
                     activeContent(snapshot)
                 }
+
+                safetyResourcesCard
             }
             .padding(.top, 8)
             .padding(.horizontal, WGJSpacing.page)
@@ -205,6 +248,11 @@ struct BrosView: View {
             }
         } message: {
             Text(viewModel.errorMessage ?? "")
+        }
+        .alert(supportNoticeTitle, isPresented: $showingSupportNotice) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(supportNoticeMessage)
         }
     }
 
@@ -283,24 +331,35 @@ struct BrosView: View {
     }
 
     private func activeContent(_ snapshot: BrosFeedSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: WGJSpacing.section) {
-            membersCard(snapshot)
-            inviteCard(snapshot)
+        let filteredSnapshot = BrosSocialRules.filteredSnapshot(
+            snapshot,
+            blockedUserRecordNames: blockedUserRecordNames
+        )
+
+        return VStack(alignment: .leading, spacing: WGJSpacing.section) {
+            membersCard(filteredSnapshot)
+            inviteCard(filteredSnapshot)
 
             VStack(alignment: .leading, spacing: 12) {
                 WGJActionHeader("Feed", subtitle: "Newest first") {
-                    WGJMetricPill(systemImage: "bolt.heart.fill", value: "\(snapshot.feedEvents.count)")
+                    WGJMetricPill(systemImage: "bolt.heart.fill", value: "\(filteredSnapshot.feedEvents.count)")
                 }
 
-                if snapshot.feedEvents.isEmpty {
+                if filteredSnapshot.feedEvents.isEmpty {
                     WGJEmptyStateCard(
                         title: "No bro updates yet",
-                        message: "Complete a workout or hit a PR to start the feed.",
+                        message: blockedUserRecordNames.isEmpty
+                            ? "Complete a workout or hit a PR to start the feed."
+                            : "Nothing visible right now. Blocked bros are hidden from the feed.",
                         icon: "figure.strengthtraining.traditional"
                     )
                 } else {
-                    ForEach(snapshot.feedEvents) { event in
-                        feedCard(event, currentUserRecordName: snapshot.currentMember.userRecordName)
+                    ForEach(filteredSnapshot.feedEvents) { event in
+                        feedCard(
+                            event,
+                            snapshot: filteredSnapshot,
+                            currentUserRecordName: filteredSnapshot.currentMember.userRecordName
+                        )
                     }
                 }
             }
@@ -333,14 +392,28 @@ struct BrosView: View {
 
                 Spacer(minLength: 0)
 
-                if snapshot.isCurrentUserOwner && member.id != snapshot.currentMember.id {
+                if member.id != snapshot.currentMember.id {
                     Menu {
-                        Button(role: .destructive) {
-                            Task {
-                                await viewModel.removeMember(membershipID: member.id, modelContext: modelContext)
+                        if snapshot.isCurrentUserOwner {
+                            Button(role: .destructive) {
+                                Task {
+                                    await viewModel.removeMember(membershipID: member.id, modelContext: modelContext)
+                                }
+                            } label: {
+                                Label("Remove Member", systemImage: "person.crop.circle.badge.minus")
                             }
+                        }
+
+                        Button {
+                            reportMember(snapshot: snapshot, member: member)
                         } label: {
-                            Label("Remove Member", systemImage: "person.crop.circle.badge.minus")
+                            Label("Report Member", systemImage: "flag.fill")
+                        }
+
+                        Button(role: .destructive) {
+                            block(member: member)
+                        } label: {
+                            Label("Block Member", systemImage: "hand.raised.fill")
                         }
                     } label: {
                         Image(systemName: "ellipsis")
@@ -428,7 +501,52 @@ struct BrosView: View {
         .wgjCardContainer()
     }
 
-    private func feedCard(_ event: BroFeedEvent, currentUserRecordName: String) -> some View {
+    private var safetyResourcesCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            WGJSectionHeader("Safety", subtitle: "Moderation, support, and block controls for Bros.")
+
+            NavigationLink {
+                CommunityGuidelinesView()
+            } label: {
+                resourceRow("Community Guidelines", systemImage: "checklist")
+            }
+            .buttonStyle(.plain)
+
+            NavigationLink {
+                BlockedBrosView()
+            } label: {
+                resourceRow("Blocked Bros", systemImage: "person.crop.circle.badge.xmark")
+            }
+            .buttonStyle(.plain)
+
+            NavigationLink {
+                SupportView()
+            } label: {
+                resourceRow("Support", systemImage: "envelope.fill")
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(WGJSpacing.card)
+        .wgjCardContainer()
+    }
+
+    private func resourceRow(_ title: String, systemImage: String) -> some View {
+        HStack {
+            Label(title, systemImage: systemImage)
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+        }
+        .foregroundStyle(WGJTheme.textPrimary)
+        .padding(12)
+        .wgjCardContainer()
+    }
+
+    private func feedCard(
+        _ event: BroFeedEvent,
+        snapshot: BrosFeedSnapshot,
+        currentUserRecordName: String
+    ) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 12) {
                 BroAvatarView(
@@ -451,7 +569,30 @@ struct BrosView: View {
 
                 Spacer(minLength: 12)
 
-                eventKindBadge(event.kind)
+                HStack(spacing: 8) {
+                    eventKindBadge(event.kind)
+
+                    if event.actorUserRecordName != currentUserRecordName {
+                        Menu {
+                            Button {
+                                reportEvent(snapshot: snapshot, event: event)
+                            } label: {
+                                Label("Report Post", systemImage: "flag.fill")
+                            }
+
+                            Button(role: .destructive) {
+                                block(event: event)
+                            } label: {
+                                Label("Block Member", systemImage: "hand.raised.fill")
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(width: 32, height: 32)
+                        }
+                        .buttonStyle(WGJIconButtonStyle())
+                    }
+                }
             }
 
             switch event.kind {
@@ -642,6 +783,91 @@ struct BrosView: View {
         let formatted = WGJFormatters.integerString(volume)
         return "\(formatted) kg"
     }
+
+    private func reportMember(snapshot: BrosFeedSnapshot, member: BroMemberSummary) {
+        presentSupportDraft(
+            SupportContactService.reportMemberDraft(
+                snapshot: snapshot,
+                reportedMember: member
+            )
+        )
+    }
+
+    private func reportEvent(snapshot: BrosFeedSnapshot, event: BroFeedEvent) {
+        presentSupportDraft(
+            SupportContactService.reportEventDraft(
+                snapshot: snapshot,
+                event: event
+            )
+        )
+    }
+
+    private func block(member: BroMemberSummary) {
+        do {
+            try blockedRepository.block(
+                userRecordName: member.userRecordName,
+                displayName: member.displayName
+            )
+            showSupportNotice(
+                title: "Member Blocked",
+                message: "\(member.displayName) is now hidden from your circle roster, feed, and reactions."
+            )
+        } catch {
+            viewModel.errorMessage = error.localizedDescription
+        }
+    }
+
+    private func block(event: BroFeedEvent) {
+        do {
+            try blockedRepository.block(
+                userRecordName: event.actorUserRecordName,
+                displayName: event.actorDisplayName
+            )
+            showSupportNotice(
+                title: "Member Blocked",
+                message: "\(event.actorDisplayName) is now hidden from your circle roster, feed, and reactions."
+            )
+        } catch {
+            viewModel.errorMessage = error.localizedDescription
+        }
+    }
+
+    private func presentSupportDraft(_ draft: SupportContactDraft) {
+        guard let url = draft.mailtoURL else {
+            UIPasteboard.general.string = supportCopyText(for: draft)
+            showSupportNotice(
+                title: "Mail Unavailable",
+                message: "The report payload was copied to your clipboard. Send it to \(draft.recipient)."
+            )
+            return
+        }
+
+        openURL(url) { accepted in
+            guard !accepted else { return }
+            UIPasteboard.general.string = supportCopyText(for: draft)
+            Task { @MainActor in
+                showSupportNotice(
+                    title: "Mail Unavailable",
+                    message: "The report payload was copied to your clipboard. Send it to \(draft.recipient)."
+                )
+            }
+        }
+    }
+
+    private func supportCopyText(for draft: SupportContactDraft) -> String {
+        """
+        To: \(draft.recipient)
+        Subject: \(draft.subject)
+
+        \(draft.body)
+        """
+    }
+
+    private func showSupportNotice(title: String, message: String) {
+        supportNoticeTitle = title
+        supportNoticeMessage = message
+        showingSupportNotice = true
+    }
 }
 
 private struct BroAvatarView: View {
@@ -703,6 +929,7 @@ private struct BroAvatarView: View {
         ExerciseCatalogSyncState.self,
         UserProfile.self,
         ProfileWidgetConfig.self,
+        BlockedBro.self,
         TemplateFolder.self,
         WorkoutTemplate.self,
         TemplateExercise.self,

@@ -179,14 +179,10 @@ final class ExerciseCatalogRepository: ExerciseCatalogRepositoryProtocol {
         draft: CustomExerciseDraft,
         excluding excludedExercise: ExerciseCatalogItem? = nil
     ) throws -> ValidatedCustomExerciseInput {
-        let name = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = try ReviewModerationService.validateUserInput(draft.name, kind: .exerciseName)
         let categoryName = draft.categoryName.trimmingCharacters(in: .whitespacesAndNewlines)
         let equipmentSummary = draft.equipmentSummary.trimmingCharacters(in: .whitespacesAndNewlines)
         let instructionText = draft.instructionText.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !name.isEmpty else {
-            throw ExerciseCatalogRepositoryError.emptyName
-        }
 
         guard !categoryName.isEmpty else {
             throw ExerciseCatalogRepositoryError.emptyCategory

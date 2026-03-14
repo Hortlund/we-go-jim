@@ -5,14 +5,15 @@ import UIKit
 
 @main
 struct WGJApp: App {
-    private static let preReleaseStoreResetVersion = 1
-    private static let preReleaseStoreResetKey = "wgj.preReleaseStoreResetVersion"
-
     private let bootstrap = WGJApp.makeContainerBootstrap()
 
     init() {
         Self.configureNavigationTitleAppearance()
         RestTimerNotificationManager.shared.configureNotifications()
+        AppRuntimeState.shared.updateCloudState(
+            isEnabled: bootstrap.cloudSyncEnabled,
+            errorDescription: bootstrap.cloudSyncErrorDescription
+        )
     }
 
     var body: some Scene {
@@ -25,8 +26,6 @@ struct WGJApp: App {
     }
 
     private static func makeContainerBootstrap() -> ModelContainerBootstrap {
-        performPreReleaseStoreResetIfNeeded()
-
         do {
             let container = try makeCloudBackedContainer()
             return ModelContainerBootstrap(
@@ -70,16 +69,6 @@ struct WGJApp: App {
         }
     }
 
-    private static func performPreReleaseStoreResetIfNeeded() {
-        let defaults = UserDefaults.standard
-        guard defaults.integer(forKey: preReleaseStoreResetKey) < preReleaseStoreResetVersion else {
-            return
-        }
-
-        try? resetLocalStores()
-        defaults.set(preReleaseStoreResetVersion, forKey: preReleaseStoreResetKey)
-    }
-
     private static func makeCloudBackedContainer() throws -> ModelContainer {
         let localCatalogSchema = Schema([
             ExerciseCatalogItem.self,
@@ -104,6 +93,7 @@ struct WGJApp: App {
 
         let socialOutboxSchema = Schema([
             SocialOutboxItem.self,
+            BlockedBro.self,
         ])
 
         let appSchema = fullAppSchema()
@@ -164,6 +154,7 @@ struct WGJApp: App {
             WorkoutSessionExercise.self,
             WorkoutSessionSet.self,
             SocialOutboxItem.self,
+            BlockedBro.self,
         ])
     }
 

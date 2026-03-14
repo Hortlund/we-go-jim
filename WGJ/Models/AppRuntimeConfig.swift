@@ -4,6 +4,46 @@ import SwiftUI
 import UIKit
 import UserNotifications
 
+struct AppReviewPolicy {
+    let brosEnabled: Bool
+    let syncBrosAvatars: Bool
+}
+
+enum AppRuntimeConfig {
+    static let supportEmail = "support@wegojim.app"
+    static let privacyPolicyURL: URL? = nil
+    static let supportURL: URL? = nil
+    static let cloudKitContainerIdentifier = "iCloud.se.highball.WeGoJim"
+    static let reviewPolicy = AppReviewPolicy(
+        brosEnabled: true,
+        syncBrosAvatars: true
+    )
+}
+
+@MainActor
+@Observable
+final class AppRuntimeState {
+    static let shared = AppRuntimeState()
+
+    var cloudSyncEnabled = false
+    var cloudSyncErrorDescription: String?
+
+    private init() { }
+
+    func updateCloudState(isEnabled: Bool, errorDescription: String?) {
+        cloudSyncEnabled = isEnabled
+        cloudSyncErrorDescription = errorDescription
+    }
+
+    var isBrosCloudAvailable: Bool {
+        AppRuntimeConfig.reviewPolicy.brosEnabled && cloudSyncEnabled
+    }
+}
+
+extension Notification.Name {
+    static let wgjDidDeleteAllUserData = Notification.Name("wgj.didDeleteAllUserData")
+}
+
 enum AppMainTab: Hashable {
     case profile
     case history

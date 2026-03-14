@@ -163,6 +163,48 @@ enum BrosSocialRules {
     static func hasCapacity(currentMemberCount: Int, limit: Int) -> Bool {
         currentMemberCount < max(1, limit)
     }
+
+    static func filteredSnapshot(
+        _ snapshot: BrosFeedSnapshot,
+        blockedUserRecordNames: Set<String>
+    ) -> BrosFeedSnapshot {
+        guard !blockedUserRecordNames.isEmpty else {
+            return snapshot
+        }
+
+        let filteredMembers = snapshot.members.filter { member in
+            !blockedUserRecordNames.contains(member.userRecordName)
+        }
+
+        let filteredEvents = snapshot.feedEvents
+            .filter { event in
+                !blockedUserRecordNames.contains(event.actorUserRecordName)
+            }
+            .map { event in
+                BroFeedEvent(
+                    id: event.id,
+                    circleID: event.circleID,
+                    actorUserRecordName: event.actorUserRecordName,
+                    actorMembershipID: event.actorMembershipID,
+                    actorDisplayName: event.actorDisplayName,
+                    actorAvatarImageData: event.actorAvatarImageData,
+                    createdAt: event.createdAt,
+                    kind: event.kind,
+                    workout: event.workout,
+                    pr: event.pr,
+                    reactions: event.reactions.filter { reaction in
+                        !blockedUserRecordNames.contains(reaction.userRecordName)
+                    }
+                )
+            }
+
+        return BrosFeedSnapshot(
+            circle: snapshot.circle,
+            currentMember: snapshot.currentMember,
+            members: filteredMembers,
+            feedEvents: filteredEvents
+        )
+    }
 }
 
 @MainActor
@@ -172,6 +214,7 @@ protocol BrosSocialService {
     func createCircle() async throws -> BrosFeedSnapshot
     func joinCircle(inviteCode: String) async throws -> BrosFeedSnapshot
     func leaveCircle() async throws
+    func deleteCurrentUserData() async throws
     func removeMember(membershipID: String) async throws
     func setReaction(eventID: String, kind: BroReactionKind) async throws
     func queueCompletedSessionPublish(sessionID: UUID) throws
@@ -271,10 +314,20 @@ final class CloudKitBrosSocialService: BrosSocialService {
     private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
 
-    init(modelContext: ModelContext, container: CKContainer = .default()) {
+    static func makeIfAvailable(modelContext: ModelContext) -> CloudKitBrosSocialService? {
+        guard AppRuntimeState.shared.isBrosCloudAvailable else {
+            return nil
+        }
+        return CloudKitBrosSocialService(modelContext: modelContext)
+    }
+
+    init(
+        modelContext: ModelContext,
+        container: CKContainer? = nil
+    ) {
         self.modelContext = modelContext
-        self.container = container
-        self.database = container.publicCloudDatabase
+        self.container = container ?? CKContainer(identifier: AppRuntimeConfig.cloudKitContainerIdentifier)
+        self.database = self.container.publicCloudDatabase
     }
 
     func refreshLocalMembershipState() async {
@@ -491,6 +544,56 @@ final class CloudKitBrosSocialService: BrosSocialService {
         try? clearLocalMembershipStateIfNeeded()
     }
 
+    func deleteCurrentUserData() async throws {
+        let userRecordName = try await currentUserRecordName()
+        let ownedMemberships = try await membershipRecords(forUserRecordName: userRecordName)
+        let ownFeedEvents = try await feedEventRecords(actorUserRecordName: userRecordName)
+        let ownReactions = try await reactionRecords(userRecordName: userRecordName)
+
+        var recordsToSave: [CKRecord] = []
+        var recordIDsToDelete = Set<CKRecord.ID>()
+
+        for membershipRecord in ownedMemberships {
+            let currentMember = try await memberSummary(from: membershipRecord)
+            recordIDsToDelete.insert(membershipRecord.recordID)
+
+            guard let circleRecord = try await circleRecord(circleID: currentMember.circleID) else {
+                continue
+            }
+
+            let members = try await memberships(circleID: currentMember.circleID)
+            let memberSummaries = try await members.asyncMap { try await memberSummary(from: $0) }
+
+            if currentMember.isOwner {
+                if let nextOwner = BrosSocialRules.nextOwner(in: memberSummaries, removingMembershipID: currentMember.id) {
+                    guard let nextOwnerRecord = try await fetchRecord(recordType: RecordType.membership, recordName: nextOwner.id) else {
+                        throw BrosSocialServiceError.memberNotFound
+                    }
+
+                    nextOwnerRecord[Field.role] = BroMembershipRole.owner.rawValue as CKRecordValue
+                    nextOwnerRecord[Field.updatedAt] = Date() as CKRecordValue
+                    circleRecord[Field.ownerUserRecordName] = nextOwner.userRecordName as CKRecordValue
+                    circleRecord[Field.updatedAt] = Date() as CKRecordValue
+                    recordsToSave.append(contentsOf: [nextOwnerRecord, circleRecord])
+                } else {
+                    let relatedMemberships = members.filter { $0.recordID != membershipRecord.recordID }
+                    let relatedEvents = try await feedEventRecords(circleID: currentMember.circleID)
+                    let relatedReactions = try await reactionRecords(circleID: currentMember.circleID)
+                    recordIDsToDelete.formUnion(relatedMemberships.map(\.recordID))
+                    recordIDsToDelete.formUnion(relatedEvents.map(\.recordID))
+                    recordIDsToDelete.formUnion(relatedReactions.map(\.recordID))
+                    recordIDsToDelete.insert(circleRecord.recordID)
+                }
+            }
+        }
+
+        recordIDsToDelete.formUnion(ownFeedEvents.map(\.recordID))
+        recordIDsToDelete.formUnion(ownReactions.map(\.recordID))
+
+        try await save(records: recordsToSave, deleting: Array(recordIDsToDelete))
+        try? clearLocalMembershipStateIfNeeded()
+    }
+
     func removeMember(membershipID: String) async throws {
         let userRecordName = try await currentUserRecordName()
         guard let currentMembershipRecord = try await membershipRecord(forUserRecordName: userRecordName) else {
@@ -570,7 +673,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
 
         let exercisePreview = (session.exercises ?? [])
             .sorted { $0.sortOrder < $1.sortOrder }
-            .map(\.exerciseNameSnapshot)
+            .map { ReviewModerationService.sanitizedForSharing($0.exerciseNameSnapshot, kind: .exerciseName) }
             .filter { !$0.isEmpty }
             .prefix(3)
             .map { $0 }
@@ -582,7 +685,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
             actorMembershipID: membershipID,
             actorDisplayName: displayName(from: profile),
             createdAt: createdAt,
-            workoutName: session.name,
+            workoutName: ReviewModerationService.sanitizedForSharing(session.name, kind: .workoutName),
             durationSeconds: session.durationSeconds,
             totalVolume: session.totalVolume,
             prCount: session.prHitsCount,
@@ -608,7 +711,10 @@ final class CloudKitBrosSocialService: BrosSocialService {
                 actorDisplayName: displayName(from: profile),
                 createdAt: createdAt,
                 catalogExerciseUUID: achievement.catalogExerciseUUID,
-                exerciseName: achievement.exerciseName,
+                exerciseName: ReviewModerationService.sanitizedForSharing(
+                    achievement.exerciseName,
+                    kind: .exerciseName
+                ),
                 estimatedOneRepMax: achievement.estimatedOneRepMax,
                 weight: achievement.weight,
                 reps: achievement.reps,
@@ -665,7 +771,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
             circleID: circleID,
             userRecordName: userRecordName,
             displayName: displayName(from: profile),
-            avatarImageData: profile.avatarImageData
+            avatarImageData: AppRuntimeConfig.reviewPolicy.syncBrosAvatars ? profile.avatarImageData : nil
         )
         try upsertOutboxItem(
             key: "profileSync_\(membershipID)",
@@ -758,6 +864,15 @@ final class CloudKitBrosSocialService: BrosSocialService {
         )
     }
 
+    private func feedEventRecords(actorUserRecordName: String) async throws -> [CKRecord] {
+        try await queryRecords(
+            recordType: RecordType.feedEvent,
+            predicate: NSPredicate(format: "%K == %@", Field.actorUserRecordName, actorUserRecordName),
+            sortDescriptors: [NSSortDescriptor(key: Field.createdAt, ascending: false)],
+            resultsLimit: 160
+        )
+    }
+
     private func reactionRecords(circleID: String) async throws -> [CKRecord] {
         try await queryRecords(
             recordType: RecordType.reaction,
@@ -767,14 +882,27 @@ final class CloudKitBrosSocialService: BrosSocialService {
         )
     }
 
+    private func reactionRecords(userRecordName: String) async throws -> [CKRecord] {
+        try await queryRecords(
+            recordType: RecordType.reaction,
+            predicate: NSPredicate(format: "%K == %@", Field.userRecordName, userRecordName),
+            sortDescriptors: [NSSortDescriptor(key: Field.updatedAt, ascending: false)],
+            resultsLimit: 320
+        )
+    }
+
     private func membershipRecord(forUserRecordName userRecordName: String) async throws -> CKRecord? {
-        let records = try await queryRecords(
+        let records = try await membershipRecords(forUserRecordName: userRecordName)
+        return records.first
+    }
+
+    private func membershipRecords(forUserRecordName userRecordName: String) async throws -> [CKRecord] {
+        try await queryRecords(
             recordType: RecordType.membership,
             predicate: NSPredicate(format: "%K == %@", Field.userRecordName, userRecordName),
             sortDescriptors: [NSSortDescriptor(key: Field.joinedAt, ascending: false)],
-            resultsLimit: 2
+            resultsLimit: 8
         )
-        return records.first
     }
 
     private func circleRecord(circleID: String) async throws -> CKRecord? {
@@ -859,12 +987,21 @@ final class CloudKitBrosSocialService: BrosSocialService {
     }
 
     private func memberSummary(from record: CKRecord) async throws -> BroMemberSummary {
-        let avatarImageData = loadAssetData(from: record[Field.avatarAsset] as? CKAsset)
+        let avatarImageData: Data?
+        if AppRuntimeConfig.reviewPolicy.syncBrosAvatars {
+            avatarImageData = loadAssetData(from: record[Field.avatarAsset] as? CKAsset)
+        } else {
+            avatarImageData = nil
+        }
+
         return BroMemberSummary(
             id: record[Field.membershipID] as? String ?? record.recordID.recordName,
             circleID: record[Field.circleID] as? String ?? "",
             userRecordName: record[Field.userRecordName] as? String ?? "",
-            displayName: record[Field.displayName] as? String ?? "Athlete",
+            displayName: ReviewModerationService.sanitizedForSharing(
+                record[Field.displayName] as? String ?? "",
+                kind: .displayName
+            ),
             avatarImageData: avatarImageData,
             joinedAt: record[Field.joinedAt] as? Date ?? .now,
             role: BroMembershipRole(rawValue: record[Field.role] as? String ?? "") ?? .member
@@ -919,9 +1056,12 @@ final class CloudKitBrosSocialService: BrosSocialService {
         }
 
         let member = membersByRecordName[actorUserRecordName]
-        let actorDisplayName = member?.displayName
-            ?? (record[Field.actorDisplayName] as? String)
-            ?? "Athlete"
+        let actorDisplayName = ReviewModerationService.sanitizedForSharing(
+            member?.displayName
+                ?? (record[Field.actorDisplayName] as? String)
+                ?? "",
+            kind: .displayName
+        )
 
         let workout: BroWorkoutFeedSnapshot?
         let pr: BroPRFeedSnapshot?
@@ -930,13 +1070,17 @@ final class CloudKitBrosSocialService: BrosSocialService {
         case .workoutCompleted:
             let previewText = record[Field.exercisePreviewText] as? String ?? ""
             workout = BroWorkoutFeedSnapshot(
-                workoutName: record[Field.workoutName] as? String ?? "Workout",
+                workoutName: ReviewModerationService.sanitizedForSharing(
+                    record[Field.workoutName] as? String ?? "",
+                    kind: .workoutName
+                ),
                 durationSeconds: record[Field.durationSeconds] as? Int ?? 0,
                 totalVolume: record[Field.totalVolume] as? Double ?? 0,
                 prCount: record[Field.prCount] as? Int ?? 0,
                 exercisePreview: previewText
                     .split(separator: "\n")
                     .map(String.init)
+                    .map { ReviewModerationService.sanitizedForSharing($0, kind: .exerciseName) }
                     .filter { !$0.isEmpty }
             )
             pr = nil
@@ -944,7 +1088,10 @@ final class CloudKitBrosSocialService: BrosSocialService {
             workout = nil
             pr = BroPRFeedSnapshot(
                 catalogExerciseUUID: record[Field.exercisePreviewText] as? String ?? "",
-                exerciseName: record[Field.exerciseName] as? String ?? "Exercise",
+                exerciseName: ReviewModerationService.sanitizedForSharing(
+                    record[Field.exerciseName] as? String ?? "",
+                    kind: .exerciseName
+                ),
                 estimatedOneRepMax: record[Field.estimatedOneRepMax] as? Double ?? 0,
                 weight: record[Field.weight] as? Double ?? 0,
                 reps: record[Field.reps] as? Int ?? 0,
@@ -980,7 +1127,10 @@ final class CloudKitBrosSocialService: BrosSocialService {
         record[Field.membershipID] = membershipID as CKRecordValue
         record[Field.circleID] = circleID as CKRecordValue
         record[Field.userRecordName] = userRecordName as CKRecordValue
-        record[Field.displayName] = displayName as CKRecordValue
+        record[Field.displayName] = ReviewModerationService.sanitizedForSharing(
+            displayName,
+            kind: .displayName
+        ) as CKRecordValue
         record[Field.joinedAt] = joinedAt as CKRecordValue
         record[Field.role] = role.rawValue as CKRecordValue
         record[Field.updatedAt] = Date() as CKRecordValue
@@ -989,7 +1139,10 @@ final class CloudKitBrosSocialService: BrosSocialService {
             record[Field.createdAt] = joinedAt as CKRecordValue
         }
 
-        if let avatarImageData, let asset = try? makeAsset(data: avatarImageData, fileExtension: "jpg") {
+        if AppRuntimeConfig.reviewPolicy.syncBrosAvatars,
+           let avatarImageData,
+           let asset = try? makeAsset(data: avatarImageData, fileExtension: "jpg")
+        {
             record[Field.avatarAsset] = asset
         } else {
             record[Field.avatarAsset] = nil
@@ -1003,15 +1156,23 @@ final class CloudKitBrosSocialService: BrosSocialService {
         record[Field.circleID] = payload.circleID as CKRecordValue
         record[Field.actorUserRecordName] = payload.actorUserRecordName as CKRecordValue
         record[Field.actorMembershipID] = payload.actorMembershipID as CKRecordValue
-        record[Field.actorDisplayName] = payload.actorDisplayName as CKRecordValue
+        record[Field.actorDisplayName] = ReviewModerationService.sanitizedForSharing(
+            payload.actorDisplayName,
+            kind: .displayName
+        ) as CKRecordValue
         record[Field.kind] = BroFeedEventKind.workoutCompleted.rawValue as CKRecordValue
         record[Field.createdAt] = payload.createdAt as CKRecordValue
         record[Field.updatedAt] = Date() as CKRecordValue
-        record[Field.workoutName] = payload.workoutName as CKRecordValue
+        record[Field.workoutName] = ReviewModerationService.sanitizedForSharing(
+            payload.workoutName,
+            kind: .workoutName
+        ) as CKRecordValue
         record[Field.durationSeconds] = payload.durationSeconds as CKRecordValue
         record[Field.totalVolume] = payload.totalVolume as CKRecordValue
         record[Field.prCount] = payload.prCount as CKRecordValue
-        record[Field.exercisePreviewText] = payload.exercisePreview.joined(separator: "\n") as CKRecordValue
+        record[Field.exercisePreviewText] = payload.exercisePreview
+            .map { ReviewModerationService.sanitizedForSharing($0, kind: .exerciseName) }
+            .joined(separator: "\n") as CKRecordValue
         try await save(records: [record])
     }
 
@@ -1022,12 +1183,18 @@ final class CloudKitBrosSocialService: BrosSocialService {
         record[Field.circleID] = payload.circleID as CKRecordValue
         record[Field.actorUserRecordName] = payload.actorUserRecordName as CKRecordValue
         record[Field.actorMembershipID] = payload.actorMembershipID as CKRecordValue
-        record[Field.actorDisplayName] = payload.actorDisplayName as CKRecordValue
+        record[Field.actorDisplayName] = ReviewModerationService.sanitizedForSharing(
+            payload.actorDisplayName,
+            kind: .displayName
+        ) as CKRecordValue
         record[Field.kind] = BroFeedEventKind.prHit.rawValue as CKRecordValue
         record[Field.createdAt] = payload.createdAt as CKRecordValue
         record[Field.updatedAt] = Date() as CKRecordValue
         record[Field.exercisePreviewText] = payload.catalogExerciseUUID as CKRecordValue
-        record[Field.exerciseName] = payload.exerciseName as CKRecordValue
+        record[Field.exerciseName] = ReviewModerationService.sanitizedForSharing(
+            payload.exerciseName,
+            kind: .exerciseName
+        ) as CKRecordValue
         record[Field.estimatedOneRepMax] = payload.estimatedOneRepMax as CKRecordValue
         record[Field.weight] = payload.weight as CKRecordValue
         record[Field.reps] = payload.reps as CKRecordValue
@@ -1119,8 +1286,10 @@ final class CloudKitBrosSocialService: BrosSocialService {
     }
 
     private func displayName(from profile: UserProfile?) -> String {
-        let cleaned = profile?.displayName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return cleaned.isEmpty ? "Athlete" : cleaned
+        ReviewModerationService.sanitizedForSharing(
+            profile?.displayName ?? "",
+            kind: .displayName
+        )
     }
 
     private func inviteCode(from circleID: String) -> String {

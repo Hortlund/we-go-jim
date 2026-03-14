@@ -4,6 +4,7 @@ import SwiftUI
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
 
     @State private var appPhase: AppPhase = .splash
     @State private var activeWorkoutCoordinator = ActiveWorkoutCoordinator()
@@ -55,6 +56,9 @@ struct ContentView: View {
                 await runSocialMaintenance()
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .wgjDidDeleteAllUserData)) { _ in
+            resetToLogin()
+        }
     }
 
     private func transitionFromSplashIfNeeded() async {
@@ -68,9 +72,21 @@ struct ContentView: View {
     }
 
     private func runSocialMaintenance() async {
-        let service = CloudKitBrosSocialService(modelContext: modelContext)
+        guard cloudSyncEnabled,
+              let service = CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)
+        else {
+            return
+        }
         await service.refreshLocalMembershipState()
         await service.flushOutbox()
+    }
+
+    private func resetToLogin() {
+        activeWorkoutCoordinator.clearActiveWorkout()
+        catalogSyncCoordinator = CatalogSyncCoordinator()
+        withAnimation(.easeInOut(duration: 0.2)) {
+            appPhase = .login
+        }
     }
 }
 
@@ -91,6 +107,7 @@ private enum AppPhase {
             ExerciseCatalogSyncState.self,
             UserProfile.self,
             ProfileWidgetConfig.self,
+            BlockedBro.self,
             TemplateFolder.self,
             WorkoutTemplate.self,
             TemplateExercise.self,

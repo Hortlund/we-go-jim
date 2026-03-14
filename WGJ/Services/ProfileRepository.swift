@@ -22,7 +22,7 @@ final class ProfileRepository {
             return existing
         }
 
-        let profile = UserProfile(displayName: "Athlete")
+        let profile = UserProfile(displayName: ReviewModerationService.sanitizedForSharing("Athlete", kind: .displayName))
         modelContext.insert(profile)
         try modelContext.save()
         return profile
@@ -30,13 +30,12 @@ final class ProfileRepository {
 
     func updateDisplayName(_ displayName: String) throws {
         let profile = try loadOrCreateProfile()
-        let cleaned = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleaned.isEmpty else { return }
+        let cleaned = try ReviewModerationService.validateUserInput(displayName, kind: .displayName)
 
         profile.displayName = cleaned
         profile.updatedAt = .now
         try modelContext.save()
-        try? CloudKitBrosSocialService(modelContext: modelContext).queueCurrentProfileSync()
+        try? CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)?.queueCurrentProfileSync()
     }
 
     func updateAvatar(imageData: Data?) throws {
@@ -44,7 +43,7 @@ final class ProfileRepository {
         profile.avatarImageData = imageData
         profile.updatedAt = .now
         try modelContext.save()
-        try? CloudKitBrosSocialService(modelContext: modelContext).queueCurrentProfileSync()
+        try? CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)?.queueCurrentProfileSync()
     }
 
     func updateWeeklyWorkoutGoal(_ goal: Int) throws {

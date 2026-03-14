@@ -185,6 +185,26 @@ final class SocialOutboxItem {
 }
 
 @Model
+final class BlockedBro {
+    var id: UUID = UUID()
+    @Attribute(.unique) var userRecordName: String = ""
+    var displayNameSnapshot: String = ""
+    var blockedAt: Date = Date()
+
+    init(
+        id: UUID = UUID(),
+        userRecordName: String,
+        displayNameSnapshot: String,
+        blockedAt: Date = .now
+    ) {
+        self.id = id
+        self.userRecordName = userRecordName
+        self.displayNameSnapshot = displayNameSnapshot
+        self.blockedAt = blockedAt
+    }
+}
+
+@Model
 final class ProfileWidgetConfig {
     var id: UUID = UUID()
     var kindRaw: String = ProfileWidgetKind.prs.rawValue

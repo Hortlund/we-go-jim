@@ -139,6 +139,7 @@ struct MainTabView: View {
             ExerciseCatalogSyncState.self,
             UserProfile.self,
             ProfileWidgetConfig.self,
+            BlockedBro.self,
             TemplateFolder.self,
             WorkoutTemplate.self,
             TemplateExercise.self,

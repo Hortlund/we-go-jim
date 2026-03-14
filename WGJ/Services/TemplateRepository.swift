@@ -169,10 +169,7 @@ final class TemplateRepository {
     }
 
     func createFolder(name: String) throws {
-        let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleaned.isEmpty else {
-            throw TemplateRepositoryError.invalidName
-        }
+        let cleaned = try ReviewModerationService.validateUserInput(name, kind: .folderName)
 
         let existing = try folders()
         let created = TemplateFolder(name: cleaned, sortOrder: (existing.last?.sortOrder ?? -1) + 1)
@@ -181,10 +178,7 @@ final class TemplateRepository {
     }
 
     func renameFolder(id: UUID, name: String) throws {
-        let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleaned.isEmpty else {
-            throw TemplateRepositoryError.invalidName
-        }
+        let cleaned = try ReviewModerationService.validateUserInput(name, kind: .folderName)
 
         guard let folder = try folder(id: id) else {
             throw TemplateRepositoryError.folderNotFound
@@ -246,10 +240,7 @@ final class TemplateRepository {
     }
 
     func createTemplate(folderID: UUID? = nil, name: String, notes: String) throws -> WorkoutTemplate {
-        let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleaned.isEmpty else {
-            throw TemplateRepositoryError.invalidName
-        }
+        let cleaned = try ReviewModerationService.validateUserInput(name, kind: .templateName)
 
         let targetFolder: TemplateFolder?
         let folderRefID: UUID
@@ -331,10 +322,7 @@ final class TemplateRepository {
     }
 
     func updateTemplate(id: UUID, name: String, notes: String) throws {
-        let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleaned.isEmpty else {
-            throw TemplateRepositoryError.invalidName
-        }
+        let cleaned = try ReviewModerationService.validateUserInput(name, kind: .templateName)
 
         guard let template = try template(id: id) else {
             throw TemplateRepositoryError.templateNotFound
