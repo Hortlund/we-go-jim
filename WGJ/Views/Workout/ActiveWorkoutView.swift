@@ -88,7 +88,13 @@ struct ActiveWorkoutView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 if let session {
-                    headerCard(session)
+                    ActiveWorkoutHeaderCard(
+                        sessionNameDraft: $sessionNameDraft,
+                        notesDraft: $notesDraft,
+                        session: session,
+                        exerciseCount: sessionExercises.count,
+                        onSubmit: persistSessionMeta
+                    )
                     exercisesSectionHeader
                 } else {
                     WGJEmptyStateCard(
@@ -141,6 +147,7 @@ struct ActiveWorkoutView: View {
                 } label: {
                     Label("Minimize", systemImage: "chevron.down")
                 }
+                .accessibilityIdentifier("active-workout-minimize-button")
             }
 
             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -150,10 +157,26 @@ struct ActiveWorkoutView: View {
                     showingFinishConfirmation = true
                 }
                 .disabled(session == nil || sessionExercises.isEmpty)
+                .accessibilityIdentifier("active-workout-finish-button")
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            bottomDock
+            ActiveWorkoutBottomDock(
+                session: session,
+                isCancelArmed: isCancelArmed,
+                reduceMotion: reduceMotion,
+                onArmCancel: {
+                    dismissKeyboard()
+                    showingFinishConfirmation = false
+                    isCancelArmed = true
+                },
+                onKeepWorkout: {
+                    isCancelArmed = false
+                },
+                onDiscardWorkout: {
+                    cancelWorkout()
+                }
+            )
         }
         .sheet(isPresented: $showingExercisePicker) {
             ExercisePickerView(repository: catalogRepository) { exercise in
@@ -169,7 +192,13 @@ struct ActiveWorkoutView: View {
             .wgjSheetSurface()
         }
         .sheet(isPresented: $showingSaveTemplateSheet) {
-            saveTemplateSheet
+            ActiveWorkoutSaveTemplateSheet(
+                templateNameDraft: $templateNameDraft,
+                templateFolderID: $templateFolderID,
+                folders: folders,
+                onSkip: finalizeCompletion,
+                onSave: saveSessionAsTemplate
+            )
         }
         .task {
             await bootstrapIfNeeded()
@@ -214,173 +243,6 @@ struct ActiveWorkoutView: View {
         sessions.first
     }
 
-    private var bottomDock: some View {
-        VStack(spacing: 8) {
-            if let popup = coordinator.restTimerPopup {
-                WGJTransientBanner(
-                    title: popup.title,
-                    message: popup.message,
-                    icon: "bell.badge.fill",
-                    tint: WGJTheme.success
-                )
-                .transition(WGJMotion.cardTransition(reduceMotion: reduceMotion))
-            }
-
-            if let session {
-                activityTimerDock(session)
-            }
-
-            if isCancelArmed {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 10) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(WGJTheme.danger)
-
-                        Text("Discard this workout and all logged sets?")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(WGJTheme.textPrimary)
-
-                        Spacer(minLength: 8)
-                    }
-
-                    HStack(spacing: 10) {
-                        Button("Keep Workout") {
-                            isCancelArmed = false
-                        }
-                        .buttonStyle(WGJGhostButtonStyle())
-
-                        Button("Discard Workout") {
-                            cancelWorkout()
-                        }
-                        .buttonStyle(WGJPrimaryButtonStyle())
-                        .tint(WGJTheme.danger)
-                    }
-                }
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(WGJTheme.field.opacity(0.82))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(WGJTheme.danger.opacity(0.32), lineWidth: 1)
-                        )
-                )
-            } else {
-                Button {
-                    dismissKeyboard()
-                    showingFinishConfirmation = false
-                    isCancelArmed = true
-                } label: {
-                    Label("Cancel Workout", systemImage: "xmark.circle.fill")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .foregroundStyle(WGJTheme.danger)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(WGJTheme.field.opacity(0.74))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .stroke(WGJTheme.danger.opacity(0.38), lineWidth: 1)
-                                )
-                        )
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 10)
-        .background(
-            AnyShapeStyle(.ultraThinMaterial)
-        )
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(WGJTheme.accentBlue.opacity(0.18))
-                .frame(height: 1)
-        }
-    }
-
-    private func activityTimerDock(_ session: WorkoutSession) -> some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            let remaining = coordinator.restTimerRemaining(at: context.date)
-            let isResting = remaining != nil
-            let accent = isResting ? WGJTheme.success : WGJTheme.accentCyan
-            let secondaryText = isResting
-                ? coordinator.restTimerContextLabel() ?? "Recover before the next set"
-                : "Workout in progress"
-            let primaryValue = isResting
-                ? formattedRest(remaining ?? 0)
-                : WGJDurationFormatter.elapsedString(since: session.startedAt, now: context.date)
-
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(isResting ? "Rest Timer" : "Elapsed Time")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(accent)
-
-                    Text(secondaryText)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(WGJTheme.textPrimary)
-                        .wgjSingleLineText(scale: 0.84)
-                }
-                Spacer(minLength: 12)
-                Text(primaryValue)
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
-                    .foregroundStyle(accent)
-                    .monospacedDigit()
-                    .wgjSingleLineText(scale: 0.84)
-
-                if isResting {
-                    Button {
-                        coordinator.clearRestTimer()
-                    } label: {
-                        Image(systemName: "xmark")
-                    }
-                    .buttonStyle(
-                        WGJIconButtonStyle(
-                            tint: WGJTheme.textSecondary,
-                            background: WGJTheme.cardStrong,
-                            outline: WGJTheme.outline
-                        )
-                    )
-                    .accessibilityLabel("Dismiss rest timer")
-                }
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(.regularMaterial)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        accent.opacity(isResting ? 0.16 : 0.12),
-                                        WGJTheme.cardStrong.opacity(0.80),
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                    }
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .stroke(accent.opacity(isResting ? 0.28 : 0.22), lineWidth: 1)
-                    }
-                    .shadow(color: WGJTheme.shadowStrong.opacity(0.14), radius: 16, x: 0, y: 8)
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(
-                isResting
-                    ? "Rest timer \(primaryValue). \(secondaryText)"
-                    : "Elapsed time \(primaryValue)"
-            )
-        }
-    }
-
     private var exercisesSectionHeader: some View {
         WGJActionHeader(
             "Exercises",
@@ -406,85 +268,7 @@ struct ActiveWorkoutView: View {
                 .frame(maxWidth: .infinity)
         }
         .buttonStyle(WGJGhostButtonStyle())
-    }
-
-    private func headerCard(_ session: WorkoutSession) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            WGJSectionHeader("Session")
-
-            TextField("Workout name", text: $sessionNameDraft)
-                .textInputAutocapitalization(.words)
-                .wgjPillField()
-                .onSubmit {
-                    persistSessionMeta()
-                }
-
-            TextField("Notes", text: $notesDraft, axis: .vertical)
-                .lineLimit(2...4)
-                .textInputAutocapitalization(.sentences)
-                .wgjPillField()
-                .onSubmit {
-                    persistSessionMeta()
-                }
-
-            HStack {
-                Text("\(sessionExercises.count) exercises")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(WGJTheme.accentCyan)
-
-                Spacer()
-            }
-
-            Text("Started \(session.startedAt.formatted(date: .abbreviated, time: .shortened))")
-                .font(.caption)
-                .foregroundStyle(WGJTheme.textSecondary)
-        }
-        .padding(14)
-        .wgjCardContainer(strong: true)
-    }
-
-    private var saveTemplateSheet: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    WGJSectionHeader("Save as Template", subtitle: "Use this workout as a reusable plan")
-
-                    TextField("Template name", text: $templateNameDraft)
-                        .textInputAutocapitalization(.words)
-                        .wgjPillField()
-
-                    Picker("Folder", selection: $templateFolderID) {
-                        Text("Unfiled").tag(Optional<UUID>.none)
-                        ForEach(folders) { folder in
-                            Text(folder.name).tag(Optional.some(folder.id))
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .wgjPillField()
-                }
-                .padding(16)
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .wgjSheetSurface()
-            .navigationTitle("Complete Workout")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Skip") {
-                        finalizeCompletion()
-                    }
-                }
-
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        saveSessionAsTemplate()
-                    }
-                    .disabled(templateNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-            }
-        }
-        .presentationDetents([.medium])
-        .presentationDragIndicator(.visible)
+        .accessibilityIdentifier("active-workout-add-exercise-button")
     }
 
     @MainActor
@@ -1049,6 +833,281 @@ struct ActiveWorkoutView: View {
 
     private func dismissKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+}
+
+private struct ActiveWorkoutHeaderCard: View {
+    @Binding var sessionNameDraft: String
+    @Binding var notesDraft: String
+
+    let session: WorkoutSession
+    let exerciseCount: Int
+    let onSubmit: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            WGJSectionHeader("Session")
+
+            TextField("Workout name", text: $sessionNameDraft)
+                .textInputAutocapitalization(.words)
+                .wgjPillField()
+                .accessibilityIdentifier("active-workout-name-field")
+                .onSubmit(onSubmit)
+
+            TextField("Notes", text: $notesDraft, axis: .vertical)
+                .lineLimit(2...4)
+                .textInputAutocapitalization(.sentences)
+                .wgjPillField()
+                .onSubmit(onSubmit)
+
+            HStack {
+                Text("\(exerciseCount) exercises")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(WGJTheme.accentCyan)
+
+                Spacer()
+            }
+
+            Text("Started \(session.startedAt.formatted(date: .abbreviated, time: .shortened))")
+                .font(.caption)
+                .foregroundStyle(WGJTheme.textSecondary)
+        }
+        .padding(14)
+        .wgjCardContainer(strong: true)
+    }
+}
+
+private struct ActiveWorkoutBottomDock: View {
+    @Environment(ActiveWorkoutCoordinator.self) private var coordinator
+
+    let session: WorkoutSession?
+    let isCancelArmed: Bool
+    let reduceMotion: Bool
+    let onArmCancel: () -> Void
+    let onKeepWorkout: () -> Void
+    let onDiscardWorkout: () -> Void
+
+    var body: some View {
+        VStack(spacing: 8) {
+            if let popup = coordinator.restTimerPopup {
+                WGJTransientBanner(
+                    title: popup.title,
+                    message: popup.message,
+                    icon: "bell.badge.fill",
+                    tint: WGJTheme.success
+                )
+                .transition(WGJMotion.cardTransition(reduceMotion: reduceMotion))
+            }
+
+            if let session {
+                ActiveWorkoutActivityTimerDock(session: session)
+            }
+
+            if isCancelArmed {
+                cancelConfirmation
+            } else {
+                Button(action: onArmCancel) {
+                    Label("Cancel Workout", systemImage: "xmark.circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .foregroundStyle(WGJTheme.danger)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(WGJTheme.field.opacity(0.74))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .stroke(WGJTheme.danger.opacity(0.38), lineWidth: 1)
+                                )
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 10)
+        .background(AnyShapeStyle(.ultraThinMaterial))
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(WGJTheme.accentBlue.opacity(0.18))
+                .frame(height: 1)
+        }
+    }
+
+    private var cancelConfirmation: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(WGJTheme.danger)
+
+                Text("Discard this workout and all logged sets?")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(WGJTheme.textPrimary)
+
+                Spacer(minLength: 8)
+            }
+
+            HStack(spacing: 10) {
+                Button("Keep Workout", action: onKeepWorkout)
+                    .buttonStyle(WGJGhostButtonStyle())
+
+                Button("Discard Workout", action: onDiscardWorkout)
+                    .buttonStyle(WGJPrimaryButtonStyle())
+                    .tint(WGJTheme.danger)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(WGJTheme.field.opacity(0.82))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(WGJTheme.danger.opacity(0.32), lineWidth: 1)
+                )
+        )
+    }
+}
+
+private struct ActiveWorkoutActivityTimerDock: View {
+    @Environment(ActiveWorkoutCoordinator.self) private var coordinator
+
+    let session: WorkoutSession
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let remaining = coordinator.restTimerRemaining(at: context.date)
+            let isResting = remaining != nil
+            let accent = isResting ? WGJTheme.success : WGJTheme.accentCyan
+            let secondaryText = isResting
+                ? coordinator.restTimerContextLabel() ?? "Recover before the next set"
+                : "Workout in progress"
+            let primaryValue = isResting
+                ? formattedRest(remaining ?? 0)
+                : WGJDurationFormatter.elapsedString(since: session.startedAt, now: context.date)
+
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(isResting ? "Rest Timer" : "Elapsed Time")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(accent)
+
+                    Text(secondaryText)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(WGJTheme.textPrimary)
+                        .wgjSingleLineText(scale: 0.84)
+                }
+                Spacer(minLength: 12)
+                Text(primaryValue)
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundStyle(accent)
+                    .monospacedDigit()
+                    .wgjSingleLineText(scale: 0.84)
+
+                if isResting {
+                    Button {
+                        coordinator.clearRestTimer()
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .buttonStyle(
+                        WGJIconButtonStyle(
+                            tint: WGJTheme.textSecondary,
+                            background: WGJTheme.cardStrong,
+                            outline: WGJTheme.outline
+                        )
+                    )
+                    .accessibilityLabel("Dismiss rest timer")
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(.regularMaterial)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        accent.opacity(isResting ? 0.16 : 0.12),
+                                        WGJTheme.cardStrong.opacity(0.80),
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                    }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(accent.opacity(isResting ? 0.28 : 0.22), lineWidth: 1)
+                    }
+                    .shadow(color: WGJTheme.shadowStrong.opacity(0.14), radius: 16, x: 0, y: 8)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(
+                isResting
+                    ? "Rest timer \(primaryValue). \(secondaryText)"
+                    : "Elapsed time \(primaryValue)"
+            )
+        }
+    }
+
+    private func formattedRest(_ seconds: Int) -> String {
+        let mins = max(0, seconds) / 60
+        let secs = max(0, seconds) % 60
+        return String(format: "%d:%02d", mins, secs)
+    }
+}
+
+private struct ActiveWorkoutSaveTemplateSheet: View {
+    @Binding var templateNameDraft: String
+    @Binding var templateFolderID: UUID?
+
+    let folders: [TemplateFolder]
+    let onSkip: () -> Void
+    let onSave: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    WGJSectionHeader("Save as Template", subtitle: "Use this workout as a reusable plan")
+
+                    TextField("Template name", text: $templateNameDraft)
+                        .textInputAutocapitalization(.words)
+                        .wgjPillField()
+                        .accessibilityIdentifier("active-workout-template-name-field")
+
+                    Picker("Folder", selection: $templateFolderID) {
+                        Text("Unfiled").tag(Optional<UUID>.none)
+                        ForEach(folders) { folder in
+                            Text(folder.name).tag(Optional.some(folder.id))
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .wgjPillField()
+                }
+                .padding(16)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .wgjSheetSurface()
+            .navigationTitle("Complete Workout")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Skip", action: onSkip)
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save", action: onSave)
+                        .disabled(templateNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
     }
 }
 

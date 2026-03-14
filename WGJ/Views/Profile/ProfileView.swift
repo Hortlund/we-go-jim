@@ -18,11 +18,7 @@ struct ProfileView: View {
     @State private var avatarImageData: Data?
     @State private var selectedAvatarItem: PhotosPickerItem?
     @State private var hasLoadedProfile = false
-    @State private var weeklyGoal = 4
-    @State private var enabledWidgets: [ProfileWidgetConfig] = []
-    @State private var prRecords: [WorkoutPRRecord] = []
-    @State private var weeklyProgress: [WeeklyWorkoutProgressPoint] = []
-    @State private var trendSeriesByKind: [ProfileWidgetKind: ExerciseMetricSeries] = [:]
+    @State private var dashboardContent = ProfileDashboardContent.empty
     @State private var showingWidgetManager = false
 
     @State private var errorMessage = ""
@@ -46,36 +42,19 @@ struct ProfileView: View {
                 WGJRootHeader("Profile", subtitle: "Personalize the app and review your progress widgets.")
 
                 VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 14) {
-                        avatarView
-                            .frame(width: 76, height: 76)
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            PhotosPicker(selection: $selectedAvatarItem, matching: .images) {
-                                Label("Choose Avatar", systemImage: "photo")
-                            }
-                            .buttonStyle(WGJGhostButtonStyle())
-
-                            if avatarImageData != nil {
-                                Button(role: .destructive) {
-                                    removeAvatar()
-                                } label: {
-                                    Label("Remove Avatar", systemImage: "trash")
-                                }
-                                .buttonStyle(WGJGhostButtonStyle())
-                            }
-                        }
-                    }
+                    avatarEditorSection
 
                     TextField("Display name", text: $displayName)
                         .textInputAutocapitalization(.words)
                         .wgjPillField()
+                        .accessibilityIdentifier("profile-display-name-field")
 
                     Button("Save Profile") {
                         saveProfile()
                     }
                     .buttonStyle(WGJPrimaryButtonStyle())
                     .disabled(displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityIdentifier("profile-save-button")
                 }
                 .padding(14)
                 .wgjCardContainer(strong: true)
@@ -90,7 +69,7 @@ struct ProfileView: View {
                         .buttonStyle(WGJGhostButtonStyle())
                     }
 
-                    if enabledWidgets.isEmpty {
+                    if dashboardContent.enabledWidgets.isEmpty {
                         WGJEmptyStateCard(
                             title: "No widgets enabled",
                             message: "Enable widgets to show PRs, weekly progress, and exercise graphs on your profile.",
@@ -98,7 +77,7 @@ struct ProfileView: View {
                         )
                     }
 
-                    ForEach(enabledWidgets) { config in
+                    ForEach(dashboardContent.enabledWidgets) { config in
                         switch config.kind {
                         case .prs:
                             prWidget
@@ -109,7 +88,7 @@ struct ProfileView: View {
                                 title: "1RM Trend",
                                 subtitle: "Best estimated 1RM for \(config.selectedExerciseNameSnapshot ?? "your lift")",
                                 accent: WGJTheme.accentCyan,
-                                series: trendSeriesByKind[config.kind],
+                                series: dashboardContent.trendSeriesByKind[config.kind],
                                 emptyMessage: "Log weighted sets for this exercise to start the line."
                             )
                         case .exerciseVolumeTrend:
@@ -117,7 +96,7 @@ struct ProfileView: View {
                                 title: "Volume Trend",
                                 subtitle: "Weighted volume for \(config.selectedExerciseNameSnapshot ?? "your lift")",
                                 accent: WGJTheme.accentBlue,
-                                series: trendSeriesByKind[config.kind],
+                                series: dashboardContent.trendSeriesByKind[config.kind],
                                 emptyMessage: "Complete weighted sets for this exercise to populate volume."
                             )
                         }
@@ -127,20 +106,14 @@ struct ProfileView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     WGJSectionHeader("App")
 
-                    NavigationLink {
+                    WGJNavigationTile(
+                        title: "Settings",
+                        systemImage: "gear",
+                        subtitle: "Training goals, privacy, support, and data controls.",
+                        accessibilityID: "profile-settings-tile"
+                    ) {
                         SettingsView()
-                    } label: {
-                        HStack {
-                            Label("Settings", systemImage: "gear")
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption.weight(.semibold))
-                        }
-                        .foregroundStyle(WGJTheme.textPrimary)
-                        .padding(12)
-                        .wgjCardContainer()
                     }
-                    .buttonStyle(.plain)
                 }
             }
             .padding(.top, 8)
@@ -151,7 +124,7 @@ struct ProfileView: View {
         .task {
             await loadProfileIfNeeded()
         }
-        .task(id: widgetStateVersionKey) {
+        .task(id: widgetStateStamp) {
             loadWidgetState()
         }
         .onChange(of: selectedAvatarItem) { _, newItem in
@@ -175,17 +148,50 @@ struct ProfileView: View {
         }
     }
 
-    private var widgetStateVersionKey: [String] {
-        let sessionKeys = trackedSessions
-            .filter { $0.status == .completed }
-            .map { "session:\($0.id.uuidString)|\($0.updatedAt.timeIntervalSinceReferenceDate)|\($0.status.rawValue)" }
-        let widgetKeys = widgetConfigs
-            .map {
-                "widget:\($0.id.uuidString)|\($0.updatedAt.timeIntervalSinceReferenceDate)|\($0.isEnabled)|\($0.sortOrder)|\($0.selectedCatalogExerciseUUID ?? "")"
+    private var widgetStateStamp: ProfileWidgetStateStamp {
+        ProfileWidgetStateStamp(
+            sessions: trackedSessions,
+            widgetConfigs: widgetConfigs,
+            profiles: storedProfiles
+        )
+    }
+
+    private var avatarEditorSection: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: 14) {
+                avatarView
+                    .frame(width: 76, height: 76)
+
+                avatarActions
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-        let profileKeys = storedProfiles
-            .map { "profile:\($0.id.uuidString)|\($0.updatedAt.timeIntervalSinceReferenceDate)|\($0.weeklyWorkoutGoal)" }
-        return sessionKeys + widgetKeys + profileKeys
+
+            VStack(alignment: .leading, spacing: 12) {
+                avatarView
+                    .frame(width: 76, height: 76)
+
+                avatarActions
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var avatarActions: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            PhotosPicker(selection: $selectedAvatarItem, matching: .images) {
+                Label("Choose Avatar", systemImage: "photo")
+            }
+            .buttonStyle(WGJGhostButtonStyle())
+
+            if avatarImageData != nil {
+                Button(role: .destructive) {
+                    removeAvatar()
+                } label: {
+                    Label("Remove Avatar", systemImage: "trash")
+                }
+                .buttonStyle(WGJGhostButtonStyle())
+            }
+        }
     }
 
     @ViewBuilder
@@ -218,12 +224,12 @@ struct ProfileView: View {
         VStack(alignment: .leading, spacing: 10) {
             WGJSectionHeader("Personal Records", subtitle: "Estimated 1RM from logged workouts")
 
-            if prRecords.isEmpty {
+            if dashboardContent.personalRecords.isEmpty {
                 Text("Complete workouts to populate PRs.")
                     .font(.subheadline)
                     .foregroundStyle(WGJTheme.textSecondary)
             } else {
-                ForEach(prRecords.prefix(5)) { record in
+                ForEach(dashboardContent.personalRecords.prefix(5)) { record in
                     HStack {
                         Text(record.exerciseName)
                             .foregroundStyle(WGJTheme.textPrimary)
@@ -250,12 +256,12 @@ struct ProfileView: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(WGJTheme.textPrimary)
 
-            if weeklyProgress.isEmpty {
+            if dashboardContent.weeklyProgress.isEmpty {
                 Text("No completed workouts yet.")
                     .font(.subheadline)
                     .foregroundStyle(WGJTheme.textSecondary)
             } else {
-                Chart(weeklyProgress) { point in
+                Chart(dashboardContent.weeklyProgress) { point in
                     BarMark(
                         x: .value("Week", point.weekStart, unit: .weekOfYear),
                         y: .value("Workouts", point.completedWorkouts)
@@ -274,6 +280,10 @@ struct ProfileView: View {
         }
         .padding(14)
         .wgjCardContainer()
+    }
+
+    private var weeklyGoal: Int {
+        max(1, dashboardContent.weeklyGoal)
     }
 
     private func exerciseTrendWidget(
@@ -385,7 +395,7 @@ struct ProfileView: View {
             let profile = try profileRepository.loadOrCreateProfile()
             displayName = profile.displayName
             avatarImageData = profile.avatarImageData
-            weeklyGoal = profile.weeklyWorkoutGoal
+            dashboardContent.weeklyGoal = profile.weeklyWorkoutGoal
             loadWidgetState()
         } catch {
             errorMessage = String(describing: error)
@@ -398,7 +408,7 @@ struct ProfileView: View {
             try profileRepository.updateDisplayName(displayName)
             if let profile = try profileRepository.currentProfile() {
                 displayName = profile.displayName
-                weeklyGoal = profile.weeklyWorkoutGoal
+                dashboardContent.weeklyGoal = profile.weeklyWorkoutGoal
             }
             loadWidgetState()
         } catch {
@@ -458,11 +468,11 @@ struct ProfileView: View {
                 }
             }
 
-            enabledWidgets = enabled
-            prRecords = dashboard.personalRecords
-            weeklyProgress = dashboard.weeklyProgress
-            trendSeriesByKind = nextTrendSeries
-            weeklyGoal = max(1, dashboard.weeklyGoal)
+            dashboardContent = ProfileDashboardContent.make(
+                enabledWidgets: enabled,
+                dashboard: dashboard,
+                trendSeriesByKind: nextTrendSeries
+            )
         } catch {
             errorMessage = String(describing: error)
             showingError = true
@@ -485,6 +495,65 @@ struct ProfileView: View {
 
         let direction = delta > 0 ? "up" : "down"
         return "\(formatWeight(abs(delta))) \(series.loadUnit.shortLabel) \(direction) across your last \(series.points.count) logged workouts."
+    }
+}
+
+struct ProfileWidgetStateStamp: Hashable {
+    let completedSessionCount: Int
+    let latestCompletedSessionUpdate: TimeInterval
+    let widgetCount: Int
+    let latestWidgetUpdate: TimeInterval
+    let profileCount: Int
+    let latestProfileUpdate: TimeInterval
+
+    init(
+        sessions: [WorkoutSession],
+        widgetConfigs: [ProfileWidgetConfig],
+        profiles: [UserProfile]
+    ) {
+        let completedSessions = sessions.filter { $0.status == .completed }
+        completedSessionCount = completedSessions.count
+        latestCompletedSessionUpdate = completedSessions
+            .map { $0.updatedAt.timeIntervalSinceReferenceDate }
+            .max() ?? 0
+        widgetCount = widgetConfigs.count
+        latestWidgetUpdate = widgetConfigs
+            .map { $0.updatedAt.timeIntervalSinceReferenceDate }
+            .max() ?? 0
+        profileCount = profiles.count
+        latestProfileUpdate = profiles
+            .map { $0.updatedAt.timeIntervalSinceReferenceDate }
+            .max() ?? 0
+    }
+}
+
+struct ProfileDashboardContent {
+    var enabledWidgets: [ProfileWidgetConfig]
+    var personalRecords: [WorkoutPRRecord]
+    var weeklyProgress: [WeeklyWorkoutProgressPoint]
+    var trendSeriesByKind: [ProfileWidgetKind: ExerciseMetricSeries]
+    var weeklyGoal: Int
+
+    static let empty = ProfileDashboardContent(
+        enabledWidgets: [],
+        personalRecords: [],
+        weeklyProgress: [],
+        trendSeriesByKind: [:],
+        weeklyGoal: 4
+    )
+
+    static func make(
+        enabledWidgets: [ProfileWidgetConfig],
+        dashboard: ProfileDashboardSnapshot,
+        trendSeriesByKind: [ProfileWidgetKind: ExerciseMetricSeries]
+    ) -> ProfileDashboardContent {
+        ProfileDashboardContent(
+            enabledWidgets: enabledWidgets,
+            personalRecords: dashboard.personalRecords,
+            weeklyProgress: dashboard.weeklyProgress,
+            trendSeriesByKind: trendSeriesByKind,
+            weeklyGoal: max(1, dashboard.weeklyGoal)
+        )
     }
 }
 

@@ -30,7 +30,6 @@ struct ExercisesCatalogView: View {
     @State private var viewModel = ExercisesCatalogViewModel()
     @State private var isBootstrappingCatalog = false
     @State private var hasAttemptedBootstrap = false
-    @State private var catalogDataToken = 0
     @State private var loadState: CatalogLoadState = .idle
     @State private var showingCustomExerciseSheet = false
     @State private var customExerciseDraft = CustomExerciseDraft.empty
@@ -82,8 +81,20 @@ struct ExercisesCatalogView: View {
         syncStates.first?.lastSuccessfulSyncAt?.timeIntervalSinceReferenceDate ?? 0
     }
 
-    private var catalogRevisionStamp: [TimeInterval] {
-        catalogExercises.map { $0.updatedAt.timeIntervalSinceReferenceDate }
+    private var catalogDataStamp: ExercisesCatalogDataStamp {
+        ExercisesCatalogDataStamp(
+            exercises: catalogExercises,
+            syncStateStamp: syncStateStamp
+        )
+    }
+
+    private var filterState: ExercisesCatalogFilterState {
+        ExercisesCatalogFilterState(
+            query: debouncedQuery,
+            selectedPrimaryMuscleID: selectedPrimaryMuscleID,
+            selectedCategory: selectedCategory,
+            sortDescending: sortDescending
+        )
     }
 
     var body: some View {
@@ -93,8 +104,6 @@ struct ExercisesCatalogView: View {
                     VStack(alignment: .leading, spacing: 14) {
                         if !isPickerMode {
                             WGJRootHeader("Exercises", subtitle: "Search, filter, and add movements to a workout.")
-
-                            EmptyView()
                         }
 
                         searchField
@@ -129,6 +138,7 @@ struct ExercisesCatalogView: View {
                     .padding(16)
                     .padding(.trailing, indexRailWidth + 24)
                 }
+                .scrollDismissesKeyboard(.interactively)
                 .wgjScreenBackground()
 
                 if !viewModel.sections.isEmpty {
@@ -195,25 +205,10 @@ struct ExercisesCatalogView: View {
         .task {
             await bootstrapCatalogIfNeeded()
         }
-        .task(id: catalogDataToken) {
+        .task(id: catalogDataStamp) {
             rebuildCatalogCache()
         }
-        .onChange(of: catalogExercises.count) { _, _ in
-            catalogDataToken &+= 1
-        }
-        .onChange(of: catalogRevisionStamp) { _, _ in
-            catalogDataToken &+= 1
-        }
-        .onChange(of: syncStateStamp) { _, _ in
-            catalogDataToken &+= 1
-        }
-        .onChange(of: selectedPrimaryMuscleID) { _, _ in
-            recomputeSections()
-        }
-        .onChange(of: selectedCategory) { _, _ in
-            recomputeSections()
-        }
-        .onChange(of: sortDescending) { _, _ in
+        .onChange(of: filterState) { _, _ in
             recomputeSections()
         }
         .onChange(of: query) { _, newValue in
@@ -234,52 +229,28 @@ struct ExercisesCatalogView: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .foregroundStyle(WGJTheme.textPrimary)
+                .accessibilityIdentifier("exercises-search-field")
         }
         .wgjPillField()
     }
 
     private var filterRow: some View {
-        HStack(spacing: 8) {
-            Menu {
-                Button("Any Body Part") {
-                    selectedPrimaryMuscleID = nil
-                }
-
-                ForEach(viewModel.availableMuscles, id: \.id) { muscle in
-                    Button(muscle.name) {
-                        selectedPrimaryMuscleID = muscle.id
-                    }
-                }
-            } label: {
-                compactFilterPill(
-                    selectedPrimaryMuscleID.flatMap { id in
-                        viewModel.availableMuscles.first(where: { $0.id == id })?.name
-                    } ?? "Any Body Part"
-                )
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                bodyPartFilter
+                categoryFilter
+                sortButton
             }
-            .buttonStyle(.plain)
-
-            Menu {
-                Button("Any Category") {
-                    selectedCategory = nil
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    bodyPartFilter
+                    categoryFilter
                 }
-
-                ForEach(viewModel.availableCategories, id: \.self) { category in
-                    Button(category) {
-                        selectedCategory = category
-                    }
+                HStack {
+                    Spacer(minLength: 0)
+                    sortButton
                 }
-            } label: {
-                compactFilterPill(selectedCategory ?? "Any Category")
             }
-            .buttonStyle(.plain)
-
-            Button {
-                sortDescending.toggle()
-            } label: {
-                Image(systemName: "arrow.up.arrow.down")
-            }
-            .buttonStyle(WGJIconButtonStyle())
         }
     }
 
@@ -295,6 +266,57 @@ struct ExercisesCatalogView: View {
             .frame(maxWidth: .infinity)
         }
         .buttonStyle(WGJGhostButtonStyle())
+        .accessibilityIdentifier("exercises-create-button")
+    }
+
+    private var bodyPartFilter: some View {
+        Menu {
+            Button("Any Body Part") {
+                selectedPrimaryMuscleID = nil
+            }
+
+            ForEach(viewModel.availableMuscles, id: \.id) { muscle in
+                Button(muscle.name) {
+                    selectedPrimaryMuscleID = muscle.id
+                }
+            }
+        } label: {
+            compactFilterPill(
+                selectedPrimaryMuscleID.flatMap { id in
+                    viewModel.availableMuscles.first(where: { $0.id == id })?.name
+                } ?? "Any Body Part"
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("exercises-body-part-filter")
+    }
+
+    private var categoryFilter: some View {
+        Menu {
+            Button("Any Category") {
+                selectedCategory = nil
+            }
+
+            ForEach(viewModel.availableCategories, id: \.self) { category in
+                Button(category) {
+                    selectedCategory = category
+                }
+            }
+        } label: {
+            compactFilterPill(selectedCategory ?? "Any Category")
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("exercises-category-filter")
+    }
+
+    private var sortButton: some View {
+        Button {
+            sortDescending.toggle()
+        } label: {
+            Image(systemName: "arrow.up.arrow.down")
+        }
+        .buttonStyle(WGJIconButtonStyle())
+        .accessibilityIdentifier("exercises-sort-button")
     }
 
     private func compactFilterPill(_ title: String) -> some View {
@@ -468,7 +490,7 @@ struct ExercisesCatalogView: View {
             await retryCatalogBootstrap()
         } else {
             loadState = .ready
-            catalogDataToken &+= 1
+            rebuildCatalogCache()
         }
     }
 
@@ -485,7 +507,6 @@ struct ExercisesCatalogView: View {
             loadState = .failed
             showError(error)
         }
-        catalogDataToken &+= 1
         rebuildCatalogCache()
     }
 
@@ -505,7 +526,6 @@ struct ExercisesCatalogView: View {
             sortDescending = false
             query = created.displayName
             debouncedQuery = created.displayName
-            catalogDataToken &+= 1
             recomputeSections()
         } catch {
             showError(error)
@@ -520,7 +540,7 @@ struct ExercisesCatalogView: View {
 
 @MainActor
 @Observable
-private final class ExercisesCatalogViewModel {
+final class ExercisesCatalogViewModel {
     private(set) var availableMuscles: [(id: Int, name: String)] = []
     private(set) var availableCategories: [String] = []
     private(set) var sections: [ExercisesSectionSnapshot] = []
@@ -608,7 +628,7 @@ private final class ExercisesCatalogViewModel {
     }
 }
 
-private struct ExerciseCatalogRowSnapshot: Identifiable, Equatable {
+struct ExerciseCatalogRowSnapshot: Identifiable, Equatable {
     let id: String
     let displayName: String
     let categoryName: String
@@ -617,10 +637,33 @@ private struct ExerciseCatalogRowSnapshot: Identifiable, Equatable {
     let indexKey: String
 }
 
-private struct ExercisesSectionSnapshot: Identifiable, Equatable {
+struct ExercisesSectionSnapshot: Identifiable, Equatable {
     let id: String
     let title: String
     let rows: [ExerciseCatalogRowSnapshot]
+}
+
+struct ExercisesCatalogDataStamp: Hashable {
+    let exerciseCount: Int
+    let visibleExerciseCount: Int
+    let latestExerciseUpdate: TimeInterval
+    let syncStateStamp: TimeInterval
+
+    init(exercises: [ExerciseCatalogItem], syncStateStamp: TimeInterval) {
+        exerciseCount = exercises.count
+        visibleExerciseCount = exercises.filter { !$0.isHidden }.count
+        latestExerciseUpdate = exercises
+            .map { $0.updatedAt.timeIntervalSinceReferenceDate }
+            .max() ?? 0
+        self.syncStateStamp = syncStateStamp
+    }
+}
+
+struct ExercisesCatalogFilterState: Hashable {
+    let query: String
+    let selectedPrimaryMuscleID: Int?
+    let selectedCategory: String?
+    let sortDescending: Bool
 }
 
 struct ExerciseDetailDestinationView: View {

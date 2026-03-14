@@ -13,6 +13,7 @@ final class ExerciseImageCacheService {
     private let minimumAccessUpdateInterval: TimeInterval = 180
     private var metadataSaveTask: Task<Void, Never>?
     private var hasPendingMetadataSave = false
+    private var cachedDiskUsageBytes: Int?
 
     init(
         modelContext: ModelContext,
@@ -69,6 +70,7 @@ final class ExerciseImageCacheService {
               let data = await readData(from: fileURL),
               let image = await decodeImage(from: data)
         else {
+            adjustCachedDiskUsage(by: -max(asset.fileSizeBytes, 0))
             asset.localPath = nil
             asset.fileSizeBytes = 0
             scheduleMetadataSave()
@@ -97,11 +99,13 @@ final class ExerciseImageCacheService {
             let destination = cacheDirectoryURL.appendingPathComponent(fileName)
             try await writeData(data, to: destination)
 
+            let previousSize = max(asset.fileSizeBytes, 0)
             asset.localPath = fileName
             asset.fileSizeBytes = data.count
             asset.lastAccessedAt = .now
             try? modelContext.save()
-            evictIfNeeded()
+            adjustCachedDiskUsage(by: data.count - previousSize)
+            evictIfNeededIfRequired()
             return image
         } catch {
             return nil
@@ -139,16 +143,21 @@ final class ExerciseImageCacheService {
         metadataSaveTask = nil
     }
 
-    private func evictIfNeeded() {
+    private func evictIfNeededIfRequired() {
+        let totalBytes = currentDiskUsageBytes()
+        guard totalBytes > cacheSizeLimitBytes else {
+            return
+        }
+        evictIfNeeded(currentBytes: totalBytes)
+    }
+
+    private func evictIfNeeded(currentBytes: Int) {
         let descriptor = FetchDescriptor<ExerciseImageAsset>()
         guard var assets = try? modelContext.fetch(descriptor) else {
             return
         }
 
-        var totalBytes = assets.reduce(0) { $0 + max($1.fileSizeBytes, 0) }
-        guard totalBytes > cacheSizeLimitBytes else {
-            return
-        }
+        var totalBytes = currentBytes
 
         assets = assets
             .filter { $0.localPath != nil }
@@ -164,7 +173,27 @@ final class ExerciseImageCacheService {
             asset.fileSizeBytes = 0
         }
 
+        cachedDiskUsageBytes = max(0, totalBytes)
         try? modelContext.save()
+    }
+
+    private func currentDiskUsageBytes() -> Int {
+        if let cachedDiskUsageBytes {
+            return cachedDiskUsageBytes
+        }
+
+        let descriptor = FetchDescriptor<ExerciseImageAsset>()
+        let totalBytes = (try? modelContext.fetch(descriptor))?
+            .reduce(0) { partialResult, asset in
+                partialResult + max(asset.fileSizeBytes, 0)
+            } ?? 0
+        cachedDiskUsageBytes = totalBytes
+        return totalBytes
+    }
+
+    private func adjustCachedDiskUsage(by delta: Int) {
+        guard let cachedDiskUsageBytes else { return }
+        self.cachedDiskUsageBytes = max(0, cachedDiskUsageBytes + delta)
     }
 
     private var cacheDirectoryURL: URL {

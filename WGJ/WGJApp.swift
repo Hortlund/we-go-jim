@@ -26,6 +26,18 @@ struct WGJApp: App {
     }
 
     private static func makeContainerBootstrap() -> ModelContainerBootstrap {
+        if ProcessInfo.processInfo.arguments.contains("UITEST_IN_MEMORY_STORE") {
+            do {
+                return ModelContainerBootstrap(
+                    container: try makeUITestContainer(),
+                    cloudSyncEnabled: false,
+                    cloudSyncErrorDescription: "UI test run using an in-memory local container."
+                )
+            } catch {
+                fatalError("Could not create UI test ModelContainer: \(describe(error))")
+            }
+        }
+
         do {
             let container = try makeCloudBackedContainer()
             return ModelContainerBootstrap(
@@ -134,6 +146,18 @@ struct WGJApp: App {
         )
 
         return try ModelContainer(for: appSchema, configurations: [localOnly])
+    }
+
+    private static func makeUITestContainer() throws -> ModelContainer {
+        let appSchema = fullAppSchema()
+        let inMemory = ModelConfiguration(
+            "UITest",
+            schema: appSchema,
+            isStoredInMemoryOnly: true,
+            cloudKitDatabase: .none
+        )
+
+        return try ModelContainer(for: appSchema, configurations: [inMemory])
     }
 
     private static func fullAppSchema() -> Schema {

@@ -1,6 +1,5 @@
 import SwiftUI
 import SwiftData
-import UIKit
 
 struct MainTabView: View {
     @Environment(ActiveWorkoutCoordinator.self) private var coordinator
@@ -9,121 +8,121 @@ struct MainTabView: View {
     var body: some View {
         @Bindable var coordinator = coordinator
 
-        ZStack(alignment: .bottom) {
-            TabView(selection: $coordinator.selectedTab) {
-                NavigationStack {
-                    ProfileView()
-                }
-                .tabItem {
-                    Label("Profile", systemImage: "person.fill")
-                }
-                .tag(AppMainTab.profile)
+        GeometryReader { proxy in
+            let bottomSafeAreaInset = proxy.safeAreaInsets.bottom
 
-                NavigationStack {
-                    HistoryOverviewView()
-                }
-                .tabItem {
-                    Label("History", systemImage: "clock.fill")
-                }
-                .tag(AppMainTab.history)
-
-                NavigationStack {
-                    StartWorkoutHomeView()
-                }
-                .tabItem {
-                    Label("Start Workout", systemImage: "plus")
-                }
-                .tag(AppMainTab.startWorkout)
-
-                NavigationStack {
-                    ExercisesCatalogView()
-                }
-                .tabItem {
-                    Label("Exercises", systemImage: "dumbbell.fill")
-                }
-                .tag(AppMainTab.exercises)
-
-                NavigationStack {
-                    BrosView()
-                }
-                .tabItem {
-                    Label("Bros", systemImage: "person.3.fill")
-                }
-                .tag(AppMainTab.bros)
-            }
-            .tint(WGJTheme.accentBlue)
-            .wgjTabChrome()
-
-            if let activeSessionID = coordinator.activeSessionID, coordinator.isActiveWorkoutStripCollapsed {
-                ActiveWorkoutStripView(sessionID: activeSessionID) {
-                    coordinator.present(sessionID: activeSessionID)
-                }
-                .padding(.bottom, tabBarLift)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-
-            if let popup = coordinator.restTimerPopup, !coordinator.isActiveWorkoutPresented {
-                WGJTransientBanner(
-                    title: popup.title,
-                    message: popup.message,
-                    icon: "bell.badge.fill",
-                    tint: WGJTheme.success
-                )
-                .padding(.horizontal, 12)
-                .padding(.bottom, popupBottomLift)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
-        .wgjScreenBackground()
-        .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: coordinator.isActiveWorkoutStripCollapsed)
-        .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: coordinator.restTimerPopup?.id)
-        .sheet(isPresented: Binding(
-            get: {
-                coordinator.isActiveWorkoutPresented && coordinator.activeSessionID != nil
-            },
-            set: { newValue in
-                if newValue {
-                    if let sessionID = coordinator.activeSessionID {
-                        coordinator.present(sessionID: sessionID)
+            ZStack(alignment: .bottom) {
+                TabView(selection: $coordinator.selectedTab) {
+                    NavigationStack {
+                        ProfileView()
                     }
-                } else {
-                    coordinator.collapseActiveWorkout()
+                    .tabItem {
+                        Label("Profile", systemImage: "person.fill")
+                    }
+                    .tag(AppMainTab.profile)
+
+                    NavigationStack {
+                        HistoryOverviewView()
+                    }
+                    .tabItem {
+                        Label("History", systemImage: "clock.fill")
+                    }
+                    .tag(AppMainTab.history)
+
+                    NavigationStack {
+                        StartWorkoutHomeView()
+                    }
+                    .tabItem {
+                        Label("Start Workout", systemImage: "plus")
+                    }
+                    .tag(AppMainTab.startWorkout)
+
+                    NavigationStack {
+                        ExercisesCatalogView()
+                    }
+                    .tabItem {
+                        Label("Exercises", systemImage: "dumbbell.fill")
+                    }
+                    .tag(AppMainTab.exercises)
+
+                    NavigationStack {
+                        BrosView()
+                    }
+                    .tabItem {
+                        Label("Bros", systemImage: "person.3.fill")
+                    }
+                    .tag(AppMainTab.bros)
+                }
+                .tint(WGJTheme.accentBlue)
+                .wgjTabChrome()
+
+                if let activeSessionID = coordinator.activeSessionID, coordinator.isActiveWorkoutStripCollapsed {
+                    ActiveWorkoutStripView(sessionID: activeSessionID) {
+                        coordinator.present(sessionID: activeSessionID)
+                    }
+                    .padding(.bottom, tabBarLift(bottomSafeAreaInset: bottomSafeAreaInset))
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .accessibilityIdentifier("active-workout-strip")
+                }
+
+                if let popup = coordinator.restTimerPopup, !coordinator.isActiveWorkoutPresented {
+                    WGJTransientBanner(
+                        title: popup.title,
+                        message: popup.message,
+                        icon: "bell.badge.fill",
+                        tint: WGJTheme.success
+                    )
+                    .padding(.horizontal, 12)
+                    .padding(
+                        .bottom,
+                        popupBottomLift(bottomSafeAreaInset: bottomSafeAreaInset)
+                    )
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
-        )) {
-            if let activeSessionID = coordinator.activeSessionID {
-                NavigationStack {
-                    ActiveWorkoutView(sessionID: activeSessionID)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .wgjScreenBackground()
+            .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: coordinator.isActiveWorkoutStripCollapsed)
+            .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: coordinator.restTimerPopup?.id)
+            .sheet(isPresented: Binding(
+                get: {
+                    coordinator.isActiveWorkoutPresented && coordinator.activeSessionID != nil
+                },
+                set: { newValue in
+                    if newValue {
+                        if let sessionID = coordinator.activeSessionID {
+                            coordinator.present(sessionID: sessionID)
+                        }
+                    } else {
+                        coordinator.collapseActiveWorkout()
+                    }
+                }
+            )) {
+                if let activeSessionID = coordinator.activeSessionID {
+                    NavigationStack {
+                        ActiveWorkoutView(sessionID: activeSessionID)
+                    }
                 }
             }
-        }
-        .onChange(of: coordinator.activeSessionID) { _, newValue in
-            if newValue == nil {
-                coordinator.clearActiveWorkout()
-            } else if !coordinator.isActiveWorkoutPresented {
-                coordinator.isActiveWorkoutStripCollapsed = true
+            .onChange(of: coordinator.activeSessionID) { _, newValue in
+                if newValue == nil {
+                    coordinator.clearActiveWorkout()
+                } else if !coordinator.isActiveWorkoutPresented {
+                    coordinator.isActiveWorkoutStripCollapsed = true
+                }
             }
         }
     }
 
-    private var tabBarLift: CGFloat {
-        let safeBottom = keyWindow?.safeAreaInsets.bottom ?? 0
-        return safeBottom + 57
+    private func tabBarLift(bottomSafeAreaInset: CGFloat) -> CGFloat {
+        bottomSafeAreaInset + 57
     }
 
-    private var popupBottomLift: CGFloat {
+    private func popupBottomLift(bottomSafeAreaInset: CGFloat) -> CGFloat {
         if coordinator.isActiveWorkoutStripCollapsed {
-            return tabBarLift + 82
+            return tabBarLift(bottomSafeAreaInset: bottomSafeAreaInset) + 82
         }
-        let safeBottom = keyWindow?.safeAreaInsets.bottom ?? 0
-        return safeBottom + 72
-    }
-
-    private var keyWindow: UIWindow? {
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .flatMap(\.windows)
-            .first(where: \.isKeyWindow)
+        return bottomSafeAreaInset + 72
     }
 }
 

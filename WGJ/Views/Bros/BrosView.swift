@@ -212,8 +212,6 @@ struct BrosView: View {
                 case .active(let snapshot):
                     activeContent(snapshot)
                 }
-
-                safetyResourcesCard
             }
             .padding(.top, 8)
             .padding(.horizontal, WGJSpacing.page)
@@ -498,47 +496,6 @@ struct BrosView: View {
             .disabled(viewModel.isBusy)
         }
         .padding(WGJSpacing.card)
-        .wgjCardContainer()
-    }
-
-    private var safetyResourcesCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            WGJSectionHeader("Safety", subtitle: "Moderation, support, and block controls for Bros.")
-
-            NavigationLink {
-                CommunityGuidelinesView()
-            } label: {
-                resourceRow("Community Guidelines", systemImage: "checklist")
-            }
-            .buttonStyle(.plain)
-
-            NavigationLink {
-                BlockedBrosView()
-            } label: {
-                resourceRow("Blocked Bros", systemImage: "person.crop.circle.badge.xmark")
-            }
-            .buttonStyle(.plain)
-
-            NavigationLink {
-                SupportView()
-            } label: {
-                resourceRow("Support", systemImage: "envelope.fill")
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(WGJSpacing.card)
-        .wgjCardContainer()
-    }
-
-    private func resourceRow(_ title: String, systemImage: String) -> some View {
-        HStack {
-            Label(title, systemImage: systemImage)
-            Spacer()
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-        }
-        .foregroundStyle(WGJTheme.textPrimary)
-        .padding(12)
         .wgjCardContainer()
     }
 

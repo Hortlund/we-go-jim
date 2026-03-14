@@ -57,29 +57,15 @@ struct StartWorkoutHomeView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(WGJPrimaryButtonStyle())
+                    .accessibilityIdentifier("start-workout-empty-button")
                 }
                 .padding(14)
                 .wgjCardContainer(strong: true)
 
                 VStack(alignment: .leading, spacing: 12) {
-                    WGJActionHeader("Templates", subtitle: "Reusable plans ready to start.") {
-                        HStack(spacing: 10) {
-                            Button {
-                                templateEditorContext = StartWorkoutTemplateEditorContext(folderID: selectedFolderID, templateID: nil)
-                            } label: {
-                                Label("Template", systemImage: "plus")
-                                    .wgjSingleLineText(scale: 0.82)
-                            }
-                            .buttonStyle(WGJGhostButtonStyle())
+                    WGJActionHeader("Templates", subtitle: "Reusable plans ready to start.")
 
-                            Button {
-                                beginCreatingFolder()
-                            } label: {
-                                Image(systemName: "folder.badge.plus")
-                            }
-                            .buttonStyle(WGJIconButtonStyle(tint: WGJTheme.accentBlue))
-                        }
-                    }
+                    templateHeaderActions
 
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
@@ -99,7 +85,7 @@ struct StartWorkoutHomeView: View {
                         )
                     }
 
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 168, maximum: 280), spacing: 12)], spacing: 12) {
                         ForEach(filteredTemplates) { template in
                             templateCard(template)
                         }
@@ -129,7 +115,14 @@ struct StartWorkoutHomeView: View {
             TemplateEditorView(folderID: context.folderID, templateID: context.templateID)
         }
         .sheet(isPresented: $showingFolderEditor) {
-            folderEditorSheet
+            TemplateFolderEditorSheet(
+                isEditing: editingFolderID != nil,
+                folderNameDraft: $folderNameDraft,
+                onCancel: {
+                    showingFolderEditor = false
+                },
+                onSave: saveFolderDraft
+            )
         }
         .alert("Start Workout Error", isPresented: $showingError) {
             Button("OK", role: .cancel) { }
@@ -139,7 +132,7 @@ struct StartWorkoutHomeView: View {
         .task {
             bootstrapActiveSessionIfNeeded()
         }
-        .task(id: sessionsVersionKey) {
+        .task(id: sessionDataStamp) {
             recomputeSessionDerivedState()
         }
     }
@@ -217,35 +210,45 @@ struct StartWorkoutHomeView: View {
         .wgjCardContainer()
     }
 
-    private var folderEditorSheet: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 14) {
-                WGJSectionHeader(editingFolderID == nil ? "Create Folder" : "Rename Folder")
-
-                TextField("Folder name", text: $folderNameDraft)
-                    .textInputAutocapitalization(.words)
-                    .wgjPillField()
-
-                HStack {
-                    Button("Cancel") {
-                        showingFolderEditor = false
-                    }
-                    .buttonStyle(WGJGhostButtonStyle())
-
-                    Spacer()
-
-                    Button("Save") {
-                        saveFolderDraft()
-                    }
-                    .buttonStyle(WGJPrimaryButtonStyle())
-                    .disabled(folderNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
+    private var templateHeaderActions: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                addTemplateButton
+                addFolderButton
+                Spacer(minLength: 0)
             }
-            .padding(16)
-            .wgjSheetSurface()
-            .navigationTitle(editingFolderID == nil ? "New Folder" : "Rename Folder")
+
+            VStack(alignment: .leading, spacing: 10) {
+                addTemplateButton
+                addFolderButton
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .presentationDetents([.height(260)])
+    }
+
+    private var addTemplateButton: some View {
+        Button {
+            templateEditorContext = StartWorkoutTemplateEditorContext(
+                folderID: selectedFolderID,
+                templateID: nil
+            )
+        } label: {
+            Label("New Template", systemImage: "doc.badge.plus")
+                .wgjSingleLineText(scale: 0.82)
+        }
+        .buttonStyle(WGJPrimaryButtonStyle())
+        .accessibilityIdentifier("start-workout-new-template-button")
+    }
+
+    private var addFolderButton: some View {
+        Button {
+            beginCreatingFolder()
+        } label: {
+            Label("New Folder", systemImage: "folder.badge.plus")
+                .wgjSingleLineText(scale: 0.82)
+        }
+        .buttonStyle(WGJGhostButtonStyle())
+        .accessibilityIdentifier("start-workout-new-folder-button")
     }
 
     private var filteredTemplates: [WorkoutTemplate] {
@@ -291,10 +294,8 @@ struct StartWorkoutHomeView: View {
         lastCompletedByTemplateID[templateID]
     }
 
-    private var sessionsVersionKey: [String] {
-        sessions.map {
-            "\($0.id.uuidString)|\($0.updatedAt.timeIntervalSinceReferenceDate)|\($0.status.rawValue)"
-        }
+    private var sessionDataStamp: StartWorkoutSessionStamp {
+        StartWorkoutSessionStamp(sessions: sessions)
     }
 
     private func recomputeSessionDerivedState() {
@@ -360,6 +361,21 @@ struct StartWorkoutHomeView: View {
     private func showError(_ error: Error) {
         errorMessage = String(describing: error)
         showingError = true
+    }
+}
+
+struct StartWorkoutSessionStamp: Hashable {
+    let completedTemplateSessionCount: Int
+    let latestCompletedSessionUpdate: TimeInterval
+
+    init(sessions: [WorkoutSession]) {
+        let completedTemplateSessions = sessions.filter {
+            $0.status == .completed && $0.templateID != nil
+        }
+        completedTemplateSessionCount = completedTemplateSessions.count
+        latestCompletedSessionUpdate = completedTemplateSessions
+            .map { $0.updatedAt.timeIntervalSinceReferenceDate }
+            .max() ?? 0
     }
 }
 

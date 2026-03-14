@@ -64,6 +64,7 @@ struct TemplateEditorView: View {
                         saveTemplate()
                     }
                     .disabled(templateName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityIdentifier("template-editor-save-button")
                 }
             }
             .sheet(isPresented: $showingExercisePicker) {
@@ -93,6 +94,7 @@ struct TemplateEditorView: View {
             TextField("Template name", text: $templateName)
                 .textInputAutocapitalization(.words)
                 .wgjPillField()
+                .accessibilityIdentifier("template-editor-name-field")
 
             TextField("Notes (optional)", text: $templateNotes, axis: .vertical)
                 .lineLimit(3...6)

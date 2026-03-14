@@ -518,6 +518,80 @@ struct WGJEmptyStateCard<Actions: View>: View {
     }
 }
 
+struct WGJNavigationTile<Destination: View>: View {
+    let title: String
+    let systemImage: String
+    let subtitle: String?
+    let accessibilityID: String?
+    @ViewBuilder let destination: Destination
+
+    init(
+        title: String,
+        systemImage: String,
+        subtitle: String? = nil,
+        accessibilityID: String? = nil,
+        @ViewBuilder destination: () -> Destination
+    ) {
+        self.title = title
+        self.systemImage = systemImage
+        self.subtitle = subtitle
+        self.accessibilityID = accessibilityID
+        self.destination = destination()
+    }
+
+    var body: some View {
+        NavigationLink {
+            destination
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: systemImage)
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(WGJTheme.accentBlue)
+                    .frame(width: 20)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(WGJTheme.textPrimary)
+                        .wgjSingleLineText(scale: 0.82)
+
+                    if let subtitle, !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(WGJTheme.textSecondary)
+                            .lineLimit(2)
+                    }
+                }
+
+                Spacer(minLength: 12)
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(WGJTheme.textSecondary)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .wgjCardContainer()
+        }
+        .buttonStyle(.plain)
+        .modifier(WGJOptionalAccessibilityIdentifier(id: accessibilityID))
+    }
+}
+
+private struct WGJOptionalAccessibilityIdentifier: ViewModifier {
+    let id: String?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let id, !id.isEmpty {
+            content.accessibilityIdentifier(id)
+        } else {
+            content
+        }
+    }
+}
+
 struct WGJTransientBanner: View {
     let title: String
     let message: String?

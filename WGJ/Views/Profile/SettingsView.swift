@@ -26,6 +26,8 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                WGJRootHeader("Settings", subtitle: "Manage the catalog, training preferences, privacy, and support.")
+
                 VStack(alignment: .leading, spacing: 10) {
                     WGJSectionHeader("Library", subtitle: "Inspect and reload the bundled exercise database.")
 
@@ -89,56 +91,60 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     WGJSectionHeader("Credits", subtitle: "Reference the data-source licenses.")
 
-                    NavigationLink {
+                    WGJNavigationTile(
+                        title: "Catalog Credits",
+                        systemImage: "text.book.closed",
+                        subtitle: "Open the bundled exercise data licenses.",
+                        accessibilityID: "settings-catalog-credits-tile"
+                    ) {
                         CatalogCreditsView()
-                    } label: {
-                        HStack {
-                            Label("Catalog Credits", systemImage: "text.book.closed")
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption.weight(.semibold))
-                        }
-                        .foregroundStyle(WGJTheme.textPrimary)
-                        .padding(12)
-                        .wgjCardContainer()
                     }
-                    .buttonStyle(.plain)
                 }
 
                 VStack(alignment: .leading, spacing: 10) {
                     WGJSectionHeader("Legal & Support", subtitle: "Review privacy details, moderation info, and account deletion controls.")
 
-                    navigationTile(
+                    WGJNavigationTile(
                         title: "Privacy",
-                        systemImage: "hand.raised.fill"
+                        systemImage: "hand.raised.fill",
+                        subtitle: "Understand what data the app stores and syncs.",
+                        accessibilityID: "settings-privacy-tile"
                     ) {
                         PrivacyOverviewView()
                     }
 
-                    navigationTile(
+                    WGJNavigationTile(
                         title: "Support",
-                        systemImage: "envelope.fill"
+                        systemImage: "envelope.fill",
+                        subtitle: "Contact support and moderation for review or account issues.",
+                        accessibilityID: "settings-support-tile"
                     ) {
                         SupportView()
                     }
 
-                    navigationTile(
+                    WGJNavigationTile(
                         title: "Community Guidelines",
-                        systemImage: "person.3.sequence.fill"
+                        systemImage: "person.3.sequence.fill",
+                        subtitle: "Review the expected behavior for Bros.",
+                        accessibilityID: "settings-community-guidelines-tile"
                     ) {
                         CommunityGuidelinesView()
                     }
 
-                    navigationTile(
+                    WGJNavigationTile(
                         title: "Blocked Bros",
-                        systemImage: "person.crop.circle.badge.xmark"
+                        systemImage: "person.crop.circle.badge.xmark",
+                        subtitle: "Manage members you have hidden from Bros.",
+                        accessibilityID: "settings-blocked-bros-tile"
                     ) {
                         BlockedBrosView()
                     }
 
-                    navigationTile(
+                    WGJNavigationTile(
                         title: "Delete My Data",
-                        systemImage: "trash.fill"
+                        systemImage: "trash.fill",
+                        subtitle: "Remove local app data and your owned social records.",
+                        accessibilityID: "settings-delete-data-tile"
                     ) {
                         DeleteMyDataView()
                     }
@@ -200,27 +206,6 @@ struct SettingsView: View {
                 .foregroundStyle(WGJTheme.textSecondary)
         }
         .font(.subheadline)
-    }
-
-    private func navigationTile<Destination: View>(
-        title: String,
-        systemImage: String,
-        @ViewBuilder destination: @escaping () -> Destination
-    ) -> some View {
-        NavigationLink {
-            destination()
-        } label: {
-            HStack {
-                Label(title, systemImage: systemImage)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-            }
-            .foregroundStyle(WGJTheme.textPrimary)
-            .padding(12)
-            .wgjCardContainer()
-        }
-        .buttonStyle(.plain)
     }
 
     private func bootstrapCatalog() async {

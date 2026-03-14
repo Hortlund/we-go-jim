@@ -20,13 +20,21 @@ final class WGJUITestsLaunchTests: XCTestCase {
     @MainActor
     func testLaunch() throws {
         let app = XCUIApplication()
+        app.launchArguments = [
+            "UITEST_SKIP_SPLASH",
+            "UITEST_IN_MEMORY_STORE",
+        ]
         app.launch()
 
-        // Insert steps here to perform after app launch but before taking a screenshot,
-        // such as logging into a test account or navigating somewhere in the app
+        let continueLocally = app.buttons["Continue Locally"]
+        if continueLocally.waitForExistence(timeout: 5) {
+            continueLocally.tap()
+        }
+
+        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 5))
 
         let attachment = XCTAttachment(screenshot: app.screenshot())
-        attachment.name = "Launch Screen"
+        attachment.name = "Main Tabs"
         attachment.lifetime = .keepAlways
         add(attachment)
     }

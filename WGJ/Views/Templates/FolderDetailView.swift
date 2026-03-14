@@ -38,23 +38,7 @@ struct FolderDetailView: View {
             VStack(alignment: .leading, spacing: 16) {
                 headerCard
 
-                HStack(spacing: 10) {
-                    Button {
-                        templateEditorContext = FolderTemplateEditorContext(folderID: folderID, templateID: nil)
-                    } label: {
-                        Label("New Template", systemImage: "doc.badge.plus")
-                    }
-                    .buttonStyle(WGJPrimaryButtonStyle())
-
-                    Button {
-                        showingAddExistingTemplate = true
-                    } label: {
-                        Label("Add Existing", systemImage: "folder.badge.plus")
-                    }
-                    .buttonStyle(WGJGhostButtonStyle())
-
-                    Spacer()
-                }
+                headerActions
 
                 if templatesInFolder.isEmpty {
                     WGJEmptyStateCard(
@@ -96,6 +80,42 @@ struct FolderDetailView: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .wgjCardContainer(strong: true)
+    }
+
+    private var headerActions: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                addTemplateButton
+                addExistingButton
+                Spacer(minLength: 0)
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                addTemplateButton
+                addExistingButton
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var addTemplateButton: some View {
+        Button {
+            templateEditorContext = FolderTemplateEditorContext(folderID: folderID, templateID: nil)
+        } label: {
+            Label("New Template", systemImage: "doc.badge.plus")
+                .wgjSingleLineText(scale: 0.82)
+        }
+        .buttonStyle(WGJPrimaryButtonStyle())
+    }
+
+    private var addExistingButton: some View {
+        Button {
+            showingAddExistingTemplate = true
+        } label: {
+            Label("Add Existing", systemImage: "folder.badge.plus")
+                .wgjSingleLineText(scale: 0.82)
+        }
+        .buttonStyle(WGJGhostButtonStyle())
     }
 
     private func templateCard(_ template: WorkoutTemplate) -> some View {

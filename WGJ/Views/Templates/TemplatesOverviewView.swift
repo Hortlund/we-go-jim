@@ -93,34 +93,14 @@ struct TemplatesOverviewView: View {
             TemplateEditorView(folderID: context.folderID, templateID: context.templateID)
         }
         .sheet(isPresented: $showingFolderEditor) {
-            NavigationStack {
-                VStack(alignment: .leading, spacing: 16) {
-                    WGJSectionHeader(editingFolderID == nil ? "Create Folder" : "Rename Folder")
-
-                    TextField("Folder name", text: $folderNameDraft)
-                        .textInputAutocapitalization(.words)
-                        .wgjPillField()
-
-                    HStack(spacing: 10) {
-                        Button("Cancel") {
-                            showingFolderEditor = false
-                        }
-                        .buttonStyle(WGJGhostButtonStyle())
-
-                        Spacer()
-
-                        Button("Save") {
-                            saveFolderDraft()
-                        }
-                        .buttonStyle(WGJPrimaryButtonStyle())
-                        .disabled(folderNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
-                }
-                .padding(16)
-                .wgjSheetSurface()
-                .navigationTitle(editingFolderID == nil ? "New Folder" : "Rename Folder")
-            }
-            .presentationDetents([.height(260)])
+            TemplateFolderEditorSheet(
+                isEditing: editingFolderID != nil,
+                folderNameDraft: $folderNameDraft,
+                onCancel: {
+                    showingFolderEditor = false
+                },
+                onSave: saveFolderDraft
+            )
         }
         .alert("Template Error", isPresented: $showingError) {
             Button("OK", role: .cancel) { }
@@ -130,26 +110,42 @@ struct TemplatesOverviewView: View {
     }
 
     private var headerActions: some View {
-        HStack(spacing: 10) {
-            Button {
-                templateEditorContext = TemplateEditorContext(
-                    folderID: activeFolderIDForCreation,
-                    templateID: nil
-                )
-            } label: {
-                Label("New Template", systemImage: "doc.badge.plus")
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                addTemplateButton
+                addFolderButton
+                Spacer(minLength: 0)
             }
-            .buttonStyle(WGJPrimaryButtonStyle())
 
-            Button {
-                beginCreatingFolder()
-            } label: {
-                Label("New Folder", systemImage: "folder.badge.plus")
+            VStack(alignment: .leading, spacing: 10) {
+                addTemplateButton
+                addFolderButton
             }
-            .buttonStyle(WGJGhostButtonStyle())
-
-            Spacer()
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    private var addTemplateButton: some View {
+        Button {
+            templateEditorContext = TemplateEditorContext(
+                folderID: activeFolderIDForCreation,
+                templateID: nil
+            )
+        } label: {
+            Label("New Template", systemImage: "doc.badge.plus")
+                .wgjSingleLineText(scale: 0.82)
+        }
+        .buttonStyle(WGJPrimaryButtonStyle())
+    }
+
+    private var addFolderButton: some View {
+        Button {
+            beginCreatingFolder()
+        } label: {
+            Label("New Folder", systemImage: "folder.badge.plus")
+                .wgjSingleLineText(scale: 0.82)
+        }
+        .buttonStyle(WGJGhostButtonStyle())
     }
 
     private func folderChip(_ filter: FolderFilter, title: String) -> some View {
@@ -445,6 +441,100 @@ private struct TemplateEditorContext: Identifiable {
     let id = UUID()
     let folderID: UUID?
     let templateID: UUID?
+}
+
+struct TemplateFolderEditorSheet: View {
+    let isEditing: Bool
+    @Binding var folderNameDraft: String
+    let onCancel: () -> Void
+    let onSave: () -> Void
+
+    @FocusState private var isNameFieldFocused: Bool
+
+    private var trimmedFolderName: String {
+        folderNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    WGJSectionHeader(
+                        isEditing ? "Rename Folder" : "Create Folder",
+                        subtitle: isEditing
+                            ? "Update the folder name anywhere this group appears."
+                            : "Use folders to group templates by split, goal, or training block."
+                    )
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Folder Name")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(WGJTheme.textSecondary)
+
+                        TextField("Push / Pull / Legs", text: $folderNameDraft)
+                            .textInputAutocapitalization(.words)
+                            .autocorrectionDisabled()
+                            .focused($isNameFieldFocused)
+                            .submitLabel(.done)
+                            .onSubmit(submitIfPossible)
+                            .wgjPillField()
+                            .accessibilityIdentifier("template-folder-name-field")
+
+                        Text("Keep names short and obvious so templates stay easy to browse.")
+                            .font(.caption)
+                            .foregroundStyle(WGJTheme.textSecondary)
+                    }
+                    .padding(14)
+                    .wgjCardContainer()
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .wgjSheetSurface()
+            .navigationTitle(isEditing ? "Rename Folder" : "New Folder")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        onCancel()
+                    }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 0) {
+                    Divider()
+                        .overlay(WGJTheme.outline.opacity(0.6))
+
+                    Button {
+                        submitIfPossible()
+                    } label: {
+                        Text(isEditing ? "Save Folder" : "Create Folder")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(WGJPrimaryButtonStyle())
+                    .disabled(trimmedFolderName.isEmpty)
+                    .accessibilityIdentifier("template-folder-save-button")
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, 16)
+                }
+                .background(.ultraThinMaterial)
+            }
+            .onAppear {
+                isNameFieldFocused = true
+            }
+        }
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func submitIfPossible() {
+        guard !trimmedFolderName.isEmpty else {
+            return
+        }
+        onSave()
+    }
 }
 
 #Preview {

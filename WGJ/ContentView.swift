@@ -9,6 +9,7 @@ struct ContentView: View {
     @State private var appPhase: AppPhase = .splash
     @State private var activeWorkoutCoordinator = ActiveWorkoutCoordinator()
     @State private var catalogSyncCoordinator = CatalogSyncCoordinator()
+    @State private var appMaintenanceTask: Task<Void, Never>?
 
     var body: some View {
         Group {
@@ -33,28 +34,15 @@ struct ContentView: View {
         .tint(WGJTheme.accent)
         .preferredColorScheme(.dark)
         .task {
-            activeWorkoutCoordinator.restoreActiveSessionIfNeeded(modelContext: modelContext)
-            activeWorkoutCoordinator.clearExpiredRestTimerIfNeeded()
-            catalogSyncCoordinator.primeLocalCatalogIfNeeded(modelContext: modelContext)
-            await runSocialMaintenance()
+            scheduleAppMaintenance()
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
-            activeWorkoutCoordinator.restoreActiveSessionIfNeeded(modelContext: modelContext)
-            activeWorkoutCoordinator.clearExpiredRestTimerIfNeeded()
-            catalogSyncCoordinator.primeLocalCatalogIfNeeded(modelContext: modelContext)
-            Task {
-                await runSocialMaintenance()
-            }
+            scheduleAppMaintenance()
         }
         .onChange(of: appPhase) { _, newPhase in
             guard newPhase == .main else { return }
-            activeWorkoutCoordinator.restoreActiveSessionIfNeeded(modelContext: modelContext)
-            activeWorkoutCoordinator.clearExpiredRestTimerIfNeeded()
-            catalogSyncCoordinator.primeLocalCatalogIfNeeded(modelContext: modelContext)
-            Task {
-                await runSocialMaintenance()
-            }
+            scheduleAppMaintenance()
         }
         .onReceive(NotificationCenter.default.publisher(for: .wgjDidDeleteAllUserData)) { _ in
             resetToLogin()
@@ -63,11 +51,27 @@ struct ContentView: View {
 
     private func transitionFromSplashIfNeeded() async {
         guard appPhase == .splash else { return }
+        if ProcessInfo.processInfo.arguments.contains("UITEST_SKIP_SPLASH") {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                appPhase = .login
+            }
+            return
+        }
         try? await Task.sleep(for: .seconds(1.1))
 
         guard appPhase == .splash else { return }
         withAnimation(.easeInOut(duration: 0.2)) {
             appPhase = .login
+        }
+    }
+
+    private func scheduleAppMaintenance() {
+        appMaintenanceTask?.cancel()
+        appMaintenanceTask = Task { @MainActor in
+            activeWorkoutCoordinator.restoreActiveSessionIfNeeded(modelContext: modelContext)
+            activeWorkoutCoordinator.clearExpiredRestTimerIfNeeded()
+            catalogSyncCoordinator.primeLocalCatalogIfNeeded(modelContext: modelContext)
+            await runSocialMaintenance()
         }
     }
 
@@ -82,6 +86,7 @@ struct ContentView: View {
     }
 
     private func resetToLogin() {
+        appMaintenanceTask?.cancel()
         activeWorkoutCoordinator.clearActiveWorkout()
         catalogSyncCoordinator = CatalogSyncCoordinator()
         withAnimation(.easeInOut(duration: 0.2)) {
