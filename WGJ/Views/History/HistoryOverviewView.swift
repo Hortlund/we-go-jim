@@ -569,38 +569,40 @@ private struct HistoryWorkoutCalendarSheet: View {
                     selectedDay = date
                 }
             } label: {
-                VStack(spacing: 6) {
-                    Text("\(calendar.component(.day, from: date))")
-                        .font(.subheadline.weight(day.isSelected ? .bold : .semibold))
-                        .foregroundStyle(day.isSelected ? WGJTheme.textInverse : WGJTheme.textPrimary)
-
-                    if day.workoutCount > 0 {
-                        Text(day.workoutCount == 1 ? "1 workout" : "\(day.workoutCount) workouts")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(day.isSelected ? WGJTheme.textInverse : WGJTheme.accentBlue)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-                    } else {
-                        Circle()
-                            .fill(Color.clear)
-                            .frame(width: 4, height: 4)
-                    }
-                }
-                .frame(maxWidth: .infinity, minHeight: 58)
-                .padding(.vertical, 6)
-                .background {
+                ZStack(alignment: .topTrailing) {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .fill(dayBackground(for: day))
                         .overlay {
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
                                 .stroke(dayBorder(for: day), lineWidth: day.isToday ? 1.4 : 1)
                         }
+
+                    Text("\(calendar.component(.day, from: date))")
+                        .font(.headline.weight(day.isSelected ? .bold : .semibold))
+                        .foregroundStyle(day.isSelected ? WGJTheme.textInverse : WGJTheme.textPrimary)
+
+                    if day.workoutCount > 0 {
+                        Text(workoutBadgeText(for: day.workoutCount))
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(day.isSelected ? WGJTheme.accentBlue : WGJTheme.textInverse)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background {
+                                Capsule(style: .continuous)
+                                    .fill(day.isSelected ? WGJTheme.textInverse : WGJTheme.accentBlue)
+                            }
+                            .padding(6)
+                    }
                 }
+                .frame(maxWidth: .infinity)
+                .aspectRatio(1, contentMode: .fit)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(accessibilityLabel(for: day, date: date))
         } else {
             Color.clear
-                .frame(maxWidth: .infinity, minHeight: 58)
+                .frame(maxWidth: .infinity)
+                .aspectRatio(1, contentMode: .fit)
         }
     }
 
@@ -631,6 +633,26 @@ private struct HistoryWorkoutCalendarSheet: View {
         guard let moved = calendar.date(byAdding: .month, value: value, to: displayedMonth) else { return }
         let components = calendar.dateComponents([.year, .month], from: moved)
         displayedMonth = calendar.date(from: components) ?? moved
+    }
+
+    private func workoutBadgeText(for workoutCount: Int) -> String {
+        workoutCount > 99 ? "99+" : "\(workoutCount)"
+    }
+
+    private func accessibilityLabel(for day: HistoryCalendarDay, date: Date) -> String {
+        var parts = [date.formatted(date: .complete, time: .omitted)]
+        if day.workoutCount > 0 {
+            parts.append(day.workoutCount == 1 ? "1 workout logged" : "\(day.workoutCount) workouts logged")
+        } else {
+            parts.append("No workouts logged")
+        }
+        if day.isToday {
+            parts.append("Today")
+        }
+        if day.isSelected {
+            parts.append("Selected")
+        }
+        return parts.joined(separator: ", ")
     }
 }
 
