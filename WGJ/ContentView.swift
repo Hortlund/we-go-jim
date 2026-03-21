@@ -1,10 +1,14 @@
 import SwiftData
 import SwiftUI
+import UIKit
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
+
+    @Query(sort: [SortDescriptor(\UserProfile.updatedAt, order: .reverse)])
+    private var storedProfiles: [UserProfile]
 
     @State private var appPhase: AppPhase = .splash
     @State private var activeWorkoutCoordinator = ActiveWorkoutCoordinator()
@@ -35,14 +39,22 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .task {
             scheduleAppMaintenance()
+            updateIdleTimerState()
         }
         .onChange(of: scenePhase) { _, newPhase in
-            guard newPhase == .active else { return }
-            scheduleAppMaintenance()
+            if newPhase == .active {
+                scheduleAppMaintenance()
+            }
+            updateIdleTimerState()
         }
         .onChange(of: appPhase) { _, newPhase in
-            guard newPhase == .main else { return }
-            scheduleAppMaintenance()
+            if newPhase == .main {
+                scheduleAppMaintenance()
+            }
+            updateIdleTimerState()
+        }
+        .onChange(of: storedProfiles.first?.updatedAt) { _, _ in
+            updateIdleTimerState()
         }
         .onReceive(NotificationCenter.default.publisher(for: .wgjDidDeleteAllUserData)) { _ in
             resetToLogin()
@@ -89,9 +101,18 @@ struct ContentView: View {
         appMaintenanceTask?.cancel()
         activeWorkoutCoordinator.clearActiveWorkout()
         catalogSyncCoordinator = CatalogSyncCoordinator()
+        updateIdleTimerState()
         withAnimation(.easeInOut(duration: 0.2)) {
             appPhase = .login
         }
+    }
+
+    private var shouldKeepScreenAwake: Bool {
+        scenePhase == .active && (storedProfiles.first?.keepsScreenAwake ?? false)
+    }
+
+    private func updateIdleTimerState() {
+        UIApplication.shared.isIdleTimerDisabled = shouldKeepScreenAwake
     }
 }
 

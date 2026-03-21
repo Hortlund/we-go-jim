@@ -30,13 +30,11 @@ final class ProfileRepository {
 
     func updateIdentity(name: String, athleteType: ProfileAthleteType?) throws {
         let profile = try loadOrCreateProfile()
-        let cleaned = try ReviewModerationService.validateUserInput(name, kind: .displayName)
-
-        profile.displayName = cleaned
-        profile.athleteType = athleteType
-        profile.updatedAt = .now
-        try modelContext.save()
-        try? CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)?.queueCurrentProfileSync()
+        try saveProfile(
+            name: name,
+            athleteType: athleteType,
+            avatarImageData: profile.avatarImageData
+        )
     }
 
     func updateDisplayName(_ displayName: String) throws {
@@ -46,7 +44,24 @@ final class ProfileRepository {
 
     func updateAvatar(imageData: Data?) throws {
         let profile = try loadOrCreateProfile()
-        profile.avatarImageData = imageData
+        try saveProfile(
+            name: profile.displayName,
+            athleteType: profile.athleteType,
+            avatarImageData: imageData
+        )
+    }
+
+    func saveProfile(
+        name: String,
+        athleteType: ProfileAthleteType?,
+        avatarImageData: Data?
+    ) throws {
+        let profile = try loadOrCreateProfile()
+        let cleaned = try ReviewModerationService.validateUserInput(name, kind: .displayName)
+
+        profile.displayName = cleaned
+        profile.athleteType = athleteType
+        profile.avatarImageData = avatarImageData
         profile.updatedAt = .now
         try modelContext.save()
         try? CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)?.queueCurrentProfileSync()
@@ -62,6 +77,13 @@ final class ProfileRepository {
     func updateTrainingGuidanceEnabled(_ isEnabled: Bool) throws {
         let profile = try loadOrCreateProfile()
         profile.isTrainingGuidanceEnabled = isEnabled
+        profile.updatedAt = .now
+        try modelContext.save()
+    }
+
+    func updateKeepsScreenAwake(_ isEnabled: Bool) throws {
+        let profile = try loadOrCreateProfile()
+        profile.keepsScreenAwake = isEnabled
         profile.updatedAt = .now
         try modelContext.save()
     }

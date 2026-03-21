@@ -156,6 +156,7 @@ final class UserProfile {
     var avatarImageData: Data?
     var weeklyWorkoutGoal: Int = 4
     var isTrainingGuidanceEnabled: Bool = true
+    var keepsScreenAwake: Bool = false
     var brosCircleID: String?
     var brosMembershipID: String?
     var brosUserRecordName: String?
@@ -191,6 +192,7 @@ final class UserProfile {
         avatarImageData: Data? = nil,
         weeklyWorkoutGoal: Int = 4,
         isTrainingGuidanceEnabled: Bool = true,
+        keepsScreenAwake: Bool = false,
         brosCircleID: String? = nil,
         brosMembershipID: String? = nil,
         brosUserRecordName: String? = nil,
@@ -205,6 +207,7 @@ final class UserProfile {
         self.avatarImageData = avatarImageData
         self.weeklyWorkoutGoal = max(1, min(14, weeklyWorkoutGoal))
         self.isTrainingGuidanceEnabled = isTrainingGuidanceEnabled
+        self.keepsScreenAwake = keepsScreenAwake
         self.brosCircleID = brosCircleID
         self.brosMembershipID = brosMembershipID
         self.brosUserRecordName = brosUserRecordName

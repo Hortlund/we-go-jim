@@ -68,6 +68,18 @@ struct BrosSocialServiceTests {
     }
 
     @Test
+    func memberLimitRulesRespectBoundsAndCurrentRoster() {
+        #expect(BrosSocialRules.isValidMemberLimit(BrosSocialRules.minMemberLimit))
+        #expect(BrosSocialRules.isValidMemberLimit(BrosSocialRules.defaultMemberLimit))
+        #expect(BrosSocialRules.isValidMemberLimit(BrosSocialRules.maxMemberLimit))
+        #expect(!BrosSocialRules.isValidMemberLimit(BrosSocialRules.minMemberLimit - 1))
+        #expect(!BrosSocialRules.isValidMemberLimit(BrosSocialRules.maxMemberLimit + 1))
+        #expect(BrosSocialRules.canSetMemberLimit(4, currentMemberCount: 4))
+        #expect(BrosSocialRules.canSetMemberLimit(25, currentMemberCount: 6))
+        #expect(!BrosSocialRules.canSetMemberLimit(3, currentMemberCount: 4))
+    }
+
+    @Test
     func missingSchemaQueryErrorsBecomeEmptyState() {
         let error = NSError(
             domain: CKError.errorDomain,

@@ -569,7 +569,7 @@ private struct HistoryWorkoutCalendarSheet: View {
                     selectedDay = date
                 }
             } label: {
-                ZStack(alignment: .topTrailing) {
+                ZStack {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .fill(dayBackground(for: day))
                         .overlay {
@@ -580,7 +580,9 @@ private struct HistoryWorkoutCalendarSheet: View {
                     Text("\(calendar.component(.day, from: date))")
                         .font(.headline.weight(day.isSelected ? .bold : .semibold))
                         .foregroundStyle(day.isSelected ? WGJTheme.textInverse : WGJTheme.textPrimary)
-
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                }
+                .overlay(alignment: .topTrailing) {
                     if day.workoutCount > 0 {
                         Text(workoutBadgeText(for: day.workoutCount))
                             .font(.caption2.weight(.bold))

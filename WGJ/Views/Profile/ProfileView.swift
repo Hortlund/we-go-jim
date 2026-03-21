@@ -1,8 +1,6 @@
 import Charts
-import PhotosUI
 import SwiftData
 import SwiftUI
-import UIKit
 
 struct ProfileView: View {
     @Environment(\.modelContext) private var modelContext
@@ -14,16 +12,10 @@ struct ProfileView: View {
     @Query(sort: [SortDescriptor(\UserProfile.updatedAt, order: .reverse)])
     private var storedProfiles: [UserProfile]
 
-    @State private var displayName = ""
-    @State private var savedDisplayName = ""
-    @State private var athleteType: ProfileAthleteType?
-    @State private var savedAthleteType: ProfileAthleteType?
-    @State private var avatarImageData: Data?
-    @State private var selectedAvatarItem: PhotosPickerItem?
     @State private var hasLoadedProfile = false
     @State private var dashboardContent = ProfileDashboardContent.empty
-    @State private var showingAthleteTypePicker = false
     @State private var showingWidgetManager = false
+    @State private var showingProfileManagement = false
 
     @State private var errorMessage = ""
     @State private var showingError = false
@@ -43,7 +35,7 @@ struct ProfileView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                WGJRootHeader("Profile", subtitle: "Personalize your name, avatar, vibe, and dashboard.")
+                WGJRootHeader("Profile", subtitle: "Your identity, highlights, and training dashboard.")
 
                 identityCard
                 highlightsCard
@@ -62,12 +54,6 @@ struct ProfileView: View {
         .task(id: widgetStateStamp) {
             loadWidgetState()
         }
-        .onChange(of: selectedAvatarItem) { _, newItem in
-            guard let newItem else { return }
-            Task {
-                await persistAvatar(from: newItem)
-            }
-        }
         .sheet(isPresented: $showingWidgetManager) {
             NavigationStack {
                 ProfileWidgetManagerView()
@@ -76,8 +62,11 @@ struct ProfileView: View {
                 loadWidgetState()
             }
         }
-        .sheet(isPresented: $showingAthleteTypePicker) {
-            ProfileAthleteTypePickerView(selectedAthleteType: $athleteType)
+        .sheet(isPresented: $showingProfileManagement) {
+            NavigationStack {
+                ProfileManagementView()
+            }
+            .wgjSheetSurface()
         }
         .alert("Profile Error", isPresented: $showingError) {
             Button("OK", role: .cancel) { }
@@ -88,32 +77,16 @@ struct ProfileView: View {
 
     private var identityCard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            WGJSectionHeader("Identity", subtitle: "Keep the top of the page personal and tight.")
-
-            identityHero
-
-            Divider()
-                .overlay(WGJTheme.outline.opacity(0.4))
-
-            VStack(alignment: .leading, spacing: 12) {
-                TextField("Name", text: $displayName)
-                    .textInputAutocapitalization(.words)
-                    .wgjPillField()
-                    .accessibilityIdentifier("profile-display-name-field")
-
-                athleteTypePickerButton
-
-                Text(profileIdentityHelperText)
-                    .font(.caption)
-                    .foregroundStyle(isUsingDefaultDisplayName ? WGJTheme.accentGold : WGJTheme.textSecondary)
-
-                Button("Save Profile") {
-                    saveProfile()
+            WGJActionHeader("Identity", subtitle: "Your current name, avatar, and athlete type.") {
+                Button {
+                    showingProfileManagement = true
+                } label: {
+                    Label("Edit Profile", systemImage: "slider.horizontal.3")
                 }
-                .buttonStyle(WGJPrimaryButtonStyle())
-                .disabled(trimmedDisplayName.isEmpty || !hasPendingIdentityChanges)
-                .accessibilityIdentifier("profile-save-button")
+                .buttonStyle(WGJCompactGhostButtonStyle())
+                .accessibilityIdentifier("profile-manage-button")
             }
+            identityHero
         }
         .padding(14)
         .wgjCardContainer(strong: true)
@@ -122,22 +95,20 @@ struct ProfileView: View {
     private var identityHero: some View {
         ViewThatFits(in: .horizontal) {
             HStack(alignment: .top, spacing: 14) {
-                avatarView
+                ProfileAvatarView(imageData: currentProfile?.avatarImageData)
                     .frame(width: 88, height: 88)
 
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 8) {
                     identityPreview
-                    avatarActionRow
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            VStack(alignment: .leading, spacing: 14) {
-                avatarView
+            VStack(alignment: .leading, spacing: 12) {
+                ProfileAvatarView(imageData: currentProfile?.avatarImageData)
                     .frame(width: 88, height: 88)
 
                 identityPreview
-                avatarActionRow
             }
         }
     }
@@ -149,113 +120,13 @@ struct ProfileView: View {
                 .foregroundStyle(WGJTheme.textPrimary)
                 .lineLimit(2)
 
-            if let athleteType {
+            if let athleteType = currentProfile?.athleteType {
                 athleteTypeBadge(title: athleteType.title, tint: WGJTheme.accentGold)
             } else {
-                Text("Pick an athlete type to add some flavor to the profile.")
+                Text("No athlete type selected")
                     .font(.caption)
                     .foregroundStyle(WGJTheme.textSecondary)
             }
-
-            Text("Your name and avatar are shown in Bros. Athlete type stays on your profile.")
-                .font(.caption)
-                .foregroundStyle(WGJTheme.textSecondary)
-        }
-    }
-
-    private var avatarActionRow: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 10) {
-                changeAvatarButton
-                removeAvatarButton
-                Spacer(minLength: 0)
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
-                changeAvatarButton
-                if avatarImageData != nil {
-                    removeAvatarButton
-                }
-            }
-        }
-    }
-
-    private var changeAvatarButton: some View {
-        PhotosPicker(selection: $selectedAvatarItem, matching: .images) {
-            Label(avatarImageData == nil ? "Choose Avatar" : "Change Avatar", systemImage: "photo")
-        }
-        .buttonStyle(WGJCompactGhostButtonStyle())
-    }
-
-    @ViewBuilder
-    private var removeAvatarButton: some View {
-        if avatarImageData != nil {
-            Button(role: .destructive) {
-                removeAvatar()
-            } label: {
-                Image(systemName: "trash")
-                    .accessibilityLabel("Remove Avatar")
-            }
-            .buttonStyle(
-                WGJIconButtonStyle(
-                    tint: WGJTheme.danger,
-                    background: WGJTheme.destructiveField,
-                    outline: WGJTheme.danger.opacity(0.28)
-                )
-            )
-        }
-    }
-
-    private var athleteTypePickerButton: some View {
-        Button {
-            showingAthleteTypePicker = true
-        } label: {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Athlete Type")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(WGJTheme.textPrimary)
-
-                    Text(athleteType?.title ?? "Optional. Pick one that fits your training vibe.")
-                        .font(.caption)
-                        .foregroundStyle(athleteType == nil ? WGJTheme.textSecondary : WGJTheme.accentGold)
-                        .lineLimit(2)
-                }
-
-                Spacer(minLength: 12)
-
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(WGJTheme.textSecondary)
-            }
-            .wgjPillField()
-        }
-        .buttonStyle(.plain)
-    }
-
-    @ViewBuilder
-    private var avatarView: some View {
-        if let avatarImageData, let image = UIImage(data: avatarImageData) {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFill()
-                .clipShape(Circle())
-                .overlay {
-                    Circle()
-                        .stroke(WGJTheme.outlineStrong, lineWidth: 1)
-                }
-        } else {
-            Circle()
-                .fill(.thinMaterial)
-                .overlay {
-                    Image(systemName: "person.fill")
-                        .font(.title2)
-                        .foregroundStyle(WGJTheme.textSecondary)
-                }
-                .overlay {
-                    Circle()
-                        .stroke(WGJTheme.outlineStrong, lineWidth: 1)
-                }
         }
     }
 
@@ -652,28 +523,13 @@ struct ProfileView: View {
         }
     }
 
-    private var trimmedDisplayName: String {
-        displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+    private var currentProfile: UserProfile? {
+        storedProfiles.first
     }
 
     private var identityPreviewName: String {
-        trimmedDisplayName.isEmpty ? "Athlete" : trimmedDisplayName
-    }
-
-    private var isUsingDefaultDisplayName: Bool {
-        identityPreviewName.localizedCaseInsensitiveCompare("Athlete") == .orderedSame
-    }
-
-    private var hasPendingIdentityChanges: Bool {
-        let savedTrimmed = savedDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmedDisplayName != savedTrimmed || athleteType != savedAthleteType
-    }
-
-    private var profileIdentityHelperText: String {
-        if isUsingDefaultDisplayName {
-            return "Set this so your bro circle sees your name instead of Athlete. Athlete type stays on your private profile."
-        }
-        return "This name is shown on your profile and in Bros. Athlete type stays on your private profile."
+        let trimmedName = currentProfile?.displayName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmedName.isEmpty ? "Athlete" : trimmedName
     }
 
     private var activeSinceText: String {
@@ -707,51 +563,8 @@ struct ProfileView: View {
 
         do {
             let profile = try profileRepository.loadOrCreateProfile()
-            displayName = profile.displayName
-            savedDisplayName = profile.displayName
-            athleteType = profile.athleteType
-            savedAthleteType = profile.athleteType
-            avatarImageData = profile.avatarImageData
             dashboardContent.weeklyGoal = profile.weeklyWorkoutGoal
             loadWidgetState()
-        } catch {
-            showError(error)
-        }
-    }
-
-    private func saveProfile() {
-        do {
-            try profileRepository.updateIdentity(name: displayName, athleteType: athleteType)
-            if let profile = try profileRepository.currentProfile() {
-                displayName = profile.displayName
-                savedDisplayName = profile.displayName
-                athleteType = profile.athleteType
-                savedAthleteType = profile.athleteType
-                dashboardContent.weeklyGoal = profile.weeklyWorkoutGoal
-            }
-            loadWidgetState()
-        } catch {
-            showError(error)
-        }
-    }
-
-    private func removeAvatar() {
-        do {
-            try profileRepository.updateAvatar(imageData: nil)
-            avatarImageData = nil
-            selectedAvatarItem = nil
-        } catch {
-            showError(error)
-        }
-    }
-
-    private func persistAvatar(from item: PhotosPickerItem) async {
-        do {
-            guard let data = try await item.loadTransferable(type: Data.self) else {
-                return
-            }
-            try profileRepository.updateAvatar(imageData: data)
-            avatarImageData = data
         } catch {
             showError(error)
         }

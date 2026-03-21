@@ -86,6 +86,21 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testProfileManagementSheetOpens() throws {
+        let app = launchApp()
+
+        tapTab("Profile", in: app)
+
+        let manageButton = identifiedElement("profile-manage-button", in: app)
+        XCTAssertTrue(manageButton.waitForExistence(timeout: 5))
+        manageButton.tap()
+
+        let nameField = identifiedElement("profile-display-name-field", in: app)
+        XCTAssertTrue(nameField.waitForExistence(timeout: 5))
+        XCTAssertTrue(identifiedElement("profile-save-button", in: app).exists)
+    }
+
+    @MainActor
     func testActiveWorkoutStartMinimizeRestoreFlow() throws {
         let app = launchApp()
 

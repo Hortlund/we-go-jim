@@ -485,7 +485,7 @@ struct WGJTests {
     }
 
     @Test
-    func profileRepositoryCreatesAndUpdatesProfile() throws {
+    func profileRepositoryCreatesAndSavesProfileIdentity() throws {
         let context = try makeInMemoryContext()
         let repository = ProfileRepository(modelContext: context)
 
@@ -493,10 +493,14 @@ struct WGJTests {
         #expect(created.displayName == "Athlete")
         #expect(created.athleteType == nil)
         #expect(created.isTrainingGuidanceEnabled)
+        #expect(created.keepsScreenAwake == false)
 
-        try repository.updateIdentity(name: "Demo Lifter", athleteType: .garageGymRat)
         let avatarData = Data([0x01, 0x02, 0x03, 0x04])
-        try repository.updateAvatar(imageData: avatarData)
+        try repository.saveProfile(
+            name: "Demo Lifter",
+            athleteType: .garageGymRat,
+            avatarImageData: avatarData
+        )
 
         let updated = try repository.currentProfile()
         #expect(updated?.displayName == "Demo Lifter")
@@ -514,6 +518,18 @@ struct WGJTests {
 
         let updated = try repository.currentProfile()
         #expect(updated?.isTrainingGuidanceEnabled == false)
+    }
+
+    @Test
+    func profileRepositoryPersistsKeepScreenAwakePreference() throws {
+        let context = try makeInMemoryContext()
+        let repository = ProfileRepository(modelContext: context)
+
+        _ = try repository.loadOrCreateProfile()
+        try repository.updateKeepsScreenAwake(true)
+
+        let updated = try repository.currentProfile()
+        #expect(updated?.keepsScreenAwake == true)
     }
 
     @Test

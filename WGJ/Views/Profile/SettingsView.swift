@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var libraryStatusText = "Not loaded yet"
     @State private var weeklyGoal = 4
     @State private var isTrainingGuidanceEnabled = true
+    @State private var keepsScreenAwake = false
     @State private var hasLoadedProfile = false
 
     @State private var errorMessage = ""
@@ -79,6 +80,24 @@ struct SettingsView: View {
                                 .foregroundStyle(WGJTheme.textPrimary)
 
                             Text("Advice stays optional everywhere and never rewrites your workout for you.")
+                                .font(.caption)
+                                .foregroundStyle(WGJTheme.textSecondary)
+                        }
+                    }
+                    .tint(WGJTheme.accentBlue)
+                }
+                .padding(14)
+                .wgjCardContainer()
+
+                VStack(alignment: .leading, spacing: 10) {
+                    WGJSectionHeader("App Preferences", subtitle: "Control how the app behaves while you train and browse.")
+
+                    Toggle(isOn: $keepsScreenAwake) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Keep screen awake")
+                                .foregroundStyle(WGJTheme.textPrimary)
+
+                            Text("Prevents dimming and auto-lock while the app is open and active.")
                                 .font(.caption)
                                 .foregroundStyle(WGJTheme.textSecondary)
                         }
@@ -189,6 +208,10 @@ struct SettingsView: View {
             guard hasLoadedProfile else { return }
             saveTrainingGuidancePreference(newValue)
         }
+        .onChange(of: keepsScreenAwake) { _, newValue in
+            guard hasLoadedProfile else { return }
+            saveKeepsScreenAwakePreference(newValue)
+        }
         .alert("Settings Error", isPresented: $showingError) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -225,6 +248,7 @@ struct SettingsView: View {
             let profile = try profileRepository.loadOrCreateProfile()
             weeklyGoal = profile.weeklyWorkoutGoal
             isTrainingGuidanceEnabled = profile.isTrainingGuidanceEnabled
+            keepsScreenAwake = profile.keepsScreenAwake
         } catch {
             showError(error)
         }
@@ -300,6 +324,14 @@ struct SettingsView: View {
     private func saveTrainingGuidancePreference(_ isEnabled: Bool) {
         do {
             try profileRepository.updateTrainingGuidanceEnabled(isEnabled)
+        } catch {
+            showError(error)
+        }
+    }
+
+    private func saveKeepsScreenAwakePreference(_ isEnabled: Bool) {
+        do {
+            try profileRepository.updateKeepsScreenAwake(isEnabled)
         } catch {
             showError(error)
         }

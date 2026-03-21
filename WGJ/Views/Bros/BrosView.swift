@@ -4,6 +4,7 @@ import UIKit
 
 enum BrosMutationAction: Equatable {
     case createCircle
+    case updateCircleMemberLimit
     case joinCircle
     case leaveCircle
     case removeMember
@@ -28,6 +29,7 @@ final class BrosViewModel {
 
     var state: ScreenState = .loading
     var joinCode: String = ""
+    var circleMemberLimit: Int = BrosSocialRules.defaultMemberLimit
     var pendingAction: BrosMutationAction?
     var successNotice: BrosSuccessNotice?
     var errorMessage: String?
@@ -105,14 +107,27 @@ final class BrosViewModel {
     func createCircle(modelContext: ModelContext) async {
         await runMutation(.createCircle) { [self] in
             let service = try service(modelContext: modelContext)
-            let snapshot = try await service.createCircle()
+            let snapshot = try await service.createCircle(memberLimit: self.circleMemberLimit)
             self.state = .active(snapshot)
             self.joinCode = ""
+            self.circleMemberLimit = BrosSocialRules.defaultMemberLimit
             self.showSuccessNotice(
                 title: "Circle created",
                 message: "Invite code: \(snapshot.circle.inviteCode)"
             )
             self.scheduleBackgroundHydration(modelContext: modelContext)
+        }
+    }
+
+    func updateCircleMemberLimit(_ memberLimit: Int, modelContext: ModelContext) async {
+        await runMutation(.updateCircleMemberLimit) { [self] in
+            let service = try service(modelContext: modelContext)
+            let snapshot = try await service.updateCircleMemberLimit(memberLimit)
+            self.state = .active(snapshot)
+            self.showSuccessNotice(
+                title: "Circle updated",
+                message: "Member limit set to \(snapshot.circle.memberLimit)."
+            )
         }
     }
 
@@ -137,6 +152,7 @@ final class BrosViewModel {
             try await service.leaveCircle()
             self.state = .onboarding
             self.joinCode = ""
+            self.circleMemberLimit = BrosSocialRules.defaultMemberLimit
         }
     }
 
@@ -371,10 +387,23 @@ struct BrosView: View {
         VStack(alignment: .leading, spacing: WGJSpacing.section) {
             WGJEmptyStateCard(
                 title: "Start a bro circle",
-                message: "Create a circle for up to 4 gym bros, or join one with an invite code.",
+                message: "Create a circle with \(BrosSocialRules.minMemberLimit) to \(BrosSocialRules.maxMemberLimit) members, or join one with an invite code.",
                 icon: "person.3.fill"
             ) {
-                HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Stepper(value: circleMemberLimitBinding, in: BrosSocialRules.memberLimitRange) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Member limit: \(viewModel.circleMemberLimit)")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(WGJTheme.textPrimary)
+
+                            Text("You can change this later if you own the circle.")
+                                .font(.caption)
+                                .foregroundStyle(WGJTheme.textSecondary)
+                        }
+                    }
+                    .tint(WGJTheme.accentBlue)
+
                     Button {
                         Task {
                             await viewModel.createCircle(modelContext: modelContext)
@@ -429,7 +458,6 @@ struct BrosView: View {
 
         return VStack(alignment: .leading, spacing: WGJSpacing.section) {
             membersCard(filteredSnapshot)
-            manageCircleTile(filteredSnapshot)
 
             VStack(alignment: .leading, spacing: 12) {
                 WGJActionHeader("Feed", subtitle: "Newest first") {
@@ -459,8 +487,14 @@ struct BrosView: View {
 
     private func membersCard(_ snapshot: BrosFeedSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            WGJActionHeader("Circle", subtitle: "Up to 4 members") {
-                WGJMetricPill(systemImage: "person.3.sequence.fill", value: "\(snapshot.members.count)/4")
+            WGJActionHeader("Circle", subtitle: "Up to \(snapshot.circle.memberLimit) members") {
+                HStack(spacing: 8) {
+                    WGJMetricPill(
+                        systemImage: "person.3.sequence.fill",
+                        value: "\(snapshot.members.count)/\(snapshot.circle.memberLimit)"
+                    )
+                    circleManagementButton(snapshot)
+                }
             }
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -483,28 +517,14 @@ struct BrosView: View {
 
                 Spacer(minLength: 0)
 
-                if member.id != snapshot.currentMember.id {
+                if snapshot.isCurrentUserOwner, member.id != snapshot.currentMember.id {
                     Menu {
-                        if snapshot.isCurrentUserOwner {
-                            Button(role: .destructive) {
-                                Task {
-                                    await viewModel.removeMember(membershipID: member.id, modelContext: modelContext)
-                                }
-                            } label: {
-                                Label("Remove Member", systemImage: "person.crop.circle.badge.minus")
-                            }
-                        }
-
-                        Button {
-                            reportMember(snapshot: snapshot, member: member)
-                        } label: {
-                            Label("Report Member", systemImage: "flag.fill")
-                        }
-
                         Button(role: .destructive) {
-                            block(member: member)
+                            Task {
+                                await viewModel.removeMember(membershipID: member.id, modelContext: modelContext)
+                            }
                         } label: {
-                            Label("Block Member", systemImage: "hand.raised.fill")
+                            Label("Remove Member", systemImage: "person.crop.circle.badge.minus")
                         }
                     } label: {
                         Image(systemName: "ellipsis")
@@ -565,15 +585,8 @@ struct BrosView: View {
             }
     }
 
-    private func manageCircleTile(_ snapshot: BrosFeedSnapshot) -> some View {
-        WGJNavigationTile(
-            title: "Manage Circle",
-            systemImage: snapshot.isCurrentUserOwner ? "person.crop.circle.badge.gearshape" : "person.3.sequence.fill",
-            subtitle: snapshot.isCurrentUserOwner
-                ? "Invite bros, manage members, and leave the circle."
-                : "See your circle roster and leave the circle.",
-            accessibilityID: "bros-manage-circle-tile"
-        ) {
+    private func circleManagementButton(_ snapshot: BrosFeedSnapshot) -> some View {
+        NavigationLink {
             BroCircleManagementView(
                 snapshot: snapshot,
                 isBusy: viewModel.isBusy,
@@ -590,14 +603,20 @@ struct BrosView: View {
                         await viewModel.removeMember(membershipID: member.id, modelContext: modelContext)
                     }
                 },
-                onReportMember: { member in
-                    reportMember(snapshot: snapshot, member: member)
-                },
-                onBlockMember: { member in
-                    block(member: member)
+                onUpdateMemberLimit: { memberLimit in
+                    Task {
+                        await viewModel.updateCircleMemberLimit(memberLimit, modelContext: modelContext)
+                    }
                 }
             )
+        } label: {
+            Label(
+                snapshot.isCurrentUserOwner ? "Manage" : "Details",
+                systemImage: snapshot.isCurrentUserOwner ? "slider.horizontal.3" : "info.circle"
+            )
         }
+        .buttonStyle(WGJCompactGhostButtonStyle())
+        .accessibilityIdentifier("bros-manage-circle-button")
     }
 
     private func feedCard(
@@ -940,6 +959,18 @@ struct BrosView: View {
         supportNoticeMessage = message
         showingSupportNotice = true
     }
+
+    private var circleMemberLimitBinding: Binding<Int> {
+        Binding(
+            get: { viewModel.circleMemberLimit },
+            set: { newValue in
+                viewModel.circleMemberLimit = min(
+                    max(newValue, BrosSocialRules.memberLimitRange.lowerBound),
+                    BrosSocialRules.memberLimitRange.upperBound
+                )
+            }
+        )
+    }
 }
 
 private struct BroCircleManagementView: View {
@@ -948,8 +979,26 @@ private struct BroCircleManagementView: View {
     let onCopyInviteCode: () -> Void
     let onLeaveCircle: () -> Void
     let onRemoveMember: (BroMemberSummary) -> Void
-    let onReportMember: (BroMemberSummary) -> Void
-    let onBlockMember: (BroMemberSummary) -> Void
+    let onUpdateMemberLimit: (Int) -> Void
+
+    @State private var memberLimitDraft: Int
+
+    init(
+        snapshot: BrosFeedSnapshot,
+        isBusy: Bool,
+        onCopyInviteCode: @escaping () -> Void,
+        onLeaveCircle: @escaping () -> Void,
+        onRemoveMember: @escaping (BroMemberSummary) -> Void,
+        onUpdateMemberLimit: @escaping (Int) -> Void
+    ) {
+        self.snapshot = snapshot
+        self.isBusy = isBusy
+        self.onCopyInviteCode = onCopyInviteCode
+        self.onLeaveCircle = onLeaveCircle
+        self.onRemoveMember = onRemoveMember
+        self.onUpdateMemberLimit = onUpdateMemberLimit
+        _memberLimitDraft = State(initialValue: snapshot.circle.memberLimit)
+    }
 
     var body: some View {
         ScrollView {
@@ -958,6 +1007,7 @@ private struct BroCircleManagementView: View {
                     inviteSection
                 }
 
+                memberLimitSection
                 membersSection
                 leaveSection
             }
@@ -966,8 +1016,16 @@ private struct BroCircleManagementView: View {
             .padding(.bottom, 28)
         }
         .wgjScreenBackground()
-        .navigationTitle("Manage Circle")
+        .navigationTitle(snapshot.isCurrentUserOwner ? "Manage Circle" : "Circle")
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: snapshot.circle.memberLimit) { _, newValue in
+            memberLimitDraft = newValue
+        }
+        .onChange(of: snapshot.members.count) { _, newValue in
+            if memberLimitDraft < newValue {
+                memberLimitDraft = newValue
+            }
+        }
     }
 
     private var inviteSection: some View {
@@ -1000,10 +1058,52 @@ private struct BroCircleManagementView: View {
         .wgjCardContainer(strong: true)
     }
 
+    private var memberLimitSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            WGJSectionHeader(
+                "Circle Size",
+                subtitle: snapshot.isCurrentUserOwner
+                    ? "Choose the total member cap for this circle."
+                    : "Only the owner can change the member limit for this circle."
+            )
+
+            WGJMetricPill(
+                systemImage: "person.3.sequence.fill",
+                value: "\(snapshot.members.count)/\(memberLimitDraft)"
+            )
+
+            if snapshot.isCurrentUserOwner {
+                Stepper(value: $memberLimitDraft, in: ownerEditableLimitRange) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Member limit: \(memberLimitDraft)")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(WGJTheme.textPrimary)
+
+                        Text("Range: \(BrosSocialRules.minMemberLimit)-\(BrosSocialRules.maxMemberLimit). Current roster: \(snapshot.members.count).")
+                            .font(.caption)
+                            .foregroundStyle(WGJTheme.textSecondary)
+                    }
+                }
+                .tint(WGJTheme.accentBlue)
+
+                Button("Save Circle Size") {
+                    onUpdateMemberLimit(memberLimitDraft)
+                }
+                .buttonStyle(WGJGhostButtonStyle())
+                .disabled(!canSaveMemberLimit)
+            }
+        }
+        .padding(WGJSpacing.card)
+        .wgjCardContainer(strong: snapshot.isCurrentUserOwner)
+    }
+
     private var membersSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            WGJActionHeader("Members", subtitle: "Names and athlete types shown here come from each bro's profile.") {
-                WGJMetricPill(systemImage: "person.3.sequence.fill", value: "\(snapshot.members.count)/4")
+            WGJActionHeader("Members", subtitle: "Names, avatars, and athlete types shown here come from each bro's profile.") {
+                WGJMetricPill(
+                    systemImage: "person.3.sequence.fill",
+                    value: "\(snapshot.members.count)/\(snapshot.circle.memberLimit)"
+                )
             }
 
             ForEach(snapshot.members) { member in
@@ -1046,26 +1146,12 @@ private struct BroCircleManagementView: View {
 
             Spacer(minLength: 12)
 
-            if member.id != snapshot.currentMember.id {
+            if snapshot.isCurrentUserOwner, member.id != snapshot.currentMember.id {
                 Menu {
-                    if snapshot.isCurrentUserOwner {
-                        Button(role: .destructive) {
-                            onRemoveMember(member)
-                        } label: {
-                            Label("Remove Member", systemImage: "person.crop.circle.badge.minus")
-                        }
-                    }
-
-                    Button {
-                        onReportMember(member)
-                    } label: {
-                        Label("Report Member", systemImage: "flag.fill")
-                    }
-
                     Button(role: .destructive) {
-                        onBlockMember(member)
+                        onRemoveMember(member)
                     } label: {
-                        Label("Block Member", systemImage: "hand.raised.fill")
+                        Label("Remove Member", systemImage: "person.crop.circle.badge.minus")
                     }
                 } label: {
                     Image(systemName: "ellipsis")
@@ -1117,6 +1203,16 @@ private struct BroCircleManagementView: View {
     private func resolvedDisplayName(_ value: String) -> String {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "Bro" : trimmed
+    }
+
+    private var ownerEditableLimitRange: ClosedRange<Int> {
+        max(BrosSocialRules.minMemberLimit, snapshot.members.count) ... BrosSocialRules.maxMemberLimit
+    }
+
+    private var canSaveMemberLimit: Bool {
+        memberLimitDraft != snapshot.circle.memberLimit
+            && BrosSocialRules.canSetMemberLimit(memberLimitDraft, currentMemberCount: snapshot.members.count)
+            && !isBusy
     }
 }
 

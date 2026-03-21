@@ -90,6 +90,8 @@ enum BrosSocialServiceError: LocalizedError, Equatable {
     case alreadyInCircle
     case invalidInviteCode
     case circleFull
+    case invalidMemberLimit
+    case memberLimitBelowCurrentMemberCount
     case notInCircle
     case memberNotFound
     case ownerCannotRemoveSelf
@@ -105,6 +107,10 @@ enum BrosSocialServiceError: LocalizedError, Equatable {
             return "That invite code could not be found."
         case .circleFull:
             return "That bro circle is already full."
+        case .invalidMemberLimit:
+            return "Circle size must be between \(BrosSocialRules.minMemberLimit) and \(BrosSocialRules.maxMemberLimit) members."
+        case .memberLimitBelowCurrentMemberCount:
+            return "Remove members before setting the circle size below the current roster."
         case .notInCircle:
             return "You are not currently in a bro circle."
         case .memberNotFound:
@@ -141,6 +147,14 @@ enum BrosRecordNames {
 }
 
 enum BrosSocialRules {
+    static let minMemberLimit = 2
+    static let defaultMemberLimit = 4
+    static let maxMemberLimit = 25
+
+    static var memberLimitRange: ClosedRange<Int> {
+        minMemberLimit ... maxMemberLimit
+    }
+
     static func resolvedReaction(existing: BroReactionKind?, tapped: BroReactionKind) -> BroReactionKind? {
         existing == tapped ? nil : tapped
     }
@@ -163,6 +177,14 @@ enum BrosSocialRules {
 
     static func hasCapacity(currentMemberCount: Int, limit: Int) -> Bool {
         currentMemberCount < max(1, limit)
+    }
+
+    static func isValidMemberLimit(_ limit: Int) -> Bool {
+        memberLimitRange.contains(limit)
+    }
+
+    static func canSetMemberLimit(_ limit: Int, currentMemberCount: Int) -> Bool {
+        isValidMemberLimit(limit) && limit >= currentMemberCount
     }
 
     static func filteredSnapshot(
@@ -212,8 +234,9 @@ enum BrosSocialRules {
 protocol BrosSocialService {
     func refreshLocalMembershipState() async
     func fetchSnapshot() async throws -> BrosFeedSnapshot?
-    func createCircle() async throws -> BrosFeedSnapshot
+    func createCircle(memberLimit: Int) async throws -> BrosFeedSnapshot
     func joinCircle(inviteCode: String) async throws -> BrosFeedSnapshot
+    func updateCircleMemberLimit(_ memberLimit: Int) async throws -> BrosFeedSnapshot
     func leaveCircle() async throws
     func deleteCurrentUserData() async throws
     func removeMember(membershipID: String) async throws
@@ -487,11 +510,13 @@ final class CloudKitBrosSocialService: BrosSocialService {
         )
     }
 
-    func createCircle() async throws -> BrosFeedSnapshot {
+    func createCircle(memberLimit: Int) async throws -> BrosFeedSnapshot {
         let userRecordName = try await currentUserRecordName()
         if try await membershipRecord(forUserRecordName: userRecordName) != nil {
             throw BrosSocialServiceError.alreadyInCircle
         }
+
+        try validateMemberLimit(memberLimit)
 
         let profile = try? ProfileRepository(modelContext: modelContext).loadOrCreateProfile()
         let createdAt = Date()
@@ -503,7 +528,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
         circleRecord[Field.circleID] = circleID as CKRecordValue
         circleRecord[Field.ownerUserRecordName] = userRecordName as CKRecordValue
         circleRecord[Field.inviteCode] = inviteCode as CKRecordValue
-        circleRecord[Field.memberLimit] = 4 as CKRecordValue
+        circleRecord[Field.memberLimit] = memberLimit as CKRecordValue
         circleRecord[Field.createdAt] = createdAt as CKRecordValue
         circleRecord[Field.updatedAt] = createdAt as CKRecordValue
 
@@ -543,7 +568,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
             circleID: circleID,
             ownerUserRecordName: userRecordName,
             inviteCode: inviteCode,
-            memberLimit: 4,
+            memberLimit: memberLimit,
             createdAt: createdAt,
             updatedAt: createdAt
         )
@@ -661,6 +686,36 @@ final class CloudKitBrosSocialService: BrosSocialService {
 
         try await save(records: recordsToSave, deleting: recordIDsToDelete)
         try? clearLocalMembershipStateIfNeeded()
+    }
+
+    func updateCircleMemberLimit(_ memberLimit: Int) async throws -> BrosFeedSnapshot {
+        let userRecordName = try await currentUserRecordName()
+        guard let currentMembershipRecord = try await membershipRecord(forUserRecordName: userRecordName) else {
+            throw BrosSocialServiceError.notInCircle
+        }
+        let currentMember = try await memberSummary(from: currentMembershipRecord)
+
+        guard currentMember.isOwner else {
+            throw BrosSocialServiceError.permissions
+        }
+
+        guard let circleRecord = try await circleRecord(circleID: currentMember.circleID) else {
+            throw BrosSocialServiceError.notInCircle
+        }
+
+        let members = try await memberships(circleID: currentMember.circleID)
+        try validateMemberLimit(memberLimit, currentMemberCount: members.count)
+
+        let updatedAt = Date()
+        circleRecord[Field.memberLimit] = memberLimit as CKRecordValue
+        circleRecord[Field.updatedAt] = updatedAt as CKRecordValue
+        try await save(records: [circleRecord])
+
+        guard let snapshot = try await fetchSnapshot() else {
+            throw BrosSocialServiceError.notInCircle
+        }
+
+        return snapshot
     }
 
     func deleteCurrentUserData() async throws {
@@ -1145,7 +1200,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
             circleID: record[Field.circleID] as? String ?? record.recordID.recordName,
             ownerUserRecordName: record[Field.ownerUserRecordName] as? String ?? "",
             inviteCode: record[Field.inviteCode] as? String ?? "",
-            memberLimit: record[Field.memberLimit] as? Int ?? 4,
+            memberLimit: record[Field.memberLimit] as? Int ?? BrosSocialRules.defaultMemberLimit,
             createdAt: record[Field.createdAt] as? Date ?? .now,
             updatedAt: record[Field.updatedAt] as? Date ?? .now
         )
@@ -1425,6 +1480,16 @@ final class CloudKitBrosSocialService: BrosSocialService {
             profile?.displayName ?? "",
             kind: .displayName
         )
+    }
+
+    private func validateMemberLimit(_ memberLimit: Int, currentMemberCount: Int? = nil) throws {
+        guard BrosSocialRules.isValidMemberLimit(memberLimit) else {
+            throw BrosSocialServiceError.invalidMemberLimit
+        }
+
+        if let currentMemberCount, memberLimit < currentMemberCount {
+            throw BrosSocialServiceError.memberLimitBelowCurrentMemberCount
+        }
     }
 
     private func athleteType(from profile: UserProfile?) -> ProfileAthleteType? {

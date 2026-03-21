@@ -5,6 +5,12 @@ enum SwipeDeleteGestureStrategy {
     case simultaneous
 }
 
+private enum SwipeDeleteDragIntent {
+    case undecided
+    case horizontal
+    case vertical
+}
+
 struct SwipeDeleteRow<Content: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -14,10 +20,12 @@ struct SwipeDeleteRow<Content: View>: View {
     var threshold: CGFloat = 84
     var isEnabled: Bool = true
     var activeRegionMaxY: CGFloat? = nil
-    var gestureStrategy: SwipeDeleteGestureStrategy = .highPriority
+    var gestureStrategy: SwipeDeleteGestureStrategy = .simultaneous
+    var gestureMask: GestureMask = .subviews
     var onDelete: () -> Void
     @ViewBuilder var content: () -> Content
     @State private var rowWidth: CGFloat = 0
+    @State private var dragIntent: SwipeDeleteDragIntent = .undecided
 
     var body: some View {
         ZStack(alignment: .trailing) {
@@ -48,27 +56,17 @@ struct SwipeDeleteRow<Content: View>: View {
     private var swipeHost: some View {
         let dragGesture = DragGesture(minimumDistance: 12)
             .onChanged { value in
-                guard shouldHandleDrag(value) else { return }
-                offset = min(0, value.translation.width)
+                handleDragChanged(value)
             }
             .onEnded { value in
-                guard shouldHandleDrag(value) else {
-                    resetOffset()
-                    return
-                }
-
-                if -value.translation.width >= deleteThreshold {
-                    dismissRow()
-                } else {
-                    resetOffset()
-                }
+                handleDragEnded(value)
             }
 
         return Group {
             if gestureStrategy == .simultaneous {
-                baseSwipeContent.simultaneousGesture(dragGesture)
+                baseSwipeContent.simultaneousGesture(dragGesture, including: gestureMask)
             } else {
-                baseSwipeContent.highPriorityGesture(dragGesture)
+                baseSwipeContent.highPriorityGesture(dragGesture, including: gestureMask)
             }
         }
     }
@@ -110,14 +108,56 @@ struct SwipeDeleteRow<Content: View>: View {
         return min(1, (distance - revealTrigger) / max(1, deleteThreshold - revealTrigger))
     }
 
+    private var intentLockThreshold: CGFloat {
+        10
+    }
+
     private func shouldHandleDrag(_ value: DragGesture.Value) -> Bool {
         guard isEnabled else { return false }
         guard !isRemoving else { return false }
-        guard abs(value.translation.width) > abs(value.translation.height) else { return false }
         if let activeRegionMaxY {
             return value.startLocation.y <= activeRegionMaxY
         }
         return true
+    }
+
+    private func handleDragChanged(_ value: DragGesture.Value) {
+        guard shouldHandleDrag(value) else {
+            dragIntent = .vertical
+            offset = 0
+            return
+        }
+
+        let horizontalDistance = abs(value.translation.width)
+        let verticalDistance = abs(value.translation.height)
+
+        if verticalDistance > horizontalDistance + intentLockThreshold {
+            dragIntent = .vertical
+            offset = 0
+            return
+        }
+
+        if horizontalDistance > verticalDistance + intentLockThreshold {
+            dragIntent = .horizontal
+        }
+
+        guard dragIntent == .horizontal else { return }
+        offset = min(0, value.translation.width)
+    }
+
+    private func handleDragEnded(_ value: DragGesture.Value) {
+        defer { dragIntent = .undecided }
+
+        guard dragIntent == .horizontal, shouldHandleDrag(value) else {
+            resetOffset()
+            return
+        }
+
+        if -value.translation.width >= deleteThreshold {
+            dismissRow()
+        } else {
+            resetOffset()
+        }
     }
 
     private func resetOffset() {
