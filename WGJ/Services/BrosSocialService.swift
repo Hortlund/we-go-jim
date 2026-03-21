@@ -435,6 +435,53 @@ final class CloudKitBrosSocialService: BrosSocialService {
         )
     }
 
+    private func optimisticSnapshot(
+        circle: BroCircleSummary,
+        currentMember: BroMemberSummary,
+        otherMembers: [BroMemberSummary] = []
+    ) -> BrosFeedSnapshot {
+        var membersByID: [String: BroMemberSummary] = [:]
+
+        for member in otherMembers {
+            membersByID[member.id] = member
+        }
+        membersByID[currentMember.id] = currentMember
+
+        let members = membersByID.values.sorted { lhs, rhs in
+            if lhs.joinedAt != rhs.joinedAt {
+                return lhs.joinedAt < rhs.joinedAt
+            }
+            return lhs.displayName.localizedStandardCompare(rhs.displayName) == .orderedAscending
+        }
+
+        return BrosFeedSnapshot(
+            circle: circle,
+            currentMember: currentMember,
+            members: members,
+            feedEvents: []
+        )
+    }
+
+    private func optimisticMemberSummary(
+        circleID: String,
+        membershipID: String,
+        userRecordName: String,
+        displayName: String,
+        avatarImageData: Data?,
+        joinedAt: Date,
+        role: BroMembershipRole
+    ) -> BroMemberSummary {
+        BroMemberSummary(
+            id: membershipID,
+            circleID: circleID,
+            userRecordName: userRecordName,
+            displayName: displayName,
+            avatarImageData: avatarImageData,
+            joinedAt: joinedAt,
+            role: role
+        )
+    }
+
     func createCircle() async throws -> BrosFeedSnapshot {
         let userRecordName = try await currentUserRecordName()
         if try await membershipRecord(forUserRecordName: userRecordName) != nil {
@@ -475,8 +522,29 @@ final class CloudKitBrosSocialService: BrosSocialService {
             joinedAt: createdAt,
             role: .owner
         )
+        let displayName = displayName(from: profile)
+        let currentMember = optimisticMemberSummary(
+            circleID: circleID,
+            membershipID: membershipID,
+            userRecordName: userRecordName,
+            displayName: displayName,
+            avatarImageData: profile?.avatarImageData,
+            joinedAt: createdAt,
+            role: .owner
+        )
+        let circle = BroCircleSummary(
+            circleID: circleID,
+            ownerUserRecordName: userRecordName,
+            inviteCode: inviteCode,
+            memberLimit: 4,
+            createdAt: createdAt,
+            updatedAt: createdAt
+        )
 
-        return try await fetchSnapshot().unwrap(or: BrosSocialServiceError.unavailable)
+        return optimisticSnapshot(
+            circle: circle,
+            currentMember: currentMember
+        )
     }
 
     func joinCircle(inviteCode: String) async throws -> BrosFeedSnapshot {
@@ -501,6 +569,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
         guard BrosSocialRules.hasCapacity(currentMemberCount: currentMembers.count, limit: circle.memberLimit) else {
             throw BrosSocialServiceError.circleFull
         }
+        let existingMembers = try await currentMembers.asyncMap { try await memberSummary(from: $0) }
 
         let profile = try? ProfileRepository(modelContext: modelContext).loadOrCreateProfile()
         let joinedAt = Date()
@@ -525,8 +594,22 @@ final class CloudKitBrosSocialService: BrosSocialService {
             joinedAt: joinedAt,
             role: .member
         )
+        let displayName = displayName(from: profile)
+        let currentMember = optimisticMemberSummary(
+            circleID: circle.circleID,
+            membershipID: membershipID,
+            userRecordName: userRecordName,
+            displayName: displayName,
+            avatarImageData: profile?.avatarImageData,
+            joinedAt: joinedAt,
+            role: .member
+        )
 
-        return try await fetchSnapshot().unwrap(or: BrosSocialServiceError.unavailable)
+        return optimisticSnapshot(
+            circle: circle,
+            currentMember: currentMember,
+            otherMembers: existingMembers
+        )
     }
 
     func leaveCircle() async throws {

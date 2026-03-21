@@ -2,6 +2,20 @@ import SwiftData
 import SwiftUI
 import UIKit
 
+enum BrosMutationAction: Equatable {
+    case createCircle
+    case joinCircle
+    case leaveCircle
+    case removeMember
+    case toggleReaction
+}
+
+struct BrosSuccessNotice: Identifiable, Equatable {
+    let id = UUID()
+    let title: String
+    let message: String?
+}
+
 @MainActor
 @Observable
 final class BrosViewModel {
@@ -14,10 +28,16 @@ final class BrosViewModel {
 
     var state: ScreenState = .loading
     var joinCode: String = ""
-    var isBusy = false
+    var pendingAction: BrosMutationAction?
+    var successNotice: BrosSuccessNotice?
     var errorMessage: String?
 
+    var isBusy: Bool { pendingAction != nil }
+    var isCreatingCircle: Bool { pendingAction == .createCircle }
+    var isJoiningCircle: Bool { pendingAction == .joinCircle }
+
     private var hasLoaded = false
+    private var successNoticeTask: Task<Void, Never>?
 
     func loadIfNeeded(
         modelContext: ModelContext,
@@ -83,24 +103,36 @@ final class BrosViewModel {
     }
 
     func createCircle(modelContext: ModelContext) async {
-        await runMutation { [self] in
-            let snapshot = try await service(modelContext: modelContext).createCircle()
+        await runMutation(.createCircle) { [self] in
+            let service = try service(modelContext: modelContext)
+            let snapshot = try await service.createCircle()
             self.state = .active(snapshot)
             self.joinCode = ""
+            self.showSuccessNotice(
+                title: "Circle created",
+                message: "Invite code: \(snapshot.circle.inviteCode)"
+            )
+            self.scheduleBackgroundHydration(modelContext: modelContext)
         }
     }
 
     func joinCircle(modelContext: ModelContext) async {
-        await runMutation { [self] in
-            let snapshot = try await service(modelContext: modelContext)
+        await runMutation(.joinCircle) { [self] in
+            let service = try service(modelContext: modelContext)
+            let snapshot = try await service
                 .joinCircle(inviteCode: self.joinCode)
             self.state = .active(snapshot)
             self.joinCode = ""
+            self.showSuccessNotice(
+                title: "Joined circle",
+                message: "Your bro circle is ready."
+            )
+            self.scheduleBackgroundHydration(modelContext: modelContext)
         }
     }
 
     func leaveCircle(modelContext: ModelContext) async {
-        await runMutation { [self] in
+        await runMutation(.leaveCircle) { [self] in
             let service = try service(modelContext: modelContext)
             try await service.leaveCircle()
             self.state = .onboarding
@@ -109,19 +141,27 @@ final class BrosViewModel {
     }
 
     func removeMember(membershipID: String, modelContext: ModelContext) async {
-        await runMutation { [self] in
+        await runMutation(.removeMember) { [self] in
             let service = try service(modelContext: modelContext)
             try await service.removeMember(membershipID: membershipID)
+            if case .active(let snapshot) = self.state {
+                self.state = .active(
+                    BrosFeedSnapshot(
+                        circle: snapshot.circle,
+                        currentMember: snapshot.currentMember,
+                        members: snapshot.members.filter { $0.id != membershipID },
+                        feedEvents: snapshot.feedEvents
+                    )
+                )
+            }
             if let snapshot = try await service.fetchSnapshot() {
                 self.state = .active(snapshot)
-            } else {
-                self.state = .onboarding
             }
         }
     }
 
     func toggleReaction(eventID: String, emoji: BroReactionKind, modelContext: ModelContext) async {
-        await runMutation { [self] in
+        await runMutation(.toggleReaction) { [self] in
             let service = try service(modelContext: modelContext)
             try await service.setReaction(eventID: eventID, kind: emoji)
             if let snapshot = try await service.fetchSnapshot() {
@@ -134,15 +174,56 @@ final class BrosViewModel {
         errorMessage = nil
     }
 
-    private func runMutation(_ operation: @escaping @MainActor () async throws -> Void) async {
-        guard !isBusy else { return }
-        isBusy = true
-        defer { isBusy = false }
+    func clearSuccessNotice() {
+        successNoticeTask?.cancel()
+        successNoticeTask = nil
+        successNotice = nil
+    }
+
+    private func runMutation(
+        _ action: BrosMutationAction,
+        _ operation: @escaping @MainActor () async throws -> Void
+    ) async {
+        guard pendingAction == nil else { return }
+        clearSuccessNotice()
+        pendingAction = action
+        defer { pendingAction = nil }
 
         do {
             try await operation()
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func scheduleBackgroundHydration(modelContext: ModelContext) {
+        Task { @MainActor [weak self] in
+            await self?.hydrateActiveSnapshot(modelContext: modelContext)
+        }
+    }
+
+    private func hydrateActiveSnapshot(modelContext: ModelContext) async {
+        guard case .active = state else { return }
+
+        do {
+            let service = try service(modelContext: modelContext)
+            await service.refreshLocalMembershipState()
+            if let snapshot = try await service.fetchSnapshot() {
+                state = .active(snapshot)
+            }
+        } catch {
+            // Keep the optimistic active state instead of regressing to unavailable.
+        }
+    }
+
+    private func showSuccessNotice(title: String, message: String?) {
+        successNoticeTask?.cancel()
+        successNotice = BrosSuccessNotice(title: title, message: message)
+        successNoticeTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            self?.successNotice = nil
+            self?.successNoticeTask = nil
         }
     }
 
@@ -202,6 +283,11 @@ struct BrosView: View {
             VStack(alignment: .leading, spacing: WGJSpacing.section) {
                 WGJRootHeader("Bros", subtitle: "Private workout and PR snapshots for your training circle.")
 
+                if let successNotice = viewModel.successNotice {
+                    successBanner(successNotice)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+
                 switch viewModel.state {
                 case .loading:
                     loadingCard
@@ -225,6 +311,7 @@ struct BrosView: View {
             )
         }
         .wgjScreenBackground()
+        .animation(.easeInOut(duration: 0.2), value: viewModel.successNotice?.id)
         .toolbar(.hidden, for: .navigationBar)
         .task {
             await viewModel.loadIfNeeded(
@@ -293,7 +380,10 @@ struct BrosView: View {
                             await viewModel.createCircle(modelContext: modelContext)
                         }
                     } label: {
-                        Label("Create Circle", systemImage: "plus.circle.fill")
+                        Label(
+                            viewModel.isCreatingCircle ? "Creating Circle..." : "Create Circle",
+                            systemImage: "plus.circle.fill"
+                        )
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(WGJPrimaryButtonStyle())
@@ -317,7 +407,10 @@ struct BrosView: View {
                         await viewModel.joinCircle(modelContext: modelContext)
                     }
                 } label: {
-                    Label("Join Circle", systemImage: "person.badge.plus")
+                    Label(
+                        viewModel.isJoiningCircle ? "Joining Circle..." : "Join Circle",
+                        systemImage: "person.badge.plus"
+                    )
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(WGJPrimaryButtonStyle())
@@ -336,7 +429,7 @@ struct BrosView: View {
 
         return VStack(alignment: .leading, spacing: WGJSpacing.section) {
             membersCard(filteredSnapshot)
-            inviteCard(filteredSnapshot)
+            manageCircleTile(filteredSnapshot)
 
             VStack(alignment: .leading, spacing: 12) {
                 WGJActionHeader("Feed", subtitle: "Newest first") {
@@ -386,7 +479,7 @@ struct BrosView: View {
     private func memberCard(_ member: BroMemberSummary, snapshot: BrosFeedSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 10) {
-                BroAvatarView(imageData: member.avatarImageData, name: member.displayName, size: 44)
+                BroAvatarView(imageData: member.avatarImageData, name: resolvedDisplayName(member.displayName), size: 44)
 
                 Spacer(minLength: 0)
 
@@ -422,7 +515,7 @@ struct BrosView: View {
                 }
             }
 
-            Text(member.displayName)
+            Text(resolvedDisplayName(member.displayName))
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(WGJTheme.textPrimary)
                 .wgjSingleLineText(scale: 0.78)
@@ -441,6 +534,15 @@ struct BrosView: View {
         .wgjCardContainer()
     }
 
+    private func successBanner(_ notice: BrosSuccessNotice) -> some View {
+        WGJTransientBanner(
+            title: notice.title,
+            message: notice.message,
+            icon: "checkmark.circle.fill",
+            tint: WGJTheme.success
+        )
+    }
+
     private func memberBadge(_ title: String, tint: Color) -> some View {
         Text(title)
             .font(.caption.weight(.semibold))
@@ -457,46 +559,39 @@ struct BrosView: View {
             }
     }
 
-    private func inviteCard(_ snapshot: BrosFeedSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            WGJSectionHeader("Invite Code", subtitle: "Share this with your bros so they can join your circle.")
-
-            HStack(alignment: .center, spacing: 12) {
-                Text(snapshot.circle.inviteCode)
-                    .font(.title3.monospaced().weight(.bold))
-                    .foregroundStyle(WGJTheme.textPrimary)
-                    .tracking(1.4)
-                    .wgjSingleLineText(scale: 0.72)
-
-                Spacer(minLength: 12)
-
-                Button {
-                    UIPasteboard.general.string = snapshot.circle.inviteCode
-                    UINotificationFeedbackGenerator().notificationOccurred(.success)
-                } label: {
-                    Label("Copy", systemImage: "doc.on.doc")
+    private func manageCircleTile(_ snapshot: BrosFeedSnapshot) -> some View {
+        WGJNavigationTile(
+            title: "Manage Circle",
+            systemImage: snapshot.isCurrentUserOwner ? "person.crop.circle.badge.gearshape" : "person.3.sequence.fill",
+            subtitle: snapshot.isCurrentUserOwner
+                ? "Invite bros, manage members, and leave the circle."
+                : "See your circle roster and leave the circle.",
+            accessibilityID: "bros-manage-circle-tile"
+        ) {
+            BroCircleManagementView(
+                snapshot: snapshot,
+                isBusy: viewModel.isBusy,
+                onCopyInviteCode: {
+                    copyInviteCode(snapshot.circle.inviteCode)
+                },
+                onLeaveCircle: {
+                    Task {
+                        await viewModel.leaveCircle(modelContext: modelContext)
+                    }
+                },
+                onRemoveMember: { member in
+                    Task {
+                        await viewModel.removeMember(membershipID: member.id, modelContext: modelContext)
+                    }
+                },
+                onReportMember: { member in
+                    reportMember(snapshot: snapshot, member: member)
+                },
+                onBlockMember: { member in
+                    block(member: member)
                 }
-                .buttonStyle(WGJGhostButtonStyle())
-
-                ShareLink(item: snapshot.circle.inviteCode) {
-                    Label("Share", systemImage: "square.and.arrow.up")
-                }
-                .buttonStyle(WGJGhostButtonStyle())
-            }
-
-            Button(role: .destructive) {
-                Task {
-                    await viewModel.leaveCircle(modelContext: modelContext)
-                }
-            } label: {
-                Label("Leave Circle", systemImage: "rectangle.portrait.and.arrow.right")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(WGJDestructiveButtonStyle())
-            .disabled(viewModel.isBusy)
+            )
         }
-        .padding(WGJSpacing.card)
-        .wgjCardContainer()
     }
 
     private func feedCard(
@@ -508,12 +603,12 @@ struct BrosView: View {
             HStack(spacing: 12) {
                 BroAvatarView(
                     imageData: event.actorAvatarImageData,
-                    name: event.actorDisplayName,
+                    name: resolvedDisplayName(event.actorDisplayName),
                     size: 46
                 )
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(event.actorDisplayName)
+                    Text(resolvedDisplayName(event.actorDisplayName))
                         .font(.headline.weight(.semibold))
                         .foregroundStyle(WGJTheme.textPrimary)
                         .wgjSingleLineText(scale: 0.82)
@@ -741,6 +836,20 @@ struct BrosView: View {
         return "\(formatted) kg"
     }
 
+    private func copyInviteCode(_ inviteCode: String) {
+        UIPasteboard.general.string = inviteCode
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        showSupportNotice(
+            title: "Invite Code Copied",
+            message: "\(inviteCode) is ready to share."
+        )
+    }
+
+    private func resolvedDisplayName(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Bro" : trimmed
+    }
+
     private func reportMember(snapshot: BrosFeedSnapshot, member: BroMemberSummary) {
         presentSupportDraft(
             SupportContactService.reportMemberDraft(
@@ -763,11 +872,11 @@ struct BrosView: View {
         do {
             try blockedRepository.block(
                 userRecordName: member.userRecordName,
-                displayName: member.displayName
+                displayName: resolvedDisplayName(member.displayName)
             )
             showSupportNotice(
                 title: "Member Blocked",
-                message: "\(member.displayName) is now hidden from your circle roster, feed, and reactions."
+                message: "\(resolvedDisplayName(member.displayName)) is now hidden from your circle roster, feed, and reactions."
             )
         } catch {
             viewModel.errorMessage = error.localizedDescription
@@ -778,11 +887,11 @@ struct BrosView: View {
         do {
             try blockedRepository.block(
                 userRecordName: event.actorUserRecordName,
-                displayName: event.actorDisplayName
+                displayName: resolvedDisplayName(event.actorDisplayName)
             )
             showSupportNotice(
                 title: "Member Blocked",
-                message: "\(event.actorDisplayName) is now hidden from your circle roster, feed, and reactions."
+                message: "\(resolvedDisplayName(event.actorDisplayName)) is now hidden from your circle roster, feed, and reactions."
             )
         } catch {
             viewModel.errorMessage = error.localizedDescription
@@ -824,6 +933,178 @@ struct BrosView: View {
         supportNoticeTitle = title
         supportNoticeMessage = message
         showingSupportNotice = true
+    }
+}
+
+private struct BroCircleManagementView: View {
+    let snapshot: BrosFeedSnapshot
+    let isBusy: Bool
+    let onCopyInviteCode: () -> Void
+    let onLeaveCircle: () -> Void
+    let onRemoveMember: (BroMemberSummary) -> Void
+    let onReportMember: (BroMemberSummary) -> Void
+    let onBlockMember: (BroMemberSummary) -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: WGJSpacing.section) {
+                if snapshot.isCurrentUserOwner {
+                    inviteSection
+                }
+
+                membersSection
+                leaveSection
+            }
+            .padding(.top, 8)
+            .padding(.horizontal, WGJSpacing.page)
+            .padding(.bottom, 28)
+        }
+        .wgjScreenBackground()
+        .navigationTitle("Manage Circle")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var inviteSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            WGJSectionHeader("Invite Code", subtitle: "Only owners can invite new bros into this circle.")
+
+            HStack(alignment: .center, spacing: 12) {
+                Text(snapshot.circle.inviteCode)
+                    .font(.title3.monospaced().weight(.bold))
+                    .foregroundStyle(WGJTheme.textPrimary)
+                    .tracking(1.4)
+                    .wgjSingleLineText(scale: 0.72)
+
+                Spacer(minLength: 12)
+
+                Button {
+                    onCopyInviteCode()
+                } label: {
+                    Label("Copy", systemImage: "doc.on.doc")
+                }
+                .buttonStyle(WGJGhostButtonStyle())
+
+                ShareLink(item: snapshot.circle.inviteCode) {
+                    Label("Share", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(WGJGhostButtonStyle())
+            }
+        }
+        .padding(WGJSpacing.card)
+        .wgjCardContainer(strong: true)
+    }
+
+    private var membersSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            WGJActionHeader("Members", subtitle: "Names shown here come from each bro's profile.") {
+                WGJMetricPill(systemImage: "person.3.sequence.fill", value: "\(snapshot.members.count)/4")
+            }
+
+            ForEach(snapshot.members) { member in
+                memberRow(member)
+            }
+        }
+        .padding(WGJSpacing.card)
+        .wgjCardContainer()
+    }
+
+    private func memberRow(_ member: BroMemberSummary) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            BroAvatarView(
+                imageData: member.avatarImageData,
+                name: resolvedDisplayName(member.displayName),
+                size: 46
+            )
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(resolvedDisplayName(member.displayName))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(WGJTheme.textPrimary)
+                    .wgjSingleLineText(scale: 0.82)
+
+                HStack(spacing: 8) {
+                    if member.id == snapshot.currentMember.id {
+                        memberBadge("You", tint: WGJTheme.accentBlue)
+                    }
+                    if member.isOwner {
+                        memberBadge("Owner", tint: WGJTheme.accentGold)
+                    } else {
+                        memberBadge("Member", tint: WGJTheme.textSecondary)
+                    }
+                }
+            }
+
+            Spacer(minLength: 12)
+
+            if member.id != snapshot.currentMember.id {
+                Menu {
+                    if snapshot.isCurrentUserOwner {
+                        Button(role: .destructive) {
+                            onRemoveMember(member)
+                        } label: {
+                            Label("Remove Member", systemImage: "person.crop.circle.badge.minus")
+                        }
+                    }
+
+                    Button {
+                        onReportMember(member)
+                    } label: {
+                        Label("Report Member", systemImage: "flag.fill")
+                    }
+
+                    Button(role: .destructive) {
+                        onBlockMember(member)
+                    } label: {
+                        Label("Block Member", systemImage: "hand.raised.fill")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(WGJIconButtonStyle())
+                .disabled(isBusy)
+            }
+        }
+        .padding(.vertical, 6)
+    }
+
+    private var leaveSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            WGJSectionHeader("Leave Circle", subtitle: "You can leave at any time.")
+
+            Button(role: .destructive) {
+                onLeaveCircle()
+            } label: {
+                Label("Leave Circle", systemImage: "rectangle.portrait.and.arrow.right")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(WGJDestructiveButtonStyle())
+            .disabled(isBusy)
+        }
+        .padding(WGJSpacing.card)
+        .wgjCardContainer()
+    }
+
+    private func memberBadge(_ title: String, tint: Color) -> some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background {
+                Capsule()
+                    .fill(tint.opacity(0.12))
+                    .overlay {
+                        Capsule()
+                            .stroke(tint.opacity(0.22), lineWidth: 1)
+                    }
+            }
+    }
+
+    private func resolvedDisplayName(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Bro" : trimmed
     }
 }
 

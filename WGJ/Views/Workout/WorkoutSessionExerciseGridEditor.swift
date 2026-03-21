@@ -17,6 +17,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     var showsInlineExerciseControls: Bool
     var showsSetProgressChip: Bool
     var manualCompletionMode: Bool
+    var enablesHeaderSwipeDelete: Bool
     var onSetDraftsChanged: (([WorkoutSessionSetDraft]) -> Void)?
     var onRestChanged: ((Int) -> Void)?
     var onSetCompletionChange: ((UUID, String, Int, Bool) -> Void)?
@@ -25,6 +26,8 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private let externalIsExpanded: Binding<Bool>?
     @State private var localIsExpanded: Bool
+    @State private var exerciseSwipeOffset: CGFloat = 0
+    @State private var exerciseSwipeRemoving = false
     @State private var setSwipeOffsets: [UUID: CGFloat] = [:]
     @State private var setSwipeRemoving: [UUID: Bool] = [:]
 
@@ -46,6 +49,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         showsInlineExerciseControls: Bool = true,
         showsSetProgressChip: Bool = true,
         manualCompletionMode: Bool = false,
+        enablesHeaderSwipeDelete: Bool = false,
         onSetDraftsChanged: (([WorkoutSessionSetDraft]) -> Void)? = nil,
         onRestChanged: ((Int) -> Void)? = nil,
         onSetCompletionChange: ((UUID, String, Int, Bool) -> Void)? = nil,
@@ -66,6 +70,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.showsInlineExerciseControls = showsInlineExerciseControls
         self.showsSetProgressChip = showsSetProgressChip
         self.manualCompletionMode = manualCompletionMode
+        self.enablesHeaderSwipeDelete = enablesHeaderSwipeDelete
         self.onSetDraftsChanged = onSetDraftsChanged
         self.onRestChanged = onRestChanged
         self.onSetCompletionChange = onSetCompletionChange
@@ -76,7 +81,7 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            header
+            headerSection
 
             if isExpanded {
                 if showsInlineExerciseControls {
@@ -95,7 +100,24 @@ struct WorkoutSessionExerciseGridEditor: View {
         }
     }
 
-    private var header: some View {
+    @ViewBuilder
+    private var headerSection: some View {
+        if enablesHeaderSwipeDelete, let onExerciseDelete {
+            SwipeDeleteRow(
+                offset: $exerciseSwipeOffset,
+                isRemoving: $exerciseSwipeRemoving,
+                gestureStrategy: .simultaneous
+            ) {
+                onExerciseDelete()
+            } content: {
+                headerContent
+            }
+        } else {
+            headerContent
+        }
+    }
+
+    private var headerContent: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 8) {
                 if let exerciseIndexTitle {

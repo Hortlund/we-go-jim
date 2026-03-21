@@ -39,7 +39,7 @@ struct ProfileView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                WGJRootHeader("Profile", subtitle: "Personalize the app and review your progress widgets.")
+                WGJRootHeader("Profile", subtitle: "Personalize the app. Your display name and avatar are shown in Bros.")
 
                 VStack(alignment: .leading, spacing: 12) {
                     avatarEditorSection
@@ -48,6 +48,10 @@ struct ProfileView: View {
                         .textInputAutocapitalization(.words)
                         .wgjPillField()
                         .accessibilityIdentifier("profile-display-name-field")
+
+                    Text(profileDisplayNameHelperText)
+                        .font(.caption)
+                        .foregroundStyle(isUsingDefaultDisplayName ? WGJTheme.accentGold : WGJTheme.textSecondary)
 
                     Button("Save Profile") {
                         saveProfile()
@@ -147,6 +151,18 @@ struct ProfileView: View {
         } message: {
             Text(errorMessage)
         }
+    }
+
+    private var isUsingDefaultDisplayName: Bool {
+        displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            .localizedCaseInsensitiveCompare("Athlete") == .orderedSame
+    }
+
+    private var profileDisplayNameHelperText: String {
+        if isUsingDefaultDisplayName {
+            return "Set this so your bro circle sees your name instead of Athlete."
+        }
+        return "This name is shown on your profile and in Bros."
     }
 
     private var widgetStateStamp: ProfileWidgetStateStamp {

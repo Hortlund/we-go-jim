@@ -77,9 +77,7 @@ struct ExercisesCatalogView: View {
         ExerciseCatalogRepository(modelContext: modelContext)
     }
 
-    private var indexRailWidth: CGFloat {
-        shouldShowIndexRail ? 28 : 0
-    }
+    private let indexRailWidth: CGFloat = 28
 
     private var syncStateStamp: TimeInterval {
         syncStates.first?.lastSuccessfulSyncAt?.timeIntervalSinceReferenceDate ?? 0
@@ -92,22 +90,21 @@ struct ExercisesCatalogView: View {
         )
     }
 
-    private var filterState: ExercisesCatalogFilterState {
-        ExercisesCatalogFilterState(
-            query: debouncedQuery,
-            selectedPrimaryMuscleID: selectedPrimaryMuscleID,
-            selectedCategory: selectedCategory,
-            sortDescending: sortDescending
-        )
+    private var contentTrailingPadding: CGFloat {
+        reservesIndexRailSpace ? indexRailWidth + 24 : 24
     }
 
     private var shouldUseCompactFilterLayout: Bool {
         horizontalSizeClass != .regular
     }
 
+    private var reservesIndexRailSpace: Bool {
+        viewModel.totalSectionCount > 6
+    }
+
     private var shouldShowIndexRail: Bool {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !isSearchFieldFocused && trimmedQuery.isEmpty && viewModel.sections.count > 6
+        return reservesIndexRailSpace && !isSearchFieldFocused && trimmedQuery.isEmpty
     }
 
     var body: some View {
@@ -153,12 +150,12 @@ struct ExercisesCatalogView: View {
                     }
                     .padding(.top, isPickerMode ? 10 : 14)
                     .padding(16)
-                    .padding(.trailing, indexRailWidth + 24)
+                    .padding(.trailing, contentTrailingPadding)
                 }
                 .scrollDismissesKeyboard(.interactively)
                 .wgjScreenBackground()
 
-                if shouldShowIndexRail {
+                if reservesIndexRailSpace {
                     VStack(spacing: 4) {
                         ForEach(viewModel.sections) { section in
                             Button(section.title) {
@@ -182,9 +179,22 @@ struct ExercisesCatalogView: View {
                             )
                     )
                     .padding(.trailing, 2)
+                    .opacity(shouldShowIndexRail ? 1 : 0)
+                    .allowsHitTesting(shouldShowIndexRail)
                 }
             }
-            .onChange(of: filterState) { _, _ in
+            .onChange(of: debouncedQuery) { _, _ in
+                recomputeSections()
+            }
+            .onChange(of: selectedPrimaryMuscleID) { _, _ in
+                recomputeSections()
+                scrollToTop(using: proxy)
+            }
+            .onChange(of: selectedCategory) { _, _ in
+                recomputeSections()
+                scrollToTop(using: proxy)
+            }
+            .onChange(of: sortDescending) { _, _ in
                 recomputeSections()
                 scrollToTop(using: proxy)
             }
@@ -455,7 +465,6 @@ struct ExercisesCatalogView: View {
             try? await Task.sleep(for: .milliseconds(140))
             guard !Task.isCancelled else { return }
             debouncedQuery = value
-            recomputeSections()
         }
     }
 
@@ -585,6 +594,7 @@ final class ExercisesCatalogViewModel {
     private(set) var availableMuscles: [(id: Int, name: String)] = []
     private(set) var availableCategories: [String] = []
     private(set) var sections: [ExercisesSectionSnapshot] = []
+    private(set) var totalSectionCount = 0
 
     private var allRows: [ExerciseCatalogRowSnapshot] = []
 
@@ -626,6 +636,7 @@ final class ExercisesCatalogViewModel {
         }
 
         allRows = rows
+        totalSectionCount = Set(rows.map(\.indexKey)).count
         availableMuscles = muscleNameByID
             .map { ($0.key, $0.value) }
             .sorted { $0.1.localizedStandardCompare($1.1) == .orderedAscending }
@@ -705,13 +716,6 @@ struct ExercisesCatalogDataStamp: Hashable {
             .max() ?? 0
         self.syncStateStamp = syncStateStamp
     }
-}
-
-struct ExercisesCatalogFilterState: Hashable {
-    let query: String
-    let selectedPrimaryMuscleID: Int?
-    let selectedCategory: String?
-    let sortDescending: Bool
 }
 
 struct ExerciseDetailDestinationView: View {

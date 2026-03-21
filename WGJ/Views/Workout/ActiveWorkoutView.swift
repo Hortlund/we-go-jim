@@ -35,8 +35,6 @@ struct ActiveWorkoutView: View {
     @State private var loadedExerciseIDs: [UUID] = []
     @State private var catalogByUUID: [String: ExerciseCatalogItem] = [:]
     @State private var cardStateController = ActiveWorkoutExerciseCardStateController()
-    @State private var exerciseSwipeOffsets: [UUID: CGFloat] = [:]
-    @State private var exerciseSwipeRemoving: [UUID: Bool] = [:]
 
     @State private var sessionNameDraft = ""
     @State private var notesDraft = ""
@@ -240,7 +238,7 @@ struct ActiveWorkoutView: View {
             } else {
                 WGJActionHeader(
                     "Exercises",
-                    subtitle: "Swipe the top of a card to delete an exercise, or swipe a set row to delete a set."
+                    subtitle: "Swipe the exercise header to delete an exercise, or swipe a set row to delete a set."
                 ) {
                     Button {
                         showingExercisePicker = true
@@ -434,60 +432,52 @@ struct ActiveWorkoutView: View {
     }
 
     private func exerciseSection(_ exercise: WorkoutSessionExercise, index: Int) -> some View {
-        SwipeDeleteRow(
-            offset: exerciseSwipeOffsetBinding(for: exercise.id),
-            isRemoving: exerciseRemovingBinding(for: exercise.id),
-            activeRegionMaxY: 104,
-            gestureStrategy: .simultaneous
-        ) {
-            removeExercise(exerciseID: exercise.id)
-        } content: {
-            WorkoutSessionExerciseGridEditor(
-                exerciseName: exercise.exerciseNameSnapshot,
-                muscleSummary: exercise.muscleSummarySnapshot,
-                category: exercise.categorySnapshot,
-                exerciseIndexTitle: "Exercise \(index + 1)",
-                targetRepMin: exercise.targetRepMin,
-                targetRepMax: exercise.targetRepMax,
-                previousBySetIndex: previousByExerciseID[exercise.id] ?? [:],
-                overloadFeedback: overloadFeedback(for: exercise),
-                restSeconds: restBinding(for: exercise),
-                setDrafts: setDraftsBinding(for: exercise),
-                isExpanded: expansionBinding(for: exercise.id),
-                showsInlineExerciseControls: false,
-                showsSetProgressChip: false,
-                manualCompletionMode: true,
-                onSetDraftsChanged: { drafts in
-                    setDraftsByExerciseID[exercise.id] = drafts
-                    cardStateController.updateCompletion(
-                        for: exercise.id,
-                        isCompleted: isExerciseCompleted(drafts)
+        WorkoutSessionExerciseGridEditor(
+            exerciseName: exercise.exerciseNameSnapshot,
+            muscleSummary: exercise.muscleSummarySnapshot,
+            category: exercise.categorySnapshot,
+            exerciseIndexTitle: "Exercise \(index + 1)",
+            targetRepMin: exercise.targetRepMin,
+            targetRepMax: exercise.targetRepMax,
+            previousBySetIndex: previousByExerciseID[exercise.id] ?? [:],
+            overloadFeedback: overloadFeedback(for: exercise),
+            restSeconds: restBinding(for: exercise),
+            setDrafts: setDraftsBinding(for: exercise),
+            isExpanded: expansionBinding(for: exercise.id),
+            showsInlineExerciseControls: false,
+            showsSetProgressChip: false,
+            manualCompletionMode: true,
+            enablesHeaderSwipeDelete: true,
+            onSetDraftsChanged: { drafts in
+                setDraftsByExerciseID[exercise.id] = drafts
+                cardStateController.updateCompletion(
+                    for: exercise.id,
+                    isCompleted: isExerciseCompleted(drafts)
+                )
+                persistDrafts(sessionExerciseID: exercise.id, drafts: drafts)
+            },
+            onRestChanged: { rest in
+                persistRest(sessionExerciseID: exercise.id, restSeconds: rest)
+            },
+            onSetCompletionChange: { setID, setLabel, restSeconds, isCompleted in
+                if isCompleted {
+                    coordinator.startRestTimer(
+                        seconds: restSeconds,
+                        exerciseName: exercise.exerciseNameSnapshot,
+                        setLabel: setLabel,
+                        sourceSetID: setID
                     )
-                    persistDrafts(sessionExerciseID: exercise.id, drafts: drafts)
-                },
-                onRestChanged: { rest in
-                    persistRest(sessionExerciseID: exercise.id, restSeconds: rest)
-                },
-                onSetCompletionChange: { setID, setLabel, restSeconds, isCompleted in
-                    if isCompleted {
-                        coordinator.startRestTimer(
-                            seconds: restSeconds,
-                            exerciseName: exercise.exerciseNameSnapshot,
-                            setLabel: setLabel,
-                            sourceSetID: setID
-                        )
-                    } else {
-                        coordinator.clearRestTimer(sourceSetID: setID)
-                    }
-                },
-                onExerciseSettings: {
-                    showExerciseSettings(for: exercise)
-                },
-                onExerciseDelete: {
-                    removeExercise(exerciseID: exercise.id)
+                } else {
+                    coordinator.clearRestTimer(sourceSetID: setID)
                 }
-            )
-        }
+            },
+            onExerciseSettings: {
+                showExerciseSettings(for: exercise)
+            },
+            onExerciseDelete: {
+                removeExercise(exerciseID: exercise.id)
+            }
+        )
     }
 
     @MainActor
@@ -596,8 +586,6 @@ struct ActiveWorkoutView: View {
                 restByExerciseID.removeValue(forKey: exerciseID)
                 lastPersistedRestByExerciseID.removeValue(forKey: exerciseID)
                 previousByExerciseID.removeValue(forKey: exerciseID)
-                exerciseSwipeOffsets.removeValue(forKey: exerciseID)
-                exerciseSwipeRemoving.removeValue(forKey: exerciseID)
                 loadedExerciseIDs = []
             } catch {
                 capturedError = error
@@ -612,13 +600,6 @@ struct ActiveWorkoutView: View {
         if let capturedError {
             showError(capturedError)
         }
-    }
-
-    private func exerciseSwipeOffsetBinding(for exerciseID: UUID) -> Binding<CGFloat> {
-        Binding(
-            get: { exerciseSwipeOffsets[exerciseID] ?? 0 },
-            set: { exerciseSwipeOffsets[exerciseID] = $0 }
-        )
     }
 
     private var templateUpdatePromptBinding: Binding<Bool> {
@@ -680,13 +661,6 @@ struct ActiveWorkoutView: View {
             }
         }
         return nil
-    }
-
-    private func exerciseRemovingBinding(for exerciseID: UUID) -> Binding<Bool> {
-        Binding(
-            get: { exerciseSwipeRemoving[exerciseID] ?? false },
-            set: { exerciseSwipeRemoving[exerciseID] = $0 }
-        )
     }
 
     private var exerciseCardTransition: AnyTransition {
