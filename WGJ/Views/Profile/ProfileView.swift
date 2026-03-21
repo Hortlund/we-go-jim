@@ -119,6 +119,7 @@ struct ProfileView: View {
             .padding(.top, 8)
             .padding(16)
         }
+        .scrollDismissesKeyboard(.interactively)
         .wgjScreenBackground()
         .toolbar(.hidden, for: .navigationBar)
         .task {

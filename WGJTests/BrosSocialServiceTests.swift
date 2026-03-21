@@ -1,3 +1,4 @@
+import CloudKit
 import Foundation
 import Testing
 @testable import WGJ
@@ -64,6 +65,42 @@ struct BrosSocialServiceTests {
         #expect(nextOwner?.id == "second")
         #expect(BrosSocialRules.hasCapacity(currentMemberCount: 3, limit: 4))
         #expect(!BrosSocialRules.hasCapacity(currentMemberCount: 4, limit: 4))
+    }
+
+    @Test
+    func missingSchemaQueryErrorsBecomeEmptyState() {
+        let error = NSError(
+            domain: CKError.errorDomain,
+            code: CKError.serverRejectedRequest.rawValue,
+            userInfo: [
+                NSLocalizedDescriptionKey: "Service record type 'BroMembership' is not queryable."
+            ]
+        )
+
+        #expect(
+            CloudKitBrosSocialService.shouldTreatAsEmptyQueryResult(
+                error,
+                recordType: "BroMembership"
+            )
+        )
+    }
+
+    @Test
+    func genericCloudKitErrorsStillSurface() {
+        let error = NSError(
+            domain: CKError.errorDomain,
+            code: CKError.networkUnavailable.rawValue,
+            userInfo: [
+                NSLocalizedDescriptionKey: "The network connection appears to be offline."
+            ]
+        )
+
+        #expect(
+            !CloudKitBrosSocialService.shouldTreatAsEmptyQueryResult(
+                error,
+                recordType: "BroMembership"
+            )
+        )
     }
 
     private func makeEvent(id: String, createdAt: Date) -> BroFeedEvent {

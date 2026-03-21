@@ -1,9 +1,11 @@
 import SwiftUI
 import SwiftData
+import UIKit
 
 struct MainTabView: View {
     @Environment(ActiveWorkoutCoordinator.self) private var coordinator
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isKeyboardVisible = false
 
     var body: some View {
         @Bindable var coordinator = coordinator
@@ -56,16 +58,22 @@ struct MainTabView: View {
                 .tint(WGJTheme.accentBlue)
                 .wgjTabChrome()
 
-                if let activeSessionID = coordinator.activeSessionID, coordinator.isActiveWorkoutStripCollapsed {
+                if let activeSessionID = coordinator.activeSessionID,
+                   coordinator.isActiveWorkoutStripCollapsed,
+                   !isKeyboardVisible
+                {
                     ActiveWorkoutStripView(sessionID: activeSessionID) {
                         coordinator.present(sessionID: activeSessionID)
                     }
-                    .padding(.bottom, tabBarLift(bottomSafeAreaInset: bottomSafeAreaInset))
+                    .padding(.bottom, activeWorkoutStripBottomLift(bottomSafeAreaInset: bottomSafeAreaInset))
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .accessibilityIdentifier("active-workout-strip")
                 }
 
-                if let popup = coordinator.restTimerPopup, !coordinator.isActiveWorkoutPresented {
+                if let popup = coordinator.restTimerPopup,
+                   !coordinator.isActiveWorkoutPresented,
+                   !isKeyboardVisible
+                {
                     WGJTransientBanner(
                         title: popup.title,
                         message: popup.message,
@@ -84,6 +92,7 @@ struct MainTabView: View {
             .wgjScreenBackground()
             .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: coordinator.isActiveWorkoutStripCollapsed)
             .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: coordinator.restTimerPopup?.id)
+            .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: isKeyboardVisible)
             .sheet(isPresented: Binding(
                 get: {
                     coordinator.isActiveWorkoutPresented && coordinator.activeSessionID != nil
@@ -111,18 +120,34 @@ struct MainTabView: View {
                     coordinator.isActiveWorkoutStripCollapsed = true
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
+                isKeyboardVisible = keyboardIsVisible(from: notification)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+                isKeyboardVisible = false
+            }
         }
     }
 
-    private func tabBarLift(bottomSafeAreaInset: CGFloat) -> CGFloat {
-        bottomSafeAreaInset + 57
+    private func activeWorkoutStripBottomLift(bottomSafeAreaInset: CGFloat) -> CGFloat {
+        bottomSafeAreaInset + 45
     }
 
     private func popupBottomLift(bottomSafeAreaInset: CGFloat) -> CGFloat {
         if coordinator.isActiveWorkoutStripCollapsed {
-            return tabBarLift(bottomSafeAreaInset: bottomSafeAreaInset) + 82
+            return activeWorkoutStripBottomLift(bottomSafeAreaInset: bottomSafeAreaInset) + 82
         }
         return bottomSafeAreaInset + 72
+    }
+
+    private func keyboardIsVisible(from notification: Notification) -> Bool {
+        guard
+            let endFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
+        else {
+            return false
+        }
+
+        return endFrame.minY < UIScreen.main.bounds.height
     }
 }
 

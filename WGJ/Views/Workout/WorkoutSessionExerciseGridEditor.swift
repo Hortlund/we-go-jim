@@ -287,7 +287,8 @@ struct WorkoutSessionExerciseGridEditor: View {
             ForEach(Array(setDrafts.enumerated()), id: \.element.id) { index, draft in
                 SwipeDeleteRow(
                     offset: setSwipeOffsetBinding(for: draft.id),
-                    isRemoving: setRemovingBinding(for: draft.id)
+                    isRemoving: setRemovingBinding(for: draft.id),
+                    gestureStrategy: .simultaneous
                 ) {
                     removeSet(withID: draft.id)
                 } content: {
@@ -867,10 +868,14 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func clearLoggedValues(at index: Int) {
         guard setDrafts.indices.contains(index) else { return }
+        let set = setDrafts[index]
         setDrafts[index].actualReps = nil
         setDrafts[index].actualWeight = nil
         setDrafts[index].isCompleted = false
         notifyChanged()
+        if set.isCompleted {
+            onSetCompletionChange?(set.id, setTitle(for: index), set.restSeconds, false)
+        }
     }
 
     private func previousText(for index: Int) -> String {
@@ -982,11 +987,14 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func updateRest(_ seconds: Int) {
+        let previousDefaultRest = restSeconds
         let normalized = max(0, min(3600, seconds))
         restSeconds = normalized
 
         for index in setDrafts.indices {
-            setDrafts[index].restSeconds = normalized
+            if setDrafts[index].restSeconds == previousDefaultRest {
+                setDrafts[index].restSeconds = normalized
+            }
         }
 
         onRestChanged?(normalized)
@@ -1031,7 +1039,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                         .frame(maxWidth: .infinity)
                         .wgjSingleLineText(scale: 0.82)
                 }
-                .buttonStyle(WGJPrimaryButtonStyle())
+                .buttonStyle(WGJCompactPrimaryButtonStyle())
             }
         }
     }

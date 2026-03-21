@@ -9,6 +9,7 @@ enum ExercisesCatalogMode {
 
 struct ExercisesCatalogView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(ActiveWorkoutCoordinator.self) private var coordinator
 
     @Query(sort: [SortDescriptor(\ExerciseCatalogItem.displayName, order: .forward)])
@@ -39,6 +40,9 @@ struct ExercisesCatalogView: View {
 
     @State private var errorMessage = ""
     @State private var showingError = false
+    @FocusState private var isSearchFieldFocused: Bool
+
+    private let topAnchorID = "exercises-catalog-top"
 
     private enum CatalogLoadState {
         case idle
@@ -74,7 +78,7 @@ struct ExercisesCatalogView: View {
     }
 
     private var indexRailWidth: CGFloat {
-        viewModel.sections.isEmpty ? 0 : 28
+        shouldShowIndexRail ? 28 : 0
     }
 
     private var syncStateStamp: TimeInterval {
@@ -97,11 +101,24 @@ struct ExercisesCatalogView: View {
         )
     }
 
+    private var shouldUseCompactFilterLayout: Bool {
+        horizontalSizeClass != .regular
+    }
+
+    private var shouldShowIndexRail: Bool {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !isSearchFieldFocused && trimmedQuery.isEmpty && viewModel.sections.count > 6
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
             ZStack(alignment: .trailing) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
+                        Color.clear
+                            .frame(height: 0)
+                            .id(topAnchorID)
+
                         if !isPickerMode {
                             WGJRootHeader("Exercises", subtitle: "Search, filter, and add movements to a workout.")
                         }
@@ -141,7 +158,7 @@ struct ExercisesCatalogView: View {
                 .scrollDismissesKeyboard(.interactively)
                 .wgjScreenBackground()
 
-                if !viewModel.sections.isEmpty {
+                if shouldShowIndexRail {
                     VStack(spacing: 4) {
                         ForEach(viewModel.sections) { section in
                             Button(section.title) {
@@ -166,6 +183,10 @@ struct ExercisesCatalogView: View {
                     )
                     .padding(.trailing, 2)
                 }
+            }
+            .onChange(of: filterState) { _, _ in
+                recomputeSections()
+                scrollToTop(using: proxy)
             }
         }
         .confirmationDialog(
@@ -208,9 +229,6 @@ struct ExercisesCatalogView: View {
         .task(id: catalogDataStamp) {
             rebuildCatalogCache()
         }
-        .onChange(of: filterState) { _, _ in
-            recomputeSections()
-        }
         .onChange(of: query) { _, newValue in
             debounceQuery(newValue)
         }
@@ -229,27 +247,31 @@ struct ExercisesCatalogView: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .foregroundStyle(WGJTheme.textPrimary)
+                .focused($isSearchFieldFocused)
                 .accessibilityIdentifier("exercises-search-field")
         }
         .wgjPillField()
     }
 
     private var filterRow: some View {
-        ViewThatFits(in: .horizontal) {
+        Group {
+            if shouldUseCompactFilterLayout {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        bodyPartFilter
+                        categoryFilter
+                    }
+                    HStack {
+                        Spacer(minLength: 0)
+                        sortButton
+                    }
+                }
+            } else {
             HStack(spacing: 8) {
                 bodyPartFilter
                 categoryFilter
                 sortButton
             }
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    bodyPartFilter
-                    categoryFilter
-                }
-                HStack {
-                    Spacer(minLength: 0)
-                    sortButton
-                }
             }
         }
     }
@@ -471,14 +493,33 @@ struct ExercisesCatalogView: View {
 
     private func startSessionAndAddPendingExercise() {
         guard let pendingExerciseForAdd else { return }
+        self.pendingExerciseForAdd = nil
+
+        var createdSessionID: UUID?
         do {
+            if let activeSession = try workoutRepository.activeSession() {
+                try workoutRepository.addExercise(sessionID: activeSession.id, catalogItem: pendingExerciseForAdd)
+                coordinator.present(sessionID: activeSession.id)
+                coordinator.selectedTab = .startWorkout
+                return
+            }
+
             let created = try workoutRepository.createEmptySession()
-            coordinator.present(sessionID: created.id)
+            createdSessionID = created.id
             try workoutRepository.addExercise(sessionID: created.id, catalogItem: pendingExerciseForAdd)
+            coordinator.present(sessionID: created.id)
             coordinator.selectedTab = .startWorkout
-            self.pendingExerciseForAdd = nil
         } catch {
+            if let createdSessionID {
+                try? workoutRepository.cancelSession(sessionID: createdSessionID)
+            }
             showError(error)
+        }
+    }
+
+    private func scrollToTop(using proxy: ScrollViewProxy) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            proxy.scrollTo(topAnchorID, anchor: .top)
         }
     }
 
@@ -601,14 +642,20 @@ final class ExercisesCatalogViewModel {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
         var filtered = allRows
+        let queryTokens = trimmed
+            .split(whereSeparator: \.isWhitespace)
+            .map(String.init)
+
         if let selectedPrimaryMuscleID {
             filtered = filtered.filter { $0.primaryMuscleIDs.contains(selectedPrimaryMuscleID) }
         }
         if let selectedCategory {
             filtered = filtered.filter { $0.categoryName == selectedCategory }
         }
-        if !trimmed.isEmpty {
-            filtered = filtered.filter { $0.searchBlob.contains(trimmed) }
+        if !queryTokens.isEmpty {
+            filtered = filtered.filter { row in
+                queryTokens.allSatisfy { row.searchBlob.contains($0) }
+            }
         }
 
         filtered.sort { lhs, rhs in
@@ -618,7 +665,8 @@ final class ExercisesCatalogViewModel {
 
         let grouped = Dictionary(grouping: filtered, by: \.indexKey)
         let sortedKeys = grouped.keys.sorted { lhs, rhs in
-            lhs.localizedStandardCompare(rhs) == .orderedAscending
+            let order = lhs.localizedStandardCompare(rhs)
+            return sortDescending ? order == .orderedDescending : order == .orderedAscending
         }
 
         sections = sortedKeys.map { key in
@@ -1124,6 +1172,7 @@ private struct ExerciseCatalogThumbnail: View {
     var placeholderPadding: CGFloat = 12
 
     @State private var image: UIImage?
+    @State private var currentRemoteUUID = ""
 
     var body: some View {
         Group {
@@ -1141,7 +1190,13 @@ private struct ExerciseCatalogThumbnail: View {
         }
         .clipped()
         .task(id: exercise.remoteUUID) {
-            image = await repository.image(for: exercise)
+            let remoteUUID = exercise.remoteUUID
+            currentRemoteUUID = remoteUUID
+            image = nil
+
+            let loadedImage = await repository.image(for: exercise)
+            guard !Task.isCancelled, currentRemoteUUID == remoteUUID else { return }
+            image = loadedImage
         }
     }
 }

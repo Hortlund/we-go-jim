@@ -265,6 +265,24 @@ struct WGJPrimaryButtonStyle: ButtonStyle {
     }
 }
 
+struct WGJCompactPrimaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(WGJTheme.textInverse)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .allowsTightening(true)
+            .frame(minHeight: 40)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .background(
+                WGJGlassButtonBackground(tone: .primary, isPressed: configuration.isPressed)
+            )
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+    }
+}
+
 struct WGJGhostButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label

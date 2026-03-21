@@ -82,10 +82,10 @@ struct HistoryDetailView: View {
                         .transition(exerciseCardTransition)
                 }
 
-                addExerciseButton(
-                    title: sessionExercises.isEmpty ? "Add your first exercise" : "Add another exercise"
-                )
-                .disabled(session == nil)
+                if !sessionExercises.isEmpty {
+                    addExerciseButton(title: "Add another exercise")
+                        .disabled(session == nil)
+                }
 
                 Button("Save Changes") {
                     saveChanges()
@@ -96,6 +96,7 @@ struct HistoryDetailView: View {
             .padding(WGJSpacing.page)
             .animation(WGJMotion.cardAnimation(reduceMotion: reduceMotion), value: sessionExercises.map(\.id))
         }
+        .scrollDismissesKeyboard(.interactively)
         .wgjScreenBackground()
         .wgjNavigationChrome()
         .navigationTitle("Workout")
@@ -138,19 +139,26 @@ struct HistoryDetailView: View {
     }
 
     private var exercisesSectionHeader: some View {
-        WGJActionHeader(
-            "Exercises",
-            subtitle: sessionExercises.isEmpty
-                ? "Add exercises and update the logged sets below."
-                : "Swipe from the top of a card to delete, or use the card menu."
-        ) {
-            Button {
-                showingExercisePicker = true
-            } label: {
-                Label("Add", systemImage: "plus")
+        Group {
+            if sessionExercises.isEmpty {
+                WGJActionHeader(
+                    "Exercises",
+                    subtitle: "Add exercises and update the logged sets below."
+                )
+            } else {
+                WGJActionHeader(
+                    "Exercises",
+                    subtitle: "Swipe from the top of a card to delete, or use the card menu."
+                ) {
+                    Button {
+                        showingExercisePicker = true
+                    } label: {
+                        Label("Add", systemImage: "plus")
+                    }
+                    .buttonStyle(WGJPrimaryButtonStyle())
+                    .disabled(session == nil)
+                }
             }
-            .buttonStyle(WGJPrimaryButtonStyle())
-            .disabled(session == nil)
         }
     }
 

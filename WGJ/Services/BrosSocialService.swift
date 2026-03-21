@@ -314,6 +314,33 @@ final class CloudKitBrosSocialService: BrosSocialService {
     private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
 
+    nonisolated static func shouldTreatAsEmptyQueryResult(_ error: Error, recordType: String) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == CKError.errorDomain,
+           nsError.code == CKError.unknownItem.rawValue
+        {
+            return true
+        }
+
+        let message = flattenedErrorText(error).joined(separator: " ").lowercased()
+        let normalizedRecordType = recordType.lowercased()
+        guard message.contains(normalizedRecordType) else {
+            return false
+        }
+
+        let schemaSignals = [
+            "record type",
+            "service record type",
+            "queryable",
+            "not marked queryable",
+            "does not exist",
+            "not found",
+            "unknown item",
+        ]
+
+        return schemaSignals.contains { message.contains($0) }
+    }
+
     static func makeIfAvailable(modelContext: ModelContext) -> CloudKitBrosSocialService? {
         guard AppRuntimeState.shared.isBrosCloudAvailable else {
             return nil
@@ -924,34 +951,45 @@ final class CloudKitBrosSocialService: BrosSocialService {
         sortDescriptors: [NSSortDescriptor] = [],
         resultsLimit: Int = CKQueryOperation.maximumResults
     ) async throws -> [CKRecord] {
-        let query = CKQuery(recordType: recordType, predicate: predicate)
-        query.sortDescriptors = sortDescriptors
+        do {
+            let query = CKQuery(recordType: recordType, predicate: predicate)
+            query.sortDescriptors = sortDescriptors
 
-        var fetched: [CKRecord] = []
-        var cursor: CKQueryOperation.Cursor?
+            var fetched: [CKRecord] = []
+            var cursor: CKQueryOperation.Cursor?
 
-        repeat {
-            let result: (matchResults: [(CKRecord.ID, Result<CKRecord, any Error>)], queryCursor: CKQueryOperation.Cursor?)
-            if let cursor {
-                result = try await database.records(
-                    continuingMatchFrom: cursor,
-                    resultsLimit: resultsLimit
-                )
-            } else {
-                result = try await database.records(
-                    matching: query,
-                    resultsLimit: resultsLimit
-                )
+            repeat {
+                let result: (matchResults: [(CKRecord.ID, Result<CKRecord, any Error>)], queryCursor: CKQueryOperation.Cursor?)
+                if let cursor {
+                    result = try await database.records(
+                        continuingMatchFrom: cursor,
+                        resultsLimit: resultsLimit
+                    )
+                } else {
+                    result = try await database.records(
+                        matching: query,
+                        resultsLimit: resultsLimit
+                    )
+                }
+
+                for (_, recordResult) in result.matchResults {
+                    fetched.append(try recordResult.get())
+                }
+
+                cursor = result.queryCursor
+            } while cursor != nil
+
+            return fetched
+        } catch {
+            guard Self.shouldTreatAsEmptyQueryResult(error, recordType: recordType) else {
+                throw error
             }
 
-            for (_, recordResult) in result.matchResults {
-                fetched.append(try recordResult.get())
-            }
-
-            cursor = result.queryCursor
-        } while cursor != nil
-
-        return fetched
+#if DEBUG
+            print("Treating CloudKit schema error for \(recordType) as empty query result: \(error)")
+#endif
+            return []
+        }
     }
 
     private func fetchRecord(recordType: String, recordName: String) async throws -> CKRecord? {
@@ -1322,6 +1360,23 @@ final class CloudKitBrosSocialService: BrosSocialService {
         }
         profile.clearBrosMembership()
         try modelContext.save()
+    }
+
+    nonisolated private static func flattenedErrorText(_ value: Any) -> [String] {
+        switch value {
+        case let error as NSError:
+            return [error.localizedDescription] + error.userInfo.values.flatMap(flattenedErrorText)
+        case let error as any Error:
+            return flattenedErrorText(error as NSError)
+        case let dictionary as [AnyHashable: Any]:
+            return dictionary.values.flatMap(flattenedErrorText)
+        case let array as [Any]:
+            return array.flatMap(flattenedErrorText)
+        case let string as String:
+            return [string]
+        default:
+            return [String(describing: value)]
+        }
     }
 }
 

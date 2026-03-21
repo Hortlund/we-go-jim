@@ -30,6 +30,8 @@ struct StartWorkoutHomeView: View {
     @State private var editingFolderID: UUID?
     @State private var folderNameDraft = ""
     @State private var lastCompletedByTemplateID: [UUID: Date] = [:]
+    @State private var conflictingActiveSessionID: UUID?
+    @State private var showingActiveWorkoutConflict = false
 
     @State private var errorMessage = ""
     @State private var showingError = false
@@ -51,7 +53,7 @@ struct StartWorkoutHomeView: View {
                     WGJActionHeader("Quick Start", subtitle: "Start logging with one tap.")
 
                     Button {
-                        startEmptyWorkout()
+                        requestStartEmptyWorkout()
                     } label: {
                         Label("Start an Empty Workout", systemImage: "play.circle.fill")
                             .frame(maxWidth: .infinity)
@@ -101,7 +103,7 @@ struct StartWorkoutHomeView: View {
             TemplateStartPreviewSheet(
                 template: template,
                 onStart: {
-                    startFromTemplate(templateID: template.id)
+                    requestStartFromTemplate(templateID: template.id)
                 },
                 onEdit: {
                     templateEditorContext = StartWorkoutTemplateEditorContext(
@@ -128,6 +130,16 @@ struct StartWorkoutHomeView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(errorMessage)
+        }
+        .alert("Workout already in progress", isPresented: $showingActiveWorkoutConflict) {
+            Button("Resume Current Workout") {
+                resumeConflictingActiveWorkout()
+            }
+            Button("Stay Here", role: .cancel) {
+                clearActiveWorkoutConflict()
+            }
+        } message: {
+            Text("Finish or cancel the current workout before starting a new one.")
         }
         .task {
             bootstrapActiveSessionIfNeeded()
@@ -271,8 +283,22 @@ struct StartWorkoutHomeView: View {
         .buttonStyle(.plain)
     }
 
+    private func requestStartEmptyWorkout() {
+        guard let activeSessionID = activeSessionIDToResume() else {
+            startEmptyWorkout()
+            return
+        }
+
+        presentActiveWorkoutConflict(for: activeSessionID)
+    }
+
     private func startEmptyWorkout() {
         do {
+            if let activeSession = try workoutRepository.activeSession() {
+                coordinator.present(sessionID: activeSession.id)
+                return
+            }
+
             let session = try workoutRepository.createEmptySession()
             coordinator.present(sessionID: session.id)
         } catch {
@@ -280,8 +306,24 @@ struct StartWorkoutHomeView: View {
         }
     }
 
+    private func requestStartFromTemplate(templateID: UUID) {
+        guard let activeSessionID = activeSessionIDToResume() else {
+            startFromTemplate(templateID: templateID)
+            return
+        }
+
+        selectedTemplateForPreview = nil
+        presentActiveWorkoutConflict(for: activeSessionID)
+    }
+
     private func startFromTemplate(templateID: UUID) {
         do {
+            if let activeSession = try workoutRepository.activeSession() {
+                coordinator.present(sessionID: activeSession.id)
+                selectedTemplateForPreview = nil
+                return
+            }
+
             let session = try workoutRepository.createSessionFromTemplate(templateID: templateID)
             coordinator.present(sessionID: session.id)
             selectedTemplateForPreview = nil
@@ -356,6 +398,34 @@ struct StartWorkoutHomeView: View {
 
     private func bootstrapActiveSessionIfNeeded() {
         coordinator.restoreActiveSessionIfNeeded(modelContext: modelContext)
+    }
+
+    private func activeSessionIDToResume() -> UUID? {
+        if let activeSessionID = coordinator.activeSessionID {
+            return activeSessionID
+        }
+
+        if let activeSession = try? workoutRepository.activeSession() {
+            return activeSession.id
+        }
+
+        return nil
+    }
+
+    private func presentActiveWorkoutConflict(for sessionID: UUID) {
+        conflictingActiveSessionID = sessionID
+        showingActiveWorkoutConflict = true
+    }
+
+    private func resumeConflictingActiveWorkout() {
+        guard let conflictingActiveSessionID else { return }
+        coordinator.present(sessionID: conflictingActiveSessionID)
+        clearActiveWorkoutConflict()
+    }
+
+    private func clearActiveWorkoutConflict() {
+        conflictingActiveSessionID = nil
+        showingActiveWorkoutConflict = false
     }
 
     private func showError(_ error: Error) {

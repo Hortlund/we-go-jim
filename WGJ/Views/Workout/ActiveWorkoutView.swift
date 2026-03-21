@@ -123,10 +123,10 @@ struct ActiveWorkoutView: View {
                         .transition(exerciseCardTransition)
                 }
 
-                addExerciseButton(
-                    title: sessionExercises.isEmpty ? "Add your first exercise" : "Add another exercise"
-                )
-                .disabled(session == nil)
+                if !sessionExercises.isEmpty {
+                    addExerciseButton(title: "Add another exercise")
+                        .disabled(session == nil)
+                }
             }
             .padding(16)
             .animation(WGJMotion.cardAnimation(reduceMotion: reduceMotion), value: sessionExercises.map(\.id))
@@ -151,13 +151,7 @@ struct ActiveWorkoutView: View {
             }
 
             ToolbarItemGroup(placement: .topBarTrailing) {
-                Button("Finish") {
-                    dismissKeyboard()
-                    isCancelArmed = false
-                    showingFinishConfirmation = true
-                }
-                .disabled(session == nil || sessionExercises.isEmpty)
-                .accessibilityIdentifier("active-workout-finish-button")
+                finishToolbarButton
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -199,6 +193,7 @@ struct ActiveWorkoutView: View {
                 onSkip: finalizeCompletion,
                 onSave: saveSessionAsTemplate
             )
+            .interactiveDismissDisabled()
         }
         .task {
             await bootstrapIfNeeded()
@@ -218,14 +213,6 @@ struct ActiveWorkoutView: View {
         } message: {
             Text(errorMessage)
         }
-        .confirmationDialog("Finish Workout?", isPresented: $showingFinishConfirmation, titleVisibility: .visible) {
-            Button("Finish and Save") {
-                finishWorkout()
-            }
-            Button("Not yet", role: .cancel) { }
-        } message: {
-            Text("This will close the active workout and add it to your history.")
-        }
         .alert("Update Template?", isPresented: templateUpdatePromptBinding, presenting: pendingTemplateUpdatePreview) { preview in
             Button("Update Template") {
                 applyTemplateUpdate(preview)
@@ -244,19 +231,41 @@ struct ActiveWorkoutView: View {
     }
 
     private var exercisesSectionHeader: some View {
-        WGJActionHeader(
-            "Exercises",
-            subtitle: sessionExercises.isEmpty
-                ? "Add exercises and log each set inline."
-                : "Swipe from the top of a card to delete, or use the card menu."
-        ) {
-            Button {
-                showingExercisePicker = true
-            } label: {
-                Label("Add", systemImage: "plus")
+        Group {
+            if sessionExercises.isEmpty {
+                WGJActionHeader(
+                    "Exercises",
+                    subtitle: "Add exercises and log each set inline."
+                )
+            } else {
+                WGJActionHeader(
+                    "Exercises",
+                    subtitle: "Swipe the top of a card to delete an exercise, or swipe a set row to delete a set."
+                ) {
+                    Button {
+                        showingExercisePicker = true
+                    } label: {
+                        Label("Add", systemImage: "plus")
+                    }
+                    .buttonStyle(WGJPrimaryButtonStyle())
+                    .disabled(session == nil)
+                }
             }
-            .buttonStyle(WGJPrimaryButtonStyle())
-            .disabled(session == nil)
+        }
+    }
+
+    private var finishToolbarButton: some View {
+        Button("Finish") {
+            presentFinishConfirmation()
+        }
+        .disabled(session == nil || sessionExercises.isEmpty)
+        .accessibilityIdentifier("active-workout-finish-button")
+        .popover(isPresented: $showingFinishConfirmation, attachmentAnchor: .point(.bottom), arrowEdge: .top) {
+            ActiveWorkoutFinishPopover(
+                onFinish: confirmFinishWorkout,
+                onCancel: { showingFinishConfirmation = false }
+            )
+            .presentationCompactAdaptation(.popover)
         }
     }
 
@@ -428,7 +437,7 @@ struct ActiveWorkoutView: View {
         SwipeDeleteRow(
             offset: exerciseSwipeOffsetBinding(for: exercise.id),
             isRemoving: exerciseRemovingBinding(for: exercise.id),
-            activeRegionMaxY: 116,
+            activeRegionMaxY: 104,
             gestureStrategy: .simultaneous
         ) {
             removeExercise(exerciseID: exercise.id)
@@ -834,6 +843,17 @@ struct ActiveWorkoutView: View {
     private func dismissKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
+
+    private func presentFinishConfirmation() {
+        dismissKeyboard()
+        isCancelArmed = false
+        showingFinishConfirmation = true
+    }
+
+    private func confirmFinishWorkout() {
+        showingFinishConfirmation = false
+        finishWorkout()
+    }
 }
 
 private struct ActiveWorkoutHeaderCard: View {
@@ -967,6 +987,44 @@ private struct ActiveWorkoutBottomDock: View {
                         .stroke(WGJTheme.danger.opacity(0.32), lineWidth: 1)
                 )
         )
+    }
+}
+
+private struct ActiveWorkoutFinishPopover: View {
+    let onFinish: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(WGJTheme.success)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Finish Workout?")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(WGJTheme.textPrimary)
+
+                    Text("This will close the active workout and add it to your history.")
+                        .font(.subheadline)
+                        .foregroundStyle(WGJTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            HStack(spacing: 10) {
+                Button("Not yet", action: onCancel)
+                    .buttonStyle(WGJGhostButtonStyle())
+
+                Button("Finish and Save", action: onFinish)
+                    .buttonStyle(WGJCompactPrimaryButtonStyle())
+            }
+        }
+        .padding(14)
+        .frame(width: 300, alignment: .leading)
+        .wgjCardContainer(strong: true, cornerRadius: 18)
+        .padding(6)
     }
 }
 
@@ -1107,7 +1165,7 @@ private struct ActiveWorkoutSaveTemplateSheet: View {
             }
         }
         .presentationDetents([.medium])
-        .presentationDragIndicator(.visible)
+        .presentationDragIndicator(.hidden)
     }
 }
 
