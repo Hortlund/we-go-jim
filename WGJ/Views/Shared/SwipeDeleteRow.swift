@@ -12,6 +12,7 @@ struct SwipeDeleteRow<Content: View>: View {
     @Binding var isRemoving: Bool
 
     var threshold: CGFloat = 84
+    var isEnabled: Bool = true
     var activeRegionMaxY: CGFloat? = nil
     var gestureStrategy: SwipeDeleteGestureStrategy = .highPriority
     var onDelete: () -> Void
@@ -110,6 +111,7 @@ struct SwipeDeleteRow<Content: View>: View {
     }
 
     private func shouldHandleDrag(_ value: DragGesture.Value) -> Bool {
+        guard isEnabled else { return false }
         guard !isRemoving else { return false }
         guard abs(value.translation.width) > abs(value.translation.height) else { return false }
         if let activeRegionMaxY {

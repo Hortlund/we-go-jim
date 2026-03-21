@@ -288,6 +288,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                 SwipeDeleteRow(
                     offset: setSwipeOffsetBinding(for: draft.id),
                     isRemoving: setRemovingBinding(for: draft.id),
+                    isEnabled: !draft.isLocked,
                     gestureStrategy: .simultaneous
                 ) {
                     removeSet(withID: draft.id)
@@ -482,9 +483,11 @@ struct WorkoutSessionExerciseGridEditor: View {
             .frame(width: 40, height: 40)
         }
         .buttonStyle(.plain)
+        .disabled(set.isLocked)
     }
 
     private func setMenu(at index: Int) -> some View {
+        let isLocked = setDrafts[index].isLocked
         let currentRest = setDrafts[index].restSeconds
 
         return Menu {
@@ -493,26 +496,28 @@ struct WorkoutSessionExerciseGridEditor: View {
             } label: {
                 Label("Insert below", systemImage: "plus")
             }
+            .disabled(isLocked)
 
             Button {
                 toggleWarmup(at: index)
             } label: {
                 Label(setDrafts[index].isWarmup ? "Mark as working" : "Mark as warmup", systemImage: "flame")
             }
+            .disabled(isLocked)
 
             Button {
                 moveSetUp(index)
             } label: {
                 Label("Move up", systemImage: "arrow.up")
             }
-            .disabled(index == 0)
+            .disabled(isLocked || index == 0 || setDrafts[index - 1].isLocked)
 
             Button {
                 moveSetDown(index)
             } label: {
                 Label("Move down", systemImage: "arrow.down")
             }
-            .disabled(index == setDrafts.count - 1)
+            .disabled(isLocked || index == setDrafts.count - 1 || setDrafts[index + 1].isLocked)
 
             Menu {
                 ForEach(restPresets, id: \.self) { value in
@@ -541,6 +546,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             } label: {
                 Label("Set rest", systemImage: "timer")
             }
+            .disabled(isLocked)
 
             Button {
                 toggleLock(at: index)
@@ -554,6 +560,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                 } label: {
                     Label("Clear logged values", systemImage: "eraser")
                 }
+                .disabled(isLocked)
             }
 
             if setDrafts[index].restSeconds != restSeconds {
@@ -562,6 +569,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                 } label: {
                     Label("Reset rest", systemImage: "timer")
                 }
+                .disabled(isLocked)
             }
 
             if manualCompletionMode {
@@ -573,6 +581,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                         systemImage: setDrafts[index].isCompleted ? "arrow.uturn.backward.circle" : "checkmark.circle"
                     )
                 }
+                .disabled(isLocked)
             }
 
             Divider()
@@ -582,6 +591,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             } label: {
                 Label("Delete set", systemImage: "trash")
             }
+            .disabled(isLocked)
         } label: {
             headerIcon(symbol: "ellipsis.circle")
         }
@@ -803,6 +813,7 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func insertSet(after index: Int) {
         guard setDrafts.indices.contains(index) else { return }
+        guard !setDrafts[index].isLocked else { return }
 
         withAnimation(.snappy(duration: 0.22, extraBounce: 0.04)) {
             setDrafts.insert(makeSetDraft(copying: setDrafts[index]), at: index + 1)
@@ -812,6 +823,7 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func removeSet(at index: Int) {
         guard setDrafts.indices.contains(index) else { return }
+        guard !setDrafts[index].isLocked else { return }
         let removedID = setDrafts[index].id
         let removedTitle = setTitle(for: index)
 
@@ -832,6 +844,7 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func toggleWarmup(at index: Int) {
         guard setDrafts.indices.contains(index) else { return }
+        guard !setDrafts[index].isLocked else { return }
         setDrafts[index].isWarmup.toggle()
         notifyChanged()
     }
@@ -844,12 +857,14 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func updateSetRest(_ seconds: Int, at index: Int) {
         guard setDrafts.indices.contains(index) else { return }
+        guard !setDrafts[index].isLocked else { return }
         setDrafts[index].restSeconds = max(0, min(3600, seconds))
         notifyChanged()
     }
 
     private func moveSetUp(_ index: Int) {
         guard index > 0 else { return }
+        guard !setDrafts[index].isLocked, !setDrafts[index - 1].isLocked else { return }
 
         withAnimation(.snappy(duration: 0.2, extraBounce: 0.02)) {
             setDrafts.swapAt(index, index - 1)
@@ -859,6 +874,7 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func moveSetDown(_ index: Int) {
         guard index < setDrafts.count - 1 else { return }
+        guard !setDrafts[index].isLocked, !setDrafts[index + 1].isLocked else { return }
 
         withAnimation(.snappy(duration: 0.2, extraBounce: 0.02)) {
             setDrafts.swapAt(index, index + 1)
@@ -868,6 +884,7 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func clearLoggedValues(at index: Int) {
         guard setDrafts.indices.contains(index) else { return }
+        guard !setDrafts[index].isLocked else { return }
         let set = setDrafts[index]
         setDrafts[index].actualReps = nil
         setDrafts[index].actualWeight = nil
@@ -992,7 +1009,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         restSeconds = normalized
 
         for index in setDrafts.indices {
-            if setDrafts[index].restSeconds == previousDefaultRest {
+            if !setDrafts[index].isLocked && setDrafts[index].restSeconds == previousDefaultRest {
                 setDrafts[index].restSeconds = normalized
             }
         }
@@ -1020,6 +1037,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                         toggleCompletion(at: index)
                     }
                     .buttonStyle(WGJGhostButtonStyle())
+                    .disabled(setDrafts[index].isLocked)
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1040,6 +1058,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                         .wgjSingleLineText(scale: 0.82)
                 }
                 .buttonStyle(WGJCompactPrimaryButtonStyle())
+                .disabled(setDrafts[index].isLocked)
             }
         }
     }
@@ -1051,6 +1070,7 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func toggleCompletion(at index: Int) {
         guard setDrafts.indices.contains(index) else { return }
+        guard !setDrafts[index].isLocked else { return }
         setDrafts[index].isCompleted.toggle()
         let set = setDrafts[index]
         notifyChanged()
