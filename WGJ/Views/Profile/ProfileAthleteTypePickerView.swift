@@ -89,18 +89,17 @@ struct ProfileAthleteTypePickerView: View {
         NavigationStack {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 18, pinnedViews: [.sectionHeaders]) {
+                    LazyVStack(alignment: .leading, spacing: 22) {
                         ForEach(sections) { section in
-                            Section {
-                                VStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                compactSectionHeader(section.title, subtitle: section.subtitle)
+
+                                LazyVStack(spacing: 8) {
                                     ForEach(section.options) { option in
                                         optionRow(option)
                                             .id(option.id)
                                     }
                                 }
-                                .padding(.top, 6)
-                            } header: {
-                                stickySectionHeader(section.title, subtitle: section.subtitle)
                             }
                         }
                     }
@@ -110,7 +109,6 @@ struct ProfileAthleteTypePickerView: View {
                 }
                 .scrollIndicators(.hidden)
                 .scrollBounceBehavior(.basedOnSize)
-                .scrollClipDisabled()
                 .wgjScreenBackground()
                 .task {
                     guard !hasScrolledToSelection, let selectedAthleteType else { return }
@@ -134,27 +132,18 @@ struct ProfileAthleteTypePickerView: View {
         }
     }
 
-    private func stickySectionHeader(_ title: String, subtitle: String) -> some View {
-        WGJSectionHeader(title, subtitle: subtitle)
-            .textCase(nil)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(.regularMaterial)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .fill(WGJTheme.bgBase.opacity(0.94))
-                    }
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .stroke(WGJTheme.outline.opacity(0.88), lineWidth: 1)
-                    }
-                    .shadow(color: WGJTheme.shadowSoft.opacity(0.42), radius: 10, x: 0, y: 6)
-            }
-            .padding(.top, 6)
-            .padding(.bottom, 2)
+    private func compactSectionHeader(_ title: String, subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(WGJTheme.textPrimary)
+
+            Text(subtitle)
+                .font(.caption2)
+                .foregroundStyle(WGJTheme.textSecondary)
+                .lineLimit(2)
+        }
+        .padding(.horizontal, 2)
     }
 
     private func optionRow(_ option: AthleteTypePickerOption) -> some View {
@@ -191,14 +180,7 @@ struct ProfileAthleteTypePickerView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
                 RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
-                    .fill(.thinMaterial)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
-                            .fill(
-                                (selectedAthleteType == option.value ? WGJTheme.cardStrong : WGJTheme.card)
-                                    .opacity(selectedAthleteType == option.value ? 0.88 : 0.72)
-                            )
-                    }
+                    .fill(selectedAthleteType == option.value ? WGJTheme.fieldStrong : WGJTheme.field)
                     .overlay {
                         RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
                             .stroke(
@@ -208,14 +190,6 @@ struct ProfileAthleteTypePickerView: View {
                                 lineWidth: 1
                             )
                     }
-                    .shadow(
-                        color: selectedAthleteType == option.value
-                            ? WGJTheme.shadowStrong.opacity(0.22)
-                            : WGJTheme.shadowSoft.opacity(0.34),
-                        radius: selectedAthleteType == option.value ? 12 : 8,
-                        x: 0,
-                        y: selectedAthleteType == option.value ? 7 : 4
-                    )
             }
         }
         .buttonStyle(.plain)
