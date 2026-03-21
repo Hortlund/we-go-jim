@@ -47,11 +47,13 @@ enum SupportContactService {
             Reported membership ID: \(reportedMember.id)
             Reported user record: \(reportedMember.userRecordName)
             Reported display name: \(reportedMember.displayName)
+            Reported athlete type: \(reportedMember.athleteType?.title ?? "None")
             Reported role: \(reportedMember.role.rawValue)
 
             Reporter membership ID: \(snapshot.currentMember.id)
             Reporter user record: \(snapshot.currentMember.userRecordName)
             Reporter display name: \(snapshot.currentMember.displayName)
+            Reporter athlete type: \(snapshot.currentMember.athleteType?.title ?? "None")
 
             Additional details:
             """

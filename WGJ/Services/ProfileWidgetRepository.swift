@@ -212,6 +212,12 @@ private extension ProfileWidgetKind {
             return 2
         case .exerciseVolumeTrend:
             return 3
+        case .streaks:
+            return 4
+        case .topExercises:
+            return 5
+        case .consistencyCalendar:
+            return 6
         }
     }
 
@@ -219,7 +225,7 @@ private extension ProfileWidgetKind {
         switch self {
         case .prs, .weeklyGoals:
             return true
-        case .exerciseOneRMTrend, .exerciseVolumeTrend:
+        case .exerciseOneRMTrend, .exerciseVolumeTrend, .streaks, .topExercises, .consistencyCalendar:
             return false
         }
     }

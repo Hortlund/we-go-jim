@@ -150,7 +150,30 @@ struct ScreenSnapshotTests {
                     goal: 0
                 ),
             ],
-            weeklyGoal: 0
+            weeklyGoal: 0,
+            overviewStats: ProfileOverviewStats(
+                totalWorkouts: 6,
+                totalPRHits: 4,
+                totalDurationSeconds: 7_200,
+                currentStreakDays: 2,
+                longestStreakDays: 4,
+                activeDaysThisMonth: 3,
+                firstWorkoutDate: Date(timeIntervalSince1970: 1_735_430_400)
+            ),
+            topExercises: [
+                ProfileTopExerciseStat(
+                    catalogExerciseUUID: "bench",
+                    exerciseName: "Bench Press",
+                    sessionCount: 4,
+                    lastPerformedAt: Date(timeIntervalSince1970: 1_736_035_200)
+                ),
+            ],
+            activityDays: [
+                ProfileActivityDay(
+                    date: Date(timeIntervalSince1970: 1_736_035_200),
+                    workoutCount: 1
+                ),
+            ]
         )
 
         let trendSeries = [
@@ -178,6 +201,9 @@ struct ScreenSnapshotTests {
         #expect(content.personalRecords.map(\.exerciseName) == ["Bench Press"])
         #expect(content.weeklyProgress.first?.completedWorkouts == 3)
         #expect(content.weeklyGoal == 1)
+        #expect(content.overviewStats.totalWorkouts == 6)
+        #expect(content.topExercises.first?.sessionCount == 4)
+        #expect(content.activityDays.first?.workoutCount == 1)
         #expect(content.trendSeriesByKind[.exerciseOneRMTrend]?.points.first?.value == 105)
     }
 }

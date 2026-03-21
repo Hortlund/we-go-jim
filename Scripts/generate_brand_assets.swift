@@ -35,39 +35,30 @@ let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
 let appIconURL = repoRoot.appendingPathComponent("WGJ/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png")
 let splashIconURL = repoRoot.appendingPathComponent("WGJ/Assets.xcassets/SplashIcon.imageset/SplashIcon.png")
 
-func makeBitmap(size: Int, draw: (CGContext, CGRect) -> Void) -> NSBitmapImageRep {
-    guard let rep = NSBitmapImageRep(
-        bitmapDataPlanes: nil,
-        pixelsWide: size,
-        pixelsHigh: size,
-        bitsPerSample: 8,
-        samplesPerPixel: 4,
-        hasAlpha: true,
-        isPlanar: false,
-        colorSpaceName: .deviceRGB,
-        bytesPerRow: 0,
-        bitsPerPixel: 0
+func makeBitmap(size: Int, hasAlpha: Bool, draw: (CGContext, CGRect) -> Void) -> NSBitmapImageRep {
+    let rect = CGRect(x: 0, y: 0, width: size, height: size)
+    let alphaInfo: CGImageAlphaInfo = hasAlpha ? .premultipliedLast : .noneSkipLast
+    let bitmapInfo = CGBitmapInfo(rawValue: alphaInfo.rawValue).union(.byteOrder32Big)
+    guard let context = CGContext(
+        data: nil,
+        width: size,
+        height: size,
+        bitsPerComponent: 8,
+        bytesPerRow: size * 4,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: bitmapInfo.rawValue
     ) else {
-        fatalError("Unable to create bitmap representation.")
-    }
-
-    guard let graphicsContext = NSGraphicsContext(bitmapImageRep: rep) else {
         fatalError("Unable to create graphics context.")
     }
 
-    let rect = CGRect(x: 0, y: 0, width: size, height: size)
-    NSGraphicsContext.saveGraphicsState()
-    NSGraphicsContext.current = graphicsContext
-
-    let context = graphicsContext.cgContext
     context.setShouldAntialias(true)
     context.interpolationQuality = .high
     context.clear(rect)
     draw(context, rect)
-
-    graphicsContext.flushGraphics()
-    NSGraphicsContext.restoreGraphicsState()
-    return rep
+    guard let cgImage = context.makeImage() else {
+        fatalError("Unable to create CGImage output.")
+    }
+    return NSBitmapImageRep(cgImage: cgImage)
 }
 
 func savePNG(_ rep: NSBitmapImageRep, to url: URL) throws {
@@ -292,8 +283,8 @@ func drawSplashIcon(in context: CGContext, rect: CGRect) {
     drawMark(in: context, rect: markRect)
 }
 
-let appIcon = makeBitmap(size: 1024, draw: drawAppIcon)
-let splashIcon = makeBitmap(size: 1024, draw: drawSplashIcon)
+let appIcon = makeBitmap(size: 1024, hasAlpha: false, draw: drawAppIcon)
+let splashIcon = makeBitmap(size: 1024, hasAlpha: true, draw: drawSplashIcon)
 
 do {
     try savePNG(appIcon, to: appIconURL)

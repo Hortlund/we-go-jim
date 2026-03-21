@@ -15,10 +15,14 @@ struct ProfileView: View {
     private var storedProfiles: [UserProfile]
 
     @State private var displayName = ""
+    @State private var savedDisplayName = ""
+    @State private var athleteType: ProfileAthleteType?
+    @State private var savedAthleteType: ProfileAthleteType?
     @State private var avatarImageData: Data?
     @State private var selectedAvatarItem: PhotosPickerItem?
     @State private var hasLoadedProfile = false
     @State private var dashboardContent = ProfileDashboardContent.empty
+    @State private var showingAthleteTypePicker = false
     @State private var showingWidgetManager = false
 
     @State private var errorMessage = ""
@@ -39,86 +43,12 @@ struct ProfileView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                WGJRootHeader("Profile", subtitle: "Personalize the app. Your display name and avatar are shown in Bros.")
+                WGJRootHeader("Profile", subtitle: "Personalize your name, avatar, vibe, and dashboard.")
 
-                VStack(alignment: .leading, spacing: 12) {
-                    avatarEditorSection
-
-                    TextField("Display name", text: $displayName)
-                        .textInputAutocapitalization(.words)
-                        .wgjPillField()
-                        .accessibilityIdentifier("profile-display-name-field")
-
-                    Text(profileDisplayNameHelperText)
-                        .font(.caption)
-                        .foregroundStyle(isUsingDefaultDisplayName ? WGJTheme.accentGold : WGJTheme.textSecondary)
-
-                    Button("Save Profile") {
-                        saveProfile()
-                    }
-                    .buttonStyle(WGJPrimaryButtonStyle())
-                    .disabled(displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .accessibilityIdentifier("profile-save-button")
-                }
-                .padding(14)
-                .wgjCardContainer(strong: true)
-
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        WGJSectionHeader("Widgets")
-                        Spacer()
-                        Button("Manage") {
-                            showingWidgetManager = true
-                        }
-                        .buttonStyle(WGJGhostButtonStyle())
-                    }
-
-                    if dashboardContent.enabledWidgets.isEmpty {
-                        WGJEmptyStateCard(
-                            title: "No widgets enabled",
-                            message: "Enable widgets to show PRs, weekly progress, and exercise graphs on your profile.",
-                            icon: "square.grid.2x2"
-                        )
-                    }
-
-                    ForEach(dashboardContent.enabledWidgets) { config in
-                        switch config.kind {
-                        case .prs:
-                            prWidget
-                        case .weeklyGoals:
-                            weeklyGoalsWidget
-                        case .exerciseOneRMTrend:
-                            exerciseTrendWidget(
-                                title: "1RM Trend",
-                                subtitle: "Best estimated 1RM for \(config.selectedExerciseNameSnapshot ?? "your lift")",
-                                accent: WGJTheme.accentCyan,
-                                series: dashboardContent.trendSeriesByKind[config.kind],
-                                emptyMessage: "Log weighted sets for this exercise to start the line."
-                            )
-                        case .exerciseVolumeTrend:
-                            exerciseTrendWidget(
-                                title: "Volume Trend",
-                                subtitle: "Weighted volume for \(config.selectedExerciseNameSnapshot ?? "your lift")",
-                                accent: WGJTheme.accentBlue,
-                                series: dashboardContent.trendSeriesByKind[config.kind],
-                                emptyMessage: "Complete weighted sets for this exercise to populate volume."
-                            )
-                        }
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 10) {
-                    WGJSectionHeader("App")
-
-                    WGJNavigationTile(
-                        title: "Settings",
-                        systemImage: "gear",
-                        subtitle: "Training goals, privacy, support, and data controls.",
-                        accessibilityID: "profile-settings-tile"
-                    ) {
-                        SettingsView()
-                    }
-                }
+                identityCard
+                highlightsCard
+                dashboardSection
+                appSection
             }
             .padding(.top, 8)
             .padding(16)
@@ -146,6 +76,9 @@ struct ProfileView: View {
                 loadWidgetState()
             }
         }
+        .sheet(isPresented: $showingAthleteTypePicker) {
+            ProfileAthleteTypePickerView(selectedAthleteType: $athleteType)
+        }
         .alert("Profile Error", isPresented: $showingError) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -153,62 +86,151 @@ struct ProfileView: View {
         }
     }
 
-    private var isUsingDefaultDisplayName: Bool {
-        displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-            .localizedCaseInsensitiveCompare("Athlete") == .orderedSame
-    }
+    private var identityCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            WGJSectionHeader("Identity", subtitle: "Keep the top of the page personal and tight.")
 
-    private var profileDisplayNameHelperText: String {
-        if isUsingDefaultDisplayName {
-            return "Set this so your bro circle sees your name instead of Athlete."
-        }
-        return "This name is shown on your profile and in Bros."
-    }
+            identityHero
 
-    private var widgetStateStamp: ProfileWidgetStateStamp {
-        ProfileWidgetStateStamp(
-            sessions: trackedSessions,
-            widgetConfigs: widgetConfigs,
-            profiles: storedProfiles
-        )
-    }
-
-    private var avatarEditorSection: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .center, spacing: 14) {
-                avatarView
-                    .frame(width: 76, height: 76)
-
-                avatarActions
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            Divider()
+                .overlay(WGJTheme.outline.opacity(0.4))
 
             VStack(alignment: .leading, spacing: 12) {
-                avatarView
-                    .frame(width: 76, height: 76)
+                TextField("Name", text: $displayName)
+                    .textInputAutocapitalization(.words)
+                    .wgjPillField()
+                    .accessibilityIdentifier("profile-display-name-field")
 
-                avatarActions
+                athleteTypePickerButton
+
+                Text(profileIdentityHelperText)
+                    .font(.caption)
+                    .foregroundStyle(isUsingDefaultDisplayName ? WGJTheme.accentGold : WGJTheme.textSecondary)
+
+                Button("Save Profile") {
+                    saveProfile()
+                }
+                .buttonStyle(WGJPrimaryButtonStyle())
+                .disabled(trimmedDisplayName.isEmpty || !hasPendingIdentityChanges)
+                .accessibilityIdentifier("profile-save-button")
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(14)
+        .wgjCardContainer(strong: true)
+    }
+
+    private var identityHero: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 14) {
+                avatarView
+                    .frame(width: 88, height: 88)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    identityPreview
+                    avatarActionRow
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            VStack(alignment: .leading, spacing: 14) {
+                avatarView
+                    .frame(width: 88, height: 88)
+
+                identityPreview
+                avatarActionRow
+            }
         }
     }
 
-    private var avatarActions: some View {
+    private var identityPreview: some View {
         VStack(alignment: .leading, spacing: 8) {
-            PhotosPicker(selection: $selectedAvatarItem, matching: .images) {
-                Label("Choose Avatar", systemImage: "photo")
-            }
-            .buttonStyle(WGJGhostButtonStyle())
+            Text(identityPreviewName)
+                .font(.title2.weight(.bold))
+                .foregroundStyle(WGJTheme.textPrimary)
+                .lineLimit(2)
 
-            if avatarImageData != nil {
-                Button(role: .destructive) {
-                    removeAvatar()
-                } label: {
-                    Label("Remove Avatar", systemImage: "trash")
+            if let athleteType {
+                athleteTypeBadge(title: athleteType.title, tint: WGJTheme.accentGold)
+            } else {
+                Text("Pick an athlete type to add some flavor to the profile.")
+                    .font(.caption)
+                    .foregroundStyle(WGJTheme.textSecondary)
+            }
+
+            Text("Your name and avatar are shown in Bros. Athlete type stays on your profile.")
+                .font(.caption)
+                .foregroundStyle(WGJTheme.textSecondary)
+        }
+    }
+
+    private var avatarActionRow: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                changeAvatarButton
+                removeAvatarButton
+                Spacer(minLength: 0)
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                changeAvatarButton
+                if avatarImageData != nil {
+                    removeAvatarButton
                 }
-                .buttonStyle(WGJGhostButtonStyle())
             }
         }
+    }
+
+    private var changeAvatarButton: some View {
+        PhotosPicker(selection: $selectedAvatarItem, matching: .images) {
+            Label(avatarImageData == nil ? "Choose Avatar" : "Change Avatar", systemImage: "photo")
+        }
+        .buttonStyle(WGJCompactGhostButtonStyle())
+    }
+
+    @ViewBuilder
+    private var removeAvatarButton: some View {
+        if avatarImageData != nil {
+            Button(role: .destructive) {
+                removeAvatar()
+            } label: {
+                Image(systemName: "trash")
+                    .accessibilityLabel("Remove Avatar")
+            }
+            .buttonStyle(
+                WGJIconButtonStyle(
+                    tint: WGJTheme.danger,
+                    background: WGJTheme.destructiveField,
+                    outline: WGJTheme.danger.opacity(0.28)
+                )
+            )
+        }
+    }
+
+    private var athleteTypePickerButton: some View {
+        Button {
+            showingAthleteTypePicker = true
+        } label: {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Athlete Type")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(WGJTheme.textPrimary)
+
+                    Text(athleteType?.title ?? "Optional. Pick one that fits your training vibe.")
+                        .font(.caption)
+                        .foregroundStyle(athleteType == nil ? WGJTheme.textSecondary : WGJTheme.accentGold)
+                        .lineLimit(2)
+                }
+
+                Spacer(minLength: 12)
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(WGJTheme.textSecondary)
+            }
+            .wgjPillField()
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -234,6 +256,107 @@ struct ProfileView: View {
                     Circle()
                         .stroke(WGJTheme.outlineStrong, lineWidth: 1)
                 }
+        }
+    }
+
+    private var highlightsCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            WGJSectionHeader("Highlights", subtitle: "Quick reads that make the profile feel alive.")
+
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), spacing: 10),
+                    GridItem(.flexible(), spacing: 10),
+                ],
+                spacing: 10
+            ) {
+                ProfileQuickStatTile(
+                    title: "Total Workouts",
+                    value: "\(dashboardContent.overviewStats.totalWorkouts)",
+                    systemImage: "figure.strengthtraining.traditional",
+                    tint: WGJTheme.accentBlue
+                )
+                ProfileQuickStatTile(
+                    title: "Total PRs",
+                    value: "\(dashboardContent.overviewStats.totalPRHits)",
+                    systemImage: "trophy.fill",
+                    tint: WGJTheme.accentGold
+                )
+                ProfileQuickStatTile(
+                    title: "Current Streak",
+                    value: dayCountText(dashboardContent.overviewStats.currentStreakDays),
+                    systemImage: "flame.fill",
+                    tint: WGJTheme.success
+                )
+                ProfileQuickStatTile(
+                    title: "Total Time",
+                    value: formattedDurationSummary(dashboardContent.overviewStats.totalDurationSeconds),
+                    systemImage: "clock.fill",
+                    tint: WGJTheme.accentCyan
+                )
+            }
+
+            ProfileHighlightsMetaRow(title: "Active Since", value: activeSinceText)
+            ProfileHighlightsMetaRow(title: "Top Exercise", value: topExerciseSummaryText)
+        }
+        .padding(14)
+        .wgjCardContainer()
+    }
+
+    private var dashboardSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            WGJActionHeader("Dashboard", subtitle: "Fixed highlights up top, flexible widgets below.") {
+                Button {
+                    showingWidgetManager = true
+                } label: {
+                    Label("Manage", systemImage: "slider.horizontal.3")
+                }
+                .buttonStyle(WGJCompactGhostButtonStyle())
+            }
+
+            if dashboardContent.enabledWidgets.isEmpty {
+                WGJEmptyStateCard(
+                    title: "No widgets enabled",
+                    message: "Enable streaks, favorites, consistency, PRs, and graphs to build your dashboard.",
+                    icon: "square.grid.2x2"
+                ) {
+                    Button("Manage Widgets") {
+                        showingWidgetManager = true
+                    }
+                    .buttonStyle(WGJCompactGhostButtonStyle())
+                }
+            }
+
+            ForEach(dashboardContent.enabledWidgets) { config in
+                switch config.kind {
+                case .prs:
+                    prWidget
+                case .weeklyGoals:
+                    weeklyGoalsWidget
+                case .exerciseOneRMTrend:
+                    exerciseTrendWidget(
+                        title: "1RM Trend",
+                        subtitle: "Best estimated 1RM for \(config.selectedExerciseNameSnapshot ?? "your lift")",
+                        accent: WGJTheme.accentCyan,
+                        series: dashboardContent.trendSeriesByKind[config.kind],
+                        emptyMessage: "Log weighted sets for this exercise to start the line."
+                    )
+                case .exerciseVolumeTrend:
+                    exerciseTrendWidget(
+                        title: "Volume Trend",
+                        subtitle: "Weighted volume for \(config.selectedExerciseNameSnapshot ?? "your lift")",
+                        accent: WGJTheme.accentBlue,
+                        series: dashboardContent.trendSeriesByKind[config.kind],
+                        emptyMessage: "Complete weighted sets for this exercise to populate volume."
+                    )
+                case .streaks:
+                    streaksWidget
+                case .topExercises:
+                    topExercisesWidget
+                case .consistencyCalendar:
+                    consistencyCalendarWidget
+                }
+            }
         }
     }
 
@@ -293,6 +416,116 @@ struct ProfileView: View {
                     AxisMarks(position: .leading)
                 }
                 .frame(height: 160)
+            }
+        }
+        .padding(14)
+        .wgjCardContainer()
+    }
+
+    private var streaksWidget: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            WGJSectionHeader("Streaks", subtitle: "A tighter read on your consistency")
+
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), spacing: 10),
+                    GridItem(.flexible(), spacing: 10),
+                    GridItem(.flexible(), spacing: 10),
+                ],
+                spacing: 10
+            ) {
+                ProfileQuickStatTile(
+                    title: "Current",
+                    value: dayCountText(dashboardContent.overviewStats.currentStreakDays),
+                    systemImage: "flame.fill",
+                    tint: WGJTheme.success
+                )
+                ProfileQuickStatTile(
+                    title: "Longest",
+                    value: dayCountText(dashboardContent.overviewStats.longestStreakDays),
+                    systemImage: "bolt.fill",
+                    tint: WGJTheme.accentGold
+                )
+                ProfileQuickStatTile(
+                    title: "This Month",
+                    value: dayCountText(dashboardContent.overviewStats.activeDaysThisMonth),
+                    systemImage: "calendar",
+                    tint: WGJTheme.accentBlue
+                )
+            }
+        }
+        .padding(14)
+        .wgjCardContainer()
+    }
+
+    private var topExercisesWidget: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            WGJSectionHeader("Top Exercises", subtitle: "Your most repeated lifts so far")
+
+            if dashboardContent.topExercises.isEmpty {
+                Text("Complete workouts to build your exercise leaderboard.")
+                    .font(.subheadline)
+                    .foregroundStyle(WGJTheme.textSecondary)
+            } else {
+                ForEach(Array(dashboardContent.topExercises.prefix(3).enumerated()), id: \.element.id) { index, exercise in
+                    HStack(alignment: .top, spacing: 12) {
+                        Text("\(index + 1)")
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(WGJTheme.accentGold)
+                            .frame(width: 20, alignment: .leading)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(exercise.exerciseName)
+                                .font(.headline)
+                                .foregroundStyle(WGJTheme.textPrimary)
+
+                            Text("Last trained \(exercise.lastPerformedAt.formatted(date: .abbreviated, time: .omitted))")
+                                .font(.caption)
+                                .foregroundStyle(WGJTheme.textSecondary)
+                        }
+
+                        Spacer()
+
+                        Text(exercise.sessionCount == 1 ? "1 session" : "\(exercise.sessionCount) sessions")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(WGJTheme.accentCyan)
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .wgjCardContainer()
+    }
+
+    private var consistencyCalendarWidget: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            WGJSectionHeader("Consistency Calendar", subtitle: "Rolling 6-week heatmap of your workout rhythm")
+
+            let maxWorkoutCount = max(1, dashboardContent.activityDays.map(\.workoutCount).max() ?? 0)
+            let hasAnyWorkoutActivity = dashboardContent.activityDays.contains { $0.workoutCount > 0 }
+
+            if !hasAnyWorkoutActivity {
+                Text("Complete workouts to light up the calendar.")
+                    .font(.subheadline)
+                    .foregroundStyle(WGJTheme.textSecondary)
+            } else {
+                HStack {
+                    Text(dashboardContent.activityDays.first?.date.formatted(date: .abbreviated, time: .omitted) ?? "")
+                    Spacer()
+                    Text(dashboardContent.activityDays.last?.date.formatted(date: .abbreviated, time: .omitted) ?? "")
+                }
+                .font(.caption)
+                .foregroundStyle(WGJTheme.textSecondary)
+
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 7), spacing: 6) {
+                    ForEach(dashboardContent.activityDays) { day in
+                        ProfileConsistencyDayCell(day: day, maxWorkoutCount: maxWorkoutCount)
+                    }
+                }
+
+                Text("Darker squares mean more workouts on that day.")
+                    .font(.caption)
+                    .foregroundStyle(WGJTheme.textSecondary)
             }
         }
         .padding(14)
@@ -404,6 +637,70 @@ struct ProfileView: View {
         .wgjCardContainer()
     }
 
+    private var appSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            WGJSectionHeader("App")
+
+            WGJNavigationTile(
+                title: "Settings",
+                systemImage: "gear",
+                subtitle: "Training goals, privacy, support, and data controls.",
+                accessibilityID: "profile-settings-tile"
+            ) {
+                SettingsView()
+            }
+        }
+    }
+
+    private var trimmedDisplayName: String {
+        displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var identityPreviewName: String {
+        trimmedDisplayName.isEmpty ? "Athlete" : trimmedDisplayName
+    }
+
+    private var isUsingDefaultDisplayName: Bool {
+        identityPreviewName.localizedCaseInsensitiveCompare("Athlete") == .orderedSame
+    }
+
+    private var hasPendingIdentityChanges: Bool {
+        let savedTrimmed = savedDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedDisplayName != savedTrimmed || athleteType != savedAthleteType
+    }
+
+    private var profileIdentityHelperText: String {
+        if isUsingDefaultDisplayName {
+            return "Set this so your bro circle sees your name instead of Athlete. Athlete type stays on your private profile."
+        }
+        return "This name is shown on your profile and in Bros. Athlete type stays on your private profile."
+    }
+
+    private var activeSinceText: String {
+        guard let firstWorkoutDate = dashboardContent.overviewStats.firstWorkoutDate else {
+            return "No workouts yet"
+        }
+
+        return firstWorkoutDate.formatted(.dateTime.month(.abbreviated).year())
+    }
+
+    private var topExerciseSummaryText: String {
+        guard let topExercise = dashboardContent.topExercises.first else {
+            return "No workout history yet"
+        }
+
+        let sessionText = topExercise.sessionCount == 1 ? "1 session" : "\(topExercise.sessionCount) sessions"
+        return "\(topExercise.exerciseName) · \(sessionText)"
+    }
+
+    private var widgetStateStamp: ProfileWidgetStateStamp {
+        ProfileWidgetStateStamp(
+            sessions: trackedSessions,
+            widgetConfigs: widgetConfigs,
+            profiles: storedProfiles
+        )
+    }
+
     private func loadProfileIfNeeded() async {
         guard !hasLoadedProfile else { return }
         hasLoadedProfile = true
@@ -411,26 +708,30 @@ struct ProfileView: View {
         do {
             let profile = try profileRepository.loadOrCreateProfile()
             displayName = profile.displayName
+            savedDisplayName = profile.displayName
+            athleteType = profile.athleteType
+            savedAthleteType = profile.athleteType
             avatarImageData = profile.avatarImageData
             dashboardContent.weeklyGoal = profile.weeklyWorkoutGoal
             loadWidgetState()
         } catch {
-            errorMessage = String(describing: error)
-            showingError = true
+            showError(error)
         }
     }
 
     private func saveProfile() {
         do {
-            try profileRepository.updateDisplayName(displayName)
+            try profileRepository.updateIdentity(name: displayName, athleteType: athleteType)
             if let profile = try profileRepository.currentProfile() {
                 displayName = profile.displayName
+                savedDisplayName = profile.displayName
+                athleteType = profile.athleteType
+                savedAthleteType = profile.athleteType
                 dashboardContent.weeklyGoal = profile.weeklyWorkoutGoal
             }
             loadWidgetState()
         } catch {
-            errorMessage = String(describing: error)
-            showingError = true
+            showError(error)
         }
     }
 
@@ -440,8 +741,7 @@ struct ProfileView: View {
             avatarImageData = nil
             selectedAvatarItem = nil
         } catch {
-            errorMessage = String(describing: error)
-            showingError = true
+            showError(error)
         }
     }
 
@@ -453,8 +753,7 @@ struct ProfileView: View {
             try profileRepository.updateAvatar(imageData: data)
             avatarImageData = data
         } catch {
-            errorMessage = String(describing: error)
-            showingError = true
+            showError(error)
         }
     }
 
@@ -480,7 +779,7 @@ struct ProfileView: View {
                         preferredExerciseName: config.selectedExerciseNameSnapshot,
                         limit: 8
                     )
-                case .prs, .weeklyGoals:
+                case .prs, .weeklyGoals, .streaks, .topExercises, .consistencyCalendar:
                     break
                 }
             }
@@ -491,13 +790,41 @@ struct ProfileView: View {
                 trendSeriesByKind: nextTrendSeries
             )
         } catch {
-            errorMessage = String(describing: error)
-            showingError = true
+            showError(error)
         }
     }
 
     private func formatWeight(_ value: Double) -> String {
         WGJFormatters.oneDecimalString(value)
+    }
+
+    private func dayCountText(_ days: Int) -> String {
+        if days == 1 {
+            return "1 day"
+        }
+        return "\(days) days"
+    }
+
+    private func formattedDurationSummary(_ seconds: Int) -> String {
+        let safeSeconds = max(0, seconds)
+        let totalMinutes = safeSeconds / 60
+        let totalHours = totalMinutes / 60
+        let remainingMinutes = totalMinutes % 60
+        let totalDays = totalHours / 24
+        let remainingHours = totalHours % 24
+
+        if totalDays > 0 {
+            if remainingHours > 0 {
+                return "\(totalDays)d \(remainingHours)h"
+            }
+            return "\(totalDays)d"
+        }
+
+        if totalHours > 0 {
+            return "\(totalHours)h \(remainingMinutes)m"
+        }
+
+        return "\(totalMinutes)m"
     }
 
     private func trendDeltaText(for series: ExerciseMetricSeries) -> String? {
@@ -512,6 +839,27 @@ struct ProfileView: View {
 
         let direction = delta > 0 ? "up" : "down"
         return "\(formatWeight(abs(delta))) \(series.loadUnit.shortLabel) \(direction) across your last \(series.points.count) logged workouts."
+    }
+
+    private func athleteTypeBadge(title: String, tint: Color) -> some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(tint.opacity(0.12))
+            )
+            .overlay(
+                Capsule()
+                    .stroke(tint.opacity(0.24), lineWidth: 1)
+            )
+    }
+
+    private func showError(_ error: Error) {
+        errorMessage = String(describing: error)
+        showingError = true
     }
 }
 
@@ -550,13 +898,19 @@ struct ProfileDashboardContent {
     var weeklyProgress: [WeeklyWorkoutProgressPoint]
     var trendSeriesByKind: [ProfileWidgetKind: ExerciseMetricSeries]
     var weeklyGoal: Int
+    var overviewStats: ProfileOverviewStats
+    var topExercises: [ProfileTopExerciseStat]
+    var activityDays: [ProfileActivityDay]
 
     static let empty = ProfileDashboardContent(
         enabledWidgets: [],
         personalRecords: [],
         weeklyProgress: [],
         trendSeriesByKind: [:],
-        weeklyGoal: 4
+        weeklyGoal: 4,
+        overviewStats: .empty,
+        topExercises: [],
+        activityDays: []
     )
 
     static func make(
@@ -569,8 +923,104 @@ struct ProfileDashboardContent {
             personalRecords: dashboard.personalRecords,
             weeklyProgress: dashboard.weeklyProgress,
             trendSeriesByKind: trendSeriesByKind,
-            weeklyGoal: max(1, dashboard.weeklyGoal)
+            weeklyGoal: max(1, dashboard.weeklyGoal),
+            overviewStats: dashboard.overviewStats,
+            topExercises: dashboard.topExercises,
+            activityDays: dashboard.activityDays
         )
+    }
+}
+
+private struct ProfileQuickStatTile: View {
+    let title: String
+    let value: String
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(tint)
+                .frame(width: 32, height: 32)
+                .background {
+                    Circle()
+                        .fill(tint.opacity(0.14))
+                }
+
+            Text(value)
+                .font(.headline.weight(.bold))
+                .foregroundStyle(WGJTheme.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(WGJTheme.textSecondary)
+                .lineLimit(2)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .wgjCardContainer(cornerRadius: WGJRadius.control)
+    }
+}
+
+private struct ProfileHighlightsMetaRow: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(WGJTheme.textPrimary)
+
+            Spacer(minLength: 12)
+
+            Text(value)
+                .font(.subheadline)
+                .foregroundStyle(WGJTheme.textSecondary)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+}
+
+private struct ProfileConsistencyDayCell: View {
+    let day: ProfileActivityDay
+    let maxWorkoutCount: Int
+
+    private var fill: Color {
+        if day.workoutCount <= 0 {
+            return WGJTheme.field.opacity(0.48)
+        }
+
+        let normalized = Double(day.workoutCount) / Double(max(1, maxWorkoutCount))
+        if normalized >= 0.95 {
+            return WGJTheme.accentBlue.opacity(0.78)
+        }
+        if normalized >= 0.6 {
+            return WGJTheme.accentBlue.opacity(0.56)
+        }
+        return WGJTheme.accentBlue.opacity(0.32)
+    }
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(fill)
+            .frame(height: 26)
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(WGJTheme.outline.opacity(day.workoutCount > 0 ? 0.34 : 0.18), lineWidth: 1)
+            }
+            .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var accessibilityLabel: String {
+        let dateText = day.date.formatted(date: .complete, time: .omitted)
+        if day.workoutCount == 1 {
+            return "\(dateText), 1 workout"
+        }
+        return "\(dateText), \(day.workoutCount) workouts"
     }
 }
 

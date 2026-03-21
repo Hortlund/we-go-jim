@@ -32,6 +32,7 @@ struct BroMemberSummary: Identifiable, Equatable {
     let circleID: String
     let userRecordName: String
     let displayName: String
+    let athleteType: ProfileAthleteType?
     let avatarImageData: Data?
     let joinedAt: Date
     let role: BroMembershipRole
@@ -243,6 +244,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
         static let membershipID = "membershipID"
         static let userRecordName = "userRecordName"
         static let displayName = "displayName"
+        static let athleteType = "athleteType"
         static let avatarAsset = "avatarAsset"
         static let joinedAt = "joinedAt"
         static let role = "role"
@@ -305,6 +307,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
         let circleID: String
         let userRecordName: String
         let displayName: String
+        let athleteTypeRaw: String?
         let avatarImageData: Data?
     }
 
@@ -467,6 +470,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
         membershipID: String,
         userRecordName: String,
         displayName: String,
+        athleteType: ProfileAthleteType?,
         avatarImageData: Data?,
         joinedAt: Date,
         role: BroMembershipRole
@@ -476,6 +480,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
             circleID: circleID,
             userRecordName: userRecordName,
             displayName: displayName,
+            athleteType: athleteType,
             avatarImageData: avatarImageData,
             joinedAt: joinedAt,
             role: role
@@ -509,6 +514,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
             membershipID: membershipID,
             userRecordName: userRecordName,
             displayName: displayName(from: profile),
+            athleteType: athleteType(from: profile),
             avatarImageData: profile?.avatarImageData,
             joinedAt: createdAt,
             role: .owner
@@ -528,6 +534,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
             membershipID: membershipID,
             userRecordName: userRecordName,
             displayName: displayName,
+            athleteType: athleteType(from: profile),
             avatarImageData: profile?.avatarImageData,
             joinedAt: createdAt,
             role: .owner
@@ -581,6 +588,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
             membershipID: membershipID,
             userRecordName: userRecordName,
             displayName: displayName(from: profile),
+            athleteType: athleteType(from: profile),
             avatarImageData: profile?.avatarImageData,
             joinedAt: joinedAt,
             role: .member
@@ -600,6 +608,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
             membershipID: membershipID,
             userRecordName: userRecordName,
             displayName: displayName,
+            athleteType: athleteType(from: profile),
             avatarImageData: profile?.avatarImageData,
             joinedAt: joinedAt,
             role: .member
@@ -881,6 +890,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
             circleID: circleID,
             userRecordName: userRecordName,
             displayName: displayName(from: profile),
+            athleteTypeRaw: profile.athleteType?.rawValue,
             avatarImageData: AppRuntimeConfig.reviewPolicy.syncBrosAvatars ? profile.avatarImageData : nil
         )
         try upsertOutboxItem(
@@ -1123,6 +1133,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
                 record[Field.displayName] as? String ?? "",
                 kind: .displayName
             ),
+            athleteType: ProfileAthleteType(rawValue: record[Field.athleteType] as? String ?? ""),
             avatarImageData: avatarImageData,
             joinedAt: record[Field.joinedAt] as? Date ?? .now,
             role: BroMembershipRole(rawValue: record[Field.role] as? String ?? "") ?? .member
@@ -1241,6 +1252,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
         membershipID: String,
         userRecordName: String,
         displayName: String,
+        athleteType: ProfileAthleteType?,
         avatarImageData: Data?,
         joinedAt: Date,
         role: BroMembershipRole
@@ -1252,6 +1264,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
             displayName,
             kind: .displayName
         ) as CKRecordValue
+        record[Field.athleteType] = athleteType?.rawValue as CKRecordValue?
         record[Field.joinedAt] = joinedAt as CKRecordValue
         record[Field.role] = role.rawValue as CKRecordValue
         record[Field.updatedAt] = Date() as CKRecordValue
@@ -1355,6 +1368,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
             membershipID: payload.membershipID,
             userRecordName: payload.userRecordName,
             displayName: payload.displayName,
+            athleteType: ProfileAthleteType(rawValue: payload.athleteTypeRaw ?? ""),
             avatarImageData: payload.avatarImageData,
             joinedAt: record[Field.joinedAt] as? Date ?? .now,
             role: BroMembershipRole(rawValue: record[Field.role] as? String ?? "") ?? .member
@@ -1411,6 +1425,10 @@ final class CloudKitBrosSocialService: BrosSocialService {
             profile?.displayName ?? "",
             kind: .displayName
         )
+    }
+
+    private func athleteType(from profile: UserProfile?) -> ProfileAthleteType? {
+        profile?.athleteType
     }
 
     private func inviteCode(from circleID: String) -> String {

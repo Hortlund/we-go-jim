@@ -50,10 +50,49 @@ struct ExerciseMetricSeries: Equatable {
     let points: [ExerciseMetricPoint]
 }
 
+struct ProfileOverviewStats: Equatable {
+    let totalWorkouts: Int
+    let totalPRHits: Int
+    let totalDurationSeconds: Int
+    let currentStreakDays: Int
+    let longestStreakDays: Int
+    let activeDaysThisMonth: Int
+    let firstWorkoutDate: Date?
+
+    static let empty = ProfileOverviewStats(
+        totalWorkouts: 0,
+        totalPRHits: 0,
+        totalDurationSeconds: 0,
+        currentStreakDays: 0,
+        longestStreakDays: 0,
+        activeDaysThisMonth: 0,
+        firstWorkoutDate: nil
+    )
+}
+
+struct ProfileTopExerciseStat: Identifiable, Equatable {
+    let catalogExerciseUUID: String
+    let exerciseName: String
+    let sessionCount: Int
+    let lastPerformedAt: Date
+
+    var id: String { catalogExerciseUUID }
+}
+
+struct ProfileActivityDay: Identifiable, Equatable {
+    let date: Date
+    let workoutCount: Int
+
+    var id: String { date.formatted(date: .numeric, time: .omitted) }
+}
+
 struct ProfileDashboardSnapshot: Equatable {
     let personalRecords: [WorkoutPRRecord]
     let weeklyProgress: [WeeklyWorkoutProgressPoint]
     let weeklyGoal: Int
+    let overviewStats: ProfileOverviewStats
+    let topExercises: [ProfileTopExerciseStat]
+    let activityDays: [ProfileActivityDay]
 }
 
 @MainActor
@@ -370,13 +409,48 @@ final class WorkoutMetricsService {
             }
         }
         var countsByWeek: [Date: Int] = [:]
+        var countsByDay: [Date: Int] = [:]
+        var exerciseFrequencyByUUID: [String: CollectedExerciseFrequency] = [:]
+        var totalDurationSeconds = 0
+        var totalPRHits = 0
+        var firstWorkoutDate: Date?
 
         for session in sessions {
             let achievedAt = session.endedAt ?? session.startedAt
             let week = weekStart(for: achievedAt)
+            let day = calendar.startOfDay(for: achievedAt)
             countsByWeek[week, default: 0] += 1
+            countsByDay[day, default: 0] += 1
+            totalDurationSeconds += max(0, session.durationSeconds)
+            totalPRHits += max(0, session.prHitsCount)
+
+            if let existingFirstWorkoutDate = firstWorkoutDate {
+                if achievedAt < existingFirstWorkoutDate {
+                    firstWorkoutDate = achievedAt
+                }
+            } else {
+                firstWorkoutDate = achievedAt
+            }
+
+            var countedExerciseUUIDs: Set<String> = []
 
             for exercise in orderedSessionExercises(session) {
+                if countedExerciseUUIDs.insert(exercise.catalogExerciseUUID).inserted {
+                    if let existing = exerciseFrequencyByUUID[exercise.catalogExerciseUUID] {
+                        exerciseFrequencyByUUID[exercise.catalogExerciseUUID] = CollectedExerciseFrequency(
+                            exerciseName: achievedAt >= existing.lastPerformedAt ? exercise.exerciseNameSnapshot : existing.exerciseName,
+                            sessionCount: existing.sessionCount + 1,
+                            lastPerformedAt: max(existing.lastPerformedAt, achievedAt)
+                        )
+                    } else {
+                        exerciseFrequencyByUUID[exercise.catalogExerciseUUID] = CollectedExerciseFrequency(
+                            exerciseName: exercise.exerciseNameSnapshot,
+                            sessionCount: 1,
+                            lastPerformedAt: achievedAt
+                        )
+                    }
+                }
+
                 for set in orderedSessionSets(exercise) where set.isCompleted {
                     guard let value = metricInput(from: set) else { continue }
                     let oneRM = estimatedOneRepMax(weight: value.weight, reps: value.reps)
@@ -391,13 +465,13 @@ final class WorkoutMetricsService {
                         achievedAt: achievedAt
                     )
 
-                if let existing = bestByExercise[exercise.catalogExerciseUUID] {
-                    if isBetterPRRecord(record, than: existing) {
+                    if let existing = bestByExercise[exercise.catalogExerciseUUID] {
+                        if isBetterPRRecord(record, than: existing) {
+                            bestByExercise[exercise.catalogExerciseUUID] = record
+                        }
+                    } else {
                         bestByExercise[exercise.catalogExerciseUUID] = record
                     }
-                } else {
-                    bestByExercise[exercise.catalogExerciseUUID] = record
-                }
                 }
             }
         }
@@ -421,11 +495,39 @@ final class WorkoutMetricsService {
                 goal: profileGoal
             )
         }
+        let overviewStats = buildOverviewStats(
+            completedWorkoutCount: sessions.count,
+            totalPRHits: totalPRHits,
+            totalDurationSeconds: totalDurationSeconds,
+            workoutCountsByDay: countsByDay,
+            firstWorkoutDate: firstWorkoutDate
+        )
+        let topExercises = exerciseFrequencyByUUID.map { entry in
+            ProfileTopExerciseStat(
+                catalogExerciseUUID: entry.key,
+                exerciseName: entry.value.exerciseName,
+                sessionCount: entry.value.sessionCount,
+                lastPerformedAt: entry.value.lastPerformedAt
+            )
+        }
+        .sorted { lhs, rhs in
+            if lhs.sessionCount != rhs.sessionCount {
+                return lhs.sessionCount > rhs.sessionCount
+            }
+            if lhs.lastPerformedAt != rhs.lastPerformedAt {
+                return lhs.lastPerformedAt > rhs.lastPerformedAt
+            }
+            return lhs.exerciseName.localizedStandardCompare(rhs.exerciseName) == .orderedAscending
+        }
+        let activityDays = buildActivityDays(from: countsByDay)
 
         return ProfileDashboardSnapshot(
             personalRecords: personalRecords,
             weeklyProgress: weeklyProgress,
-            weeklyGoal: profileGoal
+            weeklyGoal: profileGoal,
+            overviewStats: overviewStats,
+            topExercises: topExercises,
+            activityDays: activityDays
         )
     }
 
@@ -482,6 +584,105 @@ final class WorkoutMetricsService {
     private func weekStart(for date: Date) -> Date {
         let components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
         return calendar.date(from: components) ?? date
+    }
+
+    private func buildOverviewStats(
+        completedWorkoutCount: Int,
+        totalPRHits: Int,
+        totalDurationSeconds: Int,
+        workoutCountsByDay: [Date: Int],
+        firstWorkoutDate: Date?
+    ) -> ProfileOverviewStats {
+        let distinctWorkoutDays = workoutCountsByDay.keys.sorted()
+        let streaks = streakSummary(for: distinctWorkoutDays)
+        let activeDaysThisMonth = distinctWorkoutDays.filter { isInCurrentMonth($0) }.count
+
+        return ProfileOverviewStats(
+            totalWorkouts: completedWorkoutCount,
+            totalPRHits: totalPRHits,
+            totalDurationSeconds: totalDurationSeconds,
+            currentStreakDays: streaks.current,
+            longestStreakDays: streaks.longest,
+            activeDaysThisMonth: activeDaysThisMonth,
+            firstWorkoutDate: firstWorkoutDate
+        )
+    }
+
+    private func buildActivityDays(from workoutCountsByDay: [Date: Int], window: Int = 42) -> [ProfileActivityDay] {
+        let safeWindow = max(1, window)
+        let today = calendar.startOfDay(for: Date())
+
+        return (0..<safeWindow).compactMap { offset in
+            let daysBack = safeWindow - 1 - offset
+            guard let date = calendar.date(byAdding: .day, value: -daysBack, to: today) else {
+                return nil
+            }
+
+            let day = calendar.startOfDay(for: date)
+            return ProfileActivityDay(
+                date: day,
+                workoutCount: workoutCountsByDay[day, default: 0]
+            )
+        }
+    }
+
+    private func streakSummary(for workoutDays: [Date]) -> (current: Int, longest: Int) {
+        guard !workoutDays.isEmpty else { return (0, 0) }
+
+        var longest = 1
+        var running = 1
+
+        if workoutDays.count >= 2 {
+            for index in 1..<workoutDays.count {
+                if isConsecutiveDay(previous: workoutDays[index - 1], next: workoutDays[index]) {
+                    running += 1
+                } else {
+                    running = 1
+                }
+
+                longest = max(longest, running)
+            }
+        }
+
+        guard let latestWorkoutDay = workoutDays.last else {
+            return (0, longest)
+        }
+
+        let today = calendar.startOfDay(for: Date())
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: today) ?? today
+        guard calendar.isDate(latestWorkoutDay, inSameDayAs: today)
+            || calendar.isDate(latestWorkoutDay, inSameDayAs: yesterday)
+        else {
+            return (0, longest)
+        }
+
+        var current = 1
+        var index = workoutDays.count - 1
+
+        while index > 0 {
+            if isConsecutiveDay(previous: workoutDays[index - 1], next: workoutDays[index]) {
+                current += 1
+                index -= 1
+            } else {
+                break
+            }
+        }
+
+        return (current, longest)
+    }
+
+    private func isConsecutiveDay(previous: Date, next: Date) -> Bool {
+        guard let expectedNextDay = calendar.date(byAdding: .day, value: 1, to: previous) else {
+            return false
+        }
+
+        return calendar.isDate(expectedNextDay, inSameDayAs: next)
+    }
+
+    private func isInCurrentMonth(_ date: Date) -> Bool {
+        let currentComponents = calendar.dateComponents([.year, .month], from: Date())
+        let dateComponents = calendar.dateComponents([.year, .month], from: date)
+        return currentComponents.year == dateComponents.year && currentComponents.month == dateComponents.month
     }
 
     private func comparisonOneRepMax(weight: Double, reps: Int, unit: TemplateLoadUnit) -> Double {
@@ -548,4 +749,10 @@ private struct CollectedExerciseMetricPoint {
     let completedAt: Date
     let normalizedValue: Double
     let sourceUnit: TemplateLoadUnit
+}
+
+private struct CollectedExerciseFrequency {
+    let exerciseName: String
+    let sessionCount: Int
+    let lastPerformedAt: Date
 }

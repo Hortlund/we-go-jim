@@ -28,14 +28,20 @@ final class ProfileRepository {
         return profile
     }
 
-    func updateDisplayName(_ displayName: String) throws {
+    func updateIdentity(name: String, athleteType: ProfileAthleteType?) throws {
         let profile = try loadOrCreateProfile()
-        let cleaned = try ReviewModerationService.validateUserInput(displayName, kind: .displayName)
+        let cleaned = try ReviewModerationService.validateUserInput(name, kind: .displayName)
 
         profile.displayName = cleaned
+        profile.athleteType = athleteType
         profile.updatedAt = .now
         try modelContext.save()
         try? CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)?.queueCurrentProfileSync()
+    }
+
+    func updateDisplayName(_ displayName: String) throws {
+        let athleteType = try currentProfile()?.athleteType
+        try updateIdentity(name: displayName, athleteType: athleteType)
     }
 
     func updateAvatar(imageData: Data?) throws {

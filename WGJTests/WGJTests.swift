@@ -491,14 +491,16 @@ struct WGJTests {
 
         let created = try repository.loadOrCreateProfile()
         #expect(created.displayName == "Athlete")
+        #expect(created.athleteType == nil)
         #expect(created.isTrainingGuidanceEnabled)
 
-        try repository.updateDisplayName("Demo Lifter")
+        try repository.updateIdentity(name: "Demo Lifter", athleteType: .garageGymRat)
         let avatarData = Data([0x01, 0x02, 0x03, 0x04])
         try repository.updateAvatar(imageData: avatarData)
 
         let updated = try repository.currentProfile()
         #expect(updated?.displayName == "Demo Lifter")
+        #expect(updated?.athleteType == .garageGymRat)
         #expect(updated?.avatarImageData == avatarData)
     }
 

@@ -33,7 +33,7 @@ struct ProfileWidgetManagerView: View {
             Section {
                 WGJEmptyStateCard(
                     title: "Profile widgets",
-                    message: "Choose the cards that appear on your profile, then drag enabled widgets to reorder them.",
+                    message: "Choose the cards that appear on your profile, from PRs and goals to streaks, favorites, and consistency heatmaps.",
                     icon: "square.grid.2x2"
                 )
                 .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 8, trailing: 0))
@@ -144,7 +144,7 @@ struct ProfileWidgetManagerView: View {
                         Button(config.selectedCatalogExerciseUUID == nil ? "Choose Exercise" : "Change") {
                             presentExercisePicker(for: config.kind, enableWidgetAfterSelection: false)
                         }
-                        .buttonStyle(WGJGhostButtonStyle())
+                        .buttonStyle(WGJCompactGhostButtonStyle())
                     }
 
                     Spacer(minLength: 0)
@@ -153,12 +153,12 @@ struct ProfileWidgetManagerView: View {
                         Button("Remove") {
                             toggleConfig(config)
                         }
-                        .buttonStyle(WGJGhostButtonStyle())
+                        .buttonStyle(WGJCompactGhostButtonStyle())
                     } else {
                         Button("Add") {
                             enableConfig(config)
                         }
-                        .buttonStyle(WGJPrimaryButtonStyle())
+                        .buttonStyle(WGJCompactPrimaryButtonStyle())
                     }
                 }
             }
@@ -181,6 +181,12 @@ struct ProfileWidgetManagerView: View {
             return "chart.line.uptrend.xyaxis"
         case .exerciseVolumeTrend:
             return "chart.bar.xaxis"
+        case .streaks:
+            return "flame.fill"
+        case .topExercises:
+            return "list.number"
+        case .consistencyCalendar:
+            return "calendar"
         }
     }
 
@@ -194,6 +200,12 @@ struct ProfileWidgetManagerView: View {
             return "Chart your best estimated 1RM across recent workouts."
         case .exerciseVolumeTrend:
             return "Track weighted training volume over time for one exercise."
+        case .streaks:
+            return "See your current streak, longest run, and active days this month."
+        case .topExercises:
+            return "Show the lifts that keep showing up in your training."
+        case .consistencyCalendar:
+            return "Visualize the last 6 weeks of workout consistency."
         }
     }
 

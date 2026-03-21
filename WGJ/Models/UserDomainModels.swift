@@ -20,6 +20,76 @@ enum TemplateLoadUnit: String, Codable, CaseIterable, Equatable, Identifiable {
     }
 }
 
+enum ProfileAthleteType: String, Codable, CaseIterable, Equatable, Identifiable {
+    case strengthTraining
+    case powerlifting
+    case olympicLifting
+    case bodybuilding
+    case hybridAthlete
+    case strongman
+    case calisthenics
+    case running
+    case functionalFitness
+    case endurance
+    case garageGymRat
+    case benchMerchant
+    case legDaySurvivor
+    case deadliftEnthusiast
+    case cardioCriminal
+    case machineMaxxer
+    case mobilityMonk
+    case weekendWarrior
+    case dadStrength
+    case chaosGoblin
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .strengthTraining:
+            return "Strength Training"
+        case .powerlifting:
+            return "Powerlifting"
+        case .olympicLifting:
+            return "Olympic Lifting"
+        case .bodybuilding:
+            return "Bodybuilding"
+        case .hybridAthlete:
+            return "Hybrid Athlete"
+        case .strongman:
+            return "Strongman"
+        case .calisthenics:
+            return "Calisthenics"
+        case .running:
+            return "Running"
+        case .functionalFitness:
+            return "Functional Fitness"
+        case .endurance:
+            return "Endurance"
+        case .garageGymRat:
+            return "Garage Gym Rat"
+        case .benchMerchant:
+            return "Bench Merchant"
+        case .legDaySurvivor:
+            return "Leg Day Survivor"
+        case .deadliftEnthusiast:
+            return "Deadlift Enthusiast"
+        case .cardioCriminal:
+            return "Cardio Criminal"
+        case .machineMaxxer:
+            return "Machine Maxxer"
+        case .mobilityMonk:
+            return "Mobility Monk"
+        case .weekendWarrior:
+            return "Weekend Warrior"
+        case .dadStrength:
+            return "Dad Strength"
+        case .chaosGoblin:
+            return "Chaos Goblin"
+        }
+    }
+}
+
 enum WorkoutSessionStatus: String, Codable, CaseIterable, Equatable {
     case active
     case completed
@@ -31,6 +101,9 @@ enum ProfileWidgetKind: String, Codable, CaseIterable, Equatable, Hashable, Iden
     case weeklyGoals
     case exerciseOneRMTrend
     case exerciseVolumeTrend
+    case streaks
+    case topExercises
+    case consistencyCalendar
 
     var id: String { rawValue }
 
@@ -44,6 +117,12 @@ enum ProfileWidgetKind: String, Codable, CaseIterable, Equatable, Hashable, Iden
             return "1RM Trend"
         case .exerciseVolumeTrend:
             return "Volume Trend"
+        case .streaks:
+            return "Streaks"
+        case .topExercises:
+            return "Top Exercises"
+        case .consistencyCalendar:
+            return "Consistency Calendar"
         }
     }
 
@@ -51,7 +130,7 @@ enum ProfileWidgetKind: String, Codable, CaseIterable, Equatable, Hashable, Iden
         switch self {
         case .exerciseOneRMTrend, .exerciseVolumeTrend:
             return true
-        case .prs, .weeklyGoals:
+        case .prs, .weeklyGoals, .streaks, .topExercises, .consistencyCalendar:
             return false
         }
     }
@@ -73,6 +152,7 @@ enum SocialOutboxOperationKind: String, Codable, CaseIterable, Equatable {
 final class UserProfile {
     var id: UUID = UUID()
     var displayName: String = ""
+    var athleteTypeRaw: String?
     var avatarImageData: Data?
     var weeklyWorkoutGoal: Int = 4
     var isTrainingGuidanceEnabled: Bool = true
@@ -94,9 +174,20 @@ final class UserProfile {
         }
     }
 
+    var athleteType: ProfileAthleteType? {
+        get {
+            guard let athleteTypeRaw else { return nil }
+            return ProfileAthleteType(rawValue: athleteTypeRaw)
+        }
+        set {
+            athleteTypeRaw = newValue?.rawValue
+        }
+    }
+
     init(
         id: UUID = UUID(),
         displayName: String,
+        athleteType: ProfileAthleteType? = nil,
         avatarImageData: Data? = nil,
         weeklyWorkoutGoal: Int = 4,
         isTrainingGuidanceEnabled: Bool = true,
@@ -110,6 +201,7 @@ final class UserProfile {
     ) {
         self.id = id
         self.displayName = displayName
+        self.athleteTypeRaw = athleteType?.rawValue
         self.avatarImageData = avatarImageData
         self.weeklyWorkoutGoal = max(1, min(14, weeklyWorkoutGoal))
         self.isTrainingGuidanceEnabled = isTrainingGuidanceEnabled

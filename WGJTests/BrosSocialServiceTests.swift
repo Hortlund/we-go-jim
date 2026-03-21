@@ -131,6 +131,7 @@ struct BrosSocialServiceTests {
             circleID: "circle",
             userRecordName: "\(id)-user",
             displayName: id.capitalized,
+            athleteType: nil,
             avatarImageData: nil,
             joinedAt: Date(timeIntervalSince1970: joinedAt),
             role: role

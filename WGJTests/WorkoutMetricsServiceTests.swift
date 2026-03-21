@@ -224,6 +224,9 @@ struct WorkoutMetricsServiceTests {
         #expect(snapshot.weeklyProgress.count == 4)
         #expect(snapshot.weeklyProgress.allSatisfy { $0.goal == 3 })
         #expect(snapshot.weeklyProgress.map(\.completedWorkouts).reduce(0, +) == 1)
+        #expect(snapshot.overviewStats.totalWorkouts == 1)
+        #expect(snapshot.topExercises.first?.catalogExerciseUUID == exercise.remoteUUID)
+        #expect(snapshot.activityDays.count == 42)
     }
 
     @Test
@@ -271,12 +274,122 @@ struct WorkoutMetricsServiceTests {
     }
 
     @Test
+    func profileDashboardSnapshotBuildsOverviewStatsTopExercisesAndActivityDays() throws {
+        let context = try makeInMemoryContext()
+        let sessionRepository = WorkoutSessionRepository(modelContext: context)
+        let metrics = WorkoutMetricsService(modelContext: context)
+
+        let bench = ExerciseCatalogItem(
+            remoteUUID: "overview-bench",
+            displayName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        let squat = ExerciseCatalogItem(
+            remoteUUID: "overview-squat",
+            displayName: "Back Squat",
+            categoryName: "Legs",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(bench)
+        context.insert(squat)
+
+        let baseDay = Calendar.current.startOfDay(for: Date())
+        try makeCompletedSession(
+            named: "Bench 1",
+            exercise: bench,
+            start: Calendar.current.date(byAdding: .day, value: -2, to: baseDay) ?? baseDay,
+            durationSeconds: 3_600,
+            prHitsCount: 1,
+            sessionRepository: sessionRepository,
+            context: context
+        )
+        try makeCompletedSession(
+            named: "Bench 2",
+            exercise: bench,
+            start: Calendar.current.date(byAdding: .day, value: -1, to: baseDay) ?? baseDay,
+            durationSeconds: 2_400,
+            prHitsCount: 2,
+            sessionRepository: sessionRepository,
+            context: context
+        )
+        try makeCompletedSession(
+            named: "Squat Day",
+            exercise: squat,
+            start: baseDay,
+            durationSeconds: 1_800,
+            prHitsCount: 0,
+            sessionRepository: sessionRepository,
+            context: context
+        )
+
+        let snapshot = try metrics.profileDashboardSnapshot(prLimit: 5, weeks: 4)
+        #expect(snapshot.overviewStats.totalWorkouts == 3)
+        #expect(snapshot.overviewStats.totalPRHits == 3)
+        #expect(snapshot.overviewStats.totalDurationSeconds == 7_800)
+        #expect(snapshot.overviewStats.currentStreakDays == 3)
+        #expect(snapshot.overviewStats.longestStreakDays == 3)
+        #expect(snapshot.topExercises.first?.catalogExerciseUUID == bench.remoteUUID)
+        #expect(snapshot.topExercises.first?.sessionCount == 2)
+        #expect(snapshot.activityDays.count == 42)
+        #expect(snapshot.activityDays.last?.workoutCount == 1)
+    }
+
+    @Test
+    func profileDashboardSnapshotResetsCurrentStreakWhenLatestWorkoutIsOlderThanYesterday() throws {
+        let context = try makeInMemoryContext()
+        let sessionRepository = WorkoutSessionRepository(modelContext: context)
+        let metrics = WorkoutMetricsService(modelContext: context)
+
+        let bench = ExerciseCatalogItem(
+            remoteUUID: "streak-bench",
+            displayName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(bench)
+
+        let baseDay = Calendar.current.startOfDay(for: Date())
+        try makeCompletedSession(
+            named: "Old 1",
+            exercise: bench,
+            start: Calendar.current.date(byAdding: .day, value: -4, to: baseDay) ?? baseDay,
+            durationSeconds: 1_800,
+            prHitsCount: 0,
+            sessionRepository: sessionRepository,
+            context: context
+        )
+        try makeCompletedSession(
+            named: "Old 2",
+            exercise: bench,
+            start: Calendar.current.date(byAdding: .day, value: -3, to: baseDay) ?? baseDay,
+            durationSeconds: 1_800,
+            prHitsCount: 0,
+            sessionRepository: sessionRepository,
+            context: context
+        )
+
+        let snapshot = try metrics.profileDashboardSnapshot(prLimit: 5, weeks: 4)
+        #expect(snapshot.overviewStats.currentStreakDays == 0)
+        #expect(snapshot.overviewStats.longestStreakDays == 2)
+    }
+
+    @Test
     func widgetRepositoryAddRemoveReorderPersists() throws {
         let context = try makeInMemoryContext()
         let repository = ProfileWidgetRepository(modelContext: context)
 
         let allConfigs = try repository.configurations()
-        #expect(allConfigs.count == 4)
+        #expect(allConfigs.count == 7)
+        #expect(allConfigs.contains { $0.kind == .streaks })
+        #expect(allConfigs.contains { $0.kind == .topExercises })
+        #expect(allConfigs.contains { $0.kind == .consistencyCalendar })
 
         var enabled = try repository.enabledConfigurations()
         #expect(enabled.count == 2)
@@ -514,5 +627,33 @@ struct WorkoutMetricsServiceTests {
         )
         let container = try ModelContainer(for: schema, configurations: [configuration])
         return ModelContext(container)
+    }
+
+    private func makeCompletedSession(
+        named name: String,
+        exercise: ExerciseCatalogItem,
+        start: Date,
+        durationSeconds: Int,
+        prHitsCount: Int,
+        sessionRepository: WorkoutSessionRepository,
+        context: ModelContext
+    ) throws {
+        let session = try sessionRepository.createEmptySession(name: name)
+        try sessionRepository.addExercise(sessionID: session.id, catalogItem: exercise)
+        let sessionExercise = try #require(try sessionRepository.sessionExercises(sessionID: session.id).first)
+        var drafts = try sessionRepository.setDrafts(sessionExerciseID: sessionExercise.id)
+        drafts[0].actualWeight = 100
+        drafts[0].actualReps = 5
+        drafts[0].actualLoadUnit = .kg
+        drafts[0].isCompleted = true
+        try sessionRepository.saveSetDrafts(sessionExerciseID: sessionExercise.id, drafts: drafts)
+        try sessionRepository.finishSession(sessionID: session.id)
+
+        let stored = try #require(try sessionRepository.session(id: session.id))
+        stored.startedAt = start
+        stored.endedAt = start.addingTimeInterval(TimeInterval(durationSeconds))
+        stored.durationSeconds = durationSeconds
+        stored.prHitsCount = prHitsCount
+        try context.save()
     }
 }

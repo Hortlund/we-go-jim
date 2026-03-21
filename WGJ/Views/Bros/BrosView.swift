@@ -520,6 +520,10 @@ struct BrosView: View {
                 .foregroundStyle(WGJTheme.textPrimary)
                 .wgjSingleLineText(scale: 0.78)
 
+            if let athleteType = member.athleteType {
+                memberBadge(athleteType.title, tint: WGJTheme.accentCyan)
+            }
+
             HStack(spacing: 8) {
                 if member.id == snapshot.currentMember.id {
                     memberBadge("You", tint: WGJTheme.accentBlue)
@@ -547,6 +551,8 @@ struct BrosView: View {
         Text(title)
             .font(.caption.weight(.semibold))
             .foregroundStyle(tint)
+            .lineLimit(1)
+            .minimumScaleFactor(0.72)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background {
@@ -996,7 +1002,7 @@ private struct BroCircleManagementView: View {
 
     private var membersSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            WGJActionHeader("Members", subtitle: "Names shown here come from each bro's profile.") {
+            WGJActionHeader("Members", subtitle: "Names and athlete types shown here come from each bro's profile.") {
                 WGJMetricPill(systemImage: "person.3.sequence.fill", value: "\(snapshot.members.count)/4")
             }
 
@@ -1021,6 +1027,10 @@ private struct BroCircleManagementView: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(WGJTheme.textPrimary)
                     .wgjSingleLineText(scale: 0.82)
+
+                if let athleteType = member.athleteType {
+                    memberBadge(athleteType.title, tint: WGJTheme.accentCyan)
+                }
 
                 HStack(spacing: 8) {
                     if member.id == snapshot.currentMember.id {
@@ -1090,6 +1100,8 @@ private struct BroCircleManagementView: View {
         Text(title)
             .font(.caption.weight(.semibold))
             .foregroundStyle(tint)
+            .lineLimit(1)
+            .minimumScaleFactor(0.72)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background {

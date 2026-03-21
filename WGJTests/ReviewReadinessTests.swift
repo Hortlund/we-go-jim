@@ -255,6 +255,7 @@ struct ReviewReadinessTests {
             circleID: "circle-1",
             userRecordName: userRecordName,
             displayName: displayName,
+            athleteType: nil,
             avatarImageData: nil,
             joinedAt: Date(timeIntervalSince1970: joinedAt),
             role: role
