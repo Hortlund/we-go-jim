@@ -89,12 +89,12 @@ struct DeleteMyDataView: View {
         do {
             try await service.deleteAllUserData()
             alertTitle = "Data Deleted"
-            alertMessage = "All local app data was deleted. The app will return to the login screen."
+            alertMessage = "All local app data was deleted. The app will restart after you dismiss this alert."
             shouldResetAfterAlert = true
             showingAlert = true
         } catch {
             alertTitle = "Local Data Deleted"
-            alertMessage = "\(error.localizedDescription)\n\nThe app will still return to the login screen."
+            alertMessage = "\(error.localizedDescription)\n\nThe app will restart after you dismiss this alert."
             shouldResetAfterAlert = true
             showingAlert = true
         }

@@ -4,65 +4,123 @@ struct ProfileAthleteTypePickerView: View {
     @Environment(\.dismiss) private var dismiss
 
     @Binding var selectedAthleteType: ProfileAthleteType?
+    @State private var hasScrolledToSelection = false
 
-    private var trainingStyles: [ProfileAthleteType] {
+    private var sections: [AthleteTypePickerSection] {
         [
-            .strengthTraining,
-            .powerlifting,
-            .olympicLifting,
-            .bodybuilding,
-            .hybridAthlete,
-            .strongman,
-            .calisthenics,
-            .running,
-            .functionalFitness,
-            .endurance,
-        ]
-    }
-
-    private var funTypes: [ProfileAthleteType] {
-        [
-            .garageGymRat,
-            .benchMerchant,
-            .legDaySurvivor,
-            .deadliftEnthusiast,
-            .cardioCriminal,
-            .machineMaxxer,
-            .mobilityMonk,
-            .weekendWarrior,
-            .dadStrength,
-            .chaosGoblin,
+            AthleteTypePickerSection(
+                title: "Optional",
+                subtitle: "Skip it for now and keep the profile clean.",
+                options: [.none]
+            ),
+            AthleteTypePickerSection(
+                title: "Strength Sports",
+                subtitle: "Classic gym identities built around iron, intent, and progressive overload.",
+                options: [
+                    .athlete(.strengthTraining),
+                    .athlete(.powerlifting),
+                    .athlete(.olympicLifting),
+                    .athlete(.bodybuilding),
+                    .athlete(.strongman),
+                ]
+            ),
+            AthleteTypePickerSection(
+                title: "Hybrid and Conditioning",
+                subtitle: "For people who lift, move, and keep the engine switched on.",
+                options: [
+                    .athlete(.hybridAthlete),
+                    .athlete(.functionalFitness),
+                    .athlete(.calisthenics),
+                    .athlete(.running),
+                    .athlete(.endurance),
+                    .athlete(.cycling),
+                    .athlete(.swimming),
+                    .athlete(.trailRunning),
+                ]
+            ),
+            AthleteTypePickerSection(
+                title: "Skill and Movement",
+                subtitle: "Precision, body control, and athletic identity beyond straight gym bro energy.",
+                options: [
+                    .athlete(.climbing),
+                    .athlete(.martialArts),
+                    .athlete(.yogaFlow),
+                    .athlete(.racketSports),
+                ]
+            ),
+            AthleteTypePickerSection(
+                title: "Gym Lore",
+                subtitle: "Still grounded, but with more personality and more stories behind the choice.",
+                options: [
+                    .athlete(.garageGymRat),
+                    .athlete(.machineMaxxer),
+                    .athlete(.mobilityMonk),
+                    .athlete(.weekendWarrior),
+                    .athlete(.dadStrength),
+                    .athlete(.deadliftEnthusiast),
+                ]
+            ),
+            AthleteTypePickerSection(
+                title: "Meme Damage",
+                subtitle: "High flavor, high gym-brain energy, still readable enough to flex in Bros.",
+                options: [
+                    .athlete(.benchMerchant),
+                    .athlete(.legDaySurvivor),
+                    .athlete(.cardioCriminal),
+                    .athlete(.chaosGoblin),
+                    .athlete(.squatSorcerer),
+                    .athlete(.chalkGoblin),
+                    .athlete(.proteinProphet),
+                    .athlete(.preworkoutAstronaut),
+                    .athlete(.deloadDenier),
+                    .athlete(.cableCowboy),
+                    .athlete(.pumpChaser),
+                    .athlete(.repRangeBandit),
+                    .athlete(.plateCollector),
+                    .athlete(.spreadsheetTactician),
+                    .athlete(.restDayRevisionist),
+                    .athlete(.latsCartographer),
+                ]
+            ),
         ]
     }
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    optionRow(title: "None", subtitle: "Keep the profile clean without a type badge.", value: nil)
-                } header: {
-                    sectionHeader("Optional", subtitle: "You can skip this and add it later.")
-                }
-
-                Section {
-                    ForEach(trainingStyles) { athleteType in
-                        optionRow(title: athleteType.title, subtitle: "Training style", value: athleteType)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 18, pinnedViews: [.sectionHeaders]) {
+                        ForEach(sections) { section in
+                            Section {
+                                VStack(spacing: 10) {
+                                    ForEach(section.options) { option in
+                                        optionRow(option)
+                                            .id(option.id)
+                                    }
+                                }
+                                .padding(.top, 6)
+                            } header: {
+                                stickySectionHeader(section.title, subtitle: section.subtitle)
+                            }
+                        }
                     }
-                } header: {
-                    sectionHeader("Training Styles", subtitle: "Grounded options for how you train.")
+                    .padding(.top, 8)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 28)
                 }
-
-                Section {
-                    ForEach(funTypes) { athleteType in
-                        optionRow(title: athleteType.title, subtitle: "Fun profile flavor", value: athleteType)
+                .scrollIndicators(.hidden)
+                .scrollBounceBehavior(.basedOnSize)
+                .scrollClipDisabled()
+                .wgjScreenBackground()
+                .task {
+                    guard !hasScrolledToSelection, let selectedAthleteType else { return }
+                    hasScrolledToSelection = true
+                    try? await Task.sleep(for: .milliseconds(120))
+                    withAnimation(.easeInOut(duration: 0.28)) {
+                        proxy.scrollTo(selectedAthleteType.id, anchor: .center)
                     }
-                } header: {
-                    sectionHeader("Fun Types", subtitle: "A little meme energy without wrecking the app feel.")
                 }
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .wgjScreenBackground()
             .wgjNavigationChrome()
             .navigationTitle("Athlete Type")
             .navigationBarTitleDisplayMode(.inline)
@@ -76,36 +134,50 @@ struct ProfileAthleteTypePickerView: View {
         }
     }
 
-    private func sectionHeader(_ title: String, subtitle: String) -> some View {
+    private func stickySectionHeader(_ title: String, subtitle: String) -> some View {
         WGJSectionHeader(title, subtitle: subtitle)
             .textCase(nil)
-            .padding(.top, 8)
-            .padding(.bottom, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(.regularMaterial)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(WGJTheme.bgBase.opacity(0.94))
+                    }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(WGJTheme.outline.opacity(0.88), lineWidth: 1)
+                    }
+                    .shadow(color: WGJTheme.shadowSoft.opacity(0.42), radius: 10, x: 0, y: 6)
+            }
+            .padding(.top, 6)
+            .padding(.bottom, 2)
     }
 
-    private func optionRow(
-        title: String,
-        subtitle: String,
-        value: ProfileAthleteType?
-    ) -> some View {
+    private func optionRow(_ option: AthleteTypePickerOption) -> some View {
         Button {
-            selectedAthleteType = value
+            selectedAthleteType = option.value
             dismiss()
         } label: {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
+                    Text(option.title)
                         .font(.headline)
                         .foregroundStyle(WGJTheme.textPrimary)
+                        .lineLimit(1)
 
-                    Text(subtitle)
+                    Text(option.subtitle)
                         .font(.caption)
                         .foregroundStyle(WGJTheme.textSecondary)
+                        .lineLimit(2)
                 }
 
                 Spacer()
 
-                if selectedAthleteType == value {
+                if selectedAthleteType == option.value {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.headline)
                         .foregroundStyle(WGJTheme.accentBlue)
@@ -117,11 +189,65 @@ struct ProfileAthleteTypePickerView: View {
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .wgjCardContainer(cornerRadius: WGJRadius.control)
+            .background {
+                RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
+                    .fill(.thinMaterial)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
+                            .fill(
+                                (selectedAthleteType == option.value ? WGJTheme.cardStrong : WGJTheme.card)
+                                    .opacity(selectedAthleteType == option.value ? 0.88 : 0.72)
+                            )
+                    }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
+                            .stroke(
+                                selectedAthleteType == option.value
+                                    ? WGJTheme.accentBlue.opacity(0.44)
+                                    : WGJTheme.outline.opacity(0.82),
+                                lineWidth: 1
+                            )
+                    }
+                    .shadow(
+                        color: selectedAthleteType == option.value
+                            ? WGJTheme.shadowStrong.opacity(0.22)
+                            : WGJTheme.shadowSoft.opacity(0.34),
+                        radius: selectedAthleteType == option.value ? 12 : 8,
+                        x: 0,
+                        y: selectedAthleteType == option.value ? 7 : 4
+                    )
+            }
         }
         .buttonStyle(.plain)
-        .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
+    }
+}
+
+private struct AthleteTypePickerSection: Identifiable {
+    let title: String
+    let subtitle: String
+    let options: [AthleteTypePickerOption]
+
+    var id: String { title }
+}
+
+private struct AthleteTypePickerOption: Identifiable {
+    let value: ProfileAthleteType?
+    let title: String
+    let subtitle: String
+
+    var id: String { value?.id ?? "none" }
+
+    static let none = AthleteTypePickerOption(
+        value: nil,
+        title: "None",
+        subtitle: "Keep the profile clean without an athlete-type badge."
+    )
+
+    static func athlete(_ athleteType: ProfileAthleteType) -> AthleteTypePickerOption {
+        AthleteTypePickerOption(
+            value: athleteType,
+            title: athleteType.title,
+            subtitle: athleteType.pickerSubtitle
+        )
     }
 }

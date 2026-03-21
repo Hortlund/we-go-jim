@@ -57,15 +57,15 @@ struct ContentView: View {
             updateIdleTimerState()
         }
         .onReceive(NotificationCenter.default.publisher(for: .wgjDidDeleteAllUserData)) { _ in
-            resetToLogin()
+            resetToStartupFlow()
         }
     }
 
     private func transitionFromSplashIfNeeded() async {
         guard appPhase == .splash else { return }
-        if ProcessInfo.processInfo.arguments.contains("UITEST_SKIP_SPLASH") {
+        if ProcessInfo.processInfo.arguments.contains(AppStartupRouting.skipSplashArgument) {
             withAnimation(.easeInOut(duration: 0.2)) {
-                appPhase = .login
+                appPhase = AppStartupRouting.destinationAfterSplash
             }
             return
         }
@@ -73,7 +73,7 @@ struct ContentView: View {
 
         guard appPhase == .splash else { return }
         withAnimation(.easeInOut(duration: 0.2)) {
-            appPhase = .login
+            appPhase = AppStartupRouting.destinationAfterSplash
         }
     }
 
@@ -97,13 +97,14 @@ struct ContentView: View {
         await service.flushOutbox()
     }
 
-    private func resetToLogin() {
+    private func resetToStartupFlow() {
         appMaintenanceTask?.cancel()
+        appMaintenanceTask = nil
         activeWorkoutCoordinator.clearActiveWorkout()
         catalogSyncCoordinator = CatalogSyncCoordinator()
         updateIdleTimerState()
         withAnimation(.easeInOut(duration: 0.2)) {
-            appPhase = .login
+            appPhase = .splash
         }
     }
 
@@ -120,6 +121,28 @@ private enum AppPhase {
     case splash
     case login
     case main
+}
+
+private enum AppStartupRouting {
+    static let skipSplashArgument = "UITEST_SKIP_SPLASH"
+    static let forceAutoEnterArgument = "UITEST_FORCE_AUTO_ENTER_AFTER_SPLASH"
+
+    static var destinationAfterSplash: AppPhase {
+        usesLoginGate ? .login : .main
+    }
+
+    private static var usesLoginGate: Bool {
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains(forceAutoEnterArgument) {
+            return false
+        }
+
+#if DEBUG
+        return true
+#else
+        return false
+#endif
+    }
 }
 
 #Preview {

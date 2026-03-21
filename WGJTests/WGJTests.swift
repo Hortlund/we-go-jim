@@ -31,6 +31,16 @@ struct WGJTests {
     }
 
     @Test
+    func athleteTypesExposeTitlesAndPickerSubtitles() {
+        let titles = ProfileAthleteType.allCases.map(\.title)
+        let subtitles = ProfileAthleteType.allCases.map(\.pickerSubtitle)
+
+        #expect(titles.allSatisfy { !$0.isEmpty })
+        #expect(subtitles.allSatisfy { !$0.isEmpty })
+        #expect(Set(titles).count == titles.count)
+    }
+
+    @Test
     func templateRepositoryCreatesMultipleFoldersAndTemplates() throws {
         let context = try makeInMemoryContext()
         let repository = TemplateRepository(modelContext: context)

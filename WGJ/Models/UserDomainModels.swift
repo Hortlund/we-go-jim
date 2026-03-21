@@ -41,6 +41,25 @@ enum ProfileAthleteType: String, Codable, CaseIterable, Equatable, Identifiable 
     case weekendWarrior
     case dadStrength
     case chaosGoblin
+    case cycling
+    case swimming
+    case trailRunning
+    case climbing
+    case martialArts
+    case yogaFlow
+    case racketSports
+    case squatSorcerer
+    case chalkGoblin
+    case proteinProphet
+    case preworkoutAstronaut
+    case deloadDenier
+    case cableCowboy
+    case pumpChaser
+    case repRangeBandit
+    case plateCollector
+    case spreadsheetTactician
+    case restDayRevisionist
+    case latsCartographer
 
     var id: String { rawValue }
 
@@ -86,6 +105,127 @@ enum ProfileAthleteType: String, Codable, CaseIterable, Equatable, Identifiable 
             return "Dad Strength"
         case .chaosGoblin:
             return "Chaos Goblin"
+        case .cycling:
+            return "Cycling"
+        case .swimming:
+            return "Swimming"
+        case .trailRunning:
+            return "Trail Running"
+        case .climbing:
+            return "Climbing"
+        case .martialArts:
+            return "Martial Arts"
+        case .yogaFlow:
+            return "Yoga Flow"
+        case .racketSports:
+            return "Racket Sports"
+        case .squatSorcerer:
+            return "Squat Sorcerer"
+        case .chalkGoblin:
+            return "Chalk Goblin"
+        case .proteinProphet:
+            return "Protein Prophet"
+        case .preworkoutAstronaut:
+            return "Preworkout Astronaut"
+        case .deloadDenier:
+            return "Deload Denier"
+        case .cableCowboy:
+            return "Cable Cowboy"
+        case .pumpChaser:
+            return "Pump Chaser"
+        case .repRangeBandit:
+            return "Rep Range Bandit"
+        case .plateCollector:
+            return "Plate Collector"
+        case .spreadsheetTactician:
+            return "Spreadsheet Tactician"
+        case .restDayRevisionist:
+            return "Rest Day Revisionist"
+        case .latsCartographer:
+            return "Lats Cartographer"
+        }
+    }
+
+    var pickerSubtitle: String {
+        switch self {
+        case .strengthTraining:
+            return "General barbell and dumbbell work with steady progressive overload."
+        case .powerlifting:
+            return "Squat, bench, deadlift, and a soft spot for heavy singles."
+        case .olympicLifting:
+            return "Snatch, clean and jerk, and sharp bar speed under pressure."
+        case .bodybuilding:
+            return "Hypertrophy blocks, mind-muscle focus, and pump-driven sessions."
+        case .hybridAthlete:
+            return "Lifts hard, runs hard, and refuses to choose one identity."
+        case .strongman:
+            return "Carries, odd objects, and events that look mildly illegal."
+        case .calisthenics:
+            return "Bodyweight skill, control, and clean lines under tension."
+        case .running:
+            return "Mileage, pace, and the occasional identity crisis after leg day."
+        case .functionalFitness:
+            return "Mixed-modal suffering with a whiteboard and a clock nearby."
+        case .endurance:
+            return "Long efforts, patient pacing, and an engine-first mindset."
+        case .garageGymRat:
+            return "Home setup, no excuses, and one loyal speaker doing heavy work."
+        case .benchMerchant:
+            return "Lives for chest day and takes the shortest route there."
+        case .legDaySurvivor:
+            return "Still walking, technically."
+        case .deadliftEnthusiast:
+            return "Finds spiritual meaning in picking heavy things off the floor."
+        case .cardioCriminal:
+            return "Avoids steady-state like it owes money."
+        case .machineMaxxer:
+            return "Perfect angles, controlled reps, and plate-loaded peace."
+        case .mobilityMonk:
+            return "Owns a lacrosse ball and knows exactly where the hips are hiding."
+        case .weekendWarrior:
+            return "All gas on Saturday, surprisingly sore until Tuesday."
+        case .dadStrength:
+            return "Uncanny grip strength and zero warmup theatrics."
+        case .chaosGoblin:
+            return "Programming is optional. Vibes are mandatory."
+        case .cycling:
+            return "Power numbers, zone work, and suspiciously sharp tan lines."
+        case .swimming:
+            return "Laps, breathing rhythm, and silent cardio violence."
+        case .trailRunning:
+            return "Vert, dirt, and joyful suffering in scenic places."
+        case .climbing:
+            return "Grip strength, precision, and chalk on absolutely everything."
+        case .martialArts:
+            return "Skill work, rounds, and a calm switch into violence."
+        case .yogaFlow:
+            return "Mobility, balance, and strength without panic lifting."
+        case .racketSports:
+            return "Footwork, repeat sprints, and sneaky shoulder durability."
+        case .squatSorcerer:
+            return "Disappears into the hole and reappears stronger."
+        case .chalkGoblin:
+            return "Leaves fingerprints on every surface in the building."
+        case .proteinProphet:
+            return "Can turn any conversation into grams per meal."
+        case .preworkoutAstronaut:
+            return "Launch sequence begins at one and a half scoops."
+        case .deloadDenier:
+            return "Says recovery is for cowards, pays for it later."
+        case .cableCowboy:
+            return "Can build an entire workout from one cable tower."
+        case .pumpChaser:
+            return "Will add one more finisher for science."
+        case .repRangeBandit:
+            return "Treats 8-12 reps as a loose suggestion, not a law."
+        case .plateCollector:
+            return "Warmups somehow use every plate in the gym."
+        case .spreadsheetTactician:
+            return "Tracks everything and still claims it is intuitive."
+        case .restDayRevisionist:
+            return "Calls it active recovery and somehow ends up training."
+        case .latsCartographer:
+            return "Still mapping the route to true back width."
         }
     }
 }

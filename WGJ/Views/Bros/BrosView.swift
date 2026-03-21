@@ -610,12 +610,10 @@ struct BrosView: View {
                 }
             )
         } label: {
-            Label(
-                snapshot.isCurrentUserOwner ? "Manage" : "Details",
-                systemImage: snapshot.isCurrentUserOwner ? "slider.horizontal.3" : "info.circle"
-            )
+            Image(systemName: snapshot.isCurrentUserOwner ? "slider.horizontal.3" : "info.circle")
         }
         .buttonStyle(WGJCompactGhostButtonStyle())
+        .accessibilityLabel(snapshot.isCurrentUserOwner ? "Manage Circle" : "Circle Details")
         .accessibilityIdentifier("bros-manage-circle-button")
     }
 
