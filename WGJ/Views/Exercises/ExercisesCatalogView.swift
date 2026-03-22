@@ -117,29 +117,31 @@ struct ExercisesCatalogView: View {
                             .id(topAnchorID)
 
                         if !isPickerMode {
-                            WGJRootHeader("Exercises", subtitle: "Search, filter, and add movements to a workout.")
+                            WGJRootHeader("Exercises", subtitle: "Search, filter, and add exercises fast.")
                         }
 
-                        searchField
-                        filterRow
-                        createExerciseButton
+                        VStack(alignment: .leading, spacing: 14) {
+                            searchField
+                            filterRow
+                            createExerciseButton
 
-                        if viewModel.sections.isEmpty {
-                            emptyState
-                        } else {
-                            LazyVStack(alignment: .leading, spacing: 0) {
-                                ForEach(viewModel.sections) { section in
-                                    VStack(alignment: .leading, spacing: 0) {
-                                        Text(section.title)
-                                            .id(section.id)
-                                            .font(.title2.weight(.semibold))
-                                            .foregroundStyle(WGJTheme.textSecondary)
-                                            .padding(.vertical, 8)
+                            if viewModel.sections.isEmpty {
+                                emptyState
+                            } else {
+                                LazyVStack(alignment: .leading, spacing: 0) {
+                                    ForEach(viewModel.sections) { section in
+                                        VStack(alignment: .leading, spacing: 0) {
+                                            Text(section.title)
+                                                .id(section.id)
+                                                .font(.title2.weight(.semibold))
+                                                .foregroundStyle(WGJTheme.textSecondary)
+                                                .padding(.vertical, 8)
 
-                                        LazyVStack(alignment: .leading, spacing: 0) {
-                                            ForEach(section.rows) { row in
-                                                if let exercise = exerciseByUUID[row.id] {
-                                                    exerciseRow(exercise)
+                                            LazyVStack(alignment: .leading, spacing: 0) {
+                                                ForEach(section.rows) { row in
+                                                    if let exercise = exerciseByUUID[row.id] {
+                                                        exerciseRow(exercise)
+                                                    }
                                                 }
                                             }
                                         }
@@ -147,10 +149,10 @@ struct ExercisesCatalogView: View {
                                 }
                             }
                         }
+                        .padding(.trailing, contentTrailingPadding)
                     }
                     .padding(.top, isPickerMode ? 10 : 8)
                     .padding(16)
-                    .padding(.trailing, contentTrailingPadding)
                 }
                 .scrollDismissesKeyboard(.interactively)
                 .wgjScreenBackground()

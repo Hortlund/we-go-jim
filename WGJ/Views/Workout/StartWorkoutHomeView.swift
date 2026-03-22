@@ -3,6 +3,7 @@ import SwiftUI
 
 struct StartWorkoutHomeView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(ActiveWorkoutCoordinator.self) private var coordinator
 
     @Query(sort: [
@@ -22,7 +23,7 @@ struct StartWorkoutHomeView: View {
     ])
     private var sessions: [WorkoutSession]
 
-    @State private var selectedFolderID: UUID?
+    @State private var expandedFolderIDs: [UUID: Bool] = [:]
     @State private var selectedTemplateForPreview: WorkoutTemplate?
     @State private var templateEditorContext: StartWorkoutTemplateEditorContext?
 
@@ -46,50 +47,22 @@ struct StartWorkoutHomeView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                WGJRootHeader("Start Workout", subtitle: "Pick a template or jump straight into an empty session.")
+            VStack(alignment: .leading, spacing: 20) {
+                WGJRootHeader("Start Workout", subtitle: "Open the folder you need, keep the rest tucked away.")
 
-                VStack(alignment: .leading, spacing: 10) {
-                    WGJActionHeader("Quick Start", subtitle: "Start logging with one tap.")
+                quickStartSection
+                templateWorkspaceSection
 
-                    Button {
-                        requestStartEmptyWorkout()
-                    } label: {
-                        Label("Start an Empty Workout", systemImage: "play.circle.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(WGJPrimaryButtonStyle())
-                    .accessibilityIdentifier("start-workout-empty-button")
-                }
-                .padding(14)
-                .wgjCardContainer(strong: true)
-
-                VStack(alignment: .leading, spacing: 12) {
-                    WGJActionHeader("Templates", subtitle: "Reusable plans ready to start.")
-
-                    templateHeaderActions
-
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            folderChip(nil, title: "All")
-                            folderChip(TemplateRepository.unfiledFolderID, title: "Unfiled")
-                            ForEach(folders) { folder in
-                                folderChip(folder.id, title: folder.name)
-                            }
-                        }
-                    }
-
-                    if filteredTemplates.isEmpty {
-                        WGJEmptyStateCard(
-                            title: "No templates here",
-                            message: "Create a template or change the folder filter to see more saved workouts.",
-                            icon: "doc.text"
-                        )
-                    }
-
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 168, maximum: 280), spacing: 12)], spacing: 12) {
-                        ForEach(filteredTemplates) { template in
-                            templateCard(template)
+                if templateSections.isEmpty {
+                    WGJEmptyStateCard(
+                        title: "No templates yet",
+                        message: "Create a template or folder to build a cleaner workout library.",
+                        icon: "folder"
+                    )
+                } else {
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        ForEach(templateSections) { section in
+                            templateSectionCard(section)
                         }
                     }
                 }
@@ -106,10 +79,7 @@ struct StartWorkoutHomeView: View {
                     requestStartFromTemplate(templateID: template.id)
                 },
                 onEdit: {
-                    templateEditorContext = StartWorkoutTemplateEditorContext(
-                        folderID: template.folderID == TemplateRepository.unfiledFolderID ? nil : template.folderID,
-                        templateID: template.id
-                    )
+                    editTemplate(template)
                 }
             )
         }
@@ -147,24 +117,178 @@ struct StartWorkoutHomeView: View {
         .task(id: sessionDataStamp) {
             recomputeSessionDerivedState()
         }
+        .animation(WGJMotion.cardAnimation(reduceMotion: reduceMotion), value: templates.map(\.id))
+        .animation(WGJMotion.cardAnimation(reduceMotion: reduceMotion), value: folders.map(\.id))
     }
 
-    private func templateCard(_ template: WorkoutTemplate) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top) {
-                Text(template.name)
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(WGJTheme.textPrimary)
-                    .wgjSingleLineText(scale: 0.82)
+    private var quickStartSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            WGJActionHeader("Quick Start", subtitle: "Start logging without picking a template.")
 
-                Spacer()
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: 16) {
+                    quickStartCopy
+                    Spacer(minLength: 0)
+                    startEmptyWorkoutButton
+                }
+
+                VStack(alignment: .leading, spacing: 12) {
+                    quickStartCopy
+                    startEmptyWorkoutButton
+                }
+            }
+        }
+        .padding(16)
+        .wgjCardContainer(strong: true)
+    }
+
+    private var quickStartCopy: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Empty workout")
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(WGJTheme.textPrimary)
+
+            Text("Use this when you want to log freeform or build the session as you go.")
+                .font(.subheadline)
+                .foregroundStyle(WGJTheme.textSecondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var startEmptyWorkoutButton: some View {
+        Button {
+            requestStartEmptyWorkout()
+        } label: {
+            Label("Start Empty", systemImage: "play.fill")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(WGJPrimaryButtonStyle())
+        .accessibilityIdentifier("start-workout-empty-button")
+    }
+
+    private var templateWorkspaceSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            WGJActionHeader("Template Library", subtitle: "Expand a folder only when you want to see what is inside.")
+
+            templateHeaderActions
+        }
+        .padding(14)
+        .wgjCardContainer(strong: true)
+    }
+
+    private func templateSectionCard(_ section: StartWorkoutTemplateSection) -> some View {
+        let isExpanded = isSectionExpanded(section.id)
+
+        return VStack(spacing: 0) {
+            HStack(alignment: .center, spacing: 12) {
+                folderBadge(systemImage: section.systemImage, tint: section.isUnfiled ? WGJTheme.accentCyan : WGJTheme.accentBlue)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(section.title)
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(WGJTheme.textPrimary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(sectionCountText(section.templates.count))
+                        .font(.caption)
+                        .foregroundStyle(WGJTheme.textSecondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                if !section.isUnfiled {
+                    Button {
+                        createTemplate(in: section.folderIDForCreation)
+                    } label: {
+                        StartWorkoutUtilityIcon(systemImage: "plus", tint: WGJTheme.accentBlue)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Button {
+                    toggleSectionExpansion(section.id)
+                } label: {
+                    StartWorkoutUtilityIcon(
+                        systemImage: isExpanded ? "chevron.up" : "chevron.down",
+                        tint: WGJTheme.textSecondary
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(14)
+
+            if isExpanded {
+                VStack(spacing: 0) {
+                    sectionDivider
+
+                    if section.templates.isEmpty {
+                        emptySectionState(section)
+                    } else {
+                        ForEach(Array(section.templates.enumerated()), id: \.element.id) { index, template in
+                            templateRow(template)
+
+                            if index < section.templates.count - 1 {
+                                sectionDivider
+                                    .padding(.leading, 14)
+                            }
+                        }
+                    }
+                }
+                .transition(WGJMotion.cardTransition(reduceMotion: reduceMotion))
+            }
+        }
+        .wgjCardContainer(strong: isExpanded && section.isUnfiled)
+    }
+
+    private func folderBadge(systemImage: String, tint: Color) -> some View {
+        Image(systemName: systemImage)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(tint)
+            .frame(width: 36, height: 36)
+            .background {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.thinMaterial)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(WGJTheme.cardElevated.opacity(0.72))
+                    }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(WGJTheme.outline.opacity(0.82), lineWidth: 1)
+                    }
+            }
+    }
+
+    private var sectionDivider: some View {
+        Rectangle()
+            .fill(WGJTheme.rowDivider.opacity(0.55))
+            .frame(height: 1)
+    }
+
+    private func templateRow(_ template: WorkoutTemplate) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(template.name)
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(WGJTheme.textPrimary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if let notes = optionalNotes(for: template) {
+                        Text(notes)
+                            .font(.caption)
+                            .foregroundStyle(WGJTheme.textSecondary)
+                            .lineLimit(2)
+                    }
+
+                    templateMetadataRow(template)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 Menu {
                     Button {
-                        templateEditorContext = StartWorkoutTemplateEditorContext(
-                            folderID: template.folderID == TemplateRepository.unfiledFolderID ? nil : template.folderID,
-                            templateID: template.id
-                        )
+                        editTemplate(template)
                     } label: {
                         Label("Edit", systemImage: "pencil")
                     }
@@ -191,35 +315,90 @@ struct StartWorkoutHomeView: View {
                         Label("Delete", systemImage: "trash")
                     }
                 } label: {
-                    Image(systemName: "ellipsis")
+                    StartWorkoutUtilityIcon(systemImage: "ellipsis", tint: WGJTheme.textSecondary)
                 }
-                .buttonStyle(WGJIconButtonStyle(tint: WGJTheme.accentBlue))
+                .buttonStyle(.plain)
             }
 
-            if !template.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text(template.notes)
-                    .font(.caption)
-                    .foregroundStyle(WGJTheme.textSecondary)
-                    .lineLimit(3)
-            }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    editButton(for: template)
+                    startButton(for: template)
+                }
 
-            if let last = lastPerformedDate(for: template.id) {
-                WGJMetricPill(
-                    systemImage: "clock.badge.checkmark",
-                    value: last.formatted(date: .abbreviated, time: .omitted)
-                )
+                VStack(alignment: .leading, spacing: 8) {
+                    startButton(for: template)
+                    editButton(for: template)
+                }
             }
-
-            Button {
-                selectedTemplateForPreview = template
-            } label: {
-                Text("Start Workout")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(WGJPrimaryButtonStyle())
         }
         .padding(14)
-        .wgjCardContainer()
+    }
+
+    private func templateMetadataRow(_ template: WorkoutTemplate) -> some View {
+        HStack(spacing: 12) {
+            templateMetadataItem(systemImage: "list.bullet", text: exerciseCountText(for: template))
+
+            if let last = lastPerformedDate(for: template.id) {
+                templateMetadataItem(
+                    systemImage: "clock",
+                    text: last.formatted(date: .abbreviated, time: .omitted)
+                )
+            }
+        }
+    }
+
+    private func templateMetadataItem(systemImage: String, text: String) -> some View {
+        Label(text, systemImage: systemImage)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(WGJTheme.textSecondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+    }
+
+    private func startButton(for template: WorkoutTemplate) -> some View {
+        Button {
+            selectedTemplateForPreview = template
+        } label: {
+            Text("Start")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(WGJCompactPrimaryButtonStyle())
+    }
+
+    private func editButton(for template: WorkoutTemplate) -> some View {
+        Button {
+            editTemplate(template)
+        } label: {
+            Text("Edit")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(WGJCompactGhostButtonStyle())
+    }
+
+    private func emptySectionState(_ section: StartWorkoutTemplateSection) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(section.isUnfiled ? "No unfiled templates yet" : "No templates in this folder yet")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(WGJTheme.textPrimary)
+
+            Text(
+                section.isUnfiled
+                    ? "Create a template here or move one into Unfiled from the template menu."
+                    : "Add a template directly into this folder so it stays organized from the start."
+            )
+            .font(.caption)
+            .foregroundStyle(WGJTheme.textSecondary)
+
+            Button {
+                createTemplate(in: section.folderIDForCreation)
+            } label: {
+                Text("New Template")
+            }
+            .buttonStyle(WGJCompactGhostButtonStyle())
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var templateHeaderActions: some View {
@@ -240,15 +419,12 @@ struct StartWorkoutHomeView: View {
 
     private var addTemplateButton: some View {
         Button {
-            templateEditorContext = StartWorkoutTemplateEditorContext(
-                folderID: selectedFolderID,
-                templateID: nil
-            )
+            createTemplate(in: nil)
         } label: {
             Label("New Template", systemImage: "doc.badge.plus")
                 .wgjSingleLineText(scale: 0.82)
         }
-        .buttonStyle(WGJPrimaryButtonStyle())
+        .buttonStyle(WGJCompactPrimaryButtonStyle())
         .accessibilityIdentifier("start-workout-new-template-button")
     }
 
@@ -259,28 +435,81 @@ struct StartWorkoutHomeView: View {
             Label("New Folder", systemImage: "folder.badge.plus")
                 .wgjSingleLineText(scale: 0.82)
         }
-        .buttonStyle(WGJGhostButtonStyle())
+        .buttonStyle(WGJCompactGhostButtonStyle())
         .accessibilityIdentifier("start-workout-new-folder-button")
     }
 
-    private var filteredTemplates: [WorkoutTemplate] {
-        switch selectedFolderID {
-        case nil:
-            return templates
-        case TemplateRepository.unfiledFolderID:
-            return templates.filter { $0.folderID == TemplateRepository.unfiledFolderID }
-        case .some(let folderID):
-            return templates.filter { $0.folderID == folderID }
+    private var templateSections: [StartWorkoutTemplateSection] {
+        let unfiledTemplates = templates.filter { $0.folderID == TemplateRepository.unfiledFolderID }
+        var sections: [StartWorkoutTemplateSection] = []
+
+        if !unfiledTemplates.isEmpty {
+            sections.append(
+                StartWorkoutTemplateSection(
+                    id: TemplateRepository.unfiledFolderID,
+                    title: "Unfiled",
+                    systemImage: "tray.full.fill",
+                    folderIDForCreation: nil,
+                    templates: unfiledTemplates
+                )
+            )
+        }
+
+        for folder in folders {
+            sections.append(
+                StartWorkoutTemplateSection(
+                    id: folder.id,
+                    title: folder.name,
+                    systemImage: "folder.fill",
+                    folderIDForCreation: folder.id,
+                    templates: templates.filter { $0.folderID == folder.id }
+                )
+            )
+        }
+
+        return sections
+    }
+
+    private func isSectionExpanded(_ sectionID: UUID) -> Bool {
+        expandedFolderIDs[sectionID] ?? defaultExpandedState(for: sectionID)
+    }
+
+    private func defaultExpandedState(for sectionID: UUID) -> Bool {
+        sectionID == TemplateRepository.unfiledFolderID
+    }
+
+    private func toggleSectionExpansion(_ sectionID: UUID) {
+        withAnimation(WGJMotion.quickAnimation(reduceMotion: reduceMotion)) {
+            expandedFolderIDs[sectionID] = !isSectionExpanded(sectionID)
         }
     }
 
-    private func folderChip(_ folderID: UUID?, title: String) -> some View {
-        Button {
-            selectedFolderID = folderID
-        } label: {
-            WGJChip(title: title, isSelected: selectedFolderID == folderID)
-        }
-        .buttonStyle(.plain)
+    private func createTemplate(in folderID: UUID?) {
+        templateEditorContext = StartWorkoutTemplateEditorContext(
+            folderID: folderID,
+            templateID: nil
+        )
+    }
+
+    private func editTemplate(_ template: WorkoutTemplate) {
+        templateEditorContext = StartWorkoutTemplateEditorContext(
+            folderID: template.folderID == TemplateRepository.unfiledFolderID ? nil : template.folderID,
+            templateID: template.id
+        )
+    }
+
+    private func optionalNotes(for template: WorkoutTemplate) -> String? {
+        let trimmed = template.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func exerciseCountText(for template: WorkoutTemplate) -> String {
+        let count = (template.exercises ?? []).count
+        return "\(count) exercise" + (count == 1 ? "" : "s")
+    }
+
+    private func sectionCountText(_ count: Int) -> String {
+        "\(count) template" + (count == 1 ? "" : "s")
     }
 
     private func requestStartEmptyWorkout() {
@@ -449,10 +678,46 @@ struct StartWorkoutSessionStamp: Hashable {
     }
 }
 
+private struct StartWorkoutTemplateSection: Identifiable {
+    let id: UUID
+    let title: String
+    let systemImage: String
+    let folderIDForCreation: UUID?
+    let templates: [WorkoutTemplate]
+
+    var isUnfiled: Bool {
+        folderIDForCreation == nil
+    }
+}
+
 private struct StartWorkoutTemplateEditorContext: Identifiable {
     let id = UUID()
     let folderID: UUID?
     let templateID: UUID?
+}
+
+private struct StartWorkoutUtilityIcon: View {
+    let systemImage: String
+    var tint: Color = WGJTheme.textPrimary
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(tint)
+            .frame(width: 36, height: 36)
+            .background {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.thinMaterial)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(WGJTheme.cardElevated.opacity(0.7))
+                    }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(WGJTheme.outline.opacity(0.82), lineWidth: 1)
+                    }
+            }
+    }
 }
 
 private struct TemplateStartPreviewSheet: View {
@@ -468,61 +733,56 @@ private struct TemplateStartPreviewSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 14) {
-                WGJActionHeader(template.name, subtitle: "\(orderedExercises.count) exercises") {
-                    Button("Edit") {
-                        dismiss()
-                        onEdit()
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 8) {
+                    WGJActionHeader(template.name, subtitle: exerciseSummary)
+
+                    if let notes = optionalNotes {
+                        Text(notes)
+                            .font(.subheadline)
+                            .foregroundStyle(WGJTheme.textSecondary)
                     }
-                    .buttonStyle(WGJGhostButtonStyle())
                 }
 
-                if let notes = optionalNotes {
-                    Text(notes)
-                        .font(.subheadline)
-                        .foregroundStyle(WGJTheme.textSecondary)
-                }
+                if orderedExercises.isEmpty {
+                    WGJEmptyStateCard(
+                        title: "No exercises yet",
+                        message: "Edit the template to add exercises before starting from it.",
+                        icon: "list.bullet"
+                    )
+                } else {
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            ForEach(Array(orderedExercises.enumerated()), id: \.element.id) { index, exercise in
+                                previewExerciseRow(exercise)
 
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 10) {
-                        ForEach(orderedExercises) { exercise in
-                            HStack(spacing: 10) {
-                                WGJMetricPill(
-                                    systemImage: "number.square",
-                                    value: "\((exercise.prescribedSets ?? []).count)x",
-                                    tint: WGJTheme.accentBlue
-                                )
-
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(exercise.exerciseNameSnapshot)
-                                        .font(.headline)
-                                        .foregroundStyle(WGJTheme.textPrimary)
-
-                                    Text(exercise.categorySnapshot)
-                                        .font(.caption)
-                                        .foregroundStyle(WGJTheme.textSecondary)
+                                if index < orderedExercises.count - 1 {
+                                    Rectangle()
+                                        .fill(WGJTheme.rowDivider.opacity(0.55))
+                                        .frame(height: 1)
+                                        .padding(.leading, 14)
                                 }
-
-                                Spacer()
                             }
-                            .padding(10)
-                            .wgjCardContainer()
                         }
+                        .wgjCardContainer()
                     }
                 }
 
-                Button {
-                    dismiss()
-                    onStart()
-                } label: {
-                    Text("Start Workout")
-                        .frame(maxWidth: .infinity)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) {
+                        editAction
+                        startAction
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        startAction
+                        editAction
+                    }
                 }
-                .buttonStyle(WGJPrimaryButtonStyle())
             }
             .padding(16)
             .wgjSheetSurface()
-            .navigationTitle("Start Workout")
+            .navigationTitle("Template")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -533,6 +793,62 @@ private struct TemplateStartPreviewSheet: View {
             }
         }
         .presentationDetents([.large])
+    }
+
+    private var exerciseSummary: String {
+        let count = orderedExercises.count
+        return "\(count) exercise" + (count == 1 ? "" : "s")
+    }
+
+    private func previewExerciseRow(_ exercise: TemplateExercise) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(exercise.exerciseNameSnapshot)
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(WGJTheme.textPrimary)
+
+            HStack(spacing: 12) {
+                previewMetadataItem(
+                    systemImage: "number.square",
+                    text: "\((exercise.prescribedSets ?? []).count) sets"
+                )
+
+                if !exercise.categorySnapshot.isEmpty {
+                    previewMetadataItem(systemImage: "tag", text: exercise.categorySnapshot)
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func previewMetadataItem(systemImage: String, text: String) -> some View {
+        Label(text, systemImage: systemImage)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(WGJTheme.textSecondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+    }
+
+    private var startAction: some View {
+        Button {
+            dismiss()
+            onStart()
+        } label: {
+            Text("Start Workout")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(WGJPrimaryButtonStyle())
+    }
+
+    private var editAction: some View {
+        Button {
+            dismiss()
+            onEdit()
+        } label: {
+            Text("Edit Template")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(WGJGhostButtonStyle())
     }
 
     private var optionalNotes: String? {

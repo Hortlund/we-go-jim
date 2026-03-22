@@ -259,7 +259,7 @@ struct BrosView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: WGJSpacing.section) {
-                WGJRootHeader("Bros", subtitle: "Private workout and PR snapshots for your training circle.")
+                WGJRootHeader("Bros", subtitle: "Private feed and PR updates for your circle.")
 
                 switch viewModel.state {
                 case .loading:
@@ -272,9 +272,9 @@ struct BrosView: View {
                     activeContent(snapshot)
                 }
             }
+            .padding(WGJSpacing.page)
             .padding(.top, 8)
-            .padding(.horizontal, 16)
-            .padding(.bottom, 28)
+            .padding(.bottom, 12)
         }
         .refreshable {
             await viewModel.refresh(
@@ -453,10 +453,6 @@ struct BrosView: View {
                 }
             }
 
-            if snapshot.isCurrentUserOwner {
-                inviteCodeStrip(snapshot.circle.inviteCode)
-            }
-
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(snapshot.members) { member in
@@ -516,43 +512,6 @@ struct BrosView: View {
         .padding(12)
         .frame(width: 170, alignment: .leading)
         .wgjCardContainer()
-    }
-
-    private func inviteCodeStrip(_ inviteCode: String) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            WGJSectionHeader("Invite Code", subtitle: "Share this with bros you want in the circle.")
-
-            HStack(alignment: .center, spacing: 12) {
-                Text(inviteCode)
-                    .font(.title3.monospaced().weight(.bold))
-                    .foregroundStyle(WGJTheme.textPrimary)
-                    .tracking(1.2)
-                    .wgjSingleLineText(scale: 0.72)
-
-                Spacer(minLength: 12)
-
-                Button {
-                    copyInviteCode(inviteCode)
-                } label: {
-                    Label("Copy", systemImage: "doc.on.doc")
-                }
-                .buttonStyle(WGJGhostButtonStyle())
-
-                ShareLink(item: inviteCode) {
-                    Label("Share", systemImage: "square.and.arrow.up")
-                }
-                .buttonStyle(WGJGhostButtonStyle())
-            }
-        }
-        .padding(14)
-        .background {
-            RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
-                .fill(WGJTheme.cardElevated.opacity(0.68))
-                .overlay {
-                    RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
-                        .stroke(WGJTheme.outline.opacity(0.72), lineWidth: 1)
-                }
-        }
     }
 
     private func memberBadge(_ title: String, tint: Color) -> some View {
