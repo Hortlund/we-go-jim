@@ -39,7 +39,6 @@ final class BrosViewModel {
         cloudSyncErrorDescription: String?
     ) async {
         guard !hasLoaded else { return }
-        hasLoaded = true
         _ = cloudSyncEnabled
         _ = cloudSyncErrorDescription
         await refresh(
@@ -47,6 +46,12 @@ final class BrosViewModel {
             cloudSyncEnabled: cloudSyncEnabled,
             cloudSyncErrorDescription: cloudSyncErrorDescription
         )
+        switch state {
+        case .active, .onboarding:
+            hasLoaded = true
+        case .loading, .unavailable:
+            hasLoaded = false
+        }
     }
 
     func refresh(
@@ -258,7 +263,7 @@ struct BrosView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: WGJSpacing.section) {
+            LazyVStack(alignment: .leading, spacing: WGJSpacing.section) {
                 WGJRootHeader("Bros", subtitle: "Private feed and PR updates for your circle.")
 
                 switch viewModel.state {
@@ -412,10 +417,10 @@ struct BrosView: View {
             blockedUserRecordNames: blockedUserRecordNames
         )
 
-        return VStack(alignment: .leading, spacing: WGJSpacing.section) {
+        return LazyVStack(alignment: .leading, spacing: WGJSpacing.section) {
             membersCard(filteredSnapshot)
 
-            VStack(alignment: .leading, spacing: 12) {
+            LazyVStack(alignment: .leading, spacing: 12) {
                 WGJActionHeader("Feed", subtitle: "Newest first") {
                     WGJMetricPill(systemImage: "bolt.heart.fill", value: "\(filteredSnapshot.feedEvents.count)")
                 }

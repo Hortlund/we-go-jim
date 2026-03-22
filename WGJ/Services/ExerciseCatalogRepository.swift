@@ -171,8 +171,11 @@ final class ExerciseCatalogRepository: ExerciseCatalogRepositoryProtocol {
     }
 
     func syncState() -> ExerciseCatalogSyncState? {
-        let descriptor = FetchDescriptor<ExerciseCatalogSyncState>()
-        return (try? modelContext.fetch(descriptor))?.first(where: { $0.key == "global" })
+        var descriptor = FetchDescriptor<ExerciseCatalogSyncState>(
+            predicate: #Predicate { $0.key == "global" }
+        )
+        descriptor.fetchLimit = 1
+        return try? modelContext.fetch(descriptor).first
     }
 
     private func validatedCustomExerciseInput(

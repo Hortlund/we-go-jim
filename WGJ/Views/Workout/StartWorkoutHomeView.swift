@@ -47,7 +47,7 @@ struct StartWorkoutHomeView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            LazyVStack(alignment: .leading, spacing: 20) {
                 WGJRootHeader("Start Workout", subtitle: "Open the folder you need, keep the rest tucked away.")
 
                 quickStartSection
@@ -60,7 +60,7 @@ struct StartWorkoutHomeView: View {
                         icon: "folder"
                     )
                 } else {
-                    VStack(alignment: .leading, spacing: 12) {
+                    LazyVStack(alignment: .leading, spacing: 12) {
                         ForEach(templateSections) { section in
                             templateSectionCard(section)
                         }
@@ -446,10 +446,12 @@ struct StartWorkoutHomeView: View {
     }
 
     private var templateSections: [StartWorkoutTemplateSection] {
-        let unfiledTemplates = templates.filter { $0.folderID == TemplateRepository.unfiledFolderID }
+        let templatesByFolderID = Dictionary(grouping: templates, by: \.folderID)
         var sections: [StartWorkoutTemplateSection] = []
 
-        if !unfiledTemplates.isEmpty {
+        if let unfiledTemplates = templatesByFolderID[TemplateRepository.unfiledFolderID],
+           !unfiledTemplates.isEmpty
+        {
             sections.append(
                 StartWorkoutTemplateSection(
                     id: TemplateRepository.unfiledFolderID,
@@ -468,7 +470,7 @@ struct StartWorkoutHomeView: View {
                     title: folder.name,
                     systemImage: "folder.fill",
                     folderIDForCreation: folder.id,
-                    templates: templates.filter { $0.folderID == folder.id }
+                    templates: templatesByFolderID[folder.id] ?? []
                 )
             )
         }
@@ -689,13 +691,16 @@ struct StartWorkoutSessionStamp: Hashable {
     let latestCompletedSessionUpdate: TimeInterval
 
     init(sessions: [WorkoutSession]) {
-        let completedTemplateSessions = sessions.filter {
-            $0.status == .completed && $0.templateID != nil
+        var count = 0
+        var latestUpdate = 0.0
+
+        for session in sessions where session.status == .completed && session.templateID != nil {
+            count += 1
+            latestUpdate = max(latestUpdate, session.updatedAt.timeIntervalSinceReferenceDate)
         }
-        completedTemplateSessionCount = completedTemplateSessions.count
-        latestCompletedSessionUpdate = completedTemplateSessions
-            .map { $0.updatedAt.timeIntervalSinceReferenceDate }
-            .max() ?? 0
+
+        completedTemplateSessionCount = count
+        latestCompletedSessionUpdate = latestUpdate
     }
 }
 

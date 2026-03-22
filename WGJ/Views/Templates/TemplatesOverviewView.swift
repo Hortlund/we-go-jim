@@ -37,7 +37,7 @@ struct TemplatesOverviewView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            LazyVStack(alignment: .leading, spacing: 16) {
                 headerActions
 
                 VStack(alignment: .leading, spacing: 10) {
@@ -57,7 +57,7 @@ struct TemplatesOverviewView: View {
                 .padding(14)
                 .wgjCardContainer(strong: true)
 
-                VStack(alignment: .leading, spacing: 10) {
+                LazyVStack(alignment: .leading, spacing: 10) {
                     WGJSectionHeader("Template Library", subtitle: "Manage workouts without hidden menus")
 
                     if displayedTemplates.isEmpty {
@@ -73,7 +73,7 @@ struct TemplatesOverviewView: View {
                     }
                 }
 
-                VStack(alignment: .leading, spacing: 10) {
+                LazyVStack(alignment: .leading, spacing: 10) {
                     WGJSectionHeader("Folders", subtitle: "Open, rename, and organize templates")
 
                     if folders.isEmpty {
@@ -305,13 +305,17 @@ struct TemplatesOverviewView: View {
         }
     }
 
+    private var folderNameByID: [UUID: String] {
+        Dictionary(uniqueKeysWithValues: folders.map { ($0.id, $0.name) })
+    }
+
     private func folderLabel(for template: WorkoutTemplate) -> String {
         if template.folderID == TemplateRepository.unfiledFolderID {
             return "Unfiled"
         }
 
-        if let folder = folders.first(where: { $0.id == template.folderID }) {
-            return folder.name
+        if let folderName = folderNameByID[template.folderID] {
+            return folderName
         }
 
         return "Unknown folder"

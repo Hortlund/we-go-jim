@@ -23,7 +23,7 @@ struct HistoryOverviewView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            LazyVStack(alignment: .leading, spacing: 16) {
                 WGJRootHeader("History", subtitle: "Review completed sessions, volume, and best sets.") {
                     Button("Calendar") {
                         openWorkoutCalendar()
@@ -47,7 +47,7 @@ struct HistoryOverviewView: View {
                 }
 
                 ForEach(snapshot.sections) { section in
-                    VStack(alignment: .leading, spacing: 10) {
+                    LazyVStack(alignment: .leading, spacing: 10) {
                         Text(section.title.uppercased())
                             .font(.headline.weight(.semibold))
                             .foregroundStyle(WGJTheme.textSecondary)
@@ -197,11 +197,16 @@ struct HistorySessionDataStamp: Hashable {
     let latestCompletedSessionUpdate: TimeInterval
 
     init(sessions: [WorkoutSession]) {
-        let completedSessions = sessions.filter { $0.status == .completed }
-        completedSessionCount = completedSessions.count
-        latestCompletedSessionUpdate = completedSessions
-            .map { $0.updatedAt.timeIntervalSinceReferenceDate }
-            .max() ?? 0
+        var count = 0
+        var latestUpdate = 0.0
+
+        for session in sessions where session.status == .completed {
+            count += 1
+            latestUpdate = max(latestUpdate, session.updatedAt.timeIntervalSinceReferenceDate)
+        }
+
+        completedSessionCount = count
+        latestCompletedSessionUpdate = latestUpdate
     }
 }
 
@@ -468,8 +473,11 @@ private struct HistoryWorkoutCalendarSheet: View {
             )
         }
 
-        while !days.isEmpty && days.count % 7 != 0 {
-            days.append(.placeholder(UUID().uuidString))
+        let trailingPlaceholderCount = (7 - (days.count % 7)) % 7
+        for index in 0..<trailingPlaceholderCount {
+            days.append(
+                .placeholder("trailing-\(displayedMonth.timeIntervalSinceReferenceDate)-\(index)")
+            )
         }
 
         return days

@@ -216,7 +216,10 @@ struct RestTimerPopup: Identifiable, Equatable {
 final class RestTimerNotificationManager {
     static let shared = RestTimerNotificationManager()
 
-    private let notificationIdentifier = "wgj.activeWorkout.restTimer"
+    private let notificationIdentifierPrefix = "wgj.activeWorkout.restTimer"
+    private var schedulingTask: Task<Void, Never>?
+    private var schedulingGeneration = 0
+    private var currentNotificationIdentifier: String?
 
     private init() { }
 
@@ -225,7 +228,15 @@ final class RestTimerNotificationManager {
     }
 
     func scheduleRestTimer(seconds: Int, exerciseName: String, setLabel: String) {
-        Task {
+        schedulingGeneration += 1
+        let generation = schedulingGeneration
+        clearCurrentRestTimerNotifications()
+        let notificationIdentifier = "\(notificationIdentifierPrefix).\(generation)"
+        currentNotificationIdentifier = notificationIdentifier
+        schedulingTask?.cancel()
+
+        schedulingTask = Task { @MainActor [weak self] in
+            guard let self else { return }
             let center = UNUserNotificationCenter.current()
             let settings = await center.notificationSettings()
             let isAuthorized: Bool
@@ -241,9 +252,14 @@ final class RestTimerNotificationManager {
                 isAuthorized = false
             }
 
-            guard isAuthorized else { return }
-
-            cancelRestTimerNotification()
+            guard isAuthorized else {
+                if self.currentNotificationIdentifier == notificationIdentifier {
+                    self.currentNotificationIdentifier = nil
+                }
+                self.schedulingTask = nil
+                return
+            }
+            guard !Task.isCancelled, generation == self.schedulingGeneration else { return }
 
             let content = UNMutableNotificationContent()
             content.title = "Rest complete"
@@ -261,13 +277,41 @@ final class RestTimerNotificationManager {
             )
 
             try? await center.add(request)
+            if generation != self.schedulingGeneration || self.currentNotificationIdentifier != notificationIdentifier {
+                self.clearRestTimerNotifications(
+                    using: center,
+                    identifier: notificationIdentifier
+                )
+            }
+            if self.currentNotificationIdentifier == notificationIdentifier {
+                self.schedulingTask = nil
+            }
         }
     }
 
     func cancelRestTimerNotification() {
+        schedulingGeneration += 1
+        schedulingTask?.cancel()
+        schedulingTask = nil
+        clearCurrentRestTimerNotifications()
+    }
+
+    private func clearCurrentRestTimerNotifications() {
+        guard let currentNotificationIdentifier else { return }
         let center = UNUserNotificationCenter.current()
-        center.removePendingNotificationRequests(withIdentifiers: [notificationIdentifier])
-        center.removeDeliveredNotifications(withIdentifiers: [notificationIdentifier])
+        clearRestTimerNotifications(
+            using: center,
+            identifier: currentNotificationIdentifier
+        )
+        self.currentNotificationIdentifier = nil
+    }
+
+    private func clearRestTimerNotifications(
+        using center: UNUserNotificationCenter,
+        identifier: String
+    ) {
+        center.removePendingNotificationRequests(withIdentifiers: [identifier])
+        center.removeDeliveredNotifications(withIdentifiers: [identifier])
     }
 }
 

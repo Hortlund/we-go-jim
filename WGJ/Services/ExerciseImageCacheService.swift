@@ -8,12 +8,18 @@ final class ExerciseImageCacheService {
     private let modelContext: ModelContext
     private let fileManager: FileManager
     private let cacheSizeLimitBytes: Int
-    private let memoryImageCache = NSCache<NSString, UIImage>()
     private let metadataFlushDelay: Duration = .seconds(6)
     private let minimumAccessUpdateInterval: TimeInterval = 180
     private var metadataSaveTask: Task<Void, Never>?
     private var hasPendingMetadataSave = false
     private var cachedDiskUsageBytes: Int?
+
+    private static let sharedMemoryImageCache: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.countLimit = 220
+        cache.totalCostLimit = 96 * 1024 * 1024
+        return cache
+    }()
 
     init(
         modelContext: ModelContext,
@@ -23,8 +29,6 @@ final class ExerciseImageCacheService {
         self.modelContext = modelContext
         self.fileManager = fileManager
         self.cacheSizeLimitBytes = cacheSizeLimitBytes
-        self.memoryImageCache.countLimit = 220
-        self.memoryImageCache.totalCostLimit = 96 * 1024 * 1024
     }
 
     deinit {
@@ -37,19 +41,19 @@ final class ExerciseImageCacheService {
         }
 
         let cacheKey = NSString(string: imageAsset.remoteURL)
-        if let cached = memoryImageCache.object(forKey: cacheKey) {
+        if let cached = Self.sharedMemoryImageCache.object(forKey: cacheKey) {
             markAssetAccessed(imageAsset)
             return cached
         }
 
         if let cached = await loadCachedImage(from: imageAsset) {
-            memoryImageCache.setObject(cached, forKey: cacheKey)
+            Self.sharedMemoryImageCache.setObject(cached, forKey: cacheKey)
             markAssetAccessed(imageAsset)
             return cached
         }
 
         if let downloaded = await downloadImage(for: imageAsset) {
-            memoryImageCache.setObject(downloaded, forKey: cacheKey)
+            Self.sharedMemoryImageCache.setObject(downloaded, forKey: cacheKey)
             return downloaded
         }
 

@@ -34,7 +34,7 @@ struct ProfileView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            LazyVStack(alignment: .leading, spacing: 16) {
                 WGJRootHeader("Profile", subtitle: "Your identity, highlights, and training dashboard.")
 
                 identityCard
@@ -564,7 +564,6 @@ struct ProfileView: View {
         do {
             let profile = try profileRepository.loadOrCreateProfile()
             dashboardContent.weeklyGoal = profile.weeklyWorkoutGoal
-            loadWidgetState()
         } catch {
             showError(error)
         }

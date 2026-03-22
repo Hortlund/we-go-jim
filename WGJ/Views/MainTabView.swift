@@ -121,7 +121,10 @@ struct MainTabView: View {
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
-                isKeyboardVisible = keyboardIsVisible(from: notification)
+                isKeyboardVisible = keyboardIsVisible(
+                    from: notification,
+                    viewMaxY: proxy.frame(in: .global).maxY
+                )
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
                 isKeyboardVisible = false
@@ -140,14 +143,14 @@ struct MainTabView: View {
         return bottomSafeAreaInset + 72
     }
 
-    private func keyboardIsVisible(from notification: Notification) -> Bool {
+    private func keyboardIsVisible(from notification: Notification, viewMaxY: CGFloat) -> Bool {
         guard
             let endFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
         else {
             return false
         }
 
-        return endFrame.minY < UIScreen.main.bounds.height
+        return endFrame.minY < viewMaxY
     }
 }
 
