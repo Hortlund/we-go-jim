@@ -60,7 +60,7 @@ struct StartWorkoutHomeView: View {
                         icon: "folder"
                     )
                 } else {
-                    LazyVStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 12) {
                         ForEach(templateSections) { section in
                             templateSectionCard(section)
                         }
@@ -209,34 +209,21 @@ struct StartWorkoutHomeView: View {
                     toggleSectionExpansion(section.id)
                 } label: {
                     StartWorkoutUtilityIcon(
-                        systemImage: isExpanded ? "chevron.up" : "chevron.down",
+                        systemImage: "chevron.down",
                         tint: WGJTheme.textSecondary
                     )
+                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
                 }
                 .buttonStyle(.plain)
             }
             .padding(14)
 
             if isExpanded {
-                VStack(spacing: 0) {
-                    sectionDivider
-
-                    if section.templates.isEmpty {
-                        emptySectionState(section)
-                    } else {
-                        ForEach(Array(section.templates.enumerated()), id: \.element.id) { index, template in
-                            templateRow(template)
-
-                            if index < section.templates.count - 1 {
-                                sectionDivider
-                                    .padding(.leading, 14)
-                            }
-                        }
-                    }
-                }
-                .transition(WGJMotion.cardTransition(reduceMotion: reduceMotion))
+                expandedTemplateSectionContent(section)
+                    .transition(folderContentTransition)
             }
         }
+        .animation(folderExpansionAnimation, value: isExpanded)
         .wgjCardContainer(strong: isExpanded && section.isUnfiled)
     }
 
@@ -263,6 +250,25 @@ struct StartWorkoutHomeView: View {
         Rectangle()
             .fill(WGJTheme.rowDivider.opacity(0.55))
             .frame(height: 1)
+    }
+
+    private func expandedTemplateSectionContent(_ section: StartWorkoutTemplateSection) -> some View {
+        VStack(spacing: 0) {
+            sectionDivider
+
+            if section.templates.isEmpty {
+                emptySectionState(section)
+            } else {
+                ForEach(Array(section.templates.enumerated()), id: \.element.id) { index, template in
+                    templateRow(template)
+
+                    if index < section.templates.count - 1 {
+                        sectionDivider
+                            .padding(.leading, 14)
+                    }
+                }
+            }
+        }
     }
 
     private func templateRow(_ template: WorkoutTemplate) -> some View {
@@ -479,8 +485,23 @@ struct StartWorkoutHomeView: View {
     }
 
     private func toggleSectionExpansion(_ sectionID: UUID) {
-        withAnimation(WGJMotion.quickAnimation(reduceMotion: reduceMotion)) {
+        withAnimation(folderExpansionAnimation) {
             expandedFolderIDs[sectionID] = !isSectionExpanded(sectionID)
+        }
+    }
+
+    private var folderExpansionAnimation: Animation {
+        reduceMotion ? .easeOut(duration: 0.01) : .easeInOut(duration: 0.24)
+    }
+
+    private var folderContentTransition: AnyTransition {
+        if reduceMotion {
+            .opacity
+        } else {
+            .asymmetric(
+                insertion: .opacity.combined(with: .scale(scale: 0.985, anchor: .top)),
+                removal: .opacity
+            )
         }
     }
 
