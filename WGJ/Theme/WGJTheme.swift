@@ -413,7 +413,7 @@ struct WGJSectionHeader: View {
     }
 }
 
-struct WGJStickySectionHeader: View {
+struct WGJCompactSectionHeader: View {
     let title: String
     let subtitle: String?
 
@@ -434,22 +434,6 @@ struct WGJStickySectionHeader: View {
                     .foregroundStyle(WGJTheme.textSecondary)
                     .lineLimit(2)
             }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
-                .fill(.thinMaterial)
-                .overlay {
-                    RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
-                        .fill(WGJTheme.card.opacity(0.82))
-                }
-                .overlay {
-                    RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
-                        .stroke(WGJTheme.outline.opacity(0.88), lineWidth: 1)
-                }
-                .shadow(color: WGJTheme.shadowSoft.opacity(0.72), radius: 10, x: 0, y: 6)
         }
     }
 }
