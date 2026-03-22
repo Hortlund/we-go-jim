@@ -52,21 +52,7 @@ struct WGJApp: App {
             do {
                 fallbackContainer = try makeLocalFallbackContainer()
             } catch {
-                do {
-                    try resetLocalStores()
-
-                    if let recoveredCloudContainer = try? makeCloudBackedContainer() {
-                        return ModelContainerBootstrap(
-                            container: recoveredCloudContainer,
-                            cloudSyncEnabled: true,
-                            cloudSyncErrorDescription: nil
-                        )
-                    }
-
-                    fallbackContainer = try makeLocalFallbackContainer()
-                } catch {
-                    fatalError("Could not create fallback ModelContainer after resetting local stores: \(describe(error))")
-                }
+                fatalError("Could not create fallback ModelContainer without CloudKit sync: \(describe(error))")
             }
 
             #if DEBUG
@@ -82,70 +68,19 @@ struct WGJApp: App {
     }
 
     private static func makeCloudBackedContainer() throws -> ModelContainer {
-        let localCatalogSchema = Schema([
-            ExerciseCatalogItem.self,
-            MuscleGroup.self,
-            ExerciseImageAsset.self,
-            ExerciseAlias.self,
-            ExerciseAttribution.self,
-            ExerciseCatalogSyncState.self,
-        ])
-
-        let userDataSchema = Schema([
-            UserProfile.self,
-            ProfileWidgetConfig.self,
-            TemplateFolder.self,
-            WorkoutTemplate.self,
-            TemplateExercise.self,
-            TemplateExerciseSet.self,
-            WorkoutSession.self,
-            WorkoutSessionExercise.self,
-            WorkoutSessionSet.self,
-        ])
-
-        let socialOutboxSchema = Schema([
-            SocialOutboxItem.self,
-            BlockedBro.self,
-        ])
-
         let appSchema = fullAppSchema()
-
-        let localCatalogConfiguration = ModelConfiguration(
-            "LocalCatalog",
-            schema: localCatalogSchema,
-            isStoredInMemoryOnly: false,
-            cloudKitDatabase: .none
-        )
-
-        let userCloudConfiguration = ModelConfiguration(
-            "UserData",
-            schema: userDataSchema,
-            isStoredInMemoryOnly: false,
-            cloudKitDatabase: .automatic
-        )
-
-        let socialOutboxConfiguration = ModelConfiguration(
-            "SocialOutbox",
-            schema: socialOutboxSchema,
-            isStoredInMemoryOnly: false,
-            cloudKitDatabase: .none
-        )
-
         return try ModelContainer(
             for: appSchema,
-            configurations: [localCatalogConfiguration, userCloudConfiguration, socialOutboxConfiguration]
+            configurations: storeConfigurations(userDataCloudKitDatabase: .automatic)
         )
     }
 
     private static func makeLocalFallbackContainer() throws -> ModelContainer {
         let appSchema = fullAppSchema()
-        let localOnly = ModelConfiguration(
-            schema: appSchema,
-            isStoredInMemoryOnly: false,
-            cloudKitDatabase: .none
+        return try ModelContainer(
+            for: appSchema,
+            configurations: storeConfigurations(userDataCloudKitDatabase: .none)
         )
-
-        return try ModelContainer(for: appSchema, configurations: [localOnly])
     }
 
     private static func makeUITestContainer() throws -> ModelContainer {
@@ -182,32 +117,55 @@ struct WGJApp: App {
         ])
     }
 
-    private static func resetLocalStores() throws {
-        let fileManager = FileManager.default
-        guard let appSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            return
-        }
+    private static func storeConfigurations(
+        userDataCloudKitDatabase: ModelConfiguration.CloudKitDatabase
+    ) -> [ModelConfiguration] {
+        let localCatalogSchema = Schema([
+            ExerciseCatalogItem.self,
+            MuscleGroup.self,
+            ExerciseImageAsset.self,
+            ExerciseAlias.self,
+            ExerciseAttribution.self,
+            ExerciseCatalogSyncState.self,
+        ])
 
-        let knownStorePrefixes = [
-            "default.store",
-            "LocalCatalog.store",
-            "UserData.store",
-            "SocialOutbox.store",
+        let userDataSchema = Schema([
+            UserProfile.self,
+            ProfileWidgetConfig.self,
+            TemplateFolder.self,
+            WorkoutTemplate.self,
+            TemplateExercise.self,
+            TemplateExerciseSet.self,
+            WorkoutSession.self,
+            WorkoutSessionExercise.self,
+            WorkoutSessionSet.self,
+        ])
+
+        let socialOutboxSchema = Schema([
+            SocialOutboxItem.self,
+            BlockedBro.self,
+        ])
+
+        return [
+            ModelConfiguration(
+                AppStoreLayout.localCatalogConfigurationName,
+                schema: localCatalogSchema,
+                isStoredInMemoryOnly: false,
+                cloudKitDatabase: .none
+            ),
+            ModelConfiguration(
+                AppStoreLayout.userDataConfigurationName,
+                schema: userDataSchema,
+                isStoredInMemoryOnly: false,
+                cloudKitDatabase: userDataCloudKitDatabase
+            ),
+            ModelConfiguration(
+                AppStoreLayout.socialOutboxConfigurationName,
+                schema: socialOutboxSchema,
+                isStoredInMemoryOnly: false,
+                cloudKitDatabase: .none
+            ),
         ]
-
-        let existingItems = try? fileManager.contentsOfDirectory(
-            at: appSupportURL,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        )
-
-        for itemURL in existingItems ?? [] {
-            let fileName = itemURL.lastPathComponent
-            guard knownStorePrefixes.contains(where: { fileName == $0 || fileName.hasPrefix("\($0)-") }) else {
-                continue
-            }
-            try? fileManager.removeItem(at: itemURL)
-        }
     }
 
     private static func describe(_ error: Error) -> String {
@@ -234,6 +192,22 @@ struct WGJApp: App {
         barAppearance.compactAppearance = navAppearance
         barAppearance.tintColor = accentColor
     }
+}
+
+enum AppStoreLayout {
+    static let localCatalogConfigurationName = "LocalCatalog"
+    static let userDataConfigurationName = "UserData"
+    static let socialOutboxConfigurationName = "SocialOutbox"
+    static let configurationNames = [
+        localCatalogConfigurationName,
+        userDataConfigurationName,
+        socialOutboxConfigurationName,
+    ]
+    static let storeFilePrefixes = configurationNames.map { "\($0).store" }
+}
+
+enum AppBootstrapRecoveryPolicy {
+    static let preservesExistingStoresOnCloudFailure = true
 }
 
 private struct ModelContainerBootstrap {

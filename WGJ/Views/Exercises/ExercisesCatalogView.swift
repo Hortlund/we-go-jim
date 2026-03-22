@@ -91,7 +91,7 @@ struct ExercisesCatalogView: View {
     }
 
     private var contentTrailingPadding: CGFloat {
-        reservesIndexRailSpace ? indexRailWidth + 24 : 24
+        shouldShowIndexRail ? indexRailWidth : 0
     }
 
     private var shouldUseCompactFilterLayout: Bool {
@@ -148,7 +148,7 @@ struct ExercisesCatalogView: View {
                             }
                         }
                     }
-                    .padding(.top, isPickerMode ? 10 : 14)
+                    .padding(.top, isPickerMode ? 10 : 8)
                     .padding(16)
                     .padding(.trailing, contentTrailingPadding)
                 }

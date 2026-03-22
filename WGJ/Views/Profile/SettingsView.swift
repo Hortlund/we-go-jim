@@ -195,6 +195,7 @@ struct SettingsView: View {
                 .wgjCardContainer()
 #endif
             }
+            .padding(.top, 8)
             .padding(16)
         }
         .wgjScreenBackground()

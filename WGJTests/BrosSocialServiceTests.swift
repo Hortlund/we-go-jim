@@ -35,6 +35,79 @@ struct BrosSocialServiceTests {
     }
 
     @Test
+    func normalizedRecordNamesStayOrderedAndUnique() {
+        let names = BrosCloudRecordCoder.normalizedRecordNames([
+            " membership-a ",
+            "membership-b",
+            "membership-a",
+            "",
+            "membership-c",
+        ])
+
+        #expect(names == ["membership-a", "membership-b", "membership-c"])
+    }
+
+    @Test
+    func mergedReactionsPreferEmbeddedStateAndFillLegacyGaps() {
+        let embedded = [
+            BroReactionSummary(userRecordName: "user-1", emoji: .fire, displayName: nil),
+            BroReactionSummary(userRecordName: "user-2", emoji: .flex, displayName: nil),
+        ]
+        let legacy = [
+            BroReactionSummary(userRecordName: "user-1", emoji: .clap, displayName: nil),
+            BroReactionSummary(userRecordName: "user-3", emoji: .goat, displayName: nil),
+        ]
+
+        let merged = BrosCloudRecordCoder.mergedReactions(embedded: embedded, legacy: legacy)
+
+        #expect(merged == [
+            BroReactionSummary(userRecordName: "user-1", emoji: .fire, displayName: nil),
+            BroReactionSummary(userRecordName: "user-2", emoji: .flex, displayName: nil),
+            BroReactionSummary(userRecordName: "user-3", emoji: .goat, displayName: nil),
+        ])
+    }
+
+    @Test
+    func updatedReactionsReplaceOrRemoveCurrentUserSelection() {
+        let current = [
+            BroReactionSummary(userRecordName: "bro-1", emoji: .flex, displayName: nil),
+            BroReactionSummary(userRecordName: "bro-2", emoji: .fire, displayName: nil),
+        ]
+
+        let replaced = BrosCloudRecordCoder.updatedReactions(
+            current: current,
+            userRecordName: "bro-1",
+            tapped: .clap
+        )
+        #expect(replaced == [
+            BroReactionSummary(userRecordName: "bro-1", emoji: .clap, displayName: nil),
+            BroReactionSummary(userRecordName: "bro-2", emoji: .fire, displayName: nil),
+        ])
+
+        let removed = BrosCloudRecordCoder.updatedReactions(
+            current: current,
+            userRecordName: "bro-1",
+            tapped: .flex
+        )
+        #expect(removed == [
+            BroReactionSummary(userRecordName: "bro-2", emoji: .fire, displayName: nil),
+        ])
+    }
+
+    @Test
+    func encodedReactionsRoundTripWithoutLosingOrder() throws {
+        let reactions = [
+            BroReactionSummary(userRecordName: "bro-1", emoji: .fire, displayName: "Atlas"),
+            BroReactionSummary(userRecordName: "bro-2", emoji: .clap, displayName: nil),
+        ]
+
+        let payload = try #require(BrosCloudRecordCoder.encodeReactions(reactions))
+        let decoded = BrosCloudRecordCoder.decodeReactions(from: payload)
+
+        #expect(decoded == reactions)
+    }
+
+    @Test
     func visibleEventsHideAnythingBeforeJoinedAt() {
         let earlier = makeEvent(
             id: "earlier",

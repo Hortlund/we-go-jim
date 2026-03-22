@@ -230,6 +230,108 @@ enum BrosSocialRules {
     }
 }
 
+enum BrosCloudRecordCoder {
+    private struct StoredReaction: Codable, Equatable {
+        let userRecordName: String
+        let emojiRawValue: String
+        let displayName: String?
+    }
+
+    static func normalizedRecordNames(_ names: [String]) -> [String] {
+        var seen = Set<String>()
+        var ordered: [String] = []
+
+        for rawName in names {
+            let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, seen.insert(name).inserted else { continue }
+            ordered.append(name)
+        }
+
+        return ordered
+    }
+
+    static func mergedReactions(
+        embedded: [BroReactionSummary],
+        legacy: [BroReactionSummary]
+    ) -> [BroReactionSummary] {
+        var merged: [String: BroReactionSummary] = [:]
+
+        for reaction in embedded {
+            merged[reaction.userRecordName] = reaction
+        }
+
+        for reaction in legacy where merged[reaction.userRecordName] == nil {
+            merged[reaction.userRecordName] = reaction
+        }
+
+        return merged.values.sorted { lhs, rhs in
+            lhs.userRecordName.localizedStandardCompare(rhs.userRecordName) == .orderedAscending
+        }
+    }
+
+    static func updatedReactions(
+        current: [BroReactionSummary],
+        userRecordName: String,
+        tapped: BroReactionKind,
+        displayName: String? = nil
+    ) -> [BroReactionSummary] {
+        let existingReaction = current.first(where: { $0.userRecordName == userRecordName })
+        let existingEmoji = existingReaction?.emoji
+        let resolvedEmoji = BrosSocialRules.resolvedReaction(existing: existingEmoji, tapped: tapped)
+
+        var next = current.filter { $0.userRecordName != userRecordName }
+        if let resolvedEmoji {
+            next.append(
+                BroReactionSummary(
+                    userRecordName: userRecordName,
+                    emoji: resolvedEmoji,
+                    displayName: existingReaction?.displayName ?? displayName
+                )
+            )
+        }
+
+        return next.sorted { lhs, rhs in
+            lhs.userRecordName.localizedStandardCompare(rhs.userRecordName) == .orderedAscending
+        }
+    }
+
+    static func encodeReactions(_ reactions: [BroReactionSummary]) -> Data? {
+        let payload = reactions
+            .sorted { lhs, rhs in
+                lhs.userRecordName.localizedStandardCompare(rhs.userRecordName) == .orderedAscending
+            }
+            .map {
+                StoredReaction(
+                    userRecordName: $0.userRecordName,
+                    emojiRawValue: $0.emoji.rawValue,
+                    displayName: $0.displayName
+                )
+            }
+
+        return try? JSONEncoder().encode(payload)
+    }
+
+    static func decodeReactions(from data: Data?) -> [BroReactionSummary] {
+        guard let data,
+              let payload = try? JSONDecoder().decode([StoredReaction].self, from: data)
+        else {
+            return []
+        }
+
+        return payload.compactMap { item in
+            guard let emoji = BroReactionKind(rawValue: item.emojiRawValue) else {
+                return nil
+            }
+
+            return BroReactionSummary(
+                userRecordName: item.userRecordName,
+                emoji: emoji,
+                displayName: item.displayName
+            )
+        }
+    }
+}
+
 @MainActor
 protocol BrosSocialService {
     func refreshLocalMembershipState() async
@@ -251,6 +353,7 @@ protocol BrosSocialService {
 final class CloudKitBrosSocialService: BrosSocialService {
     private enum RecordType {
         static let circle = "BroCircle"
+        static let inviteLookup = "BroInviteLookup"
         static let membership = "BroMembership"
         static let feedEvent = "BroFeedEvent"
         static let reaction = "BroReaction"
@@ -261,6 +364,8 @@ final class CloudKitBrosSocialService: BrosSocialService {
         static let ownerUserRecordName = "ownerUserRecordName"
         static let inviteCode = "inviteCode"
         static let memberLimit = "memberLimit"
+        static let memberRecordNames = "memberRecordNames"
+        static let feedEventRecordNames = "feedEventRecordNames"
         static let createdAt = "createdAt"
         static let updatedAt = "updatedAt"
 
@@ -287,6 +392,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
         static let weight = "weight"
         static let reps = "reps"
         static let loadUnit = "loadUnit"
+        static let reactionsPayload = "reactionsPayload"
 
         static let reactionID = "reactionID"
         static let emoji = "emoji"
@@ -388,7 +494,10 @@ final class CloudKitBrosSocialService: BrosSocialService {
 
         do {
             let userRecordName = try await currentUserRecordName()
-            if let membershipRecord = try await membershipRecord(forUserRecordName: userRecordName) {
+            if let membershipRecord = try await resolvedMembershipRecord(
+                localProfile: profile,
+                userRecordName: userRecordName
+            ) {
                 let circleID = membershipRecord[Field.circleID] as? String ?? ""
                 let membershipID = membershipRecord[Field.membershipID] as? String ?? membershipRecord.recordID.recordName
                 let joinedAt = membershipRecord[Field.joinedAt] as? Date ?? .now
@@ -414,7 +523,12 @@ final class CloudKitBrosSocialService: BrosSocialService {
 
     func fetchSnapshot() async throws -> BrosFeedSnapshot? {
         let userRecordName = try await currentUserRecordName()
-        guard let membershipRecord = try await membershipRecord(forUserRecordName: userRecordName) else {
+        let localProfile = try? ProfileRepository(modelContext: modelContext).loadOrCreateProfile()
+
+        guard let membershipRecord = try await resolvedMembershipRecord(
+            localProfile: localProfile,
+            userRecordName: userRecordName
+        ) else {
             try? clearLocalMembershipStateIfNeeded()
             return nil
         }
@@ -426,24 +540,75 @@ final class CloudKitBrosSocialService: BrosSocialService {
         }
 
         let circle = circleSummary(from: circleRecord)
-        let membershipRecords = try await memberships(circleID: circle.circleID)
+        let membershipResolution = try await resolvedMembershipRecords(
+            circleRecord: circleRecord,
+            currentMembershipRecord: membershipRecord
+        )
+        let membershipRecords = membershipResolution.records
         let members = try await membershipRecords.asyncMap { try await memberSummary(from: $0) }
         let membersByRecordName = Dictionary(uniqueKeysWithValues: members.map { ($0.userRecordName, $0) })
 
-        let eventRecords = try await feedEvents(circleID: circle.circleID)
-        let reactionRecords = try await reactionRecords(circleID: circle.circleID)
-        let reactionsByEventID = Dictionary(grouping: reactionRecords.compactMap(reactionSummary(from:)), by: \.eventID)
+        let feedEventResolution = try await resolvedFeedEventRecords(circleRecord: circleRecord)
+        let eventRecords = feedEventResolution.records
+
+        var legacyReactionsByEventID: [String: [BroReactionSummary]] = [:]
+        if eventRecords.contains(where: { $0[Field.reactionsPayload] == nil }) {
+            do {
+                let reactionRecords = try await reactionRecords(circleID: circle.circleID)
+                legacyReactionsByEventID = Dictionary(
+                    grouping: reactionRecords.compactMap(reactionSummary(from:)),
+                    by: \.eventID
+                )
+                .mapValues { values in
+                    values.map(\.reaction)
+                }
+            } catch {
+                if Self.shouldTreatAsEmptyQueryResult(error, recordType: RecordType.reaction) {
+                    legacyReactionsByEventID = [:]
+                } else {
+                    throw error
+                }
+            }
+        }
+
+        var recordsToBackfill: [CKRecord] = []
+        if membershipResolution.didMutateCircleRecord || feedEventResolution.didMutateCircleRecord {
+            recordsToBackfill.append(circleRecord)
+        }
+        if (try? await fetchRecord(recordType: RecordType.inviteLookup, recordName: circle.inviteCode)) == nil {
+            recordsToBackfill.append(
+                makeInviteLookupRecord(
+                    inviteCode: circle.inviteCode,
+                    circleID: circle.circleID,
+                    createdAt: circle.createdAt
+                )
+            )
+        }
 
         let visibleEvents = eventRecords.compactMap { record -> BroFeedEvent? in
-            mapFeedEvent(
+            let embeddedReactions = embeddedReactions(from: record)
+            let mergedReactions = BrosCloudRecordCoder.mergedReactions(
+                embedded: embeddedReactions,
+                legacy: legacyReactionsByEventID[record.recordID.recordName] ?? []
+            )
+            if mergedReactions != embeddedReactions {
+                setEmbeddedReactions(mergedReactions, on: record)
+                recordsToBackfill.append(record)
+            }
+
+            return mapFeedEvent(
                 from: record,
                 membersByRecordName: membersByRecordName,
-                reactions: reactionsByEventID[record.recordID.recordName] ?? []
+                reactions: mergedReactions
             )
         }
 
         let filteredEvents = BrosSocialRules.visibleEvents(visibleEvents, joinedAt: currentMembership.joinedAt)
             .sorted { $0.createdAt > $1.createdAt }
+
+        if !recordsToBackfill.isEmpty {
+            try? await save(records: recordsToBackfill)
+        }
 
         try? persistLocalMembership(
             circleID: currentMembership.circleID,
@@ -512,13 +677,14 @@ final class CloudKitBrosSocialService: BrosSocialService {
 
     func createCircle(memberLimit: Int) async throws -> BrosFeedSnapshot {
         let userRecordName = try await currentUserRecordName()
-        if try await membershipRecord(forUserRecordName: userRecordName) != nil {
+        let localProfile = try? ProfileRepository(modelContext: modelContext).loadOrCreateProfile()
+        if try await resolvedMembershipRecord(localProfile: localProfile, userRecordName: userRecordName) != nil {
             throw BrosSocialServiceError.alreadyInCircle
         }
 
         try validateMemberLimit(memberLimit)
 
-        let profile = try? ProfileRepository(modelContext: modelContext).loadOrCreateProfile()
+        let profile = localProfile
         let createdAt = Date()
         let circleID = UUID().uuidString.lowercased()
         let inviteCode = inviteCode(from: circleID)
@@ -529,6 +695,8 @@ final class CloudKitBrosSocialService: BrosSocialService {
         circleRecord[Field.ownerUserRecordName] = userRecordName as CKRecordValue
         circleRecord[Field.inviteCode] = inviteCode as CKRecordValue
         circleRecord[Field.memberLimit] = memberLimit as CKRecordValue
+        setRecordNames([membershipID], on: circleRecord, field: Field.memberRecordNames)
+        setRecordNames([], on: circleRecord, field: Field.feedEventRecordNames)
         circleRecord[Field.createdAt] = createdAt as CKRecordValue
         circleRecord[Field.updatedAt] = createdAt as CKRecordValue
 
@@ -545,7 +713,13 @@ final class CloudKitBrosSocialService: BrosSocialService {
             role: .owner
         )
 
-        try await save(records: [circleRecord, membershipRecord])
+        let inviteLookupRecord = makeInviteLookupRecord(
+            inviteCode: inviteCode,
+            circleID: circleID,
+            createdAt: createdAt
+        )
+
+        try await save(records: [circleRecord, membershipRecord, inviteLookupRecord])
         try? persistLocalMembership(
             circleID: circleID,
             membershipID: membershipID,
@@ -588,22 +762,28 @@ final class CloudKitBrosSocialService: BrosSocialService {
         }
 
         let userRecordName = try await currentUserRecordName()
-        if try await membershipRecord(forUserRecordName: userRecordName) != nil {
+        let localProfile = try? ProfileRepository(modelContext: modelContext).loadOrCreateProfile()
+        if try await resolvedMembershipRecord(localProfile: localProfile, userRecordName: userRecordName) != nil {
             throw BrosSocialServiceError.alreadyInCircle
         }
 
-        guard let circleRecord = try await circleRecord(inviteCode: cleanedCode) else {
+        let inviteResolution = try await resolvedCircleRecord(inviteCode: cleanedCode)
+        guard let circleRecord = inviteResolution.record else {
             throw BrosSocialServiceError.invalidInviteCode
         }
 
         let circle = circleSummary(from: circleRecord)
-        let currentMembers = try await memberships(circleID: circle.circleID)
+        let membershipResolution = try await resolvedMembershipRecords(
+            circleRecord: circleRecord,
+            currentMembershipRecord: nil
+        )
+        let currentMembers = membershipResolution.records
         guard BrosSocialRules.hasCapacity(currentMemberCount: currentMembers.count, limit: circle.memberLimit) else {
             throw BrosSocialServiceError.circleFull
         }
         let existingMembers = try await currentMembers.asyncMap { try await memberSummary(from: $0) }
 
-        let profile = try? ProfileRepository(modelContext: modelContext).loadOrCreateProfile()
+        let profile = localProfile
         let joinedAt = Date()
         let membershipID = BrosRecordNames.membershipRecordName(circleID: circle.circleID, userRecordName: userRecordName)
         let membershipRecord = CKRecord(recordType: RecordType.membership, recordID: CKRecord.ID(recordName: membershipID))
@@ -619,7 +799,27 @@ final class CloudKitBrosSocialService: BrosSocialService {
             role: .member
         )
 
-        try await save(records: [membershipRecord])
+        var recordsToSave = [membershipRecord]
+        if membershipResolution.canWriteBackIndex {
+            let updatedMemberRecordNames = BrosCloudRecordCoder.normalizedRecordNames(
+                (recordNames(from: circleRecord, field: Field.memberRecordNames)
+                    ?? currentMembers.map(\.recordID.recordName)) + [membershipID]
+            )
+            setRecordNames(updatedMemberRecordNames, on: circleRecord, field: Field.memberRecordNames)
+            circleRecord[Field.updatedAt] = Date() as CKRecordValue
+            recordsToSave.append(circleRecord)
+        }
+        if inviteResolution.didFallbackToLegacyQuery {
+            recordsToSave.append(
+                makeInviteLookupRecord(
+                    inviteCode: cleanedCode,
+                    circleID: circle.circleID,
+                    createdAt: circle.createdAt
+                )
+            )
+        }
+
+        try await save(records: recordsToSave)
         try? persistLocalMembership(
             circleID: circle.circleID,
             membershipID: membershipID,
@@ -648,7 +848,10 @@ final class CloudKitBrosSocialService: BrosSocialService {
 
     func leaveCircle() async throws {
         let userRecordName = try await currentUserRecordName()
-        guard let membershipRecord = try await membershipRecord(forUserRecordName: userRecordName) else {
+        guard let membershipRecord = try await resolvedMembershipRecord(
+            localProfile: try? ProfileRepository(modelContext: modelContext).loadOrCreateProfile(),
+            userRecordName: userRecordName
+        ) else {
             throw BrosSocialServiceError.notInCircle
         }
         let currentMember = try await memberSummary(from: membershipRecord)
@@ -656,11 +859,21 @@ final class CloudKitBrosSocialService: BrosSocialService {
             throw BrosSocialServiceError.notInCircle
         }
 
-        let members = try await memberships(circleID: currentMember.circleID)
+        let membershipResolution = try await resolvedMembershipRecords(
+            circleRecord: circleRecord,
+            currentMembershipRecord: membershipRecord
+        )
+        let members = membershipResolution.records
         let memberSummaries = try await members.asyncMap { try await memberSummary(from: $0) }
 
         var recordsToSave: [CKRecord] = []
         var recordIDsToDelete: [CKRecord.ID] = [membershipRecord.recordID]
+        let remainingMemberRecordNames = membershipResolution.canWriteBackIndex
+            ? BrosCloudRecordCoder.normalizedRecordNames(
+                (recordNames(from: circleRecord, field: Field.memberRecordNames) ?? members.map(\.recordID.recordName))
+                    .filter { $0 != membershipRecord.recordID.recordName }
+            )
+            : nil
 
         if currentMember.isOwner {
             if let nextOwner = BrosSocialRules.nextOwner(in: memberSummaries, removingMembershipID: currentMember.id) {
@@ -671,17 +884,30 @@ final class CloudKitBrosSocialService: BrosSocialService {
                 nextOwnerRecord[Field.role] = BroMembershipRole.owner.rawValue as CKRecordValue
                 nextOwnerRecord[Field.updatedAt] = Date() as CKRecordValue
                 circleRecord[Field.ownerUserRecordName] = nextOwner.userRecordName as CKRecordValue
+                if let remainingMemberRecordNames {
+                    setRecordNames(remainingMemberRecordNames, on: circleRecord, field: Field.memberRecordNames)
+                }
                 circleRecord[Field.updatedAt] = Date() as CKRecordValue
                 recordsToSave.append(contentsOf: [nextOwnerRecord, circleRecord])
             } else {
                 let relatedMemberships = members.filter { $0.recordID != membershipRecord.recordID }
-                let relatedEvents = try await feedEventRecords(circleID: currentMember.circleID)
-                let relatedReactions = try await reactionRecords(circleID: currentMember.circleID)
+                let relatedEvents = try await resolvedFeedEventRecords(circleRecord: circleRecord).records
+                let relatedReactions = try await bestEffortReactionRecords(circleID: currentMember.circleID)
                 recordIDsToDelete.append(contentsOf: relatedMemberships.map(\.recordID))
                 recordIDsToDelete.append(contentsOf: relatedEvents.map(\.recordID))
                 recordIDsToDelete.append(contentsOf: relatedReactions.map(\.recordID))
+                if let inviteLookupRecord = try await fetchRecord(
+                    recordType: RecordType.inviteLookup,
+                    recordName: circleSummary(from: circleRecord).inviteCode
+                ) {
+                    recordIDsToDelete.append(inviteLookupRecord.recordID)
+                }
                 recordIDsToDelete.append(circleRecord.recordID)
             }
+        } else if let remainingMemberRecordNames {
+            setRecordNames(remainingMemberRecordNames, on: circleRecord, field: Field.memberRecordNames)
+            circleRecord[Field.updatedAt] = Date() as CKRecordValue
+            recordsToSave.append(circleRecord)
         }
 
         try await save(records: recordsToSave, deleting: recordIDsToDelete)
@@ -690,7 +916,10 @@ final class CloudKitBrosSocialService: BrosSocialService {
 
     func updateCircleMemberLimit(_ memberLimit: Int) async throws -> BrosFeedSnapshot {
         let userRecordName = try await currentUserRecordName()
-        guard let currentMembershipRecord = try await membershipRecord(forUserRecordName: userRecordName) else {
+        guard let currentMembershipRecord = try await resolvedMembershipRecord(
+            localProfile: try? ProfileRepository(modelContext: modelContext).loadOrCreateProfile(),
+            userRecordName: userRecordName
+        ) else {
             throw BrosSocialServiceError.notInCircle
         }
         let currentMember = try await memberSummary(from: currentMembershipRecord)
@@ -703,7 +932,10 @@ final class CloudKitBrosSocialService: BrosSocialService {
             throw BrosSocialServiceError.notInCircle
         }
 
-        let members = try await memberships(circleID: currentMember.circleID)
+        let members = try await resolvedMembershipRecords(
+            circleRecord: circleRecord,
+            currentMembershipRecord: currentMembershipRecord
+        ).records
         try validateMemberLimit(memberLimit, currentMemberCount: members.count)
 
         let updatedAt = Date()
@@ -720,49 +952,113 @@ final class CloudKitBrosSocialService: BrosSocialService {
 
     func deleteCurrentUserData() async throws {
         let userRecordName = try await currentUserRecordName()
-        let ownedMemberships = try await membershipRecords(forUserRecordName: userRecordName)
-        let ownFeedEvents = try await feedEventRecords(actorUserRecordName: userRecordName)
-        let ownReactions = try await reactionRecords(userRecordName: userRecordName)
+        guard let membershipRecord = try await resolvedMembershipRecord(
+            localProfile: try? ProfileRepository(modelContext: modelContext).loadOrCreateProfile(),
+            userRecordName: userRecordName
+        ) else {
+            try? clearLocalMembershipStateIfNeeded()
+            return
+        }
+
+        let currentMember = try await memberSummary(from: membershipRecord)
+        guard let circleRecord = try await circleRecord(circleID: currentMember.circleID) else {
+            try? clearLocalMembershipStateIfNeeded()
+            return
+        }
+
+        let membershipResolution = try await resolvedMembershipRecords(
+            circleRecord: circleRecord,
+            currentMembershipRecord: membershipRecord
+        )
+        let members = membershipResolution.records
+        let memberSummaries = try await members.asyncMap { try await memberSummary(from: $0) }
+        let feedEventResolution = try await resolvedFeedEventRecords(circleRecord: circleRecord)
+        let feedEvents = feedEventResolution.records
 
         var recordsToSave: [CKRecord] = []
-        var recordIDsToDelete = Set<CKRecord.ID>()
+        var recordIDsToDelete = Set<CKRecord.ID>([membershipRecord.recordID])
+        let removedFeedEventRecordNames = feedEvents
+            .filter { ($0[Field.actorUserRecordName] as? String) == userRecordName }
+            .map(\.recordID.recordName)
+        let remainingMemberRecordNames = membershipResolution.canWriteBackIndex
+            ? BrosCloudRecordCoder.normalizedRecordNames(
+                (recordNames(from: circleRecord, field: Field.memberRecordNames) ?? members.map(\.recordID.recordName))
+                    .filter { $0 != membershipRecord.recordID.recordName }
+            )
+            : nil
+        let remainingFeedEventRecordNames = feedEventResolution.canWriteBackIndex
+            ? BrosCloudRecordCoder.normalizedRecordNames(
+                (recordNames(from: circleRecord, field: Field.feedEventRecordNames) ?? feedEvents.map(\.recordID.recordName))
+                    .filter { !removedFeedEventRecordNames.contains($0) }
+            )
+            : nil
 
-        for membershipRecord in ownedMemberships {
-            let currentMember = try await memberSummary(from: membershipRecord)
-            recordIDsToDelete.insert(membershipRecord.recordID)
-
-            guard let circleRecord = try await circleRecord(circleID: currentMember.circleID) else {
-                continue
+        for eventRecord in feedEvents {
+            let eventID = eventRecord.recordID.recordName
+            if (eventRecord[Field.actorUserRecordName] as? String) == userRecordName {
+                recordIDsToDelete.insert(eventRecord.recordID)
+            } else {
+                let updatedReactions = embeddedReactions(from: eventRecord)
+                    .filter { $0.userRecordName != userRecordName }
+                if updatedReactions != embeddedReactions(from: eventRecord) {
+                    setEmbeddedReactions(updatedReactions, on: eventRecord)
+                    eventRecord[Field.updatedAt] = Date() as CKRecordValue
+                    recordsToSave.append(eventRecord)
+                }
             }
 
-            let members = try await memberships(circleID: currentMember.circleID)
-            let memberSummaries = try await members.asyncMap { try await memberSummary(from: $0) }
-
-            if currentMember.isOwner {
-                if let nextOwner = BrosSocialRules.nextOwner(in: memberSummaries, removingMembershipID: currentMember.id) {
-                    guard let nextOwnerRecord = try await fetchRecord(recordType: RecordType.membership, recordName: nextOwner.id) else {
-                        throw BrosSocialServiceError.memberNotFound
-                    }
-
-                    nextOwnerRecord[Field.role] = BroMembershipRole.owner.rawValue as CKRecordValue
-                    nextOwnerRecord[Field.updatedAt] = Date() as CKRecordValue
-                    circleRecord[Field.ownerUserRecordName] = nextOwner.userRecordName as CKRecordValue
-                    circleRecord[Field.updatedAt] = Date() as CKRecordValue
-                    recordsToSave.append(contentsOf: [nextOwnerRecord, circleRecord])
-                } else {
-                    let relatedMemberships = members.filter { $0.recordID != membershipRecord.recordID }
-                    let relatedEvents = try await feedEventRecords(circleID: currentMember.circleID)
-                    let relatedReactions = try await reactionRecords(circleID: currentMember.circleID)
-                    recordIDsToDelete.formUnion(relatedMemberships.map(\.recordID))
-                    recordIDsToDelete.formUnion(relatedEvents.map(\.recordID))
-                    recordIDsToDelete.formUnion(relatedReactions.map(\.recordID))
-                    recordIDsToDelete.insert(circleRecord.recordID)
-                }
+            if let legacyReactionRecord = try await fetchRecord(
+                recordType: RecordType.reaction,
+                recordName: BrosRecordNames.reactionRecordName(eventID: eventID, userRecordName: userRecordName)
+            ) {
+                recordIDsToDelete.insert(legacyReactionRecord.recordID)
             }
         }
 
-        recordIDsToDelete.formUnion(ownFeedEvents.map(\.recordID))
-        recordIDsToDelete.formUnion(ownReactions.map(\.recordID))
+        if currentMember.isOwner {
+            if let nextOwner = BrosSocialRules.nextOwner(in: memberSummaries, removingMembershipID: currentMember.id) {
+                guard let nextOwnerRecord = try await fetchRecord(recordType: RecordType.membership, recordName: nextOwner.id) else {
+                    throw BrosSocialServiceError.memberNotFound
+                }
+
+                nextOwnerRecord[Field.role] = BroMembershipRole.owner.rawValue as CKRecordValue
+                nextOwnerRecord[Field.updatedAt] = Date() as CKRecordValue
+                circleRecord[Field.ownerUserRecordName] = nextOwner.userRecordName as CKRecordValue
+                if let remainingMemberRecordNames {
+                    setRecordNames(remainingMemberRecordNames, on: circleRecord, field: Field.memberRecordNames)
+                }
+                if let remainingFeedEventRecordNames {
+                    setRecordNames(remainingFeedEventRecordNames, on: circleRecord, field: Field.feedEventRecordNames)
+                }
+                circleRecord[Field.updatedAt] = Date() as CKRecordValue
+                recordsToSave.append(contentsOf: [nextOwnerRecord, circleRecord])
+            } else {
+                recordIDsToDelete.formUnion(members.filter { $0.recordID != membershipRecord.recordID }.map(\.recordID))
+                recordIDsToDelete.formUnion(feedEvents.map(\.recordID))
+                recordIDsToDelete.formUnion(try await bestEffortReactionRecords(circleID: currentMember.circleID).map(\.recordID))
+                if let inviteLookupRecord = try await fetchRecord(
+                    recordType: RecordType.inviteLookup,
+                    recordName: circleSummary(from: circleRecord).inviteCode
+                ) {
+                    recordIDsToDelete.insert(inviteLookupRecord.recordID)
+                }
+                recordIDsToDelete.insert(circleRecord.recordID)
+            }
+        } else {
+            var didMutateCircleRecord = false
+            if let remainingMemberRecordNames {
+                setRecordNames(remainingMemberRecordNames, on: circleRecord, field: Field.memberRecordNames)
+                didMutateCircleRecord = true
+            }
+            if let remainingFeedEventRecordNames {
+                setRecordNames(remainingFeedEventRecordNames, on: circleRecord, field: Field.feedEventRecordNames)
+                didMutateCircleRecord = true
+            }
+            if didMutateCircleRecord {
+                circleRecord[Field.updatedAt] = Date() as CKRecordValue
+                recordsToSave.append(circleRecord)
+            }
+        }
 
         try await save(records: recordsToSave, deleting: Array(recordIDsToDelete))
         try? clearLocalMembershipStateIfNeeded()
@@ -770,7 +1066,10 @@ final class CloudKitBrosSocialService: BrosSocialService {
 
     func removeMember(membershipID: String) async throws {
         let userRecordName = try await currentUserRecordName()
-        guard let currentMembershipRecord = try await membershipRecord(forUserRecordName: userRecordName) else {
+        guard let currentMembershipRecord = try await resolvedMembershipRecord(
+            localProfile: try? ProfileRepository(modelContext: modelContext).loadOrCreateProfile(),
+            userRecordName: userRecordName
+        ) else {
             throw BrosSocialServiceError.notInCircle
         }
         let currentMember = try await memberSummary(from: currentMembershipRecord)
@@ -792,39 +1091,69 @@ final class CloudKitBrosSocialService: BrosSocialService {
             throw BrosSocialServiceError.memberNotFound
         }
 
-        try await save(records: [], deleting: [targetRecord.recordID])
+        guard let circleRecord = try await circleRecord(circleID: currentMember.circleID) else {
+            throw BrosSocialServiceError.notInCircle
+        }
+
+        let membershipResolution = try await resolvedMembershipRecords(
+            circleRecord: circleRecord,
+            currentMembershipRecord: currentMembershipRecord
+        )
+        if membershipResolution.canWriteBackIndex {
+            setRecordNames(
+                BrosCloudRecordCoder.normalizedRecordNames(
+                    (recordNames(from: circleRecord, field: Field.memberRecordNames) ?? membershipResolution.records.map(\.recordID.recordName))
+                        .filter { $0 != targetRecord.recordID.recordName }
+                ),
+                on: circleRecord,
+                field: Field.memberRecordNames
+            )
+            circleRecord[Field.updatedAt] = Date() as CKRecordValue
+            try await save(records: [circleRecord], deleting: [targetRecord.recordID])
+        } else {
+            try await save(records: [], deleting: [targetRecord.recordID])
+        }
     }
 
     func setReaction(eventID: String, kind: BroReactionKind) async throws {
         let userRecordName = try await currentUserRecordName()
-        guard let snapshot = try await fetchSnapshot() else {
+        guard let currentMembershipRecord = try await resolvedMembershipRecord(
+            localProfile: try? ProfileRepository(modelContext: modelContext).loadOrCreateProfile(),
+            userRecordName: userRecordName
+        ) else {
             throw BrosSocialServiceError.notInCircle
         }
+        let currentMember = try await memberSummary(from: currentMembershipRecord)
 
-        guard snapshot.feedEvents.contains(where: { $0.id == eventID }) else {
+        guard let eventRecord = try await fetchRecord(recordType: RecordType.feedEvent, recordName: eventID) else {
+            throw BrosSocialServiceError.memberNotFound
+        }
+        guard (eventRecord[Field.circleID] as? String) == currentMember.circleID else {
             throw BrosSocialServiceError.memberNotFound
         }
 
         let recordName = BrosRecordNames.reactionRecordName(eventID: eventID, userRecordName: userRecordName)
-        let existingRecord = try await fetchRecord(recordType: RecordType.reaction, recordName: recordName)
-        let existingEmoji = (existingRecord?[Field.emoji] as? String).flatMap(BroReactionKind.init(rawValue:))
-        let resolvedEmoji = BrosSocialRules.resolvedReaction(existing: existingEmoji, tapped: kind)
+        let existingLegacyRecord = try await fetchRecord(recordType: RecordType.reaction, recordName: recordName)
+        let embeddedReactions = embeddedReactions(from: eventRecord)
+        let legacyReactions = existingLegacyRecord.flatMap(reactionSummary(from:)).map { [$0.reaction] } ?? []
+        let mergedReactions = BrosCloudRecordCoder.mergedReactions(
+            embedded: embeddedReactions,
+            legacy: legacyReactions
+        )
+        let updatedReactions = BrosCloudRecordCoder.updatedReactions(
+            current: mergedReactions,
+            userRecordName: userRecordName,
+            tapped: kind,
+            displayName: currentMember.displayName
+        )
 
-        if let resolvedEmoji {
-            let record = existingRecord ?? CKRecord(recordType: RecordType.reaction, recordID: CKRecord.ID(recordName: recordName))
-            record[Field.reactionID] = recordName as CKRecordValue
-            record[Field.eventID] = eventID as CKRecordValue
-            record[Field.circleID] = snapshot.circle.circleID as CKRecordValue
-            record[Field.userRecordName] = userRecordName as CKRecordValue
-            record[Field.emoji] = resolvedEmoji.rawValue as CKRecordValue
-            if record[Field.createdAt] == nil {
-                record[Field.createdAt] = Date() as CKRecordValue
-            }
-            record[Field.updatedAt] = Date() as CKRecordValue
-            try await save(records: [record])
-        } else if let existingRecord {
-            try await save(records: [], deleting: [existingRecord.recordID])
-        }
+        setEmbeddedReactions(updatedReactions, on: eventRecord)
+        eventRecord[Field.updatedAt] = Date() as CKRecordValue
+
+        try await save(
+            records: [eventRecord],
+            deleting: existingLegacyRecord.map { [$0.recordID] } ?? []
+        )
     }
 
     func queueCompletedSessionPublish(sessionID: UUID) throws {
@@ -1012,6 +1341,191 @@ final class CloudKitBrosSocialService: BrosSocialService {
         }
     }
 
+    private struct CircleInviteResolution {
+        let record: CKRecord?
+        let didFallbackToLegacyQuery: Bool
+    }
+
+    private struct IndexedRecordsResolution {
+        let records: [CKRecord]
+        let didMutateCircleRecord: Bool
+        let canWriteBackIndex: Bool
+    }
+
+    private func resolvedMembershipRecord(
+        localProfile: UserProfile?,
+        userRecordName: String
+    ) async throws -> CKRecord? {
+        if let membershipID = localProfile?.brosMembershipID,
+           let record = try await fetchRecord(recordType: RecordType.membership, recordName: membershipID)
+        {
+            return record
+        }
+
+        if let circleID = localProfile?.brosCircleID {
+            let derivedMembershipID = BrosRecordNames.membershipRecordName(
+                circleID: circleID,
+                userRecordName: userRecordName
+            )
+            if let record = try await fetchRecord(
+                recordType: RecordType.membership,
+                recordName: derivedMembershipID
+            ) {
+                return record
+            }
+        }
+
+        _ = userRecordName
+        return nil
+    }
+
+    private func resolvedCircleRecord(inviteCode: String) async throws -> CircleInviteResolution {
+        if let inviteLookupRecord = try await fetchRecord(
+            recordType: RecordType.inviteLookup,
+            recordName: inviteCode
+        ), let circleID = inviteLookupRecord[Field.circleID] as? String {
+            return CircleInviteResolution(
+                record: try await circleRecord(circleID: circleID),
+                didFallbackToLegacyQuery: false
+            )
+        }
+
+        return CircleInviteResolution(
+            record: nil,
+            didFallbackToLegacyQuery: false
+        )
+    }
+
+    private func resolvedMembershipRecords(
+        circleRecord: CKRecord,
+        currentMembershipRecord: CKRecord?
+    ) async throws -> IndexedRecordsResolution {
+        let indexedRecordNames = recordNames(from: circleRecord, field: Field.memberRecordNames)
+
+        var records: [CKRecord]
+        let canWriteBackIndex: Bool
+        if let indexedRecordNames {
+            records = try await fetchRecords(recordType: RecordType.membership, recordNames: indexedRecordNames)
+            canWriteBackIndex = true
+        } else {
+            records = currentMembershipRecord.map { [$0] } ?? []
+            canWriteBackIndex = false
+        }
+
+        var didMutateCircleRecord = false
+
+        if let currentMembershipRecord,
+           !records.contains(where: { $0.recordID == currentMembershipRecord.recordID })
+        {
+            records.append(currentMembershipRecord)
+        }
+
+        let sortedRecords = records.sorted { lhs, rhs in
+            let lhsJoinedAt = lhs[Field.joinedAt] as? Date ?? .distantPast
+            let rhsJoinedAt = rhs[Field.joinedAt] as? Date ?? .distantPast
+            if lhsJoinedAt != rhsJoinedAt {
+                return lhsJoinedAt < rhsJoinedAt
+            }
+            return lhs.recordID.recordName.localizedStandardCompare(rhs.recordID.recordName) == .orderedAscending
+        }
+
+        let normalizedRecordNames = sortedRecords.map(\.recordID.recordName)
+        if canWriteBackIndex, indexedRecordNames != normalizedRecordNames {
+            setRecordNames(normalizedRecordNames, on: circleRecord, field: Field.memberRecordNames)
+            didMutateCircleRecord = true
+        }
+
+        return IndexedRecordsResolution(
+            records: sortedRecords,
+            didMutateCircleRecord: didMutateCircleRecord,
+            canWriteBackIndex: canWriteBackIndex
+        )
+    }
+
+    private func resolvedFeedEventRecords(circleRecord: CKRecord) async throws -> IndexedRecordsResolution {
+        let indexedRecordNames = recordNames(from: circleRecord, field: Field.feedEventRecordNames)
+
+        var records: [CKRecord]
+        let canWriteBackIndex: Bool
+        if let indexedRecordNames {
+            records = try await fetchRecords(recordType: RecordType.feedEvent, recordNames: indexedRecordNames)
+            canWriteBackIndex = true
+        } else {
+            records = []
+            canWriteBackIndex = false
+        }
+
+        records.sort {
+            let lhsCreatedAt = $0[Field.createdAt] as? Date ?? .distantPast
+            let rhsCreatedAt = $1[Field.createdAt] as? Date ?? .distantPast
+            if lhsCreatedAt != rhsCreatedAt {
+                return lhsCreatedAt > rhsCreatedAt
+            }
+            return $0.recordID.recordName.localizedStandardCompare($1.recordID.recordName) == .orderedAscending
+        }
+
+        let normalizedRecordNames = records.map(\.recordID.recordName)
+        let didMutateCircleRecord = canWriteBackIndex && indexedRecordNames != normalizedRecordNames
+        if didMutateCircleRecord {
+            setRecordNames(normalizedRecordNames, on: circleRecord, field: Field.feedEventRecordNames)
+        }
+
+        return IndexedRecordsResolution(
+            records: records,
+            didMutateCircleRecord: didMutateCircleRecord,
+            canWriteBackIndex: canWriteBackIndex
+        )
+    }
+
+    private func bestEffortReactionRecords(circleID: String) async throws -> [CKRecord] {
+        do {
+            return try await reactionRecords(circleID: circleID)
+        } catch {
+            guard Self.shouldTreatAsEmptyQueryResult(error, recordType: RecordType.reaction) else {
+                throw error
+            }
+            return []
+        }
+    }
+
+    private func recordNames(from record: CKRecord, field: String) -> [String]? {
+        if let names = record[field] as? [String] {
+            return BrosCloudRecordCoder.normalizedRecordNames(names)
+        }
+        if let names = record[field] as? [NSString] {
+            return BrosCloudRecordCoder.normalizedRecordNames(names.map(String.init))
+        }
+        return nil
+    }
+
+    private func setRecordNames(_ names: [String], on record: CKRecord, field: String) {
+        record[field] = BrosCloudRecordCoder.normalizedRecordNames(names) as CKRecordValue
+    }
+
+    private func embeddedReactions(from record: CKRecord) -> [BroReactionSummary] {
+        BrosCloudRecordCoder.decodeReactions(from: record[Field.reactionsPayload] as? Data)
+    }
+
+    private func setEmbeddedReactions(_ reactions: [BroReactionSummary], on record: CKRecord) {
+        record[Field.reactionsPayload] = BrosCloudRecordCoder.encodeReactions(reactions) as CKRecordValue?
+    }
+
+    private func makeInviteLookupRecord(
+        inviteCode: String,
+        circleID: String,
+        createdAt: Date
+    ) -> CKRecord {
+        let record = CKRecord(
+            recordType: RecordType.inviteLookup,
+            recordID: CKRecord.ID(recordName: inviteCode)
+        )
+        record[Field.inviteCode] = inviteCode as CKRecordValue
+        record[Field.circleID] = circleID as CKRecordValue
+        record[Field.createdAt] = createdAt as CKRecordValue
+        record[Field.updatedAt] = Date() as CKRecordValue
+        return record
+    }
+
     private func memberships(circleID: String) async throws -> [CKRecord] {
         try await queryRecords(
             recordType: RecordType.membership,
@@ -1161,6 +1675,30 @@ final class CloudKitBrosSocialService: BrosSocialService {
         }
     }
 
+    private func fetchRecords(recordType: String, recordNames: [String]) async throws -> [CKRecord] {
+        let normalizedRecordNames = BrosCloudRecordCoder.normalizedRecordNames(recordNames)
+        guard !normalizedRecordNames.isEmpty else { return [] }
+
+        let recordIDs = normalizedRecordNames.map { CKRecord.ID(recordName: $0) }
+        let results = try await database.records(for: recordIDs)
+        var recordsByName: [String: CKRecord] = [:]
+
+        for (recordID, result) in results {
+            switch result {
+            case let .success(record) where record.recordType == recordType:
+                recordsByName[recordID.recordName] = record
+            case .success:
+                continue
+            case let .failure(error as CKError) where error.code == .unknownItem:
+                continue
+            case let .failure(error):
+                throw error
+            }
+        }
+
+        return normalizedRecordNames.compactMap { recordsByName[$0] }
+    }
+
     private func save(records: [CKRecord], deleting recordIDs: [CKRecord.ID] = []) async throws {
         guard !records.isEmpty || !recordIDs.isEmpty else { return }
 
@@ -1168,7 +1706,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
             saving: records,
             deleting: recordIDs,
             savePolicy: .allKeys,
-            atomically: false
+            atomically: true
         )
     }
 
@@ -1229,7 +1767,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
     private func mapFeedEvent(
         from record: CKRecord,
         membersByRecordName: [String: BroMemberSummary],
-        reactions: [(eventID: String, reaction: BroReactionSummary)]
+        reactions: [BroReactionSummary]
     ) -> BroFeedEvent? {
         guard
             let circleID = record[Field.circleID] as? String,
@@ -1297,7 +1835,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
             kind: kind,
             workout: workout,
             pr: pr,
-            reactions: reactions.map(\.reaction)
+            reactions: reactions
         )
     }
 
@@ -1362,7 +1900,22 @@ final class CloudKitBrosSocialService: BrosSocialService {
         record[Field.exercisePreviewText] = payload.exercisePreview
             .map { ReviewModerationService.sanitizedForSharing($0, kind: .exerciseName) }
             .joined(separator: "\n") as CKRecordValue
-        try await save(records: [record])
+        setEmbeddedReactions(embeddedReactions(from: record), on: record)
+
+        if let circleRecord = try await circleRecord(circleID: payload.circleID) {
+            let currentEventRecordNames = recordNames(from: circleRecord, field: Field.feedEventRecordNames) ?? []
+            setRecordNames(
+                BrosCloudRecordCoder.normalizedRecordNames(
+                    currentEventRecordNames + [payload.recordName]
+                ),
+                on: circleRecord,
+                field: Field.feedEventRecordNames
+            )
+            circleRecord[Field.updatedAt] = Date() as CKRecordValue
+            try await save(records: [record, circleRecord])
+        } else {
+            try await save(records: [record])
+        }
     }
 
     private func publishPREvent(_ payload: PendingPREventPayload) async throws {
@@ -1388,12 +1941,41 @@ final class CloudKitBrosSocialService: BrosSocialService {
         record[Field.weight] = payload.weight as CKRecordValue
         record[Field.reps] = payload.reps as CKRecordValue
         record[Field.loadUnit] = payload.loadUnit.rawValue as CKRecordValue
-        try await save(records: [record])
+        setEmbeddedReactions(embeddedReactions(from: record), on: record)
+
+        if let circleRecord = try await circleRecord(circleID: payload.circleID) {
+            let currentEventRecordNames = recordNames(from: circleRecord, field: Field.feedEventRecordNames) ?? []
+            setRecordNames(
+                BrosCloudRecordCoder.normalizedRecordNames(
+                    currentEventRecordNames + [payload.recordName]
+                ),
+                on: circleRecord,
+                field: Field.feedEventRecordNames
+            )
+            circleRecord[Field.updatedAt] = Date() as CKRecordValue
+            try await save(records: [record, circleRecord])
+        } else {
+            try await save(records: [record])
+        }
     }
 
     private func deleteRecordIfPresent(recordName: String) async throws {
         if let record = try await fetchRecord(recordType: RecordType.feedEvent, recordName: recordName) {
-            try await save(records: [], deleting: [record.recordID])
+            let circleID = record[Field.circleID] as? String ?? ""
+            var recordsToSave: [CKRecord] = []
+            if let circleRecord = try await circleRecord(circleID: circleID) {
+                let currentEventRecordNames = recordNames(from: circleRecord, field: Field.feedEventRecordNames) ?? []
+                setRecordNames(
+                    BrosCloudRecordCoder.normalizedRecordNames(
+                        currentEventRecordNames.filter { $0 != recordName }
+                    ),
+                    on: circleRecord,
+                    field: Field.feedEventRecordNames
+                )
+                circleRecord[Field.updatedAt] = Date() as CKRecordValue
+                recordsToSave.append(circleRecord)
+            }
+            try await save(records: recordsToSave, deleting: [record.recordID])
             return
         }
 

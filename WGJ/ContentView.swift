@@ -80,6 +80,7 @@ struct ContentView: View {
     private func scheduleAppMaintenance() {
         appMaintenanceTask?.cancel()
         appMaintenanceTask = Task { @MainActor in
+            BrosCleanStartPolicy.applyIfNeeded(modelContext: modelContext)
             activeWorkoutCoordinator.restoreActiveSessionIfNeeded(modelContext: modelContext)
             activeWorkoutCoordinator.clearExpiredRestTimerIfNeeded()
             catalogSyncCoordinator.primeLocalCatalogIfNeeded(modelContext: modelContext)
@@ -89,12 +90,30 @@ struct ContentView: View {
 
     private func runSocialMaintenance() async {
         guard cloudSyncEnabled,
+              shouldRunSocialMaintenance(),
               let service = CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)
         else {
             return
         }
         await service.refreshLocalMembershipState()
         await service.flushOutbox()
+    }
+
+    private func shouldRunSocialMaintenance() -> Bool {
+        let profile = try? ProfileRepository(modelContext: modelContext).currentProfile()
+        let hasKnownBrosMembership =
+            profile?.brosMembershipID != nil
+            || profile?.brosCircleID != nil
+            || profile?.brosUserRecordName != nil
+
+        var outboxDescriptor = FetchDescriptor<SocialOutboxItem>()
+        outboxDescriptor.fetchLimit = 1
+        let hasPendingOutboxItems = (try? modelContext.fetch(outboxDescriptor))?.isEmpty == false
+
+        return SocialMaintenancePlanner.shouldRun(
+            hasKnownMembership: hasKnownBrosMembership,
+            hasPendingOutboxItems: hasPendingOutboxItems
+        )
     }
 
     private func resetToStartupFlow() {
@@ -142,6 +161,46 @@ private enum AppStartupRouting {
 #else
         return false
 #endif
+    }
+}
+
+enum SocialMaintenancePlanner {
+    static func shouldRun(
+        hasKnownMembership: Bool,
+        hasPendingOutboxItems: Bool
+    ) -> Bool {
+        hasKnownMembership || hasPendingOutboxItems
+    }
+}
+
+enum BrosCleanStartPolicy {
+    static let currentSchemaVersion = 1
+    static let defaultsKey = "bros.cleanStartSchemaVersion"
+
+    static func needsLocalReset(appliedVersion: Int) -> Bool {
+        appliedVersion < currentSchemaVersion
+    }
+
+    @MainActor
+    static func applyIfNeeded(
+        modelContext: ModelContext,
+        defaults: UserDefaults = .standard
+    ) {
+        let appliedVersion = defaults.integer(forKey: defaultsKey)
+        guard needsLocalReset(appliedVersion: appliedVersion) else { return }
+
+        if let profile = try? ProfileRepository(modelContext: modelContext).currentProfile() {
+            profile.clearBrosMembership()
+        }
+
+        if let outboxItems = try? modelContext.fetch(FetchDescriptor<SocialOutboxItem>()) {
+            for item in outboxItems {
+                modelContext.delete(item)
+            }
+        }
+
+        try? modelContext.save()
+        defaults.set(currentSchemaVersion, forKey: defaultsKey)
     }
 }
 

@@ -11,12 +11,6 @@ enum BrosMutationAction: Equatable {
     case toggleReaction
 }
 
-struct BrosSuccessNotice: Identifiable, Equatable {
-    let id = UUID()
-    let title: String
-    let message: String?
-}
-
 @MainActor
 @Observable
 final class BrosViewModel {
@@ -31,7 +25,6 @@ final class BrosViewModel {
     var joinCode: String = ""
     var circleMemberLimit: Int = BrosSocialRules.defaultMemberLimit
     var pendingAction: BrosMutationAction?
-    var successNotice: BrosSuccessNotice?
     var errorMessage: String?
 
     var isBusy: Bool { pendingAction != nil }
@@ -39,7 +32,6 @@ final class BrosViewModel {
     var isJoiningCircle: Bool { pendingAction == .joinCircle }
 
     private var hasLoaded = false
-    private var successNoticeTask: Task<Void, Never>?
 
     func loadIfNeeded(
         modelContext: ModelContext,
@@ -111,10 +103,6 @@ final class BrosViewModel {
             self.state = .active(snapshot)
             self.joinCode = ""
             self.circleMemberLimit = BrosSocialRules.defaultMemberLimit
-            self.showSuccessNotice(
-                title: "Circle created",
-                message: "Invite code: \(snapshot.circle.inviteCode)"
-            )
             self.scheduleBackgroundHydration(modelContext: modelContext)
         }
     }
@@ -124,10 +112,6 @@ final class BrosViewModel {
             let service = try service(modelContext: modelContext)
             let snapshot = try await service.updateCircleMemberLimit(memberLimit)
             self.state = .active(snapshot)
-            self.showSuccessNotice(
-                title: "Circle updated",
-                message: "Member limit set to \(snapshot.circle.memberLimit)."
-            )
         }
     }
 
@@ -138,10 +122,6 @@ final class BrosViewModel {
                 .joinCircle(inviteCode: self.joinCode)
             self.state = .active(snapshot)
             self.joinCode = ""
-            self.showSuccessNotice(
-                title: "Joined circle",
-                message: "Your bro circle is ready."
-            )
             self.scheduleBackgroundHydration(modelContext: modelContext)
         }
     }
@@ -190,18 +170,11 @@ final class BrosViewModel {
         errorMessage = nil
     }
 
-    func clearSuccessNotice() {
-        successNoticeTask?.cancel()
-        successNoticeTask = nil
-        successNotice = nil
-    }
-
     private func runMutation(
         _ action: BrosMutationAction,
         _ operation: @escaping @MainActor () async throws -> Void
     ) async {
         guard pendingAction == nil else { return }
-        clearSuccessNotice()
         pendingAction = action
         defer { pendingAction = nil }
 
@@ -229,17 +202,6 @@ final class BrosViewModel {
             }
         } catch {
             // Keep the optimistic active state instead of regressing to unavailable.
-        }
-    }
-
-    private func showSuccessNotice(title: String, message: String?) {
-        successNoticeTask?.cancel()
-        successNotice = BrosSuccessNotice(title: title, message: message)
-        successNoticeTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(3))
-            guard !Task.isCancelled else { return }
-            self?.successNotice = nil
-            self?.successNoticeTask = nil
         }
     }
 
@@ -299,11 +261,6 @@ struct BrosView: View {
             VStack(alignment: .leading, spacing: WGJSpacing.section) {
                 WGJRootHeader("Bros", subtitle: "Private workout and PR snapshots for your training circle.")
 
-                if let successNotice = viewModel.successNotice {
-                    successBanner(successNotice)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
-
                 switch viewModel.state {
                 case .loading:
                     loadingCard
@@ -316,7 +273,7 @@ struct BrosView: View {
                 }
             }
             .padding(.top, 8)
-            .padding(.horizontal, WGJSpacing.page)
+            .padding(.horizontal, 16)
             .padding(.bottom, 28)
         }
         .refreshable {
@@ -327,7 +284,6 @@ struct BrosView: View {
             )
         }
         .wgjScreenBackground()
-        .animation(.easeInOut(duration: 0.2), value: viewModel.successNotice?.id)
         .toolbar(.hidden, for: .navigationBar)
         .task {
             await viewModel.loadIfNeeded(
@@ -497,6 +453,10 @@ struct BrosView: View {
                 }
             }
 
+            if snapshot.isCurrentUserOwner {
+                inviteCodeStrip(snapshot.circle.inviteCode)
+            }
+
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(snapshot.members) { member in
@@ -558,13 +518,41 @@ struct BrosView: View {
         .wgjCardContainer()
     }
 
-    private func successBanner(_ notice: BrosSuccessNotice) -> some View {
-        WGJTransientBanner(
-            title: notice.title,
-            message: notice.message,
-            icon: "checkmark.circle.fill",
-            tint: WGJTheme.success
-        )
+    private func inviteCodeStrip(_ inviteCode: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            WGJSectionHeader("Invite Code", subtitle: "Share this with bros you want in the circle.")
+
+            HStack(alignment: .center, spacing: 12) {
+                Text(inviteCode)
+                    .font(.title3.monospaced().weight(.bold))
+                    .foregroundStyle(WGJTheme.textPrimary)
+                    .tracking(1.2)
+                    .wgjSingleLineText(scale: 0.72)
+
+                Spacer(minLength: 12)
+
+                Button {
+                    copyInviteCode(inviteCode)
+                } label: {
+                    Label("Copy", systemImage: "doc.on.doc")
+                }
+                .buttonStyle(WGJGhostButtonStyle())
+
+                ShareLink(item: inviteCode) {
+                    Label("Share", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(WGJGhostButtonStyle())
+            }
+        }
+        .padding(14)
+        .background {
+            RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
+                .fill(WGJTheme.cardElevated.opacity(0.68))
+                .overlay {
+                    RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
+                        .stroke(WGJTheme.outline.opacity(0.72), lineWidth: 1)
+                }
+        }
     }
 
     private func memberBadge(_ title: String, tint: Color) -> some View {
