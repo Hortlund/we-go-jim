@@ -89,17 +89,19 @@ struct ProfileAthleteTypePickerView: View {
         NavigationStack {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 22) {
+                    LazyVStack(alignment: .leading, spacing: 18, pinnedViews: [.sectionHeaders]) {
                         ForEach(sections) { section in
-                            VStack(alignment: .leading, spacing: 10) {
-                                compactSectionHeader(section.title, subtitle: section.subtitle)
-
+                            Section {
                                 LazyVStack(spacing: 8) {
                                     ForEach(section.options) { option in
                                         optionRow(option)
                                             .id(option.id)
                                     }
                                 }
+                                .padding(.top, 10)
+                                .padding(.bottom, 4)
+                            } header: {
+                                WGJStickySectionHeader(section.title, subtitle: section.subtitle)
                             }
                         }
                     }
@@ -130,20 +132,6 @@ struct ProfileAthleteTypePickerView: View {
                 }
             }
         }
-    }
-
-    private func compactSectionHeader(_ title: String, subtitle: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.subheadline.weight(.bold))
-                .foregroundStyle(WGJTheme.textPrimary)
-
-            Text(subtitle)
-                .font(.caption2)
-                .foregroundStyle(WGJTheme.textSecondary)
-                .lineLimit(2)
-        }
-        .padding(.horizontal, 2)
     }
 
     private func optionRow(_ option: AthleteTypePickerOption) -> some View {

@@ -84,7 +84,7 @@ struct TemplateExerciseDraft: Identifiable, Equatable {
         self.setDrafts = setDrafts
     }
 
-    init(model: TemplateExercise) {
+    init(model: TemplateExercise, preferredLoadUnit: TemplateLoadUnit = .kg) {
         self.id = model.id
         self.catalogExerciseUUID = model.catalogExerciseUUID
         self.exerciseNameSnapshot = model.exerciseNameSnapshot
@@ -95,7 +95,7 @@ struct TemplateExerciseDraft: Identifiable, Equatable {
         self.restSeconds = model.restSeconds
         let orderedSets = (model.prescribedSets ?? []).sorted { $0.sortOrder < $1.sortOrder }
         if orderedSets.isEmpty {
-            self.setDrafts = Self.defaultSetDrafts()
+            self.setDrafts = Self.defaultSetDrafts(loadUnit: preferredLoadUnit)
         } else {
             var drafts: [TemplateExerciseSetDraft] = []
             drafts.reserveCapacity(orderedSets.count)
@@ -119,7 +119,7 @@ struct TemplateExerciseDraft: Identifiable, Equatable {
         }
     }
 
-    init(catalogItem: ExerciseCatalogItem) {
+    init(catalogItem: ExerciseCatalogItem, preferredLoadUnit: TemplateLoadUnit = .kg) {
         self.id = UUID()
         self.catalogExerciseUUID = catalogItem.remoteUUID
         self.exerciseNameSnapshot = catalogItem.displayName
@@ -128,13 +128,18 @@ struct TemplateExerciseDraft: Identifiable, Equatable {
         self.targetRepMin = nil
         self.targetRepMax = nil
         self.restSeconds = 120
-        self.setDrafts = Self.defaultSetDrafts()
+        self.setDrafts = Self.defaultSetDrafts(loadUnit: preferredLoadUnit)
     }
 
-    static func defaultSetDrafts(count: Int = 3) -> [TemplateExerciseSetDraft] {
+    static func defaultSetDrafts(count: Int = 3, loadUnit: TemplateLoadUnit = .kg) -> [TemplateExerciseSetDraft] {
         let safeCount = max(1, count)
         return (0..<safeCount).map { index in
-            TemplateExerciseSetDraft(restSeconds: 120, isWarmup: index == 0)
+            TemplateExerciseSetDraft(
+                loadUnit: loadUnit,
+                restSeconds: 120,
+                isWarmup: index == 0,
+                previousLoadUnit: loadUnit
+            )
         }
     }
 }
@@ -156,6 +161,11 @@ final class TemplateRepository {
 
     init(modelContext: ModelContext) {
         self.modelContext = modelContext
+    }
+
+    private func preferredLoadUnit() -> TemplateLoadUnit {
+        let profileRepository = ProfileRepository(modelContext: modelContext)
+        return (try? profileRepository.currentProfile()?.preferredLoadUnit) ?? .kg
     }
 
     func folders() throws -> [TemplateFolder] {
@@ -313,7 +323,7 @@ final class TemplateRepository {
                 targetRepMin: nil,
                 targetRepMax: nil,
                 restSeconds: exercise.restSeconds,
-                setDrafts: setDrafts.isEmpty ? TemplateExerciseDraft.defaultSetDrafts() : setDrafts
+                setDrafts: setDrafts.isEmpty ? TemplateExerciseDraft.defaultSetDrafts(loadUnit: preferredLoadUnit()) : setDrafts
             )
         }
 
@@ -622,19 +632,22 @@ final class TemplateRepository {
 
         let setCount = max(1, defaultCount)
         var didChange = false
+        let defaultLoadUnit = preferredLoadUnit()
 
         for exercise in (template.exercises ?? []) {
             let ordered = (exercise.prescribedSets ?? []).sorted { $0.sortOrder < $1.sortOrder }
             if ordered.isEmpty {
-                let defaults = TemplateExerciseDraft.defaultSetDrafts(count: setCount)
+                let defaults = TemplateExerciseDraft.defaultSetDrafts(count: setCount, loadUnit: defaultLoadUnit)
                 var sets: [TemplateExerciseSet] = []
                 for (index, draft) in defaults.enumerated() {
                     let created = TemplateExerciseSet(
                         templateExerciseID: exercise.id,
                         sortOrder: index,
+                        loadUnit: draft.loadUnit,
                         restSeconds: exercise.restSeconds,
                         isWarmup: draft.isWarmup,
                         isLocked: draft.isLocked,
+                        previousLoadUnit: draft.previousLoadUnit,
                         templateExercise: exercise
                     )
                     modelContext.insert(created)
@@ -664,7 +677,7 @@ final class TemplateRepository {
     }
 
     func addExercise(templateID: UUID, catalogItem: ExerciseCatalogItem) throws {
-        let draft = TemplateExerciseDraft(catalogItem: catalogItem)
+        let draft = TemplateExerciseDraft(catalogItem: catalogItem, preferredLoadUnit: preferredLoadUnit())
         try addExercise(templateID: templateID, draft: draft)
     }
 
@@ -742,7 +755,9 @@ final class TemplateRepository {
             )
             modelContext.insert(exercise)
 
-            let sets = draft.setDrafts.isEmpty ? TemplateExerciseDraft.defaultSetDrafts() : draft.setDrafts
+            let sets = draft.setDrafts.isEmpty
+                ? TemplateExerciseDraft.defaultSetDrafts(loadUnit: preferredLoadUnit())
+                : draft.setDrafts
             var createdSets: [TemplateExerciseSet] = []
             for (setIndex, setDraft) in sets.enumerated() {
                 let createdSet = TemplateExerciseSet(
@@ -800,7 +815,9 @@ final class TemplateRepository {
         )
 
         modelContext.insert(created)
-        let setDrafts = draft.setDrafts.isEmpty ? TemplateExerciseDraft.defaultSetDrafts() : draft.setDrafts
+        let setDrafts = draft.setDrafts.isEmpty
+            ? TemplateExerciseDraft.defaultSetDrafts(loadUnit: preferredLoadUnit())
+            : draft.setDrafts
         var createdSets: [TemplateExerciseSet] = []
         for (index, setDraft) in setDrafts.enumerated() {
             let createdSet = TemplateExerciseSet(

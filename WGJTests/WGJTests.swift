@@ -502,6 +502,7 @@ struct WGJTests {
         let created = try repository.loadOrCreateProfile()
         #expect(created.displayName == "Athlete")
         #expect(created.athleteType == nil)
+        #expect(created.preferredWeightUnit == .kg)
         #expect(created.isTrainingGuidanceEnabled)
         #expect(created.keepsScreenAwake == false)
 
@@ -540,6 +541,49 @@ struct WGJTests {
 
         let updated = try repository.currentProfile()
         #expect(updated?.keepsScreenAwake == true)
+    }
+
+    @Test
+    func profileRepositoryPersistsPreferredWeightUnit() throws {
+        let context = try makeInMemoryContext()
+        let repository = ProfileRepository(modelContext: context)
+
+        _ = try repository.loadOrCreateProfile()
+        try repository.updatePreferredWeightUnit(.lb)
+
+        let updated = try repository.currentProfile()
+        #expect(updated?.preferredWeightUnit == .lb)
+        #expect(updated?.preferredLoadUnit == .lb)
+    }
+
+    @Test
+    func templateRepositoryEnsureDefaultSetPlansUsesPreferredWeightUnit() throws {
+        let context = try makeInMemoryContext()
+        let profileRepository = ProfileRepository(modelContext: context)
+        try profileRepository.updatePreferredWeightUnit(.lb)
+
+        let repository = TemplateRepository(modelContext: context)
+        let template = try repository.createTemplate(name: "Legacy", notes: "")
+        let legacyExercise = TemplateExercise(
+            templateID: template.id,
+            catalogExerciseUUID: "legacy-lb-1",
+            exerciseNameSnapshot: "Legacy Exercise",
+            categorySnapshot: "Misc",
+            muscleSummarySnapshot: "",
+            sortOrder: 0,
+            template: template
+        )
+
+        context.insert(legacyExercise)
+        template.exercises = [legacyExercise]
+        try context.save()
+
+        try repository.ensureDefaultSetPlans(templateID: template.id)
+
+        let backfilled = try repository.setDrafts(for: legacyExercise.id)
+        #expect(backfilled.count == 3)
+        #expect(backfilled.allSatisfy { $0.loadUnit == .lb })
+        #expect(backfilled.allSatisfy { $0.previousLoadUnit == .lb })
     }
 
     @Test

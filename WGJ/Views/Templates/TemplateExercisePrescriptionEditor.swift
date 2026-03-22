@@ -10,6 +10,7 @@ struct TemplateExercisePrescriptionEditor: View {
     let canMoveUp: Bool
     let canMoveDown: Bool
     let recommendation: TemplateExerciseRecommendation?
+    let preferredLoadUnit: TemplateLoadUnit
 
     @Binding var targetRepMin: Int?
     @Binding var targetRepMax: Int?
@@ -41,6 +42,7 @@ struct TemplateExercisePrescriptionEditor: View {
         exerciseIndexTitle: String? = nil,
         canMoveUp: Bool = false,
         canMoveDown: Bool = false,
+        preferredLoadUnit: TemplateLoadUnit = .kg,
         targetRepMin: Binding<Int?>,
         targetRepMax: Binding<Int?>,
         restSeconds: Binding<Int>,
@@ -60,6 +62,7 @@ struct TemplateExercisePrescriptionEditor: View {
         self.exerciseIndexTitle = exerciseIndexTitle
         self.canMoveUp = canMoveUp
         self.canMoveDown = canMoveDown
+        self.preferredLoadUnit = preferredLoadUnit
         self._targetRepMin = targetRepMin
         self._targetRepMax = targetRepMax
         self._restSeconds = restSeconds
@@ -880,16 +883,17 @@ struct TemplateExercisePrescriptionEditor: View {
     }
 
     private func makeSetDraft(copying source: TemplateExerciseSetDraft?) -> TemplateExerciseSetDraft {
-        TemplateExerciseSetDraft(
+        let fallbackLoadUnit = source?.loadUnit ?? preferredLoadUnit
+        return TemplateExerciseSetDraft(
             targetReps: source?.targetReps,
             targetWeight: source?.targetWeight,
-            loadUnit: source?.loadUnit ?? .kg,
+            loadUnit: fallbackLoadUnit,
             restSeconds: source?.restSeconds ?? restSeconds,
             isWarmup: source?.isWarmup ?? false,
             isLocked: false,
             previousTargetReps: source?.previousTargetReps,
             previousTargetWeight: source?.previousTargetWeight,
-            previousLoadUnit: source?.previousLoadUnit ?? source?.loadUnit ?? .kg
+            previousLoadUnit: source?.previousLoadUnit ?? fallbackLoadUnit
         )
     }
 

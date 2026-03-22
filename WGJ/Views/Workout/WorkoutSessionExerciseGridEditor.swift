@@ -10,6 +10,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     let targetRepMax: Int?
     let previousBySetIndex: [Int: WorkoutPreviousSetSnapshot]
     let overloadFeedback: ActiveWorkoutProgressiveOverloadPresentation?
+    let preferredLoadUnit: TemplateLoadUnit
 
     @Binding var restSeconds: Int
     @Binding var setDrafts: [WorkoutSessionSetDraft]
@@ -53,6 +54,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         targetRepMax: Int? = nil,
         previousBySetIndex: [Int: WorkoutPreviousSetSnapshot],
         overloadFeedback: ActiveWorkoutProgressiveOverloadPresentation? = nil,
+        preferredLoadUnit: TemplateLoadUnit = .kg,
         restSeconds: Binding<Int>,
         setDrafts: Binding<[WorkoutSessionSetDraft]>,
         initiallyExpanded: Bool = false,
@@ -75,6 +77,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.targetRepMax = targetRepMax
         self.previousBySetIndex = previousBySetIndex
         self.overloadFeedback = overloadFeedback
+        self.preferredLoadUnit = preferredLoadUnit
         self._restSeconds = restSeconds
         self._setDrafts = setDrafts
         self.externalIsExpanded = isExpanded
@@ -1248,15 +1251,16 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func makeSetDraft(copying source: WorkoutSessionSetDraft?) -> WorkoutSessionSetDraft {
-        WorkoutSessionSetDraft(
+        let fallbackLoadUnit = source?.targetLoadUnit ?? preferredLoadUnit
+        return WorkoutSessionSetDraft(
             isWarmup: source?.isWarmup ?? false,
             restSeconds: source?.restSeconds ?? restSeconds,
             targetReps: source?.targetReps,
             targetWeight: source?.targetWeight,
-            targetLoadUnit: source?.targetLoadUnit ?? .kg,
+            targetLoadUnit: fallbackLoadUnit,
             actualReps: nil,
             actualWeight: nil,
-            actualLoadUnit: source?.actualLoadUnit ?? source?.targetLoadUnit ?? .kg,
+            actualLoadUnit: source?.actualLoadUnit ?? source?.targetLoadUnit ?? fallbackLoadUnit,
             isCompleted: false,
             isLocked: false
         )

@@ -77,6 +77,11 @@ final class WorkoutSessionRepository {
         self.modelContext = modelContext
     }
 
+    private func preferredLoadUnit() -> TemplateLoadUnit {
+        let profileRepository = ProfileRepository(modelContext: modelContext)
+        return (try? profileRepository.currentProfile()?.preferredLoadUnit) ?? .kg
+    }
+
     func createEmptySession(name: String = "Empty Workout") throws -> WorkoutSession {
         let cleanedName = ReviewModerationService.sanitizedForSharing(name, kind: .workoutName)
         let created = WorkoutSession(name: cleanedName)
@@ -294,6 +299,7 @@ final class WorkoutSessionRepository {
 
         let ordered = (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
         let nextSort = (ordered.last?.sortOrder ?? -1) + 1
+        let defaultLoadUnit = preferredLoadUnit()
         let newSet = WorkoutSessionSet(
             sessionExerciseID: exercise.id,
             sortOrder: nextSort,
@@ -301,10 +307,10 @@ final class WorkoutSessionRepository {
             restSeconds: sanitizedRest(ordered.last?.restSeconds ?? exercise.restSeconds),
             targetReps: ordered.last?.targetReps,
             targetWeight: ordered.last?.targetWeight,
-            targetLoadUnit: ordered.last?.targetLoadUnit ?? .kg,
+            targetLoadUnit: ordered.last?.targetLoadUnit ?? defaultLoadUnit,
             actualReps: nil,
             actualWeight: nil,
-            actualLoadUnit: ordered.last?.actualLoadUnit ?? .kg,
+            actualLoadUnit: ordered.last?.actualLoadUnit ?? ordered.last?.targetLoadUnit ?? defaultLoadUnit,
             isCompleted: false,
             isLocked: false,
             sessionExercise: exercise
@@ -594,6 +600,7 @@ final class WorkoutSessionRepository {
         restSeconds: Int,
         sessionExercise: WorkoutSessionExercise
     ) -> [WorkoutSessionSet] {
+        let defaultLoadUnit = preferredLoadUnit()
         let defaults = [0, 1, 2].map { index in
             WorkoutSessionSet(
                 sessionExerciseID: sessionExerciseID,
@@ -602,10 +609,10 @@ final class WorkoutSessionRepository {
                 restSeconds: sanitizedRest(restSeconds),
                 targetReps: nil,
                 targetWeight: nil,
-                targetLoadUnit: .kg,
+                targetLoadUnit: defaultLoadUnit,
                 actualReps: nil,
                 actualWeight: nil,
-                actualLoadUnit: .kg,
+                actualLoadUnit: defaultLoadUnit,
                 isCompleted: false,
                 isLocked: false,
                 sessionExercise: sessionExercise

@@ -44,6 +44,10 @@ struct TemplateDetailView: View {
         TemplateRepository(modelContext: modelContext)
     }
 
+    private var preferredLoadUnit: TemplateLoadUnit {
+        profiles.first?.preferredLoadUnit ?? .kg
+    }
+
     init(templateID: UUID) {
         self.templateID = templateID
 
@@ -233,6 +237,7 @@ struct TemplateDetailView: View {
                 initiallyExpanded: false,
                 isExpanded: isExpandedBinding(for: templateExercise.id),
                 exerciseIndexTitle: "Exercise \(index + 1)",
+                preferredLoadUnit: preferredLoadUnit,
                 targetRepMin: targetRepMinBinding(for: templateExercise),
                 targetRepMax: targetRepMaxBinding(for: templateExercise),
                 restSeconds: restSecondsBinding(for: templateExercise),

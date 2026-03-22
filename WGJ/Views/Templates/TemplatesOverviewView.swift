@@ -15,6 +15,7 @@ struct TemplatesOverviewView: View {
         SortDescriptor(\TemplateFolder.name, order: .forward),
     ])
     private var folders: [TemplateFolder]
+    @Query private var profiles: [UserProfile]
 
     @State private var folderFilter: FolderFilter = .all
     @State private var templateEditorContext: TemplateEditorContext?
@@ -28,6 +29,10 @@ struct TemplatesOverviewView: View {
 
     private var repository: TemplateRepository {
         TemplateRepository(modelContext: modelContext)
+    }
+
+    private var preferredLoadUnit: TemplateLoadUnit {
+        profiles.first?.preferredLoadUnit ?? .kg
     }
 
     var body: some View {
@@ -381,7 +386,7 @@ struct TemplatesOverviewView: View {
 
                 let setDrafts: [TemplateExerciseSetDraft]
                 if orderedSets.isEmpty {
-                    setDrafts = TemplateExerciseDraft.defaultSetDrafts()
+                    setDrafts = TemplateExerciseDraft.defaultSetDrafts(loadUnit: preferredLoadUnit)
                 } else {
                     var mappedSetDrafts: [TemplateExerciseSetDraft] = []
                     mappedSetDrafts.reserveCapacity(orderedSets.count)

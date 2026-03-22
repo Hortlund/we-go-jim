@@ -33,6 +33,10 @@ struct TemplateEditorView: View {
         ExerciseCatalogRepository(modelContext: modelContext)
     }
 
+    private var preferredLoadUnit: TemplateLoadUnit {
+        profiles.first?.preferredLoadUnit ?? .kg
+    }
+
     init(folderID: UUID? = nil, templateID: UUID? = nil) {
         self.folderID = folderID
         self.templateID = templateID
@@ -157,6 +161,7 @@ struct TemplateEditorView: View {
                         exerciseIndexTitle: "Exercise \(index + 1)",
                         canMoveUp: index > 0,
                         canMoveDown: index < exerciseDrafts.count - 1,
+                        preferredLoadUnit: preferredLoadUnit,
                         targetRepMin: targetRepMinBinding(for: index),
                         targetRepMax: targetRepMaxBinding(for: index),
                         restSeconds: restSecondsBinding(for: index),
@@ -235,7 +240,7 @@ struct TemplateEditorView: View {
             return
         }
 
-        let draft = TemplateExerciseDraft(catalogItem: catalogItem)
+        let draft = TemplateExerciseDraft(catalogItem: catalogItem, preferredLoadUnit: preferredLoadUnit)
         withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
             exerciseDrafts.append(draft)
         }
@@ -299,7 +304,9 @@ struct TemplateEditorView: View {
                 templateNotes = template.notes
             }
             try templateRepository.ensureDefaultSetPlans(templateID: templateID)
-            exerciseDrafts = try templateRepository.exercises(in: templateID).map(TemplateExerciseDraft.init(model:))
+            exerciseDrafts = try templateRepository.exercises(in: templateID).map {
+                TemplateExerciseDraft(model: $0, preferredLoadUnit: preferredLoadUnit)
+            }
             isExpandedByDraftID = Dictionary(uniqueKeysWithValues: exerciseDrafts.map { ($0.id, false) })
         } catch {
             errorMessage = String(describing: error)

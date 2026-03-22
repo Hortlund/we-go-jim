@@ -11,6 +11,7 @@ struct HistoryDetailView: View {
 
     @Query private var sessions: [WorkoutSession]
     @Query private var sessionExercises: [WorkoutSessionExercise]
+    @Query private var profiles: [UserProfile]
 
     @State private var hasBootstrapped = false
     @State private var sessionNameDraft = ""
@@ -33,6 +34,10 @@ struct HistoryDetailView: View {
 
     private var catalogRepository: ExerciseCatalogRepository {
         ExerciseCatalogRepository(modelContext: modelContext)
+    }
+
+    private var preferredLoadUnit: TemplateLoadUnit {
+        profiles.first?.preferredLoadUnit ?? .kg
     }
 
     init(sessionID: UUID) {
@@ -343,6 +348,7 @@ struct HistoryDetailView: View {
                 targetRepMin: exercise.targetRepMin,
                 targetRepMax: exercise.targetRepMax,
                 previousBySetIndex: previousByExerciseID[exercise.id] ?? [:],
+                preferredLoadUnit: preferredLoadUnit,
                 restSeconds: restBinding(for: exercise),
                 setDrafts: setDraftsBinding(for: exercise),
                 initiallyExpanded: true,

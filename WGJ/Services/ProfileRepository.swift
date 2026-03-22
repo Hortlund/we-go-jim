@@ -87,4 +87,11 @@ final class ProfileRepository {
         profile.updatedAt = .now
         try modelContext.save()
     }
+
+    func updatePreferredWeightUnit(_ unit: PreferredWeightUnit) throws {
+        let profile = try loadOrCreateProfile()
+        profile.preferredWeightUnit = unit
+        profile.updatedAt = .now
+        try modelContext.save()
+    }
 }

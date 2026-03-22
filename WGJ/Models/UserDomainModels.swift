@@ -20,6 +20,31 @@ enum TemplateLoadUnit: String, Codable, CaseIterable, Equatable, Identifiable {
     }
 }
 
+enum PreferredWeightUnit: String, Codable, CaseIterable, Equatable, Identifiable {
+    case kg
+    case lb
+
+    var id: String { rawValue }
+
+    var shortLabel: String {
+        switch self {
+        case .kg:
+            return "kg"
+        case .lb:
+            return "lb"
+        }
+    }
+
+    var templateLoadUnit: TemplateLoadUnit {
+        switch self {
+        case .kg:
+            return .kg
+        case .lb:
+            return .lb
+        }
+    }
+}
+
 enum ProfileAthleteType: String, Codable, CaseIterable, Equatable, Identifiable {
     case strengthTraining
     case powerlifting
@@ -294,6 +319,7 @@ final class UserProfile {
     var displayName: String = ""
     var athleteTypeRaw: String?
     var avatarImageData: Data?
+    var preferredWeightUnitRaw: String = PreferredWeightUnit.kg.rawValue
     var weeklyWorkoutGoal: Int = 4
     var isTrainingGuidanceEnabled: Bool = true
     var keepsScreenAwake: Bool = false
@@ -325,11 +351,21 @@ final class UserProfile {
         }
     }
 
+    var preferredWeightUnit: PreferredWeightUnit {
+        get { PreferredWeightUnit(rawValue: preferredWeightUnitRaw) ?? .kg }
+        set { preferredWeightUnitRaw = newValue.rawValue }
+    }
+
+    var preferredLoadUnit: TemplateLoadUnit {
+        preferredWeightUnit.templateLoadUnit
+    }
+
     init(
         id: UUID = UUID(),
         displayName: String,
         athleteType: ProfileAthleteType? = nil,
         avatarImageData: Data? = nil,
+        preferredWeightUnit: PreferredWeightUnit = .kg,
         weeklyWorkoutGoal: Int = 4,
         isTrainingGuidanceEnabled: Bool = true,
         keepsScreenAwake: Bool = false,
@@ -345,6 +381,7 @@ final class UserProfile {
         self.displayName = displayName
         self.athleteTypeRaw = athleteType?.rawValue
         self.avatarImageData = avatarImageData
+        self.preferredWeightUnitRaw = preferredWeightUnit.rawValue
         self.weeklyWorkoutGoal = max(1, min(14, weeklyWorkoutGoal))
         self.isTrainingGuidanceEnabled = isTrainingGuidanceEnabled
         self.keepsScreenAwake = keepsScreenAwake

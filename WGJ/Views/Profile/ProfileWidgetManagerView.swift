@@ -107,10 +107,10 @@ struct ProfileWidgetManagerView: View {
     }
 
     private func sectionHeader(_ title: String, subtitle: String) -> some View {
-        WGJSectionHeader(title, subtitle: subtitle)
+        WGJStickySectionHeader(title, subtitle: subtitle)
             .textCase(nil)
-            .padding(.top, 8)
-            .padding(.bottom, 4)
+            .padding(.top, 10)
+            .padding(.bottom, 6)
     }
 
     private func widgetRow(_ config: ProfileWidgetConfig) -> some View {

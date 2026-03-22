@@ -45,6 +45,38 @@ struct WorkoutSessionRepositoryTests {
     }
 
     @Test
+    func addExerciseUsesPreferredWeightUnitForDefaultSets() throws {
+        let context = try makeInMemoryContext()
+        let profileRepository = ProfileRepository(modelContext: context)
+        try profileRepository.updatePreferredWeightUnit(.lb)
+
+        let repository = WorkoutSessionRepository(modelContext: context)
+
+        let item = ExerciseCatalogItem(
+            remoteUUID: "bench-lb-1",
+            displayName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(item)
+
+        let session = try repository.createEmptySession(name: "Push Day")
+        try repository.addExercise(sessionID: session.id, catalogItem: item)
+
+        guard let exercise = try repository.sessionExercises(sessionID: session.id).first else {
+            Issue.record("Expected session exercise")
+            return
+        }
+
+        let drafts = try repository.setDrafts(sessionExerciseID: exercise.id)
+        #expect(drafts.count == 3)
+        #expect(drafts.allSatisfy { $0.targetLoadUnit == .lb })
+        #expect(drafts.allSatisfy { $0.actualLoadUnit == .lb })
+    }
+
+    @Test
     func previousSetLookupMatchesExerciseAndSetIndex() throws {
         let context = try makeInMemoryContext()
         let repository = WorkoutSessionRepository(modelContext: context)

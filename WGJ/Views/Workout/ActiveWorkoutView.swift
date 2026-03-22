@@ -68,6 +68,10 @@ struct ActiveWorkoutView: View {
         ExerciseCatalogRepository(modelContext: modelContext)
     }
 
+    private var preferredLoadUnit: TemplateLoadUnit {
+        profiles.first?.preferredLoadUnit ?? .kg
+    }
+
     init(sessionID: UUID) {
         self.sessionID = sessionID
 
@@ -441,6 +445,7 @@ struct ActiveWorkoutView: View {
             targetRepMax: exercise.targetRepMax,
             previousBySetIndex: previousByExerciseID[exercise.id] ?? [:],
             overloadFeedback: overloadFeedback(for: exercise),
+            preferredLoadUnit: preferredLoadUnit,
             restSeconds: restBinding(for: exercise),
             setDrafts: setDraftsBinding(for: exercise),
             isExpanded: expansionBinding(for: exercise.id),
