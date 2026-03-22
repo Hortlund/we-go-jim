@@ -112,10 +112,6 @@ struct ExercisesCatalogView: View {
             ZStack(alignment: .trailing) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
-                        Color.clear
-                            .frame(height: 0)
-                            .id(topAnchorID)
-
                         if !isPickerMode {
                             WGJRootHeader("Exercises", subtitle: "Search, filter, and add exercises fast.")
                         }
@@ -151,6 +147,7 @@ struct ExercisesCatalogView: View {
                         }
                         .padding(.trailing, contentTrailingPadding)
                     }
+                    .id(topAnchorID)
                     .padding(.top, isPickerMode ? 10 : 8)
                     .padding(16)
                 }
