@@ -2,7 +2,6 @@ import Combine
 import Foundation
 import SwiftData
 import SwiftUI
-import UIKit
 
 struct ActiveWorkoutView: View {
     @Environment(\.dismiss) private var dismiss
@@ -46,6 +45,7 @@ struct ActiveWorkoutView: View {
     @State private var pendingTemplateUpdatePreview: WorkoutTemplateSyncPreview?
     @State private var templateNameDraft = ""
     @State private var templateFolderID: UUID?
+    @State private var isKeyboardVisible = false
 
     @State private var errorMessage = ""
     @State private var showingError = false
@@ -157,23 +157,27 @@ struct ActiveWorkoutView: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            ActiveWorkoutBottomDock(
-                session: session,
-                isCancelArmed: isCancelArmed,
-                reduceMotion: reduceMotion,
-                onArmCancel: {
-                    dismissKeyboard()
-                    showingFinishConfirmation = false
-                    isCancelArmed = true
-                },
-                onKeepWorkout: {
-                    isCancelArmed = false
-                },
-                onDiscardWorkout: {
-                    cancelWorkout()
-                }
-            )
+            if !isKeyboardVisible {
+                ActiveWorkoutBottomDock(
+                    session: session,
+                    isCancelArmed: isCancelArmed,
+                    reduceMotion: reduceMotion,
+                    onArmCancel: {
+                        dismissKeyboard()
+                        showingFinishConfirmation = false
+                        isCancelArmed = true
+                    },
+                    onKeepWorkout: {
+                        isCancelArmed = false
+                    },
+                    onDiscardWorkout: {
+                        cancelWorkout()
+                    }
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
+        .wgjTrackKeyboardVisibility($isKeyboardVisible)
         .sheet(isPresented: $showingExercisePicker) {
             ExercisePickerView(repository: catalogRepository) { exercise in
                 addExercise(exercise)
@@ -226,6 +230,7 @@ struct ActiveWorkoutView: View {
         } message: {
             Text($0.summary)
         }
+        .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: isKeyboardVisible)
     }
 
     private var session: WorkoutSession? {
@@ -820,7 +825,7 @@ struct ActiveWorkoutView: View {
     }
 
     private func dismissKeyboard() {
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        WGJKeyboard.dismiss()
     }
 
     private func presentFinishConfirmation() {
@@ -1274,6 +1279,7 @@ private struct ActiveWorkoutExerciseSettingsSheet: View {
         }
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
+        .wgjMinimalKeyboardToolbar()
     }
 
     private func formattedRest(_ seconds: Int) -> String {

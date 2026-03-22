@@ -112,11 +112,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                     .stroke(WGJTheme.success.opacity(0.34), lineWidth: 1.2)
             }
         }
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                keyboardToolbar
-            }
-        }
+        .wgjMinimalKeyboardToolbar(onDismiss: dismissInputFocus)
         .onChange(of: setDrafts.map(\.id)) { _, updatedSetIDs in
             guard let focusedInput, !updatedSetIDs.contains(focusedInput.setID) else { return }
             dismissInputFocus()
@@ -593,44 +589,6 @@ struct WorkoutSessionExerciseGridEditor: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var keyboardToolbar: some View {
-        Group {
-            if let index = focusedSetIndex, setDrafts.indices.contains(index) {
-                Button("Weight") {
-                    focusMetric(.weight, at: index)
-                }
-                .disabled(isInputFocused(.weight, at: index))
-
-                Button("Reps") {
-                    focusMetric(.reps, at: index)
-                }
-                .disabled(isInputFocused(.reps, at: index))
-
-                Spacer()
-
-                if manualCompletionMode {
-                    Button(setDrafts[index].isCompleted ? "Logged" : "Complete") {
-                        completeFocusedSet()
-                    }
-                    .fontWeight(.semibold)
-                    .disabled(setDrafts[index].isLocked)
-                }
-
-                Button("Done") {
-                    dismissInputFocus()
-                }
-                .fontWeight(.semibold)
-            } else {
-                Spacer()
-
-                Button("Done") {
-                    dismissInputFocus()
-                }
-                .fontWeight(.semibold)
-            }
-        }
-    }
-
     private func repsField(at index: Int) -> some View {
         TextField("0", text: repsTextBinding(for: index))
             .keyboardType(.numberPad)
@@ -978,11 +936,6 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private var isExerciseCompleted: Bool {
         !setDrafts.isEmpty && completedSetCount == setDrafts.count
-    }
-
-    private var focusedSetIndex: Int? {
-        guard let focusedInput else { return nil }
-        return setDrafts.firstIndex { $0.id == focusedInput.setID }
     }
 
     private func inputFocus(for index: Int, metric: SetInputFocus.Metric) -> SetInputFocus {
@@ -1361,24 +1314,15 @@ struct WorkoutSessionExerciseGridEditor: View {
         return "Complete Set\(restLabel)"
     }
 
-    private func completeFocusedSet() {
-        guard let index = focusedSetIndex else {
-            dismissInputFocus()
-            return
-        }
-
-        setCompletion(true, at: index, dismissingKeyboard: true)
-    }
-
     private func toggleCompletion(at index: Int) {
         guard setDrafts.indices.contains(index) else { return }
         setCompletion(!setDrafts[index].isCompleted, at: index)
     }
 
-    private func setCompletion(_ isCompleted: Bool, at index: Int, dismissingKeyboard: Bool = false) {
+    private func setCompletion(_ isCompleted: Bool, at index: Int) {
         guard setDrafts.indices.contains(index) else { return }
         guard !setDrafts[index].isLocked else { return }
-        if dismissingKeyboard || focusedInput?.setID == setDrafts[index].id {
+        if focusedInput?.setID == setDrafts[index].id {
             dismissInputFocus()
         }
 
@@ -1423,23 +1367,19 @@ private extension View {
             .padding(.horizontal, 12)
             .background {
                 RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
-                    .fill(.thinMaterial)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
-                            .fill(WGJTheme.field.opacity(isFocused ? 0.86 : 0.74))
-                    }
+                    .fill(isFocused ? WGJTheme.fieldStrong : WGJTheme.field.opacity(0.88))
                     .overlay {
                         RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
                             .stroke(
-                                isFocused ? WGJTheme.accentBlue.opacity(0.56) : WGJTheme.outline.opacity(0.84),
+                                isFocused ? WGJTheme.accentBlue.opacity(0.42) : WGJTheme.outline.opacity(0.72),
                                 lineWidth: isFocused ? 1.4 : 1
                             )
                     }
                     .shadow(
-                        color: isFocused ? WGJTheme.accentBlue.opacity(0.16) : WGJTheme.shadowSoft.opacity(0.9),
-                        radius: isFocused ? 12 : 10,
+                        color: isFocused ? WGJTheme.accentBlue.opacity(0.10) : WGJTheme.shadowSoft.opacity(0.42),
+                        radius: isFocused ? 8 : 6,
                         x: 0,
-                        y: isFocused ? 4 : 6
+                        y: isFocused ? 2 : 3
                     )
             }
     }

@@ -77,6 +77,7 @@ struct TemplateDetailView: View {
             .padding(WGJSpacing.page)
             .animation(WGJMotion.cardAnimation(reduceMotion: reduceMotion), value: templateExercises.map(\.id))
         }
+        .scrollDismissesKeyboard(.interactively)
         .wgjScreenBackground()
         .wgjNavigationChrome()
         .navigationTitle(template?.name ?? "Template")

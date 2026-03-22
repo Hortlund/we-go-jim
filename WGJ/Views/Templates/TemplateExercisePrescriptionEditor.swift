@@ -96,6 +96,7 @@ struct TemplateExercisePrescriptionEditor: View {
         }
         .padding(16)
         .wgjCardContainer(strong: true)
+        .wgjMinimalKeyboardToolbar()
     }
 
     private var header: some View {

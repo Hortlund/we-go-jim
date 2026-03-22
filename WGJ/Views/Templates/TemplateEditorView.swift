@@ -52,6 +52,7 @@ struct TemplateEditorView: View {
                 .padding(16)
                 .animation(WGJMotion.cardAnimation(reduceMotion: reduceMotion), value: exerciseDrafts.map(\.id))
             }
+            .scrollDismissesKeyboard(.interactively)
             .wgjScreenBackground()
             .wgjNavigationChrome()
             .navigationTitle(templateID == nil ? "New Template" : "Edit Template")
