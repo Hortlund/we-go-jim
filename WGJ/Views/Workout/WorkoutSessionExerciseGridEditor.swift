@@ -30,8 +30,19 @@ struct WorkoutSessionExerciseGridEditor: View {
     @State private var exerciseSwipeRemoving = false
     @State private var setSwipeOffsets: [UUID: CGFloat] = [:]
     @State private var setSwipeRemoving: [UUID: Bool] = [:]
+    @FocusState private var focusedInput: SetInputFocus?
 
     private let restPresets = [45, 60, 75, 90, 120, 150, 180, 210, 240]
+
+    private struct SetInputFocus: Hashable {
+        let setID: UUID
+        let metric: Metric
+
+        enum Metric: Hashable {
+            case weight
+            case reps
+        }
+    }
 
     init(
         exerciseName: String,
@@ -97,6 +108,15 @@ struct WorkoutSessionExerciseGridEditor: View {
                 RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
                     .stroke(WGJTheme.success.opacity(0.34), lineWidth: 1.2)
             }
+        }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                keyboardToolbar
+            }
+        }
+        .onChange(of: setDrafts.map(\.id)) { _, updatedSetIDs in
+            guard let focusedInput, !updatedSetIDs.contains(focusedInput.setID) else { return }
+            dismissInputFocus()
         }
     }
 
@@ -570,12 +590,54 @@ struct WorkoutSessionExerciseGridEditor: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private var keyboardToolbar: some View {
+        Group {
+            if let index = focusedSetIndex, setDrafts.indices.contains(index) {
+                Button("Weight") {
+                    focusMetric(.weight, at: index)
+                }
+                .disabled(isInputFocused(.weight, at: index))
+
+                Button("Reps") {
+                    focusMetric(.reps, at: index)
+                }
+                .disabled(isInputFocused(.reps, at: index))
+
+                Spacer()
+
+                if manualCompletionMode {
+                    Button(setDrafts[index].isCompleted ? "Logged" : "Complete") {
+                        completeFocusedSet()
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(setDrafts[index].isLocked)
+                }
+
+                Button("Done") {
+                    dismissInputFocus()
+                }
+                .fontWeight(.semibold)
+            } else {
+                Spacer()
+
+                Button("Done") {
+                    dismissInputFocus()
+                }
+                .fontWeight(.semibold)
+            }
+        }
+    }
+
     private func repsField(at index: Int) -> some View {
         TextField("0", text: repsTextBinding(for: index))
             .keyboardType(.numberPad)
+            .submitLabel(.done)
+            .font(.system(.title3, design: .rounded).weight(.semibold))
+            .monospacedDigit()
+            .focused($focusedInput, equals: inputFocus(for: index, metric: .reps))
             .multilineTextAlignment(.center)
             .disabled(setDrafts[index].isLocked)
-            .wgjPillField()
+            .metricInputShell(isFocused: isInputFocused(.reps, at: index))
     }
 
     private func loadField(at index: Int) -> some View {
@@ -584,6 +646,10 @@ struct WorkoutSessionExerciseGridEditor: View {
         return HStack(spacing: 6) {
             TextField("0", text: weightTextBinding(for: index))
                 .keyboardType(.decimalPad)
+                .submitLabel(.next)
+                .font(.system(.title3, design: .rounded).weight(.semibold))
+                .monospacedDigit()
+                .focused($focusedInput, equals: inputFocus(for: index, metric: .weight))
                 .multilineTextAlignment(.center)
                 .disabled(isLocked)
 
@@ -601,7 +667,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             }
             .disabled(isLocked)
         }
-        .wgjPillField()
+        .metricInputShell(isFocused: isInputFocused(.weight, at: index))
     }
 
     private func setBadge(for index: Int) -> some View {
@@ -857,6 +923,10 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func toggleExpanded() {
+        if isExpanded {
+            dismissInputFocus()
+        }
+
         withAnimation(.snappy(duration: 0.2, extraBounce: 0.02)) {
             expansionBinding.wrappedValue.toggle()
         }
@@ -905,6 +975,29 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private var isExerciseCompleted: Bool {
         !setDrafts.isEmpty && completedSetCount == setDrafts.count
+    }
+
+    private var focusedSetIndex: Int? {
+        guard let focusedInput else { return nil }
+        return setDrafts.firstIndex { $0.id == focusedInput.setID }
+    }
+
+    private func inputFocus(for index: Int, metric: SetInputFocus.Metric) -> SetInputFocus {
+        SetInputFocus(setID: setDrafts[index].id, metric: metric)
+    }
+
+    private func isInputFocused(_ metric: SetInputFocus.Metric, at index: Int) -> Bool {
+        guard setDrafts.indices.contains(index) else { return false }
+        return focusedInput == inputFocus(for: index, metric: metric)
+    }
+
+    private func focusMetric(_ metric: SetInputFocus.Metric, at index: Int) {
+        guard setDrafts.indices.contains(index), !setDrafts[index].isLocked else { return }
+        focusedInput = inputFocus(for: index, metric: metric)
+    }
+
+    private func dismissInputFocus() {
+        focusedInput = nil
     }
 
     private func repsTextBinding(for index: Int) -> Binding<String> {
@@ -962,19 +1055,26 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func addSet() {
+        let newDraft = makeSetDraft(copying: setDrafts.last)
+
         withAnimation(.snappy(duration: 0.24, extraBounce: 0.04)) {
-            setDrafts.append(makeSetDraft(copying: setDrafts.last))
+            setDrafts.append(newDraft)
         }
+
+        focusMetric(.weight, forSetID: newDraft.id)
         notifyChanged()
     }
 
     private func insertSet(after index: Int) {
         guard setDrafts.indices.contains(index) else { return }
         guard !setDrafts[index].isLocked else { return }
+        let newDraft = makeSetDraft(copying: setDrafts[index])
 
         withAnimation(.snappy(duration: 0.22, extraBounce: 0.04)) {
-            setDrafts.insert(makeSetDraft(copying: setDrafts[index]), at: index + 1)
+            setDrafts.insert(newDraft, at: index + 1)
         }
+
+        focusMetric(.weight, forSetID: newDraft.id)
         notifyChanged()
     }
 
@@ -988,6 +1088,9 @@ struct WorkoutSessionExerciseGridEditor: View {
             _ = setDrafts.remove(at: index)
         }
 
+        if focusedInput?.setID == removedID {
+            dismissInputFocus()
+        }
         setSwipeOffsets[removedID] = nil
         setSwipeRemoving[removedID] = nil
         notifyChanged()
@@ -1009,6 +1112,9 @@ struct WorkoutSessionExerciseGridEditor: View {
     private func toggleLock(at index: Int) {
         guard setDrafts.indices.contains(index) else { return }
         setDrafts[index].isLocked.toggle()
+        if setDrafts[index].isLocked, focusedInput?.setID == setDrafts[index].id {
+            dismissInputFocus()
+        }
         notifyChanged()
     }
 
@@ -1217,7 +1323,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                     Spacer(minLength: 8)
 
                     Button("Undo") {
-                        toggleCompletion(at: index)
+                        setCompletion(false, at: index)
                     }
                     .buttonStyle(WGJGhostButtonStyle())
                     .disabled(setDrafts[index].isLocked)
@@ -1234,7 +1340,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                 )
             } else {
                 Button {
-                    toggleCompletion(at: index)
+                    setCompletion(true, at: index)
                 } label: {
                     Label(completionButtonTitle(for: index), systemImage: "checkmark.circle.fill")
                         .frame(maxWidth: .infinity)
@@ -1251,10 +1357,29 @@ struct WorkoutSessionExerciseGridEditor: View {
         return "Complete Set\(restLabel)"
     }
 
+    private func completeFocusedSet() {
+        guard let index = focusedSetIndex else {
+            dismissInputFocus()
+            return
+        }
+
+        setCompletion(true, at: index, dismissingKeyboard: true)
+    }
+
     private func toggleCompletion(at index: Int) {
         guard setDrafts.indices.contains(index) else { return }
+        setCompletion(!setDrafts[index].isCompleted, at: index)
+    }
+
+    private func setCompletion(_ isCompleted: Bool, at index: Int, dismissingKeyboard: Bool = false) {
+        guard setDrafts.indices.contains(index) else { return }
         guard !setDrafts[index].isLocked else { return }
-        setDrafts[index].isCompleted.toggle()
+        if dismissingKeyboard || focusedInput?.setID == setDrafts[index].id {
+            dismissInputFocus()
+        }
+
+        guard setDrafts[index].isCompleted != isCompleted else { return }
+        setDrafts[index].isCompleted = isCompleted
         let set = setDrafts[index]
         notifyChanged()
         onSetCompletionChange?(set.id, setTitle(for: index), set.restSeconds, set.isCompleted)
@@ -1280,5 +1405,38 @@ struct WorkoutSessionExerciseGridEditor: View {
             get: { setSwipeRemoving[setID] ?? false },
             set: { setSwipeRemoving[setID] = $0 }
         )
+    }
+
+    private func focusMetric(_ metric: SetInputFocus.Metric, forSetID setID: UUID) {
+        guard let index = setDrafts.firstIndex(where: { $0.id == setID }) else { return }
+        focusMetric(metric, at: index)
+    }
+}
+
+private extension View {
+    func metricInputShell(isFocused: Bool) -> some View {
+        padding(.vertical, 11)
+            .padding(.horizontal, 12)
+            .background {
+                RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
+                    .fill(.thinMaterial)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
+                            .fill(WGJTheme.field.opacity(isFocused ? 0.86 : 0.74))
+                    }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
+                            .stroke(
+                                isFocused ? WGJTheme.accentBlue.opacity(0.56) : WGJTheme.outline.opacity(0.84),
+                                lineWidth: isFocused ? 1.4 : 1
+                            )
+                    }
+                    .shadow(
+                        color: isFocused ? WGJTheme.accentBlue.opacity(0.16) : WGJTheme.shadowSoft.opacity(0.9),
+                        radius: isFocused ? 12 : 10,
+                        x: 0,
+                        y: isFocused ? 4 : 6
+                    )
+            }
     }
 }
