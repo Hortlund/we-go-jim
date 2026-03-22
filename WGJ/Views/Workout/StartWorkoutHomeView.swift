@@ -746,24 +746,50 @@ private struct TemplateStartPreviewSheet: View {
     let onStart: () -> Void
     let onEdit: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dismiss) private var dismiss
+    @State private var showingAllExercises = false
+
+    private let collapsedExerciseCount = 5
 
     private var orderedExercises: [TemplateExercise] {
         (template.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
     }
 
+    private var visibleExercises: [TemplateExercise] {
+        guard orderedExercises.count > collapsedExerciseCount, !showingAllExercises else {
+            return orderedExercises
+        }
+
+        return Array(orderedExercises.prefix(collapsedExerciseCount))
+    }
+
+    private var hasExtraExercises: Bool {
+        orderedExercises.count > collapsedExerciseCount
+    }
+
+    private var hiddenExerciseCount: Int {
+        max(0, orderedExercises.count - visibleExercises.count)
+    }
+
+    private var totalPlannedSets: Int {
+        orderedExercises.reduce(0) { partialResult, exercise in
+            partialResult + plannedSetCount(for: exercise)
+        }
+    }
+
+    private var averageRestSummary: String? {
+        let rests = orderedExercises.map(\.restSeconds).filter { $0 > 0 }
+        guard !rests.isEmpty else { return nil }
+
+        let average = Int((Double(rests.reduce(0, +)) / Double(rests.count)).rounded())
+        return formattedRest(average)
+    }
+
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 8) {
-                    WGJActionHeader(template.name, subtitle: exerciseSummary)
-
-                    if let notes = optionalNotes {
-                        Text(notes)
-                            .font(.subheadline)
-                            .foregroundStyle(WGJTheme.textSecondary)
-                    }
-                }
+                summaryCard
 
                 if orderedExercises.isEmpty {
                     WGJEmptyStateCard(
@@ -772,20 +798,38 @@ private struct TemplateStartPreviewSheet: View {
                         icon: "list.bullet"
                     )
                 } else {
-                    ScrollView {
-                        VStack(spacing: 0) {
-                            ForEach(Array(orderedExercises.enumerated()), id: \.element.id) { index, exercise in
-                                previewExerciseRow(exercise)
+                    VStack(alignment: .leading, spacing: 12) {
+                        WGJActionHeader(
+                            "Exercise Order",
+                            subtitle: hasExtraExercises && !showingAllExercises
+                                ? "Showing the first \(visibleExercises.count) before you start."
+                                : "A light read of the full session."
+                        )
 
-                                if index < orderedExercises.count - 1 {
+                        ScrollView {
+                            VStack(spacing: 0) {
+                                ForEach(Array(visibleExercises.enumerated()), id: \.element.id) { index, exercise in
+                                    previewExerciseRow(exercise, index: index + 1)
+
+                                    if index < visibleExercises.count - 1 {
+                                        Rectangle()
+                                            .fill(WGJTheme.rowDivider.opacity(0.42))
+                                            .frame(height: 1)
+                                            .padding(.leading, 60)
+                                    }
+                                }
+
+                                if hasExtraExercises {
                                     Rectangle()
-                                        .fill(WGJTheme.rowDivider.opacity(0.55))
+                                        .fill(WGJTheme.rowDivider.opacity(0.42))
                                         .frame(height: 1)
-                                        .padding(.leading, 14)
+                                        .padding(.leading, 60)
+
+                                    expandExercisesButton
                                 }
                             }
+                            .wgjCardContainer()
                         }
-                        .wgjCardContainer()
                     }
                 }
 
@@ -816,38 +860,219 @@ private struct TemplateStartPreviewSheet: View {
         .presentationDetents([.large])
     }
 
+    private var summaryCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Template Preview")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(WGJTheme.accentBlue)
+                .textCase(.uppercase)
+
+            Text(template.name)
+                .font(.title2.weight(.bold))
+                .foregroundStyle(WGJTheme.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let notes = optionalNotes {
+                Text(notes)
+                    .font(.subheadline)
+                    .foregroundStyle(WGJTheme.textSecondary)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    summaryMetricPills
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    summaryMetricPills
+                }
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(.regularMaterial)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    WGJTheme.cardStrong.opacity(0.9),
+                                    WGJTheme.cardElevated.opacity(0.72),
+                                    WGJTheme.accentBlue.opacity(0.08),
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .stroke(WGJTheme.outline.opacity(0.86), lineWidth: 1)
+                }
+                .shadow(color: WGJTheme.shadowStrong.opacity(0.12), radius: 22, x: 0, y: 12)
+        }
+    }
+
     private var exerciseSummary: String {
         let count = orderedExercises.count
         return "\(count) exercise" + (count == 1 ? "" : "s")
     }
 
-    private func previewExerciseRow(_ exercise: TemplateExercise) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(exercise.exerciseNameSnapshot)
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(WGJTheme.textPrimary)
+    @ViewBuilder
+    private var summaryMetricPills: some View {
+        WGJMetricPill(
+            systemImage: "list.bullet",
+            value: exerciseSummary,
+            tint: WGJTheme.accentBlue
+        )
 
-            HStack(spacing: 12) {
-                previewMetadataItem(
-                    systemImage: "number.square",
-                    text: "\((exercise.prescribedSets ?? []).count) sets"
-                )
+        WGJMetricPill(
+            systemImage: "number.square",
+            value: "\(totalPlannedSets) sets",
+            tint: WGJTheme.accentCyan
+        )
 
-                if !exercise.categorySnapshot.isEmpty {
-                    previewMetadataItem(systemImage: "tag", text: exercise.categorySnapshot)
+        if let averageRestSummary {
+            WGJMetricPill(
+                systemImage: "timer",
+                value: averageRestSummary,
+                tint: WGJTheme.accentGold
+            )
+        }
+    }
+
+    private func previewExerciseRow(_ exercise: TemplateExercise, index: Int) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text("\(index)")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(WGJTheme.accentBlue)
+                .frame(width: 34, height: 34)
+                .background {
+                    Circle()
+                        .fill(WGJTheme.accentBlue.opacity(0.12))
+                }
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(exercise.exerciseNameSnapshot)
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(WGJTheme.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let descriptor = descriptorText(for: exercise) {
+                    Text(descriptor)
+                        .font(.caption)
+                        .foregroundStyle(WGJTheme.textSecondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(primaryPrescriptionText(for: exercise))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(WGJTheme.textPrimary)
+
+                if let secondary = secondaryPrescriptionText(for: exercise) {
+                    Text(secondary)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(WGJTheme.textSecondary)
                 }
             }
         }
-        .padding(14)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func previewMetadataItem(systemImage: String, text: String) -> some View {
-        Label(text, systemImage: systemImage)
-            .font(.caption.weight(.medium))
-            .foregroundStyle(WGJTheme.textSecondary)
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
+    private var expandExercisesButton: some View {
+        Button {
+            withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
+                showingAllExercises.toggle()
+            }
+        } label: {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(showingAllExercises ? "Show less" : "\(hiddenExerciseCount) more exercises")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(WGJTheme.textPrimary)
+
+                    Text(
+                        showingAllExercises
+                            ? "Collapse the longer list and keep this preview tight."
+                            : "Expand to see the full order before you start."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(WGJTheme.textSecondary)
+                }
+
+                Spacer(minLength: 12)
+
+                Image(systemName: showingAllExercises ? "chevron.up" : "chevron.down")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(WGJTheme.accentBlue)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func plannedSetCount(for exercise: TemplateExercise) -> Int {
+        let count = (exercise.prescribedSets ?? []).count
+        return count > 0 ? count : 3
+    }
+
+    private func descriptorText(for exercise: TemplateExercise) -> String? {
+        let muscleSummary = exercise.muscleSummarySnapshot.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !muscleSummary.isEmpty {
+            return muscleSummary
+        }
+
+        let category = exercise.categorySnapshot.trimmingCharacters(in: .whitespacesAndNewlines)
+        return category.isEmpty ? nil : category
+    }
+
+    private func primaryPrescriptionText(for exercise: TemplateExercise) -> String {
+        let setCount = plannedSetCount(for: exercise)
+        if let repSummary = repRangeSummary(for: exercise) {
+            return "\(setCount)x \(repSummary)"
+        }
+
+        return "\(setCount) set" + (setCount == 1 ? "" : "s")
+    }
+
+    private func secondaryPrescriptionText(for exercise: TemplateExercise) -> String? {
+        guard exercise.restSeconds > 0 else { return nil }
+        return "Rest \(formattedRest(exercise.restSeconds))"
+    }
+
+    private func repRangeSummary(for exercise: TemplateExercise) -> String? {
+        switch (exercise.targetRepMin, exercise.targetRepMax) {
+        case let (min?, max?) where min == max:
+            return "\(min) reps"
+        case let (min?, max?):
+            return "\(min)-\(max) reps"
+        case let (min?, nil):
+            return "\(min)+ reps"
+        case let (nil, max?):
+            return "Up to \(max)"
+        default:
+            return nil
+        }
+    }
+
+    private func formattedRest(_ seconds: Int) -> String {
+        guard seconds > 0 else { return "No rest" }
+
+        let minutes = seconds / 60
+        let remainingSeconds = seconds % 60
+        return "\(minutes):\(String(format: "%02d", remainingSeconds))"
     }
 
     private var startAction: some View {
