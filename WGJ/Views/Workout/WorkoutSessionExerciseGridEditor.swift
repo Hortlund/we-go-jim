@@ -342,6 +342,7 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func setCard(at index: Int) -> some View {
         let set = setDrafts[index]
+        let progressReference = progressReference(for: index)
 
         return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 10) {
@@ -361,11 +362,13 @@ struct WorkoutSessionExerciseGridEditor: View {
                         }
                     }
 
-                    Text(previousSummary(for: index))
-                        .font(.caption)
-                        .foregroundStyle(WGJTheme.textSecondary)
-                        .lineLimit(2)
-                        .monospacedDigit()
+                    if !manualCompletionMode || progressReference == nil {
+                        Text(previousSummary(for: index))
+                            .font(.caption)
+                            .foregroundStyle(WGJTheme.textSecondary)
+                            .lineLimit(2)
+                            .monospacedDigit()
+                    }
 
                     if let metadata = setMetadataLine(for: index) {
                         Text(metadata)
@@ -378,6 +381,10 @@ struct WorkoutSessionExerciseGridEditor: View {
                 Spacer(minLength: 8)
 
                 setMenu(at: index)
+            }
+
+            if manualCompletionMode, let progressReference {
+                progressReferenceStrip(progressReference, at: index)
             }
 
             ViewThatFits(in: .horizontal) {
@@ -416,6 +423,123 @@ struct WorkoutSessionExerciseGridEditor: View {
                         .stroke(setCardStroke(for: set), lineWidth: 1)
                 )
         )
+    }
+
+    private func progressReferenceStrip(_ reference: WorkoutSetProgressReference, at index: Int) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 12) {
+                    progressReferenceMetric(
+                        title: "Last",
+                        value: reference.lastValue,
+                        tint: WGJTheme.textPrimary
+                    )
+
+                    Rectangle()
+                        .fill(WGJTheme.rowDivider)
+                        .frame(width: 1)
+                        .padding(.vertical, 2)
+
+                    progressReferenceMetric(
+                        title: "Aim",
+                        value: reference.aimValue,
+                        tint: WGJTheme.accentBlue
+                    )
+
+                    if reference.canReusePrevious && !setDrafts[index].isLocked {
+                        Spacer(minLength: 8)
+                        applyPreviousButton(at: index)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .top, spacing: 12) {
+                        progressReferenceMetric(
+                            title: "Last",
+                            value: reference.lastValue,
+                            tint: WGJTheme.textPrimary
+                        )
+
+                        Spacer(minLength: 8)
+
+                        if reference.canReusePrevious && !setDrafts[index].isLocked {
+                            applyPreviousButton(at: index)
+                        }
+                    }
+
+                    progressReferenceMetric(
+                        title: "Aim",
+                        value: reference.aimValue,
+                        tint: WGJTheme.accentBlue
+                    )
+                }
+            }
+
+            if let statusText = reference.statusText {
+                progressStatusChip(text: statusText, tone: reference.statusTone)
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(WGJTheme.cardElevated.opacity(0.72))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(WGJTheme.accentBlue.opacity(0.18), lineWidth: 1)
+                )
+        )
+    }
+
+    private func progressReferenceMetric(title: String, value: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title.uppercased())
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(WGJTheme.textTertiary)
+
+            Text(value)
+                .font(.subheadline.monospacedDigit().weight(.semibold))
+                .foregroundStyle(tint)
+                .lineLimit(2)
+                .minimumScaleFactor(0.88)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func progressStatusChip(text: String, tone: WorkoutSetProgressTone) -> some View {
+        Text(text)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(progressToneColor(for: tone))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(progressToneColor(for: tone).opacity(0.12))
+                    .overlay(
+                        Capsule()
+                            .stroke(progressToneColor(for: tone).opacity(0.22), lineWidth: 1)
+                    )
+            )
+    }
+
+    private func applyPreviousButton(at index: Int) -> some View {
+        Button {
+            applyPreviousPerformance(at: index)
+        } label: {
+            Label("Use Last", systemImage: "arrow.down.left.circle.fill")
+                .font(.caption.weight(.bold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(
+                    Capsule()
+                        .fill(WGJTheme.accentBlue.opacity(0.12))
+                        .overlay(
+                            Capsule()
+                                .stroke(WGJTheme.accentBlue.opacity(0.24), lineWidth: 1)
+                        )
+                )
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(WGJTheme.accentBlue)
     }
 
     private func metricField<Content: View>(
@@ -656,6 +780,17 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func feedbackTint(for tone: TrainingGuidanceTone) -> Color {
+        switch tone {
+        case .accent:
+            return WGJTheme.accentBlue
+        case .success:
+            return WGJTheme.success
+        case .caution:
+            return WGJTheme.accentGold
+        }
+    }
+
+    private func progressToneColor(for tone: WorkoutSetProgressTone) -> Color {
         switch tone {
         case .accent:
             return WGJTheme.accentBlue
@@ -917,6 +1052,17 @@ struct WorkoutSessionExerciseGridEditor: View {
         }
     }
 
+    private func progressReference(for index: Int) -> WorkoutSetProgressReference? {
+        guard setDrafts.indices.contains(index) else { return nil }
+        return WorkoutSetProgressReference.make(
+            draft: setDrafts[index],
+            previous: previousBySetIndex[index],
+            targetRepMin: targetRepMin,
+            targetRepMax: targetRepMax,
+            formatWeight: formatWeight
+        )
+    }
+
     private func previousText(for index: Int) -> String {
         guard let snapshot = previousBySetIndex[index] else {
             return "-"
@@ -936,6 +1082,21 @@ struct WorkoutSessionExerciseGridEditor: View {
     private func previousSummary(for index: Int) -> String {
         let previous = previousText(for: index)
         return previous == "-" ? "No previous log for this slot." : "Previous \(previous)"
+    }
+
+    private func applyPreviousPerformance(at index: Int) {
+        guard setDrafts.indices.contains(index), let previous = previousBySetIndex[index] else { return }
+        guard !setDrafts[index].isLocked else { return }
+
+        setDrafts[index].actualWeight = previous.weight
+        setDrafts[index].actualReps = previous.reps
+        setDrafts[index].actualLoadUnit = previous.unit
+
+        if !manualCompletionMode {
+            setDrafts[index].isCompleted = previous.weight != nil || previous.reps != nil
+        }
+
+        notifyChanged()
     }
 
     private func setMetadataLine(for index: Int) -> String? {
