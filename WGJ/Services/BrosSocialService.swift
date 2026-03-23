@@ -1507,6 +1507,8 @@ final class CloudKitBrosSocialService: BrosSocialService {
         localProfile: UserProfile?,
         userRecordName: String
     ) async -> MembershipRecordResolution {
+        let hasCachedMembership = hasLocalMembership(localProfile)
+
         if let membershipID = localProfile?.brosMembershipID {
             do {
                 if let record = try await fetchRecord(recordType: RecordType.membership, recordName: membershipID) {
@@ -1540,6 +1542,11 @@ final class CloudKitBrosSocialService: BrosSocialService {
             }
             return .missingAuthoritatively
         } catch {
+            if !hasCachedMembership,
+               Self.shouldTreatAsEmptyQueryResult(error, recordType: RecordType.membership)
+            {
+                return .missingAuthoritatively
+            }
             return .inconclusive
         }
     }

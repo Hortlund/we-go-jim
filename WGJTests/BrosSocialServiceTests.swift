@@ -351,6 +351,69 @@ struct BrosSocialServiceTests {
     }
 
     @Test
+    func fetchSnapshotReturnsNilWhenMembershipQueryHasSchemaErrorWithoutCachedMembership() async throws {
+        let context = try makeInMemoryContext()
+        let schemaError = NSError(
+            domain: CKError.errorDomain,
+            code: CKError.serverRejectedRequest.rawValue,
+            userInfo: [
+                NSLocalizedDescriptionKey: "Service record type 'BroMembership' is not queryable."
+            ]
+        )
+
+        let store = TestBrosCloudStore()
+        store.currentUserRecordNameValue = "user-1"
+        store.queryRecordsHandler = { recordType, predicate, _, _ in
+            if recordType == "BroMembership",
+               predicate.predicateFormat.contains("userRecordName")
+            {
+                throw schemaError
+            }
+            return []
+        }
+
+        let service = CloudKitBrosSocialService(modelContext: context, cloudStore: store)
+        let snapshot = try await service.fetchSnapshot()
+
+        #expect(snapshot == nil)
+    }
+
+    @Test
+    func createCircleAllowsCreationWhenMembershipQueryHasSchemaErrorWithoutCachedMembership() async throws {
+        let context = try makeInMemoryContext()
+        let schemaError = NSError(
+            domain: CKError.errorDomain,
+            code: CKError.serverRejectedRequest.rawValue,
+            userInfo: [
+                NSLocalizedDescriptionKey: "Service record type 'BroMembership' is not queryable."
+            ]
+        )
+
+        var savedRecordTypes: [String] = []
+        let store = TestBrosCloudStore()
+        store.currentUserRecordNameValue = "user-1"
+        store.queryRecordsHandler = { recordType, predicate, _, _ in
+            if recordType == "BroMembership",
+               predicate.predicateFormat.contains("userRecordName")
+            {
+                throw schemaError
+            }
+            return []
+        }
+        store.saveHandler = { records, _ in
+            savedRecordTypes.append(contentsOf: records.map(\.recordType))
+        }
+
+        let service = CloudKitBrosSocialService(modelContext: context, cloudStore: store)
+        let snapshot = try await service.createCircle(memberLimit: BrosSocialRules.defaultMemberLimit)
+
+        #expect(snapshot.currentMember.userRecordName == "user-1")
+        #expect(savedRecordTypes.contains("BroCircle"))
+        #expect(savedRecordTypes.contains("BroMembership"))
+        #expect(savedRecordTypes.contains("BroInviteLookup"))
+    }
+
+    @Test
     func joinCircleFallsBackToDirectInviteQueryAndBackfillsLookupRecord() async throws {
         let context = try makeInMemoryContext()
         let store = TestBrosCloudStore()
