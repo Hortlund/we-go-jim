@@ -112,7 +112,6 @@ struct WorkoutSessionExerciseGridEditor: View {
                     .stroke(WGJTheme.success.opacity(0.34), lineWidth: 1.2)
             }
         }
-        .wgjMinimalKeyboardToolbar(onDismiss: dismissInputFocus)
         .onChange(of: setDrafts.map(\.id)) { _, updatedSetIDs in
             guard let focusedInput, !updatedSetIDs.contains(focusedInput.setID) else { return }
             dismissInputFocus()

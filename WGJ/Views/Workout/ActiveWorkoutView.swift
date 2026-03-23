@@ -231,6 +231,7 @@ struct ActiveWorkoutView: View {
             Text($0.summary)
         }
         .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: isKeyboardVisible)
+        .wgjMinimalKeyboardToolbar()
     }
 
     private var session: WorkoutSession? {

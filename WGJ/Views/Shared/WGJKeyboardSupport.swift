@@ -55,21 +55,47 @@ private struct WGJKeyboardVisibilityModifier: ViewModifier {
 
 private struct WGJMinimalKeyboardToolbarModifier: ViewModifier {
     let onDismiss: () -> Void
+    @State private var isKeyboardVisible = false
 
     func body(content: Content) -> some View {
         content
-            .toolbar {
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
+            .wgjTrackKeyboardVisibility($isKeyboardVisible)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if isKeyboardVisible {
+                    HStack {
+                        Spacer()
 
-                    Button(action: onDismiss) {
-                        Image(systemName: "keyboard.chevron.compact.down")
-                            .font(.headline.weight(.semibold))
-                            .foregroundStyle(WGJTheme.accentBlue)
+                        Button(action: onDismiss) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "keyboard.chevron.compact.down")
+                                    .font(.footnote.weight(.bold))
+
+                                Text("Hide")
+                                    .font(.footnote.weight(.semibold))
+                            }
+                            .foregroundStyle(WGJTheme.textPrimary)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(
+                                Capsule()
+                                    .fill(WGJTheme.card.opacity(0.98))
+                                    .overlay(
+                                        Capsule()
+                                            .stroke(WGJTheme.rowDivider.opacity(0.9), lineWidth: 1)
+                                    )
+                            )
+                            .shadow(color: Color.black.opacity(0.12), radius: 12, x: 0, y: 6)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Hide keyboard")
                     }
-                    .accessibilityLabel("Hide keyboard")
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 8)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
+            .animation(.easeOut(duration: 0.18), value: isKeyboardVisible)
     }
 }
 

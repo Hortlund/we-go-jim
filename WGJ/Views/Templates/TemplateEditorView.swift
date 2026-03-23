@@ -90,6 +90,7 @@ struct TemplateEditorView: View {
                 await loadCatalogMatches()
             }
         }
+        .wgjMinimalKeyboardToolbar()
     }
 
     private var templateMetaCard: some View {

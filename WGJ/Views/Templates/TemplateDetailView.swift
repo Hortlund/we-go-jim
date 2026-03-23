@@ -140,6 +140,7 @@ struct TemplateDetailView: View {
         .onDisappear {
             flushPendingSaves()
         }
+        .wgjMinimalKeyboardToolbar()
     }
 
     private var template: WorkoutTemplate? {
