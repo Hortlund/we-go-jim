@@ -127,6 +127,12 @@ enum BrosSocialServiceError: LocalizedError, Equatable {
     }
 }
 
+private struct BrosUnavailableDiagnosticError: LocalizedError {
+    let message: String
+
+    var errorDescription: String? { message }
+}
+
 enum BrosRecordNames {
     static func workoutEventRecordName(sessionID: UUID) -> String {
         "workout_\(sessionID.uuidString.lowercased())"
@@ -693,8 +699,11 @@ final class CloudKitBrosSocialService: BrosSocialService {
                 return nil
             }
             throw BrosSocialServiceError.unavailable
-        case .inconclusive:
-            throw BrosSocialServiceError.unavailable
+        case .inconclusive(let error):
+            throw unavailableError(
+                context: "Bros could not resolve your membership from CloudKit.",
+                underlying: error
+            )
         }
 
         let currentMembership = try await memberSummary(from: membershipRecord)
@@ -702,8 +711,13 @@ final class CloudKitBrosSocialService: BrosSocialService {
         switch await resolvedCircleRecord(circleID: currentMembership.circleID) {
         case .found(let record):
             circleRecord = record
-        case .missingAuthoritatively, .inconclusive:
+        case .missingAuthoritatively:
             throw BrosSocialServiceError.unavailable
+        case .inconclusive(let error):
+            throw unavailableError(
+                context: "Bros could not read your circle from CloudKit.",
+                underlying: error
+            )
         }
 
         let circle = circleSummary(from: circleRecord)
@@ -938,8 +952,11 @@ final class CloudKitBrosSocialService: BrosSocialService {
             didFallbackToLegacyQuery = didFallback
         case .missingAuthoritatively:
             throw BrosSocialServiceError.invalidInviteCode
-        case .inconclusive:
-            throw BrosSocialServiceError.unavailable
+        case .inconclusive(let error):
+            throw unavailableError(
+                context: "Bros could not resolve your invite code from CloudKit.",
+                underlying: error
+            )
         }
 
         let circle = circleSummary(from: circleRecord)
@@ -1122,8 +1139,11 @@ final class CloudKitBrosSocialService: BrosSocialService {
         case .missingAuthoritatively:
             try? clearLocalMembershipStateIfNeeded()
             return
-        case .inconclusive:
-            throw BrosSocialServiceError.unavailable
+        case .inconclusive(let error):
+            throw unavailableError(
+                context: "Bros could not load your membership before deleting local data.",
+                underlying: error
+            )
         }
 
         let currentMember = try await memberSummary(from: membershipRecord)
@@ -1482,19 +1502,19 @@ final class CloudKitBrosSocialService: BrosSocialService {
     private enum MembershipRecordResolution {
         case found(CKRecord)
         case missingAuthoritatively
-        case inconclusive
+        case inconclusive(any Error)
     }
 
     private enum CircleRecordResolution {
         case found(CKRecord)
         case missingAuthoritatively
-        case inconclusive
+        case inconclusive(any Error)
     }
 
     private enum CircleInviteResolution {
         case found(CKRecord, didFallbackToLegacyQuery: Bool)
         case missingAuthoritatively
-        case inconclusive
+        case inconclusive(any Error)
     }
 
     private struct IndexedRecordsResolution {
@@ -1507,15 +1527,13 @@ final class CloudKitBrosSocialService: BrosSocialService {
         localProfile: UserProfile?,
         userRecordName: String
     ) async -> MembershipRecordResolution {
-        let hasCachedMembership = hasLocalMembership(localProfile)
-
         if let membershipID = localProfile?.brosMembershipID {
             do {
                 if let record = try await fetchRecord(recordType: RecordType.membership, recordName: membershipID) {
                     return .found(record)
                 }
             } catch {
-                return .inconclusive
+                return .inconclusive(error)
             }
         }
 
@@ -1532,7 +1550,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
                     return .found(record)
                 }
             } catch {
-                return .inconclusive
+                return .inconclusive(error)
             }
         }
 
@@ -1542,12 +1560,16 @@ final class CloudKitBrosSocialService: BrosSocialService {
             }
             return .missingAuthoritatively
         } catch {
-            if !hasCachedMembership,
-               Self.shouldTreatAsEmptyQueryResult(error, recordType: RecordType.membership)
-            {
+            if Self.shouldTreatAsEmptyQueryResult(error, recordType: RecordType.membership) {
+                if let syntheticRecord = syntheticMembershipRecord(
+                    from: localProfile,
+                    userRecordName: userRecordName
+                ) {
+                    return .found(syntheticRecord)
+                }
                 return .missingAuthoritatively
             }
-            return .inconclusive
+            return .inconclusive(error)
         }
     }
 
@@ -1558,7 +1580,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
             }
             return .missingAuthoritatively
         } catch {
-            return .inconclusive
+            return .inconclusive(error)
         }
     }
 
@@ -1573,12 +1595,12 @@ final class CloudKitBrosSocialService: BrosSocialService {
                     return .found(record, didFallbackToLegacyQuery: false)
                 case .missingAuthoritatively:
                     break
-                case .inconclusive:
-                    return .inconclusive
+                case .inconclusive(let error):
+                    return .inconclusive(error)
                 }
             }
         } catch {
-            return .inconclusive
+            return .inconclusive(error)
         }
 
         do {
@@ -1587,7 +1609,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
             }
             return .missingAuthoritatively
         } catch {
-            return .inconclusive
+            return .inconclusive(error)
         }
     }
 
@@ -2244,6 +2266,137 @@ final class CloudKitBrosSocialService: BrosSocialService {
         try modelContext.save()
     }
 
+    private func syntheticMembershipRecord(
+        from profile: UserProfile?,
+        userRecordName: String
+    ) -> CKRecord? {
+        guard let profile else { return nil }
+        guard let circleID = profile.brosCircleID, !circleID.isEmpty else { return nil }
+        guard let membershipID = profile.brosMembershipID, !membershipID.isEmpty else { return nil }
+        guard let joinedAt = profile.brosJoinedAt else { return nil }
+        guard let role = profile.brosRole else { return nil }
+
+        let resolvedUserRecordName = profile.brosUserRecordName ?? userRecordName
+        guard !resolvedUserRecordName.isEmpty else { return nil }
+        guard resolvedUserRecordName == userRecordName else { return nil }
+
+        let record = CKRecord(
+            recordType: RecordType.membership,
+            recordID: CKRecord.ID(recordName: membershipID)
+        )
+        applyMembershipFields(
+            record,
+            circleID: circleID,
+            membershipID: membershipID,
+            userRecordName: resolvedUserRecordName,
+            displayName: displayName(from: profile),
+            athleteType: athleteType(from: profile),
+            avatarImageData: profile.avatarImageData,
+            joinedAt: joinedAt,
+            role: role
+        )
+        return record
+    }
+
+    private func unavailableError(
+        context: String,
+        underlying: (any Error)? = nil
+    ) -> any Error {
+        BrosUnavailableDiagnosticError(
+            message: unavailableMessage(context: context, underlying: underlying)
+        )
+    }
+
+    private func unavailableMessage(
+        context: String,
+        underlying: (any Error)?
+    ) -> String {
+        guard let underlying else { return context }
+
+        let nsError = underlying as NSError
+        var segments = [context]
+
+        if nsError.domain == CKError.errorDomain {
+            segments.append("CloudKit \(cloudKitErrorCodeDescription(rawValue: nsError.code)).")
+        } else {
+            segments.append("\(nsError.domain)(\(nsError.code)).")
+        }
+
+        var detailSegments: [String] = []
+        var seenDetails = Set<String>()
+
+        for detail in Self.flattenedErrorText(underlying) {
+            let trimmed = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            guard Double(trimmed) == nil else { continue }
+
+            let normalized = trimmed.lowercased()
+            guard normalized != context.lowercased() else { continue }
+
+            if nsError.domain == CKError.errorDomain,
+               normalized.contains("operation couldn"),
+               normalized.contains("ckerrordomain")
+            {
+                continue
+            }
+
+            guard seenDetails.insert(normalized).inserted else { continue }
+            detailSegments.append(trimmed)
+            if detailSegments.count == 2 {
+                break
+            }
+        }
+
+        if !detailSegments.isEmpty {
+            segments.append(detailSegments.joined(separator: " "))
+        }
+
+        return segments.joined(separator: " ")
+    }
+
+    private func cloudKitErrorCodeDescription(rawValue: Int) -> String {
+        let descriptions: [Int: String] = [
+            1: "internalError",
+            2: "partialFailure",
+            3: "networkUnavailable",
+            4: "networkFailure",
+            5: "badContainer",
+            6: "serviceUnavailable",
+            7: "requestRateLimited",
+            8: "missingEntitlement",
+            9: "notAuthenticated",
+            10: "permissionFailure",
+            11: "unknownItem",
+            12: "invalidArguments",
+            13: "resultsTruncated",
+            14: "serverRecordChanged",
+            15: "serverRejectedRequest",
+            16: "assetFileNotFound",
+            17: "assetFileModified",
+            18: "incompatibleVersion",
+            19: "constraintViolation",
+            20: "operationCancelled",
+            21: "changeTokenExpired",
+            22: "batchRequestFailed",
+            23: "zoneBusy",
+            24: "badDatabase",
+            25: "quotaExceeded",
+            26: "zoneNotFound",
+            27: "limitExceeded",
+            28: "userDeletedZone",
+            29: "tooManyParticipants",
+            30: "alreadyShared",
+            31: "referenceViolation",
+            32: "managedAccountRestricted",
+            33: "participantMayNeedVerification",
+            34: "serverResponseLost",
+            35: "assetNotAvailable",
+            36: "accountTemporarilyUnavailable",
+        ]
+
+        return descriptions[rawValue] ?? "CKErrorCode(\(rawValue))"
+    }
+
     private func hasLocalMembership(_ profile: UserProfile?) -> Bool {
         profile?.brosCircleID != nil
             || profile?.brosMembershipID != nil
@@ -2276,8 +2429,11 @@ final class CloudKitBrosSocialService: BrosSocialService {
             throw BrosSocialServiceError.alreadyInCircle
         case .missingAuthoritatively:
             return
-        case .inconclusive:
-            throw BrosSocialServiceError.unavailable
+        case .inconclusive(let error):
+            throw unavailableError(
+                context: "Bros could not verify whether you already belong to a circle.",
+                underlying: error
+            )
         }
     }
 
@@ -2290,8 +2446,11 @@ final class CloudKitBrosSocialService: BrosSocialService {
             return record
         case .missingAuthoritatively:
             throw BrosSocialServiceError.notInCircle
-        case .inconclusive:
-            throw BrosSocialServiceError.unavailable
+        case .inconclusive(let error):
+            throw unavailableError(
+                context: "Bros could not load your current membership for this action.",
+                underlying: error
+            )
         }
     }
 

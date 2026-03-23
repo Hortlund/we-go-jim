@@ -414,6 +414,98 @@ struct BrosSocialServiceTests {
     }
 
     @Test
+    func fetchSnapshotUsesCachedMembershipWhenMembershipQueryHasSchemaErrorAndCircleExists() async throws {
+        let context = try makeInMemoryContext()
+        let joinedAt = Date(timeIntervalSince1970: 100)
+        let profile = try ProfileRepository(modelContext: context).loadOrCreateProfile()
+        profile.displayName = "Atlas"
+        profile.updateBrosMembership(
+            circleID: "circle-1",
+            membershipID: "membership-circle-1-user-1",
+            userRecordName: "user-1",
+            joinedAt: joinedAt,
+            role: .owner
+        )
+        try context.save()
+
+        let schemaError = NSError(
+            domain: CKError.errorDomain,
+            code: CKError.serverRejectedRequest.rawValue,
+            userInfo: [
+                NSLocalizedDescriptionKey: "Service record type 'BroMembership' is not queryable."
+            ]
+        )
+        let existingCircle = makeCircleRecord(
+            circleID: "circle-1",
+            inviteCode: "ABC123",
+            memberLimit: 4
+        )
+        let store = TestBrosCloudStore()
+        store.currentUserRecordNameValue = "user-1"
+        store.fetchRecordHandler = { recordType, recordName in
+            if recordType == "BroCircle", recordName == "circle-1" {
+                return existingCircle
+            }
+            return nil
+        }
+        store.queryRecordsHandler = { recordType, predicate, _, _ in
+            if recordType == "BroMembership",
+               predicate.predicateFormat.contains("userRecordName")
+            {
+                throw schemaError
+            }
+            return []
+        }
+
+        let service = CloudKitBrosSocialService(modelContext: context, cloudStore: store)
+        let snapshot = try await service.fetchSnapshot()
+
+        let resolved = try #require(snapshot)
+        #expect(resolved.circle.circleID == "circle-1")
+        #expect(resolved.currentMember.userRecordName == "user-1")
+        #expect(resolved.currentMember.displayName == "Atlas")
+        #expect(resolved.members.map(\.userRecordName) == ["user-1"])
+    }
+
+    @Test
+    func fetchSnapshotSurfacesCloudKitDiagnosticWhenMembershipLookupFails() async throws {
+        let context = try makeInMemoryContext()
+        let profile = try ProfileRepository(modelContext: context).loadOrCreateProfile()
+        profile.brosMembershipID = "membership-stale"
+        try context.save()
+
+        let permissionError = NSError(
+            domain: CKError.errorDomain,
+            code: CKError.permissionFailure.rawValue,
+            userInfo: [
+                NSLocalizedDescriptionKey: "Permission failure",
+                CKErrorRetryAfterKey: 1
+            ]
+        )
+
+        let store = TestBrosCloudStore()
+        store.currentUserRecordNameValue = "user-1"
+        store.fetchRecordHandler = { recordType, recordName in
+            if recordType == "BroMembership", recordName == "membership-stale" {
+                throw permissionError
+            }
+            return nil
+        }
+
+        let service = CloudKitBrosSocialService(modelContext: context, cloudStore: store)
+
+        do {
+            _ = try await service.fetchSnapshot()
+            Issue.record("Expected fetchSnapshot to surface a CloudKit diagnostic")
+        } catch {
+            #expect(
+                error.localizedDescription
+                    == "Bros could not resolve your membership from CloudKit. CloudKit permissionFailure. Permission failure"
+            )
+        }
+    }
+
+    @Test
     func joinCircleFallsBackToDirectInviteQueryAndBackfillsLookupRecord() async throws {
         let context = try makeInMemoryContext()
         let store = TestBrosCloudStore()
