@@ -1,8 +1,10 @@
 import CloudKit
 import Foundation
+import SwiftData
 import Testing
 @testable import WGJ
 
+@MainActor
 struct BrosSocialServiceTests {
     @Test
     func deterministicRecordNamesStayStable() {
@@ -188,6 +190,199 @@ struct BrosSocialServiceTests {
         )
     }
 
+    @Test
+    func refreshRecoversMembershipViaUserQueryWhenCachedIDsMiss() async throws {
+        let context = try makeInMemoryContext()
+        let profile = try ProfileRepository(modelContext: context).loadOrCreateProfile()
+        profile.updateBrosMembership(
+            circleID: "circle-1",
+            membershipID: "membership-stale",
+            userRecordName: "user-1",
+            joinedAt: Date(timeIntervalSince1970: 100),
+            role: .member
+        )
+        try context.save()
+
+        let recoveredMembership = makeMembershipRecord(
+            recordName: "membership-circle-1-user-1",
+            circleID: "circle-1",
+            userRecordName: "user-1",
+            joinedAt: Date(timeIntervalSince1970: 200),
+            role: .owner
+        )
+        let store = TestBrosCloudStore()
+        store.currentUserRecordNameValue = "user-1"
+        store.queryRecordsHandler = { recordType, predicate, _, _ in
+            if recordType == "BroMembership",
+               predicate.predicateFormat.contains("userRecordName")
+            {
+                return [recoveredMembership]
+            }
+            return []
+        }
+
+        let service = CloudKitBrosSocialService(modelContext: context, cloudStore: store)
+        await service.refreshLocalMembershipState()
+
+        let refreshedProfile = try #require(try ProfileRepository(modelContext: context).currentProfile())
+        #expect(refreshedProfile.brosMembershipID == recoveredMembership.recordID.recordName)
+        #expect(refreshedProfile.brosCircleID == "circle-1")
+        #expect(refreshedProfile.brosUserRecordName == "user-1")
+        #expect(refreshedProfile.brosRole == .owner)
+    }
+
+    @Test
+    func refreshKeepsMembershipWhenMembershipQueryIsInconclusive() async throws {
+        let context = try makeInMemoryContext()
+        let joinedAt = Date(timeIntervalSince1970: 100)
+        let profile = try ProfileRepository(modelContext: context).loadOrCreateProfile()
+        profile.updateBrosMembership(
+            circleID: "circle-1",
+            membershipID: "membership-stale",
+            userRecordName: "user-1",
+            joinedAt: joinedAt,
+            role: .member
+        )
+        try context.save()
+
+        let schemaError = NSError(
+            domain: CKError.errorDomain,
+            code: CKError.serverRejectedRequest.rawValue,
+            userInfo: [
+                NSLocalizedDescriptionKey: "Service record type 'BroMembership' is not queryable."
+            ]
+        )
+        let store = TestBrosCloudStore()
+        store.currentUserRecordNameValue = "user-1"
+        store.queryRecordsHandler = { recordType, predicate, _, _ in
+            if recordType == "BroMembership",
+               predicate.predicateFormat.contains("userRecordName")
+            {
+                throw schemaError
+            }
+            return []
+        }
+
+        let service = CloudKitBrosSocialService(modelContext: context, cloudStore: store)
+        await service.refreshLocalMembershipState()
+
+        let refreshedProfile = try #require(try ProfileRepository(modelContext: context).currentProfile())
+        #expect(refreshedProfile.brosMembershipID == "membership-stale")
+        #expect(refreshedProfile.brosCircleID == "circle-1")
+        #expect(refreshedProfile.brosUserRecordName == "user-1")
+        #expect(refreshedProfile.brosJoinedAt == joinedAt)
+        #expect(refreshedProfile.brosRole == .member)
+    }
+
+    @Test
+    func refreshClearsMembershipOnlyAfterConfirmedAbsence() async throws {
+        let context = try makeInMemoryContext()
+        let profile = try ProfileRepository(modelContext: context).loadOrCreateProfile()
+        profile.updateBrosMembership(
+            circleID: "circle-1",
+            membershipID: "membership-stale",
+            userRecordName: "user-1",
+            joinedAt: Date(timeIntervalSince1970: 100),
+            role: .member
+        )
+        try context.save()
+
+        let store = TestBrosCloudStore()
+        store.currentUserRecordNameValue = "user-1"
+        store.queryRecordsHandler = { _, _, _, _ in [] }
+
+        let service = CloudKitBrosSocialService(modelContext: context, cloudStore: store)
+        await service.refreshLocalMembershipState()
+
+        let refreshedProfile = try #require(try ProfileRepository(modelContext: context).currentProfile())
+        #expect(refreshedProfile.brosMembershipID == nil)
+        #expect(refreshedProfile.brosCircleID == nil)
+        #expect(refreshedProfile.brosUserRecordName == nil)
+        #expect(refreshedProfile.brosJoinedAt == nil)
+        #expect(refreshedProfile.brosRole == nil)
+    }
+
+    @Test
+    func fetchSnapshotThrowsUnavailableWhenMembershipMissesButCircleStillExists() async throws {
+        let context = try makeInMemoryContext()
+        let joinedAt = Date(timeIntervalSince1970: 100)
+        let profile = try ProfileRepository(modelContext: context).loadOrCreateProfile()
+        profile.updateBrosMembership(
+            circleID: "circle-1",
+            membershipID: "membership-stale",
+            userRecordName: "user-1",
+            joinedAt: joinedAt,
+            role: .member
+        )
+        try context.save()
+
+        let existingCircle = makeCircleRecord(
+            circleID: "circle-1",
+            inviteCode: "ABC123",
+            memberLimit: 4
+        )
+        let store = TestBrosCloudStore()
+        store.currentUserRecordNameValue = "user-1"
+        store.fetchRecordHandler = { recordType, recordName in
+            if recordType == "BroCircle", recordName == "circle-1" {
+                return existingCircle
+            }
+            return nil
+        }
+        store.queryRecordsHandler = { _, _, _, _ in [] }
+
+        let service = CloudKitBrosSocialService(modelContext: context, cloudStore: store)
+
+        do {
+            _ = try await service.fetchSnapshot()
+            Issue.record("Expected fetchSnapshot to throw when membership recovery is inconclusive")
+        } catch let error as BrosSocialServiceError {
+            #expect(error == .unavailable)
+        } catch {
+            Issue.record("Expected BrosSocialServiceError.unavailable, got \(error)")
+        }
+
+        let refreshedProfile = try #require(try ProfileRepository(modelContext: context).currentProfile())
+        #expect(refreshedProfile.brosMembershipID == "membership-stale")
+        #expect(refreshedProfile.brosCircleID == "circle-1")
+        #expect(refreshedProfile.brosUserRecordName == "user-1")
+        #expect(refreshedProfile.brosJoinedAt == joinedAt)
+        #expect(refreshedProfile.brosRole == .member)
+    }
+
+    @Test
+    func joinCircleFallsBackToDirectInviteQueryAndBackfillsLookupRecord() async throws {
+        let context = try makeInMemoryContext()
+        let store = TestBrosCloudStore()
+        store.currentUserRecordNameValue = "user-1"
+
+        let circleRecord = makeCircleRecord(
+            circleID: "circle-1",
+            inviteCode: "ABC123",
+            memberLimit: 4,
+            memberRecordNames: [],
+            feedEventRecordNames: []
+        )
+        var savedRecordTypes: [String] = []
+        store.queryRecordsHandler = { recordType, predicate, _, _ in
+            if recordType == "BroCircle",
+               predicate.predicateFormat.contains("inviteCode")
+            {
+                return [circleRecord]
+            }
+            return []
+        }
+        store.saveHandler = { records, _ in
+            savedRecordTypes.append(contentsOf: records.map(\.recordType))
+        }
+
+        let service = CloudKitBrosSocialService(modelContext: context, cloudStore: store)
+        let snapshot = try await service.joinCircle(inviteCode: "ABC123")
+
+        #expect(snapshot.circle.circleID == "circle-1")
+        #expect(savedRecordTypes.contains("BroInviteLookup"))
+    }
+
     private func makeEvent(id: String, createdAt: Date) -> BroFeedEvent {
         BroFeedEvent(
             id: id,
@@ -221,5 +416,100 @@ struct BrosSocialServiceTests {
             joinedAt: Date(timeIntervalSince1970: joinedAt),
             role: role
         )
+    }
+
+    private func makeInMemoryContext() throws -> ModelContext {
+        let schema = Schema([
+            UserProfile.self,
+            SocialOutboxItem.self,
+        ])
+        let configuration = ModelConfiguration(
+            schema: schema,
+            isStoredInMemoryOnly: true,
+            cloudKitDatabase: .none
+        )
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        return ModelContext(container)
+    }
+
+    private func makeMembershipRecord(
+        recordName: String,
+        circleID: String,
+        userRecordName: String,
+        joinedAt: Date,
+        role: BroMembershipRole,
+        displayName: String = "Athlete"
+    ) -> CKRecord {
+        let record = CKRecord(
+            recordType: "BroMembership",
+            recordID: CKRecord.ID(recordName: recordName)
+        )
+        record["membershipID"] = recordName as CKRecordValue
+        record["circleID"] = circleID as CKRecordValue
+        record["userRecordName"] = userRecordName as CKRecordValue
+        record["displayName"] = displayName as CKRecordValue
+        record["joinedAt"] = joinedAt as CKRecordValue
+        record["role"] = role.rawValue as CKRecordValue
+        record["createdAt"] = joinedAt as CKRecordValue
+        record["updatedAt"] = joinedAt as CKRecordValue
+        return record
+    }
+
+    private func makeCircleRecord(
+        circleID: String,
+        inviteCode: String,
+        memberLimit: Int,
+        memberRecordNames: [String] = [],
+        feedEventRecordNames: [String] = []
+    ) -> CKRecord {
+        let record = CKRecord(
+            recordType: "BroCircle",
+            recordID: CKRecord.ID(recordName: circleID)
+        )
+        let createdAt = Date(timeIntervalSince1970: 100)
+        record["circleID"] = circleID as CKRecordValue
+        record["ownerUserRecordName"] = "owner-user" as CKRecordValue
+        record["inviteCode"] = inviteCode as CKRecordValue
+        record["memberLimit"] = memberLimit as CKRecordValue
+        record["memberRecordNames"] = memberRecordNames as CKRecordValue
+        record["feedEventRecordNames"] = feedEventRecordNames as CKRecordValue
+        record["createdAt"] = createdAt as CKRecordValue
+        record["updatedAt"] = createdAt as CKRecordValue
+        return record
+    }
+}
+
+private final class TestBrosCloudStore: BrosCloudStore {
+    var currentUserRecordNameValue = "user-1"
+    var queryRecordsHandler: (String, NSPredicate, [NSSortDescriptor], Int) async throws -> [CKRecord] = {
+        _, _, _, _ in []
+    }
+    var fetchRecordHandler: (String, String) async throws -> CKRecord? = { _, _ in nil }
+    var fetchRecordsHandler: (String, [String]) async throws -> [CKRecord] = { _, _ in [] }
+    var saveHandler: ([CKRecord], [CKRecord.ID]) async throws -> Void = { _, _ in }
+
+    func currentUserRecordName() async throws -> String {
+        currentUserRecordNameValue
+    }
+
+    func queryRecords(
+        recordType: String,
+        predicate: NSPredicate,
+        sortDescriptors: [NSSortDescriptor],
+        resultsLimit: Int
+    ) async throws -> [CKRecord] {
+        try await queryRecordsHandler(recordType, predicate, sortDescriptors, resultsLimit)
+    }
+
+    func fetchRecord(recordType: String, recordName: String) async throws -> CKRecord? {
+        try await fetchRecordHandler(recordType, recordName)
+    }
+
+    func fetchRecords(recordType: String, recordNames: [String]) async throws -> [CKRecord] {
+        try await fetchRecordsHandler(recordType, recordNames)
+    }
+
+    func save(records: [CKRecord], deleting recordIDs: [CKRecord.ID]) async throws {
+        try await saveHandler(records, recordIDs)
     }
 }
