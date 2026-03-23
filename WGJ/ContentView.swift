@@ -5,7 +5,6 @@ import UIKit
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
 
     @Query(sort: [SortDescriptor(\UserProfile.updatedAt, order: .reverse)])
     private var storedProfiles: [UserProfile]
@@ -89,8 +88,7 @@ struct ContentView: View {
     }
 
     private func runSocialMaintenance() async {
-        guard cloudSyncEnabled,
-              shouldRunSocialMaintenance(),
+        guard shouldRunSocialMaintenance(),
               let service = CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)
         else {
             return

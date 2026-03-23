@@ -36,7 +36,7 @@ final class AppRuntimeState {
     }
 
     var isBrosCloudAvailable: Bool {
-        AppRuntimeConfig.reviewPolicy.brosEnabled && cloudSyncEnabled
+        AppRuntimeConfig.reviewPolicy.brosEnabled
     }
 }
 

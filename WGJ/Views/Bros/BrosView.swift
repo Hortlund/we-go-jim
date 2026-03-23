@@ -32,6 +32,20 @@ final class BrosViewModel {
     var isJoiningCircle: Bool { pendingAction == .joinCircle }
 
     private var hasLoaded = false
+    private let accountStatusProvider: @MainActor () async -> AccountStatus
+    private let serviceFactory: @MainActor (ModelContext) -> (any BrosSocialService)?
+
+    init(
+        accountStatusProvider: @escaping @MainActor () async -> AccountStatus = {
+            await AccountStatusService().fetchAccountStatus()
+        },
+        serviceFactory: @escaping @MainActor (ModelContext) -> (any BrosSocialService)? = { modelContext in
+            CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)
+        }
+    ) {
+        self.accountStatusProvider = accountStatusProvider
+        self.serviceFactory = serviceFactory
+    }
 
     func loadIfNeeded(
         modelContext: ModelContext,
@@ -59,22 +73,20 @@ final class BrosViewModel {
         cloudSyncEnabled: Bool,
         cloudSyncErrorDescription: String?
     ) async {
+        _ = cloudSyncEnabled
+        _ = cloudSyncErrorDescription
+
         guard AppRuntimeConfig.reviewPolicy.brosEnabled else {
             state = .unavailable("Bros is disabled for this build.")
             return
         }
 
-        guard cloudSyncEnabled else {
-            state = .unavailable(localModeMessage(cloudSyncErrorDescription))
+        guard let service = serviceFactory(modelContext) else {
+            state = .unavailable(BrosSocialServiceError.unavailable.localizedDescription)
             return
         }
 
-        guard let service = CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext) else {
-            state = .unavailable(localModeMessage(cloudSyncErrorDescription))
-            return
-        }
-
-        let accountStatus = await AccountStatusService().fetchAccountStatus()
+        let accountStatus = await accountStatusProvider()
         switch accountStatus {
         case .available:
             break
@@ -223,19 +235,11 @@ final class BrosViewModel {
         }
     }
 
-    private func service(modelContext: ModelContext) throws -> CloudKitBrosSocialService {
-        guard let service = CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext) else {
+    private func service(modelContext: ModelContext) throws -> any BrosSocialService {
+        guard let service = serviceFactory(modelContext) else {
             throw BrosSocialServiceError.unavailable
         }
         return service
-    }
-
-    private func localModeMessage(_ cloudSyncErrorDescription: String?) -> String {
-        let base = "Bros needs iCloud and CloudKit. This run is currently using local-only mode, but the rest of the app still works."
-        guard let cloudSyncErrorDescription, !cloudSyncErrorDescription.isEmpty else {
-            return base
-        }
-        return "\(base)\n\n\(cloudSyncErrorDescription)"
     }
 }
 
