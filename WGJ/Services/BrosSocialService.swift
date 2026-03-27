@@ -1618,18 +1618,34 @@ final class CloudKitBrosSocialService: BrosSocialService {
         currentMembershipRecord: CKRecord?
     ) async throws -> IndexedRecordsResolution {
         let indexedRecordNames = recordNames(from: circleRecord, field: Field.memberRecordNames)
+        let circleID = circleRecord[Field.circleID] as? String ?? ""
 
-        var records: [CKRecord]
-        let canWriteBackIndex: Bool
+        var recordsByRecordName: [String: CKRecord] = [:]
+        var canWriteBackIndex = false
+
         if let indexedRecordNames {
-            records = try await fetchRecords(recordType: RecordType.membership, recordNames: indexedRecordNames)
+            let indexedRecords = try await fetchRecords(
+                recordType: RecordType.membership,
+                recordNames: indexedRecordNames
+            )
+            for record in indexedRecords {
+                recordsByRecordName[record.recordID.recordName] = record
+            }
             canWriteBackIndex = true
-        } else {
-            records = currentMembershipRecord.map { [$0] } ?? []
-            canWriteBackIndex = false
+        }
+
+        if !circleID.isEmpty {
+            let queriedRecords = try await memberships(circleID: circleID)
+            if !queriedRecords.isEmpty || indexedRecordNames == nil {
+                canWriteBackIndex = true
+                for record in queriedRecords {
+                    recordsByRecordName[record.recordID.recordName] = record
+                }
+            }
         }
 
         var didMutateCircleRecord = false
+        var records = Array(recordsByRecordName.values)
 
         if let currentMembershipRecord,
            !records.contains(where: { $0.recordID == currentMembershipRecord.recordID })
@@ -1661,17 +1677,33 @@ final class CloudKitBrosSocialService: BrosSocialService {
 
     private func resolvedFeedEventRecords(circleRecord: CKRecord) async throws -> IndexedRecordsResolution {
         let indexedRecordNames = recordNames(from: circleRecord, field: Field.feedEventRecordNames)
+        let circleID = circleRecord[Field.circleID] as? String ?? ""
 
-        var records: [CKRecord]
-        let canWriteBackIndex: Bool
+        var recordsByRecordName: [String: CKRecord] = [:]
+        var canWriteBackIndex = false
+
         if let indexedRecordNames {
-            records = try await fetchRecords(recordType: RecordType.feedEvent, recordNames: indexedRecordNames)
+            let indexedRecords = try await fetchRecords(
+                recordType: RecordType.feedEvent,
+                recordNames: indexedRecordNames
+            )
+            for record in indexedRecords {
+                recordsByRecordName[record.recordID.recordName] = record
+            }
             canWriteBackIndex = true
-        } else {
-            records = []
-            canWriteBackIndex = false
         }
 
+        if !circleID.isEmpty {
+            let queriedRecords = try await feedEventRecords(circleID: circleID)
+            if !queriedRecords.isEmpty || indexedRecordNames == nil {
+                canWriteBackIndex = true
+                for record in queriedRecords {
+                    recordsByRecordName[record.recordID.recordName] = record
+                }
+            }
+        }
+
+        var records = Array(recordsByRecordName.values)
         records.sort {
             let lhsCreatedAt = $0[Field.createdAt] as? Date ?? .distantPast
             let rhsCreatedAt = $1[Field.createdAt] as? Date ?? .distantPast
@@ -1748,7 +1780,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
             recordType: RecordType.membership,
             predicate: NSPredicate(format: "%K == %@", Field.circleID, circleID),
             sortDescriptors: [NSSortDescriptor(key: Field.joinedAt, ascending: true)],
-            resultsLimit: 8
+            resultsLimit: BrosSocialRules.maxMemberLimit
         )
     }
 

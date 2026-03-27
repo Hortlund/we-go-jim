@@ -14,6 +14,8 @@ enum BrosMutationAction: Equatable {
 @MainActor
 @Observable
 final class BrosViewModel {
+    private static let liveRefreshInterval: Duration = .seconds(3)
+
     enum ScreenState: Equatable {
         case loading
         case unavailable(String)
@@ -32,6 +34,7 @@ final class BrosViewModel {
     var isJoiningCircle: Bool { pendingAction == .joinCircle }
 
     private var hasLoaded = false
+    private var liveRefreshTask: Task<Void, Never>?
     private let accountStatusProvider: @MainActor () async -> AccountStatus
     private let serviceFactory: @MainActor (ModelContext) -> (any BrosSocialService)?
 
@@ -187,6 +190,24 @@ final class BrosViewModel {
         errorMessage = nil
     }
 
+    func startLiveRefresh(modelContext: ModelContext) {
+        guard liveRefreshTask == nil else { return }
+
+        liveRefreshTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: Self.liveRefreshInterval)
+                guard let self else { return }
+                guard self.pendingAction == nil else { continue }
+                await self.hydrateActiveSnapshot(modelContext: modelContext)
+            }
+        }
+    }
+
+    func stopLiveRefresh() {
+        liveRefreshTask?.cancel()
+        liveRefreshTask = nil
+    }
+
     private func runMutation(
         _ action: BrosMutationAction,
         _ operation: @escaping @MainActor () async throws -> Void
@@ -216,6 +237,10 @@ final class BrosViewModel {
             await service.refreshLocalMembershipState()
             if let snapshot = try await service.fetchSnapshot() {
                 state = .active(snapshot)
+            } else {
+                state = .onboarding
+                joinCode = ""
+                circleMemberLimit = BrosSocialRules.defaultMemberLimit
             }
         } catch {
             // Keep the optimistic active state instead of regressing to unavailable.
@@ -247,6 +272,7 @@ struct BrosView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
     @Environment(\.cloudSyncErrorDescription) private var cloudSyncErrorDescription
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
 
     @Query(sort: [SortDescriptor(\BlockedBro.blockedAt, order: .reverse)])
@@ -300,6 +326,15 @@ struct BrosView: View {
                 cloudSyncEnabled: cloudSyncEnabled,
                 cloudSyncErrorDescription: cloudSyncErrorDescription
             )
+        }
+        .onAppear {
+            updateLiveRefreshState()
+        }
+        .onDisappear {
+            viewModel.stopLiveRefresh()
+        }
+        .onChange(of: scenePhase) { _, _ in
+            updateLiveRefreshState()
         }
         .alert("Bros", isPresented: Binding(
             get: { viewModel.errorMessage != nil },
@@ -929,6 +964,14 @@ struct BrosView: View {
                 )
             }
         )
+    }
+
+    private func updateLiveRefreshState() {
+        if scenePhase == .active {
+            viewModel.startLiveRefresh(modelContext: modelContext)
+        } else {
+            viewModel.stopLiveRefresh()
+        }
     }
 }
 

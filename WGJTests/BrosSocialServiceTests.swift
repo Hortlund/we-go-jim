@@ -468,6 +468,308 @@ struct BrosSocialServiceTests {
     }
 
     @Test
+    func fetchSnapshotRepairsStaleMemberIndexFromCircleMembershipQuery() async throws {
+        let context = try makeInMemoryContext()
+        let joinedAt = Date(timeIntervalSince1970: 100)
+        let profile = try ProfileRepository(modelContext: context).loadOrCreateProfile()
+        profile.updateBrosMembership(
+            circleID: "circle-1",
+            membershipID: "membership-circle-1-user-1",
+            userRecordName: "user-1",
+            joinedAt: joinedAt,
+            role: .owner
+        )
+        try context.save()
+
+        let ownerMembership = makeMembershipRecord(
+            recordName: "membership-circle-1-user-1",
+            circleID: "circle-1",
+            userRecordName: "user-1",
+            joinedAt: joinedAt,
+            role: .owner,
+            displayName: "Atlas"
+        )
+        let joinedMembership = makeMembershipRecord(
+            recordName: "membership-circle-1-user-2",
+            circleID: "circle-1",
+            userRecordName: "user-2",
+            joinedAt: Date(timeIntervalSince1970: 140),
+            role: .member,
+            displayName: "Brody"
+        )
+        let circleRecord = makeCircleRecord(
+            circleID: "circle-1",
+            inviteCode: "ABC123",
+            memberLimit: 4,
+            memberRecordNames: [ownerMembership.recordID.recordName]
+        )
+
+        var savedMemberRecordNames: [String] = []
+        let store = TestBrosCloudStore()
+        store.currentUserRecordNameValue = "user-1"
+        store.fetchRecordHandler = { recordType, recordName in
+            switch (recordType, recordName) {
+            case ("BroMembership", ownerMembership.recordID.recordName):
+                return ownerMembership
+            case ("BroCircle", "circle-1"):
+                return circleRecord
+            default:
+                return nil
+            }
+        }
+        store.fetchRecordsHandler = { recordType, recordNames in
+            guard recordType == "BroMembership",
+                  recordNames == [ownerMembership.recordID.recordName]
+            else {
+                return []
+            }
+            return [ownerMembership]
+        }
+        store.queryRecordsHandler = { recordType, predicate, _, _ in
+            if recordType == "BroMembership",
+               predicate.predicateFormat.contains("circleID")
+            {
+                return [ownerMembership, joinedMembership]
+            }
+            return []
+        }
+        store.saveHandler = { records, _ in
+            guard let savedCircle = records.first(where: { $0.recordType == "BroCircle" }) else {
+                return
+            }
+            savedMemberRecordNames = (savedCircle["memberRecordNames"] as? [String]) ?? []
+        }
+
+        let service = CloudKitBrosSocialService(modelContext: context, cloudStore: store)
+        let snapshot = try await service.fetchSnapshot()
+
+        let resolved = try #require(snapshot)
+        #expect(resolved.members.map(\.userRecordName) == ["user-1", "user-2"])
+        #expect(savedMemberRecordNames == [
+            ownerMembership.recordID.recordName,
+            joinedMembership.recordID.recordName,
+        ])
+    }
+
+    @Test
+    func fetchSnapshotRepairsStaleFeedIndexFromCircleFeedQuery() async throws {
+        let context = try makeInMemoryContext()
+        let joinedAt = Date(timeIntervalSince1970: 100)
+        let profile = try ProfileRepository(modelContext: context).loadOrCreateProfile()
+        profile.updateBrosMembership(
+            circleID: "circle-1",
+            membershipID: "membership-circle-1-user-1",
+            userRecordName: "user-1",
+            joinedAt: joinedAt,
+            role: .owner
+        )
+        try context.save()
+
+        let ownerMembership = makeMembershipRecord(
+            recordName: "membership-circle-1-user-1",
+            circleID: "circle-1",
+            userRecordName: "user-1",
+            joinedAt: joinedAt,
+            role: .owner,
+            displayName: "Atlas"
+        )
+        let indexedEvent = makeWorkoutFeedEventRecord(
+            recordName: "workout-indexed",
+            circleID: "circle-1",
+            actorUserRecordName: "user-1",
+            actorMembershipID: ownerMembership.recordID.recordName,
+            actorDisplayName: "Atlas",
+            createdAt: Date(timeIntervalSince1970: 130),
+            workoutName: "Push Day"
+        )
+        let queriedEvent = makeWorkoutFeedEventRecord(
+            recordName: "workout-queried",
+            circleID: "circle-1",
+            actorUserRecordName: "user-1",
+            actorMembershipID: ownerMembership.recordID.recordName,
+            actorDisplayName: "Atlas",
+            createdAt: Date(timeIntervalSince1970: 160),
+            workoutName: "Pull Day"
+        )
+        let circleRecord = makeCircleRecord(
+            circleID: "circle-1",
+            inviteCode: "ABC123",
+            memberLimit: 4,
+            memberRecordNames: [ownerMembership.recordID.recordName],
+            feedEventRecordNames: [indexedEvent.recordID.recordName]
+        )
+
+        var savedFeedEventRecordNames: [String] = []
+        let store = TestBrosCloudStore()
+        store.currentUserRecordNameValue = "user-1"
+        store.fetchRecordHandler = { recordType, recordName in
+            switch (recordType, recordName) {
+            case ("BroMembership", ownerMembership.recordID.recordName):
+                return ownerMembership
+            case ("BroCircle", "circle-1"):
+                return circleRecord
+            default:
+                return nil
+            }
+        }
+        store.fetchRecordsHandler = { recordType, recordNames in
+            if recordType == "BroMembership",
+               recordNames == [ownerMembership.recordID.recordName]
+            {
+                return [ownerMembership]
+            }
+
+            if recordType == "BroFeedEvent",
+               recordNames == [indexedEvent.recordID.recordName]
+            {
+                return [indexedEvent]
+            }
+
+            return []
+        }
+        store.queryRecordsHandler = { recordType, predicate, _, _ in
+            if recordType == "BroMembership",
+               predicate.predicateFormat.contains("circleID")
+            {
+                return [ownerMembership]
+            }
+
+            if recordType == "BroFeedEvent",
+               predicate.predicateFormat.contains("circleID")
+            {
+                return [queriedEvent, indexedEvent]
+            }
+
+            return []
+        }
+        store.saveHandler = { records, _ in
+            guard let savedCircle = records.first(where: { $0.recordType == "BroCircle" }) else {
+                return
+            }
+            savedFeedEventRecordNames = (savedCircle["feedEventRecordNames"] as? [String]) ?? []
+        }
+
+        let service = CloudKitBrosSocialService(modelContext: context, cloudStore: store)
+        let snapshot = try await service.fetchSnapshot()
+
+        let resolved = try #require(snapshot)
+        #expect(resolved.feedEvents.map(\.id) == [
+            queriedEvent.recordID.recordName,
+            indexedEvent.recordID.recordName,
+        ])
+        #expect(savedFeedEventRecordNames == [
+            queriedEvent.recordID.recordName,
+            indexedEvent.recordID.recordName,
+        ])
+    }
+
+    @Test
+    func fetchSnapshotPreservesReactionsForQueriedFeedEventsOutsideStaleIndex() async throws {
+        let context = try makeInMemoryContext()
+        let joinedAt = Date(timeIntervalSince1970: 100)
+        let profile = try ProfileRepository(modelContext: context).loadOrCreateProfile()
+        profile.updateBrosMembership(
+            circleID: "circle-1",
+            membershipID: "membership-circle-1-user-1",
+            userRecordName: "user-1",
+            joinedAt: joinedAt,
+            role: .owner
+        )
+        try context.save()
+
+        let ownerMembership = makeMembershipRecord(
+            recordName: "membership-circle-1-user-1",
+            circleID: "circle-1",
+            userRecordName: "user-1",
+            joinedAt: joinedAt,
+            role: .owner,
+            displayName: "Atlas"
+        )
+        let indexedEvent = makeWorkoutFeedEventRecord(
+            recordName: "workout-indexed",
+            circleID: "circle-1",
+            actorUserRecordName: "user-1",
+            actorMembershipID: ownerMembership.recordID.recordName,
+            actorDisplayName: "Atlas",
+            createdAt: Date(timeIntervalSince1970: 130),
+            workoutName: "Push Day"
+        )
+        let expectedReaction = BroReactionSummary(
+            userRecordName: "user-2",
+            emoji: .fire,
+            displayName: "Brody"
+        )
+        let queriedEvent = makeWorkoutFeedEventRecord(
+            recordName: "workout-queried",
+            circleID: "circle-1",
+            actorUserRecordName: "user-1",
+            actorMembershipID: ownerMembership.recordID.recordName,
+            actorDisplayName: "Atlas",
+            createdAt: Date(timeIntervalSince1970: 160),
+            workoutName: "Pull Day",
+            reactions: [expectedReaction]
+        )
+        let circleRecord = makeCircleRecord(
+            circleID: "circle-1",
+            inviteCode: "ABC123",
+            memberLimit: 4,
+            memberRecordNames: [ownerMembership.recordID.recordName],
+            feedEventRecordNames: [indexedEvent.recordID.recordName]
+        )
+
+        let store = TestBrosCloudStore()
+        store.currentUserRecordNameValue = "user-1"
+        store.fetchRecordHandler = { recordType, recordName in
+            switch (recordType, recordName) {
+            case ("BroMembership", ownerMembership.recordID.recordName):
+                return ownerMembership
+            case ("BroCircle", "circle-1"):
+                return circleRecord
+            default:
+                return nil
+            }
+        }
+        store.fetchRecordsHandler = { recordType, recordNames in
+            if recordType == "BroMembership",
+               recordNames == [ownerMembership.recordID.recordName]
+            {
+                return [ownerMembership]
+            }
+
+            if recordType == "BroFeedEvent",
+               recordNames == [indexedEvent.recordID.recordName]
+            {
+                return [indexedEvent]
+            }
+
+            return []
+        }
+        store.queryRecordsHandler = { recordType, predicate, _, _ in
+            if recordType == "BroMembership",
+               predicate.predicateFormat.contains("circleID")
+            {
+                return [ownerMembership]
+            }
+
+            if recordType == "BroFeedEvent",
+               predicate.predicateFormat.contains("circleID")
+            {
+                return [queriedEvent, indexedEvent]
+            }
+
+            return []
+        }
+
+        let service = CloudKitBrosSocialService(modelContext: context, cloudStore: store)
+        let snapshot = try await service.fetchSnapshot()
+
+        let resolved = try #require(snapshot)
+        let firstEvent = try #require(resolved.feedEvents.first)
+        #expect(firstEvent.id == queriedEvent.recordID.recordName)
+        #expect(firstEvent.reactions == [expectedReaction])
+    }
+
+    @Test
     func fetchSnapshotSurfacesCloudKitDiagnosticWhenMembershipLookupFails() async throws {
         let context = try makeInMemoryContext()
         let profile = try ProfileRepository(modelContext: context).loadOrCreateProfile()
@@ -536,6 +838,91 @@ struct BrosSocialServiceTests {
 
         #expect(snapshot.circle.circleID == "circle-1")
         #expect(savedRecordTypes.contains("BroInviteLookup"))
+    }
+
+    @Test
+    func joinCircleRepairsStaleMemberIndexBeforeBuildingSnapshot() async throws {
+        let context = try makeInMemoryContext()
+        let ownerMembership = makeMembershipRecord(
+            recordName: "membership-circle-1-user-1",
+            circleID: "circle-1",
+            userRecordName: "user-1",
+            joinedAt: Date(timeIntervalSince1970: 100),
+            role: .owner,
+            displayName: "Atlas"
+        )
+        let existingMembership = makeMembershipRecord(
+            recordName: "membership-circle-1-user-2",
+            circleID: "circle-1",
+            userRecordName: "user-2",
+            joinedAt: Date(timeIntervalSince1970: 120),
+            role: .member,
+            displayName: "Brock"
+        )
+        let circleRecord = makeCircleRecord(
+            circleID: "circle-1",
+            inviteCode: "ABC123",
+            memberLimit: 4,
+            memberRecordNames: [ownerMembership.recordID.recordName]
+        )
+        let inviteLookupRecord = CKRecord(
+            recordType: "BroInviteLookup",
+            recordID: CKRecord.ID(recordName: "ABC123")
+        )
+        inviteLookupRecord["circleID"] = "circle-1" as CKRecordValue
+
+        var savedMemberRecordNames: [String] = []
+        let store = TestBrosCloudStore()
+        store.currentUserRecordNameValue = "user-3"
+        store.fetchRecordHandler = { recordType, recordName in
+            switch (recordType, recordName) {
+            case ("BroInviteLookup", "ABC123"):
+                return inviteLookupRecord
+            case ("BroCircle", "circle-1"):
+                return circleRecord
+            default:
+                return nil
+            }
+        }
+        store.fetchRecordsHandler = { recordType, recordNames in
+            guard recordType == "BroMembership",
+                  recordNames == [ownerMembership.recordID.recordName]
+            else {
+                return []
+            }
+            return [ownerMembership]
+        }
+        store.queryRecordsHandler = { recordType, predicate, _, _ in
+            if recordType == "BroMembership",
+               predicate.predicateFormat.contains("userRecordName")
+            {
+                return []
+            }
+
+            if recordType == "BroMembership",
+               predicate.predicateFormat.contains("circleID")
+            {
+                return [ownerMembership, existingMembership]
+            }
+
+            return []
+        }
+        store.saveHandler = { records, _ in
+            guard let savedCircle = records.first(where: { $0.recordType == "BroCircle" }) else {
+                return
+            }
+            savedMemberRecordNames = (savedCircle["memberRecordNames"] as? [String]) ?? []
+        }
+
+        let service = CloudKitBrosSocialService(modelContext: context, cloudStore: store)
+        let snapshot = try await service.joinCircle(inviteCode: "ABC123")
+
+        #expect(snapshot.members.map(\.userRecordName) == ["user-1", "user-2", "user-3"])
+        #expect(savedMemberRecordNames == [
+            ownerMembership.recordID.recordName,
+            existingMembership.recordID.recordName,
+            "membership_circle-1_user-3",
+        ])
     }
 
     private func makeEvent(id: String, createdAt: Date) -> BroFeedEvent {
@@ -607,6 +994,36 @@ struct BrosSocialServiceTests {
         record["role"] = role.rawValue as CKRecordValue
         record["createdAt"] = joinedAt as CKRecordValue
         record["updatedAt"] = joinedAt as CKRecordValue
+        return record
+    }
+
+    private func makeWorkoutFeedEventRecord(
+        recordName: String,
+        circleID: String,
+        actorUserRecordName: String,
+        actorMembershipID: String,
+        actorDisplayName: String,
+        createdAt: Date,
+        workoutName: String,
+        reactions: [BroReactionSummary] = []
+    ) -> CKRecord {
+        let record = CKRecord(
+            recordType: "BroFeedEvent",
+            recordID: CKRecord.ID(recordName: recordName)
+        )
+        record["circleID"] = circleID as CKRecordValue
+        record["actorUserRecordName"] = actorUserRecordName as CKRecordValue
+        record["actorMembershipID"] = actorMembershipID as CKRecordValue
+        record["actorDisplayName"] = actorDisplayName as CKRecordValue
+        record["kind"] = BroFeedEventKind.workoutCompleted.rawValue as CKRecordValue
+        record["workoutName"] = workoutName as CKRecordValue
+        record["durationSeconds"] = 3600 as CKRecordValue
+        record["totalVolume"] = 1000.0 as CKRecordValue
+        record["prCount"] = 1 as CKRecordValue
+        record["exercisePreviewText"] = "Bench Press\nRows" as CKRecordValue
+        record["reactionsPayload"] = BrosCloudRecordCoder.encodeReactions(reactions) as CKRecordValue?
+        record["createdAt"] = createdAt as CKRecordValue
+        record["updatedAt"] = createdAt as CKRecordValue
         return record
     }
 
