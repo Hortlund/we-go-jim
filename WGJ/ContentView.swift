@@ -5,6 +5,7 @@ import UIKit
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
 
     @Query(sort: [SortDescriptor(\UserProfile.updatedAt, order: .reverse)])
     private var storedProfiles: [UserProfile]
@@ -13,6 +14,7 @@ struct ContentView: View {
     @State private var activeWorkoutCoordinator = ActiveWorkoutCoordinator()
     @State private var catalogSyncCoordinator = CatalogSyncCoordinator()
     @State private var appMaintenanceTask: Task<Void, Never>?
+    @State private var isPreparingMainPhase = false
 
     var body: some View {
         Group {
@@ -24,9 +26,7 @@ struct ContentView: View {
                     }
             case .login:
                 LoginGateView {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        appPhase = .main
-                    }
+                    await prepareAndEnterMainPhase()
                 }
             case .main:
                 MainTabView()
@@ -53,6 +53,9 @@ struct ContentView: View {
             updateIdleTimerState()
         }
         .onChange(of: storedProfiles.first?.updatedAt) { _, _ in
+            if appPhase == .main {
+                scheduleAppMaintenance()
+            }
             updateIdleTimerState()
         }
         .onReceive(NotificationCenter.default.publisher(for: .wgjDidDeleteAllUserData)) { _ in
@@ -63,16 +66,38 @@ struct ContentView: View {
     private func transitionFromSplashIfNeeded() async {
         guard appPhase == .splash else { return }
         if ProcessInfo.processInfo.arguments.contains(AppStartupRouting.skipSplashArgument) {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                appPhase = AppStartupRouting.destinationAfterSplash
-            }
+            await transition(to: AppStartupRouting.destinationAfterSplash)
             return
         }
         try? await Task.sleep(for: .seconds(1.1))
 
         guard appPhase == .splash else { return }
+        await transition(to: AppStartupRouting.destinationAfterSplash)
+    }
+
+    private func transition(to destination: AppPhase) async {
+        switch destination {
+        case .splash:
+            return
+        case .login:
+            withAnimation(.easeInOut(duration: 0.2)) {
+                appPhase = .login
+            }
+        case .main:
+            await prepareAndEnterMainPhase()
+        }
+    }
+
+    private func prepareAndEnterMainPhase() async {
+        guard !isPreparingMainPhase else { return }
+        isPreparingMainPhase = true
+        defer { isPreparingMainPhase = false }
+
+        await bootstrapProfileIdentityIfNeeded()
+
+        guard appPhase != .main else { return }
         withAnimation(.easeInOut(duration: 0.2)) {
-            appPhase = AppStartupRouting.destinationAfterSplash
+            appPhase = .main
         }
     }
 
@@ -122,6 +147,16 @@ struct ContentView: View {
         updateIdleTimerState()
         withAnimation(.easeInOut(duration: 0.2)) {
             appPhase = .splash
+        }
+    }
+
+    private func bootstrapProfileIdentityIfNeeded() async {
+        let repository = ProfileRepository(modelContext: modelContext)
+
+        do {
+            _ = try await repository.bootstrapProfileIdentity(cloudSyncEnabled: cloudSyncEnabled)
+        } catch {
+            _ = try? repository.loadOrCreateProfile()
         }
     }
 

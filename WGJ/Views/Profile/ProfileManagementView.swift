@@ -6,6 +6,7 @@ import UIKit
 struct ProfileManagementView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
 
     @State private var displayName = ""
     @State private var savedDisplayName = ""
@@ -214,7 +215,7 @@ struct ProfileManagementView: View {
         hasLoadedProfile = true
 
         do {
-            let profile = try profileRepository.loadOrCreateProfile()
+            let profile = try await profileRepository.bootstrapProfileIdentity(cloudSyncEnabled: cloudSyncEnabled)
             displayName = profile.displayName
             savedDisplayName = profile.displayName
             athleteType = profile.athleteType
@@ -336,4 +337,5 @@ struct ProfileAvatarView: View {
         WorkoutSessionExercise.self,
         WorkoutSessionSet.self,
     ], inMemory: true)
+    .environment(\.cloudSyncEnabled, false)
 }

@@ -6,7 +6,7 @@ struct LoginGateView: View {
     @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
 
     private let accountService: any AccountStatusProviding
-    private let onAuthenticated: () -> Void
+    private let onAuthenticated: @MainActor () async -> Void
 
     @State private var accountStatus: AccountStatus = .checking
     @State private var isSeedingDemoData = false
@@ -15,7 +15,7 @@ struct LoginGateView: View {
 
     init(
         accountService: any AccountStatusProviding = AccountStatusService(),
-        onAuthenticated: @escaping () -> Void
+        onAuthenticated: @escaping @MainActor () async -> Void
     ) {
         self.accountService = accountService
         self.onAuthenticated = onAuthenticated
@@ -97,7 +97,9 @@ struct LoginGateView: View {
         case .available:
             VStack(spacing: 10) {
                 Button {
-                    onAuthenticated()
+                    Task {
+                        await onAuthenticated()
+                    }
                 } label: {
                     Label("Continue with iCloud", systemImage: "arrow.right.circle.fill")
                         .frame(maxWidth: .infinity)
@@ -129,7 +131,9 @@ struct LoginGateView: View {
                     .multilineTextAlignment(.center)
 
                 Button {
-                    onAuthenticated()
+                    Task {
+                        await onAuthenticated()
+                    }
                 } label: {
                     Label("Continue Locally", systemImage: "arrow.right.circle.fill")
                         .frame(maxWidth: .infinity)
@@ -154,7 +158,9 @@ struct LoginGateView: View {
             icon: "internaldrive"
         ) {
             Button {
-                onAuthenticated()
+                Task {
+                    await onAuthenticated()
+                }
             } label: {
                 Label("Continue Locally", systemImage: "arrow.right.circle.fill")
                     .frame(maxWidth: .infinity)
@@ -255,4 +261,5 @@ struct LoginGateView: View {
             TemplateExercise.self,
             TemplateExerciseSet.self,
         ], inMemory: true)
+        .environment(\.cloudSyncEnabled, false)
 }

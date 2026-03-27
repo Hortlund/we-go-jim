@@ -520,6 +520,68 @@ struct WGJTests {
     }
 
     @Test
+    func profileRepositoryBootstrapsProfileWithICloudNameWhenAvailable() async throws {
+        let context = try makeInMemoryContext()
+        let repository = ProfileRepository(modelContext: context)
+
+        let profile = try await repository.bootstrapProfileIdentity(
+            cloudSyncEnabled: true,
+            defaultDisplayNameProvider: MockProfileDefaultDisplayNameProvider(displayName: "Cloud Bro")
+        )
+
+        #expect(profile.displayName == "Cloud Bro")
+    }
+
+    @Test
+    func profileRepositoryUpgradesFallbackNameWhenCloudNameArrivesLater() async throws {
+        let context = try makeInMemoryContext()
+        let repository = ProfileRepository(modelContext: context)
+
+        let created = try repository.loadOrCreateProfile()
+        #expect(created.displayName == "Athlete")
+
+        let updated = try await repository.bootstrapProfileIdentity(
+            cloudSyncEnabled: true,
+            defaultDisplayNameProvider: MockProfileDefaultDisplayNameProvider(displayName: "Cloud Bro")
+        )
+
+        #expect(updated.id == created.id)
+        #expect(updated.displayName == "Cloud Bro")
+    }
+
+    @Test
+    func profileRepositoryKeepsAthleteWhenRunningFullyLocal() async throws {
+        let context = try makeInMemoryContext()
+        let repository = ProfileRepository(modelContext: context)
+
+        let profile = try await repository.bootstrapProfileIdentity(
+            cloudSyncEnabled: false,
+            defaultDisplayNameProvider: MockProfileDefaultDisplayNameProvider(displayName: "Cloud Bro")
+        )
+
+        #expect(profile.displayName == "Athlete")
+    }
+
+    @Test
+    func profileRepositoryDoesNotOverwriteCustomIdentityName() async throws {
+        let context = try makeInMemoryContext()
+        let repository = ProfileRepository(modelContext: context)
+
+        try repository.saveProfile(
+            name: "Local Bro",
+            athleteType: nil,
+            avatarImageData: nil
+        )
+
+        let profile = try await repository.bootstrapProfileIdentity(
+            cloudSyncEnabled: true,
+            defaultDisplayNameProvider: MockProfileDefaultDisplayNameProvider(displayName: "Cloud Bro")
+        )
+
+        #expect(profile.displayName == "Local Bro")
+    }
+
+    @Test
     func profileRepositoryPersistsTrainingGuidancePreference() throws {
         let context = try makeInMemoryContext()
         let repository = ProfileRepository(modelContext: context)
@@ -657,6 +719,14 @@ struct WGJTests {
         )
         let container = try ModelContainer(for: schema, configurations: [configuration])
         return ModelContext(container)
+    }
+}
+
+private struct MockProfileDefaultDisplayNameProvider: ProfileDefaultDisplayNameProviding {
+    let displayName: String?
+
+    func defaultDisplayName() async -> String? {
+        displayName
     }
 }
 

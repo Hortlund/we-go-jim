@@ -208,6 +208,11 @@ final class BrosViewModel {
         liveRefreshTask = nil
     }
 
+    func refreshActiveSnapshotIfNeeded(modelContext: ModelContext) async {
+        guard pendingAction == nil else { return }
+        await hydrateActiveSnapshot(modelContext: modelContext)
+    }
+
     private func runMutation(
         _ action: BrosMutationAction,
         _ operation: @escaping @MainActor () async throws -> Void
@@ -225,7 +230,7 @@ final class BrosViewModel {
 
     private func scheduleBackgroundHydration(modelContext: ModelContext) {
         Task { @MainActor [weak self] in
-            await self?.hydrateActiveSnapshot(modelContext: modelContext)
+            await self?.refreshActiveSnapshotIfNeeded(modelContext: modelContext)
         }
     }
 
@@ -275,6 +280,8 @@ struct BrosView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
 
+    @Query(sort: [SortDescriptor(\UserProfile.updatedAt, order: .reverse)])
+    private var storedProfiles: [UserProfile]
     @Query(sort: [SortDescriptor(\BlockedBro.blockedAt, order: .reverse)])
     private var blockedBros: [BlockedBro]
 
@@ -335,6 +342,11 @@ struct BrosView: View {
         }
         .onChange(of: scenePhase) { _, _ in
             updateLiveRefreshState()
+        }
+        .onChange(of: storedProfiles.first?.updatedAt) { _, _ in
+            Task {
+                await viewModel.refreshActiveSnapshotIfNeeded(modelContext: modelContext)
+            }
         }
         .alert("Bros", isPresented: Binding(
             get: { viewModel.errorMessage != nil },
@@ -969,6 +981,9 @@ struct BrosView: View {
     private func updateLiveRefreshState() {
         if scenePhase == .active {
             viewModel.startLiveRefresh(modelContext: modelContext)
+            Task {
+                await viewModel.refreshActiveSnapshotIfNeeded(modelContext: modelContext)
+            }
         } else {
             viewModel.stopLiveRefresh()
         }

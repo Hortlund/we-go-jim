@@ -3,6 +3,10 @@ import SwiftData
 
 @MainActor
 final class ProfileRepository {
+    private static var localDefaultDisplayName: String {
+        ReviewModerationService.sanitizedForSharing("Athlete", kind: .displayName)
+    }
+
     private let modelContext: ModelContext
 
     init(modelContext: ModelContext) {
@@ -23,7 +27,36 @@ final class ProfileRepository {
             return existing
         }
 
-        let profile = UserProfile(displayName: ReviewModerationService.sanitizedForSharing("Athlete", kind: .displayName))
+        let profile = UserProfile(displayName: Self.localDefaultDisplayName)
+        modelContext.insert(profile)
+        try modelContext.save()
+        return profile
+    }
+
+    @discardableResult
+    func bootstrapProfileIdentity(
+        cloudSyncEnabled: Bool,
+        defaultDisplayNameProvider: (any ProfileDefaultDisplayNameProviding)? = nil
+    ) async throws -> UserProfile {
+        let defaultDisplayNameProvider = defaultDisplayNameProvider ?? ICloudProfileDefaultDisplayNameProvider()
+        let preferredDisplayName = await resolvedDefaultDisplayName(
+            cloudSyncEnabled: cloudSyncEnabled,
+            defaultDisplayNameProvider: defaultDisplayNameProvider
+        )
+
+        if let existing = try currentProfile() {
+            guard shouldReplaceDefaultDisplayName(for: existing, with: preferredDisplayName) else {
+                return existing
+            }
+
+            existing.displayName = preferredDisplayName
+            existing.updatedAt = .now
+            try modelContext.save()
+            try? CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)?.queueCurrentProfileSync()
+            return existing
+        }
+
+        let profile = UserProfile(displayName: preferredDisplayName)
         modelContext.insert(profile)
         try modelContext.save()
         return profile
@@ -94,5 +127,31 @@ final class ProfileRepository {
         profile.preferredWeightUnit = unit
         profile.updatedAt = .now
         try modelContext.save()
+    }
+
+    private func resolvedDefaultDisplayName(
+        cloudSyncEnabled: Bool,
+        defaultDisplayNameProvider: any ProfileDefaultDisplayNameProviding
+    ) async -> String {
+        guard cloudSyncEnabled,
+              let preferredName = await defaultDisplayNameProvider.defaultDisplayName(),
+              !preferredName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            return Self.localDefaultDisplayName
+        }
+
+        return ReviewModerationService.sanitizedForSharing(preferredName, kind: .displayName)
+    }
+
+    private func shouldReplaceDefaultDisplayName(
+        for profile: UserProfile,
+        with preferredDisplayName: String
+    ) -> Bool {
+        let currentName = profile.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard currentName.isEmpty || currentName == Self.localDefaultDisplayName else {
+            return false
+        }
+
+        return currentName != preferredDisplayName
     }
 }

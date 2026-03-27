@@ -144,6 +144,7 @@ struct MainTabView: View {
 #Preview {
     MainTabView()
         .environment(ActiveWorkoutCoordinator())
+        .environment(\.cloudSyncEnabled, false)
         .modelContainer(for: [
             ExerciseCatalogItem.self,
             MuscleGroup.self,

@@ -706,7 +706,13 @@ final class CloudKitBrosSocialService: BrosSocialService {
             )
         }
 
-        let currentMembership = try await memberSummary(from: membershipRecord)
+        let remoteCurrentMembership = try await memberSummary(from: membershipRecord)
+        let currentMembership = resolvedCurrentMemberSummary(
+            remoteSummary: remoteCurrentMembership,
+            remoteUpdatedAt: membershipRecord[Field.updatedAt] as? Date,
+            localProfile: localProfile,
+            currentUserRecordName: userRecordName
+        )
         let circleRecord: CKRecord
         switch await resolvedCircleRecord(circleID: currentMembership.circleID) {
         case .found(let record):
@@ -726,7 +732,12 @@ final class CloudKitBrosSocialService: BrosSocialService {
             currentMembershipRecord: membershipRecord
         )
         let membershipRecords = membershipResolution.records
-        let members = try await membershipRecords.asyncMap { try await memberSummary(from: $0) }
+        let members = try await membershipRecords.asyncMap { record in
+            if record.recordID == membershipRecord.recordID {
+                return currentMembership
+            }
+            return try await memberSummary(from: record)
+        }
         let membersByRecordName = Dictionary(uniqueKeysWithValues: members.map { ($0.userRecordName, $0) })
 
         let feedEventResolution = try await resolvedFeedEventRecords(circleRecord: circleRecord)
@@ -802,7 +813,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
         return BrosFeedSnapshot(
             circle: circle,
             currentMember: currentMembership,
-            members: members.sorted { $0.joinedAt < $1.joinedAt },
+            members: sortedMembers(members),
             feedEvents: filteredEvents
         )
     }
@@ -819,17 +830,10 @@ final class CloudKitBrosSocialService: BrosSocialService {
         }
         membersByID[currentMember.id] = currentMember
 
-        let members = membersByID.values.sorted { lhs, rhs in
-            if lhs.joinedAt != rhs.joinedAt {
-                return lhs.joinedAt < rhs.joinedAt
-            }
-            return lhs.displayName.localizedStandardCompare(rhs.displayName) == .orderedAscending
-        }
-
         return BrosFeedSnapshot(
             circle: circle,
             currentMember: currentMember,
-            members: members,
+            members: sortedMembers(Array(membersByID.values)),
             feedEvents: []
         )
     }
@@ -854,6 +858,15 @@ final class CloudKitBrosSocialService: BrosSocialService {
             joinedAt: joinedAt,
             role: role
         )
+    }
+
+    private func sortedMembers(_ members: [BroMemberSummary]) -> [BroMemberSummary] {
+        members.sorted { lhs, rhs in
+            if lhs.joinedAt != rhs.joinedAt {
+                return lhs.joinedAt < rhs.joinedAt
+            }
+            return lhs.displayName.localizedStandardCompare(rhs.displayName) == .orderedAscending
+        }
     }
 
     func createCircle(memberLimit: Int) async throws -> BrosFeedSnapshot {
@@ -1918,6 +1931,44 @@ final class CloudKitBrosSocialService: BrosSocialService {
             avatarImageData: avatarImageData,
             joinedAt: record[Field.joinedAt] as? Date ?? .now,
             role: BroMembershipRole(rawValue: record[Field.role] as? String ?? "") ?? .member
+        )
+    }
+
+    private func resolvedCurrentMemberSummary(
+        remoteSummary: BroMemberSummary,
+        remoteUpdatedAt: Date?,
+        localProfile: UserProfile?,
+        currentUserRecordName: String
+    ) -> BroMemberSummary {
+        guard let localProfile else {
+            return remoteSummary
+        }
+
+        guard remoteSummary.userRecordName == currentUserRecordName else {
+            return remoteSummary
+        }
+
+        if let localMembershipID = localProfile.brosMembershipID,
+           !localMembershipID.isEmpty,
+           localMembershipID != remoteSummary.id
+        {
+            return remoteSummary
+        }
+
+        let remoteIdentityUpdatedAt = remoteUpdatedAt ?? remoteSummary.joinedAt
+        guard localProfile.updatedAt >= remoteIdentityUpdatedAt else {
+            return remoteSummary
+        }
+
+        return BroMemberSummary(
+            id: remoteSummary.id,
+            circleID: remoteSummary.circleID,
+            userRecordName: remoteSummary.userRecordName,
+            displayName: displayName(from: localProfile),
+            athleteType: athleteType(from: localProfile),
+            avatarImageData: localProfile.avatarImageData,
+            joinedAt: remoteSummary.joinedAt,
+            role: remoteSummary.role
         )
     }
 

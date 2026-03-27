@@ -3,6 +3,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
 
     @Query private var catalogExercises: [ExerciseCatalogItem]
 
@@ -271,7 +272,7 @@ struct SettingsView: View {
         hasLoadedProfile = true
 
         do {
-            let profile = try profileRepository.loadOrCreateProfile()
+            let profile = try await profileRepository.bootstrapProfileIdentity(cloudSyncEnabled: cloudSyncEnabled)
             weeklyGoal = profile.weeklyWorkoutGoal
             isTrainingGuidanceEnabled = profile.isTrainingGuidanceEnabled
             keepsScreenAwake = profile.keepsScreenAwake
@@ -401,4 +402,5 @@ struct SettingsView: View {
         WorkoutSessionExercise.self,
         WorkoutSessionSet.self,
     ], inMemory: true)
+    .environment(\.cloudSyncEnabled, false)
 }

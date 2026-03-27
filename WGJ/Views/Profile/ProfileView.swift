@@ -4,6 +4,7 @@ import SwiftUI
 
 struct ProfileView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
 
     @Query(sort: [SortDescriptor(\WorkoutSession.updatedAt, order: .reverse)])
     private var trackedSessions: [WorkoutSession]
@@ -562,7 +563,7 @@ struct ProfileView: View {
         hasLoadedProfile = true
 
         do {
-            let profile = try profileRepository.loadOrCreateProfile()
+            let profile = try await profileRepository.bootstrapProfileIdentity(cloudSyncEnabled: cloudSyncEnabled)
             dashboardContent.weeklyGoal = profile.weeklyWorkoutGoal
         } catch {
             showError(error)
@@ -859,4 +860,5 @@ private struct ProfileConsistencyDayCell: View {
         WorkoutSessionExercise.self,
         WorkoutSessionSet.self,
     ], inMemory: true)
+    .environment(\.cloudSyncEnabled, false)
 }

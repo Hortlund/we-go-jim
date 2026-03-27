@@ -25,6 +25,26 @@ struct BrosViewModelTests {
         #expect(service.didFlushOutbox)
     }
 
+    @Test
+    func refreshActiveSnapshotIfNeededHydratesCurrentBrosState() async throws {
+        let context = try makeInMemoryContext()
+        let service = StubBrosSocialService()
+        let staleSnapshot = makeSnapshot(displayName: "Atlas")
+        let refreshedSnapshot = makeSnapshot(displayName: "Custom Bro")
+        service.snapshot = refreshedSnapshot
+
+        let viewModel = BrosViewModel(
+            accountStatusProvider: { .available },
+            serviceFactory: { _ in service }
+        )
+        viewModel.state = .active(staleSnapshot)
+
+        await viewModel.refreshActiveSnapshotIfNeeded(modelContext: context)
+
+        #expect(viewModel.state == .active(refreshedSnapshot))
+        #expect(service.didRefreshLocalMembershipState)
+    }
+
     private func makeInMemoryContext() throws -> ModelContext {
         let schema = Schema([
             UserProfile.self,
@@ -38,19 +58,47 @@ struct BrosViewModelTests {
         let container = try ModelContainer(for: schema, configurations: [configuration])
         return ModelContext(container)
     }
+
+    private func makeSnapshot(displayName: String) -> BrosFeedSnapshot {
+        let member = BroMemberSummary(
+            id: "membership-circle-1-user-1",
+            circleID: "circle-1",
+            userRecordName: "user-1",
+            displayName: displayName,
+            athleteType: nil,
+            avatarImageData: nil,
+            joinedAt: Date(timeIntervalSince1970: 100),
+            role: .owner
+        )
+
+        return BrosFeedSnapshot(
+            circle: BroCircleSummary(
+                circleID: "circle-1",
+                ownerUserRecordName: "user-1",
+                inviteCode: "ABC123",
+                memberLimit: 4,
+                createdAt: Date(timeIntervalSince1970: 100),
+                updatedAt: Date(timeIntervalSince1970: 100)
+            ),
+            currentMember: member,
+            members: [member],
+            feedEvents: []
+        )
+    }
 }
 
 @MainActor
 private final class StubBrosSocialService: BrosSocialService {
     var didRefreshLocalMembershipState = false
     var didFlushOutbox = false
+    var snapshot: BrosFeedSnapshot?
 
     func refreshLocalMembershipState() async {
         didRefreshLocalMembershipState = true
     }
 
     func fetchSnapshot() async throws -> BrosFeedSnapshot? {
-        nil
+        snapshot
     }
 
     func createCircle(memberLimit: Int) async throws -> BrosFeedSnapshot {

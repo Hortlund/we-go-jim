@@ -468,6 +468,108 @@ struct BrosSocialServiceTests {
     }
 
     @Test
+    func fetchSnapshotPrefersNewerLocalProfileIdentityForCurrentMember() async throws {
+        let context = try makeInMemoryContext()
+        let joinedAt = Date(timeIntervalSince1970: 100)
+        let localUpdatedAt = Date(timeIntervalSince1970: 220)
+        let avatarData = Data([0x01, 0x02, 0x03])
+
+        let profile = try ProfileRepository(modelContext: context).loadOrCreateProfile()
+        profile.displayName = "Local Atlas"
+        profile.athleteType = .garageGymRat
+        profile.avatarImageData = avatarData
+        profile.updatedAt = localUpdatedAt
+        profile.updateBrosMembership(
+            circleID: "circle-1",
+            membershipID: "membership-circle-1-user-1",
+            userRecordName: "user-1",
+            joinedAt: joinedAt,
+            role: .owner
+        )
+        try context.save()
+
+        let remoteMembership = makeMembershipRecord(
+            recordName: "membership-circle-1-user-1",
+            circleID: "circle-1",
+            userRecordName: "user-1",
+            joinedAt: joinedAt,
+            role: .owner,
+            displayName: "Remote Atlas"
+        )
+        remoteMembership["updatedAt"] = Date(timeIntervalSince1970: 150) as CKRecordValue
+
+        let feedEvent = makeWorkoutFeedEventRecord(
+            recordName: "workout-current-user",
+            circleID: "circle-1",
+            actorUserRecordName: "user-1",
+            actorMembershipID: remoteMembership.recordID.recordName,
+            actorDisplayName: "Remote Atlas",
+            createdAt: Date(timeIntervalSince1970: 160),
+            workoutName: "Push Day"
+        )
+        let circleRecord = makeCircleRecord(
+            circleID: "circle-1",
+            inviteCode: "ABC123",
+            memberLimit: 4,
+            memberRecordNames: [remoteMembership.recordID.recordName],
+            feedEventRecordNames: [feedEvent.recordID.recordName]
+        )
+
+        let store = TestBrosCloudStore()
+        store.currentUserRecordNameValue = "user-1"
+        store.fetchRecordHandler = { recordType, recordName in
+            switch (recordType, recordName) {
+            case ("BroMembership", remoteMembership.recordID.recordName):
+                return remoteMembership
+            case ("BroCircle", "circle-1"):
+                return circleRecord
+            default:
+                return nil
+            }
+        }
+        store.fetchRecordsHandler = { recordType, recordNames in
+            if recordType == "BroMembership",
+               recordNames == [remoteMembership.recordID.recordName]
+            {
+                return [remoteMembership]
+            }
+
+            if recordType == "BroFeedEvent",
+               recordNames == [feedEvent.recordID.recordName]
+            {
+                return [feedEvent]
+            }
+
+            return []
+        }
+        store.queryRecordsHandler = { recordType, predicate, _, _ in
+            if recordType == "BroMembership",
+               predicate.predicateFormat.contains("circleID")
+            {
+                return [remoteMembership]
+            }
+
+            if recordType == "BroFeedEvent",
+               predicate.predicateFormat.contains("circleID")
+            {
+                return [feedEvent]
+            }
+
+            return []
+        }
+
+        let service = CloudKitBrosSocialService(modelContext: context, cloudStore: store)
+        let snapshot = try #require(try await service.fetchSnapshot())
+
+        #expect(snapshot.currentMember.displayName == "Local Atlas")
+        #expect(snapshot.currentMember.athleteType == .garageGymRat)
+        #expect(snapshot.currentMember.avatarImageData == avatarData)
+        #expect(snapshot.members.map(\.displayName) == ["Local Atlas"])
+        #expect(snapshot.feedEvents.first?.actorDisplayName == "Local Atlas")
+        #expect(snapshot.feedEvents.first?.actorAvatarImageData == avatarData)
+    }
+
+    @Test
     func fetchSnapshotRepairsStaleMemberIndexFromCircleMembershipQuery() async throws {
         let context = try makeInMemoryContext()
         let joinedAt = Date(timeIntervalSince1970: 100)
@@ -838,6 +940,58 @@ struct BrosSocialServiceTests {
 
         #expect(snapshot.circle.circleID == "circle-1")
         #expect(savedRecordTypes.contains("BroInviteLookup"))
+    }
+
+    @Test
+    func queueCurrentProfileSyncFlushesUpdatedIdentityToMembershipRecord() async throws {
+        let context = try makeInMemoryContext()
+        let avatarData = Data([0x0A, 0x0B, 0x0C])
+        let profile = try ProfileRepository(modelContext: context).loadOrCreateProfile()
+        profile.displayName = "Local Atlas"
+        profile.athleteType = .garageGymRat
+        profile.avatarImageData = avatarData
+        profile.updatedAt = Date(timeIntervalSince1970: 220)
+        profile.updateBrosMembership(
+            circleID: "circle-1",
+            membershipID: "membership-circle-1-user-1",
+            userRecordName: "user-1",
+            joinedAt: Date(timeIntervalSince1970: 100),
+            role: .owner
+        )
+        try context.save()
+
+        let membershipRecord = makeMembershipRecord(
+            recordName: "membership-circle-1-user-1",
+            circleID: "circle-1",
+            userRecordName: "user-1",
+            joinedAt: Date(timeIntervalSince1970: 100),
+            role: .owner,
+            displayName: "Remote Atlas"
+        )
+
+        var persistedMembershipRecord: CKRecord?
+        let store = TestBrosCloudStore()
+        store.fetchRecordHandler = { recordType, recordName in
+            if recordType == "BroMembership", recordName == membershipRecord.recordID.recordName {
+                return membershipRecord
+            }
+            return nil
+        }
+        store.saveHandler = { records, _ in
+            persistedMembershipRecord = records.first(where: { $0.recordType == "BroMembership" })
+        }
+
+        let service = CloudKitBrosSocialService(modelContext: context, cloudStore: store)
+        try service.queueCurrentProfileSync()
+        #expect(try context.fetch(FetchDescriptor<SocialOutboxItem>()).count == 1)
+
+        await service.flushOutbox()
+
+        let savedMembershipRecord = try #require(persistedMembershipRecord)
+        #expect(savedMembershipRecord["displayName"] as? String == "Local Atlas")
+        #expect(savedMembershipRecord["athleteType"] as? String == ProfileAthleteType.garageGymRat.rawValue)
+        #expect(savedMembershipRecord["avatarAsset"] as? CKAsset != nil)
+        #expect(try context.fetch(FetchDescriptor<SocialOutboxItem>()).isEmpty)
     }
 
     @Test
