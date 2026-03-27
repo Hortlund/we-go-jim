@@ -662,6 +662,7 @@ struct ProfileView: View {
             .background(
                 Capsule()
                     .fill(tint.opacity(0.12))
+                    .wgjCapsuleGlass(tint: tint.opacity(0.12))
             )
             .overlay(
                 Capsule()

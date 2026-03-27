@@ -45,6 +45,7 @@ struct LoginGateView: View {
                                         Circle()
                                             .stroke(WGJTheme.outlineStrong, lineWidth: 1)
                                     }
+                                    .wgjCircleGlass(tint: WGJTheme.accentBlue.opacity(0.18))
                             }
 
                         Text("Continue with iCloud")
@@ -69,6 +70,7 @@ struct LoginGateView: View {
                 }
                 .padding(.top, 8)
                 .padding(16)
+                .wgjGlassContainer(spacing: 18)
             }
             .toolbar(.hidden, for: .navigationBar)
             .task {
@@ -93,7 +95,7 @@ struct LoginGateView: View {
             ProgressView("Checking iCloud account...")
 
         case .available:
-                    VStack(spacing: 10) {
+            VStack(spacing: 10) {
                 Button {
                     onAuthenticated()
                 } label: {
@@ -104,9 +106,7 @@ struct LoginGateView: View {
 
 #if DEBUG
                 Button {
-                    Task {
-                        await seedDemoData()
-                    }
+                    beginDemoSeed()
                 } label: {
                     if isSeedingDemoData {
                         ProgressView()
@@ -137,9 +137,7 @@ struct LoginGateView: View {
                 .buttonStyle(WGJPrimaryButtonStyle())
 
                 Button {
-                    Task {
-                        await refreshAccountStatus()
-                    }
+                    beginAccountStatusRefresh()
                 } label: {
                     Label("Retry", systemImage: "arrow.clockwise")
                         .frame(maxWidth: .infinity)
@@ -212,7 +210,19 @@ struct LoginGateView: View {
         accountStatus = await accountService.fetchAccountStatus()
     }
 
+    private func beginAccountStatusRefresh() {
+        Task {
+            await refreshAccountStatus()
+        }
+    }
+
 #if DEBUG
+    private func beginDemoSeed() {
+        Task {
+            await seedDemoData()
+        }
+    }
+
     private func seedDemoData() async {
         guard case .available = accountStatus else { return }
 

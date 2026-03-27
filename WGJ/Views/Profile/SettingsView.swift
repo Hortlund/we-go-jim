@@ -37,9 +37,7 @@ struct SettingsView: View {
                     infoRow("Library status", value: libraryStatusText)
 
                     Button {
-                        Task {
-                            await refreshCatalog(force: true)
-                        }
+                        beginCatalogRefresh()
                     } label: {
                         if isReloadingLibrary {
                             ProgressView()
@@ -238,6 +236,12 @@ struct SettingsView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(errorMessage)
+        }
+    }
+
+    private func beginCatalogRefresh() {
+        Task {
+            await refreshCatalog(force: true)
         }
     }
 

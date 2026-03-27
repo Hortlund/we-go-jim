@@ -72,9 +72,7 @@ struct ProfileManagementView: View {
         }
         .onChange(of: selectedAvatarItem) { _, newItem in
             guard let newItem else { return }
-            Task {
-                await stageAvatar(from: newItem)
-            }
+            stageAvatarSelection(newItem)
         }
         .sheet(isPresented: $showingAthleteTypePicker) {
             ProfileAthleteTypePickerView(selectedAthleteType: $athleteType)
@@ -84,6 +82,7 @@ struct ProfileManagementView: View {
         } message: {
             Text(errorMessage)
         }
+        .wgjMinimalKeyboardToolbar()
     }
 
     private var avatarSection: some View {
@@ -256,6 +255,12 @@ struct ProfileManagementView: View {
         }
     }
 
+    private func stageAvatarSelection(_ item: PhotosPickerItem) {
+        Task {
+            await stageAvatar(from: item)
+        }
+    }
+
     private func athleteTypeBadge(title: String, tint: Color) -> some View {
         Text(title)
             .font(.caption.weight(.semibold))
@@ -265,6 +270,7 @@ struct ProfileManagementView: View {
             .background(
                 Capsule()
                     .fill(tint.opacity(0.12))
+                    .wgjCapsuleGlass(tint: tint.opacity(0.12))
             )
             .overlay(
                 Capsule()
@@ -294,6 +300,7 @@ struct ProfileAvatarView: View {
         } else {
             Circle()
                 .fill(.thinMaterial)
+                .wgjCircleGlass(tint: WGJTheme.card.opacity(0.14))
                 .overlay {
                     Image(systemName: "person.fill")
                         .font(.title2)

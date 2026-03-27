@@ -47,6 +47,7 @@ struct SwipeDeleteRow<Content: View>: View {
                         .scaleEffect(0.86 + (0.14 * revealProgress))
                         .padding(.trailing, 16)
                 }
+                .wgjRoundedGlass(cornerRadius: 12, tint: WGJTheme.danger.opacity(0.18))
                 .opacity(backgroundOpacity)
 
             swipeHost

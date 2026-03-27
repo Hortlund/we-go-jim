@@ -83,6 +83,10 @@ private struct WGJMinimalKeyboardToolbarModifier: ViewModifier {
                                         Capsule()
                                             .stroke(WGJTheme.rowDivider.opacity(0.9), lineWidth: 1)
                                     )
+                                    .wgjCapsuleGlass(
+                                        tint: WGJTheme.accentBlue.opacity(0.08),
+                                        interactive: true
+                                    )
                             )
                             .shadow(color: Color.black.opacity(0.12), radius: 12, x: 0, y: 6)
                         }

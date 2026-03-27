@@ -99,6 +99,39 @@ enum WGJMotion {
     }
 }
 
+@available(iOS 26.0, *)
+private func wgjConfiguredGlass(
+    tint: Color? = nil,
+    interactive: Bool = false
+) -> Glass {
+    var glass = Glass.regular
+
+    if let tint {
+        glass = glass.tint(tint)
+    }
+
+    if interactive {
+        glass = glass.interactive()
+    }
+
+    return glass
+}
+
+private struct WGJGlassContainerModifier: ViewModifier {
+    let spacing: CGFloat?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: spacing) {
+                content
+            }
+        } else {
+            content
+        }
+    }
+}
+
 private enum WGJButtonTone {
     case primary
     case secondary
@@ -150,6 +183,10 @@ private struct WGJCardModifier: ViewModifier {
                                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                             }
                     }
+                    .wgjRoundedGlass(
+                        cornerRadius: cornerRadius,
+                        tint: strong ? WGJTheme.cardStrong.opacity(0.18) : WGJTheme.card.opacity(0.14)
+                    )
                     .shadow(color: shadowColor, radius: strong ? 22 : 16, x: 0, y: strong ? 12 : 8)
             }
     }
@@ -210,6 +247,17 @@ private struct WGJGlassButtonBackground: View {
         }
     }
 
+    private var glassTint: Color {
+        switch tone {
+        case .primary:
+            return WGJTheme.accentBlue.opacity(0.18)
+        case .secondary:
+            return WGJTheme.card.opacity(0.14)
+        case .destructive:
+            return WGJTheme.danger.opacity(0.16)
+        }
+    }
+
     var body: some View {
         RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
             .fill(fill)
@@ -221,6 +269,11 @@ private struct WGJGlassButtonBackground: View {
                 RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
                     .stroke(stroke, lineWidth: 1)
             }
+            .wgjRoundedGlass(
+                cornerRadius: WGJRadius.control,
+                tint: glassTint,
+                interactive: true
+            )
             .shadow(
                 color: tone == .secondary ? WGJTheme.shadowSoft : WGJTheme.shadowStrong.opacity(0.78),
                 radius: tone == .secondary ? 10 : 14,
@@ -358,6 +411,11 @@ struct WGJIconButtonStyle: ButtonStyle {
                         RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
                             .stroke(outline.opacity(0.92), lineWidth: 1)
                     }
+                    .wgjRoundedGlass(
+                        cornerRadius: WGJRadius.control,
+                        tint: background.opacity(0.14),
+                        interactive: true
+                    )
                     .shadow(color: WGJTheme.shadowSoft, radius: 10, x: 0, y: 6)
             }
             .scaleEffect(configuration.isPressed ? 0.97 : 1)
@@ -374,18 +432,21 @@ struct WGJChip: View {
             .foregroundStyle(isSelected ? WGJTheme.textInverse : WGJTheme.textPrimary)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
-            .background {
-                Capsule()
-                    .fill(isSelected ? AnyShapeStyle(WGJTheme.accentBlue) : AnyShapeStyle(.thinMaterial))
-                    .overlay {
-                        Capsule()
-                            .fill(isSelected ? WGJTheme.accentCyan.opacity(0.28) : WGJTheme.card.opacity(0.54))
-                    }
-                    .overlay {
-                        Capsule()
-                            .stroke(isSelected ? Color.white.opacity(0.18) : WGJTheme.outline.opacity(0.82), lineWidth: 1)
-                    }
-            }
+        .background {
+            Capsule()
+                .fill(isSelected ? AnyShapeStyle(WGJTheme.accentBlue) : AnyShapeStyle(.thinMaterial))
+                .overlay {
+                    Capsule()
+                        .fill(isSelected ? WGJTheme.accentCyan.opacity(0.28) : WGJTheme.card.opacity(0.54))
+                }
+                .overlay {
+                    Capsule()
+                        .stroke(isSelected ? Color.white.opacity(0.18) : WGJTheme.outline.opacity(0.82), lineWidth: 1)
+                }
+                .wgjCapsuleGlass(
+                    tint: isSelected ? WGJTheme.accentBlue.opacity(0.18) : WGJTheme.card.opacity(0.12)
+                )
+        }
     }
 }
 
@@ -528,6 +589,7 @@ struct WGJMetricPill: View {
                     Capsule()
                         .stroke(WGJTheme.outline.opacity(0.82), lineWidth: 1)
                 }
+                .wgjCapsuleGlass(tint: tint.opacity(0.12))
         }
     }
 }
@@ -708,12 +770,17 @@ struct WGJTransientBanner: View {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .stroke(tint.opacity(0.26), lineWidth: 1)
                 }
+                .wgjRoundedGlass(cornerRadius: 18, tint: tint.opacity(0.16))
                 .shadow(color: WGJTheme.shadowStrong.opacity(0.14), radius: 16, x: 0, y: 8)
         }
     }
 }
 
 extension View {
+    func wgjGlassContainer(spacing: CGFloat? = nil) -> some View {
+        modifier(WGJGlassContainerModifier(spacing: spacing))
+    }
+
     func wgjScreenBackground() -> some View {
         background {
             ZStack {
@@ -746,14 +813,24 @@ extension View {
             .wgjScreenBackground()
     }
 
+    @ViewBuilder
     func wgjNavigationChrome() -> some View {
-        toolbarBackground(.thinMaterial, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+        if #available(iOS 26.0, *) {
+            self
+        } else {
+            toolbarBackground(.thinMaterial, for: .navigationBar)
+                .toolbarBackground(.visible, for: .navigationBar)
+        }
     }
 
+    @ViewBuilder
     func wgjTabChrome() -> some View {
-        toolbarBackground(.thinMaterial, for: .tabBar)
-            .toolbarBackground(.visible, for: .tabBar)
+        if #available(iOS 26.0, *) {
+            self
+        } else {
+            toolbarBackground(.thinMaterial, for: .tabBar)
+                .toolbarBackground(.visible, for: .tabBar)
+        }
     }
 
     func wgjCardContainer(strong: Bool = false, cornerRadius: CGFloat = WGJRadius.card) -> some View {
@@ -774,6 +851,10 @@ extension View {
                         RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
                             .stroke(WGJTheme.outline.opacity(0.84), lineWidth: 1)
                     }
+                    .wgjRoundedGlass(
+                        cornerRadius: WGJRadius.control,
+                        tint: WGJTheme.field.opacity(0.14)
+                    )
                     .shadow(color: WGJTheme.shadowSoft.opacity(0.9), radius: 10, x: 0, y: 6)
             }
     }
@@ -789,5 +870,51 @@ extension View {
             .truncationMode(.tail)
             .minimumScaleFactor(scale)
             .allowsTightening(true)
+    }
+
+    @ViewBuilder
+    func wgjRoundedGlass(
+        cornerRadius: CGFloat,
+        tint: Color? = nil,
+        interactive: Bool = false
+    ) -> some View {
+        if #available(iOS 26.0, *) {
+            glassEffect(
+                wgjConfiguredGlass(tint: tint, interactive: interactive),
+                in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            )
+        } else {
+            self
+        }
+    }
+
+    @ViewBuilder
+    func wgjCapsuleGlass(
+        tint: Color? = nil,
+        interactive: Bool = false
+    ) -> some View {
+        if #available(iOS 26.0, *) {
+            glassEffect(
+                wgjConfiguredGlass(tint: tint, interactive: interactive),
+                in: Capsule()
+            )
+        } else {
+            self
+        }
+    }
+
+    @ViewBuilder
+    func wgjCircleGlass(
+        tint: Color? = nil,
+        interactive: Bool = false
+    ) -> some View {
+        if #available(iOS 26.0, *) {
+            glassEffect(
+                wgjConfiguredGlass(tint: tint, interactive: interactive),
+                in: Circle()
+            )
+        } else {
+            self
+        }
     }
 }

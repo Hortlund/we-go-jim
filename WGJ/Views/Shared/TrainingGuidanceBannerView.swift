@@ -35,6 +35,7 @@ struct TrainingGuidanceBannerView: View {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .stroke(tintColor.opacity(compact ? 0.16 : 0.22), lineWidth: 1)
                 )
+                .wgjRoundedGlass(cornerRadius: 12, tint: tintColor.opacity(compact ? 0.10 : 0.12))
         )
     }
 

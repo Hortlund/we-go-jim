@@ -1,6 +1,5 @@
 import SwiftUI
 import SwiftData
-import UIKit
 
 struct MainTabView: View {
     @Environment(ActiveWorkoutCoordinator.self) private var coordinator
@@ -58,35 +57,7 @@ struct MainTabView: View {
                 .tint(WGJTheme.accentBlue)
                 .wgjTabChrome()
 
-                if let activeSessionID = coordinator.activeSessionID,
-                   coordinator.isActiveWorkoutStripCollapsed,
-                   !isKeyboardVisible
-                {
-                    ActiveWorkoutStripView(sessionID: activeSessionID) {
-                        coordinator.present(sessionID: activeSessionID)
-                    }
-                    .padding(.bottom, activeWorkoutStripBottomLift(bottomSafeAreaInset: bottomSafeAreaInset))
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .accessibilityIdentifier("active-workout-strip")
-                }
-
-                if let popup = coordinator.restTimerPopup,
-                   !coordinator.isActiveWorkoutPresented,
-                   !isKeyboardVisible
-                {
-                    WGJTransientBanner(
-                        title: popup.title,
-                        message: popup.message,
-                        icon: "bell.badge.fill",
-                        tint: WGJTheme.success
-                    )
-                    .padding(.horizontal, 12)
-                    .padding(
-                        .bottom,
-                        popupBottomLift(bottomSafeAreaInset: bottomSafeAreaInset)
-                    )
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
+                overlayChrome(bottomSafeAreaInset: bottomSafeAreaInset)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             .wgjScreenBackground()
@@ -113,6 +84,7 @@ struct MainTabView: View {
                     }
                 }
             }
+            .wgjTrackKeyboardVisibility($isKeyboardVisible)
             .onChange(of: coordinator.activeSessionID) { _, newValue in
                 if newValue == nil {
                     coordinator.clearActiveWorkout()
@@ -120,16 +92,41 @@ struct MainTabView: View {
                     coordinator.isActiveWorkoutStripCollapsed = true
                 }
             }
-            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
-                isKeyboardVisible = keyboardIsVisible(
-                    from: notification,
-                    viewMaxY: proxy.frame(in: .global).maxY
-                )
+        }
+    }
+
+    @ViewBuilder
+    private func overlayChrome(bottomSafeAreaInset: CGFloat) -> some View {
+        ZStack(alignment: .bottom) {
+            if let activeSessionID = coordinator.activeSessionID,
+               coordinator.isActiveWorkoutStripCollapsed,
+               !isKeyboardVisible
+            {
+                ActiveWorkoutStripView(sessionID: activeSessionID) {
+                    coordinator.present(sessionID: activeSessionID)
+                }
+                .padding(.bottom, activeWorkoutStripBottomLift(bottomSafeAreaInset: bottomSafeAreaInset))
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .accessibilityIdentifier("active-workout-strip")
             }
-            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-                isKeyboardVisible = false
+
+            if let popup = coordinator.restTimerPopup,
+               !coordinator.isActiveWorkoutPresented,
+               !isKeyboardVisible
+            {
+                WGJTransientBanner(
+                    title: popup.title,
+                    message: popup.message,
+                    icon: "bell.badge.fill",
+                    tint: WGJTheme.success
+                )
+                .padding(.horizontal, 12)
+                .padding(.bottom, popupBottomLift(bottomSafeAreaInset: bottomSafeAreaInset))
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .wgjGlassContainer(spacing: 16)
     }
 
     private func activeWorkoutStripBottomLift(bottomSafeAreaInset: CGFloat) -> CGFloat {
@@ -141,16 +138,6 @@ struct MainTabView: View {
             return activeWorkoutStripBottomLift(bottomSafeAreaInset: bottomSafeAreaInset) + 82
         }
         return bottomSafeAreaInset + 72
-    }
-
-    private func keyboardIsVisible(from notification: Notification, viewMaxY: CGFloat) -> Bool {
-        guard
-            let endFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
-        else {
-            return false
-        }
-
-        return endFrame.minY < viewMaxY
     }
 }
 

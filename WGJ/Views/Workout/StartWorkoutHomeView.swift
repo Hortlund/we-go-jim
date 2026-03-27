@@ -243,6 +243,7 @@ struct StartWorkoutHomeView: View {
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .stroke(WGJTheme.outline.opacity(0.82), lineWidth: 1)
                     }
+                    .wgjRoundedGlass(cornerRadius: 12, tint: tint.opacity(0.14))
             }
     }
 
@@ -742,6 +743,7 @@ private struct StartWorkoutUtilityIcon: View {
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .stroke(WGJTheme.outline.opacity(0.82), lineWidth: 1)
                     }
+                    .wgjRoundedGlass(cornerRadius: 12, tint: tint.opacity(0.12))
             }
     }
 }
@@ -851,6 +853,7 @@ private struct TemplateStartPreviewSheet: View {
                 }
             }
             .padding(16)
+            .wgjGlassContainer(spacing: 16)
             .wgjSheetSurface()
             .navigationTitle("Template")
             .navigationBarTitleDisplayMode(.inline)
@@ -918,6 +921,7 @@ private struct TemplateStartPreviewSheet: View {
                     RoundedRectangle(cornerRadius: 24, style: .continuous)
                         .stroke(WGJTheme.outline.opacity(0.86), lineWidth: 1)
                 }
+                .wgjRoundedGlass(cornerRadius: 24, tint: WGJTheme.accentBlue.opacity(0.16))
                 .shadow(color: WGJTheme.shadowStrong.opacity(0.12), radius: 22, x: 0, y: 12)
         }
     }

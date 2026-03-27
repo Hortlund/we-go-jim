@@ -924,11 +924,17 @@ private struct ActiveWorkoutBottomDock: View {
                                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                                         .stroke(WGJTheme.danger.opacity(0.38), lineWidth: 1)
                                 )
+                                .wgjRoundedGlass(
+                                    cornerRadius: 12,
+                                    tint: WGJTheme.danger.opacity(0.12),
+                                    interactive: true
+                                )
                         )
                 }
                 .buttonStyle(.plain)
             }
         }
+        .wgjGlassContainer(spacing: 8)
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 10)
@@ -971,6 +977,7 @@ private struct ActiveWorkoutBottomDock: View {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .stroke(WGJTheme.danger.opacity(0.32), lineWidth: 1)
                 )
+                .wgjRoundedGlass(cornerRadius: 14, tint: WGJTheme.danger.opacity(0.14))
         )
     }
 }
@@ -1086,6 +1093,7 @@ private struct ActiveWorkoutActivityTimerDock: View {
                         RoundedRectangle(cornerRadius: 18, style: .continuous)
                             .stroke(accent.opacity(isResting ? 0.28 : 0.22), lineWidth: 1)
                     }
+                    .wgjRoundedGlass(cornerRadius: 18, tint: accent.opacity(isResting ? 0.16 : 0.12))
                     .shadow(color: WGJTheme.shadowStrong.opacity(0.14), radius: 16, x: 0, y: 8)
             }
             .accessibilityElement(children: .combine)

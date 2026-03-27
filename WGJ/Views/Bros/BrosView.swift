@@ -788,6 +788,11 @@ struct BrosView: View {
                                     lineWidth: 1
                                 )
                         }
+                        .wgjCapsuleGlass(
+                            tint: selectedEmoji == emoji
+                                ? WGJTheme.accentBlue.opacity(0.18)
+                                : WGJTheme.card.opacity(0.12)
+                        )
                 }
             }
             .buttonStyle(.plain)

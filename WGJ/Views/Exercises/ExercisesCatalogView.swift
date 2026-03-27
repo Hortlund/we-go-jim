@@ -176,6 +176,7 @@ struct ExercisesCatalogView: View {
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                                     .fill(WGJTheme.field.opacity(0.55))
                             )
+                            .wgjRoundedGlass(cornerRadius: 12, tint: WGJTheme.accentBlue.opacity(0.10))
                     )
                     .padding(.trailing, 2)
                     .opacity(shouldShowIndexRail ? 1 : 0)
@@ -415,9 +416,7 @@ struct ExercisesCatalogView: View {
         ) {
             if catalogExercises.isEmpty && loadState != .loading && !isBootstrappingCatalog {
                 Button("Retry") {
-                    Task {
-                        await retryCatalogBootstrap()
-                    }
+                    beginRetryCatalogBootstrap()
                 }
                 .buttonStyle(WGJGhostButtonStyle())
             } else if loadState == .loading || isBootstrappingCatalog {
@@ -456,6 +455,12 @@ struct ExercisesCatalogView: View {
             return "tray.full"
         }
         return "line.3.horizontal.decrease.circle"
+    }
+
+    private func beginRetryCatalogBootstrap() {
+        Task {
+            await retryCatalogBootstrap()
+        }
     }
 
     private func debounceQuery(_ value: String) {
