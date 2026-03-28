@@ -1079,6 +1079,76 @@ struct BrosSocialServiceTests {
         ])
     }
 
+    @Test
+    func updateCircleMemberLimitRejectsNonOwner() async throws {
+        let context = try makeInMemoryContext()
+        let memberRecord = makeMembershipRecord(
+            recordName: "membership-circle-1-user-2",
+            circleID: "circle-1",
+            userRecordName: "user-2",
+            joinedAt: Date(timeIntervalSince1970: 120),
+            role: .member,
+            displayName: "Brock"
+        )
+
+        let store = TestBrosCloudStore()
+        store.currentUserRecordNameValue = "user-2"
+        store.queryRecordsHandler = { recordType, predicate, _, _ in
+            if recordType == "BroMembership",
+               predicate.predicateFormat.contains("userRecordName")
+            {
+                return [memberRecord]
+            }
+            return []
+        }
+
+        let service = CloudKitBrosSocialService(modelContext: context, cloudStore: store)
+
+        do {
+            _ = try await service.updateCircleMemberLimit(6)
+            Issue.record("Expected non-owner member limit update to be rejected")
+        } catch let error as BrosSocialServiceError {
+            #expect(error == .permissions)
+        } catch {
+            Issue.record("Expected BrosSocialServiceError.permissions, got \(error)")
+        }
+    }
+
+    @Test
+    func removeMemberRejectsNonOwner() async throws {
+        let context = try makeInMemoryContext()
+        let memberRecord = makeMembershipRecord(
+            recordName: "membership-circle-1-user-2",
+            circleID: "circle-1",
+            userRecordName: "user-2",
+            joinedAt: Date(timeIntervalSince1970: 120),
+            role: .member,
+            displayName: "Brock"
+        )
+
+        let store = TestBrosCloudStore()
+        store.currentUserRecordNameValue = "user-2"
+        store.queryRecordsHandler = { recordType, predicate, _, _ in
+            if recordType == "BroMembership",
+               predicate.predicateFormat.contains("userRecordName")
+            {
+                return [memberRecord]
+            }
+            return []
+        }
+
+        let service = CloudKitBrosSocialService(modelContext: context, cloudStore: store)
+
+        do {
+            try await service.removeMember(membershipID: "membership-circle-1-user-1")
+            Issue.record("Expected non-owner member removal to be rejected")
+        } catch let error as BrosSocialServiceError {
+            #expect(error == .permissions)
+        } catch {
+            Issue.record("Expected BrosSocialServiceError.permissions, got \(error)")
+        }
+    }
+
     private func makeEvent(id: String, createdAt: Date) -> BroFeedEvent {
         BroFeedEvent(
             id: id,
