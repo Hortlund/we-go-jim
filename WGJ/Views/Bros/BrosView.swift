@@ -510,7 +510,7 @@ struct BrosView: View {
             }
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
                     ForEach(snapshot.members) { member in
                         memberCard(member, snapshot: snapshot)
                     }
@@ -523,7 +523,10 @@ struct BrosView: View {
     }
 
     private func memberCard(_ member: BroMemberSummary, snapshot: BrosFeedSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let isCurrentUser = member.id == snapshot.currentMember.id
+        let showsRoleBadges = isCurrentUser || member.isOwner
+
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 10) {
                 BroAvatarView(imageData: member.avatarImageData, name: resolvedDisplayName(member.displayName), size: 44)
 
@@ -552,21 +555,34 @@ struct BrosView: View {
                 .foregroundStyle(WGJTheme.textPrimary)
                 .wgjSingleLineText(scale: 0.78)
 
-            if let athleteType = member.athleteType {
-                memberBadge(athleteType.title, tint: WGJTheme.accentCyan)
-            }
+            ZStack(alignment: .leading) {
+                memberBadge("Athlete Type", tint: WGJTheme.accentCyan)
+                    .hidden()
 
-            HStack(spacing: 8) {
-                if member.id == snapshot.currentMember.id {
-                    memberBadge("You", tint: WGJTheme.accentBlue)
-                }
-                if member.isOwner {
-                    memberBadge("Owner", tint: WGJTheme.accentGold)
+                if let athleteType = member.athleteType {
+                    memberBadge(athleteType.title, tint: WGJTheme.accentCyan)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            ZStack(alignment: .leading) {
+                memberBadge("Member", tint: WGJTheme.textSecondary)
+                    .hidden()
+
+                HStack(spacing: 8) {
+                    if isCurrentUser {
+                        memberBadge("You", tint: WGJTheme.accentBlue)
+                    }
+                    if member.isOwner {
+                        memberBadge("Owner", tint: WGJTheme.accentGold)
+                    }
+                }
+                .opacity(showsRoleBadges ? 1 : 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(12)
-        .frame(width: 170, alignment: .leading)
+        .frame(width: 170, alignment: .topLeading)
         .wgjCardContainer()
     }
 
