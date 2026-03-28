@@ -66,6 +66,26 @@ struct WorkoutSetProgressReferenceTests {
     }
 
     @Test
+    func marksCombinedWeightAndRepProgressAgainstPreviousSession() {
+        let draft = WorkoutSessionSetDraft(
+            actualReps: 9,
+            actualWeight: 105,
+            actualLoadUnit: .kg
+        )
+        let previous = WorkoutPreviousSetSnapshot(reps: 8, weight: 100, unit: .kg)
+
+        let reference = WorkoutSetProgressReference.make(
+            draft: draft,
+            previous: previous,
+            targetRepMin: 6,
+            targetRepMax: 10
+        )
+
+        #expect(reference?.statusText == "+5 kg and +1 rep vs last")
+        #expect(reference?.statusTone == .success)
+    }
+
+    @Test
     func hidesReuseActionWhenCurrentLogAlreadyMatchesPrevious() {
         let draft = WorkoutSessionSetDraft(
             actualReps: 8,

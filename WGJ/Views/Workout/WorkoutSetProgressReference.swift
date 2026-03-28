@@ -162,29 +162,40 @@ struct WorkoutSetProgressReference: Equatable {
         guard hasCurrentWeight || hasCurrentReps else { return nil }
 
         let unitsMatch = draft.actualLoadUnit == previous.unit
+        let weightDelta = weightDelta(draft: draft, previous: previous, unitsMatch: unitsMatch)
+        let repDelta = repDelta(draft: draft, previous: previous)
 
-        if unitsMatch, let currentWeight = draft.actualWeight, let previousWeight = previous.weight {
-            let delta = currentWeight - previousWeight
-
+        if let delta = weightDelta {
             if delta > 0.01 {
-                if let currentReps = draft.actualReps, let previousReps = previous.reps, currentReps < previousReps {
-                    let repGap = previousReps - currentReps
+                if let repDelta, repDelta > 0 {
+                    return ("\(positiveWeightDeltaText(delta, unit: previous.unit, formatWeight: formatWeight)) and \(positiveRepDeltaText(repDelta)) vs last", .success)
+                }
+
+                if let repDelta, repDelta < 0 {
+                    let repGap = abs(repDelta)
                     return ("Heavier, but \(repGap) rep\(repGap == 1 ? "" : "s") under last", .accent)
                 }
 
-                return ("+\(formatWeight(delta)) \(previous.unit.shortLabel) vs last", .success)
+                return ("\(positiveWeightDeltaText(delta, unit: previous.unit, formatWeight: formatWeight)) vs last", .success)
             }
 
             if delta < -0.01 {
+                if let repDelta, repDelta > 0 {
+                    return ("\(positiveRepDeltaText(repDelta)) at lighter load", .accent)
+                }
+
+                if let repDelta, repDelta < 0 {
+                    let deficit = abs(repDelta)
+                    return ("Lighter and \(deficit) rep\(deficit == 1 ? "" : "s") under last", .caution)
+                }
+
                 return ("Below last load", .caution)
             }
         }
 
-        if let currentReps = draft.actualReps, let previousReps = previous.reps {
-            let repDelta = currentReps - previousReps
-
+        if let repDelta {
             if repDelta > 0 {
-                return ("+\(repDelta) rep\(repDelta == 1 ? "" : "s") vs last", .success)
+                return ("\(positiveRepDeltaText(repDelta)) vs last", .success)
             }
 
             if repDelta < 0 {
@@ -193,12 +204,12 @@ struct WorkoutSetProgressReference: Equatable {
             }
         }
 
-        if unitsMatch, let currentWeight = draft.actualWeight, let previousWeight = previous.weight {
-            if abs(currentWeight - previousWeight) <= 0.01, draft.actualReps == previous.reps {
+        if let delta = weightDelta {
+            if abs(delta) <= 0.01, draft.actualReps == previous.reps {
                 return ("Matched last session", .accent)
             }
 
-            if abs(currentWeight - previousWeight) <= 0.01 {
+            if abs(delta) <= 0.01 {
                 return ("Matched last load", .accent)
             }
         }
@@ -208,6 +219,41 @@ struct WorkoutSetProgressReference: Equatable {
         }
 
         return nil
+    }
+
+    private static func weightDelta(
+        draft: WorkoutSessionSetDraft,
+        previous: WorkoutPreviousSetSnapshot,
+        unitsMatch: Bool
+    ) -> Double? {
+        guard unitsMatch, let currentWeight = draft.actualWeight, let previousWeight = previous.weight else {
+            return nil
+        }
+
+        return currentWeight - previousWeight
+    }
+
+    private static func repDelta(
+        draft: WorkoutSessionSetDraft,
+        previous: WorkoutPreviousSetSnapshot
+    ) -> Int? {
+        guard let currentReps = draft.actualReps, let previousReps = previous.reps else {
+            return nil
+        }
+
+        return currentReps - previousReps
+    }
+
+    private static func positiveWeightDeltaText(
+        _ delta: Double,
+        unit: TemplateLoadUnit,
+        formatWeight: (Double) -> String
+    ) -> String {
+        "+\(formatWeight(delta)) \(unit.shortLabel)"
+    }
+
+    private static func positiveRepDeltaText(_ delta: Int) -> String {
+        "+\(delta) rep\(delta == 1 ? "" : "s")"
     }
 
     private static func hasReusableValues(in previous: WorkoutPreviousSetSnapshot) -> Bool {

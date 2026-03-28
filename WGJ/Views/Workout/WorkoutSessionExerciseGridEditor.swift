@@ -444,7 +444,10 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func progressReferenceStrip(_ reference: WorkoutSetProgressReference, at index: Int) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let canApplyPrevious = reference.canReusePrevious && !setDrafts[index].isLocked
+        let showsSecondaryRow = canApplyPrevious || reference.statusText != nil
+
+        return VStack(alignment: .leading, spacing: 10) {
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .top, spacing: 12) {
                     progressReferenceMetric(
@@ -463,27 +466,14 @@ struct WorkoutSessionExerciseGridEditor: View {
                         value: reference.aimValue,
                         tint: WGJTheme.accentBlue
                     )
-
-                    if reference.canReusePrevious && !setDrafts[index].isLocked {
-                        Spacer(minLength: 8)
-                        applyPreviousButton(at: index)
-                    }
                 }
 
                 VStack(alignment: .leading, spacing: 10) {
-                    HStack(alignment: .top, spacing: 12) {
-                        progressReferenceMetric(
-                            title: "Last",
-                            value: reference.lastValue,
-                            tint: WGJTheme.textPrimary
-                        )
-
-                        Spacer(minLength: 8)
-
-                        if reference.canReusePrevious && !setDrafts[index].isLocked {
-                            applyPreviousButton(at: index)
-                        }
-                    }
+                    progressReferenceMetric(
+                        title: "Last",
+                        value: reference.lastValue,
+                        tint: WGJTheme.textPrimary
+                    )
 
                     progressReferenceMetric(
                         title: "Aim",
@@ -493,8 +483,20 @@ struct WorkoutSessionExerciseGridEditor: View {
                 }
             }
 
-            if let statusText = reference.statusText {
-                progressStatusChip(text: statusText, tone: reference.statusTone)
+            if showsSecondaryRow {
+                HStack(alignment: .center, spacing: 10) {
+                    if let statusText = reference.statusText {
+                        progressStatusChip(text: statusText, tone: reference.statusTone)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    applyPreviousButton(at: index)
+                        .opacity(canApplyPrevious ? 1 : 0)
+                        .allowsHitTesting(canApplyPrevious)
+                        .accessibilityHidden(!canApplyPrevious)
+                }
+                .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
             }
         }
         .padding(12)
@@ -517,10 +519,12 @@ struct WorkoutSessionExerciseGridEditor: View {
             Text(value)
                 .font(.subheadline.monospacedDigit().weight(.semibold))
                 .foregroundStyle(tint)
-                .lineLimit(2)
-                .minimumScaleFactor(0.88)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .allowsTightening(true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .layoutPriority(1)
     }
 
     private func progressStatusChip(text: String, tone: WorkoutSetProgressTone) -> some View {
