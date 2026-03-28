@@ -99,36 +99,15 @@ enum WGJMotion {
     }
 }
 
-@available(iOS 26.0, *)
-private func wgjConfiguredGlass(
-    tint: Color? = nil,
-    interactive: Bool = false
-) -> Glass {
-    var glass = Glass.regular
-
-    if let tint {
-        glass = glass.tint(tint)
-    }
-
-    if interactive {
-        glass = glass.interactive()
-    }
-
-    return glass
-}
-
 private struct WGJGlassContainerModifier: ViewModifier {
     let spacing: CGFloat?
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            GlassEffectContainer(spacing: spacing) {
-                content
-            }
-        } else {
-            content
-        }
+        // iOS 26 glass rendering currently blanks key workout text on device,
+        // so keep the existing material-based styling path until that is isolated.
+        let _ = spacing
+        content
     }
 }
 
@@ -878,14 +857,10 @@ extension View {
         tint: Color? = nil,
         interactive: Bool = false
     ) -> some View {
-        if #available(iOS 26.0, *) {
-            glassEffect(
-                wgjConfiguredGlass(tint: tint, interactive: interactive),
-                in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            )
-        } else {
-            self
-        }
+        let _ = cornerRadius
+        let _ = tint
+        let _ = interactive
+        self
     }
 
     @ViewBuilder
@@ -893,14 +868,9 @@ extension View {
         tint: Color? = nil,
         interactive: Bool = false
     ) -> some View {
-        if #available(iOS 26.0, *) {
-            glassEffect(
-                wgjConfiguredGlass(tint: tint, interactive: interactive),
-                in: Capsule()
-            )
-        } else {
-            self
-        }
+        let _ = tint
+        let _ = interactive
+        self
     }
 
     @ViewBuilder
@@ -908,13 +878,8 @@ extension View {
         tint: Color? = nil,
         interactive: Bool = false
     ) -> some View {
-        if #available(iOS 26.0, *) {
-            glassEffect(
-                wgjConfiguredGlass(tint: tint, interactive: interactive),
-                in: Circle()
-            )
-        } else {
-            self
-        }
+        let _ = tint
+        let _ = interactive
+        self
     }
 }

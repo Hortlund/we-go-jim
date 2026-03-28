@@ -24,7 +24,7 @@ struct StartWorkoutHomeView: View {
     private var sessions: [WorkoutSession]
 
     @State private var expandedFolderIDs: [UUID: Bool] = [:]
-    @State private var selectedTemplateForPreview: WorkoutTemplate?
+    @State private var selectedTemplatePreview: StartWorkoutTemplatePreview?
     @State private var templateEditorContext: StartWorkoutTemplateEditorContext?
 
     @State private var showingFolderEditor = false
@@ -72,14 +72,14 @@ struct StartWorkoutHomeView: View {
         }
         .wgjScreenBackground()
         .toolbar(.hidden, for: .navigationBar)
-        .sheet(item: $selectedTemplateForPreview) { template in
+        .sheet(item: $selectedTemplatePreview) { preview in
             TemplateStartPreviewSheet(
-                template: template,
+                preview: preview,
                 onStart: {
-                    requestStartFromTemplate(templateID: template.id)
+                    requestStartFromTemplate(templateID: preview.templateID)
                 },
                 onEdit: {
-                    editTemplate(template)
+                    editTemplate(templateID: preview.templateID, folderID: preview.folderID)
                 }
             )
         }
@@ -365,7 +365,7 @@ struct StartWorkoutHomeView: View {
 
     private func startButton(for template: WorkoutTemplate) -> some View {
         Button {
-            selectedTemplateForPreview = template
+            selectedTemplatePreview = StartWorkoutTemplatePreview(template: template)
         } label: {
             Text("Start")
                 .frame(maxWidth: .infinity)
@@ -516,9 +516,13 @@ struct StartWorkoutHomeView: View {
     }
 
     private func editTemplate(_ template: WorkoutTemplate) {
+        editTemplate(templateID: template.id, folderID: template.folderID)
+    }
+
+    private func editTemplate(templateID: UUID, folderID: UUID) {
         templateEditorContext = StartWorkoutTemplateEditorContext(
-            folderID: template.folderID == TemplateRepository.unfiledFolderID ? nil : template.folderID,
-            templateID: template.id
+            folderID: folderID == TemplateRepository.unfiledFolderID ? nil : folderID,
+            templateID: templateID
         )
     }
 
@@ -565,7 +569,7 @@ struct StartWorkoutHomeView: View {
             return
         }
 
-        selectedTemplateForPreview = nil
+        selectedTemplatePreview = nil
         presentActiveWorkoutConflict(for: activeSessionID)
     }
 
@@ -573,13 +577,13 @@ struct StartWorkoutHomeView: View {
         do {
             if let activeSession = try workoutRepository.activeSession() {
                 coordinator.present(sessionID: activeSession.id)
-                selectedTemplateForPreview = nil
+                selectedTemplatePreview = nil
                 return
             }
 
             let session = try workoutRepository.createSessionFromTemplate(templateID: templateID)
             coordinator.present(sessionID: session.id)
-            selectedTemplateForPreview = nil
+            selectedTemplatePreview = nil
         } catch {
             showError(error)
         }
@@ -748,8 +752,68 @@ private struct StartWorkoutUtilityIcon: View {
     }
 }
 
+@MainActor
+struct StartWorkoutTemplatePreview: Identifiable, Equatable {
+    struct Exercise: Identifiable, Equatable {
+        let id: UUID
+        let sortOrder: Int
+        let exerciseName: String
+        let descriptor: String?
+        let targetRepMin: Int?
+        let targetRepMax: Int?
+        let restSeconds: Int
+        let plannedSetCount: Int
+
+        init(templateExercise: TemplateExercise) {
+            id = templateExercise.id
+            sortOrder = templateExercise.sortOrder
+            exerciseName = templateExercise.exerciseNameSnapshot
+            descriptor = Self.makeDescriptor(
+                muscleSummary: templateExercise.muscleSummarySnapshot,
+                category: templateExercise.categorySnapshot
+            )
+            targetRepMin = templateExercise.targetRepMin
+            targetRepMax = templateExercise.targetRepMax
+            restSeconds = templateExercise.restSeconds
+
+            let prescribedSetCount = (templateExercise.prescribedSets ?? []).count
+            plannedSetCount = prescribedSetCount > 0 ? prescribedSetCount : 3
+        }
+
+        private static func makeDescriptor(muscleSummary: String, category: String) -> String? {
+            let trimmedMuscleSummary = muscleSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedMuscleSummary.isEmpty {
+                return trimmedMuscleSummary
+            }
+
+            let trimmedCategory = category.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmedCategory.isEmpty ? nil : trimmedCategory
+        }
+    }
+
+    let id: UUID
+    let templateID: UUID
+    let folderID: UUID
+    let name: String
+    let notes: String?
+    let exercises: [Exercise]
+
+    init(template: WorkoutTemplate) {
+        id = template.id
+        templateID = template.id
+        folderID = template.folderID
+        name = template.name
+
+        let trimmedNotes = template.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        notes = trimmedNotes.isEmpty ? nil : trimmedNotes
+        exercises = (template.exercises ?? [])
+            .sorted { $0.sortOrder < $1.sortOrder }
+            .map(Exercise.init(templateExercise:))
+    }
+}
+
 private struct TemplateStartPreviewSheet: View {
-    let template: WorkoutTemplate
+    let preview: StartWorkoutTemplatePreview
     let onStart: () -> Void
     let onEdit: () -> Void
 
@@ -759,11 +823,11 @@ private struct TemplateStartPreviewSheet: View {
 
     private let collapsedExerciseCount = 5
 
-    private var orderedExercises: [TemplateExercise] {
-        (template.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
+    private var orderedExercises: [StartWorkoutTemplatePreview.Exercise] {
+        preview.exercises
     }
 
-    private var visibleExercises: [TemplateExercise] {
+    private var visibleExercises: [StartWorkoutTemplatePreview.Exercise] {
         guard orderedExercises.count > collapsedExerciseCount, !showingAllExercises else {
             return orderedExercises
         }
@@ -781,7 +845,7 @@ private struct TemplateStartPreviewSheet: View {
 
     private var totalPlannedSets: Int {
         orderedExercises.reduce(0) { partialResult, exercise in
-            partialResult + plannedSetCount(for: exercise)
+            partialResult + exercise.plannedSetCount
         }
     }
 
@@ -875,12 +939,12 @@ private struct TemplateStartPreviewSheet: View {
                 .foregroundStyle(WGJTheme.accentBlue)
                 .textCase(.uppercase)
 
-            Text(template.name)
+            Text(preview.name)
                 .font(.title2.weight(.bold))
                 .foregroundStyle(WGJTheme.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if let notes = optionalNotes {
+            if let notes = preview.notes {
                 Text(notes)
                     .font(.subheadline)
                     .foregroundStyle(WGJTheme.textSecondary)
@@ -954,7 +1018,7 @@ private struct TemplateStartPreviewSheet: View {
         }
     }
 
-    private func previewExerciseRow(_ exercise: TemplateExercise, index: Int) -> some View {
+    private func previewExerciseRow(_ exercise: StartWorkoutTemplatePreview.Exercise, index: Int) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Text("\(index)")
                 .font(.caption.weight(.bold))
@@ -966,12 +1030,12 @@ private struct TemplateStartPreviewSheet: View {
                 }
 
             VStack(alignment: .leading, spacing: 5) {
-                Text(exercise.exerciseNameSnapshot)
+                Text(exercise.exerciseName)
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(WGJTheme.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                if let descriptor = descriptorText(for: exercise) {
+                if let descriptor = exercise.descriptor {
                     Text(descriptor)
                         .font(.caption)
                         .foregroundStyle(WGJTheme.textSecondary)
@@ -1032,23 +1096,8 @@ private struct TemplateStartPreviewSheet: View {
         .buttonStyle(.plain)
     }
 
-    private func plannedSetCount(for exercise: TemplateExercise) -> Int {
-        let count = (exercise.prescribedSets ?? []).count
-        return count > 0 ? count : 3
-    }
-
-    private func descriptorText(for exercise: TemplateExercise) -> String? {
-        let muscleSummary = exercise.muscleSummarySnapshot.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !muscleSummary.isEmpty {
-            return muscleSummary
-        }
-
-        let category = exercise.categorySnapshot.trimmingCharacters(in: .whitespacesAndNewlines)
-        return category.isEmpty ? nil : category
-    }
-
-    private func primaryPrescriptionText(for exercise: TemplateExercise) -> String {
-        let setCount = plannedSetCount(for: exercise)
+    private func primaryPrescriptionText(for exercise: StartWorkoutTemplatePreview.Exercise) -> String {
+        let setCount = exercise.plannedSetCount
         if let repSummary = repRangeSummary(for: exercise) {
             return "\(setCount)x \(repSummary)"
         }
@@ -1056,12 +1105,12 @@ private struct TemplateStartPreviewSheet: View {
         return "\(setCount) set" + (setCount == 1 ? "" : "s")
     }
 
-    private func secondaryPrescriptionText(for exercise: TemplateExercise) -> String? {
+    private func secondaryPrescriptionText(for exercise: StartWorkoutTemplatePreview.Exercise) -> String? {
         guard exercise.restSeconds > 0 else { return nil }
         return "Rest \(formattedRest(exercise.restSeconds))"
     }
 
-    private func repRangeSummary(for exercise: TemplateExercise) -> String? {
+    private func repRangeSummary(for exercise: StartWorkoutTemplatePreview.Exercise) -> String? {
         switch (exercise.targetRepMin, exercise.targetRepMax) {
         case let (min?, max?) where min == max:
             return "\(min) reps"
@@ -1106,10 +1155,6 @@ private struct TemplateStartPreviewSheet: View {
         .buttonStyle(WGJGhostButtonStyle())
     }
 
-    private var optionalNotes: String? {
-        let value = template.notes.trimmingCharacters(in: .whitespacesAndNewlines)
-        return value.isEmpty ? nil : value
-    }
 }
 
 #Preview {
