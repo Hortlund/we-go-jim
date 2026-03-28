@@ -499,7 +499,7 @@ struct BrosView: View {
 
     private func membersCard(_ snapshot: BrosFeedSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            WGJActionHeader("Bros", subtitle: "Up to \(snapshot.circle.memberLimit) members") {
+            WGJActionHeader("Circle", subtitle: "Your current roster") {
                 HStack(spacing: 8) {
                     WGJMetricPill(
                         systemImage: "person.3.sequence.fill",

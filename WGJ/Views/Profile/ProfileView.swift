@@ -36,7 +36,7 @@ struct ProfileView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
-                WGJRootHeader("Profile", subtitle: "Your identity, highlights, and training dashboard.")
+                WGJRootHeader("Profile", subtitle: "Your training snapshot, progress, and app controls.")
 
                 identityCard
                 highlightsCard
@@ -78,7 +78,7 @@ struct ProfileView: View {
 
     private var identityCard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            WGJActionHeader("Identity", subtitle: "Your current name, avatar, and athlete type.") {
+            WGJActionHeader("Identity", subtitle: "How you show up across the app.") {
                 Button {
                     showingProfileManagement = true
                 } label: {
@@ -133,7 +133,7 @@ struct ProfileView: View {
 
     private var highlightsCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            WGJSectionHeader("Highlights", subtitle: "Quick reads that make the profile feel alive.")
+            WGJSectionHeader("Highlights", subtitle: "A quick look at the work you've been putting in.")
 
             LazyVGrid(
                 columns: [
@@ -177,7 +177,7 @@ struct ProfileView: View {
 
     private var dashboardSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            WGJActionHeader("Dashboard", subtitle: "Fixed highlights up top, flexible widgets below.") {
+            WGJActionHeader("Dashboard", subtitle: "Keep your key numbers and trends close.") {
                 Button {
                     showingWidgetManager = true
                 } label: {
@@ -189,7 +189,7 @@ struct ProfileView: View {
             if dashboardContent.enabledWidgets.isEmpty {
                 WGJEmptyStateCard(
                     title: "No widgets enabled",
-                    message: "Enable streaks, favorites, consistency, PRs, and graphs to build your dashboard.",
+                    message: "Turn on widgets for PRs, streaks, favorite lifts, and training trends.",
                     icon: "square.grid.2x2"
                 ) {
                     Button("Manage Widgets") {
@@ -208,18 +208,18 @@ struct ProfileView: View {
                 case .exerciseOneRMTrend:
                     exerciseTrendWidget(
                         title: "1RM Trend",
-                        subtitle: "Best estimated 1RM for \(config.selectedExerciseNameSnapshot ?? "your lift")",
+                        subtitle: "Estimated max strength for \(config.selectedExerciseNameSnapshot ?? "your lift")",
                         accent: WGJTheme.accentCyan,
                         series: dashboardContent.trendSeriesByKind[config.kind],
-                        emptyMessage: "Log weighted sets for this exercise to start the line."
+                        emptyMessage: "Log weighted sets for this lift to start the trend."
                     )
                 case .exerciseVolumeTrend:
                     exerciseTrendWidget(
                         title: "Volume Trend",
-                        subtitle: "Weighted volume for \(config.selectedExerciseNameSnapshot ?? "your lift")",
+                        subtitle: "Training volume for \(config.selectedExerciseNameSnapshot ?? "your lift")",
                         accent: WGJTheme.accentBlue,
                         series: dashboardContent.trendSeriesByKind[config.kind],
-                        emptyMessage: "Complete weighted sets for this exercise to populate volume."
+                        emptyMessage: "Log weighted sets for this lift to chart your volume."
                     )
                 case .streaks:
                     streaksWidget
@@ -234,10 +234,10 @@ struct ProfileView: View {
 
     private var prWidget: some View {
         VStack(alignment: .leading, spacing: 10) {
-            WGJSectionHeader("Personal Records", subtitle: "Estimated 1RM from logged workouts")
+            WGJSectionHeader("Personal Records", subtitle: "Your strongest logged lifts at a glance")
 
             if dashboardContent.personalRecords.isEmpty {
-                Text("Complete workouts to populate PRs.")
+                Text("Finish a few workouts and your top lifts will show up here.")
                     .font(.subheadline)
                     .foregroundStyle(WGJTheme.textSecondary)
             } else {
@@ -262,14 +262,14 @@ struct ProfileView: View {
 
     private var weeklyGoalsWidget: some View {
         VStack(alignment: .leading, spacing: 10) {
-            WGJSectionHeader("Weekly Goal", subtitle: "Track workouts per week")
+            WGJSectionHeader("Weekly Goal", subtitle: "See how each week stacks up against your target")
 
-            Text("Target: \(weeklyGoal) workouts/week")
+            Text("Goal: \(weeklyGoal) workouts each week")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(WGJTheme.textPrimary)
 
             if dashboardContent.weeklyProgress.isEmpty {
-                Text("No completed workouts yet.")
+                Text("Finish a workout to start tracking your weekly pace.")
                     .font(.subheadline)
                     .foregroundStyle(WGJTheme.textSecondary)
             } else {
@@ -296,7 +296,7 @@ struct ProfileView: View {
 
     private var streaksWidget: some View {
         VStack(alignment: .leading, spacing: 12) {
-            WGJSectionHeader("Streaks", subtitle: "A tighter read on your consistency")
+            WGJSectionHeader("Streaks", subtitle: "How steady your training has been lately")
 
             LazyVGrid(
                 columns: [
@@ -332,10 +332,10 @@ struct ProfileView: View {
 
     private var topExercisesWidget: some View {
         VStack(alignment: .leading, spacing: 12) {
-            WGJSectionHeader("Top Exercises", subtitle: "Your most repeated lifts so far")
+            WGJSectionHeader("Top Exercises", subtitle: "The lifts you come back to most")
 
             if dashboardContent.topExercises.isEmpty {
-                Text("Complete workouts to build your exercise leaderboard.")
+                Text("Keep logging sessions and your go-to lifts will rise here.")
                     .font(.subheadline)
                     .foregroundStyle(WGJTheme.textSecondary)
             } else {
@@ -371,13 +371,13 @@ struct ProfileView: View {
 
     private var consistencyCalendarWidget: some View {
         VStack(alignment: .leading, spacing: 12) {
-            WGJSectionHeader("Consistency Calendar", subtitle: "Rolling 6-week heatmap of your workout rhythm")
+            WGJSectionHeader("Consistency Calendar", subtitle: "Your last six weeks of training, day by day")
 
             let maxWorkoutCount = max(1, dashboardContent.activityDays.map(\.workoutCount).max() ?? 0)
             let hasAnyWorkoutActivity = dashboardContent.activityDays.contains { $0.workoutCount > 0 }
 
             if !hasAnyWorkoutActivity {
-                Text("Complete workouts to light up the calendar.")
+                Text("Train a few days and your calendar will start to fill in.")
                     .font(.subheadline)
                     .foregroundStyle(WGJTheme.textSecondary)
             } else {
@@ -395,7 +395,7 @@ struct ProfileView: View {
                     }
                 }
 
-                Text("Darker squares mean more workouts on that day.")
+                Text("Darker squares mean busier training days.")
                     .font(.caption)
                     .foregroundStyle(WGJTheme.textSecondary)
             }
@@ -490,7 +490,7 @@ struct ProfileView: View {
                             .font(.title3.weight(.bold))
                             .foregroundStyle(accent)
 
-                        Text("Log one more weighted session for this exercise to unlock the chart.")
+                        Text("Log one more weighted session for this lift to unlock the chart.")
                             .font(.subheadline)
                             .foregroundStyle(WGJTheme.textSecondary)
                     }
@@ -516,7 +516,7 @@ struct ProfileView: View {
             WGJNavigationTile(
                 title: "Settings",
                 systemImage: "gear",
-                subtitle: "Training goals, privacy, support, and data controls.",
+                subtitle: "Goals, privacy, support, and data controls.",
                 accessibilityID: "profile-settings-tile"
             ) {
                 SettingsView()
