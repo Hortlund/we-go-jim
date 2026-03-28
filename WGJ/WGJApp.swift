@@ -10,6 +10,7 @@ struct WGJApp: App {
     init() {
         Self.configureNavigationTitleAppearance()
         RestTimerNotificationManager.shared.configureNotifications()
+        CloudSyncEventMonitor.shared.start()
         AppRuntimeState.shared.updateCloudState(
             isEnabled: bootstrap.cloudSyncEnabled,
             errorDescription: bootstrap.cloudSyncErrorDescription

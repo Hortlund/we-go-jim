@@ -9,6 +9,15 @@ struct AppReviewPolicy {
     let syncBrosAvatars: Bool
 }
 
+struct CloudSyncEventSummary: Equatable {
+    let typeLabel: String
+    let statusLabel: String
+    let storeIdentifier: String
+    let startedAt: Date
+    let endedAt: Date?
+    let errorDescription: String?
+}
+
 enum AppRuntimeConfig {
     static let supportEmail = "support@wegojim.app"
     static let privacyPolicyURL: URL? = nil
@@ -27,12 +36,17 @@ final class AppRuntimeState {
 
     var cloudSyncEnabled = false
     var cloudSyncErrorDescription: String?
+    var latestCloudSyncEvent: CloudSyncEventSummary?
 
     private init() { }
 
     func updateCloudState(isEnabled: Bool, errorDescription: String?) {
         cloudSyncEnabled = isEnabled
         cloudSyncErrorDescription = errorDescription
+    }
+
+    func updateLatestCloudSyncEvent(_ summary: CloudSyncEventSummary?) {
+        latestCloudSyncEvent = summary
     }
 
     var isBrosCloudAvailable: Bool {

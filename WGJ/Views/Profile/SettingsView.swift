@@ -4,8 +4,13 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
+    @Environment(\.cloudSyncErrorDescription) private var cloudSyncErrorDescription
+    @State private var appRuntimeState = AppRuntimeState.shared
 
     @Query private var catalogExercises: [ExerciseCatalogItem]
+    @Query private var profiles: [UserProfile]
+    @Query private var templates: [WorkoutTemplate]
+    @Query private var sessions: [WorkoutSession]
 
     @State private var isReloadingLibrary = false
     @State private var libraryStatusText = "Not loaded yet"
@@ -14,6 +19,10 @@ struct SettingsView: View {
     @State private var keepsScreenAwake = false
     @State private var preferredWeightUnit: PreferredWeightUnit = .kg
     @State private var hasLoadedProfile = false
+    @State private var cloudAccountStatus: AccountStatus = .checking
+    @State private var isWritingCloudProbe = false
+    @State private var cloudProbe: CloudSyncDebugProbeDescriptor?
+    @State private var cloudProbeErrorDescription: String?
 
     @State private var errorMessage = ""
     @State private var showingError = false
@@ -191,6 +200,94 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     WGJSectionHeader("Debug", subtitle: "Developer-only utilities for local testing.")
 
+                    infoRow("Cloud mode", value: cloudSyncEnabled ? "CloudKit enabled" : "Local fallback")
+                    infoRow("iCloud account", value: cloudAccountStatusText)
+                    infoRow("Profiles", value: "\(profiles.count)")
+                    infoRow("Templates", value: "\(templates.count)")
+                    infoRow("Workouts", value: "\(sessions.count)")
+
+                    if let lastProfileUpdate = profiles.first?.updatedAt {
+                        infoRow(
+                            "Last profile save",
+                            value: lastProfileUpdate.formatted(date: .abbreviated, time: .shortened)
+                        )
+                    }
+
+                    if let latestEvent = appRuntimeState.latestCloudSyncEvent {
+                        infoRow("Last cloud event", value: "\(latestEvent.typeLabel) \(latestEvent.statusLabel)")
+                        infoRow("Cloud store", value: latestEvent.storeIdentifier)
+                        infoRow(
+                            "Event time",
+                            value: (latestEvent.endedAt ?? latestEvent.startedAt)
+                                .formatted(date: .abbreviated, time: .shortened)
+                        )
+
+                        if let errorDescription = latestEvent.errorDescription, !errorDescription.isEmpty {
+                            Text(errorDescription)
+                                .font(.caption)
+                                .foregroundStyle(WGJTheme.warning)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    if let cloudSyncErrorDescription, !cloudSyncErrorDescription.isEmpty {
+                        Text(cloudSyncErrorDescription)
+                            .font(.caption)
+                            .foregroundStyle(WGJTheme.warning)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Button {
+                        Task {
+                            await refreshCloudDiagnostics()
+                        }
+                    } label: {
+                        Label("Refresh Cloud Status", systemImage: "icloud.and.arrow.down")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(WGJGhostButtonStyle())
+
+                    Button {
+                        Task {
+                            await writeCloudProbe()
+                        }
+                    } label: {
+                        Group {
+                            if isWritingCloudProbe {
+                                ProgressView()
+                            } else {
+                                Label("Write Cloud Probe", systemImage: "externaldrive.badge.icloud")
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(WGJGhostButtonStyle())
+                    .disabled(isWritingCloudProbe || !cloudSyncEnabled)
+
+                    if let cloudProbe {
+                        infoRow("Probe record type", value: CloudSyncDebugProbeDescriptor.recordType)
+                        infoRow("Probe record name", value: CloudSyncDebugProbeDescriptor.recordName)
+                        infoRow("Probe zone", value: CloudSyncDebugProbeDescriptor.zoneName)
+                        infoRow(
+                            "Probe updated",
+                            value: cloudProbe.updatedAt.formatted(date: .abbreviated, time: .shortened)
+                        )
+
+                        Text(
+                            "CloudKit Console query: \(cloudProbe.consoleEnvironmentName) > \(cloudProbe.databaseName) > \(CloudSyncDebugProbeDescriptor.zoneName) > \(CloudSyncDebugProbeDescriptor.recordType). Add a QUERYABLE index for `recordName` or `probeKey` in Schema if Console still refuses to list the type."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(WGJTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    if let cloudProbeErrorDescription, !cloudProbeErrorDescription.isEmpty {
+                        Text(cloudProbeErrorDescription)
+                            .font(.caption)
+                            .foregroundStyle(WGJTheme.warning)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
                     Button {
                         seedDemoData()
                     } label: {
@@ -220,6 +317,7 @@ struct SettingsView: View {
         .task {
             await bootstrapCatalog()
             await loadProfileIfNeeded()
+            await refreshCloudDiagnostics()
         }
         .onChange(of: isTrainingGuidanceEnabled) { _, newValue in
             guard hasLoadedProfile else { return }
@@ -319,6 +417,47 @@ struct SettingsView: View {
         }
 
         libraryStatusText = "Bundled library ready"
+    }
+
+    private var cloudAccountStatusText: String {
+        switch cloudAccountStatus {
+        case .checking:
+            return "Checking"
+        case .available:
+            return "Available"
+        case .unavailable(.noAccount):
+            return "No account"
+        case .unavailable(.restricted):
+            return "Restricted"
+        case .unavailable(.temporarilyUnavailable):
+            return "Temporarily unavailable"
+        case .unavailable(.unknown):
+            return "Unknown"
+        }
+    }
+
+    private func refreshCloudDiagnostics() async {
+        cloudAccountStatus = await AccountStatusService().fetchAccountStatus()
+    }
+
+    @MainActor
+    private func writeCloudProbe() async {
+        guard cloudSyncEnabled else { return }
+
+        isWritingCloudProbe = true
+        cloudProbeErrorDescription = nil
+        defer { isWritingCloudProbe = false }
+
+        do {
+            cloudProbe = try await CloudSyncDebugProbeService().writeProbe(
+                profileName: profiles.first?.displayName,
+                templateCount: templates.count,
+                workoutCount: sessions.count
+            )
+        } catch {
+            cloudProbe = nil
+            cloudProbeErrorDescription = String(describing: error)
+        }
     }
 
 #if DEBUG
