@@ -25,58 +25,73 @@ struct ActiveWorkoutStripView: View {
     }
 
     var body: some View {
-        Button(action: onExpand) {
-            HStack(spacing: 10) {
-                Circle()
-                    .fill(WGJTheme.success)
-                    .frame(width: 12, height: 12)
-                    .overlay {
+        Group {
+            if let session, session.status == .active {
+                Button(action: onExpand) {
+                    HStack(spacing: 10) {
                         Circle()
-                            .stroke(Color.white.opacity(0.24), lineWidth: 1)
+                            .fill(WGJTheme.success)
+                            .frame(width: 12, height: 12)
+                            .overlay {
+                                Circle()
+                                    .stroke(Color.white.opacity(0.24), lineWidth: 1)
+                            }
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(session.name)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(WGJTheme.textPrimary)
+                                .wgjSingleLineText(scale: 0.84)
+
+                            TimelineView(.periodic(from: .now, by: 1)) { context in
+                                Text(statusText(now: context.date))
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(restTimerAccent(now: context.date))
+                                    .monospacedDigit()
+                                    .wgjSingleLineText(scale: 0.84)
+                            }
+                        }
+
+                        Spacer()
+
+                        TimelineView(.periodic(from: .now, by: 1)) { context in
+                            WGJMetricPill(
+                                systemImage: restTimerPillIcon(now: context.date),
+                                value: restTimerPillText(now: context.date),
+                                tint: restTimerPillTint(now: context.date)
+                            )
+                        }
                     }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(session?.name ?? "Active Workout")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(WGJTheme.textPrimary)
-                        .wgjSingleLineText(scale: 0.84)
-
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        Text(statusText(now: context.date))
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(restTimerAccent(now: context.date))
-                            .monospacedDigit()
-                            .wgjSingleLineText(scale: 0.84)
-                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity)
+                    .wgjCardContainer(strong: true, cornerRadius: 22)
                 }
-
-                Spacer()
-
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    WGJMetricPill(
-                        systemImage: restTimerPillIcon(now: context.date),
-                        value: restTimerPillText(now: context.date),
-                        tint: restTimerPillTint(now: context.date)
-                    )
-                }
+                .buttonStyle(.plain)
+                .highPriorityGesture(
+                    DragGesture(minimumDistance: 12)
+                        .onEnded { value in
+                            if value.translation.height < -18 {
+                                onExpand()
+                            }
+                        }
+                )
+                .padding(.horizontal, 12)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity)
-            .wgjCardContainer(strong: true, cornerRadius: 22)
         }
-        .buttonStyle(.plain)
-        .highPriorityGesture(
-            DragGesture(minimumDistance: 12)
-                .onEnded { value in
-                    if value.translation.height < -18 {
-                        onExpand()
-                    }
-                }
-        )
-        .padding(.horizontal, 12)
         .onReceive(restTimerTick) { date in
             coordinator.handleRestTimerExpirationIfNeeded(at: date)
+        }
+        .task(id: session?.statusRaw) {
+            await reconcileSessionLifecycleIfNeeded()
+        }
+    }
+
+    @MainActor
+    private func reconcileSessionLifecycleIfNeeded() async {
+        guard let session, session.status == .active else {
+            coordinator.clearActiveWorkout()
+            return
         }
     }
 

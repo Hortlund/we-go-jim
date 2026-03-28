@@ -23,6 +23,8 @@ struct SettingsView: View {
     @State private var isWritingCloudProbe = false
     @State private var cloudProbe: CloudSyncDebugProbeDescriptor?
     @State private var cloudProbeErrorDescription: String?
+    @State private var isVerifyingCloudProbe = false
+    @State private var cloudProbeVerification: CloudSyncDebugProbeVerification?
 
     @State private var errorMessage = ""
     @State private var showingError = false
@@ -264,21 +266,49 @@ struct SettingsView: View {
                     .buttonStyle(WGJGhostButtonStyle())
                     .disabled(isWritingCloudProbe || !cloudSyncEnabled)
 
+                    Button {
+                        Task {
+                            await verifyCloudProbe()
+                        }
+                    } label: {
+                        Group {
+                            if isVerifyingCloudProbe {
+                                ProgressView()
+                            } else {
+                                Label("Verify Cloud Probe", systemImage: "checkmark.icloud")
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(WGJGhostButtonStyle())
+                    .disabled(isVerifyingCloudProbe || !cloudSyncEnabled)
+
                     if let cloudProbe {
                         infoRow("Probe record type", value: CloudSyncDebugProbeDescriptor.recordType)
                         infoRow("Probe record name", value: CloudSyncDebugProbeDescriptor.recordName)
                         infoRow("Probe zone", value: CloudSyncDebugProbeDescriptor.zoneName)
+                        infoRow("Probe query field", value: "probeKey")
+                        infoRow("Probe query value", value: CloudSyncDebugProbeDescriptor.recordName)
                         infoRow(
                             "Probe updated",
                             value: cloudProbe.updatedAt.formatted(date: .abbreviated, time: .shortened)
                         )
 
                         Text(
-                            "CloudKit Console query: \(cloudProbe.consoleEnvironmentName) > \(cloudProbe.databaseName) > \(CloudSyncDebugProbeDescriptor.zoneName) > \(CloudSyncDebugProbeDescriptor.recordType). Add a QUERYABLE index for `recordName` or `probeKey` in Schema if Console still refuses to list the type."
+                            "CloudKit Console query: \(cloudProbe.consoleEnvironmentName) > \(cloudProbe.databaseName) > \(CloudSyncDebugProbeDescriptor.zoneName) > \(CloudSyncDebugProbeDescriptor.recordType). Add a QUERYABLE index for `probeKey`, then query `probeKey == \(CloudSyncDebugProbeDescriptor.recordName)`. Do not leave a blank filter row in the Console because it defaults to `recordName` and throws the queryable error."
                         )
                         .font(.caption)
                         .foregroundStyle(WGJTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    if let cloudProbeVerification {
+                        infoRow(
+                            "Probe verified",
+                            value: cloudProbeVerification.verifiedAt.formatted(date: .abbreviated, time: .shortened)
+                        )
+                        infoRow("Direct lookup", value: cloudProbeVerification.directLookupStatus)
+                        infoRow("Indexed query", value: cloudProbeVerification.indexedQueryStatus)
                     }
 
                     if let cloudProbeErrorDescription, !cloudProbeErrorDescription.isEmpty {
@@ -454,9 +484,29 @@ struct SettingsView: View {
                 templateCount: templates.count,
                 workoutCount: sessions.count
             )
+            await verifyCloudProbe()
         } catch {
             cloudProbe = nil
+            cloudProbeVerification = nil
             cloudProbeErrorDescription = String(describing: error)
+        }
+    }
+
+    @MainActor
+    private func verifyCloudProbe() async {
+        guard cloudSyncEnabled else { return }
+
+        isVerifyingCloudProbe = true
+        defer { isVerifyingCloudProbe = false }
+
+        do {
+            cloudProbeVerification = try await CloudSyncDebugProbeService().verifyProbe()
+        } catch {
+            cloudProbeVerification = CloudSyncDebugProbeVerification(
+                verifiedAt: Date(),
+                directLookupStatus: "Failed",
+                indexedQueryStatus: String(describing: error)
+            )
         }
     }
 

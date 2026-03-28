@@ -16,6 +16,12 @@ struct CloudSyncDebugProbeDescriptor: Equatable {
     var consoleEnvironmentName: String { "Development" }
 }
 
+struct CloudSyncDebugProbeVerification: Equatable {
+    let verifiedAt: Date
+    let directLookupStatus: String
+    let indexedQueryStatus: String
+}
+
 struct CloudSyncDebugProbeService {
     private enum Field {
         static let probeKey = "probeKey"
@@ -71,6 +77,32 @@ struct CloudSyncDebugProbeService {
         )
     }
 
+    func verifyProbe() async throws -> CloudSyncDebugProbeVerification {
+        let recordID = CKRecord.ID(recordName: CloudSyncDebugProbeDescriptor.recordName)
+        let directRecord = try await existingRecord(recordID: recordID)
+
+        let directLookupStatus: String
+        if directRecord != nil {
+            directLookupStatus = "Succeeded"
+        } else {
+            directLookupStatus = "Missing"
+        }
+
+        let indexedQueryStatus: String
+        do {
+            let record = try await queriedProbeRecord()
+            indexedQueryStatus = record == nil ? "No match" : "Succeeded"
+        } catch {
+            indexedQueryStatus = Self.describe(error)
+        }
+
+        return CloudSyncDebugProbeVerification(
+            verifiedAt: Date(),
+            directLookupStatus: directLookupStatus,
+            indexedQueryStatus: indexedQueryStatus
+        )
+    }
+
     private func existingRecord(recordID: CKRecord.ID) async throws -> CKRecord? {
         do {
             let results = try await database.records(for: [recordID])
@@ -96,11 +128,39 @@ struct CloudSyncDebugProbeService {
         return trimmed.isEmpty ? "Unknown" : trimmed
     }
 
+    private func queriedProbeRecord() async throws -> CKRecord? {
+        let query = CKQuery(
+            recordType: CloudSyncDebugProbeDescriptor.recordType,
+            predicate: NSPredicate(
+                format: "%K == %@",
+                Field.probeKey,
+                CloudSyncDebugProbeDescriptor.recordName
+            )
+        )
+
+        let result = try await database.records(matching: query, resultsLimit: 1)
+        for (_, matchResult) in result.matchResults {
+            switch matchResult {
+            case let .success(record):
+                return record
+            case let .failure(error):
+                throw error
+            }
+        }
+
+        return nil
+    }
+
     private var buildConfiguration: String {
         #if DEBUG
         return "Debug"
         #else
         return "Release"
         #endif
+    }
+
+    private static func describe(_ error: Error) -> String {
+        let nsError = error as NSError
+        return "\(nsError.domain)(\(nsError.code)): \(nsError.localizedDescription)"
     }
 }

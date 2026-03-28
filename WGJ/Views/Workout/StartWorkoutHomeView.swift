@@ -658,12 +658,12 @@ struct StartWorkoutHomeView: View {
     }
 
     private func activeSessionIDToResume() -> UUID? {
-        if let activeSessionID = coordinator.activeSessionID {
-            return activeSessionID
-        }
-
         if let activeSession = try? workoutRepository.activeSession() {
             return activeSession.id
+        }
+
+        if coordinator.activeSessionID != nil, !coordinator.isActiveWorkoutPresented {
+            coordinator.clearActiveWorkout()
         }
 
         return nil

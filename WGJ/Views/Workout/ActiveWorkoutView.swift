@@ -40,7 +40,10 @@ struct ActiveWorkoutView: View {
     @State private var showingExercisePicker = false
     @State private var showingFinishConfirmation = false
     @State private var isCancelArmed = false
+    @State private var isEndingSession = false
     @State private var showingSaveTemplateSheet = false
+    @State private var pendingCompletionAfterSaveTemplateSheet = false
+    @State private var pendingCompletionTask: Task<Void, Never>?
     @State private var exerciseSettingsDraft: ActiveWorkoutExerciseSettingsDraft?
     @State private var pendingTemplateUpdatePreview: WorkoutTemplateSyncPreview?
     @State private var templateNameDraft = ""
@@ -157,7 +160,7 @@ struct ActiveWorkoutView: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if !isKeyboardVisible {
+            if !isKeyboardVisible, !isEndingSession, let session, session.status == .active {
                 ActiveWorkoutBottomDock(
                     session: session,
                     isCancelArmed: isCancelArmed,
@@ -191,12 +194,12 @@ struct ActiveWorkoutView: View {
             )
             .wgjSheetSurface()
         }
-        .sheet(isPresented: $showingSaveTemplateSheet) {
+        .sheet(isPresented: $showingSaveTemplateSheet, onDismiss: handleSaveTemplateSheetDismissed) {
             ActiveWorkoutSaveTemplateSheet(
                 templateNameDraft: $templateNameDraft,
                 templateFolderID: $templateFolderID,
                 folders: folders,
-                onSkip: finalizeCompletion,
+                onSkip: skipSavingSessionAsTemplate,
                 onSave: saveSessionAsTemplate
             )
             .interactiveDismissDisabled()
@@ -204,11 +207,16 @@ struct ActiveWorkoutView: View {
         .task {
             await bootstrapIfNeeded()
         }
+        .task(id: session?.statusRaw) {
+            await reconcileSessionLifecycleIfNeeded()
+        }
         .task(id: sessionExercises.map(\.id)) {
             await loadExerciseStateIfNeeded()
         }
         .onDisappear {
             isCancelArmed = false
+            pendingCompletionTask?.cancel()
+            pendingCompletionTask = nil
             flushPendingSaves()
         }
         .onReceive(restTimerTick) { date in
@@ -266,7 +274,7 @@ struct ActiveWorkoutView: View {
         Button("Finish") {
             presentFinishConfirmation()
         }
-        .disabled(session == nil || sessionExercises.isEmpty)
+        .disabled(isEndingSession || session == nil || sessionExercises.isEmpty || session?.status != .active)
         .accessibilityIdentifier("active-workout-finish-button")
         .popover(isPresented: $showingFinishConfirmation, attachmentAnchor: .point(.bottom), arrowEdge: .top) {
             ActiveWorkoutFinishPopover(
@@ -337,11 +345,13 @@ struct ActiveWorkoutView: View {
         coordinator.present(sessionID: sessionID)
 
         guard let session else { return }
+        isEndingSession = session.status != .active
         sessionNameDraft = session.name
         notesDraft = session.notes
         if session.templateID == nil {
             templateNameDraft = session.name == "Empty Workout" ? "New Template" : session.name
         }
+        handleTerminalSessionStateIfNeeded(session)
     }
 
     @MainActor
@@ -391,6 +401,62 @@ struct ActiveWorkoutView: View {
             )
         )
         loadedExerciseIDs = currentIDs
+    }
+
+    @MainActor
+    private func reconcileSessionLifecycleIfNeeded() async {
+        guard hasBootstrapped else { return }
+
+        guard let latestSession = try? sessionRepository.session(id: sessionID) else {
+            coordinator.clearActiveWorkout()
+            dismiss()
+            return
+        }
+
+        guard latestSession.status != .active else {
+            isEndingSession = false
+            return
+        }
+
+        handleTerminalSessionStateIfNeeded(latestSession)
+    }
+
+    @MainActor
+    private func handleTerminalSessionStateIfNeeded(_ latestSession: WorkoutSession) {
+        guard latestSession.status != .active else { return }
+
+        dismissKeyboard()
+        showingFinishConfirmation = false
+        isCancelArmed = false
+        isEndingSession = true
+        coordinator.clearRestTimer()
+
+        guard !pendingCompletionAfterSaveTemplateSheet else { return }
+        guard !showingSaveTemplateSheet, pendingTemplateUpdatePreview == nil else { return }
+
+        guard latestSession.status == .completed else {
+            coordinator.clearActiveWorkout()
+            dismiss()
+            return
+        }
+
+        if latestSession.templateID == nil {
+            if templateNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                templateNameDraft = latestSession.name == "Empty Workout" ? "New Template" : latestSession.name
+            }
+            showingSaveTemplateSheet = true
+            return
+        }
+
+        do {
+            if let preview = try templateSyncService.previewTemplateUpdate(forSessionID: sessionID) {
+                pendingTemplateUpdatePreview = preview
+            } else {
+                finalizeCompletion()
+            }
+        } catch {
+            showError(error)
+        }
     }
 
     private func resolvedPreviousMap(
@@ -733,20 +799,25 @@ struct ActiveWorkoutView: View {
     private func finishWorkout() {
         dismissKeyboard()
         isCancelArmed = false
+        guard !isEndingSession else { return }
+        if let session, session.status != .active {
+            handleTerminalSessionStateIfNeeded(session)
+            return
+        }
+        isEndingSession = true
         persistSessionMeta()
         flushPendingSaves()
         coordinator.clearRestTimer()
 
         do {
             try sessionRepository.finishSession(sessionID: sessionID, notes: notesDraft)
-            if session?.templateID == nil {
-                showingSaveTemplateSheet = true
-            } else if let preview = try templateSyncService.previewTemplateUpdate(forSessionID: sessionID) {
-                pendingTemplateUpdatePreview = preview
+            if let latestSession = try sessionRepository.session(id: sessionID) {
+                handleTerminalSessionStateIfNeeded(latestSession)
             } else {
                 finalizeCompletion()
             }
         } catch {
+            isEndingSession = false
             showError(error)
         }
     }
@@ -759,16 +830,42 @@ struct ActiveWorkoutView: View {
                 name: templateNameDraft,
                 folderID: templateFolderID
             )
-            finalizeCompletion()
+            requestCompletionAfterSaveTemplateSheetDismissal()
         } catch {
             showError(error)
         }
     }
 
+    private func skipSavingSessionAsTemplate() {
+        dismissKeyboard()
+        requestCompletionAfterSaveTemplateSheetDismissal()
+    }
+
+    private func handleSaveTemplateSheetDismissed() {
+        guard pendingCompletionAfterSaveTemplateSheet else { return }
+        pendingCompletionTask?.cancel()
+        pendingCompletionTask = nil
+        finalizeCompletion()
+    }
+
+    private func requestCompletionAfterSaveTemplateSheetDismissal() {
+        pendingCompletionAfterSaveTemplateSheet = true
+        showingSaveTemplateSheet = false
+        pendingCompletionTask?.cancel()
+        pendingCompletionTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(180))
+            guard !Task.isCancelled, pendingCompletionAfterSaveTemplateSheet, !showingSaveTemplateSheet else { return }
+            finalizeCompletion()
+        }
+    }
+
     private func finalizeCompletion() {
+        pendingCompletionTask?.cancel()
+        pendingCompletionTask = nil
         dismissKeyboard()
         isCancelArmed = false
         showingSaveTemplateSheet = false
+        pendingCompletionAfterSaveTemplateSheet = false
         exerciseSettingsDraft = nil
         pendingTemplateUpdatePreview = nil
         coordinator.clearActiveWorkout()
@@ -786,6 +883,12 @@ struct ActiveWorkoutView: View {
     private func cancelWorkout() {
         dismissKeyboard()
         isCancelArmed = false
+        guard !isEndingSession else { return }
+        if let session, session.status != .active {
+            handleTerminalSessionStateIfNeeded(session)
+            return
+        }
+        isEndingSession = true
         persistSessionMeta()
         flushPendingSaves()
         coordinator.clearRestTimer()
@@ -794,12 +897,39 @@ struct ActiveWorkoutView: View {
             try sessionRepository.cancelSession(sessionID: sessionID)
             coordinator.clearActiveWorkout()
             dismiss()
+        } catch WorkoutSessionRepositoryError.invalidSessionState {
+            if let latestSession = try? sessionRepository.session(id: sessionID) {
+                handleTerminalSessionStateIfNeeded(latestSession)
+            } else {
+                coordinator.clearActiveWorkout()
+                dismiss()
+            }
         } catch {
+            isEndingSession = false
             showError(error)
         }
     }
 
     private func showError(_ error: Error) {
+        if let repositoryError = error as? WorkoutSessionRepositoryError {
+            switch repositoryError {
+            case .invalidSessionState:
+                if let latestSession = try? sessionRepository.session(id: sessionID) {
+                    handleTerminalSessionStateIfNeeded(latestSession)
+                } else {
+                    coordinator.clearActiveWorkout()
+                    dismiss()
+                }
+                return
+            case .sessionNotFound:
+                coordinator.clearActiveWorkout()
+                dismiss()
+                return
+            default:
+                break
+            }
+        }
+
         errorMessage = String(describing: error)
         showingError = true
     }
@@ -831,6 +961,7 @@ struct ActiveWorkoutView: View {
 
     private func presentFinishConfirmation() {
         dismissKeyboard()
+        guard !isEndingSession else { return }
         isCancelArmed = false
         showingFinishConfirmation = true
     }
