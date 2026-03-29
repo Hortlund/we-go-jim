@@ -356,6 +356,7 @@ final class WorkoutSessionRepository {
         }
 
         let existing = exercise.sets ?? []
+        let existingByID = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
         let incomingIDs = Set(drafts.map(\.id))
 
         for set in existing where !incomingIDs.contains(set.id) {
@@ -363,8 +364,9 @@ final class WorkoutSessionRepository {
         }
 
         var updatedSets: [WorkoutSessionSet] = []
+        updatedSets.reserveCapacity(drafts.count)
         for (index, draft) in drafts.enumerated() {
-            let set = existing.first(where: { $0.id == draft.id }) ?? WorkoutSessionSet(
+            let set = existingByID[draft.id] ?? WorkoutSessionSet(
                 id: draft.id,
                 sessionExerciseID: sessionExerciseID,
                 sessionExercise: exercise

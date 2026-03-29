@@ -112,10 +112,6 @@ struct WorkoutSessionExerciseGridEditor: View {
                     .stroke(WGJTheme.success.opacity(0.34), lineWidth: 1.2)
             }
         }
-        .onChange(of: setDrafts.map(\.id)) { _, updatedSetIDs in
-            guard let focusedInput, !updatedSetIDs.contains(focusedInput.setID) else { return }
-            dismissInputFocus()
-        }
     }
 
     @ViewBuilder
@@ -304,7 +300,9 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private var setsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let rows = displayRows
+
+        return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Logged Sets")
                     .font(.subheadline.weight(.semibold))
@@ -312,28 +310,28 @@ struct WorkoutSessionExerciseGridEditor: View {
 
                 Spacer()
 
-                Text("\(setDrafts.count) total")
+                Text("\(rows.count) total")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(WGJTheme.textSecondary)
             }
 
-            if setDrafts.isEmpty {
+            if rows.isEmpty {
                 Text("No sets yet.")
                     .font(.caption)
                     .foregroundStyle(WGJTheme.textSecondary)
                     .padding(.vertical, 6)
             }
 
-            ForEach(Array(setDrafts.enumerated()), id: \.element.id) { index, draft in
+            ForEach(rows) { row in
                 SwipeDeleteRow(
-                    offset: setSwipeOffsetBinding(for: draft.id),
-                    isRemoving: setRemovingBinding(for: draft.id),
-                    isEnabled: !draft.isLocked,
+                    offset: setSwipeOffsetBinding(for: row.id),
+                    isRemoving: setRemovingBinding(for: row.id),
+                    isEnabled: !row.set.isLocked,
                     gestureStrategy: .simultaneous
                 ) {
-                    removeSet(withID: draft.id)
+                    removeSet(withID: row.id)
                 } content: {
-                    setCard(at: index)
+                    setCard(row)
                 }
             }
 
@@ -358,17 +356,17 @@ struct WorkoutSessionExerciseGridEditor: View {
         }
     }
 
-    private func setCard(at index: Int) -> some View {
-        let set = setDrafts[index]
-        let progressReference = progressReference(for: index)
+    private func setCard(_ row: WorkoutSessionExerciseSetRowDisplaySnapshot) -> some View {
+        let set = row.set
+        let progressReference = row.progressReference
 
         return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 10) {
-                setBadge(for: index)
+                setBadge(for: row)
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
-                        Text(setTitle(for: index))
+                        Text(row.title)
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(WGJTheme.textPrimary)
                             .wgjSingleLineText(scale: 0.84)
@@ -381,14 +379,14 @@ struct WorkoutSessionExerciseGridEditor: View {
                     }
 
                     if !manualCompletionMode || progressReference == nil {
-                        Text(previousSummary(for: index))
+                        Text(row.previousSummary)
                             .font(.caption)
                             .foregroundStyle(WGJTheme.textSecondary)
                             .lineLimit(2)
                             .monospacedDigit()
                     }
 
-                    if let metadata = setMetadataLine(for: index) {
+                    if let metadata = row.metadataLine {
                         Text(metadata)
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(WGJTheme.textSecondary)
@@ -398,37 +396,37 @@ struct WorkoutSessionExerciseGridEditor: View {
 
                 Spacer(minLength: 8)
 
-                setMenu(at: index)
+                setMenu(at: row.index)
             }
 
             if manualCompletionMode, let progressReference {
-                progressReferenceStrip(progressReference, at: index)
+                progressReferenceStrip(progressReference, at: row.index)
             }
 
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .top, spacing: 12) {
-                    metricField(title: "Weight", supporting: targetWeightText(for: index)) {
-                        loadField(at: index)
+                    metricField(title: "Weight", supporting: row.targetWeightText) {
+                        loadField(at: row.index)
                     }
 
-                    metricField(title: "Reps", supporting: targetRepsText(for: index)) {
-                        repsField(at: index)
+                    metricField(title: "Reps", supporting: row.targetRepsText) {
+                        repsField(at: row.index)
                     }
                 }
 
                 VStack(alignment: .leading, spacing: 12) {
-                    metricField(title: "Weight", supporting: targetWeightText(for: index)) {
-                        loadField(at: index)
+                    metricField(title: "Weight", supporting: row.targetWeightText) {
+                        loadField(at: row.index)
                     }
 
-                    metricField(title: "Reps", supporting: targetRepsText(for: index)) {
-                        repsField(at: index)
+                    metricField(title: "Reps", supporting: row.targetRepsText) {
+                        repsField(at: row.index)
                     }
                 }
             }
 
             if manualCompletionMode {
-                completionRow(at: index)
+                completionRow(for: row)
             }
         }
         .padding(12)
@@ -634,12 +632,11 @@ struct WorkoutSessionExerciseGridEditor: View {
         .metricInputShell(isFocused: isInputFocused(.weight, at: index))
     }
 
-    private func setBadge(for index: Int) -> some View {
-        let set = setDrafts[index]
-        let title = set.isWarmup ? "W" : "\(workingSetNumber(at: index))"
+    private func setBadge(for row: WorkoutSessionExerciseSetRowDisplaySnapshot) -> some View {
+        let set = row.set
 
         return Button {
-            toggleWarmup(at: index)
+            toggleWarmup(at: row.index)
         } label: {
             ZStack {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -652,7 +649,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                             )
                     )
 
-                Text(title)
+                Text(row.badgeTitle)
                     .font(.subheadline.weight(.bold))
                     .foregroundStyle(set.isWarmup ? WGJTheme.accentGold : WGJTheme.textPrimary)
             }
@@ -933,6 +930,10 @@ struct WorkoutSessionExerciseGridEditor: View {
         (targetRepMin, targetRepMax)
     }
 
+    private var displayRows: [WorkoutSessionExerciseSetRowDisplaySnapshot] {
+        buildDisplayRows()
+    }
+
     private var completedSetCount: Int {
         setDrafts.filter(\.isCompleted).count
     }
@@ -1117,36 +1118,68 @@ struct WorkoutSessionExerciseGridEditor: View {
         }
     }
 
-    private func progressReference(for index: Int) -> WorkoutSetProgressReference? {
-        guard setDrafts.indices.contains(index) else { return nil }
-        return WorkoutSetProgressReference.make(
-            draft: setDrafts[index],
-            previous: previousBySetIndex[index],
-            targetRepMin: targetRepMin,
-            targetRepMax: targetRepMax,
-            formatWeight: formatWeight
-        )
-    }
+    private func buildDisplayRows() -> [WorkoutSessionExerciseSetRowDisplaySnapshot] {
+        var rows: [WorkoutSessionExerciseSetRowDisplaySnapshot] = []
+        rows.reserveCapacity(setDrafts.count)
 
-    private func previousText(for index: Int) -> String {
-        guard let snapshot = previousBySetIndex[index] else {
-            return "-"
+        var workingSetNumber = 0
+
+        for (index, draft) in setDrafts.enumerated() {
+            let label: WorkoutSessionExerciseSetRowLabel
+            if draft.isWarmup {
+                label = WorkoutSessionExerciseSetRowLabel(
+                    badgeTitle: "W",
+                    title: "Warmup Set"
+                )
+            } else {
+                workingSetNumber += 1
+                label = WorkoutSessionExerciseSetRowLabel(
+                    badgeTitle: "\(workingSetNumber)",
+                    title: "Working Set \(workingSetNumber)"
+                )
+            }
+
+            rows.append(
+                WorkoutSessionExerciseSetRowDisplaySnapshot(
+                    id: draft.id,
+                    index: index,
+                    set: draft,
+                    badgeTitle: label.badgeTitle,
+                    title: label.title,
+                    previousSummary: previousSummaryText(for: previousBySetIndex[index]),
+                    metadataLine: metadataLine(for: draft),
+                    targetWeightText: targetWeightText(for: draft),
+                    targetRepsText: targetRepsText(for: draft),
+                    progressReference: WorkoutSetProgressReference.make(
+                        draft: draft,
+                        previous: previousBySetIndex[index],
+                        targetRepMin: targetRepMin,
+                        targetRepMax: targetRepMax,
+                        formatWeight: formatWeight
+                    ),
+                    completionButtonTitle: completionButtonTitle(restSeconds: draft.restSeconds)
+                )
+            )
         }
 
+        return rows
+    }
+
+    private func previousSummaryText(for snapshot: WorkoutPreviousSetSnapshot?) -> String {
+        guard let snapshot else {
+            return "No previous log for this slot."
+        }
+
+        let previousText: String
         if let weight = snapshot.weight, let reps = snapshot.reps {
-            return "\(formatWeight(weight)) \(snapshot.unit.shortLabel) x \(reps)"
+            previousText = "\(formatWeight(weight)) \(snapshot.unit.shortLabel) x \(reps)"
+        } else if let reps = snapshot.reps {
+            previousText = "\(reps) reps"
+        } else {
+            return "No previous log for this slot."
         }
 
-        if let reps = snapshot.reps {
-            return "\(reps) reps"
-        }
-
-        return "-"
-    }
-
-    private func previousSummary(for index: Int) -> String {
-        let previous = previousText(for: index)
-        return previous == "-" ? "No previous log for this slot." : "Previous \(previous)"
+        return "Previous \(previousText)"
     }
 
     private func applyPreviousPerformance(at index: Int) {
@@ -1164,9 +1197,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         notifyChanged()
     }
 
-    private func setMetadataLine(for index: Int) -> String? {
-        guard setDrafts.indices.contains(index) else { return nil }
-        let set = setDrafts[index]
+    private func metadataLine(for set: WorkoutSessionSetDraft) -> String? {
         var parts: [String] = []
 
         if set.isLocked {
@@ -1181,16 +1212,16 @@ struct WorkoutSessionExerciseGridEditor: View {
         return parts.joined(separator: " • ")
     }
 
-    private func targetWeightText(for index: Int) -> String? {
-        guard setDrafts.indices.contains(index), let targetWeight = setDrafts[index].targetWeight else {
+    private func targetWeightText(for set: WorkoutSessionSetDraft) -> String? {
+        guard let targetWeight = set.targetWeight else {
             return nil
         }
 
-        return "Target \(formatWeight(targetWeight)) \(setDrafts[index].targetLoadUnit.shortLabel)"
+        return "Target \(formatWeight(targetWeight)) \(set.targetLoadUnit.shortLabel)"
     }
 
-    private func targetRepsText(for index: Int) -> String? {
-        guard setDrafts.indices.contains(index), let targetReps = setDrafts[index].targetReps else {
+    private func targetRepsText(for set: WorkoutSessionSetDraft) -> String? {
+        guard let targetReps = set.targetReps else {
             return nil
         }
 
@@ -1271,9 +1302,12 @@ struct WorkoutSessionExerciseGridEditor: View {
         seconds <= 0 ? "No rest" : formattedRest(seconds)
     }
 
-    private func completionRow(at index: Int) -> some View {
-        Group {
-            if setDrafts[index].isCompleted {
+    private func completionRow(for row: WorkoutSessionExerciseSetRowDisplaySnapshot) -> some View {
+        let index = row.index
+        let set = row.set
+
+        return Group {
+            if set.isCompleted {
                 HStack(spacing: 10) {
                     Label("Completed", systemImage: "checkmark.circle.fill")
                         .font(.subheadline.weight(.semibold))
@@ -1286,7 +1320,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                         setCompletion(false, at: index)
                     }
                     .buttonStyle(WGJGhostButtonStyle())
-                    .disabled(setDrafts[index].isLocked)
+                    .disabled(set.isLocked)
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1302,18 +1336,18 @@ struct WorkoutSessionExerciseGridEditor: View {
                 Button {
                     setCompletion(true, at: index)
                 } label: {
-                    Label(completionButtonTitle(for: index), systemImage: "checkmark.circle.fill")
+                    Label(row.completionButtonTitle, systemImage: "checkmark.circle.fill")
                         .frame(maxWidth: .infinity)
                         .wgjSingleLineText(scale: 0.82)
                 }
                 .buttonStyle(WGJCompactPrimaryButtonStyle())
-                .disabled(setDrafts[index].isLocked)
+                .disabled(set.isLocked)
             }
         }
     }
 
-    private func completionButtonTitle(for index: Int) -> String {
-        let restLabel = setDrafts[index].restSeconds > 0 ? " + Rest \(formattedRest(setDrafts[index].restSeconds))" : ""
+    private func completionButtonTitle(restSeconds: Int) -> String {
+        let restLabel = restSeconds > 0 ? " + Rest \(formattedRest(restSeconds))" : ""
         return "Complete Set\(restLabel)"
     }
 
@@ -1386,4 +1420,23 @@ private extension View {
                     )
             }
     }
+}
+
+private struct WorkoutSessionExerciseSetRowLabel {
+    let badgeTitle: String
+    let title: String
+}
+
+private struct WorkoutSessionExerciseSetRowDisplaySnapshot: Identifiable, Equatable {
+    let id: UUID
+    let index: Int
+    let set: WorkoutSessionSetDraft
+    let badgeTitle: String
+    let title: String
+    let previousSummary: String
+    let metadataLine: String?
+    let targetWeightText: String?
+    let targetRepsText: String?
+    let progressReference: WorkoutSetProgressReference?
+    let completionButtonTitle: String
 }

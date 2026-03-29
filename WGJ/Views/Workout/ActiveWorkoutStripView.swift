@@ -1,4 +1,3 @@
-import Combine
 import SwiftData
 import SwiftUI
 
@@ -7,8 +6,6 @@ struct ActiveWorkoutStripView: View {
 
     let sessionID: UUID
     let onExpand: () -> Void
-
-    private let restTimerTick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     @Query private var sessions: [WorkoutSession]
 
@@ -27,60 +24,60 @@ struct ActiveWorkoutStripView: View {
     var body: some View {
         Group {
             if let session, session.status == .active {
-                Button(action: onExpand) {
-                    HStack(spacing: 10) {
-                        Circle()
-                            .fill(WGJTheme.success)
-                            .frame(width: 12, height: 12)
-                            .overlay {
-                                Circle()
-                                    .stroke(Color.white.opacity(0.24), lineWidth: 1)
-                            }
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    let status = statusPresentation(now: context.date)
 
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(session.name)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(WGJTheme.textPrimary)
-                                .wgjSingleLineText(scale: 0.84)
+                    Button(action: onExpand) {
+                        HStack(spacing: 10) {
+                            Circle()
+                                .fill(WGJTheme.success)
+                                .frame(width: 12, height: 12)
+                                .overlay {
+                                    Circle()
+                                        .stroke(Color.white.opacity(0.24), lineWidth: 1)
+                                }
 
-                            TimelineView(.periodic(from: .now, by: 1)) { context in
-                                Text(statusText(now: context.date))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(session.name)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(WGJTheme.textPrimary)
+                                    .wgjSingleLineText(scale: 0.84)
+
+                                Text(status.statusText)
                                     .font(.caption.weight(.medium))
-                                    .foregroundStyle(restTimerAccent(now: context.date))
+                                    .foregroundStyle(status.statusTint)
                                     .monospacedDigit()
                                     .wgjSingleLineText(scale: 0.84)
                             }
-                        }
 
-                        Spacer()
+                            Spacer()
 
-                        TimelineView(.periodic(from: .now, by: 1)) { context in
                             WGJMetricPill(
-                                systemImage: restTimerPillIcon(now: context.date),
-                                value: restTimerPillText(now: context.date),
-                                tint: restTimerPillTint(now: context.date)
+                                systemImage: status.pillIcon,
+                                value: status.pillText,
+                                tint: status.pillTint
                             )
                         }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .frame(maxWidth: .infinity)
+                        .wgjCardContainer(strong: true, cornerRadius: 22)
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .frame(maxWidth: .infinity)
-                    .wgjCardContainer(strong: true, cornerRadius: 22)
-                }
-                .buttonStyle(.plain)
-                .highPriorityGesture(
-                    DragGesture(minimumDistance: 12)
-                        .onEnded { value in
-                            if value.translation.height < -18 {
-                                onExpand()
+                    .buttonStyle(.plain)
+                    .highPriorityGesture(
+                        DragGesture(minimumDistance: 12)
+                            .onEnded { value in
+                                if value.translation.height < -18 {
+                                    onExpand()
+                                }
                             }
-                        }
-                )
-                .padding(.horizontal, 12)
+                    )
+                    .padding(.horizontal, 12)
+                }
+                .background {
+                    WorkoutRestTimerExpiryObserver()
+                }
             }
-        }
-        .onReceive(restTimerTick) { date in
-            coordinator.handleRestTimerExpirationIfNeeded(at: date)
         }
         .task(id: session?.statusRaw) {
             await reconcileSessionLifecycleIfNeeded()
@@ -102,42 +99,32 @@ struct ActiveWorkoutStripView: View {
         return WGJDurationFormatter.elapsedString(since: startedAt, now: now)
     }
 
-    private func statusText(now: Date) -> String {
+    private func statusPresentation(now: Date) -> ActiveWorkoutStripStatusPresentation {
         if let remaining = coordinator.restTimerRemaining(at: now) {
-            let prefix = "Rest \(formattedRest(remaining))"
+            let restText = formattedRest(remaining)
+            let statusText: String
             if let context = coordinator.restTimerContextLabel() {
-                return "\(prefix) · \(context)"
+                statusText = "Rest \(restText) · \(context)"
+            } else {
+                statusText = "Rest \(restText)"
             }
-            return prefix
+
+            return ActiveWorkoutStripStatusPresentation(
+                statusText: statusText,
+                statusTint: WGJTheme.success,
+                pillText: restText,
+                pillIcon: "timer",
+                pillTint: WGJTheme.success
+            )
         }
 
-        return "Elapsed \(elapsedText(now: now))"
-    }
-
-    private func restTimerPillText(now: Date) -> String {
-        if let remaining = coordinator.restTimerRemaining(at: now) {
-            return formattedRest(remaining)
-        }
-
-        return "Open"
-    }
-
-    private func restTimerPillIcon(now: Date) -> String {
-        coordinator.restTimerRemaining(at: now) == nil ? "chevron.up" : "timer"
-    }
-
-    private func restTimerPillTint(now: Date) -> Color {
-        guard coordinator.restTimerRemaining(at: now) != nil else {
-            return WGJTheme.accentBlue
-        }
-        return WGJTheme.success
-    }
-
-    private func restTimerAccent(now: Date) -> Color {
-        guard coordinator.restTimerRemaining(at: now) != nil else {
-            return WGJTheme.textSecondary
-        }
-        return WGJTheme.success
+        return ActiveWorkoutStripStatusPresentation(
+            statusText: "Elapsed \(elapsedText(now: now))",
+            statusTint: WGJTheme.textSecondary,
+            pillText: "Open",
+            pillIcon: "chevron.up",
+            pillTint: WGJTheme.accentBlue
+        )
     }
 
     private func formattedRest(_ seconds: Int) -> String {
@@ -145,6 +132,14 @@ struct ActiveWorkoutStripView: View {
         let secs = max(0, seconds) % 60
         return String(format: "%d:%02d", mins, secs)
     }
+}
+
+private struct ActiveWorkoutStripStatusPresentation {
+    let statusText: String
+    let statusTint: Color
+    let pillText: String
+    let pillIcon: String
+    let pillTint: Color
 }
 
 #Preview {

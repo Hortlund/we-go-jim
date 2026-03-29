@@ -31,6 +31,7 @@ struct ActiveWorkoutView: View {
     @State private var pendingRestTasks: [UUID: Task<Void, Never>] = [:]
 
     @State private var previousByExerciseID: [UUID: [Int: WorkoutPreviousSetSnapshot]] = [:]
+    @State private var overloadFeedbackByExerciseID: [UUID: ActiveWorkoutProgressiveOverloadPresentation] = [:]
     @State private var loadedExerciseStateStamp: ActiveWorkoutExerciseStateStamp?
     @State private var catalogByUUID: [String: ExerciseCatalogItem] = [:]
     @State private var cardStateController = ActiveWorkoutExerciseCardStateController()
@@ -211,6 +212,9 @@ struct ActiveWorkoutView: View {
         .task(id: exerciseHydrationStamp) {
             await loadExerciseStateIfNeeded()
         }
+        .task(id: isTrainingGuidanceEnabled) {
+            await refreshOverloadFeedback()
+        }
         .onDisappear {
             isCancelArmed = false
             pendingCompletionTask?.cancel()
@@ -235,7 +239,7 @@ struct ActiveWorkoutView: View {
         }
         .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: isKeyboardVisible)
         .background {
-            ActiveWorkoutRestTimerObserver()
+            WorkoutRestTimerExpiryObserver()
         }
         .wgjMinimalKeyboardToolbar()
     }
@@ -379,6 +383,11 @@ struct ActiveWorkoutView: View {
         lastPersistedRestByExerciseID = result.restsByExerciseID
         previousByExerciseID = result.previousByExerciseID
         catalogByUUID = result.catalogByUUID
+        overloadFeedbackByExerciseID = buildOverloadFeedbacks(
+            exercises: sessionExercises,
+            draftsByExerciseID: result.draftsByExerciseID,
+            catalogByUUID: result.catalogByUUID
+        )
         let completedExerciseIDs = Set(
             result.draftsByExerciseID.compactMap { exerciseID, drafts in
                 isExerciseCompleted(drafts) ? exerciseID : nil
@@ -508,7 +517,7 @@ struct ActiveWorkoutView: View {
             targetRepMin: exercise.targetRepMin,
             targetRepMax: exercise.targetRepMax,
             previousBySetIndex: previousByExerciseID[exercise.id] ?? [:],
-            overloadFeedback: overloadFeedback(for: exercise),
+            overloadFeedback: overloadFeedbackByExerciseID[exercise.id],
             preferredLoadUnit: preferredLoadUnit,
             restSeconds: restBinding(for: exercise),
             setDrafts: setDraftsBinding(for: exercise),
@@ -523,6 +532,7 @@ struct ActiveWorkoutView: View {
                     for: exercise.id,
                     isCompleted: isExerciseCompleted(drafts)
                 )
+                syncOverloadFeedback(for: exercise, drafts: drafts)
                 persistDrafts(sessionExerciseID: exercise.id, drafts: drafts)
             },
             onRestChanged: { rest in
@@ -667,6 +677,7 @@ struct ActiveWorkoutView: View {
                 restByExerciseID.removeValue(forKey: exerciseID)
                 lastPersistedRestByExerciseID.removeValue(forKey: exerciseID)
                 previousByExerciseID.removeValue(forKey: exerciseID)
+                overloadFeedbackByExerciseID.removeValue(forKey: exerciseID)
                 loadedExerciseStateStamp = nil
             } catch {
                 capturedError = error
@@ -698,6 +709,66 @@ struct ActiveWorkoutView: View {
         profiles.first?.isTrainingGuidanceEnabled ?? true
     }
 
+    @MainActor
+    private func refreshOverloadFeedback() async {
+        overloadFeedbackByExerciseID = buildOverloadFeedbacks(
+            exercises: sessionExercises,
+            draftsByExerciseID: setDraftsByExerciseID,
+            catalogByUUID: catalogByUUID
+        )
+    }
+
+    @MainActor
+    private func buildOverloadFeedbacks(
+        exercises: [WorkoutSessionExercise],
+        draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]],
+        catalogByUUID: [String: ExerciseCatalogItem]
+    ) -> [UUID: ActiveWorkoutProgressiveOverloadPresentation] {
+        guard isTrainingGuidanceEnabled else { return [:] }
+
+        var feedbackByExerciseID: [UUID: ActiveWorkoutProgressiveOverloadPresentation] = [:]
+        feedbackByExerciseID.reserveCapacity(exercises.count)
+
+        for exercise in exercises {
+            let drafts = draftsByExerciseID[exercise.id] ?? makeDrafts(from: exercise)
+            guard
+                let catalogExercise = catalogByUUID[exercise.catalogExerciseUUID],
+                let feedback = makeOverloadFeedback(
+                    for: exercise,
+                    drafts: drafts,
+                    catalogExercise: catalogExercise
+                )
+            else {
+                continue
+            }
+
+            feedbackByExerciseID[exercise.id] = feedback
+        }
+
+        return feedbackByExerciseID
+    }
+
+    @MainActor
+    private func syncOverloadFeedback(
+        for exercise: WorkoutSessionExercise,
+        drafts: [WorkoutSessionSetDraft]
+    ) {
+        guard
+            isTrainingGuidanceEnabled,
+            let catalogExercise = catalogByUUID[exercise.catalogExerciseUUID],
+            let feedback = makeOverloadFeedback(
+                for: exercise,
+                drafts: drafts,
+                catalogExercise: catalogExercise
+            )
+        else {
+            overloadFeedbackByExerciseID.removeValue(forKey: exercise.id)
+            return
+        }
+
+        overloadFeedbackByExerciseID[exercise.id] = feedback
+    }
+
     private func expansionBinding(for exerciseID: UUID) -> Binding<Bool> {
         Binding(
             get: { cardStateController.isExpanded(for: exerciseID) },
@@ -705,13 +776,11 @@ struct ActiveWorkoutView: View {
         )
     }
 
-    @MainActor
-    private func overloadFeedback(for exercise: WorkoutSessionExercise) -> ActiveWorkoutProgressiveOverloadPresentation? {
-        guard isTrainingGuidanceEnabled else { return nil }
-        guard let catalogExercise = catalogByUUID[exercise.catalogExerciseUUID] else { return nil }
-
-        let drafts = draftsForDisplay(for: exercise)
-
+    private func makeOverloadFeedback(
+        for exercise: WorkoutSessionExercise,
+        drafts: [WorkoutSessionSetDraft],
+        catalogExercise: ExerciseCatalogItem
+    ) -> ActiveWorkoutProgressiveOverloadPresentation? {
         let cue = guidanceService.progressiveOverloadCue(
             for: catalogExercise,
             targetRepMin: exercise.targetRepMin,
@@ -780,6 +849,12 @@ struct ActiveWorkoutView: View {
                 previousDefaultRest: previousDefaultRest,
                 updatedRest: draft.restSeconds
             )
+            if let exercise = sessionExercises.first(where: { $0.id == draft.exerciseID }) {
+                syncOverloadFeedback(
+                    for: exercise,
+                    drafts: setDraftsByExerciseID[draft.exerciseID] ?? makeDrafts(from: exercise)
+                )
+            }
             exerciseSettingsDraft = nil
         } catch {
             showError(error)
@@ -972,11 +1047,6 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
-    private func draftsForDisplay(for exercise: WorkoutSessionExercise) -> [WorkoutSessionSetDraft] {
-        setDraftsByExerciseID[exercise.id] ?? makeDrafts(from: exercise)
-    }
-
-    @MainActor
     private func applyPersistedRestChange(
         sessionExerciseID: UUID,
         previousDefaultRest: Int,
@@ -1141,7 +1211,7 @@ private struct ActiveWorkoutBottomDock: View {
     }
 }
 
-private struct ActiveWorkoutRestTimerObserver: View {
+struct WorkoutRestTimerExpiryObserver: View {
     @Environment(ActiveWorkoutCoordinator.self) private var coordinator
 
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
