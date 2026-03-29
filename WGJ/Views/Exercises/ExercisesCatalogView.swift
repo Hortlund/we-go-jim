@@ -396,8 +396,10 @@ struct ExercisesCatalogView: View {
     }
 
     private func rebuildCatalogCache() {
-        exerciseByUUID = Dictionary(uniqueKeysWithValues: catalogExercises.map { ($0.remoteUUID, $0) })
-        viewModel.rebuildCatalog(from: catalogExercises)
+        WGJPerformance.measure("catalog.rebuild") {
+            exerciseByUUID = Dictionary(uniqueKeysWithValues: catalogExercises.map { ($0.remoteUUID, $0) })
+            viewModel.rebuildCatalog(from: catalogExercises)
+        }
         recomputeSections()
         if catalogExercises.isEmpty {
             if loadState == .loading {

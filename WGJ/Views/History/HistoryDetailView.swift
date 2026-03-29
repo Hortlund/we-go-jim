@@ -19,7 +19,7 @@ struct HistoryDetailView: View {
     @State private var setDraftsByExerciseID: [UUID: [WorkoutSessionSetDraft]] = [:]
     @State private var restByExerciseID: [UUID: Int] = [:]
     @State private var previousByExerciseID: [UUID: [Int: WorkoutPreviousSetSnapshot]] = [:]
-    @State private var loadedExerciseIDs: [UUID] = []
+    @State private var loadedExerciseStateStamp: HistoryExerciseStateStamp?
 
     @State private var showingExercisePicker = false
     @State private var showingDeleteConfirmation = false
@@ -99,7 +99,7 @@ struct HistoryDetailView: View {
                 .disabled(session == nil)
             }
             .padding(WGJSpacing.page)
-            .animation(WGJMotion.cardAnimation(reduceMotion: reduceMotion), value: sessionExercises.map(\.id))
+            .animation(WGJMotion.cardAnimation(reduceMotion: reduceMotion), value: exerciseListAnimationToken)
         }
         .scrollDismissesKeyboard(.interactively)
         .wgjScreenBackground()
@@ -129,7 +129,7 @@ struct HistoryDetailView: View {
         .task {
             await bootstrapIfNeeded()
         }
-        .task(id: sessionExercises.map(\.id)) {
+        .task(id: exerciseHydrationStamp) {
             await loadExerciseStateIfNeeded()
         }
         .alert("History Error", isPresented: $showingError) {
@@ -141,6 +141,14 @@ struct HistoryDetailView: View {
 
     private var session: WorkoutSession? {
         sessions.first
+    }
+
+    private var exerciseHydrationStamp: HistoryExerciseStateStamp {
+        HistoryExerciseStateStamp(exercises: sessionExercises)
+    }
+
+    private var exerciseListAnimationToken: HistoryExerciseListAnimationToken {
+        HistoryExerciseListAnimationToken(exercises: sessionExercises)
     }
 
     private var exercisesSectionHeader: some View {
@@ -234,28 +242,7 @@ struct HistoryDetailView: View {
             if let cached = setDraftsByExerciseID[exercise.id] {
                 return cached
             }
-            let orderedSets = (exercise.sets ?? [])
-                .sorted { $0.sortOrder < $1.sortOrder }
-            var drafts: [WorkoutSessionSetDraft] = []
-            drafts.reserveCapacity(orderedSets.count)
-            for set in orderedSets {
-                drafts.append(
-                    WorkoutSessionSetDraft(
-                        id: set.id,
-                        isWarmup: set.isWarmup,
-                        restSeconds: set.restSeconds,
-                        targetReps: set.targetReps,
-                        targetWeight: set.targetWeight,
-                        targetLoadUnit: set.targetLoadUnit,
-                        actualReps: set.actualReps,
-                        actualWeight: set.actualWeight,
-                        actualLoadUnit: set.actualLoadUnit,
-                        isCompleted: set.isCompleted,
-                        isLocked: set.isLocked
-                    )
-                )
-            }
-            return drafts
+            return makeDrafts(from: exercise)
         } set: { updated in
             setDraftsByExerciseID[exercise.id] = updated
         }
@@ -280,34 +267,40 @@ struct HistoryDetailView: View {
 
     @MainActor
     private func loadExerciseStateIfNeeded() async {
-        let currentIDs = sessionExercises.map(\.id)
-        guard currentIDs != loadedExerciseIDs else { return }
+        let currentStamp = exerciseHydrationStamp
+        guard currentStamp != loadedExerciseStateStamp else { return }
 
-        var loadedDrafts: [UUID: [WorkoutSessionSetDraft]] = [:]
-        var loadedRests: [UUID: Int] = [:]
-        var loadedPrevious: [UUID: [Int: WorkoutPreviousSetSnapshot]] = [:]
-        let startedAt = session?.startedAt ?? .now
-        let requestedExerciseUUIDs = Array(Set(sessionExercises.map(\.catalogExerciseUUID)))
-        let previousMaps = (try? sessionRepository.previousSetMaps(
-            forExercises: requestedExerciseUUIDs,
-            before: startedAt,
-            excludingSessionID: sessionID
-        )) ?? [:]
+        let result = WGJPerformance.measure("history-detail.hydrate") { () -> HistoryExerciseHydrationResult in
+            var loadedDrafts: [UUID: [WorkoutSessionSetDraft]] = [:]
+            var loadedRests: [UUID: Int] = [:]
+            var loadedPrevious: [UUID: [Int: WorkoutPreviousSetSnapshot]] = [:]
+            let startedAt = session?.startedAt ?? .now
+            let requestedExerciseUUIDs = Array(Set(sessionExercises.map(\.catalogExerciseUUID)))
+            let previousMaps = (try? sessionRepository.previousSetMaps(
+                forExercises: requestedExerciseUUIDs,
+                before: startedAt,
+                excludingSessionID: sessionID
+            )) ?? [:]
 
-        for exercise in sessionExercises {
-            let drafts = (exercise.sets ?? [])
-                .sorted { $0.sortOrder < $1.sortOrder }
-                .map(WorkoutSessionSetDraft.init(model:))
-            loadedDrafts[exercise.id] = drafts
-            loadedRests[exercise.id] = exercise.restSeconds
-            let base = previousMaps[exercise.catalogExerciseUUID] ?? [:]
-            loadedPrevious[exercise.id] = resolvedPreviousMap(baseMap: base, maxSetCount: drafts.count)
+            for exercise in sessionExercises {
+                let drafts = makeDrafts(from: exercise)
+                loadedDrafts[exercise.id] = drafts
+                loadedRests[exercise.id] = exercise.restSeconds
+                let base = previousMaps[exercise.catalogExerciseUUID] ?? [:]
+                loadedPrevious[exercise.id] = resolvedPreviousMap(baseMap: base, maxSetCount: drafts.count)
+            }
+
+            return HistoryExerciseHydrationResult(
+                draftsByExerciseID: loadedDrafts,
+                restsByExerciseID: loadedRests,
+                previousByExerciseID: loadedPrevious
+            )
         }
 
-        setDraftsByExerciseID = loadedDrafts
-        restByExerciseID = loadedRests
-        previousByExerciseID = loadedPrevious
-        loadedExerciseIDs = currentIDs
+        setDraftsByExerciseID = result.draftsByExerciseID
+        restByExerciseID = result.restsByExerciseID
+        previousByExerciseID = result.previousByExerciseID
+        loadedExerciseStateStamp = currentStamp
     }
 
     private func resolvedPreviousMap(
@@ -378,33 +371,7 @@ struct HistoryDetailView: View {
             }
 
             for exercise in sessionExercises {
-                let drafts: [WorkoutSessionSetDraft]
-                if let cached = setDraftsByExerciseID[exercise.id] {
-                    drafts = cached
-                } else {
-                    let orderedSets = (exercise.sets ?? [])
-                        .sorted { $0.sortOrder < $1.sortOrder }
-                    var mappedDrafts: [WorkoutSessionSetDraft] = []
-                    mappedDrafts.reserveCapacity(orderedSets.count)
-                    for set in orderedSets {
-                        mappedDrafts.append(
-                            WorkoutSessionSetDraft(
-                                id: set.id,
-                                isWarmup: set.isWarmup,
-                                restSeconds: set.restSeconds,
-                                targetReps: set.targetReps,
-                                targetWeight: set.targetWeight,
-                                targetLoadUnit: set.targetLoadUnit,
-                                actualReps: set.actualReps,
-                                actualWeight: set.actualWeight,
-                                actualLoadUnit: set.actualLoadUnit,
-                                isCompleted: set.isCompleted,
-                                isLocked: set.isLocked
-                            )
-                        )
-                    }
-                    drafts = mappedDrafts
-                }
+                let drafts = setDraftsByExerciseID[exercise.id] ?? makeDrafts(from: exercise)
                 try sessionRepository.saveSetDrafts(sessionExerciseID: exercise.id, drafts: drafts)
             }
 
@@ -426,7 +393,7 @@ struct HistoryDetailView: View {
         withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
             do {
                 try sessionRepository.addExercise(sessionID: sessionID, catalogItem: item)
-                loadedExerciseIDs = []
+                loadedExerciseStateStamp = nil
             } catch {
                 capturedError = error
             }
@@ -447,7 +414,7 @@ struct HistoryDetailView: View {
                 restByExerciseID.removeValue(forKey: exerciseID)
                 previousByExerciseID.removeValue(forKey: exerciseID)
                 clearExerciseSwipeState(for: exerciseID)
-                loadedExerciseIDs = []
+                loadedExerciseStateStamp = nil
             } catch {
                 capturedError = error
             }
@@ -493,6 +460,68 @@ struct HistoryDetailView: View {
     private func showError(_ error: Error) {
         errorMessage = String(describing: error)
         showingError = true
+    }
+
+    @MainActor
+    private func orderedSessionSets(for exercise: WorkoutSessionExercise) -> [WorkoutSessionSet] {
+        (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    @MainActor
+    private func makeDrafts(from exercise: WorkoutSessionExercise) -> [WorkoutSessionSetDraft] {
+        orderedSessionSets(for: exercise).map(WorkoutSessionSetDraft.init(model:))
+    }
+}
+
+private struct HistoryExerciseHydrationResult {
+    let draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
+    let restsByExerciseID: [UUID: Int]
+    let previousByExerciseID: [UUID: [Int: WorkoutPreviousSetSnapshot]]
+}
+
+private struct HistoryExerciseStateStamp: Hashable {
+    private let entries: [Entry]
+
+    @MainActor
+    init(exercises: [WorkoutSessionExercise]) {
+        entries = exercises.map(Entry.init(exercise:))
+    }
+
+    private struct Entry: Hashable {
+        let id: UUID
+        let exerciseUpdatedAt: TimeInterval
+        let restSeconds: Int
+        let setCount: Int
+        let latestSetUpdate: TimeInterval
+
+        @MainActor
+        init(exercise: WorkoutSessionExercise) {
+            id = exercise.id
+            exerciseUpdatedAt = exercise.updatedAt.timeIntervalSinceReferenceDate
+            restSeconds = exercise.restSeconds
+            let sets = exercise.sets ?? []
+            setCount = sets.count
+            latestSetUpdate = sets
+                .map { $0.updatedAt.timeIntervalSinceReferenceDate }
+                .max() ?? 0
+        }
+    }
+}
+
+private struct HistoryExerciseListAnimationToken: Hashable {
+    let count: Int
+    let latestUpdate: TimeInterval
+
+    init(exercises: [WorkoutSessionExercise]) {
+        count = exercises.count
+        latestUpdate = exercises
+            .map { exercise in
+                max(
+                    exercise.updatedAt.timeIntervalSinceReferenceDate,
+                    (exercise.sets ?? []).map { $0.updatedAt.timeIntervalSinceReferenceDate }.max() ?? 0
+                )
+            }
+            .max() ?? 0
     }
 }
 

@@ -31,7 +31,7 @@ struct ActiveWorkoutView: View {
     @State private var pendingRestTasks: [UUID: Task<Void, Never>] = [:]
 
     @State private var previousByExerciseID: [UUID: [Int: WorkoutPreviousSetSnapshot]] = [:]
-    @State private var loadedExerciseIDs: [UUID] = []
+    @State private var loadedExerciseStateStamp: ActiveWorkoutExerciseStateStamp?
     @State private var catalogByUUID: [String: ExerciseCatalogItem] = [:]
     @State private var cardStateController = ActiveWorkoutExerciseCardStateController()
 
@@ -52,8 +52,6 @@ struct ActiveWorkoutView: View {
 
     @State private var errorMessage = ""
     @State private var showingError = false
-
-    private let restTimerTick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     private var sessionRepository: WorkoutSessionRepository {
         WorkoutSessionRepository(modelContext: modelContext)
@@ -134,7 +132,7 @@ struct ActiveWorkoutView: View {
                 }
             }
             .padding(16)
-            .animation(WGJMotion.cardAnimation(reduceMotion: reduceMotion), value: sessionExercises.map(\.id))
+            .animation(WGJMotion.cardAnimation(reduceMotion: reduceMotion), value: exerciseListAnimationToken)
             .animation(
                 WGJMotion.overlayAnimation(reduceMotion: reduceMotion),
                 value: coordinator.restTimerPopup?.id
@@ -210,7 +208,7 @@ struct ActiveWorkoutView: View {
         .task(id: session?.statusRaw) {
             await reconcileSessionLifecycleIfNeeded()
         }
-        .task(id: sessionExercises.map(\.id)) {
+        .task(id: exerciseHydrationStamp) {
             await loadExerciseStateIfNeeded()
         }
         .onDisappear {
@@ -218,9 +216,6 @@ struct ActiveWorkoutView: View {
             pendingCompletionTask?.cancel()
             pendingCompletionTask = nil
             flushPendingSaves()
-        }
-        .onReceive(restTimerTick) { date in
-            coordinator.handleRestTimerExpirationIfNeeded(at: date)
         }
         .alert("Workout Error", isPresented: $showingError) {
             Button("OK", role: .cancel) { }
@@ -239,11 +234,22 @@ struct ActiveWorkoutView: View {
             Text($0.summary)
         }
         .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: isKeyboardVisible)
+        .background {
+            ActiveWorkoutRestTimerObserver()
+        }
         .wgjMinimalKeyboardToolbar()
     }
 
     private var session: WorkoutSession? {
         sessions.first
+    }
+
+    private var exerciseHydrationStamp: ActiveWorkoutExerciseStateStamp {
+        ActiveWorkoutExerciseStateStamp(exercises: sessionExercises)
+    }
+
+    private var exerciseListAnimationToken: ActiveWorkoutListAnimationToken {
+        ActiveWorkoutListAnimationToken(exercises: sessionExercises)
     }
 
     private var exercisesSectionHeader: some View {
@@ -302,28 +308,7 @@ struct ActiveWorkoutView: View {
             if let cached = setDraftsByExerciseID[exercise.id] {
                 return cached
             }
-            let orderedSets = (exercise.sets ?? [])
-                .sorted { $0.sortOrder < $1.sortOrder }
-            var drafts: [WorkoutSessionSetDraft] = []
-            drafts.reserveCapacity(orderedSets.count)
-            for set in orderedSets {
-                drafts.append(
-                    WorkoutSessionSetDraft(
-                        id: set.id,
-                        isWarmup: set.isWarmup,
-                        restSeconds: set.restSeconds,
-                        targetReps: set.targetReps,
-                        targetWeight: set.targetWeight,
-                        targetLoadUnit: set.targetLoadUnit,
-                        actualReps: set.actualReps,
-                        actualWeight: set.actualWeight,
-                        actualLoadUnit: set.actualLoadUnit,
-                        isCompleted: set.isCompleted,
-                        isLocked: set.isLocked
-                    )
-                )
-            }
-            return drafts
+            return makeDrafts(from: exercise)
         } set: { updated in
             setDraftsByExerciseID[exercise.id] = updated
         }
@@ -356,51 +341,58 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func loadExerciseStateIfNeeded() async {
-        let currentIDs = sessionExercises.map(\.id)
-        guard currentIDs != loadedExerciseIDs else { return }
+        let currentStamp = exerciseHydrationStamp
+        guard currentStamp != loadedExerciseStateStamp else { return }
 
-        var loadedDrafts: [UUID: [WorkoutSessionSetDraft]] = [:]
-        var loadedRests: [UUID: Int] = [:]
-        var loadedPrevious: [UUID: [Int: WorkoutPreviousSetSnapshot]] = [:]
-        let startedAt = session?.startedAt ?? .now
-        let requestedExerciseUUIDs = Array(Set(sessionExercises.map(\.catalogExerciseUUID)))
-        let loadedCatalog = (try? catalogRepository.exerciseMap(for: requestedExerciseUUIDs)) ?? [:]
-        let previousMaps = (try? sessionRepository.previousSetMaps(
-            forExercises: requestedExerciseUUIDs,
-            before: startedAt,
-            excludingSessionID: sessionID
-        )) ?? [:]
+        let result = WGJPerformance.measure("active-workout.hydrate") { () -> ActiveWorkoutHydrationResult in
+            var loadedDrafts: [UUID: [WorkoutSessionSetDraft]] = [:]
+            var loadedRests: [UUID: Int] = [:]
+            var loadedPrevious: [UUID: [Int: WorkoutPreviousSetSnapshot]] = [:]
+            let startedAt = session?.startedAt ?? .now
+            let requestedExerciseUUIDs = Array(Set(sessionExercises.map(\.catalogExerciseUUID)))
+            let loadedCatalog = (try? catalogRepository.exerciseMap(for: requestedExerciseUUIDs)) ?? [:]
+            let previousMaps = (try? sessionRepository.previousSetMaps(
+                forExercises: requestedExerciseUUIDs,
+                before: startedAt,
+                excludingSessionID: sessionID
+            )) ?? [:]
 
-        for exercise in sessionExercises {
-            let drafts = (exercise.sets ?? [])
-                .sorted { $0.sortOrder < $1.sortOrder }
-                .map(WorkoutSessionSetDraft.init(model:))
-            loadedDrafts[exercise.id] = drafts
-            loadedRests[exercise.id] = exercise.restSeconds
-            let base = previousMaps[exercise.catalogExerciseUUID] ?? [:]
-            loadedPrevious[exercise.id] = resolvedPreviousMap(baseMap: base, maxSetCount: drafts.count)
+            for exercise in sessionExercises {
+                let drafts = makeDrafts(from: exercise)
+                loadedDrafts[exercise.id] = drafts
+                loadedRests[exercise.id] = exercise.restSeconds
+                let base = previousMaps[exercise.catalogExerciseUUID] ?? [:]
+                loadedPrevious[exercise.id] = resolvedPreviousMap(baseMap: base, maxSetCount: drafts.count)
+            }
+
+            return ActiveWorkoutHydrationResult(
+                draftsByExerciseID: loadedDrafts,
+                restsByExerciseID: loadedRests,
+                previousByExerciseID: loadedPrevious,
+                catalogByUUID: loadedCatalog
+            )
         }
 
-        setDraftsByExerciseID = loadedDrafts
-        lastPersistedDraftsByExerciseID = loadedDrafts
-        restByExerciseID = loadedRests
-        lastPersistedRestByExerciseID = loadedRests
-        previousByExerciseID = loadedPrevious
-        catalogByUUID = loadedCatalog
+        setDraftsByExerciseID = result.draftsByExerciseID
+        lastPersistedDraftsByExerciseID = result.draftsByExerciseID
+        restByExerciseID = result.restsByExerciseID
+        lastPersistedRestByExerciseID = result.restsByExerciseID
+        previousByExerciseID = result.previousByExerciseID
+        catalogByUUID = result.catalogByUUID
         let completedExerciseIDs = Set(
-            loadedDrafts.compactMap { exerciseID, drafts in
+            result.draftsByExerciseID.compactMap { exerciseID, drafts in
                 isExerciseCompleted(drafts) ? exerciseID : nil
             }
         )
         cardStateController.sync(
-            exerciseIDs: currentIDs,
+            exerciseIDs: sessionExercises.map(\.id),
             completedExerciseIDs: completedExerciseIDs,
             firstIncompleteExerciseID: firstIncompleteExerciseID(
                 from: sessionExercises,
-                draftsByExerciseID: loadedDrafts
+                draftsByExerciseID: result.draftsByExerciseID
             )
         )
-        loadedExerciseIDs = currentIDs
+        loadedExerciseStateStamp = currentStamp
     }
 
     @MainActor
@@ -576,8 +568,14 @@ struct ActiveWorkoutView: View {
             }
 
             do {
+                let previousDefaultRest = lastPersistedRestByExerciseID[sessionExerciseID] ?? normalized
                 try sessionRepository.updateExerciseRest(sessionExerciseID: sessionExerciseID, restSeconds: latest)
-                reloadExerciseState(sessionExerciseID: sessionExerciseID)
+                lastPersistedRestByExerciseID[sessionExerciseID] = latest
+                applyPersistedRestChange(
+                    sessionExerciseID: sessionExerciseID,
+                    previousDefaultRest: previousDefaultRest,
+                    updatedRest: latest
+                )
                 pendingRestTasks[sessionExerciseID] = nil
             } catch {
                 showError(error)
@@ -610,8 +608,14 @@ struct ActiveWorkoutView: View {
         for (exerciseID, rest) in restByExerciseID {
             guard lastPersistedRestByExerciseID[exerciseID] != rest else { continue }
             do {
+                let previousDefaultRest = lastPersistedRestByExerciseID[exerciseID] ?? rest
                 try sessionRepository.updateExerciseRest(sessionExerciseID: exerciseID, restSeconds: rest)
-                reloadExerciseState(sessionExerciseID: exerciseID)
+                lastPersistedRestByExerciseID[exerciseID] = rest
+                applyPersistedRestChange(
+                    sessionExerciseID: exerciseID,
+                    previousDefaultRest: previousDefaultRest,
+                    updatedRest: rest
+                )
             } catch {
                 showError(error)
             }
@@ -640,7 +644,7 @@ struct ActiveWorkoutView: View {
         withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
             do {
                 try sessionRepository.addExercise(sessionID: sessionID, catalogItem: item)
-                loadedExerciseIDs = []
+                loadedExerciseStateStamp = nil
             } catch {
                 capturedError = error
             }
@@ -663,7 +667,7 @@ struct ActiveWorkoutView: View {
                 restByExerciseID.removeValue(forKey: exerciseID)
                 lastPersistedRestByExerciseID.removeValue(forKey: exerciseID)
                 previousByExerciseID.removeValue(forKey: exerciseID)
-                loadedExerciseIDs = []
+                loadedExerciseStateStamp = nil
             } catch {
                 capturedError = error
             }
@@ -706,8 +710,7 @@ struct ActiveWorkoutView: View {
         guard isTrainingGuidanceEnabled else { return nil }
         guard let catalogExercise = catalogByUUID[exercise.catalogExerciseUUID] else { return nil }
 
-        let drafts = setDraftsByExerciseID[exercise.id]
-            ?? (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }.map(WorkoutSessionSetDraft.init(model:))
+        let drafts = draftsForDisplay(for: exercise)
 
         let cue = guidanceService.progressiveOverloadCue(
             for: catalogExercise,
@@ -731,8 +734,7 @@ struct ActiveWorkoutView: View {
         draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
     ) -> UUID? {
         for exercise in exercises {
-            let drafts = draftsByExerciseID[exercise.id]
-                ?? (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }.map(WorkoutSessionSetDraft.init(model:))
+            let drafts = draftsByExerciseID[exercise.id] ?? makeDrafts(from: exercise)
             if !isExerciseCompleted(drafts) {
                 return exercise.id
             }
@@ -766,31 +768,19 @@ struct ActiveWorkoutView: View {
                 minReps: minReps,
                 maxReps: maxReps
             )
+            let previousDefaultRest = lastPersistedRestByExerciseID[draft.exerciseID] ?? draft.restSeconds
             try sessionRepository.updateExerciseRest(
                 sessionExerciseID: draft.exerciseID,
                 restSeconds: draft.restSeconds
             )
-            reloadExerciseState(sessionExerciseID: draft.exerciseID)
-            exerciseSettingsDraft = nil
-        } catch {
-            showError(error)
-        }
-    }
-
-    private func reloadExerciseState(sessionExerciseID: UUID) {
-        do {
-            let drafts = try sessionRepository.setDrafts(sessionExerciseID: sessionExerciseID)
-            setDraftsByExerciseID[sessionExerciseID] = drafts
-            lastPersistedDraftsByExerciseID[sessionExerciseID] = drafts
-            cardStateController.updateCompletion(
-                for: sessionExerciseID,
-                isCompleted: isExerciseCompleted(drafts)
+            restByExerciseID[draft.exerciseID] = draft.restSeconds
+            lastPersistedRestByExerciseID[draft.exerciseID] = draft.restSeconds
+            applyPersistedRestChange(
+                sessionExerciseID: draft.exerciseID,
+                previousDefaultRest: previousDefaultRest,
+                updatedRest: draft.restSeconds
             )
-
-            if let exercise = try sessionRepository.sessionExercises(sessionID: sessionID).first(where: { $0.id == sessionExerciseID }) {
-                restByExerciseID[sessionExerciseID] = exercise.restSeconds
-                lastPersistedRestByExerciseID[sessionExerciseID] = exercise.restSeconds
-            }
+            exerciseSettingsDraft = nil
         } catch {
             showError(error)
         }
@@ -970,6 +960,44 @@ struct ActiveWorkoutView: View {
         showingFinishConfirmation = false
         finishWorkout()
     }
+
+    @MainActor
+    private func orderedSessionSets(for exercise: WorkoutSessionExercise) -> [WorkoutSessionSet] {
+        (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    @MainActor
+    private func makeDrafts(from exercise: WorkoutSessionExercise) -> [WorkoutSessionSetDraft] {
+        orderedSessionSets(for: exercise).map(WorkoutSessionSetDraft.init(model:))
+    }
+
+    @MainActor
+    private func draftsForDisplay(for exercise: WorkoutSessionExercise) -> [WorkoutSessionSetDraft] {
+        setDraftsByExerciseID[exercise.id] ?? makeDrafts(from: exercise)
+    }
+
+    @MainActor
+    private func applyPersistedRestChange(
+        sessionExerciseID: UUID,
+        previousDefaultRest: Int,
+        updatedRest: Int
+    ) {
+        guard var drafts = setDraftsByExerciseID[sessionExerciseID] else { return }
+
+        var changed = false
+        for index in drafts.indices where !drafts[index].isLocked && drafts[index].restSeconds == previousDefaultRest {
+            drafts[index].restSeconds = updatedRest
+            changed = true
+        }
+
+        guard changed else { return }
+        setDraftsByExerciseID[sessionExerciseID] = drafts
+        lastPersistedDraftsByExerciseID[sessionExerciseID] = drafts
+        cardStateController.updateCompletion(
+            for: sessionExerciseID,
+            isCompleted: isExerciseCompleted(drafts)
+        )
+    }
 }
 
 private struct ActiveWorkoutHeaderCard: View {
@@ -1110,6 +1138,21 @@ private struct ActiveWorkoutBottomDock: View {
                 )
                 .wgjRoundedGlass(cornerRadius: 14, tint: WGJTheme.danger.opacity(0.14))
         )
+    }
+}
+
+private struct ActiveWorkoutRestTimerObserver: View {
+    @Environment(ActiveWorkoutCoordinator.self) private var coordinator
+
+    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .allowsHitTesting(false)
+            .onReceive(timer) { date in
+                coordinator.handleRestTimerExpirationIfNeeded(at: date)
+            }
     }
 }
 
@@ -1301,6 +1344,59 @@ private struct ActiveWorkoutExerciseSettingsDraft: Identifiable, Equatable {
     var restSeconds: Int
 
     var id: UUID { exerciseID }
+}
+
+private struct ActiveWorkoutHydrationResult {
+    let draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
+    let restsByExerciseID: [UUID: Int]
+    let previousByExerciseID: [UUID: [Int: WorkoutPreviousSetSnapshot]]
+    let catalogByUUID: [String: ExerciseCatalogItem]
+}
+
+private struct ActiveWorkoutExerciseStateStamp: Hashable {
+    private let entries: [Entry]
+
+    @MainActor
+    init(exercises: [WorkoutSessionExercise]) {
+        entries = exercises.map(Entry.init(exercise:))
+    }
+
+    private struct Entry: Hashable {
+        let id: UUID
+        let exerciseUpdatedAt: TimeInterval
+        let restSeconds: Int
+        let setCount: Int
+        let latestSetUpdate: TimeInterval
+
+        @MainActor
+        init(exercise: WorkoutSessionExercise) {
+            id = exercise.id
+            exerciseUpdatedAt = exercise.updatedAt.timeIntervalSinceReferenceDate
+            restSeconds = exercise.restSeconds
+            let sets = exercise.sets ?? []
+            setCount = sets.count
+            latestSetUpdate = sets
+                .map { $0.updatedAt.timeIntervalSinceReferenceDate }
+                .max() ?? 0
+        }
+    }
+}
+
+private struct ActiveWorkoutListAnimationToken: Hashable {
+    let count: Int
+    let latestUpdate: TimeInterval
+
+    init(exercises: [WorkoutSessionExercise]) {
+        count = exercises.count
+        latestUpdate = exercises
+            .map { exercise in
+                max(
+                    exercise.updatedAt.timeIntervalSinceReferenceDate,
+                    (exercise.sets ?? []).map { $0.updatedAt.timeIntervalSinceReferenceDate }.max() ?? 0
+                )
+            }
+            .max() ?? 0
+    }
 }
 
 private struct ActiveWorkoutExerciseSettingsSheet: View {

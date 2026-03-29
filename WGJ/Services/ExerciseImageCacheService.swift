@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import ImageIO
 import SwiftData
 import UIKit
 
@@ -10,6 +11,7 @@ final class ExerciseImageCacheService {
     private let cacheSizeLimitBytes: Int
     private let metadataFlushDelay: Duration = .seconds(6)
     private let minimumAccessUpdateInterval: TimeInterval = 180
+    private let decodedThumbnailMaxPixelSize = 640
     private var metadataSaveTask: Task<Void, Never>?
     private var hasPendingMetadataSave = false
     private var cachedDiskUsageBytes: Int?
@@ -238,8 +240,24 @@ final class ExerciseImageCacheService {
     }
 
     private func decodeImage(from data: Data) async -> UIImage? {
-        await Task.detached(priority: .utility) {
-            UIImage(data: data)
+        await Task.detached(priority: .utility) { [decodedThumbnailMaxPixelSize] in
+            let options = [kCGImageSourceShouldCache: false] as CFDictionary
+            guard let source = CGImageSourceCreateWithData(data as CFData, options) else {
+                return UIImage(data: data)
+            }
+
+            let thumbnailOptions = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceThumbnailMaxPixelSize: decodedThumbnailMaxPixelSize,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: false,
+            ] as CFDictionary
+
+            if let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions) {
+                return UIImage(cgImage: cgImage)
+            }
+
+            return UIImage(data: data)
         }
         .value
     }

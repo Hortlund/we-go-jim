@@ -149,8 +149,13 @@ final class ExerciseCatalogRepository: ExerciseCatalogRepositoryProtocol {
             return [:]
         }
 
-        let descriptor = FetchDescriptor<ExerciseCatalogItem>()
-        let matches = try modelContext.fetch(descriptor).filter { requested.contains($0.remoteUUID) }
+        let requestedList = Array(requested)
+        let descriptor = FetchDescriptor<ExerciseCatalogItem>(
+            predicate: #Predicate { exercise in
+                requestedList.contains(exercise.remoteUUID)
+            }
+        )
+        let matches = try modelContext.fetch(descriptor)
         return Dictionary(uniqueKeysWithValues: matches.map { ($0.remoteUUID, $0) })
     }
 

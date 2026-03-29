@@ -13,7 +13,7 @@ struct ContentView: View {
     @State private var appPhase: AppPhase = .splash
     @State private var activeWorkoutCoordinator = ActiveWorkoutCoordinator()
     @State private var catalogSyncCoordinator = CatalogSyncCoordinator()
-    @State private var appMaintenanceTask: Task<Void, Never>?
+    @State private var socialMaintenanceScheduler = SocialMaintenanceScheduler()
     @State private var isPreparingMainPhase = false
 
     var body: some View {
@@ -37,24 +37,24 @@ struct ContentView: View {
         .tint(WGJTheme.accent)
         .preferredColorScheme(.dark)
         .task {
-            scheduleAppMaintenance()
+            requestAppMaintenance()
             updateIdleTimerState()
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
-                scheduleAppMaintenance()
+                requestAppMaintenance()
             }
             updateIdleTimerState()
         }
         .onChange(of: appPhase) { _, newPhase in
             if newPhase == .main {
-                scheduleAppMaintenance()
+                requestAppMaintenance()
             }
             updateIdleTimerState()
         }
         .onChange(of: storedProfiles.first?.updatedAt) { _, _ in
             if appPhase == .main {
-                scheduleAppMaintenance()
+                requestAppMaintenance()
             }
             updateIdleTimerState()
         }
@@ -101,9 +101,15 @@ struct ContentView: View {
         }
     }
 
-    private func scheduleAppMaintenance() {
-        appMaintenanceTask?.cancel()
-        appMaintenanceTask = Task { @MainActor in
+    private func requestAppMaintenance() {
+        socialMaintenanceScheduler.schedule {
+            await performAppMaintenance()
+        }
+    }
+
+    @MainActor
+    private func performAppMaintenance() async {
+        await WGJPerformance.measureAsync("app.maintenance") {
             BrosCleanStartPolicy.applyIfNeeded(modelContext: modelContext)
             activeWorkoutCoordinator.restoreActiveSessionIfNeeded(modelContext: modelContext)
             activeWorkoutCoordinator.clearExpiredRestTimerIfNeeded()
@@ -112,14 +118,20 @@ struct ContentView: View {
         }
     }
 
+    @MainActor
     private func runSocialMaintenance() async {
         guard shouldRunSocialMaintenance(),
               let service = CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)
         else {
             return
         }
-        await service.refreshLocalMembershipState()
-        await service.flushOutbox()
+
+        await WGJPerformance.measureAsync("bros.refresh-membership") {
+            await service.refreshLocalMembershipState()
+        }
+        await WGJPerformance.measureAsync("bros.flush-outbox") {
+            await service.flushOutbox()
+        }
     }
 
     private func shouldRunSocialMaintenance() -> Bool {
@@ -140,8 +152,7 @@ struct ContentView: View {
     }
 
     private func resetToStartupFlow() {
-        appMaintenanceTask?.cancel()
-        appMaintenanceTask = nil
+        socialMaintenanceScheduler.cancel()
         activeWorkoutCoordinator.clearActiveWorkout()
         catalogSyncCoordinator = CatalogSyncCoordinator()
         updateIdleTimerState()

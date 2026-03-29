@@ -31,6 +31,7 @@ struct StartWorkoutHomeView: View {
     @State private var editingFolderID: UUID?
     @State private var folderNameDraft = ""
     @State private var lastCompletedByTemplateID: [UUID: Date] = [:]
+    @State private var templateSectionsSnapshot: [StartWorkoutTemplateSection] = []
     @State private var conflictingActiveSessionID: UUID?
     @State private var showingActiveWorkoutConflict = false
 
@@ -53,7 +54,7 @@ struct StartWorkoutHomeView: View {
                 quickStartSection
                 templateWorkspaceSection
 
-                if templateSections.isEmpty {
+                if templateSectionsSnapshot.isEmpty {
                     WGJEmptyStateCard(
                         title: "No templates yet",
                         message: "Create a template or folder to build a cleaner workout library.",
@@ -61,7 +62,7 @@ struct StartWorkoutHomeView: View {
                     )
                 } else {
                     LazyVStack(alignment: .leading, spacing: 12) {
-                        ForEach(templateSections) { section in
+                        ForEach(templateSectionsSnapshot) { section in
                             templateSectionCard(section)
                         }
                     }
@@ -114,11 +115,13 @@ struct StartWorkoutHomeView: View {
         .task {
             bootstrapActiveSessionIfNeeded()
         }
+        .task(id: templateLibraryStamp) {
+            rebuildTemplateSections()
+        }
         .task(id: sessionDataStamp) {
             recomputeSessionDerivedState()
         }
-        .animation(WGJMotion.cardAnimation(reduceMotion: reduceMotion), value: templates.map(\.id))
-        .animation(WGJMotion.cardAnimation(reduceMotion: reduceMotion), value: folders.map(\.id))
+        .animation(WGJMotion.cardAnimation(reduceMotion: reduceMotion), value: templateLibraryStamp)
     }
 
     private var quickStartSection: some View {
@@ -446,7 +449,11 @@ struct StartWorkoutHomeView: View {
         .accessibilityIdentifier("start-workout-new-folder-button")
     }
 
-    private var templateSections: [StartWorkoutTemplateSection] {
+    private var templateLibraryStamp: StartWorkoutTemplateLibraryStamp {
+        StartWorkoutTemplateLibraryStamp(folders: folders, templates: templates)
+    }
+
+    private func rebuiltTemplateSections() -> [StartWorkoutTemplateSection] {
         let templatesByFolderID = Dictionary(grouping: templates, by: \.folderID)
         var sections: [StartWorkoutTemplateSection] = []
 
@@ -477,6 +484,12 @@ struct StartWorkoutHomeView: View {
         }
 
         return sections
+    }
+
+    private func rebuildTemplateSections() {
+        templateSectionsSnapshot = WGJPerformance.measure("start-workout.template-sections") {
+            rebuiltTemplateSections()
+        }
     }
 
     private func isSectionExpanded(_ sectionID: UUID) -> Bool {
@@ -706,6 +719,24 @@ struct StartWorkoutSessionStamp: Hashable {
 
         completedTemplateSessionCount = count
         latestCompletedSessionUpdate = latestUpdate
+    }
+}
+
+struct StartWorkoutTemplateLibraryStamp: Hashable {
+    let folderCount: Int
+    let latestFolderUpdate: TimeInterval
+    let templateCount: Int
+    let latestTemplateUpdate: TimeInterval
+
+    init(folders: [TemplateFolder], templates: [WorkoutTemplate]) {
+        folderCount = folders.count
+        latestFolderUpdate = folders
+            .map { $0.updatedAt.timeIntervalSinceReferenceDate }
+            .max() ?? 0
+        templateCount = templates.count
+        latestTemplateUpdate = templates
+            .map { $0.updatedAt.timeIntervalSinceReferenceDate }
+            .max() ?? 0
     }
 }
 

@@ -99,10 +99,14 @@ struct ProfileDashboardSnapshot: Equatable {
 final class WorkoutMetricsService {
     private let modelContext: ModelContext
     private let calendar: Calendar
+    private let repository: WorkoutSessionRepository
+    private var cachedGoal: Int?
+    private var cachedMetricsSnapshot: MetricsSnapshotCache?
 
     init(modelContext: ModelContext, calendar: Calendar = .current) {
         self.modelContext = modelContext
         self.calendar = calendar
+        self.repository = WorkoutSessionRepository(modelContext: modelContext)
     }
 
     func estimatedOneRepMax(weight: Double, reps: Int) -> Double {
@@ -116,26 +120,18 @@ final class WorkoutMetricsService {
         before date: Date? = nil,
         excludingSessionID: UUID? = nil
     ) throws -> Double? {
-        let sessions = try completedSessions()
+        let entries = try metricsSnapshot().exerciseHistoryByUUID[catalogExerciseUUID] ?? []
         var best: Double?
 
-        for session in sessions {
-            if let excludingSessionID, session.id == excludingSessionID {
+        for entry in entries {
+            if let excludingSessionID, entry.sessionID == excludingSessionID {
                 continue
             }
-
-            let referenceDate = session.endedAt ?? session.startedAt
-            if let date, referenceDate >= date {
+            if let date, entry.completedAt >= date {
                 continue
             }
-
-            for exercise in orderedSessionExercises(session) where exercise.catalogExerciseUUID == catalogExerciseUUID {
-                for set in orderedSessionSets(exercise) where set.isCompleted {
-                    guard let value = metricInput(from: set) else { continue }
-                    let oneRM = comparisonOneRepMax(weight: value.weight, reps: value.reps, unit: value.unit)
-                    best = max(best ?? 0, oneRM)
-                }
-            }
+            guard let comparisonOneRepMax = entry.comparisonOneRepMax else { continue }
+            best = max(best ?? 0, comparisonOneRepMax)
         }
 
         return best
@@ -242,32 +238,19 @@ final class WorkoutMetricsService {
     }
 
     func exerciseHistoryOptions() throws -> [ExerciseHistoryOption] {
-        let sessions = try completedSessions()
+        let exerciseHistoryByUUID = try metricsSnapshot().exerciseHistoryByUUID
         var latestByExercise: [String: ExerciseHistoryOption] = [:]
 
-        for session in sessions {
-            let performedAt = session.endedAt ?? session.startedAt
-
-            for exercise in orderedSessionExercises(session) {
-                let hasWeightedHistory = orderedSessionSets(exercise).contains { set in
-                    set.isCompleted && weightedMetricInput(from: set) != nil
-                }
-                guard hasWeightedHistory else { continue }
-
-                let option = ExerciseHistoryOption(
-                    catalogExerciseUUID: exercise.catalogExerciseUUID,
-                    exerciseName: exercise.exerciseNameSnapshot,
-                    lastPerformedAt: performedAt
-                )
-
-                if let existing = latestByExercise[exercise.catalogExerciseUUID] {
-                    if option.lastPerformedAt > existing.lastPerformedAt {
-                        latestByExercise[exercise.catalogExerciseUUID] = option
-                    }
-                } else {
-                    latestByExercise[exercise.catalogExerciseUUID] = option
-                }
+        for (catalogExerciseUUID, entries) in exerciseHistoryByUUID {
+            guard let latestEntry = entries.first(where: { $0.weightedOneRepMaxInKilograms != nil || $0.totalWeightedVolumeInKilograms != nil }) else {
+                continue
             }
+
+            latestByExercise[catalogExerciseUUID] = ExerciseHistoryOption(
+                catalogExerciseUUID: catalogExerciseUUID,
+                exerciseName: latestEntry.exerciseName,
+                lastPerformedAt: latestEntry.completedAt
+            )
         }
 
         return latestByExercise.values.sorted { lhs, rhs in
@@ -284,48 +267,23 @@ final class WorkoutMetricsService {
         limit: Int = 8
     ) throws -> ExerciseMetricSeries {
         let safeLimit = max(1, limit)
-        let sessions = try completedSessions()
         var recentPoints: [CollectedExerciseMetricPoint] = []
         var exerciseName = preferredExerciseName?.trimmingCharacters(in: .whitespacesAndNewlines)
         if exerciseName?.isEmpty == true {
             exerciseName = nil
         }
 
-        for session in sessions {
-            let performedAt = session.endedAt ?? session.startedAt
-            var bestOneRepMaxInKilograms: Double?
-            var sourceUnit: TemplateLoadUnit = .kg
-
-            for exercise in orderedSessionExercises(session) where exercise.catalogExerciseUUID == catalogExerciseUUID {
-                if exerciseName == nil {
-                    exerciseName = exercise.exerciseNameSnapshot
-                }
-
-                for set in orderedSessionSets(exercise) where set.isCompleted {
-                    guard let value = weightedMetricInput(from: set) else { continue }
-                    let oneRepMaxInKilograms = normalizedLoadForComparison(
-                        estimatedOneRepMax(weight: value.weight, reps: value.reps),
-                        unit: value.unit
-                    )
-
-                    if let currentBest = bestOneRepMaxInKilograms {
-                        if oneRepMaxInKilograms > currentBest {
-                            bestOneRepMaxInKilograms = oneRepMaxInKilograms
-                            sourceUnit = value.unit
-                        }
-                    } else {
-                        bestOneRepMaxInKilograms = oneRepMaxInKilograms
-                        sourceUnit = value.unit
-                    }
-                }
+        let entries = try metricsSnapshot().exerciseHistoryByUUID[catalogExerciseUUID] ?? []
+        for entry in entries {
+            guard let bestOneRepMaxInKilograms = entry.weightedOneRepMaxInKilograms else { continue }
+            if exerciseName == nil {
+                exerciseName = entry.exerciseName
             }
-
-            guard let bestOneRepMaxInKilograms else { continue }
             recentPoints.append(
                 CollectedExerciseMetricPoint(
-                    completedAt: performedAt,
+                    completedAt: entry.completedAt,
                     normalizedValue: bestOneRepMaxInKilograms,
-                    sourceUnit: sourceUnit
+                    sourceUnit: entry.weightedOneRepMaxUnit
                 )
             )
 
@@ -347,38 +305,23 @@ final class WorkoutMetricsService {
         limit: Int = 8
     ) throws -> ExerciseMetricSeries {
         let safeLimit = max(1, limit)
-        let sessions = try completedSessions()
         var recentPoints: [CollectedExerciseMetricPoint] = []
         var exerciseName = preferredExerciseName?.trimmingCharacters(in: .whitespacesAndNewlines)
         if exerciseName?.isEmpty == true {
             exerciseName = nil
         }
 
-        for session in sessions {
-            let performedAt = session.endedAt ?? session.startedAt
-            var totalVolumeInKilograms = 0.0
-            var sourceUnit: TemplateLoadUnit = .kg
-            var hasData = false
-
-            for exercise in orderedSessionExercises(session) where exercise.catalogExerciseUUID == catalogExerciseUUID {
-                if exerciseName == nil {
-                    exerciseName = exercise.exerciseNameSnapshot
-                }
-
-                for set in orderedSessionSets(exercise) where set.isCompleted {
-                    guard let value = weightedMetricInput(from: set) else { continue }
-                    totalVolumeInKilograms += normalizedLoadForComparison(value.weight, unit: value.unit) * Double(value.reps)
-                    sourceUnit = value.unit
-                    hasData = true
-                }
+        let entries = try metricsSnapshot().exerciseHistoryByUUID[catalogExerciseUUID] ?? []
+        for entry in entries {
+            guard let totalVolumeInKilograms = entry.totalWeightedVolumeInKilograms else { continue }
+            if exerciseName == nil {
+                exerciseName = entry.exerciseName
             }
-
-            guard hasData else { continue }
             recentPoints.append(
                 CollectedExerciseMetricPoint(
-                    completedAt: performedAt,
+                    completedAt: entry.completedAt,
                     normalizedValue: totalVolumeInKilograms,
-                    sourceUnit: sourceUnit
+                    sourceUnit: entry.weightedVolumeUnit
                 )
             )
 
@@ -398,8 +341,7 @@ final class WorkoutMetricsService {
         let safePRLimit = max(1, prLimit)
         let safeWeeks = max(1, weeks)
         let profileGoal = try currentGoal()
-        let sessions = try completedSessions()
-        var bestByExercise: [String: WorkoutPRRecord] = [:]
+        let snapshot = try metricsSnapshot()
         let nowWeek = weekStart(for: Date())
         var weeksToInclude: [Date] = []
         weeksToInclude.reserveCapacity(safeWeeks)
@@ -408,75 +350,7 @@ final class WorkoutMetricsService {
                 weeksToInclude.append(week)
             }
         }
-        var countsByWeek: [Date: Int] = [:]
-        var countsByDay: [Date: Int] = [:]
-        var exerciseFrequencyByUUID: [String: CollectedExerciseFrequency] = [:]
-        var totalDurationSeconds = 0
-        var totalPRHits = 0
-        var firstWorkoutDate: Date?
-
-        for session in sessions {
-            let achievedAt = session.endedAt ?? session.startedAt
-            let week = weekStart(for: achievedAt)
-            let day = calendar.startOfDay(for: achievedAt)
-            countsByWeek[week, default: 0] += 1
-            countsByDay[day, default: 0] += 1
-            totalDurationSeconds += max(0, session.durationSeconds)
-            totalPRHits += max(0, session.prHitsCount)
-
-            if let existingFirstWorkoutDate = firstWorkoutDate {
-                if achievedAt < existingFirstWorkoutDate {
-                    firstWorkoutDate = achievedAt
-                }
-            } else {
-                firstWorkoutDate = achievedAt
-            }
-
-            var countedExerciseUUIDs: Set<String> = []
-
-            for exercise in orderedSessionExercises(session) {
-                if countedExerciseUUIDs.insert(exercise.catalogExerciseUUID).inserted {
-                    if let existing = exerciseFrequencyByUUID[exercise.catalogExerciseUUID] {
-                        exerciseFrequencyByUUID[exercise.catalogExerciseUUID] = CollectedExerciseFrequency(
-                            exerciseName: achievedAt >= existing.lastPerformedAt ? exercise.exerciseNameSnapshot : existing.exerciseName,
-                            sessionCount: existing.sessionCount + 1,
-                            lastPerformedAt: max(existing.lastPerformedAt, achievedAt)
-                        )
-                    } else {
-                        exerciseFrequencyByUUID[exercise.catalogExerciseUUID] = CollectedExerciseFrequency(
-                            exerciseName: exercise.exerciseNameSnapshot,
-                            sessionCount: 1,
-                            lastPerformedAt: achievedAt
-                        )
-                    }
-                }
-
-                for set in orderedSessionSets(exercise) where set.isCompleted {
-                    guard let value = metricInput(from: set) else { continue }
-                    let oneRM = estimatedOneRepMax(weight: value.weight, reps: value.reps)
-                    let record = WorkoutPRRecord(
-                        id: exercise.catalogExerciseUUID,
-                        catalogExerciseUUID: exercise.catalogExerciseUUID,
-                        exerciseName: exercise.exerciseNameSnapshot,
-                        estimatedOneRepMax: oneRM,
-                        weight: value.weight,
-                        reps: value.reps,
-                        loadUnit: value.unit,
-                        achievedAt: achievedAt
-                    )
-
-                    if let existing = bestByExercise[exercise.catalogExerciseUUID] {
-                        if isBetterPRRecord(record, than: existing) {
-                            bestByExercise[exercise.catalogExerciseUUID] = record
-                        }
-                    } else {
-                        bestByExercise[exercise.catalogExerciseUUID] = record
-                    }
-                }
-            }
-        }
-
-        let personalRecords = bestByExercise.values
+        let personalRecords = snapshot.bestPRByExercise.values
             .sorted { lhs, rhs in
                 let lhsValue = normalizedLoadForComparison(lhs.estimatedOneRepMax, unit: lhs.loadUnit)
                 let rhsValue = normalizedLoadForComparison(rhs.estimatedOneRepMax, unit: rhs.loadUnit)
@@ -491,18 +365,18 @@ final class WorkoutMetricsService {
             WeeklyWorkoutProgressPoint(
                 id: week.formatted(date: .numeric, time: .omitted),
                 weekStart: week,
-                completedWorkouts: countsByWeek[week, default: 0],
+                completedWorkouts: snapshot.countsByWeek[week, default: 0],
                 goal: profileGoal
             )
         }
         let overviewStats = buildOverviewStats(
-            completedWorkoutCount: sessions.count,
-            totalPRHits: totalPRHits,
-            totalDurationSeconds: totalDurationSeconds,
-            workoutCountsByDay: countsByDay,
-            firstWorkoutDate: firstWorkoutDate
+            completedWorkoutCount: snapshot.completedSessions.count,
+            totalPRHits: snapshot.totalPRHits,
+            totalDurationSeconds: snapshot.totalDurationSeconds,
+            workoutCountsByDay: snapshot.countsByDay,
+            firstWorkoutDate: snapshot.firstWorkoutDate
         )
-        let topExercises = exerciseFrequencyByUUID.map { entry in
+        let topExercises = snapshot.exerciseFrequencyByUUID.map { entry in
             ProfileTopExerciseStat(
                 catalogExerciseUUID: entry.key,
                 exerciseName: entry.value.exerciseName,
@@ -519,7 +393,7 @@ final class WorkoutMetricsService {
             }
             return lhs.exerciseName.localizedStandardCompare(rhs.exerciseName) == .orderedAscending
         }
-        let activityDays = buildActivityDays(from: countsByDay)
+        let activityDays = buildActivityDays(from: snapshot.countsByDay)
 
         return ProfileDashboardSnapshot(
             personalRecords: personalRecords,
@@ -532,10 +406,157 @@ final class WorkoutMetricsService {
     }
 
     private func completedSessions() throws -> [WorkoutSession] {
-        let descriptor = FetchDescriptor<WorkoutSession>(
-            sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
-        )
-        return try modelContext.fetch(descriptor).filter { $0.status == .completed }
+        try metricsSnapshot().completedSessions
+    }
+
+    private func metricsSnapshot() throws -> MetricsSnapshotCache {
+        if let cachedMetricsSnapshot {
+            return cachedMetricsSnapshot
+        }
+
+        let snapshot = try WGJPerformance.measure("metrics.snapshot") {
+            let sessions = try repository.completedSessions()
+            var bestPRByExercise: [String: WorkoutPRRecord] = [:]
+            var countsByWeek: [Date: Int] = [:]
+            var countsByDay: [Date: Int] = [:]
+            var exerciseFrequencyByUUID: [String: CollectedExerciseFrequency] = [:]
+            var exerciseHistoryByUUID: [String: [CompletedExerciseHistoryEntry]] = [:]
+            var totalDurationSeconds = 0
+            var totalPRHits = 0
+            var firstWorkoutDate: Date?
+
+            for session in sessions {
+                let completedAt = session.endedAt ?? session.startedAt
+                let week = weekStart(for: completedAt)
+                let day = calendar.startOfDay(for: completedAt)
+                countsByWeek[week, default: 0] += 1
+                countsByDay[day, default: 0] += 1
+                totalDurationSeconds += max(0, session.durationSeconds)
+                totalPRHits += max(0, session.prHitsCount)
+
+                if let existingFirstWorkoutDate = firstWorkoutDate {
+                    if completedAt < existingFirstWorkoutDate {
+                        firstWorkoutDate = completedAt
+                    }
+                } else {
+                    firstWorkoutDate = completedAt
+                }
+
+                var countedExerciseUUIDs: Set<String> = []
+                var perSessionHistory: [String: WorkingExerciseHistoryEntry] = [:]
+
+                for exercise in orderedSessionExercises(session) {
+                    if countedExerciseUUIDs.insert(exercise.catalogExerciseUUID).inserted {
+                        if let existing = exerciseFrequencyByUUID[exercise.catalogExerciseUUID] {
+                            exerciseFrequencyByUUID[exercise.catalogExerciseUUID] = CollectedExerciseFrequency(
+                                exerciseName: completedAt >= existing.lastPerformedAt ? exercise.exerciseNameSnapshot : existing.exerciseName,
+                                sessionCount: existing.sessionCount + 1,
+                                lastPerformedAt: max(existing.lastPerformedAt, completedAt)
+                            )
+                        } else {
+                            exerciseFrequencyByUUID[exercise.catalogExerciseUUID] = CollectedExerciseFrequency(
+                                exerciseName: exercise.exerciseNameSnapshot,
+                                sessionCount: 1,
+                                lastPerformedAt: completedAt
+                            )
+                        }
+                    }
+
+                    var historyEntry = perSessionHistory[exercise.catalogExerciseUUID]
+                        ?? WorkingExerciseHistoryEntry(exerciseName: exercise.exerciseNameSnapshot)
+                    historyEntry.exerciseName = exercise.exerciseNameSnapshot
+
+                    for set in orderedSessionSets(exercise) where set.isCompleted {
+                        if let value = metricInput(from: set) {
+                            let oneRM = estimatedOneRepMax(weight: value.weight, reps: value.reps)
+                            let comparisonValue = normalizedLoadForComparison(oneRM, unit: value.unit)
+                            historyEntry.comparisonOneRepMax = max(
+                                historyEntry.comparisonOneRepMax ?? 0,
+                                comparisonValue
+                            )
+
+                            let record = WorkoutPRRecord(
+                                id: exercise.catalogExerciseUUID,
+                                catalogExerciseUUID: exercise.catalogExerciseUUID,
+                                exerciseName: exercise.exerciseNameSnapshot,
+                                estimatedOneRepMax: oneRM,
+                                weight: value.weight,
+                                reps: value.reps,
+                                loadUnit: value.unit,
+                                achievedAt: completedAt
+                            )
+
+                            if let existing = bestPRByExercise[exercise.catalogExerciseUUID] {
+                                if isBetterPRRecord(record, than: existing) {
+                                    bestPRByExercise[exercise.catalogExerciseUUID] = record
+                                }
+                            } else {
+                                bestPRByExercise[exercise.catalogExerciseUUID] = record
+                            }
+                        }
+
+                        if let weightedValue = weightedMetricInput(from: set) {
+                            let weightedOneRepMaxInKilograms = normalizedLoadForComparison(
+                                estimatedOneRepMax(weight: weightedValue.weight, reps: weightedValue.reps),
+                                unit: weightedValue.unit
+                            )
+                            if let currentBest = historyEntry.weightedOneRepMaxInKilograms {
+                                if weightedOneRepMaxInKilograms > currentBest {
+                                    historyEntry.weightedOneRepMaxInKilograms = weightedOneRepMaxInKilograms
+                                    historyEntry.weightedOneRepMaxUnit = weightedValue.unit
+                                }
+                            } else {
+                                historyEntry.weightedOneRepMaxInKilograms = weightedOneRepMaxInKilograms
+                                historyEntry.weightedOneRepMaxUnit = weightedValue.unit
+                            }
+
+                            historyEntry.totalWeightedVolumeInKilograms += normalizedLoadForComparison(
+                                weightedValue.weight,
+                                unit: weightedValue.unit
+                            ) * Double(weightedValue.reps)
+                            historyEntry.weightedVolumeUnit = weightedValue.unit
+                            historyEntry.hasWeightedMetrics = true
+                        }
+                    }
+
+                    perSessionHistory[exercise.catalogExerciseUUID] = historyEntry
+                }
+
+                for (catalogExerciseUUID, historyEntry) in perSessionHistory
+                    where historyEntry.comparisonOneRepMax != nil || historyEntry.hasWeightedMetrics
+                {
+                    exerciseHistoryByUUID[catalogExerciseUUID, default: []].append(
+                        CompletedExerciseHistoryEntry(
+                            sessionID: session.id,
+                            completedAt: completedAt,
+                            exerciseName: historyEntry.exerciseName,
+                            comparisonOneRepMax: historyEntry.comparisonOneRepMax,
+                            weightedOneRepMaxInKilograms: historyEntry.weightedOneRepMaxInKilograms,
+                            weightedOneRepMaxUnit: historyEntry.weightedOneRepMaxUnit ?? .kg,
+                            totalWeightedVolumeInKilograms: historyEntry.hasWeightedMetrics
+                                ? historyEntry.totalWeightedVolumeInKilograms
+                                : nil,
+                            weightedVolumeUnit: historyEntry.weightedVolumeUnit ?? .kg
+                        )
+                    )
+                }
+            }
+
+            return MetricsSnapshotCache(
+                completedSessions: sessions,
+                bestPRByExercise: bestPRByExercise,
+                countsByWeek: countsByWeek,
+                countsByDay: countsByDay,
+                exerciseFrequencyByUUID: exerciseFrequencyByUUID,
+                exerciseHistoryByUUID: exerciseHistoryByUUID,
+                totalDurationSeconds: totalDurationSeconds,
+                totalPRHits: totalPRHits,
+                firstWorkoutDate: firstWorkoutDate
+            )
+        }
+
+        cachedMetricsSnapshot = snapshot
+        return snapshot
     }
 
     private func session(id: UUID) throws -> WorkoutSession? {
@@ -576,9 +597,15 @@ final class WorkoutMetricsService {
     }
 
     private func currentGoal() throws -> Int {
+        if let cachedGoal {
+            return cachedGoal
+        }
+
         let descriptor = FetchDescriptor<UserProfile>(sortBy: [SortDescriptor(\.createdAt, order: .forward)])
         let profile = try modelContext.fetch(descriptor).first
-        return max(1, min(14, profile?.weeklyWorkoutGoal ?? 4))
+        let resolvedGoal = max(1, min(14, profile?.weeklyWorkoutGoal ?? 4))
+        cachedGoal = resolvedGoal
+        return resolvedGoal
     }
 
     private func weekStart(for date: Date) -> Date {
@@ -749,6 +776,39 @@ private struct CollectedExerciseMetricPoint {
     let completedAt: Date
     let normalizedValue: Double
     let sourceUnit: TemplateLoadUnit
+}
+
+private struct MetricsSnapshotCache {
+    let completedSessions: [WorkoutSession]
+    let bestPRByExercise: [String: WorkoutPRRecord]
+    let countsByWeek: [Date: Int]
+    let countsByDay: [Date: Int]
+    let exerciseFrequencyByUUID: [String: CollectedExerciseFrequency]
+    let exerciseHistoryByUUID: [String: [CompletedExerciseHistoryEntry]]
+    let totalDurationSeconds: Int
+    let totalPRHits: Int
+    let firstWorkoutDate: Date?
+}
+
+private struct CompletedExerciseHistoryEntry {
+    let sessionID: UUID
+    let completedAt: Date
+    let exerciseName: String
+    let comparisonOneRepMax: Double?
+    let weightedOneRepMaxInKilograms: Double?
+    let weightedOneRepMaxUnit: TemplateLoadUnit
+    let totalWeightedVolumeInKilograms: Double?
+    let weightedVolumeUnit: TemplateLoadUnit
+}
+
+private struct WorkingExerciseHistoryEntry {
+    var exerciseName: String
+    var comparisonOneRepMax: Double?
+    var weightedOneRepMaxInKilograms: Double?
+    var weightedOneRepMaxUnit: TemplateLoadUnit?
+    var totalWeightedVolumeInKilograms: Double = 0
+    var weightedVolumeUnit: TemplateLoadUnit?
+    var hasWeightedMetrics = false
 }
 
 private struct CollectedExerciseFrequency {

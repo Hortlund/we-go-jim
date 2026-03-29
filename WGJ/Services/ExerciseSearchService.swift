@@ -4,20 +4,22 @@ import SwiftData
 @MainActor
 final class ExerciseSearchService {
     private let modelContext: ModelContext
+    private static var cachedCatalogIndex: CatalogSearchIndex?
 
     init(modelContext: ModelContext) {
         self.modelContext = modelContext
     }
 
     func searchExercises(query: String, filters: ExerciseFilters) throws -> [ExerciseCatalogItem] {
-        let descriptor = FetchDescriptor<ExerciseCatalogItem>(
-            sortBy: [SortDescriptor(\.displayName, order: .forward)]
-        )
-        let allExercises = try modelContext.fetch(descriptor)
-        return allExercises.filter { exercise in
-            matchesVisibility(exercise: exercise, filters: filters)
-                && matchesFilters(exercise: exercise, filters: filters)
-                && matchesQuery(exercise: exercise, query: query)
+        let rows = try catalogRows()
+        return rows.compactMap { row in
+            guard matchesVisibility(row: row, filters: filters),
+                  matchesFilters(row: row, filters: filters),
+                  matchesQuery(row: row, query: query)
+            else {
+                return nil
+            }
+            return row.exercise
         }
     }
 
@@ -69,9 +71,7 @@ final class ExerciseSearchService {
     }
 
     func availableCategories(includeUncurated: Bool) throws -> [String] {
-        let descriptor = FetchDescriptor<ExerciseCatalogItem>()
-        let exercises = try modelContext.fetch(descriptor)
-        let categories = exercises
+        let categories = try catalogRows()
             .filter { isVisibleInCatalog($0, includeUncurated: includeUncurated) }
             .map(\.categoryName)
             .filter { !$0.isEmpty }
@@ -79,41 +79,84 @@ final class ExerciseSearchService {
     }
 
     func availableEquipmentTokens(includeUncurated: Bool) throws -> [String] {
-        let descriptor = FetchDescriptor<ExerciseCatalogItem>()
-        let exercises = try modelContext.fetch(descriptor)
-
-        let tokens = exercises
+        let tokens = try catalogRows()
             .filter { isVisibleInCatalog($0, includeUncurated: includeUncurated) }
-            .flatMap(\.equipmentTokens)
+            .flatMap { Array($0.equipmentTokenSet) }
 
         return Array(Set(tokens)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
-    private func matchesVisibility(exercise: ExerciseCatalogItem, filters: ExerciseFilters) -> Bool {
-        isVisibleInCatalog(exercise, includeUncurated: filters.includeUncurated)
+    private func catalogRows() throws -> [CatalogSearchRow] {
+        try catalogIndex().rows
     }
 
-    private func matchesFilters(exercise: ExerciseCatalogItem, filters: ExerciseFilters) -> Bool {
+    private func catalogIndex() throws -> CatalogSearchIndex {
+        let stamp = try makeCatalogIndexStamp()
+        if let cachedCatalogIndex = Self.cachedCatalogIndex, cachedCatalogIndex.stamp == stamp {
+            return cachedCatalogIndex
+        }
+
+        let descriptor = FetchDescriptor<ExerciseCatalogItem>(
+            sortBy: [SortDescriptor(\.displayName, order: .forward)]
+        )
+        let exercises = try modelContext.fetch(descriptor)
+        let index = CatalogSearchIndex(
+            stamp: stamp,
+            rows: exercises.map(CatalogSearchRow.init(exercise:))
+        )
+        Self.cachedCatalogIndex = index
+        return index
+    }
+
+    private func makeCatalogIndexStamp() throws -> CatalogIndexStamp {
+        var latestExerciseDescriptor = FetchDescriptor<ExerciseCatalogItem>(
+            sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
+        )
+        latestExerciseDescriptor.fetchLimit = 1
+        let latestExerciseUpdate = try modelContext.fetch(latestExerciseDescriptor)
+            .first?.updatedAt.timeIntervalSinceReferenceDate ?? 0
+
+        var syncStateDescriptor = FetchDescriptor<ExerciseCatalogSyncState>(
+            predicate: #Predicate { $0.key == "global" }
+        )
+        syncStateDescriptor.fetchLimit = 1
+        let syncState = try modelContext.fetch(syncStateDescriptor).first
+        let syncMarker = [
+            syncState?.lastSuccessfulSyncAt?.timeIntervalSinceReferenceDate ?? 0,
+            syncState?.seedImportedAt?.timeIntervalSinceReferenceDate ?? 0,
+            syncState?.lastUpdateCursor?.timeIntervalSinceReferenceDate ?? 0,
+        ].max() ?? 0
+
+        return CatalogIndexStamp(
+            contextID: ObjectIdentifier(modelContext),
+            latestExerciseUpdate: latestExerciseUpdate,
+            syncMarker: syncMarker
+        )
+    }
+
+    private func matchesVisibility(row: CatalogSearchRow, filters: ExerciseFilters) -> Bool {
+        isVisibleInCatalog(row, includeUncurated: filters.includeUncurated)
+    }
+
+    private func matchesFilters(row: CatalogSearchRow, filters: ExerciseFilters) -> Bool {
         if let primaryID = filters.primaryMuscleID,
-           !exercise.primaryMuscles.contains(where: { $0.remoteID == primaryID }) {
+           !row.primaryMuscleIDs.contains(primaryID) {
             return false
         }
 
         if let secondaryID = filters.secondaryMuscleID,
-           !exercise.secondaryMuscles.contains(where: { $0.remoteID == secondaryID }) {
+           !row.secondaryMuscleIDs.contains(secondaryID) {
             return false
         }
 
         if let category = filters.categoryName,
-           exercise.categoryName.localizedCaseInsensitiveCompare(category) != .orderedSame {
+           row.categoryName.localizedCaseInsensitiveCompare(category) != .orderedSame {
             return false
         }
 
         if let equipment = filters.equipmentToken {
-            let match = exercise.equipmentTokens.contains {
-                $0.localizedCaseInsensitiveCompare(equipment) == .orderedSame
-            }
-            if !match {
+            let normalizedEquipment = equipment.lowercased()
+            if !row.equipmentTokenSet.contains(normalizedEquipment) {
                 return false
             }
         }
@@ -121,7 +164,7 @@ final class ExerciseSearchService {
         return true
     }
 
-    private func matchesQuery(exercise: ExerciseCatalogItem, query: String) -> Bool {
+    private func matchesQuery(row: CatalogSearchRow, query: String) -> Bool {
         let normalized = query
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
@@ -130,8 +173,8 @@ final class ExerciseSearchService {
             return true
         }
 
-        return exercise.searchableTerms.contains {
-            $0.lowercased().contains(normalized)
+        return row.searchTerms.contains {
+            $0.contains(normalized)
         }
     }
 
@@ -147,15 +190,50 @@ final class ExerciseSearchService {
         return deduplicated
     }
 
-    private func isVisibleInCatalog(_ exercise: ExerciseCatalogItem, includeUncurated: Bool) -> Bool {
-        guard !exercise.isHidden else {
+    private func isVisibleInCatalog(_ row: CatalogSearchRow, includeUncurated: Bool) -> Bool {
+        guard !row.isHidden else {
             return false
         }
 
-        if exercise.isCustomExercise {
+        if row.isCustomExercise {
             return true
         }
 
-        return includeUncurated || exercise.isCurated
+        return includeUncurated || row.isCurated
+    }
+}
+
+private struct CatalogIndexStamp: Equatable {
+    let contextID: ObjectIdentifier
+    let latestExerciseUpdate: TimeInterval
+    let syncMarker: TimeInterval
+}
+
+private struct CatalogSearchIndex {
+    let stamp: CatalogIndexStamp
+    let rows: [CatalogSearchRow]
+}
+
+private struct CatalogSearchRow {
+    let exercise: ExerciseCatalogItem
+    let searchTerms: [String]
+    let categoryName: String
+    let equipmentTokenSet: Set<String>
+    let primaryMuscleIDs: Set<Int>
+    let secondaryMuscleIDs: Set<Int>
+    let isHidden: Bool
+    let isCustomExercise: Bool
+    let isCurated: Bool
+
+    init(exercise: ExerciseCatalogItem) {
+        self.exercise = exercise
+        self.searchTerms = exercise.searchableTerms.map { $0.lowercased() }
+        self.categoryName = exercise.categoryName
+        self.equipmentTokenSet = Set(exercise.equipmentTokens.map { $0.lowercased() })
+        self.primaryMuscleIDs = Set(exercise.primaryMuscles.map(\.remoteID))
+        self.secondaryMuscleIDs = Set(exercise.secondaryMuscles.map(\.remoteID))
+        self.isHidden = exercise.isHidden
+        self.isCustomExercise = exercise.isCustomExercise
+        self.isCurated = exercise.isCurated
     }
 }

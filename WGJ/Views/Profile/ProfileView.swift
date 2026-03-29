@@ -29,10 +29,6 @@ struct ProfileView: View {
         ProfileWidgetRepository(modelContext: modelContext)
     }
 
-    private var metricsService: WorkoutMetricsService {
-        WorkoutMetricsService(modelContext: modelContext)
-    }
-
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
@@ -572,36 +568,41 @@ struct ProfileView: View {
 
     private func loadWidgetState() {
         do {
-            let enabled = try widgetRepository.enabledConfigurations()
-            let dashboard = try metricsService.profileDashboardSnapshot(prLimit: 8, weeks: 8)
-            var nextTrendSeries: [ProfileWidgetKind: ExerciseMetricSeries] = [:]
+            let nextContent = try WGJPerformance.measure("profile.dashboard") {
+                let metricsService = WorkoutMetricsService(modelContext: modelContext)
+                let enabled = try widgetRepository.enabledConfigurations()
+                let dashboard = try metricsService.profileDashboardSnapshot(prLimit: 8, weeks: 8)
+                var nextTrendSeries: [ProfileWidgetKind: ExerciseMetricSeries] = [:]
 
-            for config in enabled {
-                guard let selectedExerciseUUID = config.selectedCatalogExerciseUUID else { continue }
+                for config in enabled {
+                    guard let selectedExerciseUUID = config.selectedCatalogExerciseUUID else { continue }
 
-                switch config.kind {
-                case .exerciseOneRMTrend:
-                    nextTrendSeries[config.kind] = try metricsService.exerciseOneRepMaxTrend(
-                        for: selectedExerciseUUID,
-                        preferredExerciseName: config.selectedExerciseNameSnapshot,
-                        limit: 8
-                    )
-                case .exerciseVolumeTrend:
-                    nextTrendSeries[config.kind] = try metricsService.exerciseVolumeTrend(
-                        for: selectedExerciseUUID,
-                        preferredExerciseName: config.selectedExerciseNameSnapshot,
-                        limit: 8
-                    )
-                case .prs, .weeklyGoals, .streaks, .topExercises, .consistencyCalendar:
-                    break
+                    switch config.kind {
+                    case .exerciseOneRMTrend:
+                        nextTrendSeries[config.kind] = try metricsService.exerciseOneRepMaxTrend(
+                            for: selectedExerciseUUID,
+                            preferredExerciseName: config.selectedExerciseNameSnapshot,
+                            limit: 8
+                        )
+                    case .exerciseVolumeTrend:
+                        nextTrendSeries[config.kind] = try metricsService.exerciseVolumeTrend(
+                            for: selectedExerciseUUID,
+                            preferredExerciseName: config.selectedExerciseNameSnapshot,
+                            limit: 8
+                        )
+                    case .prs, .weeklyGoals, .streaks, .topExercises, .consistencyCalendar:
+                        break
+                    }
                 }
+
+                return ProfileDashboardContent.make(
+                    enabledWidgets: enabled,
+                    dashboard: dashboard,
+                    trendSeriesByKind: nextTrendSeries
+                )
             }
 
-            dashboardContent = ProfileDashboardContent.make(
-                enabledWidgets: enabled,
-                dashboard: dashboard,
-                trendSeriesByKind: nextTrendSeries
-            )
+            dashboardContent = nextContent
         } catch {
             showError(error)
         }
