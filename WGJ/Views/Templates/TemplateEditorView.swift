@@ -14,16 +14,13 @@ struct TemplateEditorView: View {
 
     @State private var templateName = ""
     @State private var templateNotes = ""
-    @State private var exerciseDrafts: [TemplateExerciseDraft] = []
+    @State private var exerciseDrafts: [TemplateExerciseDraftStore] = []
     @State private var catalogByUUID: [String: ExerciseCatalogItem] = [:]
-    @State private var isExpandedByDraftID: [UUID: Bool] = [:]
 
     @State private var hasLoadedInitialData = false
     @State private var showingExercisePicker = false
     @State private var errorMessage = ""
     @State private var showingError = false
-    @State private var exerciseSwipeOffsets: [UUID: CGFloat] = [:]
-    @State private var exerciseSwipeRemoving: [UUID: Bool] = [:]
 
     private var templateRepository: TemplateRepository {
         TemplateRepository(modelContext: modelContext)
@@ -45,7 +42,7 @@ struct TemplateEditorView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                LazyVStack(alignment: .leading, spacing: 16) {
                     templateMetaCard
                     exercisesSection
                 }
@@ -110,7 +107,7 @@ struct TemplateEditorView: View {
     }
 
     private var exercisesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        LazyVStack(alignment: .leading, spacing: 12) {
             if exerciseDrafts.isEmpty {
                 WGJActionHeader(
                     "Exercises",
@@ -143,97 +140,28 @@ struct TemplateEditorView: View {
                 }
             }
 
-            ForEach(Array(exerciseDrafts.enumerated()), id: \.element.id) { index, draft in
-                SwipeDeleteRow(
-                    offset: exerciseSwipeOffsetBinding(for: draft.id),
-                    isRemoving: exerciseRemovingBinding(for: draft.id),
-                    activeRegionMaxY: 116,
-                    gestureStrategy: .simultaneous
-                ) {
-                    removeExercise(withID: draft.id)
-                } content: {
-                    TemplateExercisePrescriptionEditor(
-                        exerciseName: draft.exerciseNameSnapshot,
-                        muscleSummary: draft.muscleSummarySnapshot,
-                        category: draft.categorySnapshot,
-                        recommendation: templateRecommendation(for: draft),
-                        initiallyExpanded: false,
-                        isExpanded: isExpandedBinding(for: draft.id),
-                        exerciseIndexTitle: "Exercise \(index + 1)",
-                        canMoveUp: index > 0,
-                        canMoveDown: index < exerciseDrafts.count - 1,
-                        preferredLoadUnit: preferredLoadUnit,
-                        targetRepMin: targetRepMinBinding(for: index),
-                        targetRepMax: targetRepMaxBinding(for: index),
-                        restSeconds: restSecondsBinding(for: index),
-                        setDrafts: setDraftsBinding(for: index),
-                        onMoveUp: {
-                            moveExerciseUp(index)
-                        },
-                        onMoveDown: {
-                            moveExerciseDown(index)
-                        },
-                        onExerciseDelete: {
-                            removeExercise(withID: draft.id)
-                        }
-                    )
-                }
-                .id(draft.id)
+            ForEach(Array(exerciseDrafts.enumerated()), id: \.element.id) { index, draftStore in
+                TemplateEditorExerciseRow(
+                    draftStore: draftStore,
+                    recommendation: templateRecommendation(for: draftStore),
+                    exerciseIndexTitle: "Exercise \(index + 1)",
+                    canMoveUp: index > 0,
+                    canMoveDown: index < exerciseDrafts.count - 1,
+                    preferredLoadUnit: preferredLoadUnit,
+                    onMoveUp: {
+                        moveExerciseUp(index)
+                    },
+                    onMoveDown: {
+                        moveExerciseDown(index)
+                    },
+                    onExerciseDelete: {
+                        removeExercise(withID: draftStore.id)
+                    }
+                )
+                .id(draftStore.id)
                 .transition(exerciseCardTransition)
             }
         }
-    }
-
-    private func targetRepMinBinding(for index: Int) -> Binding<Int?> {
-        Binding(
-            get: {
-                guard exerciseDrafts.indices.contains(index) else { return nil }
-                return exerciseDrafts[index].targetRepMin
-            },
-            set: { newValue in
-                guard exerciseDrafts.indices.contains(index) else { return }
-                exerciseDrafts[index].targetRepMin = newValue
-            }
-        )
-    }
-
-    private func targetRepMaxBinding(for index: Int) -> Binding<Int?> {
-        Binding(
-            get: {
-                guard exerciseDrafts.indices.contains(index) else { return nil }
-                return exerciseDrafts[index].targetRepMax
-            },
-            set: { newValue in
-                guard exerciseDrafts.indices.contains(index) else { return }
-                exerciseDrafts[index].targetRepMax = newValue
-            }
-        )
-    }
-
-    private func setDraftsBinding(for index: Int) -> Binding<[TemplateExerciseSetDraft]> {
-        Binding(
-            get: {
-                guard exerciseDrafts.indices.contains(index) else { return [] }
-                return exerciseDrafts[index].setDrafts
-            },
-            set: { newValue in
-                guard exerciseDrafts.indices.contains(index) else { return }
-                exerciseDrafts[index].setDrafts = newValue
-            }
-        )
-    }
-
-    private func restSecondsBinding(for index: Int) -> Binding<Int> {
-        Binding(
-            get: {
-                guard exerciseDrafts.indices.contains(index) else { return 120 }
-                return exerciseDrafts[index].restSeconds
-            },
-            set: { newValue in
-                guard exerciseDrafts.indices.contains(index) else { return }
-                exerciseDrafts[index].restSeconds = max(0, min(3600, newValue))
-            }
-        )
     }
 
     private func appendExercise(catalogItem: ExerciseCatalogItem) {
@@ -241,21 +169,23 @@ struct TemplateEditorView: View {
             return
         }
 
-        let draft = TemplateExerciseDraft(catalogItem: catalogItem, preferredLoadUnit: preferredLoadUnit)
+        let draftStore = TemplateExerciseDraftStore(
+            draft: TemplateExerciseDraft(
+                catalogItem: catalogItem,
+                preferredLoadUnit: preferredLoadUnit
+            ),
+            isExpanded: true
+        )
         withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
-            exerciseDrafts.append(draft)
+            exerciseDrafts.append(draftStore)
         }
-        isExpandedByDraftID[draft.id] = true
     }
 
     private func removeExercise(at index: Int) {
         guard exerciseDrafts.indices.contains(index) else { return }
-        let removedID = exerciseDrafts[index].id
         withAnimation(WGJMotion.quickAnimation(reduceMotion: reduceMotion)) {
             _ = exerciseDrafts.remove(at: index)
         }
-        isExpandedByDraftID[removedID] = nil
-        clearExerciseSwipeState(for: removedID)
     }
 
     private func removeExercise(withID exerciseID: UUID) {
@@ -279,12 +209,13 @@ struct TemplateEditorView: View {
 
     private func saveTemplate() {
         do {
+            let drafts = exerciseDrafts.map(\.draft)
             if let templateID {
                 try templateRepository.updateTemplate(id: templateID, name: templateName, notes: templateNotes)
-                try templateRepository.setExercises(templateID: templateID, drafts: exerciseDrafts)
+                try templateRepository.setExercises(templateID: templateID, drafts: drafts)
             } else {
                 let created = try templateRepository.createTemplate(folderID: folderID, name: templateName, notes: templateNotes)
-                try templateRepository.setExercises(templateID: created.id, drafts: exerciseDrafts)
+                try templateRepository.setExercises(templateID: created.id, drafts: drafts)
             }
             dismiss()
         } catch {
@@ -306,9 +237,10 @@ struct TemplateEditorView: View {
             }
             try templateRepository.ensureDefaultSetPlans(templateID: templateID)
             exerciseDrafts = try templateRepository.exercises(in: templateID).map {
-                TemplateExerciseDraft(model: $0, preferredLoadUnit: preferredLoadUnit)
+                TemplateExerciseDraftStore(
+                    draft: TemplateExerciseDraft(model: $0, preferredLoadUnit: preferredLoadUnit)
+                )
             }
-            isExpandedByDraftID = Dictionary(uniqueKeysWithValues: exerciseDrafts.map { ($0.id, false) })
         } catch {
             errorMessage = String(describing: error)
             showingError = true
@@ -319,25 +251,18 @@ struct TemplateEditorView: View {
         profiles.first?.isTrainingGuidanceEnabled ?? true
     }
 
-    private func isExpandedBinding(for draftID: UUID) -> Binding<Bool> {
-        Binding(
-            get: { isExpandedByDraftID[draftID] ?? false },
-            set: { isExpandedByDraftID[draftID] = $0 }
-        )
-    }
-
-    private func templateRecommendation(for draft: TemplateExerciseDraft) -> TemplateExerciseRecommendation? {
+    private func templateRecommendation(for draftStore: TemplateExerciseDraftStore) -> TemplateExerciseRecommendation? {
         guard isTrainingGuidanceEnabled else { return nil }
-        if let catalogExercise = catalogByUUID[draft.catalogExerciseUUID] {
+        if let catalogExercise = catalogByUUID[draftStore.catalogExerciseUUID] {
             return guidanceService.templateRecommendation(for: catalogExercise)
         }
 
         return guidanceService.templateRecommendation(
             for: TrainingGuidanceCatalogSnapshot(
-                exerciseName: draft.exerciseNameSnapshot,
-                categoryName: draft.categorySnapshot,
+                exerciseName: draftStore.exerciseNameSnapshot,
+                categoryName: draftStore.categorySnapshot,
                 equipmentSummary: "",
-                primaryMuscleNames: draft.muscleSummarySnapshot
+                primaryMuscleNames: draftStore.muscleSummarySnapshot
             )
         )
     }
@@ -351,27 +276,132 @@ struct TemplateEditorView: View {
         }
     }
 
-    private func clearExerciseSwipeState(for exerciseID: UUID) {
-        exerciseSwipeOffsets[exerciseID] = nil
-        exerciseSwipeRemoving[exerciseID] = nil
-    }
-
-    private func exerciseSwipeOffsetBinding(for exerciseID: UUID) -> Binding<CGFloat> {
-        Binding(
-            get: { exerciseSwipeOffsets[exerciseID] ?? 0 },
-            set: { exerciseSwipeOffsets[exerciseID] = $0 }
-        )
-    }
-
-    private func exerciseRemovingBinding(for exerciseID: UUID) -> Binding<Bool> {
-        Binding(
-            get: { exerciseSwipeRemoving[exerciseID] ?? false },
-            set: { exerciseSwipeRemoving[exerciseID] = $0 }
-        )
-    }
-
     private var exerciseCardTransition: AnyTransition {
         WGJMotion.cardTransition(reduceMotion: reduceMotion)
+    }
+}
+
+@MainActor
+@Observable
+private final class TemplateExerciseDraftStore: Identifiable {
+    let id: UUID
+    let catalogExerciseUUID: String
+    let exerciseNameSnapshot: String
+    let categorySnapshot: String
+    let muscleSummarySnapshot: String
+    var targetRepMin: Int?
+    var targetRepMax: Int?
+    var restSeconds: Int
+    var setDrafts: [TemplateExerciseSetDraft]
+    var isExpanded: Bool
+
+    init(draft: TemplateExerciseDraft, isExpanded: Bool = false) {
+        id = draft.id
+        catalogExerciseUUID = draft.catalogExerciseUUID
+        exerciseNameSnapshot = draft.exerciseNameSnapshot
+        categorySnapshot = draft.categorySnapshot
+        muscleSummarySnapshot = draft.muscleSummarySnapshot
+        targetRepMin = draft.targetRepMin
+        targetRepMax = draft.targetRepMax
+        restSeconds = draft.restSeconds
+        setDrafts = draft.setDrafts
+        self.isExpanded = isExpanded
+    }
+
+    var draft: TemplateExerciseDraft {
+        TemplateExerciseDraft(
+            id: id,
+            catalogExerciseUUID: catalogExerciseUUID,
+            exerciseNameSnapshot: exerciseNameSnapshot,
+            categorySnapshot: categorySnapshot,
+            muscleSummarySnapshot: muscleSummarySnapshot,
+            targetRepMin: targetRepMin,
+            targetRepMax: targetRepMax,
+            restSeconds: restSeconds,
+            setDrafts: setDrafts
+        )
+    }
+}
+
+private struct TemplateEditorExerciseRow: View {
+    @Bindable var draftStore: TemplateExerciseDraftStore
+
+    let recommendation: TemplateExerciseRecommendation?
+    let exerciseIndexTitle: String
+    let canMoveUp: Bool
+    let canMoveDown: Bool
+    let preferredLoadUnit: TemplateLoadUnit
+    let onMoveUp: () -> Void
+    let onMoveDown: () -> Void
+    let onExerciseDelete: () -> Void
+
+    @State private var swipeOffset: CGFloat = 0
+    @State private var swipeRemoving = false
+
+    var body: some View {
+        SwipeDeleteRow(
+            offset: $swipeOffset,
+            isRemoving: $swipeRemoving,
+            activeRegionMaxY: 116,
+            gestureStrategy: .simultaneous
+        ) {
+            onExerciseDelete()
+        } content: {
+            TemplateExercisePrescriptionEditor(
+                exerciseName: draftStore.exerciseNameSnapshot,
+                muscleSummary: draftStore.muscleSummarySnapshot,
+                category: draftStore.categorySnapshot,
+                recommendation: recommendation,
+                initiallyExpanded: false,
+                isExpanded: isExpandedBinding,
+                exerciseIndexTitle: exerciseIndexTitle,
+                canMoveUp: canMoveUp,
+                canMoveDown: canMoveDown,
+                preferredLoadUnit: preferredLoadUnit,
+                targetRepMin: targetRepMinBinding,
+                targetRepMax: targetRepMaxBinding,
+                restSeconds: restSecondsBinding,
+                setDrafts: setDraftsBinding,
+                onMoveUp: onMoveUp,
+                onMoveDown: onMoveDown,
+                onExerciseDelete: onExerciseDelete
+            )
+        }
+    }
+
+    private var isExpandedBinding: Binding<Bool> {
+        Binding(
+            get: { draftStore.isExpanded },
+            set: { draftStore.isExpanded = $0 }
+        )
+    }
+
+    private var targetRepMinBinding: Binding<Int?> {
+        Binding(
+            get: { draftStore.targetRepMin },
+            set: { draftStore.targetRepMin = $0 }
+        )
+    }
+
+    private var targetRepMaxBinding: Binding<Int?> {
+        Binding(
+            get: { draftStore.targetRepMax },
+            set: { draftStore.targetRepMax = $0 }
+        )
+    }
+
+    private var restSecondsBinding: Binding<Int> {
+        Binding(
+            get: { draftStore.restSeconds },
+            set: { draftStore.restSeconds = max(0, min(3600, $0)) }
+        )
+    }
+
+    private var setDraftsBinding: Binding<[TemplateExerciseSetDraft]> {
+        Binding(
+            get: { draftStore.setDrafts },
+            set: { draftStore.setDrafts = $0 }
+        )
     }
 }
 
