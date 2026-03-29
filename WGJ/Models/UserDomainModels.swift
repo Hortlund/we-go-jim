@@ -394,28 +394,46 @@ final class UserProfile {
         self.updatedAt = updatedAt
     }
 
+    @discardableResult
     func updateBrosMembership(
         circleID: String,
         membershipID: String,
         userRecordName: String,
         joinedAt: Date,
         role: BroMembershipRole
-    ) {
+    ) -> Bool {
+        guard
+            brosCircleID != circleID
+                || brosMembershipID != membershipID
+                || brosUserRecordName != userRecordName
+                || brosJoinedAt != joinedAt
+                || brosRole != role
+        else {
+            return false
+        }
+
         brosCircleID = circleID
         brosMembershipID = membershipID
         brosUserRecordName = userRecordName
         brosJoinedAt = joinedAt
         brosRole = role
         updatedAt = .now
+        return true
     }
 
-    func clearBrosMembership() {
+    @discardableResult
+    func clearBrosMembership() -> Bool {
+        guard brosCircleID != nil || brosMembershipID != nil || brosUserRecordName != nil || brosJoinedAt != nil || brosRole != nil else {
+            return false
+        }
+
         brosCircleID = nil
         brosMembershipID = nil
         brosUserRecordName = nil
         brosJoinedAt = nil
         brosRole = nil
         updatedAt = .now
+        return true
     }
 }
 

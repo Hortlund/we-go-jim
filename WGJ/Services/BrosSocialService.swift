@@ -648,6 +648,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
 
         do {
             let userRecordName = try await currentUserRecordName()
+            var didChangeProfile = false
             switch await resolvedMembershipRecord(
                 localProfile: profile,
                 userRecordName: userRecordName
@@ -659,7 +660,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
                 let roleRaw = membershipRecord[Field.role] as? String ?? BroMembershipRole.member.rawValue
                 let role = BroMembershipRole(rawValue: roleRaw) ?? .member
 
-                profile.updateBrosMembership(
+                didChangeProfile = profile.updateBrosMembership(
                     circleID: circleID,
                     membershipID: membershipID,
                     userRecordName: userRecordName,
@@ -670,12 +671,13 @@ final class CloudKitBrosSocialService: BrosSocialService {
                 if hasLocalMembership(profile),
                    await shouldClearLocalMembershipState(afterMissingMembershipWith: profile)
                 {
-                    profile.clearBrosMembership()
+                    didChangeProfile = profile.clearBrosMembership()
                 }
             case .inconclusive:
                 break
             }
 
+            guard didChangeProfile else { return }
             try modelContext.save()
         } catch {
             // Keep local state as-is when CloudKit is temporarily unavailable.
@@ -2327,22 +2329,22 @@ final class CloudKitBrosSocialService: BrosSocialService {
         role: BroMembershipRole
     ) throws {
         let profile = try ProfileRepository(modelContext: modelContext).loadOrCreateProfile()
-        profile.updateBrosMembership(
+        let didChangeProfile = profile.updateBrosMembership(
             circleID: circleID,
             membershipID: membershipID,
             userRecordName: userRecordName,
             joinedAt: joinedAt,
             role: role
         )
+        guard didChangeProfile else { return }
         try modelContext.save()
     }
 
     private func clearLocalMembershipStateIfNeeded() throws {
         guard let profile = try ProfileRepository(modelContext: modelContext).currentProfile() else { return }
-        guard profile.brosCircleID != nil || profile.brosMembershipID != nil || profile.brosUserRecordName != nil else {
+        guard profile.clearBrosMembership() else {
             return
         }
-        profile.clearBrosMembership()
         try modelContext.save()
     }
 

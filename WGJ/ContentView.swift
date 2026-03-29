@@ -58,10 +58,7 @@ struct ContentView: View {
             }
             updateIdleTimerState()
         }
-        .onChange(of: storedProfiles.first?.updatedAt) { _, _ in
-            if appPhase == .main {
-                requestAppMaintenance()
-            }
+        .onChange(of: storedProfiles.first?.keepsScreenAwake) { _, _ in
             updateIdleTimerState()
         }
         .onReceive(NotificationCenter.default.publisher(for: .wgjDidDeleteAllUserData)) { _ in
