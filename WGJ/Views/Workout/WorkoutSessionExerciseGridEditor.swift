@@ -192,8 +192,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                     Text(overloadFeedback.text)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(feedbackTint(for: overloadFeedback.tone))
-                        .lineLimit(3)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(2)
                 }
 
                 if !personalRecordSummaryKinds.isEmpty {
@@ -537,28 +536,21 @@ struct WorkoutSessionExerciseGridEditor: View {
             }
 
             if showsSecondaryRow {
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .center, spacing: 10) {
-                        if let statusText = reference.statusText {
-                            progressStatusChip(text: statusText, tone: reference.statusTone)
-                        }
-
-                        if canApplyPrevious {
-                            applyPreviousButton(at: index)
-                        }
+                HStack(alignment: .top, spacing: 10) {
+                    if let statusText = reference.statusText {
+                        progressStatusChip(text: statusText, tone: reference.statusTone)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        Spacer(minLength: 0)
                     }
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        if let statusText = reference.statusText {
-                            progressStatusChip(text: statusText, tone: reference.statusTone)
-                        }
-
-                        if canApplyPrevious {
-                            applyPreviousButton(at: index)
-                        }
-                    }
+                    applyPreviousButton(at: index)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .opacity(canApplyPrevious ? 1 : 0)
+                        .allowsHitTesting(canApplyPrevious)
+                        .accessibilityHidden(!canApplyPrevious)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
             }
         }
         .padding(12)
@@ -606,7 +598,6 @@ struct WorkoutSessionExerciseGridEditor: View {
                             .stroke(progressToneColor(for: tone).opacity(0.22), lineWidth: 1)
                     )
             )
-            .frame(maxWidth: .infinity, alignment: .leading)
             .layoutPriority(1)
     }
 
