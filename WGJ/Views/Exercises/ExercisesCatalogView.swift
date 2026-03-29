@@ -171,7 +171,7 @@ struct ExercisesCatalogView: View {
                     .padding(.horizontal, 6)
                     .background(
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(AnyShapeStyle(.ultraThinMaterial))
+                            .fill(WGJTheme.fieldStrong.opacity(0.96))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                                     .fill(WGJTheme.field.opacity(0.55))

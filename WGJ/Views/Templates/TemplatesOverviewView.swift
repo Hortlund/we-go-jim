@@ -528,7 +528,7 @@ struct TemplateFolderEditorSheet: View {
                     .padding(.top, 12)
                     .padding(.bottom, 16)
                 }
-                .background(.ultraThinMaterial)
+                .background(WGJTheme.bgBase.opacity(0.97))
             }
             .onAppear {
                 isNameFieldFocused = true

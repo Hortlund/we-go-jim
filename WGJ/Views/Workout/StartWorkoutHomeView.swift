@@ -121,7 +121,6 @@ struct StartWorkoutHomeView: View {
         .task(id: sessionDataStamp) {
             recomputeSessionDerivedState()
         }
-        .animation(WGJMotion.cardAnimation(reduceMotion: reduceMotion), value: templateLibraryStamp)
     }
 
     private var quickStartSection: some View {
@@ -237,16 +236,15 @@ struct StartWorkoutHomeView: View {
             .frame(width: 36, height: 36)
             .background {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.thinMaterial)
+                    .fill(WGJTheme.fieldStrong.opacity(0.96))
                     .overlay {
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(WGJTheme.cardElevated.opacity(0.72))
+                            .fill(WGJTheme.cardElevated.opacity(0.32))
                     }
                     .overlay {
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .stroke(WGJTheme.outline.opacity(0.82), lineWidth: 1)
                     }
-                    .wgjRoundedGlass(cornerRadius: 12, tint: tint.opacity(0.14))
             }
     }
 
@@ -769,16 +767,15 @@ private struct StartWorkoutUtilityIcon: View {
             .frame(width: 36, height: 36)
             .background {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.thinMaterial)
+                    .fill(WGJTheme.fieldStrong.opacity(0.96))
                     .overlay {
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(WGJTheme.cardElevated.opacity(0.7))
+                            .fill(WGJTheme.cardElevated.opacity(0.28))
                     }
                     .overlay {
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .stroke(WGJTheme.outline.opacity(0.82), lineWidth: 1)
                     }
-                    .wgjRoundedGlass(cornerRadius: 12, tint: tint.opacity(0.12))
             }
     }
 }
@@ -997,7 +994,7 @@ private struct TemplateStartPreviewSheet: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(.regularMaterial)
+                .fill(WGJTheme.cardStrong.opacity(0.97))
                 .overlay {
                     RoundedRectangle(cornerRadius: 24, style: .continuous)
                         .fill(
@@ -1016,8 +1013,7 @@ private struct TemplateStartPreviewSheet: View {
                     RoundedRectangle(cornerRadius: 24, style: .continuous)
                         .stroke(WGJTheme.outline.opacity(0.86), lineWidth: 1)
                 }
-                .wgjRoundedGlass(cornerRadius: 24, tint: WGJTheme.accentBlue.opacity(0.16))
-                .shadow(color: WGJTheme.shadowStrong.opacity(0.12), radius: 22, x: 0, y: 12)
+                .shadow(color: WGJTheme.shadowStrong.opacity(0.08), radius: 10, x: 0, y: 4)
         }
     }
 

@@ -1167,7 +1167,7 @@ private struct ActiveWorkoutBottomDock: View {
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 10)
-        .background(AnyShapeStyle(.ultraThinMaterial))
+        .background(WGJTheme.bgBase.opacity(0.97))
         .overlay(alignment: .top) {
             Rectangle()
                 .fill(WGJTheme.accentBlue.opacity(0.18))
@@ -1319,7 +1319,7 @@ private struct ActiveWorkoutActivityTimerDock: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(.regularMaterial)
+                    .fill(WGJTheme.cardStrong.opacity(0.97))
                     .overlay {
                         RoundedRectangle(cornerRadius: 18, style: .continuous)
                             .fill(
@@ -1337,8 +1337,7 @@ private struct ActiveWorkoutActivityTimerDock: View {
                         RoundedRectangle(cornerRadius: 18, style: .continuous)
                             .stroke(accent.opacity(isResting ? 0.28 : 0.22), lineWidth: 1)
                     }
-                    .wgjRoundedGlass(cornerRadius: 18, tint: accent.opacity(isResting ? 0.16 : 0.12))
-                    .shadow(color: WGJTheme.shadowStrong.opacity(0.14), radius: 16, x: 0, y: 8)
+                    .shadow(color: WGJTheme.shadowStrong.opacity(0.08), radius: 8, x: 0, y: 4)
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel(
@@ -1453,19 +1452,10 @@ private struct ActiveWorkoutExerciseStateStamp: Hashable {
 }
 
 private struct ActiveWorkoutListAnimationToken: Hashable {
-    let count: Int
-    let latestUpdate: TimeInterval
+    let exerciseIDs: [UUID]
 
     init(exercises: [WorkoutSessionExercise]) {
-        count = exercises.count
-        latestUpdate = exercises
-            .map { exercise in
-                max(
-                    exercise.updatedAt.timeIntervalSinceReferenceDate,
-                    (exercise.sets ?? []).map { $0.updatedAt.timeIntervalSinceReferenceDate }.max() ?? 0
-                )
-            }
-            .max() ?? 0
+        exerciseIDs = exercises.map(\.id)
     }
 }
 

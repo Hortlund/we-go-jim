@@ -30,7 +30,7 @@ struct SwipeDeleteRow<Content: View>: View {
     var body: some View {
         ZStack(alignment: .trailing) {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.regularMaterial)
+                .fill(WGJTheme.destructiveField.opacity(0.96))
                 .overlay {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(WGJTheme.danger.opacity(0.78))
@@ -47,7 +47,6 @@ struct SwipeDeleteRow<Content: View>: View {
                         .scaleEffect(0.86 + (0.14 * revealProgress))
                         .padding(.trailing, 16)
                 }
-                .wgjRoundedGlass(cornerRadius: 12, tint: WGJTheme.danger.opacity(0.18))
                 .opacity(backgroundOpacity)
 
             swipeHost

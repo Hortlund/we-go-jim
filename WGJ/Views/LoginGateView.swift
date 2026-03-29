@@ -36,7 +36,7 @@ struct LoginGateView: View {
                             .frame(width: 78, height: 78)
                             .background {
                                 Circle()
-                                    .fill(.thinMaterial)
+                                    .fill(WGJTheme.fieldStrong.opacity(0.96))
                                     .overlay {
                                         Circle()
                                             .fill(WGJTheme.headerOverlayGradient.opacity(0.8))
@@ -45,7 +45,6 @@ struct LoginGateView: View {
                                         Circle()
                                             .stroke(WGJTheme.outlineStrong, lineWidth: 1)
                                     }
-                                    .wgjCircleGlass(tint: WGJTheme.accentBlue.opacity(0.18))
                             }
 
                         Text("Continue with iCloud")

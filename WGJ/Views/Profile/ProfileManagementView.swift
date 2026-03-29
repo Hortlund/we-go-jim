@@ -287,31 +287,52 @@ struct ProfileManagementView: View {
 
 struct ProfileAvatarView: View {
     let imageData: Data?
+    @State private var image: UIImage?
 
     var body: some View {
-        if let imageData, let image = UIImage(data: imageData) {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFill()
-                .clipShape(Circle())
-                .overlay {
-                    Circle()
-                        .stroke(WGJTheme.outlineStrong, lineWidth: 1)
-                }
-        } else {
-            Circle()
-                .fill(.thinMaterial)
-                .wgjCircleGlass(tint: WGJTheme.card.opacity(0.14))
-                .overlay {
-                    Image(systemName: "person.fill")
-                        .font(.title2)
-                        .foregroundStyle(WGJTheme.textSecondary)
-                }
-                .overlay {
-                    Circle()
-                        .stroke(WGJTheme.outlineStrong, lineWidth: 1)
-                }
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .clipShape(Circle())
+                    .overlay {
+                        Circle()
+                            .stroke(WGJTheme.outlineStrong, lineWidth: 1)
+                    }
+            } else {
+                Circle()
+                    .fill(WGJTheme.fieldStrong.opacity(0.96))
+                    .overlay {
+                        Image(systemName: "person.fill")
+                            .font(.title2)
+                            .foregroundStyle(WGJTheme.textSecondary)
+                    }
+                    .overlay {
+                        Circle()
+                            .stroke(WGJTheme.outlineStrong, lineWidth: 1)
+                    }
+            }
         }
+        .task(id: imageData) {
+            await loadImage()
+        }
+    }
+
+    @MainActor
+    private func loadImage() async {
+        guard let imageData else {
+            image = nil
+            return
+        }
+
+        let decodedImage = await Task.detached(priority: .utility) { () -> UIImage? in
+            let baseImage = UIImage(data: imageData)
+            return baseImage?.preparingForDisplay() ?? baseImage
+        }.value
+
+        guard !Task.isCancelled else { return }
+        image = decodedImage
     }
 }
 

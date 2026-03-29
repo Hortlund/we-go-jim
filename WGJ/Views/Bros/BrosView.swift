@@ -96,19 +96,24 @@ final class BrosViewModel {
             return
         }
 
+        let shouldReplaceCurrentStateWithLoading = !hasRenderableState
         let accountStatus = await accountStatusProvider()
         switch accountStatus {
         case .available:
             break
         case .checking:
-            state = .loading
+            if shouldReplaceCurrentStateWithLoading {
+                state = .loading
+            }
             return
         case .unavailable(let reason):
             state = .unavailable(message(for: reason))
             return
         }
 
-        state = .loading
+        if shouldReplaceCurrentStateWithLoading {
+            state = .loading
+        }
         scheduleOutboxFlush(modelContext: modelContext)
 
         do {
@@ -318,6 +323,15 @@ final class BrosViewModel {
             return "iCloud is temporarily unavailable. Try again in a moment."
         case .unknown:
             return "Bros could not reach iCloud right now."
+        }
+    }
+
+    private var hasRenderableState: Bool {
+        switch state {
+        case .onboarding, .active:
+            return true
+        case .loading, .unavailable:
+            return false
         }
     }
 
@@ -962,7 +976,11 @@ struct BrosView: View {
                 .padding(.vertical, 8)
                 .background {
                     Capsule()
-                        .fill(selectedEmoji == emoji ? AnyShapeStyle(WGJTheme.accentBlue) : AnyShapeStyle(.thinMaterial))
+                        .fill(
+                            selectedEmoji == emoji
+                                ? AnyShapeStyle(WGJTheme.accentBlue)
+                                : AnyShapeStyle(WGJTheme.fieldStrong.opacity(0.96))
+                        )
                         .overlay {
                             Capsule()
                                 .fill(
@@ -1440,10 +1458,11 @@ private struct BroAvatarView: View {
     let imageData: Data?
     let name: String
     let size: CGFloat
+    @State private var image: UIImage?
 
     var body: some View {
         Group {
-            if let imageData, let image = UIImage(data: imageData) {
+            if let image {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
@@ -1470,6 +1489,9 @@ private struct BroAvatarView: View {
             Circle()
                 .stroke(WGJTheme.outlineStrong, lineWidth: 1)
         }
+        .task(id: imageData) {
+            await loadImage()
+        }
     }
 
     private var initials: String {
@@ -1479,6 +1501,22 @@ private struct BroAvatarView: View {
             .compactMap { $0.first }
         let text = String(pieces)
         return text.isEmpty ? "B" : text.uppercased()
+    }
+
+    @MainActor
+    private func loadImage() async {
+        guard let imageData else {
+            image = nil
+            return
+        }
+
+        let decodedImage = await Task.detached(priority: .utility) { () -> UIImage? in
+            let baseImage = UIImage(data: imageData)
+            return baseImage?.preparingForDisplay() ?? baseImage
+        }.value
+
+        guard !Task.isCancelled else { return }
+        image = decodedImage
     }
 }
 

@@ -509,19 +509,10 @@ private struct HistoryExerciseStateStamp: Hashable {
 }
 
 private struct HistoryExerciseListAnimationToken: Hashable {
-    let count: Int
-    let latestUpdate: TimeInterval
+    let exerciseIDs: [UUID]
 
     init(exercises: [WorkoutSessionExercise]) {
-        count = exercises.count
-        latestUpdate = exercises
-            .map { exercise in
-                max(
-                    exercise.updatedAt.timeIntervalSinceReferenceDate,
-                    (exercise.sets ?? []).map { $0.updatedAt.timeIntervalSinceReferenceDate }.max() ?? 0
-                )
-            }
-            .max() ?? 0
+        exerciseIDs = exercises.map(\.id)
     }
 }
 

@@ -121,52 +121,29 @@ private struct WGJCardModifier: ViewModifier {
     let strong: Bool
     let cornerRadius: CGFloat
 
-    private var fillMaterial: Material {
-        strong ? .regularMaterial : .thinMaterial
-    }
-
     private var fillColor: Color {
-        strong ? WGJTheme.cardStrong.opacity(0.78) : WGJTheme.card.opacity(0.68)
+        strong ? WGJTheme.cardStrong.opacity(0.98) : WGJTheme.card.opacity(0.94)
     }
 
-    private var shadowColor: Color {
-        strong ? WGJTheme.shadowStrong : WGJTheme.shadowSoft
+    private var strokeColor: Color {
+        strong ? WGJTheme.outline.opacity(0.52) : WGJTheme.outline.opacity(0.34)
     }
 
     func body(content: Content) -> some View {
         content
             .background {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(fillMaterial)
+                    .fill(fillColor)
                     .overlay {
                         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .fill(fillColor)
+                            .stroke(strokeColor, lineWidth: 1)
                     }
-                    .overlay {
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .stroke(WGJTheme.outline.opacity(strong ? 0.9 : 0.75), lineWidth: 1)
-                    }
-                    .overlay(alignment: .top) {
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(strong ? 0.18 : 0.12),
-                                        Color.white.opacity(0),
-                                    ],
-                                    startPoint: .top,
-                                    endPoint: .center
-                                )
-                            )
-                            .mask {
-                                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            }
-                    }
-                    .wgjRoundedGlass(
-                        cornerRadius: cornerRadius,
-                        tint: strong ? WGJTheme.cardStrong.opacity(0.18) : WGJTheme.card.opacity(0.14)
+                    .shadow(
+                        color: (strong ? WGJTheme.shadowStrong : WGJTheme.shadowSoft).opacity(strong ? 0.18 : 0.12),
+                        radius: strong ? 8 : 4,
+                        x: 0,
+                        y: strong ? 4 : 2
                     )
-                    .shadow(color: shadowColor, radius: strong ? 22 : 16, x: 0, y: strong ? 12 : 8)
             }
     }
 }
@@ -189,7 +166,7 @@ private struct WGJGlassButtonBackground: View {
                 )
             )
         case .secondary:
-            return AnyShapeStyle(.thinMaterial)
+            return AnyShapeStyle(WGJTheme.fieldStrong.opacity(isPressed ? 0.98 : 0.92))
         case .destructive:
             return AnyShapeStyle(
                 LinearGradient(
@@ -207,11 +184,11 @@ private struct WGJGlassButtonBackground: View {
     private var overlayFill: Color {
         switch tone {
         case .primary:
-            return Color.white.opacity(0.08)
+            return Color.white.opacity(0.04)
         case .secondary:
-            return WGJTheme.card.opacity(isPressed ? 0.64 : 0.56)
+            return WGJTheme.card.opacity(isPressed ? 0.10 : 0.06)
         case .destructive:
-            return WGJTheme.destructiveField.opacity(isPressed ? 0.18 : 0.10)
+            return WGJTheme.destructiveField.opacity(isPressed ? 0.12 : 0.06)
         }
     }
 
@@ -248,16 +225,11 @@ private struct WGJGlassButtonBackground: View {
                 RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
                     .stroke(stroke, lineWidth: 1)
             }
-            .wgjRoundedGlass(
-                cornerRadius: WGJRadius.control,
-                tint: glassTint,
-                interactive: true
-            )
             .shadow(
-                color: tone == .secondary ? WGJTheme.shadowSoft : WGJTheme.shadowStrong.opacity(0.78),
-                radius: tone == .secondary ? 10 : 14,
+                color: (tone == .secondary ? WGJTheme.shadowSoft : WGJTheme.shadowStrong).opacity(tone == .secondary ? 0.12 : 0.18),
+                radius: tone == .secondary ? 3 : 5,
                 x: 0,
-                y: tone == .secondary ? 6 : 10
+                y: tone == .secondary ? 1 : 2
             )
     }
 }
@@ -381,21 +353,12 @@ struct WGJIconButtonStyle: ButtonStyle {
             .frame(width: 44, height: 44)
             .background {
                 RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
-                    .fill(.thinMaterial)
+                    .fill(background.opacity(configuration.isPressed ? 0.78 : 0.92))
                     .overlay {
                         RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
-                            .fill(background.opacity(configuration.isPressed ? 0.56 : 0.66))
+                            .stroke(outline.opacity(0.70), lineWidth: 1)
                     }
-                    .overlay {
-                        RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
-                            .stroke(outline.opacity(0.92), lineWidth: 1)
-                    }
-                    .wgjRoundedGlass(
-                        cornerRadius: WGJRadius.control,
-                        tint: background.opacity(0.14),
-                        interactive: true
-                    )
-                    .shadow(color: WGJTheme.shadowSoft, radius: 10, x: 0, y: 6)
+                    .shadow(color: WGJTheme.shadowSoft.opacity(0.12), radius: 3, x: 0, y: 1)
             }
             .scaleEffect(configuration.isPressed ? 0.97 : 1)
     }
@@ -411,21 +374,18 @@ struct WGJChip: View {
             .foregroundStyle(isSelected ? WGJTheme.textInverse : WGJTheme.textPrimary)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
-        .background {
-            Capsule()
-                .fill(isSelected ? AnyShapeStyle(WGJTheme.accentBlue) : AnyShapeStyle(.thinMaterial))
+            .background {
+                Capsule()
+                    .fill(isSelected ? AnyShapeStyle(WGJTheme.accentBlue) : AnyShapeStyle(WGJTheme.fieldStrong))
                 .overlay {
                     Capsule()
-                        .fill(isSelected ? WGJTheme.accentCyan.opacity(0.28) : WGJTheme.card.opacity(0.54))
+                        .fill(isSelected ? WGJTheme.accentCyan.opacity(0.20) : WGJTheme.card.opacity(0.10))
                 }
                 .overlay {
                     Capsule()
-                        .stroke(isSelected ? Color.white.opacity(0.18) : WGJTheme.outline.opacity(0.82), lineWidth: 1)
+                        .stroke(isSelected ? Color.white.opacity(0.16) : WGJTheme.outline.opacity(0.42), lineWidth: 1)
                 }
-                .wgjCapsuleGlass(
-                    tint: isSelected ? WGJTheme.accentBlue.opacity(0.18) : WGJTheme.card.opacity(0.12)
-                )
-        }
+            }
     }
 }
 
@@ -559,16 +519,11 @@ struct WGJMetricPill: View {
         .padding(.vertical, 8)
         .background {
             Capsule()
-                .fill(.thinMaterial)
+                .fill(WGJTheme.cardStrong.opacity(0.94))
                 .overlay {
                     Capsule()
-                        .fill(WGJTheme.card.opacity(0.56))
+                        .stroke(WGJTheme.outline.opacity(0.38), lineWidth: 1)
                 }
-                .overlay {
-                    Capsule()
-                        .stroke(WGJTheme.outline.opacity(0.82), lineWidth: 1)
-                }
-                .wgjCapsuleGlass(tint: tint.opacity(0.12))
         }
     }
 }
@@ -731,14 +686,14 @@ struct WGJTransientBanner: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(.regularMaterial)
+                .fill(WGJTheme.cardStrong.opacity(0.96))
                 .overlay {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .fill(
                             LinearGradient(
                                 colors: [
-                                    tint.opacity(0.16),
-                                    WGJTheme.cardStrong.opacity(0.82),
+                                    tint.opacity(0.10),
+                                    Color.clear,
                                 ],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
@@ -749,8 +704,7 @@ struct WGJTransientBanner: View {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .stroke(tint.opacity(0.26), lineWidth: 1)
                 }
-                .wgjRoundedGlass(cornerRadius: 18, tint: tint.opacity(0.16))
-                .shadow(color: WGJTheme.shadowStrong.opacity(0.14), radius: 16, x: 0, y: 8)
+                .shadow(color: WGJTheme.shadowStrong.opacity(0.14), radius: 5, x: 0, y: 2)
         }
     }
 }
@@ -762,28 +716,7 @@ extension View {
 
     func wgjScreenBackground() -> some View {
         background {
-            ZStack {
-                WGJTheme.screenBackgroundGradient
-                RadialGradient(
-                    colors: [
-                        WGJTheme.accentBlue.opacity(0.10),
-                        Color.clear,
-                    ],
-                    center: .topLeading,
-                    startRadius: 20,
-                    endRadius: 380
-                )
-                RadialGradient(
-                    colors: [
-                        WGJTheme.accentPurple.opacity(0.06),
-                        Color.clear,
-                    ],
-                    center: .bottomTrailing,
-                    startRadius: 30,
-                    endRadius: 420
-                )
-            }
-            .ignoresSafeArea()
+            WGJTheme.screenBackgroundGradient.ignoresSafeArea()
         }
     }
 
@@ -797,7 +730,7 @@ extension View {
         if #available(iOS 26.0, *) {
             self
         } else {
-            toolbarBackground(.thinMaterial, for: .navigationBar)
+            toolbarBackground(WGJTheme.bgBase, for: .navigationBar)
                 .toolbarBackground(.visible, for: .navigationBar)
         }
     }
@@ -807,7 +740,7 @@ extension View {
         if #available(iOS 26.0, *) {
             self
         } else {
-            toolbarBackground(.thinMaterial, for: .tabBar)
+            toolbarBackground(WGJTheme.bgBase, for: .tabBar)
                 .toolbarBackground(.visible, for: .tabBar)
         }
     }
@@ -821,20 +754,12 @@ extension View {
             .padding(.horizontal, 12)
             .background {
                 RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
-                    .fill(.thinMaterial)
+                    .fill(WGJTheme.fieldStrong.opacity(0.96))
                     .overlay {
                         RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
-                            .fill(WGJTheme.field.opacity(0.74))
+                            .stroke(WGJTheme.outline.opacity(0.42), lineWidth: 1)
                     }
-                    .overlay {
-                        RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
-                            .stroke(WGJTheme.outline.opacity(0.84), lineWidth: 1)
-                    }
-                    .wgjRoundedGlass(
-                        cornerRadius: WGJRadius.control,
-                        tint: WGJTheme.field.opacity(0.14)
-                    )
-                    .shadow(color: WGJTheme.shadowSoft.opacity(0.9), radius: 10, x: 0, y: 6)
+                    .shadow(color: WGJTheme.shadowSoft.opacity(0.10), radius: 2, x: 0, y: 1)
             }
     }
 

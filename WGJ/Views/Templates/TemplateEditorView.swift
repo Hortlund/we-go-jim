@@ -50,7 +50,6 @@ struct TemplateEditorView: View {
                     exercisesSection
                 }
                 .padding(16)
-                .animation(WGJMotion.cardAnimation(reduceMotion: reduceMotion), value: exerciseDrafts.map(\.id))
             }
             .scrollDismissesKeyboard(.interactively)
             .wgjScreenBackground()

@@ -75,7 +75,6 @@ struct TemplateDetailView: View {
                 exercisesSection
             }
             .padding(WGJSpacing.page)
-            .animation(WGJMotion.cardAnimation(reduceMotion: reduceMotion), value: templateExercises.map(\.id))
         }
         .scrollDismissesKeyboard(.interactively)
         .wgjScreenBackground()
