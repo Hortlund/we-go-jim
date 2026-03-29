@@ -29,7 +29,7 @@ struct TemplateExercisePrescriptionEditor: View {
     @State private var setSwipeOffsets: [UUID: CGFloat] = [:]
     @State private var setSwipeRemoving: [UUID: Bool] = [:]
 
-    private let restPresets = [45, 60, 75, 90, 120, 150, 180, 210, 240]
+    private let restPresets = [10, 15, 20, 30, 45, 60, 75, 90, 105, 120, 150, 180, 210, 240]
 
     init(
         exerciseName: String,

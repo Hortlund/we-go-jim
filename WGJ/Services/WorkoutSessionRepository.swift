@@ -269,10 +269,9 @@ final class WorkoutSessionRepository {
             throw WorkoutSessionRepositoryError.sessionExerciseNotFound
         }
 
-        let previousDefaultRest = exercise.restSeconds
         let normalizedRest = sanitizedRest(restSeconds)
         exercise.restSeconds = normalizedRest
-        for set in exercise.sets ?? [] where !set.isLocked && set.restSeconds == previousDefaultRest {
+        for set in exercise.sets ?? [] where !set.isLocked {
             set.restSeconds = normalizedRest
             set.updatedAt = .now
         }

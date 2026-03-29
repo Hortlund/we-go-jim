@@ -1082,13 +1082,13 @@ struct ActiveWorkoutView: View {
     @MainActor
     private func applyPersistedRestChange(
         sessionExerciseID: UUID,
-        previousDefaultRest: Int,
+        previousDefaultRest _: Int,
         updatedRest: Int
     ) {
         guard var drafts = setDraftsByExerciseID[sessionExerciseID] else { return }
 
         var changed = false
-        for index in drafts.indices where !drafts[index].isLocked && drafts[index].restSeconds == previousDefaultRest {
+        for index in drafts.indices where !drafts[index].isLocked {
             drafts[index].restSeconds = updatedRest
             changed = true
         }
@@ -1572,7 +1572,7 @@ private struct ActiveWorkoutExerciseSettingsSheet: View {
 
     @State private var draft: ActiveWorkoutExerciseSettingsDraft
 
-    private let restPresets = [45, 60, 75, 90, 120, 150, 180, 210, 240]
+    private let restPresets = [10, 15, 20, 30, 45, 60, 75, 90, 105, 120, 150, 180, 210, 240]
     private let onSave: (ActiveWorkoutExerciseSettingsDraft) -> Void
 
     init(

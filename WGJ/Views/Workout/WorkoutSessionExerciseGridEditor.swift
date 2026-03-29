@@ -37,7 +37,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     @State private var setSwipeRemoving: [UUID: Bool] = [:]
     @FocusState private var focusedInput: SetInputFocus?
 
-    private let restPresets = [45, 60, 75, 90, 120, 150, 180, 210, 240]
+    private let restPresets = [10, 15, 20, 30, 45, 60, 75, 90, 105, 120, 150, 180, 210, 240]
 
     private struct SetInputFocus: Hashable {
         let setID: UUID
@@ -1445,14 +1445,11 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func updateRest(_ seconds: Int) {
-        let previousDefaultRest = restSeconds
         let normalized = max(0, min(3600, seconds))
         restSeconds = normalized
 
-        for index in setDrafts.indices {
-            if !setDrafts[index].isLocked && setDrafts[index].restSeconds == previousDefaultRest {
-                setDrafts[index].restSeconds = normalized
-            }
+        for index in setDrafts.indices where !setDrafts[index].isLocked {
+            setDrafts[index].restSeconds = normalized
         }
 
         onRestChanged?(normalized)

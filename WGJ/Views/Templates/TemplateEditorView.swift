@@ -380,6 +380,15 @@ private struct TemplateEditorExerciseRow: View {
                 restSeconds: draftStore.restSeconds,
                 setDrafts: draftStore.setDrafts,
                 isExpanded: draftStore.isExpanded,
+                currentRestSeconds: {
+                    draftStore.restSeconds
+                },
+                currentSetDrafts: {
+                    draftStore.setDrafts
+                },
+                currentIsExpanded: {
+                    draftStore.isExpanded
+                },
                 onExpandedChanged: updateExpanded,
                 onTargetRepMinChanged: updateTargetRepMin,
                 onTargetRepMaxChanged: updateTargetRepMax,
@@ -435,6 +444,9 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
     let setDrafts: [TemplateExerciseSetDraft]
     let isExpanded: Bool
 
+    let currentRestSeconds: () -> Int
+    let currentSetDrafts: () -> [TemplateExerciseSetDraft]
+    let currentIsExpanded: () -> Bool
     let onExpandedChanged: (Bool) -> Void
     let onTargetRepMinChanged: (Int?) -> Void
     let onTargetRepMaxChanged: (Int?) -> Void
@@ -468,7 +480,7 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
             recommendation: recommendation,
             initiallyExpanded: false,
             isExpanded: Binding(
-                get: { isExpanded },
+                get: { currentIsExpanded() },
                 set: { onExpandedChanged($0) }
             ),
             exerciseIndexTitle: exerciseIndexTitle,
@@ -484,11 +496,11 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
                 set: { onTargetRepMaxChanged($0) }
             ),
             restSeconds: Binding(
-                get: { restSeconds },
+                get: { currentRestSeconds() },
                 set: { onRestChanged($0) }
             ),
             setDrafts: Binding(
-                get: { setDrafts },
+                get: { currentSetDrafts() },
                 set: { onSetDraftsChanged($0) }
             ),
             onMoveUp: onMoveUp,
