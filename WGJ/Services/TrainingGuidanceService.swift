@@ -109,6 +109,7 @@ struct ActiveWorkoutExerciseCardStateController: Equatable {
     }
 
     mutating func setExpanded(_ isExpanded: Bool, for exerciseID: UUID) {
+        guard isExpandedByExerciseID[exerciseID] != isExpanded else { return }
         isExpandedByExerciseID[exerciseID] = isExpanded
     }
 
@@ -120,6 +121,10 @@ struct ActiveWorkoutExerciseCardStateController: Equatable {
         } else {
             completedInCurrentCycle.remove(exerciseID)
         }
+    }
+
+    func didCompleteCurrentCycle(for exerciseID: UUID) -> Bool {
+        completedInCurrentCycle.contains(exerciseID)
     }
 
     func isExpanded(for exerciseID: UUID, default defaultValue: Bool = false) -> Bool {

@@ -118,8 +118,55 @@ struct ActiveWorkoutView: View {
                 }
 
                 ForEach(Array(sessionExercises.enumerated()), id: \.element.id) { index, exercise in
-                    exerciseSection(exercise, index: index)
-                        .id(exercise.id)
+                    ActiveWorkoutExerciseRowView(
+                        exerciseID: exercise.id,
+                        exerciseName: exercise.exerciseNameSnapshot,
+                        muscleSummary: exercise.muscleSummarySnapshot,
+                        category: exercise.categorySnapshot,
+                        exerciseIndexTitle: "Exercise \(index + 1)",
+                        targetRepMin: exercise.targetRepMin,
+                        targetRepMax: exercise.targetRepMax,
+                        previousBySetIndex: previousByExerciseID[exercise.id] ?? [:],
+                        overloadFeedback: overloadFeedbackByExerciseID[exercise.id],
+                        preferredLoadUnit: preferredLoadUnit,
+                        restSeconds: resolvedRest(for: exercise),
+                        setDrafts: resolvedDrafts(for: exercise),
+                        isExpanded: cardStateController.isExpanded(for: exercise.id),
+                        onSetDraftsBindingChanged: { updated in
+                            updateDraftsValue(updated, for: exercise.id)
+                        },
+                        onRestBindingChanged: { updated in
+                            updateRestValue(updated, for: exercise.id)
+                        },
+                        onExpandedChanged: { isExpanded in
+                            cardStateController.setExpanded(isExpanded, for: exercise.id)
+                        },
+                        onSetDraftsChanged: { drafts in
+                            handleDraftsChanged(drafts, for: exercise)
+                        },
+                        onRestChanged: { rest in
+                            persistRest(sessionExerciseID: exercise.id, restSeconds: rest)
+                        },
+                        onSetCompletionChange: { setID, setLabel, restSeconds, isCompleted in
+                            if isCompleted {
+                                restTimerState.startRestTimer(
+                                    seconds: restSeconds,
+                                    exerciseName: exercise.exerciseNameSnapshot,
+                                    setLabel: setLabel,
+                                    sourceSetID: setID
+                                )
+                            } else {
+                                restTimerState.clearRestTimer(sourceSetID: setID)
+                            }
+                        },
+                        onExerciseSettings: {
+                            showExerciseSettings(for: exercise)
+                        },
+                        onExerciseDelete: {
+                            removeExercise(exerciseID: exercise.id)
+                        }
+                    )
+                    .equatable()
                         .transition(exerciseCardTransition)
                 }
 
@@ -297,24 +344,29 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
-    private func setDraftsBinding(for exercise: WorkoutSessionExercise) -> Binding<[WorkoutSessionSetDraft]> {
-        Binding {
-            if let cached = setDraftsByExerciseID[exercise.id] {
-                return cached
-            }
-            return makeDrafts(from: exercise)
-        } set: { updated in
-            setDraftsByExerciseID[exercise.id] = updated
+    private func resolvedDrafts(for exercise: WorkoutSessionExercise) -> [WorkoutSessionSetDraft] {
+        if let cached = setDraftsByExerciseID[exercise.id] {
+            return cached
         }
+        return makeDrafts(from: exercise)
     }
 
     @MainActor
-    private func restBinding(for exercise: WorkoutSessionExercise) -> Binding<Int> {
-        Binding {
-            restByExerciseID[exercise.id] ?? exercise.restSeconds
-        } set: { updated in
-            restByExerciseID[exercise.id] = max(0, min(3600, updated))
-        }
+    private func resolvedRest(for exercise: WorkoutSessionExercise) -> Int {
+        restByExerciseID[exercise.id] ?? exercise.restSeconds
+    }
+
+    @MainActor
+    private func updateDraftsValue(_ updated: [WorkoutSessionSetDraft], for exerciseID: UUID) {
+        guard setDraftsByExerciseID[exerciseID] != updated else { return }
+        setDraftsByExerciseID[exerciseID] = updated
+    }
+
+    @MainActor
+    private func updateRestValue(_ updated: Int, for exerciseID: UUID) {
+        let normalized = max(0, min(3600, updated))
+        guard restByExerciseID[exerciseID] != normalized else { return }
+        restByExerciseID[exerciseID] = normalized
     }
 
     @MainActor
@@ -515,57 +567,6 @@ struct ActiveWorkoutView: View {
         }
     }
 
-    private func exerciseSection(_ exercise: WorkoutSessionExercise, index: Int) -> some View {
-        WorkoutSessionExerciseGridEditor(
-            exerciseName: exercise.exerciseNameSnapshot,
-            muscleSummary: exercise.muscleSummarySnapshot,
-            category: exercise.categorySnapshot,
-            exerciseIndexTitle: "Exercise \(index + 1)",
-            targetRepMin: exercise.targetRepMin,
-            targetRepMax: exercise.targetRepMax,
-            previousBySetIndex: previousByExerciseID[exercise.id] ?? [:],
-            overloadFeedback: overloadFeedbackByExerciseID[exercise.id],
-            preferredLoadUnit: preferredLoadUnit,
-            restSeconds: restBinding(for: exercise),
-            setDrafts: setDraftsBinding(for: exercise),
-            isExpanded: expansionBinding(for: exercise.id),
-            showsInlineExerciseControls: false,
-            showsSetProgressChip: false,
-            manualCompletionMode: true,
-            enablesHeaderSwipeDelete: true,
-            onSetDraftsChanged: { drafts in
-                setDraftsByExerciseID[exercise.id] = drafts
-                cardStateController.updateCompletion(
-                    for: exercise.id,
-                    isCompleted: isExerciseCompleted(drafts)
-                )
-                syncOverloadFeedback(for: exercise, drafts: drafts)
-                persistDrafts(sessionExerciseID: exercise.id, drafts: drafts)
-            },
-            onRestChanged: { rest in
-                persistRest(sessionExerciseID: exercise.id, restSeconds: rest)
-            },
-            onSetCompletionChange: { setID, setLabel, restSeconds, isCompleted in
-                if isCompleted {
-                    restTimerState.startRestTimer(
-                        seconds: restSeconds,
-                        exerciseName: exercise.exerciseNameSnapshot,
-                        setLabel: setLabel,
-                        sourceSetID: setID
-                    )
-                } else {
-                    restTimerState.clearRestTimer(sourceSetID: setID)
-                }
-            },
-            onExerciseSettings: {
-                showExerciseSettings(for: exercise)
-            },
-            onExerciseDelete: {
-                removeExercise(exerciseID: exercise.id)
-            }
-        )
-    }
-
     @MainActor
     private func persistRest(sessionExerciseID: UUID, restSeconds: Int) {
         let normalized = max(0, min(3600, restSeconds))
@@ -753,7 +754,9 @@ struct ActiveWorkoutView: View {
         drafts: [WorkoutSessionSetDraft]
     ) {
         guard isExerciseCompleted(drafts) else {
-            overloadFeedbackByExerciseID.removeValue(forKey: exercise.id)
+            if overloadFeedbackByExerciseID[exercise.id] != nil {
+                overloadFeedbackByExerciseID.removeValue(forKey: exercise.id)
+            }
             return
         }
         if catalogByUUID[exercise.catalogExerciseUUID] == nil,
@@ -761,6 +764,7 @@ struct ActiveWorkoutView: View {
         {
             catalogByUUID[exercise.catalogExerciseUUID] = loaded
         }
+        let nextFeedback: ActiveWorkoutProgressiveOverloadPresentation?
         guard
             isTrainingGuidanceEnabled,
             let catalogExercise = catalogByUUID[exercise.catalogExerciseUUID],
@@ -770,18 +774,25 @@ struct ActiveWorkoutView: View {
                 catalogExercise: catalogExercise
             )
         else {
-            overloadFeedbackByExerciseID.removeValue(forKey: exercise.id)
+            if overloadFeedbackByExerciseID[exercise.id] != nil {
+                overloadFeedbackByExerciseID.removeValue(forKey: exercise.id)
+            }
             return
         }
 
-        overloadFeedbackByExerciseID[exercise.id] = feedback
+        nextFeedback = feedback
+        guard overloadFeedbackByExerciseID[exercise.id] != nextFeedback else { return }
+        overloadFeedbackByExerciseID[exercise.id] = nextFeedback
     }
 
-    private func expansionBinding(for exerciseID: UUID) -> Binding<Bool> {
-        Binding(
-            get: { cardStateController.isExpanded(for: exerciseID) },
-            set: { cardStateController.setExpanded($0, for: exerciseID) }
-        )
+    @MainActor
+    private func handleDraftsChanged(_ drafts: [WorkoutSessionSetDraft], for exercise: WorkoutSessionExercise) {
+        let isCompleted = isExerciseCompleted(drafts)
+        if cardStateController.didCompleteCurrentCycle(for: exercise.id) != isCompleted {
+            cardStateController.updateCompletion(for: exercise.id, isCompleted: isCompleted)
+        }
+        syncOverloadFeedback(for: exercise, drafts: drafts)
+        persistDrafts(sessionExerciseID: exercise.id, drafts: drafts)
     }
 
     private func makeOverloadFeedback(
@@ -1076,9 +1087,88 @@ struct ActiveWorkoutView: View {
         guard changed else { return }
         setDraftsByExerciseID[sessionExerciseID] = drafts
         lastPersistedDraftsByExerciseID[sessionExerciseID] = drafts
-        cardStateController.updateCompletion(
-            for: sessionExerciseID,
-            isCompleted: isExerciseCompleted(drafts)
+        let isCompleted = isExerciseCompleted(drafts)
+        if cardStateController.didCompleteCurrentCycle(for: sessionExerciseID) != isCompleted {
+            cardStateController.updateCompletion(
+                for: sessionExerciseID,
+                isCompleted: isCompleted
+            )
+        }
+    }
+}
+
+private struct ActiveWorkoutExerciseRowView: View, Equatable {
+    let exerciseID: UUID
+    let exerciseName: String
+    let muscleSummary: String
+    let category: String
+    let exerciseIndexTitle: String
+    let targetRepMin: Int?
+    let targetRepMax: Int?
+    let previousBySetIndex: [Int: WorkoutPreviousSetSnapshot]
+    let overloadFeedback: ActiveWorkoutProgressiveOverloadPresentation?
+    let preferredLoadUnit: TemplateLoadUnit
+    let restSeconds: Int
+    let setDrafts: [WorkoutSessionSetDraft]
+    let isExpanded: Bool
+
+    let onSetDraftsBindingChanged: ([WorkoutSessionSetDraft]) -> Void
+    let onRestBindingChanged: (Int) -> Void
+    let onExpandedChanged: (Bool) -> Void
+    let onSetDraftsChanged: ([WorkoutSessionSetDraft]) -> Void
+    let onRestChanged: (Int) -> Void
+    let onSetCompletionChange: (UUID, String, Int, Bool) -> Void
+    let onExerciseSettings: () -> Void
+    let onExerciseDelete: () -> Void
+
+    static func == (lhs: ActiveWorkoutExerciseRowView, rhs: ActiveWorkoutExerciseRowView) -> Bool {
+        lhs.exerciseID == rhs.exerciseID
+            && lhs.exerciseName == rhs.exerciseName
+            && lhs.muscleSummary == rhs.muscleSummary
+            && lhs.category == rhs.category
+            && lhs.exerciseIndexTitle == rhs.exerciseIndexTitle
+            && lhs.targetRepMin == rhs.targetRepMin
+            && lhs.targetRepMax == rhs.targetRepMax
+            && lhs.previousBySetIndex == rhs.previousBySetIndex
+            && lhs.overloadFeedback == rhs.overloadFeedback
+            && lhs.preferredLoadUnit == rhs.preferredLoadUnit
+            && lhs.restSeconds == rhs.restSeconds
+            && lhs.setDrafts == rhs.setDrafts
+            && lhs.isExpanded == rhs.isExpanded
+    }
+
+    var body: some View {
+        WorkoutSessionExerciseGridEditor(
+            exerciseName: exerciseName,
+            muscleSummary: muscleSummary,
+            category: category,
+            exerciseIndexTitle: exerciseIndexTitle,
+            targetRepMin: targetRepMin,
+            targetRepMax: targetRepMax,
+            previousBySetIndex: previousBySetIndex,
+            overloadFeedback: overloadFeedback,
+            preferredLoadUnit: preferredLoadUnit,
+            restSeconds: Binding(
+                get: { restSeconds },
+                set: { onRestBindingChanged($0) }
+            ),
+            setDrafts: Binding(
+                get: { setDrafts },
+                set: { onSetDraftsBindingChanged($0) }
+            ),
+            isExpanded: Binding(
+                get: { isExpanded },
+                set: { onExpandedChanged($0) }
+            ),
+            showsInlineExerciseControls: false,
+            showsSetProgressChip: false,
+            manualCompletionMode: true,
+            enablesHeaderSwipeDelete: true,
+            onSetDraftsChanged: onSetDraftsChanged,
+            onRestChanged: onRestChanged,
+            onSetCompletionChange: onSetCompletionChange,
+            onExerciseSettings: onExerciseSettings,
+            onExerciseDelete: onExerciseDelete
         )
     }
 }
