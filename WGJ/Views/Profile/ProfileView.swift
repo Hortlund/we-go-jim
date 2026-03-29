@@ -10,6 +10,8 @@ struct ProfileView: View {
     @State private var currentProfile: UserProfile?
     @State private var dashboardContent = ProfileDashboardContent.empty
     @State private var controller = ProfileViewController()
+    @State private var trendSeriesLoadTask: Task<Void, Never>?
+    @State private var isLoadingTrendSeries = false
     @State private var showingWidgetManager = false
     @State private var showingProfileManagement = false
 
@@ -34,6 +36,11 @@ struct ProfileView: View {
         .task(id: isTabActive) {
             guard isTabActive else { return }
             await reloadProfile()
+        }
+        .onDisappear {
+            trendSeriesLoadTask?.cancel()
+            trendSeriesLoadTask = nil
+            isLoadingTrendSeries = false
         }
         .sheet(isPresented: $showingWidgetManager) {
             NavigationStack {
@@ -482,6 +489,13 @@ struct ProfileView: View {
                         .font(.subheadline)
                         .foregroundStyle(WGJTheme.textSecondary)
                 }
+            } else if isLoadingTrendSeries {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("Loading trend data…")
+                        .font(.subheadline)
+                        .foregroundStyle(WGJTheme.textSecondary)
+                }
             } else {
                 Text(emptyMessage)
                     .font(.subheadline)
@@ -532,12 +546,17 @@ struct ProfileView: View {
     @MainActor
     private func reloadProfile() async {
         do {
-            let snapshot = try await controller.reload(
+            trendSeriesLoadTask?.cancel()
+            trendSeriesLoadTask = nil
+            isLoadingTrendSeries = false
+
+            let snapshot = try await controller.reloadOverview(
                 modelContext: modelContext,
                 cloudSyncEnabled: cloudSyncEnabled
             )
             currentProfile = snapshot.profile
             dashboardContent = snapshot.dashboardContent
+            scheduleTrendSeriesLoad()
         } catch {
             showError(error)
         }
@@ -547,6 +566,34 @@ struct ProfileView: View {
         guard isTabActive else { return }
         Task {
             await reloadProfile()
+        }
+    }
+
+    private func scheduleTrendSeriesLoad() {
+        let enabledWidgets = dashboardContent.enabledWidgets
+        guard enabledWidgets.contains(where: { $0.kind.requiresExerciseSelection }) else { return }
+
+        trendSeriesLoadTask?.cancel()
+        isLoadingTrendSeries = true
+        trendSeriesLoadTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(180))
+            guard !Task.isCancelled, isTabActive else { return }
+
+            do {
+                let trendSeriesByKind = try controller.loadTrendSeries(
+                    modelContext: modelContext,
+                    enabledWidgets: enabledWidgets
+                )
+                guard !Task.isCancelled else { return }
+                dashboardContent.trendSeriesByKind = trendSeriesByKind
+            } catch {
+                showError(error)
+            }
+
+            if !Task.isCancelled {
+                isLoadingTrendSeries = false
+                trendSeriesLoadTask = nil
+            }
         }
     }
 
@@ -628,7 +675,7 @@ struct ProfileOverviewSnapshot {
 @MainActor
 @Observable
 final class ProfileViewController {
-    func reload(
+    func reloadOverview(
         modelContext: ModelContext,
         cloudSyncEnabled: Bool
     ) async throws -> ProfileOverviewSnapshot {
@@ -640,9 +687,30 @@ final class ProfileViewController {
             let metricsService = WorkoutMetricsService(modelContext: modelContext)
             let enabled = try widgetRepository.enabledConfigurations()
             let dashboard = try metricsService.profileDashboardSnapshot(prLimit: 8, weeks: 8)
+            var nextContent = ProfileDashboardContent.make(
+                enabledWidgets: enabled,
+                dashboard: dashboard,
+                trendSeriesByKind: [:]
+            )
+            nextContent.weeklyGoal = profile.weeklyWorkoutGoal
+            return nextContent
+        }
+
+        return ProfileOverviewSnapshot(
+            profile: profile,
+            dashboardContent: dashboardContent
+        )
+    }
+
+    func loadTrendSeries(
+        modelContext: ModelContext,
+        enabledWidgets: [ProfileWidgetConfig]
+    ) throws -> [ProfileWidgetKind: ExerciseMetricSeries] {
+        try WGJPerformance.measure("profile.trends") {
+            let metricsService = WorkoutMetricsService(modelContext: modelContext)
             var trendSeriesByKind: [ProfileWidgetKind: ExerciseMetricSeries] = [:]
 
-            for config in enabled {
+            for config in enabledWidgets {
                 guard let selectedExerciseUUID = config.selectedCatalogExerciseUUID else { continue }
 
                 switch config.kind {
@@ -663,19 +731,8 @@ final class ProfileViewController {
                 }
             }
 
-            var nextContent = ProfileDashboardContent.make(
-                enabledWidgets: enabled,
-                dashboard: dashboard,
-                trendSeriesByKind: trendSeriesByKind
-            )
-            nextContent.weeklyGoal = profile.weeklyWorkoutGoal
-            return nextContent
+            return trendSeriesByKind
         }
-
-        return ProfileOverviewSnapshot(
-            profile: profile,
-            dashboardContent: dashboardContent
-        )
     }
 }
 

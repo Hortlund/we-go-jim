@@ -16,12 +16,6 @@ struct ActiveWorkoutView: View {
 
     @Query private var sessions: [WorkoutSession]
     @Query private var sessionExercises: [WorkoutSessionExercise]
-    @Query(sort: [
-        SortDescriptor(\TemplateFolder.sortOrder, order: .forward),
-        SortDescriptor(\TemplateFolder.name, order: .forward),
-    ])
-    private var folders: [TemplateFolder]
-    @Query private var profiles: [UserProfile]
 
     @State private var hasBootstrapped = false
     @State private var setDraftsByExerciseID: [UUID: [WorkoutSessionSetDraft]] = [:]
@@ -51,6 +45,9 @@ struct ActiveWorkoutView: View {
     @State private var pendingTemplateUpdatePreview: WorkoutTemplateSyncPreview?
     @State private var templateNameDraft = ""
     @State private var templateFolderID: UUID?
+    @State private var saveTemplateFolders: [TemplateFolder] = []
+    @State private var preferredLoadUnit: TemplateLoadUnit = .kg
+    @State private var trainingGuidanceEnabled = true
     @State private var isKeyboardVisible = false
 
     @State private var errorMessage = ""
@@ -72,10 +69,6 @@ struct ActiveWorkoutView: View {
         ExerciseCatalogRepository(modelContext: modelContext)
     }
 
-    private var preferredLoadUnit: TemplateLoadUnit {
-        profiles.first?.preferredLoadUnit ?? .kg
-    }
-
     init(sessionID: UUID) {
         self.sessionID = sessionID
 
@@ -92,7 +85,7 @@ struct ActiveWorkoutView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            LazyVStack(alignment: .leading, spacing: 16) {
                 if let session {
                     ActiveWorkoutHeaderCard(
                         sessionNameDraft: $sessionNameDraft,
@@ -199,7 +192,7 @@ struct ActiveWorkoutView: View {
             ActiveWorkoutSaveTemplateSheet(
                 templateNameDraft: $templateNameDraft,
                 templateFolderID: $templateFolderID,
-                folders: folders,
+                folders: saveTemplateFolders,
                 onSkip: skipSavingSessionAsTemplate,
                 onSave: saveSessionAsTemplate
             )
@@ -213,9 +206,6 @@ struct ActiveWorkoutView: View {
         }
         .task(id: exerciseHydrationStamp) {
             await loadExerciseStateIfNeeded()
-        }
-        .task(id: isTrainingGuidanceEnabled) {
-            await refreshOverloadFeedback()
         }
         .onDisappear {
             isCancelArmed = false
@@ -339,6 +329,10 @@ struct ActiveWorkoutView: View {
         isEndingSession = session.status != .active
         sessionNameDraft = session.name
         notesDraft = session.notes
+        if let profile = try? ProfileRepository(modelContext: modelContext).currentProfile() {
+            preferredLoadUnit = profile.preferredLoadUnit
+            trainingGuidanceEnabled = profile.isTrainingGuidanceEnabled
+        }
         if session.templateID == nil {
             templateNameDraft = session.name == "Empty Workout" ? "New Template" : session.name
         }
@@ -356,7 +350,6 @@ struct ActiveWorkoutView: View {
             var loadedPrevious: [UUID: [Int: WorkoutPreviousSetSnapshot]] = [:]
             let startedAt = session?.startedAt ?? .now
             let requestedExerciseUUIDs = Array(Set(sessionExercises.map(\.catalogExerciseUUID)))
-            let loadedCatalog = (try? catalogRepository.exerciseMap(for: requestedExerciseUUIDs)) ?? [:]
             let previousMaps = (try? sessionRepository.previousSetMaps(
                 forExercises: requestedExerciseUUIDs,
                 before: startedAt,
@@ -369,6 +362,19 @@ struct ActiveWorkoutView: View {
                 loadedRests[exercise.id] = exercise.restSeconds
                 let base = previousMaps[exercise.catalogExerciseUUID] ?? [:]
                 loadedPrevious[exercise.id] = resolvedPreviousMap(baseMap: base, maxSetCount: drafts.count)
+            }
+
+            let completedCatalogUUIDs = Set(
+                sessionExercises.compactMap { exercise in
+                    let drafts = loadedDrafts[exercise.id] ?? []
+                    return isExerciseCompleted(drafts) ? exercise.catalogExerciseUUID : nil
+                }
+            )
+            let loadedCatalog: [String: ExerciseCatalogItem]
+            if trainingGuidanceEnabled, !completedCatalogUUIDs.isEmpty {
+                loadedCatalog = (try? catalogRepository.exerciseMap(for: Array(completedCatalogUUIDs))) ?? [:]
+            } else {
+                loadedCatalog = [:]
             }
 
             return ActiveWorkoutHydrationResult(
@@ -447,6 +453,7 @@ struct ActiveWorkoutView: View {
             if templateNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 templateNameDraft = latestSession.name == "Empty Workout" ? "New Template" : latestSession.name
             }
+            loadSaveTemplateFoldersIfNeeded()
             showingSaveTemplateSheet = true
             return
         }
@@ -708,16 +715,7 @@ struct ActiveWorkoutView: View {
     }
 
     private var isTrainingGuidanceEnabled: Bool {
-        profiles.first?.isTrainingGuidanceEnabled ?? true
-    }
-
-    @MainActor
-    private func refreshOverloadFeedback() async {
-        overloadFeedbackByExerciseID = buildOverloadFeedbacks(
-            exercises: sessionExercises,
-            draftsByExerciseID: setDraftsByExerciseID,
-            catalogByUUID: catalogByUUID
-        )
+        trainingGuidanceEnabled
     }
 
     @MainActor
@@ -733,6 +731,7 @@ struct ActiveWorkoutView: View {
 
         for exercise in exercises {
             let drafts = draftsByExerciseID[exercise.id] ?? makeDrafts(from: exercise)
+            guard isExerciseCompleted(drafts) else { continue }
             guard
                 let catalogExercise = catalogByUUID[exercise.catalogExerciseUUID],
                 let feedback = makeOverloadFeedback(
@@ -755,6 +754,15 @@ struct ActiveWorkoutView: View {
         for exercise: WorkoutSessionExercise,
         drafts: [WorkoutSessionSetDraft]
     ) {
+        guard isExerciseCompleted(drafts) else {
+            overloadFeedbackByExerciseID.removeValue(forKey: exercise.id)
+            return
+        }
+        if catalogByUUID[exercise.catalogExerciseUUID] == nil,
+           let loaded = try? catalogRepository.exerciseMap(for: [exercise.catalogExerciseUUID])[exercise.catalogExerciseUUID]
+        {
+            catalogByUUID[exercise.catalogExerciseUUID] = loaded
+        }
         guard
             isTrainingGuidanceEnabled,
             let catalogExercise = catalogByUUID[exercise.catalogExerciseUUID],
@@ -901,6 +909,11 @@ struct ActiveWorkoutView: View {
         } catch {
             showError(error)
         }
+    }
+
+    private func loadSaveTemplateFoldersIfNeeded() {
+        guard saveTemplateFolders.isEmpty else { return }
+        saveTemplateFolders = (try? templateRepository.folders()) ?? []
     }
 
     private func skipSavingSessionAsTemplate() {

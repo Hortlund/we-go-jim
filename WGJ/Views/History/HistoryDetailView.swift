@@ -11,15 +11,16 @@ struct HistoryDetailView: View {
 
     @Query private var sessions: [WorkoutSession]
     @Query private var sessionExercises: [WorkoutSessionExercise]
-    @Query private var profiles: [UserProfile]
 
     @State private var hasBootstrapped = false
     @State private var sessionNameDraft = ""
     @State private var notesDraft = ""
+    @State private var preferredLoadUnit: TemplateLoadUnit = .kg
     @State private var setDraftsByExerciseID: [UUID: [WorkoutSessionSetDraft]] = [:]
     @State private var restByExerciseID: [UUID: Int] = [:]
     @State private var previousByExerciseID: [UUID: [Int: WorkoutPreviousSetSnapshot]] = [:]
     @State private var loadedExerciseStateStamp: HistoryExerciseStateStamp?
+    @State private var expandedExerciseIDs: [UUID: Bool] = [:]
 
     @State private var showingExercisePicker = false
     @State private var showingDeleteConfirmation = false
@@ -34,10 +35,6 @@ struct HistoryDetailView: View {
 
     private var catalogRepository: ExerciseCatalogRepository {
         ExerciseCatalogRepository(modelContext: modelContext)
-    }
-
-    private var preferredLoadUnit: TemplateLoadUnit {
-        profiles.first?.preferredLoadUnit ?? .kg
     }
 
     init(sessionID: UUID) {
@@ -56,7 +53,7 @@ struct HistoryDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: WGJSpacing.section) {
+            LazyVStack(alignment: .leading, spacing: WGJSpacing.section) {
                 if let session {
                     headerCard(session)
                     exercisesSectionHeader
@@ -263,6 +260,9 @@ struct HistoryDetailView: View {
         hasBootstrapped = true
         sessionNameDraft = session?.name ?? ""
         notesDraft = session?.notes ?? ""
+        if let profile = try? ProfileRepository(modelContext: modelContext).currentProfile() {
+            preferredLoadUnit = profile.preferredLoadUnit
+        }
     }
 
     @MainActor
@@ -300,6 +300,7 @@ struct HistoryDetailView: View {
         setDraftsByExerciseID = result.draftsByExerciseID
         restByExerciseID = result.restsByExerciseID
         previousByExerciseID = result.previousByExerciseID
+        syncExpandedExerciseState()
         loadedExerciseStateStamp = currentStamp
     }
 
@@ -344,7 +345,7 @@ struct HistoryDetailView: View {
                 preferredLoadUnit: preferredLoadUnit,
                 restSeconds: restBinding(for: exercise),
                 setDrafts: setDraftsBinding(for: exercise),
-                initiallyExpanded: true,
+                isExpanded: expansionBinding(for: exercise.id),
                 onSetDraftsChanged: { drafts in
                     setDraftsByExerciseID[exercise.id] = drafts
                 },
@@ -437,6 +438,22 @@ struct HistoryDetailView: View {
     private func clearExerciseSwipeState(for exerciseID: UUID) {
         exerciseSwipeOffsets[exerciseID] = nil
         exerciseSwipeRemoving[exerciseID] = nil
+    }
+
+    private func syncExpandedExerciseState() {
+        let validIDs = Set(sessionExercises.map(\.id))
+        expandedExerciseIDs = expandedExerciseIDs.filter { validIDs.contains($0.key) }
+
+        for (index, exercise) in sessionExercises.enumerated() where expandedExerciseIDs[exercise.id] == nil {
+            expandedExerciseIDs[exercise.id] = index == 0
+        }
+    }
+
+    private func expansionBinding(for exerciseID: UUID) -> Binding<Bool> {
+        Binding(
+            get: { expandedExerciseIDs[exerciseID] ?? false },
+            set: { expandedExerciseIDs[exerciseID] = $0 }
+        )
     }
 
     private func exerciseSwipeOffsetBinding(for exerciseID: UUID) -> Binding<CGFloat> {
