@@ -192,7 +192,8 @@ struct WorkoutSessionExerciseGridEditor: View {
                     Text(overloadFeedback.text)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(feedbackTint(for: overloadFeedback.tone))
-                        .lineLimit(2)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 if !personalRecordSummaryKinds.isEmpty {
@@ -536,19 +537,28 @@ struct WorkoutSessionExerciseGridEditor: View {
             }
 
             if showsSecondaryRow {
-                HStack(alignment: .center, spacing: 10) {
-                    if let statusText = reference.statusText {
-                        progressStatusChip(text: statusText, tone: reference.statusTone)
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .center, spacing: 10) {
+                        if let statusText = reference.statusText {
+                            progressStatusChip(text: statusText, tone: reference.statusTone)
+                        }
+
+                        if canApplyPrevious {
+                            applyPreviousButton(at: index)
+                        }
                     }
 
-                    Spacer(minLength: 8)
+                    VStack(alignment: .leading, spacing: 8) {
+                        if let statusText = reference.statusText {
+                            progressStatusChip(text: statusText, tone: reference.statusTone)
+                        }
 
-                    applyPreviousButton(at: index)
-                        .opacity(canApplyPrevious ? 1 : 0)
-                        .allowsHitTesting(canApplyPrevious)
-                        .accessibilityHidden(!canApplyPrevious)
+                        if canApplyPrevious {
+                            applyPreviousButton(at: index)
+                        }
+                    }
                 }
-                .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding(12)
@@ -583,6 +593,9 @@ struct WorkoutSessionExerciseGridEditor: View {
         Text(text)
             .font(.caption.weight(.semibold))
             .foregroundStyle(progressToneColor(for: tone))
+            .lineLimit(2)
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(
@@ -593,6 +606,8 @@ struct WorkoutSessionExerciseGridEditor: View {
                             .stroke(progressToneColor(for: tone).opacity(0.22), lineWidth: 1)
                     )
             )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
     }
 
     private func applyPreviousButton(at index: Int) -> some View {
