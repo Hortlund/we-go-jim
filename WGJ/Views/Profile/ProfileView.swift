@@ -4,31 +4,17 @@ import SwiftUI
 
 struct ProfileView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.isTabActive) private var isTabActive
     @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
 
-    @Query(sort: [SortDescriptor(\WorkoutSession.updatedAt, order: .reverse)])
-    private var trackedSessions: [WorkoutSession]
-    @Query(sort: [SortDescriptor(\ProfileWidgetConfig.updatedAt, order: .reverse)])
-    private var widgetConfigs: [ProfileWidgetConfig]
-    @Query(sort: [SortDescriptor(\UserProfile.updatedAt, order: .reverse)])
-    private var storedProfiles: [UserProfile]
-
-    @State private var hasLoadedProfile = false
+    @State private var currentProfile: UserProfile?
     @State private var dashboardContent = ProfileDashboardContent.empty
+    @State private var controller = ProfileViewController()
     @State private var showingWidgetManager = false
     @State private var showingProfileManagement = false
 
     @State private var errorMessage = ""
     @State private var showingError = false
-
-    private var profileRepository: ProfileRepository {
-        ProfileRepository(modelContext: modelContext)
-    }
-
-    private var widgetRepository: ProfileWidgetRepository {
-        ProfileWidgetRepository(modelContext: modelContext)
-    }
-
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
@@ -45,18 +31,16 @@ struct ProfileView: View {
         .scrollDismissesKeyboard(.interactively)
         .wgjScreenBackground()
         .toolbar(.hidden, for: .navigationBar)
-        .task {
-            await loadProfileIfNeeded()
-        }
-        .task(id: widgetStateStamp) {
-            loadWidgetState()
+        .task(id: isTabActive) {
+            guard isTabActive else { return }
+            await reloadProfile()
         }
         .sheet(isPresented: $showingWidgetManager) {
             NavigationStack {
                 ProfileWidgetManagerView()
             }
             .onDisappear {
-                loadWidgetState()
+                reloadProfileIfActive()
             }
         }
         .sheet(isPresented: $showingProfileManagement) {
@@ -64,6 +48,9 @@ struct ProfileView: View {
                 ProfileManagementView()
             }
             .wgjSheetSurface()
+            .onDisappear {
+                reloadProfileIfActive()
+            }
         }
         .alert("Profile Error", isPresented: $showingError) {
             Button("OK", role: .cancel) { }
@@ -520,10 +507,6 @@ struct ProfileView: View {
         }
     }
 
-    private var currentProfile: UserProfile? {
-        storedProfiles.first
-    }
-
     private var identityPreviewName: String {
         let trimmedName = currentProfile?.displayName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmedName.isEmpty ? "Athlete" : trimmedName
@@ -546,65 +529,24 @@ struct ProfileView: View {
         return "\(topExercise.exerciseName) · \(sessionText)"
     }
 
-    private var widgetStateStamp: ProfileWidgetStateStamp {
-        ProfileWidgetStateStamp(
-            sessions: trackedSessions,
-            widgetConfigs: widgetConfigs,
-            profiles: storedProfiles
-        )
-    }
-
-    private func loadProfileIfNeeded() async {
-        guard !hasLoadedProfile else { return }
-        hasLoadedProfile = true
-
+    @MainActor
+    private func reloadProfile() async {
         do {
-            let profile = try await profileRepository.bootstrapProfileIdentity(cloudSyncEnabled: cloudSyncEnabled)
-            dashboardContent.weeklyGoal = profile.weeklyWorkoutGoal
+            let snapshot = try await controller.reload(
+                modelContext: modelContext,
+                cloudSyncEnabled: cloudSyncEnabled
+            )
+            currentProfile = snapshot.profile
+            dashboardContent = snapshot.dashboardContent
         } catch {
             showError(error)
         }
     }
 
-    private func loadWidgetState() {
-        do {
-            let nextContent = try WGJPerformance.measure("profile.dashboard") {
-                let metricsService = WorkoutMetricsService(modelContext: modelContext)
-                let enabled = try widgetRepository.enabledConfigurations()
-                let dashboard = try metricsService.profileDashboardSnapshot(prLimit: 8, weeks: 8)
-                var nextTrendSeries: [ProfileWidgetKind: ExerciseMetricSeries] = [:]
-
-                for config in enabled {
-                    guard let selectedExerciseUUID = config.selectedCatalogExerciseUUID else { continue }
-
-                    switch config.kind {
-                    case .exerciseOneRMTrend:
-                        nextTrendSeries[config.kind] = try metricsService.exerciseOneRepMaxTrend(
-                            for: selectedExerciseUUID,
-                            preferredExerciseName: config.selectedExerciseNameSnapshot,
-                            limit: 8
-                        )
-                    case .exerciseVolumeTrend:
-                        nextTrendSeries[config.kind] = try metricsService.exerciseVolumeTrend(
-                            for: selectedExerciseUUID,
-                            preferredExerciseName: config.selectedExerciseNameSnapshot,
-                            limit: 8
-                        )
-                    case .prs, .weeklyGoals, .streaks, .topExercises, .consistencyCalendar:
-                        break
-                    }
-                }
-
-                return ProfileDashboardContent.make(
-                    enabledWidgets: enabled,
-                    dashboard: dashboard,
-                    trendSeriesByKind: nextTrendSeries
-                )
-            }
-
-            dashboardContent = nextContent
-        } catch {
-            showError(error)
+    private func reloadProfileIfActive() {
+        guard isTabActive else { return }
+        Task {
+            await reloadProfile()
         }
     }
 
@@ -678,32 +620,62 @@ struct ProfileView: View {
     }
 }
 
-struct ProfileWidgetStateStamp: Hashable {
-    let completedSessionCount: Int
-    let latestCompletedSessionUpdate: TimeInterval
-    let widgetCount: Int
-    let latestWidgetUpdate: TimeInterval
-    let profileCount: Int
-    let latestProfileUpdate: TimeInterval
+struct ProfileOverviewSnapshot {
+    let profile: UserProfile?
+    let dashboardContent: ProfileDashboardContent
+}
 
-    init(
-        sessions: [WorkoutSession],
-        widgetConfigs: [ProfileWidgetConfig],
-        profiles: [UserProfile]
-    ) {
-        let completedSessions = sessions.filter { $0.status == .completed }
-        completedSessionCount = completedSessions.count
-        latestCompletedSessionUpdate = completedSessions
-            .map { $0.updatedAt.timeIntervalSinceReferenceDate }
-            .max() ?? 0
-        widgetCount = widgetConfigs.count
-        latestWidgetUpdate = widgetConfigs
-            .map { $0.updatedAt.timeIntervalSinceReferenceDate }
-            .max() ?? 0
-        profileCount = profiles.count
-        latestProfileUpdate = profiles
-            .map { $0.updatedAt.timeIntervalSinceReferenceDate }
-            .max() ?? 0
+@MainActor
+@Observable
+final class ProfileViewController {
+    func reload(
+        modelContext: ModelContext,
+        cloudSyncEnabled: Bool
+    ) async throws -> ProfileOverviewSnapshot {
+        let profileRepository = ProfileRepository(modelContext: modelContext)
+        let widgetRepository = ProfileWidgetRepository(modelContext: modelContext)
+
+        let profile = try await profileRepository.bootstrapProfileIdentity(cloudSyncEnabled: cloudSyncEnabled)
+        let dashboardContent = try WGJPerformance.measure("profile.dashboard") {
+            let metricsService = WorkoutMetricsService(modelContext: modelContext)
+            let enabled = try widgetRepository.enabledConfigurations()
+            let dashboard = try metricsService.profileDashboardSnapshot(prLimit: 8, weeks: 8)
+            var trendSeriesByKind: [ProfileWidgetKind: ExerciseMetricSeries] = [:]
+
+            for config in enabled {
+                guard let selectedExerciseUUID = config.selectedCatalogExerciseUUID else { continue }
+
+                switch config.kind {
+                case .exerciseOneRMTrend:
+                    trendSeriesByKind[config.kind] = try metricsService.exerciseOneRepMaxTrend(
+                        for: selectedExerciseUUID,
+                        preferredExerciseName: config.selectedExerciseNameSnapshot,
+                        limit: 8
+                    )
+                case .exerciseVolumeTrend:
+                    trendSeriesByKind[config.kind] = try metricsService.exerciseVolumeTrend(
+                        for: selectedExerciseUUID,
+                        preferredExerciseName: config.selectedExerciseNameSnapshot,
+                        limit: 8
+                    )
+                case .prs, .weeklyGoals, .streaks, .topExercises, .consistencyCalendar:
+                    break
+                }
+            }
+
+            var nextContent = ProfileDashboardContent.make(
+                enabledWidgets: enabled,
+                dashboard: dashboard,
+                trendSeriesByKind: trendSeriesByKind
+            )
+            nextContent.weeklyGoal = profile.weeklyWorkoutGoal
+            return nextContent
+        }
+
+        return ProfileOverviewSnapshot(
+            profile: profile,
+            dashboardContent: dashboardContent
+        )
     }
 }
 

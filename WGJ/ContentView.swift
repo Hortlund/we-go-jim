@@ -11,7 +11,9 @@ struct ContentView: View {
     private var storedProfiles: [UserProfile]
 
     @State private var appPhase: AppPhase = .splash
-    @State private var activeWorkoutCoordinator = ActiveWorkoutCoordinator()
+    @State private var appTabState = AppTabState()
+    @State private var activeWorkoutPresentationState = ActiveWorkoutPresentationState()
+    @State private var restTimerState = RestTimerState()
     @State private var catalogSyncCoordinator = CatalogSyncCoordinator()
     @State private var socialMaintenanceScheduler = SocialMaintenanceScheduler()
     @State private var isPreparingMainPhase = false
@@ -32,7 +34,9 @@ struct ContentView: View {
                 MainTabView()
             }
         }
-        .environment(activeWorkoutCoordinator)
+        .environment(appTabState)
+        .environment(activeWorkoutPresentationState)
+        .environment(restTimerState)
         .environment(catalogSyncCoordinator)
         .tint(WGJTheme.accent)
         .preferredColorScheme(.dark)
@@ -111,8 +115,8 @@ struct ContentView: View {
     private func performAppMaintenance() async {
         await WGJPerformance.measureAsync("app.maintenance") {
             BrosCleanStartPolicy.applyIfNeeded(modelContext: modelContext)
-            activeWorkoutCoordinator.restoreActiveSessionIfNeeded(modelContext: modelContext)
-            activeWorkoutCoordinator.clearExpiredRestTimerIfNeeded()
+            activeWorkoutPresentationState.restoreActiveSessionIfNeeded(modelContext: modelContext)
+            restTimerState.clearExpiredRestTimerIfNeeded()
             catalogSyncCoordinator.primeLocalCatalogIfNeeded(modelContext: modelContext)
             await runSocialMaintenance()
         }
@@ -153,7 +157,7 @@ struct ContentView: View {
 
     private func resetToStartupFlow() {
         socialMaintenanceScheduler.cancel()
-        activeWorkoutCoordinator.clearActiveWorkout()
+        activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
         catalogSyncCoordinator = CatalogSyncCoordinator()
         updateIdleTimerState()
         withAnimation(.easeInOut(duration: 0.2)) {

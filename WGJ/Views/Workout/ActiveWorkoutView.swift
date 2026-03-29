@@ -6,7 +6,9 @@ import SwiftUI
 struct ActiveWorkoutView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
-    @Environment(ActiveWorkoutCoordinator.self) private var coordinator
+    @Environment(AppTabState.self) private var appTabState
+    @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
+    @Environment(RestTimerState.self) private var restTimerState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let sessionID: UUID
@@ -136,7 +138,7 @@ struct ActiveWorkoutView: View {
             .animation(WGJMotion.cardAnimation(reduceMotion: reduceMotion), value: exerciseListAnimationToken)
             .animation(
                 WGJMotion.overlayAnimation(reduceMotion: reduceMotion),
-                value: coordinator.restTimerPopup?.id
+                value: restTimerState.restTimerPopup?.id
             )
         }
         .scrollDismissesKeyboard(.interactively)
@@ -331,7 +333,7 @@ struct ActiveWorkoutView: View {
     private func bootstrapIfNeeded() async {
         guard !hasBootstrapped else { return }
         hasBootstrapped = true
-        coordinator.present(sessionID: sessionID)
+        activeWorkoutPresentationState.present(sessionID: sessionID)
 
         guard let session else { return }
         isEndingSession = session.status != .active
@@ -409,7 +411,7 @@ struct ActiveWorkoutView: View {
         guard hasBootstrapped else { return }
 
         guard let latestSession = try? sessionRepository.session(id: sessionID) else {
-            coordinator.clearActiveWorkout()
+            activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
             dismiss()
             return
         }
@@ -430,13 +432,13 @@ struct ActiveWorkoutView: View {
         showingFinishConfirmation = false
         isCancelArmed = false
         isEndingSession = true
-        coordinator.clearRestTimer()
+        restTimerState.clearRestTimer()
 
         guard !pendingCompletionAfterSaveTemplateSheet else { return }
         guard !showingSaveTemplateSheet, pendingTemplateUpdatePreview == nil else { return }
 
         guard latestSession.status == .completed else {
-            coordinator.clearActiveWorkout()
+            activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
             dismiss()
             return
         }
@@ -540,14 +542,14 @@ struct ActiveWorkoutView: View {
             },
             onSetCompletionChange: { setID, setLabel, restSeconds, isCompleted in
                 if isCompleted {
-                    coordinator.startRestTimer(
+                    restTimerState.startRestTimer(
                         seconds: restSeconds,
                         exerciseName: exercise.exerciseNameSnapshot,
                         setLabel: setLabel,
                         sourceSetID: setID
                     )
                 } else {
-                    coordinator.clearRestTimer(sourceSetID: setID)
+                    restTimerState.clearRestTimer(sourceSetID: setID)
                 }
             },
             onExerciseSettings: {
@@ -684,9 +686,9 @@ struct ActiveWorkoutView: View {
             }
         }
 
-        if let restTimerSourceSetID = coordinator.restTimerSourceSetID,
+        if let restTimerSourceSetID = restTimerState.restTimerSourceSetID,
            removedSetIDs.contains(restTimerSourceSetID) {
-            coordinator.clearRestTimer(sourceSetID: restTimerSourceSetID)
+            restTimerState.clearRestTimer(sourceSetID: restTimerSourceSetID)
         }
 
         if let capturedError {
@@ -872,7 +874,7 @@ struct ActiveWorkoutView: View {
         isEndingSession = true
         persistSessionMeta()
         flushPendingSaves()
-        coordinator.clearRestTimer()
+        restTimerState.clearRestTimer()
 
         do {
             try sessionRepository.finishSession(sessionID: sessionID, notes: notesDraft)
@@ -933,15 +935,15 @@ struct ActiveWorkoutView: View {
         pendingCompletionAfterSaveTemplateSheet = false
         exerciseSettingsDraft = nil
         pendingTemplateUpdatePreview = nil
-        coordinator.clearActiveWorkout()
-        coordinator.selectedTab = .history
+        activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
+        appTabState.selectedTab = .history
         dismiss()
     }
 
     private func minimizeWorkout() {
         dismissKeyboard()
         isCancelArmed = false
-        coordinator.collapseActiveWorkout()
+        activeWorkoutPresentationState.collapseActiveWorkout()
         dismiss()
     }
 
@@ -956,17 +958,17 @@ struct ActiveWorkoutView: View {
         isEndingSession = true
         persistSessionMeta()
         flushPendingSaves()
-        coordinator.clearRestTimer()
+        restTimerState.clearRestTimer()
 
         do {
             try sessionRepository.cancelSession(sessionID: sessionID)
-            coordinator.clearActiveWorkout()
+            activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
             dismiss()
         } catch WorkoutSessionRepositoryError.invalidSessionState {
             if let latestSession = try? sessionRepository.session(id: sessionID) {
                 handleTerminalSessionStateIfNeeded(latestSession)
             } else {
-                coordinator.clearActiveWorkout()
+                activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
                 dismiss()
             }
         } catch {
@@ -982,12 +984,12 @@ struct ActiveWorkoutView: View {
                 if let latestSession = try? sessionRepository.session(id: sessionID) {
                     handleTerminalSessionStateIfNeeded(latestSession)
                 } else {
-                    coordinator.clearActiveWorkout()
+                    activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
                     dismiss()
                 }
                 return
             case .sessionNotFound:
-                coordinator.clearActiveWorkout()
+                activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
                 dismiss()
                 return
             default:
@@ -1112,7 +1114,7 @@ private struct ActiveWorkoutHeaderCard: View {
 }
 
 private struct ActiveWorkoutBottomDock: View {
-    @Environment(ActiveWorkoutCoordinator.self) private var coordinator
+    @Environment(RestTimerState.self) private var restTimerState
 
     let session: WorkoutSession?
     let isCancelArmed: Bool
@@ -1123,7 +1125,7 @@ private struct ActiveWorkoutBottomDock: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            if let popup = coordinator.restTimerPopup {
+            if let popup = restTimerState.restTimerPopup {
                 WGJTransientBanner(
                     title: popup.title,
                     message: popup.message,
@@ -1212,7 +1214,7 @@ private struct ActiveWorkoutBottomDock: View {
 }
 
 struct WorkoutRestTimerExpiryObserver: View {
-    @Environment(ActiveWorkoutCoordinator.self) private var coordinator
+    @Environment(RestTimerState.self) private var restTimerState
 
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -1221,7 +1223,7 @@ struct WorkoutRestTimerExpiryObserver: View {
             .frame(width: 0, height: 0)
             .allowsHitTesting(false)
             .onReceive(timer) { date in
-                coordinator.handleRestTimerExpirationIfNeeded(at: date)
+                restTimerState.handleRestTimerExpirationIfNeeded(at: date)
             }
     }
 }
@@ -1265,17 +1267,17 @@ private struct ActiveWorkoutFinishPopover: View {
 }
 
 private struct ActiveWorkoutActivityTimerDock: View {
-    @Environment(ActiveWorkoutCoordinator.self) private var coordinator
+    @Environment(RestTimerState.self) private var restTimerState
 
     let session: WorkoutSession
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
-            let remaining = coordinator.restTimerRemaining(at: context.date)
+            let remaining = restTimerState.restTimerRemaining(at: context.date)
             let isResting = remaining != nil
             let accent = isResting ? WGJTheme.success : WGJTheme.accentCyan
             let secondaryText = isResting
-                ? coordinator.restTimerContextLabel() ?? "Recover before the next set"
+                ? restTimerState.restTimerContextLabel() ?? "Recover before the next set"
                 : "Workout in progress"
             let primaryValue = isResting
                 ? formattedRest(remaining ?? 0)
@@ -1301,7 +1303,7 @@ private struct ActiveWorkoutActivityTimerDock: View {
 
                 if isResting {
                     Button {
-                        coordinator.clearRestTimer()
+                        restTimerState.clearRestTimer()
                     } label: {
                         Image(systemName: "xmark")
                     }
@@ -1598,7 +1600,9 @@ private struct ActiveWorkoutExerciseSettingsSheet: View {
     NavigationStack {
         ActiveWorkoutView(sessionID: UUID())
     }
-    .environment(ActiveWorkoutCoordinator())
+    .environment(AppTabState())
+    .environment(ActiveWorkoutPresentationState())
+    .environment(RestTimerState())
     .modelContainer(for: [
         ExerciseCatalogItem.self,
         MuscleGroup.self,

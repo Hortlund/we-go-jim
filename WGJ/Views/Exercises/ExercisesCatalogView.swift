@@ -9,15 +9,10 @@ enum ExercisesCatalogMode {
 
 struct ExercisesCatalogView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.isTabActive) private var isTabActive
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @Environment(ActiveWorkoutCoordinator.self) private var coordinator
-
-    @Query(sort: [SortDescriptor(\ExerciseCatalogItem.displayName, order: .forward)])
-    private var catalogExercises: [ExerciseCatalogItem]
-    @Query(sort: [SortDescriptor(\MuscleGroup.name, order: .forward)])
-    private var muscleGroups: [MuscleGroup]
-    @Query(filter: #Predicate<ExerciseCatalogSyncState> { $0.key == "global" })
-    private var syncStates: [ExerciseCatalogSyncState]
+    @Environment(AppTabState.self) private var appTabState
+    @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
 
     private let mode: ExercisesCatalogMode
 
@@ -29,6 +24,7 @@ struct ExercisesCatalogView: View {
     @State private var queryDebounceTask: Task<Void, Never>?
     @State private var exerciseByUUID: [String: ExerciseCatalogItem] = [:]
     @State private var viewModel = ExercisesCatalogViewModel()
+    @State private var controller = ExercisesCatalogController()
     @State private var isBootstrappingCatalog = false
     @State private var hasAttemptedBootstrap = false
     @State private var loadState: CatalogLoadState = .idle
@@ -80,7 +76,7 @@ struct ExercisesCatalogView: View {
     private let indexRailWidth: CGFloat = 28
 
     private var syncStateStamp: TimeInterval {
-        syncStates.first?.lastSuccessfulSyncAt?.timeIntervalSinceReferenceDate ?? 0
+        controller.syncStateStamp
     }
 
     private var catalogDataStamp: ExercisesCatalogDataStamp {
@@ -105,6 +101,14 @@ struct ExercisesCatalogView: View {
     private var shouldShowIndexRail: Bool {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         return reservesIndexRailSpace && !isSearchFieldFocused && trimmedQuery.isEmpty
+    }
+
+    private var catalogExercises: [ExerciseCatalogItem] {
+        controller.catalogExercises
+    }
+
+    private var muscleGroups: [MuscleGroup] {
+        controller.muscleGroups
     }
 
     var body: some View {
@@ -233,8 +237,18 @@ struct ExercisesCatalogView: View {
             .wgjSheetSurface()
         }
         .toolbar(isPickerMode ? .visible : .hidden, for: .navigationBar)
-        .task {
-            await bootstrapCatalogIfNeeded()
+        .task(id: isTabActive) {
+            guard isTabActive else { return }
+            if hasAttemptedBootstrap {
+                do {
+                    try controller.reload(modelContext: modelContext)
+                    rebuildCatalogCache()
+                } catch {
+                    showError(error)
+                }
+            } else {
+                await bootstrapCatalogIfNeeded()
+            }
         }
         .task(id: catalogDataStamp) {
             rebuildCatalogCache()
@@ -493,7 +507,7 @@ struct ExercisesCatalogView: View {
     }
 
     private func addExerciseToSessionOrPrompt(_ exercise: ExerciseCatalogItem) {
-        if let activeSessionID = coordinator.activeSessionID {
+        if let activeSessionID = activeWorkoutPresentationState.activeSessionID {
             do {
                 try workoutRepository.addExercise(sessionID: activeSessionID, catalogItem: exercise)
             } catch {
@@ -514,16 +528,16 @@ struct ExercisesCatalogView: View {
         do {
             if let activeSession = try workoutRepository.activeSession() {
                 try workoutRepository.addExercise(sessionID: activeSession.id, catalogItem: pendingExerciseForAdd)
-                coordinator.present(sessionID: activeSession.id)
-                coordinator.selectedTab = .startWorkout
+                activeWorkoutPresentationState.present(sessionID: activeSession.id)
+                appTabState.selectedTab = .startWorkout
                 return
             }
 
             let created = try workoutRepository.createEmptySession()
             createdSessionID = created.id
             try workoutRepository.addExercise(sessionID: created.id, catalogItem: pendingExerciseForAdd)
-            coordinator.present(sessionID: created.id)
-            coordinator.selectedTab = .startWorkout
+            activeWorkoutPresentationState.present(sessionID: created.id)
+            appTabState.selectedTab = .startWorkout
         } catch {
             if let createdSessionID {
                 try? workoutRepository.cancelSession(sessionID: createdSessionID)
@@ -559,6 +573,7 @@ struct ExercisesCatalogView: View {
 
         do {
             try catalogRepository.ensureSeedImportedIfNeeded()
+            try controller.reload(modelContext: modelContext)
         } catch {
             loadState = .failed
             showError(error)
@@ -569,6 +584,7 @@ struct ExercisesCatalogView: View {
     private func saveCustomExercise() {
         do {
             let created = try catalogRepository.createCustomExercise(draft: customExerciseDraft)
+            try controller.reload(modelContext: modelContext)
             showingCustomExerciseSheet = false
             customExerciseDraft = .empty
 
@@ -582,7 +598,7 @@ struct ExercisesCatalogView: View {
             sortDescending = false
             query = created.displayName
             debouncedQuery = created.displayName
-            recomputeSections()
+            rebuildCatalogCache()
         } catch {
             showError(error)
         }
@@ -591,6 +607,21 @@ struct ExercisesCatalogView: View {
     private func showError(_ error: Error) {
         errorMessage = String(describing: error)
         showingError = true
+    }
+}
+
+@MainActor
+@Observable
+final class ExercisesCatalogController {
+    var catalogExercises: [ExerciseCatalogItem] = []
+    var muscleGroups: [MuscleGroup] = []
+    var syncStateStamp: TimeInterval = 0
+
+    func reload(modelContext: ModelContext) throws {
+        let repository = ExerciseCatalogRepository(modelContext: modelContext)
+        catalogExercises = try repository.allExercises()
+        muscleGroups = try repository.availableMuscles()
+        syncStateStamp = repository.syncState()?.lastSuccessfulSyncAt?.timeIntervalSinceReferenceDate ?? 0
     }
 }
 
@@ -1215,7 +1246,8 @@ private struct ExerciseCatalogThumbnail: View {
     NavigationStack {
         ExercisesCatalogView()
     }
-    .environment(ActiveWorkoutCoordinator())
+    .environment(AppTabState())
+    .environment(ActiveWorkoutPresentationState())
     .modelContainer(for: [
         ExerciseCatalogItem.self,
         MuscleGroup.self,

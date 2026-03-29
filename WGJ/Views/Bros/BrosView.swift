@@ -14,8 +14,6 @@ enum BrosMutationAction: Equatable {
 @MainActor
 @Observable
 final class BrosViewModel {
-    private static let liveRefreshInterval: Duration = .seconds(15)
-
     enum ScreenState: Equatable {
         case loading
         case unavailable(String)
@@ -36,8 +34,8 @@ final class BrosViewModel {
     private var hasLoaded = false
     private var isSnapshotRefreshInFlight = false
     private var pendingOutboxHydration = false
-    private var liveRefreshTask: Task<Void, Never>?
     private var outboxFlushTask: Task<Void, Never>?
+    private(set) var lastSuccessfulSnapshotRefreshAt: Date?
     private let accountStatusProvider: @MainActor () async -> AccountStatus
     private let serviceFactory: @MainActor (ModelContext) -> (any BrosSocialService)?
 
@@ -122,6 +120,7 @@ final class BrosViewModel {
             } else {
                 state = .onboarding
             }
+            lastSuccessfulSnapshotRefreshAt = .now
         } catch {
             state = .unavailable(error.localizedDescription)
         }
@@ -206,22 +205,22 @@ final class BrosViewModel {
         errorMessage = nil
     }
 
-    func startLiveRefresh(modelContext: ModelContext) {
-        guard liveRefreshTask == nil else { return }
-
-        liveRefreshTask = Task { @MainActor [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: Self.liveRefreshInterval)
-                guard let self else { return }
-                guard self.pendingAction == nil, !self.isSnapshotRefreshInFlight else { continue }
-                await self.hydrateActiveSnapshot(modelContext: modelContext)
-            }
+    func refreshIfStale(
+        modelContext: ModelContext,
+        cloudSyncEnabled: Bool,
+        cloudSyncErrorDescription: String?
+    ) async {
+        if let lastSuccessfulSnapshotRefreshAt,
+           Date().timeIntervalSince(lastSuccessfulSnapshotRefreshAt) < 60
+        {
+            return
         }
-    }
 
-    func stopLiveRefresh() {
-        liveRefreshTask?.cancel()
-        liveRefreshTask = nil
+        await refresh(
+            modelContext: modelContext,
+            cloudSyncEnabled: cloudSyncEnabled,
+            cloudSyncErrorDescription: cloudSyncErrorDescription
+        )
     }
 
     func refreshActiveSnapshotIfNeeded(modelContext: ModelContext) async {
@@ -287,6 +286,7 @@ final class BrosViewModel {
                 joinCode = ""
                 circleMemberLimit = BrosSocialRules.defaultMemberLimit
             }
+            lastSuccessfulSnapshotRefreshAt = .now
         } catch {
             // Keep the current state if the follow-up hydration fails.
         }
@@ -308,6 +308,7 @@ final class BrosViewModel {
                 joinCode = ""
                 circleMemberLimit = BrosSocialRules.defaultMemberLimit
             }
+            lastSuccessfulSnapshotRefreshAt = .now
         } catch {
             // Keep the optimistic active state instead of regressing to unavailable.
         }
@@ -409,28 +410,21 @@ struct BroCircleManagementPresentation: Equatable {
 
 struct BrosView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.isTabActive) private var isTabActive
     @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
     @Environment(\.cloudSyncErrorDescription) private var cloudSyncErrorDescription
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
 
-    @Query(sort: [SortDescriptor(\UserProfile.updatedAt, order: .reverse)])
-    private var storedProfiles: [UserProfile]
-    @Query(sort: [SortDescriptor(\BlockedBro.blockedAt, order: .reverse)])
-    private var blockedBros: [BlockedBro]
-
     @State private var viewModel = BrosViewModel()
     @State private var filteredActiveSnapshot: BrosFeedSnapshot?
+    @State private var blockedUserRecordNames: Set<String> = []
     @State private var supportNoticeTitle = ""
     @State private var supportNoticeMessage = ""
     @State private var showingSupportNotice = false
 
     private var blockedRepository: BlockedBroRepository {
         BlockedBroRepository(modelContext: modelContext)
-    }
-
-    private var blockedUserRecordNames: Set<String> {
-        Set(blockedBros.map(\.userRecordName))
     }
 
     var body: some View {
@@ -454,6 +448,7 @@ struct BrosView: View {
             .padding(.bottom, 12)
         }
         .refreshable {
+            reloadBlockedBros()
             await viewModel.refresh(
                 modelContext: modelContext,
                 cloudSyncEnabled: cloudSyncEnabled,
@@ -462,7 +457,9 @@ struct BrosView: View {
         }
         .wgjScreenBackground()
         .toolbar(.hidden, for: .navigationBar)
-        .task {
+        .task(id: isTabActive) {
+            guard isTabActive else { return }
+            reloadBlockedBros()
             await viewModel.loadIfNeeded(
                 modelContext: modelContext,
                 cloudSyncEnabled: cloudSyncEnabled,
@@ -470,18 +467,15 @@ struct BrosView: View {
             )
             rebuildFilteredSnapshot()
         }
-        .onAppear {
-            updateLiveRefreshState()
-        }
-        .onDisappear {
-            viewModel.stopLiveRefresh()
-        }
-        .onChange(of: scenePhase) { _, _ in
-            updateLiveRefreshState()
-        }
-        .onChange(of: storedProfiles.first?.updatedAt) { _, _ in
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active, isTabActive else { return }
+            reloadBlockedBros()
             Task {
-                await viewModel.refreshActiveSnapshotIfNeeded(modelContext: modelContext)
+                await viewModel.refreshIfStale(
+                    modelContext: modelContext,
+                    cloudSyncEnabled: cloudSyncEnabled,
+                    cloudSyncErrorDescription: cloudSyncErrorDescription
+                )
             }
         }
         .onChange(of: viewModel.state) { _, _ in
@@ -782,12 +776,6 @@ struct BrosView: View {
                     }
                 }
             )
-            .onAppear {
-                viewModel.stopLiveRefresh()
-            }
-            .onDisappear {
-                updateLiveRefreshState()
-            }
         } label: {
             Image(systemName: presentation.buttonSystemImage)
         }
@@ -1083,6 +1071,7 @@ struct BrosView: View {
                 userRecordName: member.userRecordName,
                 displayName: resolvedDisplayName(member.displayName)
             )
+            reloadBlockedBros()
             showSupportNotice(
                 title: "Member Blocked",
                 message: "\(resolvedDisplayName(member.displayName)) is now hidden from your circle roster, feed, and reactions."
@@ -1098,6 +1087,7 @@ struct BrosView: View {
                 userRecordName: event.actorUserRecordName,
                 displayName: resolvedDisplayName(event.actorDisplayName)
             )
+            reloadBlockedBros()
             showSupportNotice(
                 title: "Member Blocked",
                 message: "\(resolvedDisplayName(event.actorDisplayName)) is now hidden from your circle roster, feed, and reactions."
@@ -1156,15 +1146,8 @@ struct BrosView: View {
         )
     }
 
-    private func updateLiveRefreshState() {
-        if scenePhase == .active {
-            viewModel.startLiveRefresh(modelContext: modelContext)
-            Task {
-                await viewModel.refreshActiveSnapshotIfNeeded(modelContext: modelContext)
-            }
-        } else {
-            viewModel.stopLiveRefresh()
-        }
+    private func reloadBlockedBros() {
+        blockedUserRecordNames = blockedRepository.blockedUserRecordNames()
     }
 }
 

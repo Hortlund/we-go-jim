@@ -2,7 +2,8 @@ import SwiftData
 import SwiftUI
 
 struct ActiveWorkoutStripView: View {
-    @Environment(ActiveWorkoutCoordinator.self) private var coordinator
+    @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
+    @Environment(RestTimerState.self) private var restTimerState
 
     let sessionID: UUID
     let onExpand: () -> Void
@@ -87,7 +88,7 @@ struct ActiveWorkoutStripView: View {
     @MainActor
     private func reconcileSessionLifecycleIfNeeded() async {
         guard let session, session.status == .active else {
-            coordinator.clearActiveWorkout()
+            activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
             return
         }
     }
@@ -100,10 +101,10 @@ struct ActiveWorkoutStripView: View {
     }
 
     private func statusPresentation(now: Date) -> ActiveWorkoutStripStatusPresentation {
-        if let remaining = coordinator.restTimerRemaining(at: now) {
+        if let remaining = restTimerState.restTimerRemaining(at: now) {
             let restText = formattedRest(remaining)
             let statusText: String
-            if let context = coordinator.restTimerContextLabel() {
+            if let context = restTimerState.restTimerContextLabel() {
                 statusText = "Rest \(restText) · \(context)"
             } else {
                 statusText = "Rest \(restText)"
@@ -144,7 +145,8 @@ private struct ActiveWorkoutStripStatusPresentation {
 
 #Preview {
     ActiveWorkoutStripView(sessionID: UUID(), onExpand: {})
-        .environment(ActiveWorkoutCoordinator())
+        .environment(ActiveWorkoutPresentationState())
+        .environment(RestTimerState())
         .modelContainer(for: [
             ExerciseCatalogItem.self,
             MuscleGroup.self,

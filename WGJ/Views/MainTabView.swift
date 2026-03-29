@@ -2,57 +2,49 @@ import SwiftUI
 import SwiftData
 
 struct MainTabView: View {
-    @Environment(ActiveWorkoutCoordinator.self) private var coordinator
+    @Environment(AppTabState.self) private var tabState
+    @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
+    @Environment(RestTimerState.self) private var restTimerState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isKeyboardVisible = false
 
     var body: some View {
-        @Bindable var coordinator = coordinator
+        @Bindable var tabState = tabState
 
         GeometryReader { proxy in
             let bottomSafeAreaInset = proxy.safeAreaInsets.bottom
 
             ZStack(alignment: .bottom) {
-                TabView(selection: $coordinator.selectedTab) {
-                    NavigationStack {
-                        ProfileView()
+                TabView(selection: $tabState.selectedTab) {
+                    rootTab(.profile, title: "Profile", systemImage: "person.fill") {
+                        NavigationStack {
+                            ProfileView()
+                        }
                     }
-                    .tabItem {
-                        Label("Profile", systemImage: "person.fill")
-                    }
-                    .tag(AppMainTab.profile)
 
-                    NavigationStack {
-                        HistoryOverviewView()
+                    rootTab(.history, title: "History", systemImage: "clock.fill") {
+                        NavigationStack {
+                            HistoryOverviewView()
+                        }
                     }
-                    .tabItem {
-                        Label("History", systemImage: "clock.fill")
-                    }
-                    .tag(AppMainTab.history)
 
-                    NavigationStack {
-                        StartWorkoutHomeView()
+                    rootTab(.startWorkout, title: "Start Workout", systemImage: "plus") {
+                        NavigationStack {
+                            StartWorkoutHomeView()
+                        }
                     }
-                    .tabItem {
-                        Label("Start Workout", systemImage: "plus")
-                    }
-                    .tag(AppMainTab.startWorkout)
 
-                    NavigationStack {
-                        ExercisesCatalogView()
+                    rootTab(.exercises, title: "Exercises", systemImage: "dumbbell.fill") {
+                        NavigationStack {
+                            ExercisesCatalogView()
+                        }
                     }
-                    .tabItem {
-                        Label("Exercises", systemImage: "dumbbell.fill")
-                    }
-                    .tag(AppMainTab.exercises)
 
-                    NavigationStack {
-                        BrosView()
+                    rootTab(.bros, title: "Bros", systemImage: "person.3.fill") {
+                        NavigationStack {
+                            BrosView()
+                        }
                     }
-                    .tabItem {
-                        Label("Bros", systemImage: "person.3.fill")
-                    }
-                    .tag(AppMainTab.bros)
                 }
                 .tint(WGJTheme.accentBlue)
                 .wgjTabChrome()
@@ -60,57 +52,70 @@ struct MainTabView: View {
                 overlayChrome(bottomSafeAreaInset: bottomSafeAreaInset)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-            .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: coordinator.isActiveWorkoutStripCollapsed)
-            .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: coordinator.restTimerPopup?.id)
+            .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: activeWorkoutPresentationState.isActiveWorkoutStripCollapsed)
+            .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: restTimerState.restTimerPopup?.id)
             .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: isKeyboardVisible)
             .sheet(isPresented: Binding(
                 get: {
-                    coordinator.isActiveWorkoutPresented && coordinator.activeSessionID != nil
+                    activeWorkoutPresentationState.isActiveWorkoutPresented && activeWorkoutPresentationState.activeSessionID != nil
                 },
                 set: { newValue in
                     if newValue {
-                        if let sessionID = coordinator.activeSessionID {
-                            coordinator.present(sessionID: sessionID)
+                        if let sessionID = activeWorkoutPresentationState.activeSessionID {
+                            activeWorkoutPresentationState.present(sessionID: sessionID)
                         }
                     } else {
-                        coordinator.collapseActiveWorkout()
+                        activeWorkoutPresentationState.collapseActiveWorkout()
                     }
                 }
             )) {
-                if let activeSessionID = coordinator.activeSessionID {
+                if let activeSessionID = activeWorkoutPresentationState.activeSessionID {
                     NavigationStack {
                         ActiveWorkoutView(sessionID: activeSessionID)
                     }
                 }
             }
             .wgjTrackKeyboardVisibility($isKeyboardVisible)
-            .onChange(of: coordinator.activeSessionID) { _, newValue in
+            .onChange(of: activeWorkoutPresentationState.activeSessionID) { _, newValue in
                 if newValue == nil {
-                    coordinator.clearActiveWorkout()
-                } else if !coordinator.isActiveWorkoutPresented {
-                    coordinator.isActiveWorkoutStripCollapsed = true
+                    activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
+                } else if !activeWorkoutPresentationState.isActiveWorkoutPresented {
+                    activeWorkoutPresentationState.isActiveWorkoutStripCollapsed = true
                 }
             }
         }
     }
 
+    private func rootTab<Content: View>(
+        _ tab: AppMainTab,
+        title: String,
+        systemImage: String,
+        @ViewBuilder content: @escaping () -> Content
+    ) -> some View {
+        LazyTabContainer(tab: tab, content: content)
+            .tabItem {
+                Label(title, systemImage: systemImage)
+            }
+            .tag(tab)
+    }
+
     @ViewBuilder
     private func overlayChrome(bottomSafeAreaInset: CGFloat) -> some View {
         ZStack(alignment: .bottom) {
-            if let activeSessionID = coordinator.activeSessionID,
-               coordinator.isActiveWorkoutStripCollapsed,
+            if let activeSessionID = activeWorkoutPresentationState.activeSessionID,
+               activeWorkoutPresentationState.isActiveWorkoutStripCollapsed,
                !isKeyboardVisible
             {
                 ActiveWorkoutStripView(sessionID: activeSessionID) {
-                    coordinator.present(sessionID: activeSessionID)
+                    activeWorkoutPresentationState.present(sessionID: activeSessionID)
                 }
                 .padding(.bottom, activeWorkoutStripBottomLift(bottomSafeAreaInset: bottomSafeAreaInset))
                 .transition(.move(edge: .bottom).combined(with: .opacity))
                 .accessibilityIdentifier("active-workout-strip")
             }
 
-            if let popup = coordinator.restTimerPopup,
-               !coordinator.isActiveWorkoutPresented,
+            if let popup = restTimerState.restTimerPopup,
+               !activeWorkoutPresentationState.isActiveWorkoutPresented,
                !isKeyboardVisible
             {
                 WGJTransientBanner(
@@ -133,16 +138,44 @@ struct MainTabView: View {
     }
 
     private func popupBottomLift(bottomSafeAreaInset: CGFloat) -> CGFloat {
-        if coordinator.isActiveWorkoutStripCollapsed {
+        if activeWorkoutPresentationState.isActiveWorkoutStripCollapsed {
             return activeWorkoutStripBottomLift(bottomSafeAreaInset: bottomSafeAreaInset) + 82
         }
         return bottomSafeAreaInset + 72
     }
 }
 
+private struct LazyTabContainer<Content: View>: View {
+    @Environment(AppTabState.self) private var tabState
+
+    let tab: AppMainTab
+    let content: () -> Content
+
+    @State private var hasLoaded = false
+
+    var body: some View {
+        Group {
+            if hasLoaded || tabState.selectedTab == tab {
+                content()
+                    .environment(\.isTabActive, tabState.selectedTab == tab)
+            } else {
+                Color.clear
+                    .environment(\.isTabActive, false)
+            }
+        }
+        .task(id: tabState.selectedTab) {
+            if tabState.selectedTab == tab {
+                hasLoaded = true
+            }
+        }
+    }
+}
+
 #Preview {
     MainTabView()
-        .environment(ActiveWorkoutCoordinator())
+        .environment(AppTabState())
+        .environment(ActiveWorkoutPresentationState())
+        .environment(RestTimerState())
         .environment(\.cloudSyncEnabled, false)
         .modelContainer(for: [
             ExerciseCatalogItem.self,

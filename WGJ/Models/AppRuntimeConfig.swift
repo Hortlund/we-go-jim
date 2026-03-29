@@ -68,18 +68,16 @@ enum AppMainTab: Hashable {
 
 @MainActor
 @Observable
-final class ActiveWorkoutCoordinator {
+final class AppTabState {
     var selectedTab: AppMainTab = .startWorkout
+}
+
+@MainActor
+@Observable
+final class ActiveWorkoutPresentationState {
     var activeSessionID: UUID?
     var isActiveWorkoutPresented = false
     var isActiveWorkoutStripCollapsed = false
-    var restTimerEndsAt: Date?
-    var restTimerExerciseName: String?
-    var restTimerSetLabel: String?
-    var restTimerSourceSetID: UUID?
-    var restTimerPopup: RestTimerPopup?
-
-    @ObservationIgnored private var restTimerPopupDismissTask: Task<Void, Never>?
 
     func present(sessionID: UUID) {
         activeSessionID = sessionID
@@ -89,20 +87,50 @@ final class ActiveWorkoutCoordinator {
 
     func collapseActiveWorkout() {
         guard activeSessionID != nil else {
-            clearActiveWorkout()
+            clearPresentation()
             return
         }
         isActiveWorkoutPresented = false
         isActiveWorkoutStripCollapsed = true
     }
 
-    func clearActiveWorkout() {
+    func clearPresentation() {
         activeSessionID = nil
         isActiveWorkoutPresented = false
         isActiveWorkoutStripCollapsed = false
-        clearRestTimer()
-        dismissRestTimerPopup()
     }
+
+    func clearActiveWorkout(restTimerState: RestTimerState? = nil) {
+        clearPresentation()
+        restTimerState?.clearRestTimer()
+        restTimerState?.dismissRestTimerPopup()
+    }
+
+    func restoreActiveSessionIfNeeded(modelContext: ModelContext) {
+        let repository = WorkoutSessionRepository(modelContext: modelContext)
+        do {
+            if let active = try repository.activeSession() {
+                activeSessionID = active.id
+                isActiveWorkoutStripCollapsed = !isActiveWorkoutPresented
+            } else {
+                clearPresentation()
+            }
+        } catch {
+            clearPresentation()
+        }
+    }
+}
+
+@MainActor
+@Observable
+final class RestTimerState {
+    var restTimerEndsAt: Date?
+    var restTimerExerciseName: String?
+    var restTimerSetLabel: String?
+    var restTimerSourceSetID: UUID?
+    var restTimerPopup: RestTimerPopup?
+
+    @ObservationIgnored private var restTimerPopupDismissTask: Task<Void, Never>?
 
     func startRestTimer(seconds: Int, exerciseName: String, setLabel: String, sourceSetID: UUID) {
         let normalized = max(0, min(3600, seconds))
@@ -153,20 +181,6 @@ final class ActiveWorkoutCoordinator {
             return setLabel
         case (nil, nil):
             return nil
-        }
-    }
-
-    func restoreActiveSessionIfNeeded(modelContext: ModelContext) {
-        let repository = WorkoutSessionRepository(modelContext: modelContext)
-        do {
-            if let active = try repository.activeSession() {
-                activeSessionID = active.id
-                isActiveWorkoutStripCollapsed = !isActiveWorkoutPresented
-            } else {
-                clearActiveWorkout()
-            }
-        } catch {
-            clearActiveWorkout()
         }
     }
 
@@ -224,6 +238,17 @@ struct RestTimerPopup: Identifiable, Equatable {
     let id = UUID()
     let title: String
     let message: String?
+}
+
+private struct WGJTabActiveKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var isTabActive: Bool {
+        get { self[WGJTabActiveKey.self] }
+        set { self[WGJTabActiveKey.self] = newValue }
+    }
 }
 
 @MainActor

@@ -127,6 +127,13 @@ final class ExerciseCatalogRepository: ExerciseCatalogRepositoryProtocol {
         try searchService.searchExercises(query: query, filters: .default)
     }
 
+    func allExercises() throws -> [ExerciseCatalogItem] {
+        let descriptor = FetchDescriptor<ExerciseCatalogItem>(
+            sortBy: [SortDescriptor(\.displayName, order: .forward)]
+        )
+        return try modelContext.fetch(descriptor)
+    }
+
     func groupedByMuscle(primaryOnly: Bool) throws -> [ExerciseMuscleGroupSection] {
         try searchService.groupedByMuscle(primaryOnly: primaryOnly, query: "", filters: .default)
     }

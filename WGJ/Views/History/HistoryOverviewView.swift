@@ -4,22 +4,16 @@ import SwiftUI
 
 struct HistoryOverviewView: View {
     @Environment(\.modelContext) private var modelContext
-
-    @Query(sort: [SortDescriptor(\WorkoutSession.startedAt, order: .reverse)])
-    private var sessions: [WorkoutSession]
+    @Environment(\.isTabActive) private var isTabActive
 
     @State private var selectedDayFilter: Date?
     @State private var showingWorkoutCalendar = false
     @State private var displayedCalendarMonth = Calendar.current.date(
         from: Calendar.current.dateComponents([.year, .month], from: Date())
     ) ?? Date()
-    @State private var snapshot = HistoryOverviewSnapshot.empty
+    @State private var controller = HistoryOverviewController()
     @State private var errorMessage = ""
     @State private var showingError = false
-
-    private var sessionRepository: WorkoutSessionRepository {
-        WorkoutSessionRepository(modelContext: modelContext)
-    }
 
     var body: some View {
         ScrollView {
@@ -36,7 +30,7 @@ struct HistoryOverviewView: View {
                     selectedDayFilterCard(selectedDayFilter)
                 }
 
-                if snapshot.sections.isEmpty {
+                if controller.snapshot.sections.isEmpty {
                     WGJEmptyStateCard(
                         title: selectedDayFilter == nil ? "No completed workouts yet" : "No workouts on this day",
                         message: selectedDayFilter == nil
@@ -46,7 +40,7 @@ struct HistoryOverviewView: View {
                     )
                 }
 
-                ForEach(snapshot.sections) { section in
+                ForEach(controller.snapshot.sections) { section in
                     LazyVStack(alignment: .leading, spacing: 10) {
                         Text(section.title.uppercased())
                             .font(.headline.weight(.semibold))
@@ -66,8 +60,9 @@ struct HistoryOverviewView: View {
         .sheet(isPresented: $showingWorkoutCalendar) {
             workoutCalendarSheet
         }
-        .task(id: sessionDataStamp) {
-            recomputeSnapshot()
+        .task(id: isTabActive) {
+            guard isTabActive else { return }
+            await reloadSnapshot()
         }
         .onChange(of: selectedDayFilter) { _, _ in
             recomputeSnapshot()
@@ -84,7 +79,7 @@ struct HistoryOverviewView: View {
             HistoryWorkoutCalendarSheet(
                 displayedMonth: $displayedCalendarMonth,
                 selectedDay: $selectedDayFilter,
-                workoutCountsByDay: snapshot.workoutCountsByDay,
+                workoutCountsByDay: controller.snapshot.workoutCountsByDay,
                 onClose: { showingWorkoutCalendar = false }
             )
         }
@@ -98,24 +93,16 @@ struct HistoryOverviewView: View {
         .equatable()
     }
 
-    private var sessionDataStamp: HistorySessionDataStamp {
-        HistorySessionDataStamp(sessions: sessions)
-    }
-
-    private var completedSessions: [WorkoutSession] {
-        sessions.filter { $0.status == .completed }
-    }
-
     private func recomputeSnapshot() {
-        snapshot = HistoryOverviewSnapshotBuilder.build(
-            sessions: sessions,
+        controller.snapshot = HistoryOverviewSnapshotBuilder.build(
+            sessions: controller.completedSessions,
             selectedDayFilter: selectedDayFilter
         )
     }
 
     private func openWorkoutCalendar() {
         let referenceDate = selectedDayFilter
-            ?? completedSessions.first.map { $0.endedAt ?? $0.startedAt }
+            ?? controller.completedSessions.first.map { $0.endedAt ?? $0.startedAt }
             ?? Date()
         displayedCalendarMonth = startOfMonth(for: referenceDate)
         showingWorkoutCalendar = true
@@ -128,7 +115,7 @@ struct HistoryOverviewView: View {
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(WGJTheme.textPrimary)
 
-                let workoutCount = snapshot.workoutCountsByDay[startOfDay(for: day), default: 0]
+                let workoutCount = controller.snapshot.workoutCountsByDay[startOfDay(for: day), default: 0]
                 Text("\(workoutCount) logged workout\(workoutCount == 1 ? "" : "s")")
                     .font(.caption)
                     .foregroundStyle(WGJTheme.textSecondary)
@@ -157,7 +144,21 @@ struct HistoryOverviewView: View {
 
     private func deleteSession(_ id: UUID) {
         do {
-            try sessionRepository.deleteSession(id: id)
+            try WorkoutSessionRepository(modelContext: modelContext).deleteSession(id: id)
+            Task {
+                await reloadSnapshot()
+            }
+        } catch {
+            errorMessage = String(describing: error)
+            showingError = true
+        }
+    }
+
+    @MainActor
+    private func reloadSnapshot() async {
+        do {
+            try controller.reload(modelContext: modelContext)
+            recomputeSnapshot()
         } catch {
             errorMessage = String(describing: error)
             showingError = true
@@ -208,6 +209,21 @@ struct HistorySessionDataStamp: Hashable {
 
         completedSessionCount = count
         latestCompletedSessionUpdate = latestUpdate
+    }
+}
+
+@MainActor
+@Observable
+final class HistoryOverviewController {
+    var completedSessions: [WorkoutSession] = []
+    var snapshot = HistoryOverviewSnapshot.empty
+
+    func reload(modelContext: ModelContext) throws {
+        completedSessions = try WorkoutSessionRepository(modelContext: modelContext).completedSessions()
+        snapshot = HistoryOverviewSnapshotBuilder.build(
+            sessions: completedSessions,
+            selectedDayFilter: nil
+        )
     }
 }
 

@@ -3,29 +3,14 @@ import SwiftUI
 
 struct StartWorkoutHomeView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.isTabActive) private var isTabActive
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(ActiveWorkoutCoordinator.self) private var coordinator
-
-    @Query(sort: [
-        SortDescriptor(\TemplateFolder.sortOrder, order: .forward),
-        SortDescriptor(\TemplateFolder.name, order: .forward),
-    ])
-    private var folders: [TemplateFolder]
-
-    @Query(sort: [
-        SortDescriptor(\WorkoutTemplate.sortOrder, order: .forward),
-        SortDescriptor(\WorkoutTemplate.name, order: .forward),
-    ])
-    private var templates: [WorkoutTemplate]
-
-    @Query(sort: [
-        SortDescriptor(\WorkoutSession.startedAt, order: .reverse),
-    ])
-    private var sessions: [WorkoutSession]
+    @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
 
     @State private var expandedFolderIDs: [UUID: Bool] = [:]
     @State private var selectedTemplatePreview: StartWorkoutTemplatePreview?
     @State private var templateEditorContext: StartWorkoutTemplateEditorContext?
+    @State private var controller = StartWorkoutHomeController()
 
     @State private var showingFolderEditor = false
     @State private var editingFolderID: UUID?
@@ -44,6 +29,18 @@ struct StartWorkoutHomeView: View {
 
     private var workoutRepository: WorkoutSessionRepository {
         WorkoutSessionRepository(modelContext: modelContext)
+    }
+
+    private var folders: [TemplateFolder] {
+        controller.folders
+    }
+
+    private var templates: [WorkoutTemplate] {
+        controller.templates
+    }
+
+    private var sessions: [WorkoutSession] {
+        controller.completedSessions
     }
 
     var body: some View {
@@ -84,10 +81,10 @@ struct StartWorkoutHomeView: View {
                 }
             )
         }
-        .sheet(item: $templateEditorContext) { context in
+        .sheet(item: $templateEditorContext, onDismiss: reloadHomeSnapshotIfActive) { context in
             TemplateEditorView(folderID: context.folderID, templateID: context.templateID)
         }
-        .sheet(isPresented: $showingFolderEditor) {
+        .sheet(isPresented: $showingFolderEditor, onDismiss: reloadHomeSnapshotIfActive) {
             TemplateFolderEditorSheet(
                 isEditing: editingFolderID != nil,
                 folderNameDraft: $folderNameDraft,
@@ -112,7 +109,9 @@ struct StartWorkoutHomeView: View {
         } message: {
             Text("Finish or cancel the current workout before starting a new one.")
         }
-        .task {
+        .task(id: isTabActive) {
+            guard isTabActive else { return }
+            await reloadHomeSnapshot()
             bootstrapActiveSessionIfNeeded()
         }
         .task(id: templateLibraryStamp) {
@@ -563,12 +562,12 @@ struct StartWorkoutHomeView: View {
     private func startEmptyWorkout() {
         do {
             if let activeSession = try workoutRepository.activeSession() {
-                coordinator.present(sessionID: activeSession.id)
+                activeWorkoutPresentationState.present(sessionID: activeSession.id)
                 return
             }
 
             let session = try workoutRepository.createEmptySession()
-            coordinator.present(sessionID: session.id)
+            activeWorkoutPresentationState.present(sessionID: session.id)
         } catch {
             showError(error)
         }
@@ -587,13 +586,13 @@ struct StartWorkoutHomeView: View {
     private func startFromTemplate(templateID: UUID) {
         do {
             if let activeSession = try workoutRepository.activeSession() {
-                coordinator.present(sessionID: activeSession.id)
+                activeWorkoutPresentationState.present(sessionID: activeSession.id)
                 selectedTemplatePreview = nil
                 return
             }
 
             let session = try workoutRepository.createSessionFromTemplate(templateID: templateID)
-            coordinator.present(sessionID: session.id)
+            activeWorkoutPresentationState.present(sessionID: session.id)
             selectedTemplatePreview = nil
         } catch {
             showError(error)
@@ -643,6 +642,7 @@ struct StartWorkoutHomeView: View {
                 try templateRepository.createFolder(name: folderNameDraft)
             }
             showingFolderEditor = false
+            reloadHomeSnapshotIfActive()
         } catch {
             showError(error)
         }
@@ -651,6 +651,7 @@ struct StartWorkoutHomeView: View {
     private func moveTemplate(templateID: UUID, toFolderID folderID: UUID?) {
         do {
             try templateRepository.moveTemplate(id: templateID, toFolderID: folderID)
+            reloadHomeSnapshotIfActive()
         } catch {
             showError(error)
         }
@@ -659,13 +660,14 @@ struct StartWorkoutHomeView: View {
     private func deleteTemplate(_ templateID: UUID) {
         do {
             try templateRepository.deleteTemplate(id: templateID)
+            reloadHomeSnapshotIfActive()
         } catch {
             showError(error)
         }
     }
 
     private func bootstrapActiveSessionIfNeeded() {
-        coordinator.restoreActiveSessionIfNeeded(modelContext: modelContext)
+        activeWorkoutPresentationState.restoreActiveSessionIfNeeded(modelContext: modelContext)
     }
 
     private func activeSessionIDToResume() -> UUID? {
@@ -673,8 +675,8 @@ struct StartWorkoutHomeView: View {
             return activeSession.id
         }
 
-        if coordinator.activeSessionID != nil, !coordinator.isActiveWorkoutPresented {
-            coordinator.clearActiveWorkout()
+        if activeWorkoutPresentationState.activeSessionID != nil, !activeWorkoutPresentationState.isActiveWorkoutPresented {
+            activeWorkoutPresentationState.clearPresentation()
         }
 
         return nil
@@ -687,13 +689,29 @@ struct StartWorkoutHomeView: View {
 
     private func resumeConflictingActiveWorkout() {
         guard let conflictingActiveSessionID else { return }
-        coordinator.present(sessionID: conflictingActiveSessionID)
+        activeWorkoutPresentationState.present(sessionID: conflictingActiveSessionID)
         clearActiveWorkoutConflict()
     }
 
     private func clearActiveWorkoutConflict() {
         conflictingActiveSessionID = nil
         showingActiveWorkoutConflict = false
+    }
+
+    private func reloadHomeSnapshotIfActive() {
+        guard isTabActive else { return }
+        Task {
+            await reloadHomeSnapshot()
+        }
+    }
+
+    @MainActor
+    private func reloadHomeSnapshot() async {
+        do {
+            try controller.reload(modelContext: modelContext)
+        } catch {
+            showError(error)
+        }
     }
 
     private func showError(_ error: Error) {
@@ -735,6 +753,45 @@ struct StartWorkoutTemplateLibraryStamp: Hashable {
         latestTemplateUpdate = templates
             .map { $0.updatedAt.timeIntervalSinceReferenceDate }
             .max() ?? 0
+    }
+}
+
+@MainActor
+@Observable
+final class StartWorkoutHomeController {
+    var folders: [TemplateFolder] = []
+    var templates: [WorkoutTemplate] = []
+    var completedSessions: [WorkoutSession] = []
+
+    func reload(modelContext: ModelContext) throws {
+        let templateRepository = TemplateRepository(modelContext: modelContext)
+        let sessionRepository = WorkoutSessionRepository(modelContext: modelContext)
+
+        let loadedFolders = try templateRepository.folders()
+        var loadedTemplates = try templateRepository.templatesWithoutFolder()
+        for folder in loadedFolders {
+            loadedTemplates.append(contentsOf: try templateRepository.templates(in: folder.id))
+        }
+        let folderOrderByID = Dictionary(uniqueKeysWithValues: loadedFolders.enumerated().map { ($0.element.id, $0.offset) })
+
+        folders = loadedFolders
+        templates = loadedTemplates.sorted {
+            let lhsFolderOrder = $0.folderID == TemplateRepository.unfiledFolderID
+                ? -1
+                : (folderOrderByID[$0.folderID] ?? Int.max)
+            let rhsFolderOrder = $1.folderID == TemplateRepository.unfiledFolderID
+                ? -1
+                : (folderOrderByID[$1.folderID] ?? Int.max)
+
+            if lhsFolderOrder != rhsFolderOrder {
+                return lhsFolderOrder < rhsFolderOrder
+            }
+            if $0.sortOrder != $1.sortOrder {
+                return $0.sortOrder < $1.sortOrder
+            }
+            return $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+        completedSessions = try sessionRepository.completedSessions()
     }
 }
 
@@ -1188,7 +1245,7 @@ private struct TemplateStartPreviewSheet: View {
     NavigationStack {
         StartWorkoutHomeView()
     }
-    .environment(ActiveWorkoutCoordinator())
+    .environment(ActiveWorkoutPresentationState())
     .modelContainer(for: [
         ExerciseCatalogItem.self,
         MuscleGroup.self,
