@@ -106,63 +106,62 @@ struct TemplateEditorView: View {
         .wgjCardContainer(strong: true)
     }
 
+    @ViewBuilder
     private var exercisesSection: some View {
         let rows = exerciseRows
 
-        return LazyVStack(alignment: .leading, spacing: 12) {
-            if exerciseDrafts.isEmpty {
-                WGJActionHeader(
-                    "Exercises",
-                    subtitle: "Build your workout with cleaner set targets."
-                )
-            } else {
-                WGJActionHeader(
-                    "Exercises",
-                    subtitle: "Swipe from the top of a card to delete, or use the card menu to reorder."
-                ) {
-                    Button {
-                        showingExercisePicker = true
-                    } label: {
-                        Label("Add", systemImage: "plus")
-                    }
-                    .buttonStyle(WGJPrimaryButtonStyle())
+        if exerciseDrafts.isEmpty {
+            WGJActionHeader(
+                "Exercises",
+                subtitle: "Build your workout with cleaner set targets."
+            )
+        } else {
+            WGJActionHeader(
+                "Exercises",
+                subtitle: "Swipe from the top of a card to delete, or use the card menu to reorder."
+            ) {
+                Button {
+                    showingExercisePicker = true
+                } label: {
+                    Label("Add", systemImage: "plus")
                 }
+                .buttonStyle(WGJPrimaryButtonStyle())
             }
+        }
 
-            if exerciseDrafts.isEmpty {
-                WGJEmptyStateCard(
-                    title: "No exercises selected",
-                    message: "Add exercises to build the template and set up the planned sets.",
-                    icon: "list.bullet.rectangle"
-                ) {
-                    Button("Add Exercise") {
-                        showingExercisePicker = true
-                    }
-                    .buttonStyle(WGJPrimaryButtonStyle())
+        if exerciseDrafts.isEmpty {
+            WGJEmptyStateCard(
+                title: "No exercises selected",
+                message: "Add exercises to build the template and set up the planned sets.",
+                icon: "list.bullet.rectangle"
+            ) {
+                Button("Add Exercise") {
+                    showingExercisePicker = true
                 }
+                .buttonStyle(WGJPrimaryButtonStyle())
             }
+        }
 
-            ForEach(rows) { row in
-                TemplateEditorExerciseRow(
-                    draftStore: row.draftStore,
-                    recommendation: row.recommendation,
-                    exerciseIndexTitle: "Exercise \(row.index + 1)",
-                    canMoveUp: row.index > 0,
-                    canMoveDown: row.index < rows.count - 1,
-                    preferredLoadUnit: preferredLoadUnit,
-                    onMoveUp: {
-                        moveExerciseUp(row.index)
-                    },
-                    onMoveDown: {
-                        moveExerciseDown(row.index)
-                    },
-                    onExerciseDelete: {
-                        removeExercise(withID: row.id)
-                    }
-                )
-                .id(row.id)
-                .transition(exerciseCardTransition)
-            }
+        ForEach(rows) { row in
+            TemplateEditorExerciseRow(
+                draftStore: row.draftStore,
+                recommendation: row.recommendation,
+                exerciseIndexTitle: "Exercise \(row.index + 1)",
+                canMoveUp: row.index > 0,
+                canMoveDown: row.index < rows.count - 1,
+                preferredLoadUnit: preferredLoadUnit,
+                onMoveUp: {
+                    moveExerciseUp(row.index)
+                },
+                onMoveDown: {
+                    moveExerciseDown(row.index)
+                },
+                onExerciseDelete: {
+                    removeExercise(withID: row.id)
+                }
+            )
+            .id(row.id)
+            .transition(exerciseCardTransition)
         }
     }
 
@@ -367,60 +366,134 @@ private struct TemplateEditorExerciseRow: View {
         ) {
             onExerciseDelete()
         } content: {
-            TemplateExercisePrescriptionEditor(
+            TemplateEditorExerciseCardView(
                 exerciseName: draftStore.exerciseNameSnapshot,
                 muscleSummary: draftStore.muscleSummarySnapshot,
                 category: draftStore.categorySnapshot,
                 recommendation: recommendation,
-                initiallyExpanded: false,
-                isExpanded: isExpandedBinding,
                 exerciseIndexTitle: exerciseIndexTitle,
                 canMoveUp: canMoveUp,
                 canMoveDown: canMoveDown,
                 preferredLoadUnit: preferredLoadUnit,
-                targetRepMin: targetRepMinBinding,
-                targetRepMax: targetRepMaxBinding,
-                restSeconds: restSecondsBinding,
-                setDrafts: setDraftsBinding,
+                targetRepMin: draftStore.targetRepMin,
+                targetRepMax: draftStore.targetRepMax,
+                restSeconds: draftStore.restSeconds,
+                setDrafts: draftStore.setDrafts,
+                isExpanded: draftStore.isExpanded,
+                onExpandedChanged: updateExpanded,
+                onTargetRepMinChanged: updateTargetRepMin,
+                onTargetRepMaxChanged: updateTargetRepMax,
+                onRestChanged: updateRestSeconds,
+                onSetDraftsChanged: updateSetDrafts,
                 onMoveUp: onMoveUp,
                 onMoveDown: onMoveDown,
                 onExerciseDelete: onExerciseDelete
             )
+            .equatable()
         }
     }
 
-    private var isExpandedBinding: Binding<Bool> {
-        Binding(
-            get: { draftStore.isExpanded },
-            set: { draftStore.isExpanded = $0 }
-        )
+    private func updateExpanded(_ isExpanded: Bool) {
+        guard draftStore.isExpanded != isExpanded else { return }
+        draftStore.isExpanded = isExpanded
     }
 
-    private var targetRepMinBinding: Binding<Int?> {
-        Binding(
-            get: { draftStore.targetRepMin },
-            set: { draftStore.targetRepMin = $0 }
-        )
+    private func updateTargetRepMin(_ value: Int?) {
+        guard draftStore.targetRepMin != value else { return }
+        draftStore.targetRepMin = value
     }
 
-    private var targetRepMaxBinding: Binding<Int?> {
-        Binding(
-            get: { draftStore.targetRepMax },
-            set: { draftStore.targetRepMax = $0 }
-        )
+    private func updateTargetRepMax(_ value: Int?) {
+        guard draftStore.targetRepMax != value else { return }
+        draftStore.targetRepMax = value
     }
 
-    private var restSecondsBinding: Binding<Int> {
-        Binding(
-            get: { draftStore.restSeconds },
-            set: { draftStore.restSeconds = max(0, min(3600, $0)) }
-        )
+    private func updateRestSeconds(_ value: Int) {
+        let normalized = max(0, min(3600, value))
+        guard draftStore.restSeconds != normalized else { return }
+        draftStore.restSeconds = normalized
     }
 
-    private var setDraftsBinding: Binding<[TemplateExerciseSetDraft]> {
-        Binding(
-            get: { draftStore.setDrafts },
-            set: { draftStore.setDrafts = $0 }
+    private func updateSetDrafts(_ value: [TemplateExerciseSetDraft]) {
+        guard draftStore.setDrafts != value else { return }
+        draftStore.setDrafts = value
+    }
+}
+
+private struct TemplateEditorExerciseCardView: View, Equatable {
+    let exerciseName: String
+    let muscleSummary: String
+    let category: String
+    let recommendation: TemplateExerciseRecommendation?
+    let exerciseIndexTitle: String
+    let canMoveUp: Bool
+    let canMoveDown: Bool
+    let preferredLoadUnit: TemplateLoadUnit
+    let targetRepMin: Int?
+    let targetRepMax: Int?
+    let restSeconds: Int
+    let setDrafts: [TemplateExerciseSetDraft]
+    let isExpanded: Bool
+
+    let onExpandedChanged: (Bool) -> Void
+    let onTargetRepMinChanged: (Int?) -> Void
+    let onTargetRepMaxChanged: (Int?) -> Void
+    let onRestChanged: (Int) -> Void
+    let onSetDraftsChanged: ([TemplateExerciseSetDraft]) -> Void
+    let onMoveUp: () -> Void
+    let onMoveDown: () -> Void
+    let onExerciseDelete: () -> Void
+
+    static func == (lhs: TemplateEditorExerciseCardView, rhs: TemplateEditorExerciseCardView) -> Bool {
+        lhs.exerciseName == rhs.exerciseName
+            && lhs.muscleSummary == rhs.muscleSummary
+            && lhs.category == rhs.category
+            && lhs.recommendation == rhs.recommendation
+            && lhs.exerciseIndexTitle == rhs.exerciseIndexTitle
+            && lhs.canMoveUp == rhs.canMoveUp
+            && lhs.canMoveDown == rhs.canMoveDown
+            && lhs.preferredLoadUnit == rhs.preferredLoadUnit
+            && lhs.targetRepMin == rhs.targetRepMin
+            && lhs.targetRepMax == rhs.targetRepMax
+            && lhs.restSeconds == rhs.restSeconds
+            && lhs.setDrafts == rhs.setDrafts
+            && lhs.isExpanded == rhs.isExpanded
+    }
+
+    var body: some View {
+        TemplateExercisePrescriptionEditor(
+            exerciseName: exerciseName,
+            muscleSummary: muscleSummary,
+            category: category,
+            recommendation: recommendation,
+            initiallyExpanded: false,
+            isExpanded: Binding(
+                get: { isExpanded },
+                set: { onExpandedChanged($0) }
+            ),
+            exerciseIndexTitle: exerciseIndexTitle,
+            canMoveUp: canMoveUp,
+            canMoveDown: canMoveDown,
+            preferredLoadUnit: preferredLoadUnit,
+            targetRepMin: Binding(
+                get: { targetRepMin },
+                set: { onTargetRepMinChanged($0) }
+            ),
+            targetRepMax: Binding(
+                get: { targetRepMax },
+                set: { onTargetRepMaxChanged($0) }
+            ),
+            restSeconds: Binding(
+                get: { restSeconds },
+                set: { onRestChanged($0) }
+            ),
+            setDrafts: Binding(
+                get: { setDrafts },
+                set: { onSetDraftsChanged($0) }
+            ),
+            onMoveUp: onMoveUp,
+            onMoveDown: onMoveDown,
+            onExerciseDelete: onExerciseDelete
         )
     }
 }

@@ -78,8 +78,10 @@ struct TemplateExercisePrescriptionEditor: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            header
+        let presentation = setPresentation
+
+        return VStack(alignment: .leading, spacing: 14) {
+            header(presentation: presentation)
 
             if isExpanded {
                 if let recommendation {
@@ -91,14 +93,14 @@ struct TemplateExercisePrescriptionEditor: View {
                 }
 
                 controlsSection
-                setsSection
+                setsSection(presentation: presentation)
             }
         }
         .padding(16)
         .wgjCardContainer(strong: true)
     }
 
-    private var header: some View {
+    private func header(presentation: SetPresentation) -> some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 8) {
                 if let exerciseIndexTitle {
@@ -114,7 +116,7 @@ struct TemplateExercisePrescriptionEditor: View {
                     .foregroundStyle(WGJTheme.textSecondary)
                     .lineLimit(2)
 
-                headerSummaryChips
+                headerSummaryChips(presentation: presentation)
             }
 
             Spacer(minLength: 12)
@@ -247,10 +249,8 @@ struct TemplateExercisePrescriptionEditor: View {
         }
     }
 
-    private var setsSection: some View {
-        let presentation = setPresentation
-
-        return VStack(alignment: .leading, spacing: 10) {
+    private func setsSection(presentation: SetPresentation) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Set Plan")
                     .font(.subheadline.weight(.semibold))
@@ -282,7 +282,26 @@ struct TemplateExercisePrescriptionEditor: View {
                     ) {
                         removeSet(withID: row.id)
                     } content: {
-                        setCard(row: row)
+                        TemplateExerciseSetCardView(
+                            row: row,
+                            set: setDrafts[row.index],
+                            defaultRestSeconds: restSeconds,
+                            restPresets: restPresets,
+                            canMoveDown: row.index < presentation.rows.count - 1,
+                            repsText: repsText(for: row.index),
+                            weightText: weightText(for: row.index),
+                            onRepsTextChanged: { updateRepsText($0, at: row.index) },
+                            onWeightTextChanged: { updateWeightText($0, at: row.index) },
+                            onLoadUnitChanged: { updateLoadUnit($0, at: row.index) },
+                            onToggleWarmup: { toggleWarmup(at: row.index) },
+                            onInsertBelow: { insertSet(after: row.index) },
+                            onMoveUp: { moveSetUp(row.index) },
+                            onMoveDown: { moveSetDown(row.index) },
+                            onSetRestChanged: { updateSetRest($0, at: row.index) },
+                            onToggleLock: { toggleLock(at: row.index) },
+                            onDelete: { removeSet(at: row.index) }
+                        )
+                        .equatable()
                     }
                 }
             }
@@ -308,83 +327,6 @@ struct TemplateExercisePrescriptionEditor: View {
         }
     }
 
-    private func setCard(row: SetRowData) -> some View {
-        let set = setDrafts[row.index]
-
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 10) {
-                setBadge(for: row)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Text(row.title)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(WGJTheme.textPrimary)
-                            .wgjSingleLineText(scale: 0.84)
-
-                        if row.isLocked {
-                            Image(systemName: "lock.fill")
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(WGJTheme.accentGold)
-                        }
-                    }
-
-                    Text(row.previousSummary)
-                        .font(.caption)
-                        .foregroundStyle(WGJTheme.textSecondary)
-                        .lineLimit(2)
-                        .monospacedDigit()
-
-                    if let metadata = row.metadataLine {
-                        Text(metadata)
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(WGJTheme.textSecondary)
-                            .lineLimit(1)
-                    }
-                }
-
-                Spacer(minLength: 8)
-
-                setMenu(at: row.index)
-            }
-
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 12) {
-                    metricField(title: "Weight") {
-                        loadField(at: row.index)
-                    }
-
-                    metricField(title: "Reps") {
-                        repsField(at: row.index)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 12) {
-                    metricField(title: "Weight") {
-                        loadField(at: row.index)
-                    }
-
-                    metricField(title: "Reps") {
-                        repsField(at: row.index)
-                    }
-                }
-            }
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(set.isWarmup ? WGJTheme.accentGold.opacity(0.12) : WGJTheme.field.opacity(0.54))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(
-                            set.isWarmup ? WGJTheme.accentGold.opacity(0.34) : WGJTheme.accentBlue.opacity(0.18),
-                            lineWidth: 1
-                        )
-                )
-        )
-    }
-
     private func metricField<Content: View>(
         title: String,
         @ViewBuilder content: () -> Content
@@ -400,148 +342,18 @@ struct TemplateExercisePrescriptionEditor: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func repsField(at index: Int) -> some View {
-        TextField("0", text: repsTextBinding(for: index))
-            .keyboardType(.numberPad)
-            .multilineTextAlignment(.center)
-            .disabled(setDrafts[index].isLocked)
-            .wgjPillField()
+    private func repsText(for index: Int) -> String {
+        guard setDrafts.indices.contains(index), let reps = setDrafts[index].targetReps else {
+            return ""
+        }
+        return "\(reps)"
     }
 
-    private func loadField(at index: Int) -> some View {
-        let isLocked = setDrafts[index].isLocked
-
-        return HStack(spacing: 6) {
-            TextField("0", text: weightTextBinding(for: index))
-                .keyboardType(.decimalPad)
-                .multilineTextAlignment(.center)
-                .disabled(isLocked)
-
-            Menu {
-                ForEach(TemplateLoadUnit.allCases) { unit in
-                    Button(unit.shortLabel) {
-                        setDrafts[index].loadUnit = unit
-                        notifySetChanged()
-                    }
-                }
-            } label: {
-                Text(setDrafts[index].loadUnit.shortLabel)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(WGJTheme.accentCyan)
-            }
-            .disabled(isLocked)
+    private func weightText(for index: Int) -> String {
+        guard setDrafts.indices.contains(index), let weight = setDrafts[index].targetWeight else {
+            return ""
         }
-        .wgjPillField()
-    }
-
-    private func setBadge(for row: SetRowData) -> some View {
-        let set = setDrafts[row.index]
-
-        return Button {
-            toggleWarmup(at: row.index)
-        } label: {
-            ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(set.isWarmup ? WGJTheme.accentGold.opacity(0.24) : WGJTheme.field)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(
-                                set.isWarmup ? WGJTheme.accentGold.opacity(0.58) : WGJTheme.accentBlue.opacity(0.22),
-                                lineWidth: 1
-                            )
-                    )
-
-                Text(row.badgeTitle)
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(set.isWarmup ? WGJTheme.accentGold : WGJTheme.textPrimary)
-            }
-            .frame(width: 40, height: 40)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func setMenu(at index: Int) -> some View {
-        let currentRest = setDrafts[index].restSeconds
-
-        return Menu {
-            Button {
-                insertSet(after: index)
-            } label: {
-                Label("Insert below", systemImage: "plus")
-            }
-
-            Button {
-                toggleWarmup(at: index)
-            } label: {
-                Label(setDrafts[index].isWarmup ? "Mark as working" : "Mark as warmup", systemImage: "flame")
-            }
-
-            Button {
-                moveSetUp(index)
-            } label: {
-                Label("Move up", systemImage: "arrow.up")
-            }
-            .disabled(index == 0)
-
-            Button {
-                moveSetDown(index)
-            } label: {
-                Label("Move down", systemImage: "arrow.down")
-            }
-            .disabled(index == setDrafts.count - 1)
-
-            Menu {
-                ForEach(restPresets, id: \.self) { value in
-                    Button(formattedRest(value)) {
-                        updateSetRest(value, at: index)
-                    }
-                }
-
-                Divider()
-
-                Button("Use exercise default (\(formattedRest(restSeconds)))") {
-                    updateSetRest(restSeconds, at: index)
-                }
-
-                Button("-15 sec") {
-                    updateSetRest(currentRest - 15, at: index)
-                }
-
-                Button("+15 sec") {
-                    updateSetRest(currentRest + 15, at: index)
-                }
-
-                Button("No rest") {
-                    updateSetRest(0, at: index)
-                }
-            } label: {
-                Label("Set rest", systemImage: "timer")
-            }
-
-            Button {
-                toggleLock(at: index)
-            } label: {
-                Label(setDrafts[index].isLocked ? "Unlock set" : "Lock set", systemImage: setDrafts[index].isLocked ? "lock.open" : "lock")
-            }
-
-            if setDrafts[index].restSeconds != restSeconds {
-                Button {
-                    updateSetRest(restSeconds, at: index)
-                } label: {
-                    Label("Reset rest", systemImage: "timer")
-                }
-            }
-
-            Divider()
-
-            Button(role: .destructive) {
-                removeSet(at: index)
-            } label: {
-                Label("Delete set", systemImage: "trash")
-            }
-        } label: {
-            headerIcon(symbol: "ellipsis.circle")
-        }
+        return formatWeight(weight)
     }
 
     private var headerMenu: some View {
@@ -585,16 +397,16 @@ struct TemplateExercisePrescriptionEditor: View {
         onMoveUp != nil || onMoveDown != nil || onExerciseDelete != nil
     }
 
-    private var headerSummaryChips: some View {
+    private func headerSummaryChips(presentation: SetPresentation) -> some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 8) {
                 infoChip(repRangeSummary, tint: WGJTheme.accentGold)
-                infoChip(setPresentation.summary, tint: WGJTheme.accentBlue)
+                infoChip(presentation.summary, tint: WGJTheme.accentBlue)
             }
 
             VStack(alignment: .leading, spacing: 8) {
                 infoChip(repRangeSummary, tint: WGJTheme.accentGold)
-                infoChip(setPresentation.summary, tint: WGJTheme.accentBlue)
+                infoChip(presentation.summary, tint: WGJTheme.accentBlue)
             }
         }
     }
@@ -711,7 +523,9 @@ struct TemplateExercisePrescriptionEditor: View {
             },
             set: { newValue in
                 let cleaned = newValue.filter(\.isNumber)
-                targetRepMin = cleaned.isEmpty ? nil : Int(cleaned)
+                let updatedValue = cleaned.isEmpty ? nil : Int(cleaned)
+                guard targetRepMin != updatedValue else { return }
+                targetRepMin = updatedValue
                 onRepRangeChanged?(targetRepMin, targetRepMax)
             }
         )
@@ -725,50 +539,46 @@ struct TemplateExercisePrescriptionEditor: View {
             },
             set: { newValue in
                 let cleaned = newValue.filter(\.isNumber)
-                targetRepMax = cleaned.isEmpty ? nil : Int(cleaned)
+                let updatedValue = cleaned.isEmpty ? nil : Int(cleaned)
+                guard targetRepMax != updatedValue else { return }
+                targetRepMax = updatedValue
                 onRepRangeChanged?(targetRepMin, targetRepMax)
             }
         )
     }
 
-    private func repsTextBinding(for index: Int) -> Binding<String> {
-        Binding(
-            get: {
-                guard setDrafts.indices.contains(index), let reps = setDrafts[index].targetReps else {
-                    return ""
-                }
-                return "\(reps)"
-            },
-            set: { newValue in
-                guard setDrafts.indices.contains(index) else { return }
-                let cleaned = newValue.filter(\.isNumber)
-                setDrafts[index].targetReps = cleaned.isEmpty ? nil : Int(cleaned)
-                notifySetChanged()
-            }
-        )
+    private func updateRepsText(_ newValue: String, at index: Int) {
+        guard setDrafts.indices.contains(index) else { return }
+        let cleaned = newValue.filter(\.isNumber)
+        let updatedValue = cleaned.isEmpty ? nil : Int(cleaned)
+        guard setDrafts[index].targetReps != updatedValue else { return }
+        setDrafts[index].targetReps = updatedValue
+        notifySetChanged()
     }
 
-    private func weightTextBinding(for index: Int) -> Binding<String> {
-        Binding(
-            get: {
-                guard setDrafts.indices.contains(index), let weight = setDrafts[index].targetWeight else {
-                    return ""
-                }
-                return formatWeight(weight)
-            },
-            set: { newValue in
-                guard setDrafts.indices.contains(index) else { return }
-                let normalized = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func updateWeightText(_ newValue: String, at index: Int) {
+        guard setDrafts.indices.contains(index) else { return }
+        let normalized = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
 
-                if normalized.isEmpty {
-                    setDrafts[index].targetWeight = nil
-                } else if let parsed = WGJFormatters.parseLocalizedDecimal(normalized) {
-                    setDrafts[index].targetWeight = max(0, parsed)
-                }
+        let updatedValue: Double?
+        if normalized.isEmpty {
+            updatedValue = nil
+        } else if let parsed = WGJFormatters.parseLocalizedDecimal(normalized) {
+            updatedValue = max(0, parsed)
+        } else {
+            return
+        }
 
-                notifySetChanged()
-            }
-        )
+        guard setDrafts[index].targetWeight != updatedValue else { return }
+        setDrafts[index].targetWeight = updatedValue
+        notifySetChanged()
+    }
+
+    private func updateLoadUnit(_ loadUnit: TemplateLoadUnit, at index: Int) {
+        guard setDrafts.indices.contains(index) else { return }
+        guard setDrafts[index].loadUnit != loadUnit else { return }
+        setDrafts[index].loadUnit = loadUnit
+        notifySetChanged()
     }
 
     private func addSet() {
@@ -890,19 +700,31 @@ struct TemplateExercisePrescriptionEditor: View {
 
     private func updateRest(_ seconds: Int) {
         let normalized = max(0, min(3600, seconds))
-        restSeconds = normalized
+        let didChangeDefaultRest = restSeconds != normalized
+        let didChangeSetRest = setDrafts.contains(where: { $0.restSeconds != normalized })
+        guard didChangeDefaultRest || didChangeSetRest else { return }
 
-        for index in setDrafts.indices {
-            setDrafts[index].restSeconds = normalized
+        if didChangeDefaultRest {
+            restSeconds = normalized
         }
 
-        notifySetChanged()
-        onRestChanged?(normalized)
+        if didChangeSetRest {
+            for index in setDrafts.indices where setDrafts[index].restSeconds != normalized {
+                setDrafts[index].restSeconds = normalized
+            }
+            notifySetChanged()
+        }
+
+        if didChangeDefaultRest {
+            onRestChanged?(normalized)
+        }
     }
 
     private func updateSetRest(_ seconds: Int, at index: Int) {
         guard setDrafts.indices.contains(index) else { return }
-        setDrafts[index].restSeconds = max(0, min(3600, seconds))
+        let normalized = max(0, min(3600, seconds))
+        guard setDrafts[index].restSeconds != normalized else { return }
+        setDrafts[index].restSeconds = normalized
         notifySetChanged()
     }
 
@@ -987,4 +809,288 @@ private struct SetRowData: Identifiable, Equatable {
     let previousSummary: String
     let metadataLine: String?
     let isLocked: Bool
+}
+
+private struct TemplateExerciseSetCardView: View, Equatable {
+    let row: SetRowData
+    let set: TemplateExerciseSetDraft
+    let defaultRestSeconds: Int
+    let restPresets: [Int]
+    let canMoveDown: Bool
+    let repsText: String
+    let weightText: String
+
+    let onRepsTextChanged: (String) -> Void
+    let onWeightTextChanged: (String) -> Void
+    let onLoadUnitChanged: (TemplateLoadUnit) -> Void
+    let onToggleWarmup: () -> Void
+    let onInsertBelow: () -> Void
+    let onMoveUp: () -> Void
+    let onMoveDown: () -> Void
+    let onSetRestChanged: (Int) -> Void
+    let onToggleLock: () -> Void
+    let onDelete: () -> Void
+
+    static func == (lhs: TemplateExerciseSetCardView, rhs: TemplateExerciseSetCardView) -> Bool {
+        lhs.row == rhs.row
+            && lhs.set == rhs.set
+            && lhs.defaultRestSeconds == rhs.defaultRestSeconds
+            && lhs.restPresets == rhs.restPresets
+            && lhs.canMoveDown == rhs.canMoveDown
+            && lhs.repsText == rhs.repsText
+            && lhs.weightText == rhs.weightText
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                setBadge
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(row.title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(WGJTheme.textPrimary)
+                            .wgjSingleLineText(scale: 0.84)
+
+                        if row.isLocked {
+                            Image(systemName: "lock.fill")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(WGJTheme.accentGold)
+                        }
+                    }
+
+                    Text(row.previousSummary)
+                        .font(.caption)
+                        .foregroundStyle(WGJTheme.textSecondary)
+                        .lineLimit(2)
+                        .monospacedDigit()
+
+                    if let metadata = row.metadataLine {
+                        Text(metadata)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(WGJTheme.textSecondary)
+                            .lineLimit(1)
+                    }
+                }
+
+                Spacer(minLength: 8)
+
+                setMenu
+            }
+
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 12) {
+                    metricField(title: "Weight") {
+                        loadField
+                    }
+
+                    metricField(title: "Reps") {
+                        repsField
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 12) {
+                    metricField(title: "Weight") {
+                        loadField
+                    }
+
+                    metricField(title: "Reps") {
+                        repsField
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(set.isWarmup ? WGJTheme.accentGold.opacity(0.12) : WGJTheme.field.opacity(0.54))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(
+                            set.isWarmup ? WGJTheme.accentGold.opacity(0.34) : WGJTheme.accentBlue.opacity(0.18),
+                            lineWidth: 1
+                        )
+                )
+        )
+    }
+
+    private var repsField: some View {
+        TextField(
+            "0",
+            text: Binding(
+                get: { repsText },
+                set: { onRepsTextChanged($0) }
+            )
+        )
+        .keyboardType(.numberPad)
+        .multilineTextAlignment(.center)
+        .disabled(set.isLocked)
+        .wgjPillField()
+    }
+
+    private var loadField: some View {
+        HStack(spacing: 6) {
+            TextField(
+                "0",
+                text: Binding(
+                    get: { weightText },
+                    set: { onWeightTextChanged($0) }
+                )
+            )
+            .keyboardType(.decimalPad)
+            .multilineTextAlignment(.center)
+            .disabled(set.isLocked)
+
+            Menu {
+                ForEach(TemplateLoadUnit.allCases) { unit in
+                    Button(unit.shortLabel) {
+                        onLoadUnitChanged(unit)
+                    }
+                }
+            } label: {
+                Text(set.loadUnit.shortLabel)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(WGJTheme.accentCyan)
+            }
+            .disabled(set.isLocked)
+        }
+        .wgjPillField()
+    }
+
+    private var setBadge: some View {
+        Button {
+            onToggleWarmup()
+        } label: {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(set.isWarmup ? WGJTheme.accentGold.opacity(0.24) : WGJTheme.field)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(
+                                set.isWarmup ? WGJTheme.accentGold.opacity(0.58) : WGJTheme.accentBlue.opacity(0.22),
+                                lineWidth: 1
+                            )
+                    )
+
+                Text(row.badgeTitle)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(set.isWarmup ? WGJTheme.accentGold : WGJTheme.textPrimary)
+            }
+            .frame(width: 40, height: 40)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var setMenu: some View {
+        Menu {
+            Button {
+                onInsertBelow()
+            } label: {
+                Label("Insert below", systemImage: "plus")
+            }
+
+            Button {
+                onToggleWarmup()
+            } label: {
+                Label(set.isWarmup ? "Mark as working" : "Mark as warmup", systemImage: "flame")
+            }
+
+            Button {
+                onMoveUp()
+            } label: {
+                Label("Move up", systemImage: "arrow.up")
+            }
+            .disabled(row.index == 0)
+
+            Button {
+                onMoveDown()
+            } label: {
+                Label("Move down", systemImage: "arrow.down")
+            }
+            .disabled(!canMoveDown)
+
+            Menu {
+                ForEach(restPresets, id: \.self) { value in
+                    Button(formattedRest(value)) {
+                        onSetRestChanged(value)
+                    }
+                }
+
+                Divider()
+
+                Button("Use exercise default (\(formattedRest(defaultRestSeconds)))") {
+                    onSetRestChanged(defaultRestSeconds)
+                }
+
+                Button("-15 sec") {
+                    onSetRestChanged(set.restSeconds - 15)
+                }
+
+                Button("+15 sec") {
+                    onSetRestChanged(set.restSeconds + 15)
+                }
+
+                Button("No rest") {
+                    onSetRestChanged(0)
+                }
+            } label: {
+                Label("Set rest", systemImage: "timer")
+            }
+
+            Button {
+                onToggleLock()
+            } label: {
+                Label(set.isLocked ? "Unlock set" : "Lock set", systemImage: set.isLocked ? "lock.open" : "lock")
+            }
+
+            if set.restSeconds != defaultRestSeconds {
+                Button {
+                    onSetRestChanged(defaultRestSeconds)
+                } label: {
+                    Label("Reset rest", systemImage: "timer")
+                }
+            }
+
+            Divider()
+
+            Button(role: .destructive) {
+                onDelete()
+            } label: {
+                Label("Delete set", systemImage: "trash")
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.title3)
+                .foregroundStyle(WGJTheme.accentBlue)
+                .frame(width: 34, height: 34)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(WGJTheme.field)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func metricField<Content: View>(
+        title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(WGJTheme.textSecondary)
+
+            content()
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func formattedRest(_ seconds: Int) -> String {
+        let mins = max(0, seconds) / 60
+        let secs = max(0, seconds) % 60
+        return String(format: "%d:%02d", mins, secs)
+    }
 }
