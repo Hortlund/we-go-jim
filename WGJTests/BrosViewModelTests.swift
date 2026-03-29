@@ -19,9 +19,10 @@ struct BrosViewModelTests {
             cloudSyncEnabled: false,
             cloudSyncErrorDescription: "Cloud-backed ModelContainer unavailable."
         )
+        await Task.yield()
 
         #expect(viewModel.state == .onboarding)
-        #expect(service.didRefreshLocalMembershipState)
+        #expect(!service.didRefreshLocalMembershipState)
         #expect(service.didFlushOutbox)
     }
 
@@ -42,7 +43,7 @@ struct BrosViewModelTests {
         await viewModel.refreshActiveSnapshotIfNeeded(modelContext: context)
 
         #expect(viewModel.state == .active(refreshedSnapshot))
-        #expect(service.didRefreshLocalMembershipState)
+        #expect(!service.didRefreshLocalMembershipState)
     }
 
     @Test

@@ -14,7 +14,7 @@ enum BrosMutationAction: Equatable {
 @MainActor
 @Observable
 final class BrosViewModel {
-    private static let liveRefreshInterval: Duration = .seconds(3)
+    private static let liveRefreshInterval: Duration = .seconds(15)
 
     enum ScreenState: Equatable {
         case loading
@@ -34,7 +34,10 @@ final class BrosViewModel {
     var isJoiningCircle: Bool { pendingAction == .joinCircle }
 
     private var hasLoaded = false
+    private var isSnapshotRefreshInFlight = false
+    private var pendingOutboxHydration = false
     private var liveRefreshTask: Task<Void, Never>?
+    private var outboxFlushTask: Task<Void, Never>?
     private let accountStatusProvider: @MainActor () async -> AccountStatus
     private let serviceFactory: @MainActor (ModelContext) -> (any BrosSocialService)?
 
@@ -76,6 +79,10 @@ final class BrosViewModel {
         cloudSyncEnabled: Bool,
         cloudSyncErrorDescription: String?
     ) async {
+        guard !isSnapshotRefreshInFlight else { return }
+        isSnapshotRefreshInFlight = true
+        defer { isSnapshotRefreshInFlight = false }
+
         _ = cloudSyncEnabled
         _ = cloudSyncErrorDescription
 
@@ -102,8 +109,7 @@ final class BrosViewModel {
         }
 
         state = .loading
-        await service.refreshLocalMembershipState()
-        await service.flushOutbox()
+        scheduleOutboxFlush(modelContext: modelContext)
 
         do {
             if let snapshot = try await service.fetchSnapshot() {
@@ -113,6 +119,11 @@ final class BrosViewModel {
             }
         } catch {
             state = .unavailable(error.localizedDescription)
+        }
+
+        if pendingOutboxHydration {
+            pendingOutboxHydration = false
+            await hydrateSnapshotAfterOutboxFlush(modelContext: modelContext)
         }
     }
 
@@ -197,7 +208,7 @@ final class BrosViewModel {
             while !Task.isCancelled {
                 try? await Task.sleep(for: Self.liveRefreshInterval)
                 guard let self else { return }
-                guard self.pendingAction == nil else { continue }
+                guard self.pendingAction == nil, !self.isSnapshotRefreshInFlight else { continue }
                 await self.hydrateActiveSnapshot(modelContext: modelContext)
             }
         }
@@ -209,7 +220,7 @@ final class BrosViewModel {
     }
 
     func refreshActiveSnapshotIfNeeded(modelContext: ModelContext) async {
-        guard pendingAction == nil else { return }
+        guard pendingAction == nil, !isSnapshotRefreshInFlight else { return }
         await hydrateActiveSnapshot(modelContext: modelContext)
     }
 
@@ -234,12 +245,57 @@ final class BrosViewModel {
         }
     }
 
-    private func hydrateActiveSnapshot(modelContext: ModelContext) async {
-        guard case .active = state else { return }
+    private func scheduleOutboxFlush(modelContext: ModelContext) {
+        guard outboxFlushTask == nil else { return }
+
+        outboxFlushTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.outboxFlushTask = nil }
+
+            do {
+                let service = try self.service(modelContext: modelContext)
+                await service.flushOutbox()
+                guard !Task.isCancelled else { return }
+                guard !self.isSnapshotRefreshInFlight else {
+                    self.pendingOutboxHydration = true
+                    return
+                }
+                await self.hydrateSnapshotAfterOutboxFlush(modelContext: modelContext)
+            } catch {
+                // Preserve the current screen state if background sync fails.
+            }
+        }
+    }
+
+    private func hydrateSnapshotAfterOutboxFlush(modelContext: ModelContext) async {
+        guard pendingAction == nil, !isSnapshotRefreshInFlight else { return }
+
+        isSnapshotRefreshInFlight = true
+        defer { isSnapshotRefreshInFlight = false }
 
         do {
             let service = try service(modelContext: modelContext)
-            await service.refreshLocalMembershipState()
+            if let snapshot = try await service.fetchSnapshot() {
+                state = .active(snapshot)
+            } else {
+                state = .onboarding
+                joinCode = ""
+                circleMemberLimit = BrosSocialRules.defaultMemberLimit
+            }
+        } catch {
+            // Keep the current state if the follow-up hydration fails.
+        }
+    }
+
+    private func hydrateActiveSnapshot(modelContext: ModelContext) async {
+        guard case .active = state else { return }
+        guard !isSnapshotRefreshInFlight else { return }
+
+        isSnapshotRefreshInFlight = true
+        defer { isSnapshotRefreshInFlight = false }
+
+        do {
+            let service = try service(modelContext: modelContext)
             if let snapshot = try await service.fetchSnapshot() {
                 state = .active(snapshot)
             } else {
@@ -271,6 +327,14 @@ final class BrosViewModel {
         }
         return service
     }
+}
+
+private enum BrosViewFormatters {
+    static let relativeTimestamp: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter
+    }()
 }
 
 struct BroCircleManagementPresentation: Equatable {
@@ -929,9 +993,7 @@ struct BrosView: View {
     }
 
     private func relativeTimestamp(for date: Date) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: .now)
+        BrosViewFormatters.relativeTimestamp.localizedString(for: date, relativeTo: .now)
     }
 
     private func durationText(_ seconds: Int) -> String {

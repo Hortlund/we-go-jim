@@ -727,10 +727,13 @@ final class CloudKitBrosSocialService: BrosSocialService {
         }
 
         let circle = circleSummary(from: circleRecord)
-        let membershipResolution = try await resolvedMembershipRecords(
+        async let membershipResolutionTask = resolvedMembershipRecords(
             circleRecord: circleRecord,
             currentMembershipRecord: membershipRecord
         )
+        async let feedEventResolutionTask = resolvedFeedEventRecords(circleRecord: circleRecord)
+
+        let membershipResolution = try await membershipResolutionTask
         let membershipRecords = membershipResolution.records
         let members = try await membershipRecords.asyncMap { record in
             if record.recordID == membershipRecord.recordID {
@@ -740,7 +743,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
         }
         let membersByRecordName = Dictionary(uniqueKeysWithValues: members.map { ($0.userRecordName, $0) })
 
-        let feedEventResolution = try await resolvedFeedEventRecords(circleRecord: circleRecord)
+        let feedEventResolution = try await feedEventResolutionTask
         let eventRecords = feedEventResolution.records
 
         var legacyReactionsByEventID: [String: [BroReactionSummary]] = [:]
@@ -766,15 +769,6 @@ final class CloudKitBrosSocialService: BrosSocialService {
         var recordsToBackfill: [CKRecord] = []
         if membershipResolution.didMutateCircleRecord || feedEventResolution.didMutateCircleRecord {
             recordsToBackfill.append(circleRecord)
-        }
-        if (try? await fetchRecord(recordType: RecordType.inviteLookup, recordName: circle.inviteCode)) == nil {
-            recordsToBackfill.append(
-                makeInviteLookupRecord(
-                    inviteCode: circle.inviteCode,
-                    circleID: circle.circleID,
-                    createdAt: circle.createdAt
-                )
-            )
         }
 
         let visibleEvents = eventRecords.compactMap { record -> BroFeedEvent? in
@@ -1914,7 +1908,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
     private func memberSummary(from record: CKRecord) async throws -> BroMemberSummary {
         let avatarImageData: Data?
         if AppRuntimeConfig.reviewPolicy.syncBrosAvatars {
-            avatarImageData = loadAssetData(from: record[Field.avatarAsset] as? CKAsset)
+            avatarImageData = await loadAssetData(from: (record[Field.avatarAsset] as? CKAsset)?.fileURL)
         } else {
             avatarImageData = nil
         }
@@ -2283,9 +2277,12 @@ final class CloudKitBrosSocialService: BrosSocialService {
         return try modelContext.fetch(descriptor).first
     }
 
-    private func loadAssetData(from asset: CKAsset?) -> Data? {
-        guard let url = asset?.fileURL else { return nil }
-        return try? Data(contentsOf: url)
+    private nonisolated func loadAssetData(from fileURL: URL?) async -> Data? {
+        guard let fileURL else { return nil }
+
+        return await Task.detached(priority: .userInitiated) {
+            try? Data(contentsOf: fileURL)
+        }.value
     }
 
     private func makeAsset(data: Data, fileExtension: String) throws -> CKAsset {
