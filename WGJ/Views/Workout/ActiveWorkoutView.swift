@@ -1448,6 +1448,7 @@ private struct ActiveWorkoutActivityTimerDock: View {
                     ? "Rest timer \(primaryValue). \(secondaryText)"
                     : "Elapsed time \(primaryValue)"
             )
+            .accessibilityIdentifier(isResting ? "active-workout-rest-timer" : "active-workout-elapsed-timer")
         }
     }
 

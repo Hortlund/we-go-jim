@@ -1511,10 +1511,12 @@ struct WorkoutSessionExerciseGridEditor: View {
         }
 
         guard setDrafts[index].isCompleted != isCompleted else { return }
+        let setID = setDrafts[index].id
+        let setTitle = setTitle(for: index)
+        let setRestSeconds = setDrafts[index].restSeconds
         setDrafts[index].isCompleted = isCompleted
-        let set = setDrafts[index]
         notifyChanged()
-        onSetCompletionChange?(set.id, setTitle(for: index), set.restSeconds, set.isCompleted)
+        onSetCompletionChange?(setID, setTitle, setRestSeconds, isCompleted)
     }
 
     private func notifyChanged() {
