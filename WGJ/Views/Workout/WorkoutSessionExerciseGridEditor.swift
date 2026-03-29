@@ -614,6 +614,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(WGJTheme.accentBlue)
+        .accessibilityIdentifier("workout-set-\(index)-use-last-button")
     }
 
     private func metricField<Content: View>(
@@ -653,6 +654,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             .focused($focusedInput, equals: inputFocus(for: index, metric: .reps))
             .multilineTextAlignment(.center)
             .disabled(setDrafts[index].isLocked)
+            .accessibilityIdentifier("workout-set-\(index)-reps-field")
             .metricInputShell(isFocused: isInputFocused(.reps, at: index))
     }
 
@@ -668,6 +670,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                 .focused($focusedInput, equals: inputFocus(for: index, metric: .weight))
                 .multilineTextAlignment(.center)
                 .disabled(isLocked)
+                .accessibilityIdentifier("workout-set-\(index)-weight-field")
 
             Menu {
                 ForEach(TemplateLoadUnit.allCases) { unit in

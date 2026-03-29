@@ -132,6 +132,15 @@ struct ActiveWorkoutView: View {
                         restSeconds: resolvedRest(for: exercise),
                         setDrafts: resolvedDrafts(for: exercise),
                         isExpanded: cardStateController.isExpanded(for: exercise.id),
+                        currentRestSeconds: {
+                            resolvedRest(for: exercise)
+                        },
+                        currentSetDrafts: {
+                            resolvedDrafts(for: exercise)
+                        },
+                        currentIsExpanded: {
+                            cardStateController.isExpanded(for: exercise.id)
+                        },
                         onSetDraftsBindingChanged: { updated in
                             updateDraftsValue(updated, for: exercise.id)
                         },
@@ -1112,6 +1121,9 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
     let setDrafts: [WorkoutSessionSetDraft]
     let isExpanded: Bool
 
+    let currentRestSeconds: () -> Int
+    let currentSetDrafts: () -> [WorkoutSessionSetDraft]
+    let currentIsExpanded: () -> Bool
     let onSetDraftsBindingChanged: ([WorkoutSessionSetDraft]) -> Void
     let onRestBindingChanged: (Int) -> Void
     let onExpandedChanged: (Bool) -> Void
@@ -1149,15 +1161,15 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
             overloadFeedback: overloadFeedback,
             preferredLoadUnit: preferredLoadUnit,
             restSeconds: Binding(
-                get: { restSeconds },
+                get: { currentRestSeconds() },
                 set: { onRestBindingChanged($0) }
             ),
             setDrafts: Binding(
-                get: { setDrafts },
+                get: { currentSetDrafts() },
                 set: { onSetDraftsBindingChanged($0) }
             ),
             isExpanded: Binding(
-                get: { isExpanded },
+                get: { currentIsExpanded() },
                 set: { onExpandedChanged($0) }
             ),
             showsInlineExerciseControls: false,
