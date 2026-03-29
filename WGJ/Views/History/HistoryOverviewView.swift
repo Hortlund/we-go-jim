@@ -539,7 +539,7 @@ private struct HistoryWorkoutCalendarSheet: View {
                     .buttonStyle(WGJGhostButtonStyle())
                 }
 
-                Text("Select a day to filter history. Badges show how many workouts were logged on that date.")
+                Text("Select a day to filter history. Heatmap shading marks logged days, and deeper color means more workouts.")
                     .font(.subheadline)
                     .foregroundStyle(WGJTheme.textSecondary)
 
@@ -606,24 +606,27 @@ private struct HistoryWorkoutCalendarSheet: View {
                                 .stroke(dayBorder(for: day), lineWidth: day.isToday ? 1.4 : 1)
                         }
 
-                    Text("\(calendar.component(.day, from: date))")
-                        .font(.headline.weight(day.isSelected ? .bold : .semibold))
-                        .foregroundStyle(day.isSelected ? WGJTheme.textInverse : WGJTheme.textPrimary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                }
-                .overlay(alignment: .topTrailing) {
-                    if day.workoutCount > 0 {
-                        Text(workoutBadgeText(for: day.workoutCount))
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(day.isSelected ? WGJTheme.accentBlue : WGJTheme.textInverse)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background {
-                                Capsule(style: .continuous)
-                                    .fill(day.isSelected ? WGJTheme.textInverse : WGJTheme.accentBlue)
-                            }
-                            .padding(6)
+                    VStack(spacing: 0) {
+                        Spacer(minLength: 0)
+
+                        Text("\(calendar.component(.day, from: date))")
+                            .font(.headline.weight(day.isSelected ? .bold : .semibold))
+                            .foregroundStyle(day.isSelected ? WGJTheme.textInverse : WGJTheme.textPrimary)
+
+                        Spacer(minLength: 0)
+
+                        if day.workoutCount > 0 {
+                            Capsule(style: .continuous)
+                                .fill(day.isSelected ? WGJTheme.textInverse : workoutMarkerColor(for: day))
+                                .frame(width: workoutMarkerWidth(for: day), height: 6)
+                                .padding(.bottom, 8)
+                        } else {
+                            Color.clear
+                                .frame(height: 14)
+                                .accessibilityHidden(true)
+                        }
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .frame(maxWidth: .infinity)
                 .aspectRatio(1, contentMode: .fit)
@@ -641,10 +644,18 @@ private struct HistoryWorkoutCalendarSheet: View {
         if day.isSelected {
             return WGJTheme.accentBlue.opacity(0.92)
         }
-        if day.workoutCount > 0 {
+        switch activityLevel(for: day.workoutCount) {
+        case 4:
+            return WGJTheme.accentBlue.opacity(0.46)
+        case 3:
+            return WGJTheme.accentBlue.opacity(0.34)
+        case 2:
+            return WGJTheme.accentBlue.opacity(0.22)
+        case 1:
             return WGJTheme.accentBlue.opacity(0.12)
+        default:
+            return WGJTheme.field.opacity(0.54)
         }
-        return WGJTheme.field.opacity(0.54)
     }
 
     private func dayBorder(for day: HistoryCalendarDay) -> Color {
@@ -654,10 +665,18 @@ private struct HistoryWorkoutCalendarSheet: View {
         if day.isToday {
             return WGJTheme.accentCyan.opacity(0.42)
         }
-        if day.workoutCount > 0 {
+        switch activityLevel(for: day.workoutCount) {
+        case 4:
+            return WGJTheme.accentBlue.opacity(0.54)
+        case 3:
+            return WGJTheme.accentBlue.opacity(0.46)
+        case 2:
+            return WGJTheme.accentBlue.opacity(0.38)
+        case 1:
             return WGJTheme.accentBlue.opacity(0.28)
+        default:
+            return WGJTheme.outline.opacity(0.68)
         }
-        return WGJTheme.outline.opacity(0.68)
     }
 
     private func moveMonth(by value: Int) {
@@ -666,8 +685,45 @@ private struct HistoryWorkoutCalendarSheet: View {
         displayedMonth = calendar.date(from: components) ?? moved
     }
 
-    private func workoutBadgeText(for workoutCount: Int) -> String {
-        workoutCount > 99 ? "99+" : "\(workoutCount)"
+    private func activityLevel(for workoutCount: Int) -> Int {
+        switch workoutCount {
+        case ...0:
+            return 0
+        case 1:
+            return 1
+        case 2:
+            return 2
+        case 3:
+            return 3
+        default:
+            return 4
+        }
+    }
+
+    private func workoutMarkerColor(for day: HistoryCalendarDay) -> Color {
+        switch activityLevel(for: day.workoutCount) {
+        case 4:
+            return WGJTheme.accentBlue
+        case 3:
+            return WGJTheme.accentBlue.opacity(0.86)
+        case 2:
+            return WGJTheme.accentBlue.opacity(0.74)
+        default:
+            return WGJTheme.accentBlue.opacity(0.62)
+        }
+    }
+
+    private func workoutMarkerWidth(for day: HistoryCalendarDay) -> CGFloat {
+        switch activityLevel(for: day.workoutCount) {
+        case 4:
+            return 22
+        case 3:
+            return 18
+        case 2:
+            return 14
+        default:
+            return 10
+        }
     }
 
     private func accessibilityLabel(for day: HistoryCalendarDay, date: Date) -> String {
