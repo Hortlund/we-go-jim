@@ -93,7 +93,9 @@ struct WGJApp: App {
             cloudKitDatabase: .none
         )
 
-        return try ModelContainer(for: appSchema, configurations: [inMemory])
+        let container = try ModelContainer(for: appSchema, configurations: [inMemory])
+        try seedUITestCatalogIfNeeded(container: container)
+        return container
     }
 
     private static func fullAppSchema() -> Schema {
@@ -176,6 +178,27 @@ struct WGJApp: App {
             return "\(nsError.domain)(\(nsError.code)): \(nsError.localizedDescription)"
         }
         return "\(nsError.domain)(\(nsError.code)): \(nsError.localizedDescription) [\(userInfo)]"
+    }
+
+    private static func seedUITestCatalogIfNeeded(container: ModelContainer) throws {
+        let context = ModelContext(container)
+        var descriptor = FetchDescriptor<ExerciseCatalogItem>()
+        descriptor.fetchLimit = 1
+
+        if try context.fetch(descriptor).isEmpty == false {
+            return
+        }
+
+        let bench = ExerciseCatalogItem(
+            remoteUUID: "ui-test-bench",
+            displayName: "Bench Press",
+            categoryName: "Strength",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "ui-test"
+        )
+        context.insert(bench)
+        try context.save()
     }
 
     private static func configureNavigationTitleAppearance() {

@@ -72,6 +72,26 @@ final class AppTabState {
     var selectedTab: AppMainTab = .startWorkout
 }
 
+struct WorkoutCompletionPresentation: Identifiable, Equatable {
+    let sessionID: UUID
+
+    var id: UUID { sessionID }
+}
+
+@MainActor
+@Observable
+final class WorkoutCompletionPresentationState {
+    var presentedWorkout: WorkoutCompletionPresentation?
+
+    func present(sessionID: UUID) {
+        presentedWorkout = WorkoutCompletionPresentation(sessionID: sessionID)
+    }
+
+    func dismiss() {
+        presentedWorkout = nil
+    }
+}
+
 @MainActor
 @Observable
 final class ActiveWorkoutPresentationState {

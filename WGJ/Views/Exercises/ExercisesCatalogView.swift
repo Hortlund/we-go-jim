@@ -103,6 +103,10 @@ struct ExercisesCatalogView: View {
         return reservesIndexRailSpace && !isSearchFieldFocused && trimmedQuery.isEmpty
     }
 
+    private var shouldLoadCatalog: Bool {
+        isPickerMode || isTabActive
+    }
+
     private var catalogExercises: [ExerciseCatalogItem] {
         controller.catalogExercises
     }
@@ -237,8 +241,8 @@ struct ExercisesCatalogView: View {
             .wgjSheetSurface()
         }
         .toolbar(isPickerMode ? .visible : .hidden, for: .navigationBar)
-        .task(id: isTabActive) {
-            guard isTabActive else { return }
+        .task(id: shouldLoadCatalog) {
+            guard shouldLoadCatalog else { return }
             if hasAttemptedBootstrap {
                 do {
                     try controller.reload(modelContext: modelContext)
@@ -400,6 +404,7 @@ struct ExercisesCatalogView: View {
             }
             .buttonStyle(WGJIconButtonStyle(tint: WGJTheme.accentBlue, background: WGJTheme.cardElevated))
             .accessibilityLabel(isPickerMode ? "Select \(exercise.displayName)" : "Add \(exercise.displayName)")
+            .accessibilityIdentifier(isPickerMode ? "exercise-picker-select-button" : "exercise-catalog-add-button")
         }
         .padding(.vertical, 10)
         .overlay(alignment: .bottom) {

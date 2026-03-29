@@ -12,6 +12,7 @@ struct ContentView: View {
 
     @State private var appPhase: AppPhase = .splash
     @State private var appTabState = AppTabState()
+    @State private var workoutCompletionPresentationState = WorkoutCompletionPresentationState()
     @State private var activeWorkoutPresentationState = ActiveWorkoutPresentationState()
     @State private var restTimerState = RestTimerState()
     @State private var catalogSyncCoordinator = CatalogSyncCoordinator()
@@ -35,6 +36,7 @@ struct ContentView: View {
             }
         }
         .environment(appTabState)
+        .environment(workoutCompletionPresentationState)
         .environment(activeWorkoutPresentationState)
         .environment(restTimerState)
         .environment(catalogSyncCoordinator)

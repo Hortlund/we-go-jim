@@ -3,6 +3,7 @@ import SwiftData
 
 struct MainTabView: View {
     @Environment(AppTabState.self) private var tabState
+    @Environment(WorkoutCompletionPresentationState.self) private var workoutCompletionPresentationState
     @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
     @Environment(RestTimerState.self) private var restTimerState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -10,6 +11,7 @@ struct MainTabView: View {
 
     var body: some View {
         @Bindable var tabState = tabState
+        @Bindable var workoutCompletionPresentationState = workoutCompletionPresentationState
 
         GeometryReader { proxy in
             let bottomSafeAreaInset = proxy.safeAreaInsets.bottom
@@ -74,6 +76,10 @@ struct MainTabView: View {
                         ActiveWorkoutView(sessionID: activeSessionID)
                     }
                 }
+            }
+            .fullScreenCover(item: $workoutCompletionPresentationState.presentedWorkout) { presentation in
+                WorkoutCompletionSummaryView(sessionID: presentation.sessionID)
+                    .interactiveDismissDisabled()
             }
             .wgjTrackKeyboardVisibility($isKeyboardVisible)
             .onChange(of: activeWorkoutPresentationState.activeSessionID) { _, newValue in
@@ -174,6 +180,7 @@ private struct LazyTabContainer<Content: View>: View {
 #Preview {
     MainTabView()
         .environment(AppTabState())
+        .environment(WorkoutCompletionPresentationState())
         .environment(ActiveWorkoutPresentationState())
         .environment(RestTimerState())
         .environment(\.cloudSyncEnabled, false)

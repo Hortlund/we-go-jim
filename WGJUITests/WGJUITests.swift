@@ -120,6 +120,57 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(app.buttons["active-workout-finish-button"].waitForExistence(timeout: 5))
     }
 
+    @MainActor
+    func testWorkoutFinishShowsCelebrationBeforeHistory() throws {
+        let app = launchApp()
+
+        tapTab("Start Workout", in: app)
+
+        let startButton = app.buttons["start-workout-empty-button"]
+        XCTAssertTrue(startButton.waitForExistence(timeout: 5))
+        startButton.tap()
+
+        let addExerciseButton = app.buttons["active-workout-empty-add-exercise-button"]
+        XCTAssertTrue(addExerciseButton.waitForExistence(timeout: 5))
+        addExerciseButton.tap()
+
+        let searchField = app.textFields["exercises-search-field"]
+        XCTAssertTrue(searchField.waitForExistence(timeout: 5))
+        searchField.tap()
+        searchField.typeText("bench")
+
+        let selectExerciseButton = identifiedElement("exercise-picker-select-button", in: app)
+        XCTAssertTrue(selectExerciseButton.waitForExistence(timeout: 15))
+        selectExerciseButton.tap()
+
+        let completeSetButton = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
+        ).firstMatch
+        XCTAssertTrue(completeSetButton.waitForExistence(timeout: 5))
+        completeSetButton.tap()
+
+        let finishButton = app.buttons["active-workout-finish-button"]
+        XCTAssertTrue(finishButton.waitForExistence(timeout: 5))
+        finishButton.tap()
+
+        let finishAndSaveButton = app.buttons["Finish and Save"]
+        XCTAssertTrue(finishAndSaveButton.waitForExistence(timeout: 5))
+        finishAndSaveButton.tap()
+
+        let skipButton = app.buttons["Skip"]
+        XCTAssertTrue(skipButton.waitForExistence(timeout: 5))
+        skipButton.tap()
+
+        let summary = identifiedElement("workout-completion-summary", in: app)
+        XCTAssertTrue(summary.waitForExistence(timeout: 5))
+
+        let confirmButton = identifiedElement("workout-completion-confirm-button", in: app)
+        XCTAssertTrue(confirmButton.waitForExistence(timeout: 5))
+        confirmButton.tap()
+
+        XCTAssertTrue(app.buttons["history-calendar-button"].waitForExistence(timeout: 5))
+    }
+
     private func launchApp() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = [

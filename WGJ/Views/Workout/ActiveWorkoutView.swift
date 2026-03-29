@@ -6,7 +6,7 @@ import SwiftUI
 struct ActiveWorkoutView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
-    @Environment(AppTabState.self) private var appTabState
+    @Environment(WorkoutCompletionPresentationState.self) private var workoutCompletionPresentationState
     @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
     @Environment(RestTimerState.self) private var restTimerState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -113,6 +113,7 @@ struct ActiveWorkoutView: View {
                             showingExercisePicker = true
                         }
                         .buttonStyle(WGJPrimaryButtonStyle())
+                        .accessibilityIdentifier("active-workout-empty-add-exercise-button")
                     }
                 }
 
@@ -224,7 +225,7 @@ struct ActiveWorkoutView: View {
             }
             Button("Keep Template", role: .cancel) {
                 pendingTemplateUpdatePreview = nil
-                finalizeCompletion()
+                presentWorkoutCompletionSummary()
             }
         } message: {
             Text($0.summary)
@@ -462,7 +463,7 @@ struct ActiveWorkoutView: View {
             if let preview = try templateSyncService.previewTemplateUpdate(forSessionID: sessionID) {
                 pendingTemplateUpdatePreview = preview
             } else {
-                finalizeCompletion()
+                presentWorkoutCompletionSummary()
             }
         } catch {
             showError(error)
@@ -889,7 +890,7 @@ struct ActiveWorkoutView: View {
             if let latestSession = try sessionRepository.session(id: sessionID) {
                 handleTerminalSessionStateIfNeeded(latestSession)
             } else {
-                finalizeCompletion()
+                presentWorkoutCompletionSummary()
             }
         } catch {
             isEndingSession = false
@@ -925,7 +926,7 @@ struct ActiveWorkoutView: View {
         guard pendingCompletionAfterSaveTemplateSheet else { return }
         pendingCompletionTask?.cancel()
         pendingCompletionTask = nil
-        finalizeCompletion()
+        presentWorkoutCompletionSummary()
     }
 
     private func requestCompletionAfterSaveTemplateSheetDismissal() {
@@ -935,11 +936,11 @@ struct ActiveWorkoutView: View {
         pendingCompletionTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(180))
             guard !Task.isCancelled, pendingCompletionAfterSaveTemplateSheet, !showingSaveTemplateSheet else { return }
-            finalizeCompletion()
+            presentWorkoutCompletionSummary()
         }
     }
 
-    private func finalizeCompletion() {
+    private func presentWorkoutCompletionSummary() {
         pendingCompletionTask?.cancel()
         pendingCompletionTask = nil
         dismissKeyboard()
@@ -948,8 +949,8 @@ struct ActiveWorkoutView: View {
         pendingCompletionAfterSaveTemplateSheet = false
         exerciseSettingsDraft = nil
         pendingTemplateUpdatePreview = nil
+        workoutCompletionPresentationState.present(sessionID: sessionID)
         activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
-        appTabState.selectedTab = .history
         dismiss()
     }
 
@@ -1029,7 +1030,7 @@ struct ActiveWorkoutView: View {
         pendingTemplateUpdatePreview = nil
         do {
             try templateSyncService.applyTemplateUpdate(preview)
-            finalizeCompletion()
+            presentWorkoutCompletionSummary()
         } catch {
             showError(error)
         }
@@ -1613,7 +1614,7 @@ private struct ActiveWorkoutExerciseSettingsSheet: View {
     NavigationStack {
         ActiveWorkoutView(sessionID: UUID())
     }
-    .environment(AppTabState())
+    .environment(WorkoutCompletionPresentationState())
     .environment(ActiveWorkoutPresentationState())
     .environment(RestTimerState())
     .modelContainer(for: [
