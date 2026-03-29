@@ -41,7 +41,7 @@ struct HistoryOverviewView: View {
                 }
 
                 ForEach(controller.snapshot.sections) { section in
-                    LazyVStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 10) {
                         Text(section.title.uppercased())
                             .font(.headline.weight(.semibold))
                             .foregroundStyle(WGJTheme.textSecondary)

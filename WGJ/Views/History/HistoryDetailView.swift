@@ -22,7 +22,6 @@ struct HistoryDetailView: View {
     @State private var personalRecordPresentationByExerciseID: [UUID: HistoryExercisePersonalRecordPresentation] = [:]
     @State private var loadedExerciseStateStamp: HistoryExerciseStateStamp?
     @State private var expandedExerciseIDs: [UUID: Bool] = [:]
-    @State private var exerciseListAnimationToken = HistoryExerciseListAnimationToken(exercises: [])
     @State private var personalRecordSummary = HistoryWorkoutPersonalRecordSummary(highlightedSetCount: 0)
 
     @State private var showingExercisePicker = false
@@ -97,7 +96,6 @@ struct HistoryDetailView: View {
                 .disabled(session == nil)
             }
             .padding(WGJSpacing.page)
-            .animation(WGJMotion.cardAnimation(reduceMotion: reduceMotion), value: exerciseListAnimationToken)
         }
         .scrollDismissesKeyboard(.interactively)
         .wgjScreenBackground()
@@ -301,7 +299,6 @@ struct HistoryDetailView: View {
                 partialResult + presentation.highlightedSetCount
             }
         )
-        exerciseListAnimationToken = HistoryExerciseListAnimationToken(exercises: sessionExercises)
         syncExpandedExerciseState()
         loadedExerciseStateStamp = currentStamp
     }
@@ -555,14 +552,6 @@ private struct HistoryExerciseStateStamp: Hashable {
                 .map { $0.updatedAt.timeIntervalSinceReferenceDate }
                 .max() ?? 0
         }
-    }
-}
-
-private struct HistoryExerciseListAnimationToken: Hashable {
-    let exerciseIDs: [UUID]
-
-    init(exercises: [WorkoutSessionExercise]) {
-        exerciseIDs = exercises.map(\.id)
     }
 }
 

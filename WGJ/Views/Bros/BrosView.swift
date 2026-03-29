@@ -12,6 +12,12 @@ enum BrosMutationAction: Equatable {
     case toggleReaction
 }
 
+enum BroMemberLimitSaveState: Equatable {
+    case idle
+    case saving(Int)
+    case saved(Int)
+}
+
 @MainActor
 @Observable
 final class BrosViewModel {
@@ -27,6 +33,7 @@ final class BrosViewModel {
     var circleMemberLimit: Int = BrosSocialRules.defaultMemberLimit
     var pendingAction: BrosMutationAction?
     var errorMessage: String?
+    var memberLimitSaveState: BroMemberLimitSaveState = .idle
 
     var isBusy: Bool { pendingAction != nil }
     var isCreatingCircle: Bool { pendingAction == .createCircle }
@@ -36,6 +43,7 @@ final class BrosViewModel {
     private var isSnapshotRefreshInFlight = false
     private var pendingOutboxHydration = false
     private var outboxFlushTask: Task<Void, Never>?
+    private var memberLimitFeedbackTask: Task<Void, Never>?
     private(set) var lastSuccessfulSnapshotRefreshAt: Date?
     private let accountStatusProvider: @MainActor () async -> AccountStatus
     private let serviceFactory: @MainActor (ModelContext) -> (any BrosSocialService)?
@@ -133,6 +141,7 @@ final class BrosViewModel {
     }
 
     func createCircle(modelContext: ModelContext) async {
+        clearMemberLimitSaveFeedback()
         await runMutation(.createCircle) { [self] in
             let service = try service(modelContext: modelContext)
             let snapshot = try await service.createCircle(memberLimit: self.circleMemberLimit)
@@ -144,14 +153,29 @@ final class BrosViewModel {
     }
 
     func updateCircleMemberLimit(_ memberLimit: Int, modelContext: ModelContext) async {
-        await runMutation(.updateCircleMemberLimit) { [self] in
+        clearMemberLimitSaveFeedback()
+        memberLimitSaveState = .saving(memberLimit)
+
+        let didUpdate = await runMutation(.updateCircleMemberLimit) { [self] in
             let service = try service(modelContext: modelContext)
             let snapshot = try await service.updateCircleMemberLimit(memberLimit)
             self.state = .active(snapshot)
         }
+
+        guard didUpdate else {
+            memberLimitSaveState = .idle
+            return
+        }
+
+        if case .active(let snapshot) = state {
+            showMemberLimitSaveSuccess(limit: snapshot.circle.memberLimit)
+        } else {
+            memberLimitSaveState = .idle
+        }
     }
 
     func joinCircle(modelContext: ModelContext) async {
+        clearMemberLimitSaveFeedback()
         await runMutation(.joinCircle) { [self] in
             let service = try service(modelContext: modelContext)
             let snapshot = try await service
@@ -163,6 +187,7 @@ final class BrosViewModel {
     }
 
     func leaveCircle(modelContext: ModelContext) async {
+        clearMemberLimitSaveFeedback()
         await runMutation(.leaveCircle) { [self] in
             let service = try service(modelContext: modelContext)
             try await service.leaveCircle()
@@ -173,6 +198,7 @@ final class BrosViewModel {
     }
 
     func removeMember(membershipID: String, modelContext: ModelContext) async {
+        clearMemberLimitSaveFeedback()
         await runMutation(.removeMember) { [self] in
             let service = try service(modelContext: modelContext)
             try await service.removeMember(membershipID: membershipID)
@@ -193,6 +219,7 @@ final class BrosViewModel {
     }
 
     func toggleReaction(eventID: String, emoji: BroReactionKind, modelContext: ModelContext) async {
+        clearMemberLimitSaveFeedback()
         await runMutation(.toggleReaction) { [self] in
             let service = try service(modelContext: modelContext)
             try await service.setReaction(eventID: eventID, kind: emoji)
@@ -229,18 +256,21 @@ final class BrosViewModel {
         await hydrateActiveSnapshot(modelContext: modelContext)
     }
 
+    @discardableResult
     private func runMutation(
         _ action: BrosMutationAction,
         _ operation: @escaping @MainActor () async throws -> Void
-    ) async {
-        guard pendingAction == nil else { return }
+    ) async -> Bool {
+        guard pendingAction == nil else { return false }
         pendingAction = action
         defer { pendingAction = nil }
 
         do {
             try await operation()
+            return true
         } catch {
             errorMessage = error.localizedDescription
+            return false
         }
     }
 
@@ -342,6 +372,24 @@ final class BrosViewModel {
             throw BrosSocialServiceError.unavailable
         }
         return service
+    }
+
+    private func clearMemberLimitSaveFeedback() {
+        memberLimitFeedbackTask?.cancel()
+        memberLimitFeedbackTask = nil
+        memberLimitSaveState = .idle
+    }
+
+    private func showMemberLimitSaveSuccess(limit: Int) {
+        memberLimitFeedbackTask?.cancel()
+        memberLimitSaveState = .saved(limit)
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        memberLimitFeedbackTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(2.4))
+            guard !Task.isCancelled else { return }
+            self?.memberLimitSaveState = .idle
+            self?.memberLimitFeedbackTask = nil
+        }
     }
 }
 
@@ -755,9 +803,9 @@ struct BrosView: View {
 
         return NavigationLink {
             BroCircleManagementView(
+                viewModel: viewModel,
                 snapshot: snapshot,
                 presentation: presentation,
-                isBusy: viewModel.isBusy,
                 onCopyInviteCode: {
                     copyInviteCode(snapshot.circle.inviteCode)
                 },
@@ -1161,9 +1209,9 @@ struct BrosView: View {
 }
 
 private struct BroCircleManagementView: View {
+    @Bindable var viewModel: BrosViewModel
     let snapshot: BrosFeedSnapshot
     let presentation: BroCircleManagementPresentation
-    let isBusy: Bool
     let onCopyInviteCode: () -> Void
     let onLeaveCircle: () -> Void
     let onRemoveMember: (BroMemberSummary) -> Void
@@ -1172,17 +1220,17 @@ private struct BroCircleManagementView: View {
     @State private var memberLimitDraft: Int
 
     init(
+        viewModel: BrosViewModel,
         snapshot: BrosFeedSnapshot,
         presentation: BroCircleManagementPresentation,
-        isBusy: Bool,
         onCopyInviteCode: @escaping () -> Void,
         onLeaveCircle: @escaping () -> Void,
         onRemoveMember: @escaping (BroMemberSummary) -> Void,
         onUpdateMemberLimit: @escaping (Int) -> Void
     ) {
+        self.viewModel = viewModel
         self.snapshot = snapshot
         self.presentation = presentation
-        self.isBusy = isBusy
         self.onCopyInviteCode = onCopyInviteCode
         self.onLeaveCircle = onLeaveCircle
         self.onRemoveMember = onRemoveMember
@@ -1313,15 +1361,83 @@ private struct BroCircleManagementView: View {
                 }
             }
             .tint(WGJTheme.accentBlue)
+            .disabled(viewModel.isBusy)
 
-            Button("Save Circle Size") {
+            memberLimitStatus
+
+            Button {
                 onUpdateMemberLimit(memberLimitDraft)
+            } label: {
+                Label(
+                    viewModel.pendingAction == .updateCircleMemberLimit ? "Saving Circle Size..." : "Save Circle Size",
+                    systemImage: viewModel.pendingAction == .updateCircleMemberLimit ? "arrow.triangle.2.circlepath" : "checkmark.circle"
+                )
+                .frame(maxWidth: .infinity)
             }
             .buttonStyle(WGJGhostButtonStyle())
             .disabled(!canSaveMemberLimit)
         }
         .padding(WGJSpacing.card)
         .wgjCardContainer(strong: true)
+    }
+
+    @ViewBuilder
+    private var memberLimitStatus: some View {
+        switch viewModel.memberLimitSaveState {
+        case .idle:
+            EmptyView()
+        case .saving(let pendingLimit):
+            HStack(alignment: .center, spacing: 10) {
+                ProgressView()
+                    .progressViewStyle(.circular)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Saving circle size")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(WGJTheme.textPrimary)
+
+                    Text("Updating the member cap to \(pendingLimit).")
+                        .font(.caption)
+                        .foregroundStyle(WGJTheme.textSecondary)
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
+                    .fill(WGJTheme.fieldStrong.opacity(0.94))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
+                            .stroke(WGJTheme.outline.opacity(0.36), lineWidth: 1)
+                    )
+            )
+        case .saved(let savedLimit):
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.headline)
+                    .foregroundStyle(WGJTheme.success)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Circle size updated")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(WGJTheme.textPrimary)
+
+                    Text("The member cap is now \(savedLimit).")
+                        .font(.caption)
+                        .foregroundStyle(WGJTheme.textSecondary)
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
+                    .fill(WGJTheme.success.opacity(0.10))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
+                            .stroke(WGJTheme.success.opacity(0.18), lineWidth: 1)
+                    )
+            )
+        }
     }
 
     private var blockedBrosSection: some View {
@@ -1406,7 +1522,7 @@ private struct BroCircleManagementView: View {
                         .frame(width: 32, height: 32)
                 }
                 .buttonStyle(WGJIconButtonStyle())
-                .disabled(isBusy)
+                .disabled(viewModel.isBusy)
             }
         }
         .padding(.vertical, 6)
@@ -1423,7 +1539,7 @@ private struct BroCircleManagementView: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(WGJDestructiveButtonStyle())
-            .disabled(isBusy)
+            .disabled(viewModel.isBusy)
         }
         .padding(WGJSpacing.card)
         .wgjCardContainer()
@@ -1459,7 +1575,7 @@ private struct BroCircleManagementView: View {
     private var canSaveMemberLimit: Bool {
         memberLimitDraft != snapshot.circle.memberLimit
             && BrosSocialRules.canSetMemberLimit(memberLimitDraft, currentMemberCount: snapshot.members.count)
-            && !isBusy
+            && !viewModel.isBusy
     }
 }
 

@@ -129,7 +129,6 @@ struct ActiveWorkoutView: View {
                 }
             }
             .padding(16)
-            .animation(WGJMotion.cardAnimation(reduceMotion: reduceMotion), value: exerciseListAnimationToken)
         }
         .scrollDismissesKeyboard(.interactively)
         .wgjScreenBackground()
@@ -245,10 +244,6 @@ struct ActiveWorkoutView: View {
 
     private var exerciseHydrationStamp: ActiveWorkoutExerciseStateStamp {
         ActiveWorkoutExerciseStateStamp(exercises: sessionExercises)
-    }
-
-    private var exerciseListAnimationToken: ActiveWorkoutListAnimationToken {
-        ActiveWorkoutListAnimationToken(exercises: sessionExercises)
     }
 
     private var exercisesSectionHeader: some View {
@@ -1466,14 +1461,6 @@ private struct ActiveWorkoutExerciseStateStamp: Hashable {
                 .map { $0.updatedAt.timeIntervalSinceReferenceDate }
                 .max() ?? 0
         }
-    }
-}
-
-private struct ActiveWorkoutListAnimationToken: Hashable {
-    let exerciseIDs: [UUID]
-
-    init(exercises: [WorkoutSessionExercise]) {
-        exerciseIDs = exercises.map(\.id)
     }
 }
 

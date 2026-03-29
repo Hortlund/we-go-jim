@@ -281,6 +281,8 @@ struct ProfileView: View {
                     AxisMarks(position: .leading)
                 }
                 .frame(height: 160)
+                .drawingGroup()
+                .allowsHitTesting(false)
             }
         }
         .padding(14)
@@ -476,6 +478,8 @@ struct ProfileView: View {
                             }
                         }
                         .frame(height: 170)
+                        .drawingGroup()
+                        .allowsHitTesting(false)
                     }
                 } else if let latest = series.points.last {
                     VStack(alignment: .leading, spacing: 6) {
