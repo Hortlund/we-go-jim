@@ -420,6 +420,7 @@ struct BrosView: View {
     private var blockedBros: [BlockedBro]
 
     @State private var viewModel = BrosViewModel()
+    @State private var filteredActiveSnapshot: BrosFeedSnapshot?
     @State private var supportNoticeTitle = ""
     @State private var supportNoticeMessage = ""
     @State private var showingSupportNotice = false
@@ -445,7 +446,7 @@ struct BrosView: View {
                 case .onboarding:
                     onboardingContent
                 case .active(let snapshot):
-                    activeContent(snapshot)
+                    activeContent(filteredActiveSnapshot ?? snapshot)
                 }
             }
             .padding(WGJSpacing.page)
@@ -467,6 +468,7 @@ struct BrosView: View {
                 cloudSyncEnabled: cloudSyncEnabled,
                 cloudSyncErrorDescription: cloudSyncErrorDescription
             )
+            rebuildFilteredSnapshot()
         }
         .onAppear {
             updateLiveRefreshState()
@@ -481,6 +483,12 @@ struct BrosView: View {
             Task {
                 await viewModel.refreshActiveSnapshotIfNeeded(modelContext: modelContext)
             }
+        }
+        .onChange(of: viewModel.state) { _, _ in
+            rebuildFilteredSnapshot()
+        }
+        .onChange(of: blockedUserRecordNames) { _, _ in
+            rebuildFilteredSnapshot()
         }
         .alert("Bros", isPresented: Binding(
             get: { viewModel.errorMessage != nil },
@@ -596,21 +604,30 @@ struct BrosView: View {
         }
     }
 
-    private func activeContent(_ snapshot: BrosFeedSnapshot) -> some View {
-        let filteredSnapshot = BrosSocialRules.filteredSnapshot(
-            snapshot,
-            blockedUserRecordNames: blockedUserRecordNames
-        )
+    private func rebuildFilteredSnapshot() {
+        switch viewModel.state {
+        case .active(let snapshot):
+            filteredActiveSnapshot = WGJPerformance.measure("bros.filtered-snapshot") {
+                BrosSocialRules.filteredSnapshot(
+                    snapshot,
+                    blockedUserRecordNames: blockedUserRecordNames
+                )
+            }
+        case .loading, .unavailable, .onboarding:
+            filteredActiveSnapshot = nil
+        }
+    }
 
+    private func activeContent(_ snapshot: BrosFeedSnapshot) -> some View {
         return LazyVStack(alignment: .leading, spacing: WGJSpacing.section) {
-            membersCard(filteredSnapshot)
+            membersCard(snapshot)
 
             LazyVStack(alignment: .leading, spacing: 12) {
                 WGJActionHeader("Feed", subtitle: "Newest first") {
-                    WGJMetricPill(systemImage: "bolt.heart.fill", value: "\(filteredSnapshot.feedEvents.count)")
+                    WGJMetricPill(systemImage: "bolt.heart.fill", value: "\(snapshot.feedEvents.count)")
                 }
 
-                if filteredSnapshot.feedEvents.isEmpty {
+                if snapshot.feedEvents.isEmpty {
                     WGJEmptyStateCard(
                         title: "No bro updates yet",
                         message: blockedUserRecordNames.isEmpty
@@ -619,11 +636,11 @@ struct BrosView: View {
                         icon: "figure.strengthtraining.traditional"
                     )
                 } else {
-                    ForEach(filteredSnapshot.feedEvents) { event in
+                    ForEach(snapshot.feedEvents) { event in
                         feedCard(
                             event,
-                            snapshot: filteredSnapshot,
-                            currentUserRecordName: filteredSnapshot.currentMember.userRecordName
+                            snapshot: snapshot,
+                            currentUserRecordName: snapshot.currentMember.userRecordName
                         )
                     }
                 }

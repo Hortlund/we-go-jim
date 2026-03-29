@@ -95,6 +95,7 @@ struct HistoryOverviewView: View {
         HistorySessionCardView(card: card) {
             deleteSession(card.sessionID)
         }
+        .equatable()
     }
 
     private var sessionDataStamp: HistorySessionDataStamp {
@@ -170,7 +171,7 @@ struct HistoryMonthSection: Identifiable {
     let cards: [HistorySessionCardData]
 }
 
-struct HistorySessionCardData: Identifiable {
+struct HistorySessionCardData: Identifiable, Equatable {
     let id: String
     let sessionID: UUID
     let name: String
@@ -336,9 +337,13 @@ enum HistoryOverviewSnapshotBuilder {
     }
 }
 
-private struct HistorySessionCardView: View {
+private struct HistorySessionCardView: View, Equatable {
     let card: HistorySessionCardData
     let onDelete: () -> Void
+
+    static func == (lhs: HistorySessionCardView, rhs: HistorySessionCardView) -> Bool {
+        lhs.card == rhs.card
+    }
 
     var body: some View {
         NavigationLink {

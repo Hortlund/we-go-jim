@@ -138,12 +138,6 @@ private struct WGJCardModifier: ViewModifier {
                         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                             .stroke(strokeColor, lineWidth: 1)
                     }
-                    .shadow(
-                        color: (strong ? WGJTheme.shadowStrong : WGJTheme.shadowSoft).opacity(strong ? 0.18 : 0.12),
-                        radius: strong ? 8 : 4,
-                        x: 0,
-                        y: strong ? 4 : 2
-                    )
             }
     }
 }
@@ -225,12 +219,6 @@ private struct WGJGlassButtonBackground: View {
                 RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
                     .stroke(stroke, lineWidth: 1)
             }
-            .shadow(
-                color: (tone == .secondary ? WGJTheme.shadowSoft : WGJTheme.shadowStrong).opacity(tone == .secondary ? 0.12 : 0.18),
-                radius: tone == .secondary ? 3 : 5,
-                x: 0,
-                y: tone == .secondary ? 1 : 2
-            )
     }
 }
 
@@ -358,7 +346,6 @@ struct WGJIconButtonStyle: ButtonStyle {
                         RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
                             .stroke(outline.opacity(0.70), lineWidth: 1)
                     }
-                    .shadow(color: WGJTheme.shadowSoft.opacity(0.12), radius: 3, x: 0, y: 1)
             }
             .scaleEffect(configuration.isPressed ? 0.97 : 1)
     }
@@ -704,7 +691,6 @@ struct WGJTransientBanner: View {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .stroke(tint.opacity(0.26), lineWidth: 1)
                 }
-                .shadow(color: WGJTheme.shadowStrong.opacity(0.14), radius: 5, x: 0, y: 2)
         }
     }
 }
@@ -716,7 +702,7 @@ extension View {
 
     func wgjScreenBackground() -> some View {
         background {
-            WGJTheme.screenBackgroundGradient.ignoresSafeArea()
+            WGJTheme.bgBase.ignoresSafeArea()
         }
     }
 
@@ -759,7 +745,6 @@ extension View {
                         RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
                             .stroke(WGJTheme.outline.opacity(0.42), lineWidth: 1)
                     }
-                    .shadow(color: WGJTheme.shadowSoft.opacity(0.10), radius: 2, x: 0, y: 1)
             }
     }
 
