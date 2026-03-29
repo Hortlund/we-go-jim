@@ -9,6 +9,8 @@ struct WorkoutSessionExerciseGridEditor: View {
     let targetRepMin: Int?
     let targetRepMax: Int?
     let previousBySetIndex: [Int: WorkoutPreviousSetSnapshot]
+    let personalRecordSummaryKinds: [WorkoutPersonalRecordKind]
+    let personalRecordKindsBySetID: [UUID: [WorkoutPersonalRecordKind]]
     let overloadFeedback: ActiveWorkoutProgressiveOverloadPresentation?
     let preferredLoadUnit: TemplateLoadUnit
 
@@ -53,6 +55,8 @@ struct WorkoutSessionExerciseGridEditor: View {
         targetRepMin: Int? = nil,
         targetRepMax: Int? = nil,
         previousBySetIndex: [Int: WorkoutPreviousSetSnapshot],
+        personalRecordSummaryKinds: [WorkoutPersonalRecordKind] = [],
+        personalRecordKindsBySetID: [UUID: [WorkoutPersonalRecordKind]] = [:],
         overloadFeedback: ActiveWorkoutProgressiveOverloadPresentation? = nil,
         preferredLoadUnit: TemplateLoadUnit = .kg,
         restSeconds: Binding<Int>,
@@ -76,6 +80,8 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.targetRepMin = targetRepMin
         self.targetRepMax = targetRepMax
         self.previousBySetIndex = previousBySetIndex
+        self.personalRecordSummaryKinds = personalRecordSummaryKinds
+        self.personalRecordKindsBySetID = personalRecordKindsBySetID
         self.overloadFeedback = overloadFeedback
         self.preferredLoadUnit = preferredLoadUnit
         self._restSeconds = restSeconds
@@ -155,6 +161,10 @@ struct WorkoutSessionExerciseGridEditor: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(feedbackTint(for: overloadFeedback.tone))
                         .lineLimit(2)
+                }
+
+                if !personalRecordSummaryKinds.isEmpty {
+                    personalRecordChipGroup(personalRecordSummaryKinds)
                 }
 
                 headerSummaryChips
@@ -359,6 +369,8 @@ struct WorkoutSessionExerciseGridEditor: View {
     private func setCard(_ row: WorkoutSessionExerciseSetRowDisplaySnapshot) -> some View {
         let set = row.set
         let progressReference = row.progressReference
+        let personalRecordKinds = personalRecordKindsBySetID[row.id] ?? []
+        let hasPersonalRecord = !personalRecordKinds.isEmpty
 
         return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 10) {
@@ -376,6 +388,12 @@ struct WorkoutSessionExerciseGridEditor: View {
                                 .font(.caption2.weight(.bold))
                                 .foregroundStyle(WGJTheme.accentGold)
                         }
+
+                        if hasPersonalRecord {
+                            Image(systemName: "trophy.fill")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(WGJTheme.accentGold)
+                        }
                     }
 
                     if !manualCompletionMode || progressReference == nil {
@@ -391,6 +409,10 @@ struct WorkoutSessionExerciseGridEditor: View {
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(WGJTheme.textSecondary)
                             .lineLimit(1)
+                    }
+
+                    if hasPersonalRecord {
+                        personalRecordChipGroup(personalRecordKinds, compact: true)
                     }
                 }
 
@@ -433,10 +455,10 @@ struct WorkoutSessionExerciseGridEditor: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(setCardFill(for: set))
+                .fill(setCardFill(for: set, hasPersonalRecord: hasPersonalRecord))
                 .overlay(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(setCardStroke(for: set), lineWidth: 1)
+                        .stroke(setCardStroke(for: set, hasPersonalRecord: hasPersonalRecord), lineWidth: hasPersonalRecord ? 1.35 : 1)
                 )
         )
     }
@@ -784,6 +806,57 @@ struct WorkoutSessionExerciseGridEditor: View {
                             .stroke(tint.opacity(0.24), lineWidth: 1)
                     )
             )
+    }
+
+    @ViewBuilder
+    private func personalRecordChipGroup(_ kinds: [WorkoutPersonalRecordKind], compact: Bool = false) -> some View {
+        let orderedKinds = kinds.sorted()
+
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                ForEach(orderedKinds) { kind in
+                    personalRecordChip(kind, compact: compact)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(orderedKinds) { kind in
+                    personalRecordChip(kind, compact: compact)
+                }
+            }
+        }
+    }
+
+    private func personalRecordChip(_ kind: WorkoutPersonalRecordKind, compact: Bool) -> some View {
+        let tint = personalRecordTint(for: kind)
+        let font: Font = compact ? .caption : .caption.weight(.bold)
+
+        return Label(kind.chipTitle, systemImage: kind.systemImage)
+            .font(font.weight(.semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, compact ? 8 : 10)
+            .padding(.vertical, compact ? 5 : 6)
+            .background(
+                Capsule()
+                    .fill(tint.opacity(compact ? 0.12 : 0.14))
+                    .overlay(
+                        Capsule()
+                            .stroke(tint.opacity(0.28), lineWidth: 1)
+                    )
+            )
+    }
+
+    private func personalRecordTint(for kind: WorkoutPersonalRecordKind) -> Color {
+        switch kind {
+        case .strength:
+            return WGJTheme.accentGold
+        case .weight:
+            return WGJTheme.accentBlue
+        case .reps:
+            return WGJTheme.success
+        case .volume:
+            return WGJTheme.accentCyan
+        }
     }
 
     private func headerIcon(symbol: String) -> some View {
@@ -1253,7 +1326,17 @@ struct WorkoutSessionExerciseGridEditor: View {
         )
     }
 
-    private func setCardFill(for set: WorkoutSessionSetDraft) -> Color {
+    private func setCardFill(for set: WorkoutSessionSetDraft, hasPersonalRecord: Bool) -> Color {
+        if hasPersonalRecord {
+            if set.isCompleted {
+                return WGJTheme.accentGold.opacity(0.12)
+            }
+            if set.isWarmup {
+                return WGJTheme.accentGold.opacity(0.14)
+            }
+            return WGJTheme.accentGold.opacity(0.08)
+        }
+
         if set.isCompleted {
             return WGJTheme.accentBlue.opacity(0.12)
         }
@@ -1265,7 +1348,11 @@ struct WorkoutSessionExerciseGridEditor: View {
         return WGJTheme.field.opacity(0.54)
     }
 
-    private func setCardStroke(for set: WorkoutSessionSetDraft) -> Color {
+    private func setCardStroke(for set: WorkoutSessionSetDraft, hasPersonalRecord: Bool) -> Color {
+        if hasPersonalRecord {
+            return WGJTheme.accentGold.opacity(0.50)
+        }
+
         if set.isCompleted {
             return WGJTheme.accentBlue.opacity(0.34)
         }

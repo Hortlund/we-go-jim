@@ -143,6 +143,55 @@ struct WorkoutMetricsServiceTests {
     }
 
     @Test
+    func sessionSetPRAchievementsMarksExactSetsAndKinds() throws {
+        let context = try makeInMemoryContext()
+        let sessionRepository = WorkoutSessionRepository(modelContext: context)
+        let metrics = WorkoutMetricsService(modelContext: context)
+
+        let exercise = ExerciseCatalogItem(
+            remoteUUID: "bench-set-prs",
+            displayName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(exercise)
+
+        let baseline = try sessionRepository.createEmptySession(name: "Baseline")
+        try sessionRepository.addExercise(sessionID: baseline.id, catalogItem: exercise)
+        let baselineExercise = try sessionRepository.sessionExercises(sessionID: baseline.id).first!
+        var baselineDrafts = try sessionRepository.setDrafts(sessionExerciseID: baselineExercise.id)
+        baselineDrafts[0].actualWeight = 100
+        baselineDrafts[0].actualReps = 5
+        baselineDrafts[0].isCompleted = true
+        try sessionRepository.saveSetDrafts(sessionExerciseID: baselineExercise.id, drafts: baselineDrafts)
+        try sessionRepository.finishSession(sessionID: baseline.id)
+
+        let current = try sessionRepository.createEmptySession(name: "Push")
+        try sessionRepository.addExercise(sessionID: current.id, catalogItem: exercise)
+        let currentExercise = try sessionRepository.sessionExercises(sessionID: current.id).first!
+        var currentDrafts = try sessionRepository.setDrafts(sessionExerciseID: currentExercise.id)
+        currentDrafts[0].actualWeight = 102.5
+        currentDrafts[0].actualReps = 5
+        currentDrafts[0].isCompleted = true
+        currentDrafts[1].actualWeight = 100
+        currentDrafts[1].actualReps = 6
+        currentDrafts[1].isCompleted = true
+        try sessionRepository.saveSetDrafts(sessionExerciseID: currentExercise.id, drafts: currentDrafts)
+        try sessionRepository.finishSession(sessionID: current.id)
+
+        let achievements = try metrics.sessionSetPRAchievements(sessionID: current.id)
+        let achievementsBySetID = Dictionary(
+            uniqueKeysWithValues: achievements.map { ($0.setID, $0) }
+        )
+
+        #expect(achievements.count == 2)
+        #expect(achievementsBySetID[currentDrafts[0].id]?.kinds == [.strength, .weight, .volume])
+        #expect(achievementsBySetID[currentDrafts[1].id]?.kinds == [.strength, .reps, .volume])
+    }
+
+    @Test
     func weeklyWorkoutProgressUsesProfileGoal() throws {
         let context = try makeInMemoryContext()
         let profileRepository = ProfileRepository(modelContext: context)

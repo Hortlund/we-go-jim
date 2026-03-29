@@ -19,6 +19,7 @@ struct HistoryDetailView: View {
     @State private var setDraftsByExerciseID: [UUID: [WorkoutSessionSetDraft]] = [:]
     @State private var restByExerciseID: [UUID: Int] = [:]
     @State private var previousByExerciseID: [UUID: [Int: WorkoutPreviousSetSnapshot]] = [:]
+    @State private var personalRecordPresentationByExerciseID: [UUID: HistoryExercisePersonalRecordPresentation] = [:]
     @State private var loadedExerciseStateStamp: HistoryExerciseStateStamp?
     @State private var expandedExerciseIDs: [UUID: Bool] = [:]
 
@@ -148,6 +149,13 @@ struct HistoryDetailView: View {
         HistoryExerciseListAnimationToken(exercises: sessionExercises)
     }
 
+    private var personalRecordSummary: HistoryWorkoutPersonalRecordSummary {
+        let highlightedSetCount = personalRecordPresentationByExerciseID.values.reduce(0) { partialResult, presentation in
+            partialResult + presentation.highlightedSetCount
+        }
+        return HistoryWorkoutPersonalRecordSummary(highlightedSetCount: highlightedSetCount)
+    }
+
     private var exercisesSectionHeader: some View {
         Group {
             if sessionExercises.isEmpty {
@@ -186,9 +194,9 @@ struct HistoryDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
             WGJActionHeader("Session", subtitle: "Review the saved workout and adjust any logged values") {
                 WGJMetricPill(
-                    systemImage: "flag.checkered",
-                    value: "\(session.prHitsCount) PRs",
-                    tint: session.prHitsCount > 0 ? WGJTheme.accentCyan : WGJTheme.textSecondary
+                    systemImage: personalRecordSummary.highlightedSetCount > 0 ? "trophy.fill" : "flag.checkered",
+                    value: personalRecordSummary.label,
+                    tint: personalRecordSummary.highlightedSetCount > 0 ? WGJTheme.accentGold : WGJTheme.textSecondary
                 )
             }
 
@@ -274,6 +282,7 @@ struct HistoryDetailView: View {
             var loadedDrafts: [UUID: [WorkoutSessionSetDraft]] = [:]
             var loadedRests: [UUID: Int] = [:]
             var loadedPrevious: [UUID: [Int: WorkoutPreviousSetSnapshot]] = [:]
+            let personalRecordPresentation = loadPersonalRecordPresentation()
             let startedAt = session?.startedAt ?? .now
             let requestedExerciseUUIDs = Array(Set(sessionExercises.map(\.catalogExerciseUUID)))
             let previousMaps = (try? sessionRepository.previousSetMaps(
@@ -293,13 +302,15 @@ struct HistoryDetailView: View {
             return HistoryExerciseHydrationResult(
                 draftsByExerciseID: loadedDrafts,
                 restsByExerciseID: loadedRests,
-                previousByExerciseID: loadedPrevious
+                previousByExerciseID: loadedPrevious,
+                personalRecordPresentationByExerciseID: personalRecordPresentation
             )
         }
 
         setDraftsByExerciseID = result.draftsByExerciseID
         restByExerciseID = result.restsByExerciseID
         previousByExerciseID = result.previousByExerciseID
+        personalRecordPresentationByExerciseID = result.personalRecordPresentationByExerciseID
         syncExpandedExerciseState()
         loadedExerciseStateStamp = currentStamp
     }
@@ -342,6 +353,8 @@ struct HistoryDetailView: View {
                 targetRepMin: exercise.targetRepMin,
                 targetRepMax: exercise.targetRepMax,
                 previousBySetIndex: previousByExerciseID[exercise.id] ?? [:],
+                personalRecordSummaryKinds: personalRecordPresentationByExerciseID[exercise.id]?.summaryKinds ?? [],
+                personalRecordKindsBySetID: personalRecordPresentationByExerciseID[exercise.id]?.setKindsBySetID ?? [:],
                 preferredLoadUnit: preferredLoadUnit,
                 restSeconds: restBinding(for: exercise),
                 setDrafts: setDraftsBinding(for: exercise),
@@ -480,6 +493,31 @@ struct HistoryDetailView: View {
     }
 
     @MainActor
+    private func loadPersonalRecordPresentation() -> [UUID: HistoryExercisePersonalRecordPresentation] {
+        guard let achievements = try? WorkoutMetricsService(modelContext: modelContext).sessionSetPRAchievements(sessionID: sessionID) else {
+            return [:]
+        }
+
+        var groupedSetKindsByExerciseID: [UUID: [UUID: [WorkoutPersonalRecordKind]]] = [:]
+        var groupedSummaryKindsByExerciseID: [UUID: Set<WorkoutPersonalRecordKind>] = [:]
+
+        for achievement in achievements {
+            groupedSetKindsByExerciseID[achievement.sessionExerciseID, default: [:]][achievement.setID] = achievement.kinds
+            groupedSummaryKindsByExerciseID[achievement.sessionExerciseID, default: []].formUnion(achievement.kinds)
+        }
+
+        var presentationByExerciseID: [UUID: HistoryExercisePersonalRecordPresentation] = [:]
+        for exercise in sessionExercises {
+            presentationByExerciseID[exercise.id] = HistoryExercisePersonalRecordPresentation(
+                summaryKinds: Array(groupedSummaryKindsByExerciseID[exercise.id, default: []]).sorted(),
+                setKindsBySetID: groupedSetKindsByExerciseID[exercise.id, default: [:]]
+            )
+        }
+
+        return presentationByExerciseID
+    }
+
+    @MainActor
     private func orderedSessionSets(for exercise: WorkoutSessionExercise) -> [WorkoutSessionSet] {
         (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
     }
@@ -494,6 +532,7 @@ private struct HistoryExerciseHydrationResult {
     let draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
     let restsByExerciseID: [UUID: Int]
     let previousByExerciseID: [UUID: [Int: WorkoutPreviousSetSnapshot]]
+    let personalRecordPresentationByExerciseID: [UUID: HistoryExercisePersonalRecordPresentation]
 }
 
 private struct HistoryExerciseStateStamp: Hashable {
@@ -530,6 +569,27 @@ private struct HistoryExerciseListAnimationToken: Hashable {
 
     init(exercises: [WorkoutSessionExercise]) {
         exerciseIDs = exercises.map(\.id)
+    }
+}
+
+private struct HistoryExercisePersonalRecordPresentation: Equatable {
+    let summaryKinds: [WorkoutPersonalRecordKind]
+    let setKindsBySetID: [UUID: [WorkoutPersonalRecordKind]]
+
+    var highlightedSetCount: Int {
+        setKindsBySetID.count
+    }
+}
+
+private struct HistoryWorkoutPersonalRecordSummary {
+    let highlightedSetCount: Int
+
+    var label: String {
+        guard highlightedSetCount > 0 else {
+            return "No PR sets"
+        }
+
+        return "\(highlightedSetCount) PR set\(highlightedSetCount == 1 ? "" : "s")"
     }
 }
 

@@ -22,6 +22,76 @@ struct SessionPRAchievement: Identifiable, Equatable {
     let loadUnit: TemplateLoadUnit
 }
 
+enum WorkoutPersonalRecordKind: String, Identifiable, CaseIterable, Equatable, Hashable, Comparable {
+    case strength
+    case weight
+    case reps
+    case volume
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .strength:
+            return "Strength"
+        case .weight:
+            return "Weight"
+        case .reps:
+            return "Reps"
+        case .volume:
+            return "Volume"
+        }
+    }
+
+    var chipTitle: String {
+        "\(title) PR"
+    }
+
+    var systemImage: String {
+        switch self {
+        case .strength:
+            return "bolt.fill"
+        case .weight:
+            return "scalemass.fill"
+        case .reps:
+            return "repeat"
+        case .volume:
+            return "chart.bar.fill"
+        }
+    }
+
+    private var sortOrder: Int {
+        switch self {
+        case .strength:
+            return 0
+        case .weight:
+            return 1
+        case .reps:
+            return 2
+        case .volume:
+            return 3
+        }
+    }
+
+    static func < (lhs: WorkoutPersonalRecordKind, rhs: WorkoutPersonalRecordKind) -> Bool {
+        lhs.sortOrder < rhs.sortOrder
+    }
+}
+
+struct SessionSetPRAchievement: Identifiable, Equatable {
+    let id: String
+    let sessionExerciseID: UUID
+    let setID: UUID
+    let catalogExerciseUUID: String
+    let exerciseName: String
+    let kinds: [WorkoutPersonalRecordKind]
+    let estimatedOneRepMax: Double
+    let weight: Double
+    let reps: Int
+    let volume: Double
+    let loadUnit: TemplateLoadUnit
+}
+
 struct WeeklyWorkoutProgressPoint: Identifiable, Equatable {
     let id: String
     let weekStart: Date
@@ -203,6 +273,71 @@ final class WorkoutMetricsService {
 
             if let bestAchievement {
                 achievements.append(bestAchievement)
+            }
+        }
+
+        return achievements
+    }
+
+    func sessionSetPRAchievements(sessionID: UUID) throws -> [SessionSetPRAchievement] {
+        guard let session = try session(id: sessionID) else { return [] }
+
+        var achievements: [SessionSetPRAchievement] = []
+
+        for exercise in orderedSessionExercises(session) {
+            var runningBest = try priorSetMetricPeaks(
+                for: exercise.catalogExerciseUUID,
+                before: session.startedAt,
+                excludingSessionID: session.id
+            )
+
+            for set in orderedSessionSets(exercise) where set.isCompleted {
+                guard let value = metricInput(from: set) else { continue }
+
+                let estimatedOneRepMax = self.estimatedOneRepMax(weight: value.weight, reps: value.reps)
+                let comparisonOneRepMax = normalizedLoadForComparison(estimatedOneRepMax, unit: value.unit)
+                let normalizedWeight = normalizedLoadForComparison(value.weight, unit: value.unit)
+                let normalizedVolume = normalizedWeight * Double(value.reps)
+
+                var kinds: [WorkoutPersonalRecordKind] = []
+
+                if comparisonOneRepMax > runningBest.strength {
+                    runningBest.strength = comparisonOneRepMax
+                    kinds.append(.strength)
+                }
+
+                if normalizedWeight > runningBest.weight {
+                    runningBest.weight = normalizedWeight
+                    kinds.append(.weight)
+                }
+
+                if value.reps > runningBest.reps {
+                    runningBest.reps = value.reps
+                    kinds.append(.reps)
+                }
+
+                if normalizedVolume > runningBest.volume {
+                    runningBest.volume = normalizedVolume
+                    kinds.append(.volume)
+                }
+
+                guard !kinds.isEmpty else { continue }
+
+                achievements.append(
+                    SessionSetPRAchievement(
+                        id: "\(session.id.uuidString.lowercased())_\(set.id.uuidString.lowercased())",
+                        sessionExerciseID: exercise.id,
+                        setID: set.id,
+                        catalogExerciseUUID: exercise.catalogExerciseUUID,
+                        exerciseName: exercise.exerciseNameSnapshot,
+                        kinds: kinds.sorted(),
+                        estimatedOneRepMax: estimatedOneRepMax,
+                        weight: value.weight,
+                        reps: value.reps,
+                        volume: value.weight * Double(value.reps),
+                        loadUnit: value.unit
+                    )
+                )
             }
         }
 
@@ -608,6 +743,48 @@ final class WorkoutMetricsService {
         return resolvedGoal
     }
 
+    private func priorSetMetricPeaks(
+        for catalogExerciseUUID: String,
+        before date: Date? = nil,
+        excludingSessionID: UUID? = nil
+    ) throws -> PriorSetMetricPeaks {
+        let sessions = try completedSessions()
+        var peaks = PriorSetMetricPeaks()
+
+        for session in sessions {
+            if let excludingSessionID, session.id == excludingSessionID {
+                continue
+            }
+
+            let completedAt = session.endedAt ?? session.startedAt
+            if let date, completedAt >= date {
+                continue
+            }
+
+            for exercise in orderedSessionExercises(session) where exercise.catalogExerciseUUID == catalogExerciseUUID {
+                for set in orderedSessionSets(exercise) where set.isCompleted {
+                    guard let value = metricInput(from: set) else { continue }
+
+                    peaks.strength = max(
+                        peaks.strength,
+                        comparisonOneRepMax(weight: value.weight, reps: value.reps, unit: value.unit)
+                    )
+                    peaks.weight = max(
+                        peaks.weight,
+                        normalizedLoadForComparison(value.weight, unit: value.unit)
+                    )
+                    peaks.reps = max(peaks.reps, value.reps)
+                    peaks.volume = max(
+                        peaks.volume,
+                        normalizedLoadForComparison(value.weight, unit: value.unit) * Double(value.reps)
+                    )
+                }
+            }
+        }
+
+        return peaks
+    }
+
     private func weekStart(for date: Date) -> Date {
         let components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
         return calendar.date(from: components) ?? date
@@ -776,6 +953,13 @@ private struct CollectedExerciseMetricPoint {
     let completedAt: Date
     let normalizedValue: Double
     let sourceUnit: TemplateLoadUnit
+}
+
+private struct PriorSetMetricPeaks {
+    var strength: Double = 0
+    var weight: Double = 0
+    var reps: Int = 0
+    var volume: Double = 0
 }
 
 private struct MetricsSnapshotCache {
