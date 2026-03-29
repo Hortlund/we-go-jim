@@ -36,6 +36,9 @@ struct TemplatesOverviewView: View {
     }
 
     var body: some View {
+        let visibleTemplates = displayedTemplates
+        let folderLookup = folderNameByID
+
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
                 headerActions
@@ -68,8 +71,8 @@ struct TemplatesOverviewView: View {
                         )
                     }
 
-                    ForEach(displayedTemplates) { template in
-                        templateCard(template)
+                    ForEach(visibleTemplates) { template in
+                        templateCard(template, folderNameByID: folderLookup)
                     }
                 }
 
@@ -162,8 +165,13 @@ struct TemplatesOverviewView: View {
         .buttonStyle(.plain)
     }
 
-    private func templateCard(_ template: WorkoutTemplate) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+    private func templateCard(
+        _ template: WorkoutTemplate,
+        folderNameByID: [UUID: String]
+    ) -> some View {
+        let destinationFolders = folders.filter { $0.id != template.folderID }
+
+        return VStack(alignment: .leading, spacing: 10) {
             NavigationLink {
                 TemplateDetailView(templateID: template.id)
             } label: {
@@ -185,7 +193,7 @@ struct TemplatesOverviewView: View {
             .buttonStyle(.plain)
 
             HStack {
-                Text(folderLabel(for: template))
+                Text(folderLabel(for: template, folderNameByID: folderNameByID))
                     .font(.caption)
                     .foregroundStyle(WGJTheme.accentCyan)
 
@@ -214,7 +222,7 @@ struct TemplatesOverviewView: View {
                         }
                     }
 
-                    ForEach(folders.filter { $0.id != template.folderID }) { folder in
+                    ForEach(destinationFolders) { folder in
                         Button(folder.name) {
                             moveTemplate(templateID: template.id, toFolderID: folder.id)
                         }
@@ -309,7 +317,7 @@ struct TemplatesOverviewView: View {
         Dictionary(uniqueKeysWithValues: folders.map { ($0.id, $0.name) })
     }
 
-    private func folderLabel(for template: WorkoutTemplate) -> String {
+    private func folderLabel(for template: WorkoutTemplate, folderNameByID: [UUID: String]) -> String {
         if template.folderID == TemplateRepository.unfiledFolderID {
             return "Unfiled"
         }

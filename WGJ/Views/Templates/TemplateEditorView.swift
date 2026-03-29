@@ -15,7 +15,7 @@ struct TemplateEditorView: View {
     @State private var templateName = ""
     @State private var templateNotes = ""
     @State private var exerciseDrafts: [TemplateExerciseDraftStore] = []
-    @State private var catalogByUUID: [String: ExerciseCatalogItem] = [:]
+    @State private var recommendationByExerciseID: [UUID: TemplateExerciseRecommendation?] = [:]
 
     @State private var hasLoadedInitialData = false
     @State private var showingExercisePicker = false
@@ -107,7 +107,9 @@ struct TemplateEditorView: View {
     }
 
     private var exercisesSection: some View {
-        LazyVStack(alignment: .leading, spacing: 12) {
+        let rows = exerciseRows
+
+        return LazyVStack(alignment: .leading, spacing: 12) {
             if exerciseDrafts.isEmpty {
                 WGJActionHeader(
                     "Exercises",
@@ -140,25 +142,25 @@ struct TemplateEditorView: View {
                 }
             }
 
-            ForEach(Array(exerciseDrafts.enumerated()), id: \.element.id) { index, draftStore in
+            ForEach(rows) { row in
                 TemplateEditorExerciseRow(
-                    draftStore: draftStore,
-                    recommendation: templateRecommendation(for: draftStore),
-                    exerciseIndexTitle: "Exercise \(index + 1)",
-                    canMoveUp: index > 0,
-                    canMoveDown: index < exerciseDrafts.count - 1,
+                    draftStore: row.draftStore,
+                    recommendation: row.recommendation,
+                    exerciseIndexTitle: "Exercise \(row.index + 1)",
+                    canMoveUp: row.index > 0,
+                    canMoveDown: row.index < rows.count - 1,
                     preferredLoadUnit: preferredLoadUnit,
                     onMoveUp: {
-                        moveExerciseUp(index)
+                        moveExerciseUp(row.index)
                     },
                     onMoveDown: {
-                        moveExerciseDown(index)
+                        moveExerciseDown(row.index)
                     },
                     onExerciseDelete: {
-                        removeExercise(withID: draftStore.id)
+                        removeExercise(withID: row.id)
                     }
                 )
-                .id(draftStore.id)
+                .id(row.id)
                 .transition(exerciseCardTransition)
             }
         }
@@ -251,7 +253,10 @@ struct TemplateEditorView: View {
         profiles.first?.isTrainingGuidanceEnabled ?? true
     }
 
-    private func templateRecommendation(for draftStore: TemplateExerciseDraftStore) -> TemplateExerciseRecommendation? {
+    private func templateRecommendation(
+        for draftStore: TemplateExerciseDraftStore,
+        catalogByUUID: [String: ExerciseCatalogItem]
+    ) -> TemplateExerciseRecommendation? {
         guard isTrainingGuidanceEnabled else { return nil }
         if let catalogExercise = catalogByUUID[draftStore.catalogExerciseUUID] {
             return guidanceService.templateRecommendation(for: catalogExercise)
@@ -267,9 +272,13 @@ struct TemplateEditorView: View {
         )
     }
 
+    @MainActor
     private func loadCatalogMatches() async {
         do {
-            catalogByUUID = try catalogRepository.exerciseMap(for: exerciseDrafts.map(\.catalogExerciseUUID))
+            let matches = try catalogRepository.exerciseMap(for: exerciseDrafts.map(\.catalogExerciseUUID))
+            recommendationByExerciseID = Dictionary(uniqueKeysWithValues: exerciseDrafts.map { draftStore in
+                (draftStore.id, templateRecommendation(for: draftStore, catalogByUUID: matches))
+            })
         } catch {
             errorMessage = String(describing: error)
             showingError = true
@@ -278,6 +287,17 @@ struct TemplateEditorView: View {
 
     private var exerciseCardTransition: AnyTransition {
         WGJMotion.cardTransition(reduceMotion: reduceMotion)
+    }
+
+    private var exerciseRows: [TemplateEditorExerciseRowData] {
+        exerciseDrafts.enumerated().map { index, draftStore in
+            TemplateEditorExerciseRowData(
+                id: draftStore.id,
+                index: index,
+                draftStore: draftStore,
+                recommendation: recommendationByExerciseID[draftStore.id] ?? nil
+            )
+        }
     }
 }
 
@@ -403,6 +423,13 @@ private struct TemplateEditorExerciseRow: View {
             set: { draftStore.setDrafts = $0 }
         )
     }
+}
+
+private struct TemplateEditorExerciseRowData: Identifiable {
+    let id: UUID
+    let index: Int
+    let draftStore: TemplateExerciseDraftStore
+    let recommendation: TemplateExerciseRecommendation?
 }
 
 #Preview {

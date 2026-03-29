@@ -248,7 +248,9 @@ struct TemplateExercisePrescriptionEditor: View {
     }
 
     private var setsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let presentation = setPresentation
+
+        return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Set Plan")
                     .font(.subheadline.weight(.semibold))
@@ -256,26 +258,32 @@ struct TemplateExercisePrescriptionEditor: View {
 
                 Spacer()
 
-                Text("\(setDrafts.count) total")
+                Text("\(presentation.rows.count) total")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(WGJTheme.textSecondary)
             }
 
-            if setDrafts.isEmpty {
+            Text(presentation.summary)
+                .font(.caption)
+                .foregroundStyle(WGJTheme.textSecondary)
+
+            if presentation.rows.isEmpty {
                 Text("No sets yet.")
                     .font(.caption)
                     .foregroundStyle(WGJTheme.textSecondary)
                     .padding(.vertical, 6)
             }
 
-            ForEach(Array(setDrafts.enumerated()), id: \.element.id) { index, draft in
-                SwipeDeleteRow(
-                    offset: setSwipeOffsetBinding(for: draft.id),
-                    isRemoving: setRemovingBinding(for: draft.id)
-                ) {
-                    removeSet(withID: draft.id)
-                } content: {
-                    setCard(at: index)
+            LazyVStack(alignment: .leading, spacing: 10) {
+                ForEach(presentation.rows) { row in
+                    SwipeDeleteRow(
+                        offset: setSwipeOffsetBinding(for: row.id),
+                        isRemoving: setRemovingBinding(for: row.id)
+                    ) {
+                        removeSet(withID: row.id)
+                    } content: {
+                        setCard(row: row)
+                    }
                 }
             }
 
@@ -300,34 +308,34 @@ struct TemplateExercisePrescriptionEditor: View {
         }
     }
 
-    private func setCard(at index: Int) -> some View {
-        let set = setDrafts[index]
+    private func setCard(row: SetRowData) -> some View {
+        let set = setDrafts[row.index]
 
         return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 10) {
-                setBadge(for: index)
+                setBadge(for: row)
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
-                        Text(setTitle(for: index))
+                        Text(row.title)
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(WGJTheme.textPrimary)
                             .wgjSingleLineText(scale: 0.84)
 
-                        if set.isLocked {
+                        if row.isLocked {
                             Image(systemName: "lock.fill")
                                 .font(.caption2.weight(.bold))
                                 .foregroundStyle(WGJTheme.accentGold)
                         }
                     }
 
-                    Text(previousSummary(for: set))
+                    Text(row.previousSummary)
                         .font(.caption)
                         .foregroundStyle(WGJTheme.textSecondary)
                         .lineLimit(2)
                         .monospacedDigit()
 
-                    if let metadata = setMetadataLine(for: index) {
+                    if let metadata = row.metadataLine {
                         Text(metadata)
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(WGJTheme.textSecondary)
@@ -337,27 +345,27 @@ struct TemplateExercisePrescriptionEditor: View {
 
                 Spacer(minLength: 8)
 
-                setMenu(at: index)
+                setMenu(at: row.index)
             }
 
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .top, spacing: 12) {
                     metricField(title: "Weight") {
-                        loadField(at: index)
+                        loadField(at: row.index)
                     }
 
                     metricField(title: "Reps") {
-                        repsField(at: index)
+                        repsField(at: row.index)
                     }
                 }
 
                 VStack(alignment: .leading, spacing: 12) {
                     metricField(title: "Weight") {
-                        loadField(at: index)
+                        loadField(at: row.index)
                     }
 
                     metricField(title: "Reps") {
-                        repsField(at: index)
+                        repsField(at: row.index)
                     }
                 }
             }
@@ -426,12 +434,11 @@ struct TemplateExercisePrescriptionEditor: View {
         .wgjPillField()
     }
 
-    private func setBadge(for index: Int) -> some View {
-        let set = setDrafts[index]
-        let title = set.isWarmup ? "W" : "\(workingSetNumber(at: index))"
+    private func setBadge(for row: SetRowData) -> some View {
+        let set = setDrafts[row.index]
 
         return Button {
-            toggleWarmup(at: index)
+            toggleWarmup(at: row.index)
         } label: {
             ZStack {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -444,7 +451,7 @@ struct TemplateExercisePrescriptionEditor: View {
                             )
                     )
 
-                Text(title)
+                Text(row.badgeTitle)
                     .font(.subheadline.weight(.bold))
                     .foregroundStyle(set.isWarmup ? WGJTheme.accentGold : WGJTheme.textPrimary)
             }
@@ -582,12 +589,12 @@ struct TemplateExercisePrescriptionEditor: View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 8) {
                 infoChip(repRangeSummary, tint: WGJTheme.accentGold)
-                infoChip(setPlanSummary, tint: WGJTheme.accentBlue)
+                infoChip(setPresentation.summary, tint: WGJTheme.accentBlue)
             }
 
             VStack(alignment: .leading, spacing: 8) {
                 infoChip(repRangeSummary, tint: WGJTheme.accentGold)
-                infoChip(setPlanSummary, tint: WGJTheme.accentBlue)
+                infoChip(setPresentation.summary, tint: WGJTheme.accentBlue)
             }
         }
     }
@@ -659,17 +666,6 @@ struct TemplateExercisePrescriptionEditor: View {
         case (nil, nil):
             return "No rep range"
         }
-    }
-
-    private var setPlanSummary: String {
-        let warmups = setDrafts.filter(\.isWarmup).count
-        let workingSets = max(0, setDrafts.count - warmups)
-
-        if warmups > 0 {
-            return "\(workingSets) working • \(warmups) warmup"
-        }
-
-        return "\(workingSets) working sets"
     }
 
     private func toggleExpanded() {
@@ -856,9 +852,7 @@ struct TemplateExercisePrescriptionEditor: View {
         return previous == "-" ? "No previous target saved." : "Last target \(previous)"
     }
 
-    private func setMetadataLine(for index: Int) -> String? {
-        guard setDrafts.indices.contains(index) else { return nil }
-        let set = setDrafts[index]
+    private func setMetadataLine(for set: TemplateExerciseSetDraft) -> String? {
         var parts: [String] = []
 
         if set.isLocked {
@@ -871,15 +865,6 @@ struct TemplateExercisePrescriptionEditor: View {
 
         guard !parts.isEmpty else { return nil }
         return parts.joined(separator: " • ")
-    }
-
-    private func setTitle(for index: Int) -> String {
-        setDrafts[index].isWarmup ? "Warmup Set" : "Working Set \(workingSetNumber(at: index))"
-    }
-
-    private func workingSetNumber(at index: Int) -> Int {
-        let priorWorking = setDrafts.prefix(index).filter { !$0.isWarmup }
-        return priorWorking.count + 1
     }
 
     private func makeSetDraft(copying source: TemplateExerciseSetDraft?) -> TemplateExerciseSetDraft {
@@ -950,4 +935,56 @@ struct TemplateExercisePrescriptionEditor: View {
             set: { setSwipeRemoving[setID] = $0 }
         )
     }
+}
+
+private extension TemplateExercisePrescriptionEditor {
+    var setPresentation: SetPresentation {
+        var rows: [SetRowData] = []
+        rows.reserveCapacity(setDrafts.count)
+
+        var workingSetNumber = 0
+        var warmupCount = 0
+
+        for (index, set) in setDrafts.enumerated() {
+            if set.isWarmup {
+                warmupCount += 1
+            } else {
+                workingSetNumber += 1
+            }
+
+            rows.append(
+                SetRowData(
+                    id: set.id,
+                    index: index,
+                    title: set.isWarmup ? "Warmup Set" : "Working Set \(workingSetNumber)",
+                    badgeTitle: set.isWarmup ? "W" : "\(workingSetNumber)",
+                    previousSummary: previousSummary(for: set),
+                    metadataLine: setMetadataLine(for: set),
+                    isLocked: set.isLocked
+                )
+            )
+        }
+
+        let workingSets = max(0, setDrafts.count - warmupCount)
+        let summary = warmupCount > 0
+            ? "\(workingSets) working • \(warmupCount) warmup"
+            : "\(workingSets) working sets"
+
+        return SetPresentation(rows: rows, summary: summary)
+    }
+}
+
+private struct SetPresentation: Equatable {
+    let rows: [SetRowData]
+    let summary: String
+}
+
+private struct SetRowData: Identifiable, Equatable {
+    let id: UUID
+    let index: Int
+    let title: String
+    let badgeTitle: String
+    let previousSummary: String
+    let metadataLine: String?
+    let isLocked: Bool
 }

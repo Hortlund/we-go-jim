@@ -1,4 +1,5 @@
 import PhotosUI
+import ImageIO
 import SwiftData
 import SwiftUI
 import UIKit
@@ -326,13 +327,40 @@ struct ProfileAvatarView: View {
             return
         }
 
-        let decodedImage = await Task.detached(priority: .utility) { () -> UIImage? in
-            let baseImage = UIImage(data: imageData)
-            return baseImage?.preparingForDisplay() ?? baseImage
-        }.value
+        let decodedImage = await AvatarImageDecoder.decode(
+            imageData,
+            maxPixelSize: 176
+        )
 
         guard !Task.isCancelled else { return }
         image = decodedImage
+    }
+}
+
+private enum AvatarImageDecoder {
+    static func decode(_ data: Data, maxPixelSize: CGFloat) async -> UIImage? {
+        let displayScale = await MainActor.run { UIScreen.main.scale }
+
+        return await Task.detached(priority: .utility) {
+            let options = [kCGImageSourceShouldCache: false] as CFDictionary
+            guard let source = CGImageSourceCreateWithData(data as CFData, options) else {
+                return UIImage(data: data)
+            }
+
+            let thumbnailOptions = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceThumbnailMaxPixelSize: Int(maxPixelSize),
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: false,
+            ] as CFDictionary
+
+            if let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions) {
+                return UIImage(cgImage: cgImage, scale: displayScale, orientation: .up)
+            }
+
+            return UIImage(data: data)
+        }
+        .value
     }
 }
 

@@ -314,6 +314,11 @@ struct WorkoutCompletionExerciseRecap: Identifiable, Equatable {
     let bestSetText: String
 }
 
+private struct WorkoutCompletionExerciseData {
+    let completedSetCount: Int
+    let recap: WorkoutCompletionExerciseRecap
+}
+
 @MainActor
 enum WorkoutCompletionSnapshotBuilder {
     static func build(sessionID: UUID, modelContext: ModelContext) throws -> WorkoutCompletionSnapshot? {
@@ -323,8 +328,9 @@ enum WorkoutCompletionSnapshotBuilder {
         }
 
         let exercises = try repository.sessionExercises(sessionID: sessionID)
-        let completedSetCount = exercises.reduce(0) { partialResult, exercise in
-            partialResult + orderedSessionSets(for: exercise).filter(\.isCompleted).count
+        let exerciseData = exercises.map(makeExerciseData)
+        let completedSetCount = exerciseData.reduce(0) { partialResult, data in
+            partialResult + data.completedSetCount
         }
         let personalRecords = try WorkoutMetricsService(modelContext: modelContext)
             .sessionPRAchievements(sessionID: sessionID)
@@ -366,20 +372,23 @@ enum WorkoutCompletionSnapshotBuilder {
             prHeadline: prHeadline,
             prSupportText: prSupportText,
             personalRecords: personalRecords,
-            exerciseRecap: exercises.map(makeExerciseRecap)
+            exerciseRecap: exerciseData.map(\.recap)
         )
     }
 
-    private static func makeExerciseRecap(_ exercise: WorkoutSessionExercise) -> WorkoutCompletionExerciseRecap {
+    private static func makeExerciseData(_ exercise: WorkoutSessionExercise) -> WorkoutCompletionExerciseData {
         let sets = orderedSessionSets(for: exercise)
         let completedSets = sets.filter(\.isCompleted)
 
-        return WorkoutCompletionExerciseRecap(
-            id: exercise.id,
-            exerciseName: exercise.exerciseNameSnapshot,
+        return WorkoutCompletionExerciseData(
             completedSetCount: completedSets.count,
-            totalSetCount: sets.count,
-            bestSetText: bestSetText(for: completedSets)
+            recap: WorkoutCompletionExerciseRecap(
+                id: exercise.id,
+                exerciseName: exercise.exerciseNameSnapshot,
+                completedSetCount: completedSets.count,
+                totalSetCount: sets.count,
+                bestSetText: bestSetText(for: completedSets)
+            )
         )
     }
 

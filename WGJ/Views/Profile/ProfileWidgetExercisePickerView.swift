@@ -8,14 +8,17 @@ struct ProfileWidgetExercisePickerView: View {
     let onSelect: (ExerciseHistoryOption) -> Void
 
     @State private var searchText = ""
+    @State private var filteredOptions: [ExerciseHistoryOption]
 
-    private var filteredOptions: [ExerciseHistoryOption] {
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return options }
-
-        return options.filter { option in
-            option.exerciseName.localizedCaseInsensitiveContains(query)
-        }
+    init(
+        title: String,
+        options: [ExerciseHistoryOption],
+        onSelect: @escaping (ExerciseHistoryOption) -> Void
+    ) {
+        self.title = title
+        self.options = options
+        self.onSelect = onSelect
+        _filteredOptions = State(initialValue: options)
     }
 
     var body: some View {
@@ -79,6 +82,9 @@ struct ProfileWidgetExercisePickerView: View {
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $searchText, prompt: "Search exercise history")
+            .task(id: searchText) {
+                refreshFilteredOptions()
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
@@ -86,6 +92,18 @@ struct ProfileWidgetExercisePickerView: View {
                     }
                 }
             }
+        }
+    }
+
+    private func refreshFilteredOptions() {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            filteredOptions = options
+            return
+        }
+
+        filteredOptions = options.filter { option in
+            option.exerciseName.localizedCaseInsensitiveContains(query)
         }
     }
 }

@@ -6,91 +6,89 @@ struct ProfileAthleteTypePickerView: View {
     @Binding var selectedAthleteType: ProfileAthleteType?
     @State private var hasScrolledToSelection = false
 
-    private var sections: [AthleteTypePickerSection] {
-        [
-            AthleteTypePickerSection(
-                title: "Optional",
-                subtitle: "Skip it for now and keep the profile clean.",
-                options: [.none]
-            ),
-            AthleteTypePickerSection(
-                title: "Strength Sports",
-                subtitle: "Classic gym identities built around iron, intent, and progressive overload.",
-                options: [
-                    .athlete(.strengthTraining),
-                    .athlete(.powerlifting),
-                    .athlete(.olympicLifting),
-                    .athlete(.bodybuilding),
-                    .athlete(.strongman),
-                ]
-            ),
-            AthleteTypePickerSection(
-                title: "Hybrid and Conditioning",
-                subtitle: "For people who lift, move, and keep the engine switched on.",
-                options: [
-                    .athlete(.hybridAthlete),
-                    .athlete(.functionalFitness),
-                    .athlete(.calisthenics),
-                    .athlete(.running),
-                    .athlete(.endurance),
-                    .athlete(.cycling),
-                    .athlete(.swimming),
-                    .athlete(.trailRunning),
-                ]
-            ),
-            AthleteTypePickerSection(
-                title: "Skill and Movement",
-                subtitle: "Precision, body control, and athletic identity beyond straight gym bro energy.",
-                options: [
-                    .athlete(.climbing),
-                    .athlete(.martialArts),
-                    .athlete(.yogaFlow),
-                    .athlete(.racketSports),
-                ]
-            ),
-            AthleteTypePickerSection(
-                title: "Gym Lore",
-                subtitle: "Still grounded, but with more personality and more stories behind the choice.",
-                options: [
-                    .athlete(.garageGymRat),
-                    .athlete(.machineMaxxer),
-                    .athlete(.mobilityMonk),
-                    .athlete(.weekendWarrior),
-                    .athlete(.dadStrength),
-                    .athlete(.deadliftEnthusiast),
-                ]
-            ),
-            AthleteTypePickerSection(
-                title: "Meme Damage",
-                subtitle: "High flavor, high gym-brain energy, still readable enough to flex in Bros.",
-                options: [
-                    .athlete(.benchMerchant),
-                    .athlete(.legDaySurvivor),
-                    .athlete(.cardioCriminal),
-                    .athlete(.chaosGoblin),
-                    .athlete(.squatSorcerer),
-                    .athlete(.chalkGoblin),
-                    .athlete(.proteinProphet),
-                    .athlete(.preworkoutAstronaut),
-                    .athlete(.deloadDenier),
-                    .athlete(.cableCowboy),
-                    .athlete(.pumpChaser),
-                    .athlete(.repRangeBandit),
-                    .athlete(.plateCollector),
-                    .athlete(.spreadsheetTactician),
-                    .athlete(.restDayRevisionist),
-                    .athlete(.latsCartographer),
-                ]
-            ),
-        ]
-    }
+    private static let sections: [AthleteTypePickerSection] = [
+        AthleteTypePickerSection(
+            title: "Optional",
+            subtitle: "Skip it for now and keep the profile clean.",
+            options: [.none]
+        ),
+        AthleteTypePickerSection(
+            title: "Strength Sports",
+            subtitle: "Classic gym identities built around iron, intent, and progressive overload.",
+            options: [
+                .athlete(.strengthTraining),
+                .athlete(.powerlifting),
+                .athlete(.olympicLifting),
+                .athlete(.bodybuilding),
+                .athlete(.strongman),
+            ]
+        ),
+        AthleteTypePickerSection(
+            title: "Hybrid and Conditioning",
+            subtitle: "For people who lift, move, and keep the engine switched on.",
+            options: [
+                .athlete(.hybridAthlete),
+                .athlete(.functionalFitness),
+                .athlete(.calisthenics),
+                .athlete(.running),
+                .athlete(.endurance),
+                .athlete(.cycling),
+                .athlete(.swimming),
+                .athlete(.trailRunning),
+            ]
+        ),
+        AthleteTypePickerSection(
+            title: "Skill and Movement",
+            subtitle: "Precision, body control, and athletic identity beyond straight gym bro energy.",
+            options: [
+                .athlete(.climbing),
+                .athlete(.martialArts),
+                .athlete(.yogaFlow),
+                .athlete(.racketSports),
+            ]
+        ),
+        AthleteTypePickerSection(
+            title: "Gym Lore",
+            subtitle: "Still grounded, but with more personality and more stories behind the choice.",
+            options: [
+                .athlete(.garageGymRat),
+                .athlete(.machineMaxxer),
+                .athlete(.mobilityMonk),
+                .athlete(.weekendWarrior),
+                .athlete(.dadStrength),
+                .athlete(.deadliftEnthusiast),
+            ]
+        ),
+        AthleteTypePickerSection(
+            title: "Meme Damage",
+            subtitle: "High flavor, high gym-brain energy, still readable enough to flex in Bros.",
+            options: [
+                .athlete(.benchMerchant),
+                .athlete(.legDaySurvivor),
+                .athlete(.cardioCriminal),
+                .athlete(.chaosGoblin),
+                .athlete(.squatSorcerer),
+                .athlete(.chalkGoblin),
+                .athlete(.proteinProphet),
+                .athlete(.preworkoutAstronaut),
+                .athlete(.deloadDenier),
+                .athlete(.cableCowboy),
+                .athlete(.pumpChaser),
+                .athlete(.repRangeBandit),
+                .athlete(.plateCollector),
+                .athlete(.spreadsheetTactician),
+                .athlete(.restDayRevisionist),
+                .athlete(.latsCartographer),
+            ]
+        ),
+    ]
 
     var body: some View {
         NavigationStack {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 22) {
-                        ForEach(sections) { section in
+                        ForEach(Self.sections) { section in
                             VStack(alignment: .leading, spacing: 10) {
                                 sectionHeader(section.title, subtitle: section.subtitle)
 

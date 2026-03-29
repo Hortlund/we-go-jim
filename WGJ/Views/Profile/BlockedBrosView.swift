@@ -16,7 +16,7 @@ struct BlockedBrosView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            LazyVStack(alignment: .leading, spacing: 16) {
                 WGJRootHeader("Blocked Bros", subtitle: "Blocked members are hidden from your circle roster, feed, and reactions.")
 
                 if blockedBros.isEmpty {

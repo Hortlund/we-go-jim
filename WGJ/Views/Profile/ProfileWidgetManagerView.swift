@@ -6,6 +6,8 @@ struct ProfileWidgetManagerView: View {
     @Environment(\.modelContext) private var modelContext
 
     @State private var configs: [ProfileWidgetConfig] = []
+    @State private var enabledConfigs: [ProfileWidgetConfig] = []
+    @State private var disabledConfigs: [ProfileWidgetConfig] = []
     @State private var exerciseOptions: [ExerciseHistoryOption] = []
     @State private var selectingKind: ProfileWidgetKind?
     @State private var enableAfterSelection = false
@@ -18,14 +20,6 @@ struct ProfileWidgetManagerView: View {
 
     private var metricsService: WorkoutMetricsService {
         WorkoutMetricsService(modelContext: modelContext)
-    }
-
-    private var enabledConfigs: [ProfileWidgetConfig] {
-        configs.filter { $0.isEnabled }.sorted { $0.sortOrder < $1.sortOrder }
-    }
-
-    private var disabledConfigs: [ProfileWidgetConfig] {
-        configs.filter { !$0.isEnabled }.sorted { $0.sortOrder < $1.sortOrder }
     }
 
     var body: some View {
@@ -263,6 +257,7 @@ struct ProfileWidgetManagerView: View {
     private func loadConfigs() {
         do {
             configs = try repository.configurations()
+            refreshConfigSections()
         } catch {
             showError(error)
         }
@@ -311,6 +306,15 @@ struct ProfileWidgetManagerView: View {
     private func showError(_ error: Error) {
         errorMessage = String(describing: error)
         showingError = true
+    }
+
+    private func refreshConfigSections() {
+        enabledConfigs = configs
+            .filter { $0.isEnabled }
+            .sorted { $0.sortOrder < $1.sortOrder }
+        disabledConfigs = configs
+            .filter { !$0.isEnabled }
+            .sorted { $0.sortOrder < $1.sortOrder }
     }
 }
 

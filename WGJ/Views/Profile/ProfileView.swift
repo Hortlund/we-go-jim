@@ -263,14 +263,17 @@ struct ProfileView: View {
                     .font(.subheadline)
                     .foregroundStyle(WGJTheme.textSecondary)
             } else {
-                Chart(dashboardContent.weeklyProgress) { point in
-                    BarMark(
-                        x: .value("Week", point.weekStart, unit: .weekOfYear),
-                        y: .value("Workouts", point.completedWorkouts)
-                    )
-                    .foregroundStyle(WGJTheme.accentBlue)
+                let goal = self.weeklyGoal
+                Chart {
+                    ForEach(dashboardContent.weeklyProgress) { point in
+                        BarMark(
+                            x: .value("Week", point.weekStart, unit: .weekOfYear),
+                            y: .value("Workouts", point.completedWorkouts)
+                        )
+                        .foregroundStyle(WGJTheme.accentBlue)
+                    }
 
-                    RuleMark(y: .value("Goal", point.goal))
+                    RuleMark(y: .value("Goal", goal))
                         .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
                         .foregroundStyle(WGJTheme.accentGold.opacity(0.75))
                 }
@@ -686,7 +689,7 @@ final class ProfileViewController {
         let dashboardContent = try WGJPerformance.measure("profile.dashboard") {
             let metricsService = WorkoutMetricsService(modelContext: modelContext)
             let enabled = try widgetRepository.enabledConfigurations()
-            let dashboard = try metricsService.profileDashboardSnapshot(prLimit: 8, weeks: 8)
+            let dashboard = try metricsService.profileDashboardSnapshot(prLimit: 5, weeks: 8)
             var nextContent = ProfileDashboardContent.make(
                 enabledWidgets: enabled,
                 dashboard: dashboard,
@@ -764,12 +767,12 @@ struct ProfileDashboardContent {
     ) -> ProfileDashboardContent {
         ProfileDashboardContent(
             enabledWidgets: enabledWidgets,
-            personalRecords: dashboard.personalRecords,
+            personalRecords: Array(dashboard.personalRecords.prefix(5)),
             weeklyProgress: dashboard.weeklyProgress,
             trendSeriesByKind: trendSeriesByKind,
             weeklyGoal: max(1, dashboard.weeklyGoal),
             overviewStats: dashboard.overviewStats,
-            topExercises: dashboard.topExercises,
+            topExercises: Array(dashboard.topExercises.prefix(3)),
             activityDays: dashboard.activityDays
         )
     }

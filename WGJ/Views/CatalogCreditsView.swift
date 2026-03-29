@@ -50,21 +50,23 @@ struct CatalogCreditsView: View {
     }
 
     private var deduplicatedAttributions: [CreditsAttributionRow] {
-        let mapped = attributions.map {
-            CreditsAttributionRow(
-                sourceName: $0.sourceName,
-                sourceURL: $0.sourceURL,
-                licenseName: $0.licenseName,
-                licenseURL: $0.licenseURL,
-                authorName: $0.authorName,
-                catalogSourceName: $0.exercise?.sourceName ?? ""
-            )
-        }
-
         var seen = Set<CreditsAttributionRow>()
-        return mapped
-            .filter { $0.catalogSourceName != "custom" }
-            .filter { seen.insert($0).inserted }
+        return attributions.reduce(into: []) { result, attribution in
+            let row = CreditsAttributionRow(
+                sourceName: attribution.sourceName,
+                sourceURL: attribution.sourceURL,
+                licenseName: attribution.licenseName,
+                licenseURL: attribution.licenseURL,
+                authorName: attribution.authorName,
+                catalogSourceName: attribution.exercise?.sourceName ?? ""
+            )
+
+            guard row.catalogSourceName != "custom", seen.insert(row).inserted else {
+                return
+            }
+
+            result.append(row)
+        }
     }
 }
 

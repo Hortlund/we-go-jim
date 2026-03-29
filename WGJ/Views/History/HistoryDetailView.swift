@@ -22,6 +22,8 @@ struct HistoryDetailView: View {
     @State private var personalRecordPresentationByExerciseID: [UUID: HistoryExercisePersonalRecordPresentation] = [:]
     @State private var loadedExerciseStateStamp: HistoryExerciseStateStamp?
     @State private var expandedExerciseIDs: [UUID: Bool] = [:]
+    @State private var exerciseListAnimationToken = HistoryExerciseListAnimationToken(exercises: [])
+    @State private var personalRecordSummary = HistoryWorkoutPersonalRecordSummary(highlightedSetCount: 0)
 
     @State private var showingExercisePicker = false
     @State private var showingDeleteConfirmation = false
@@ -32,10 +34,6 @@ struct HistoryDetailView: View {
 
     private var sessionRepository: WorkoutSessionRepository {
         WorkoutSessionRepository(modelContext: modelContext)
-    }
-
-    private var catalogRepository: ExerciseCatalogRepository {
-        ExerciseCatalogRepository(modelContext: modelContext)
     }
 
     init(sessionID: UUID) {
@@ -53,6 +51,8 @@ struct HistoryDetailView: View {
     }
 
     var body: some View {
+        let catalogRepository = ExerciseCatalogRepository(modelContext: modelContext)
+
         ScrollView {
             LazyVStack(alignment: .leading, spacing: WGJSpacing.section) {
                 if let session {
@@ -127,7 +127,7 @@ struct HistoryDetailView: View {
         .task {
             await bootstrapIfNeeded()
         }
-        .task(id: exerciseHydrationStamp) {
+        .task(id: sessionExercises.count) {
             await loadExerciseStateIfNeeded()
         }
         .alert("History Error", isPresented: $showingError) {
@@ -139,21 +139,6 @@ struct HistoryDetailView: View {
 
     private var session: WorkoutSession? {
         sessions.first
-    }
-
-    private var exerciseHydrationStamp: HistoryExerciseStateStamp {
-        HistoryExerciseStateStamp(exercises: sessionExercises)
-    }
-
-    private var exerciseListAnimationToken: HistoryExerciseListAnimationToken {
-        HistoryExerciseListAnimationToken(exercises: sessionExercises)
-    }
-
-    private var personalRecordSummary: HistoryWorkoutPersonalRecordSummary {
-        let highlightedSetCount = personalRecordPresentationByExerciseID.values.reduce(0) { partialResult, presentation in
-            partialResult + presentation.highlightedSetCount
-        }
-        return HistoryWorkoutPersonalRecordSummary(highlightedSetCount: highlightedSetCount)
     }
 
     private var exercisesSectionHeader: some View {
@@ -275,7 +260,7 @@ struct HistoryDetailView: View {
 
     @MainActor
     private func loadExerciseStateIfNeeded() async {
-        let currentStamp = exerciseHydrationStamp
+        let currentStamp = HistoryExerciseStateStamp(exercises: sessionExercises)
         guard currentStamp != loadedExerciseStateStamp else { return }
 
         let result = WGJPerformance.measure("history-detail.hydrate") { () -> HistoryExerciseHydrationResult in
@@ -311,6 +296,12 @@ struct HistoryDetailView: View {
         restByExerciseID = result.restsByExerciseID
         previousByExerciseID = result.previousByExerciseID
         personalRecordPresentationByExerciseID = result.personalRecordPresentationByExerciseID
+        personalRecordSummary = HistoryWorkoutPersonalRecordSummary(
+            highlightedSetCount: result.personalRecordPresentationByExerciseID.values.reduce(0) { partialResult, presentation in
+                partialResult + presentation.highlightedSetCount
+            }
+        )
+        exerciseListAnimationToken = HistoryExerciseListAnimationToken(exercises: sessionExercises)
         syncExpandedExerciseState()
         loadedExerciseStateStamp = currentStamp
     }
@@ -337,7 +328,10 @@ struct HistoryDetailView: View {
     }
 
     private func exerciseSection(_ exercise: WorkoutSessionExercise, index: Int) -> some View {
-        SwipeDeleteRow(
+        let personalRecordPresentation = personalRecordPresentationByExerciseID[exercise.id]
+        let previousSets = previousByExerciseID[exercise.id] ?? [:]
+
+        return SwipeDeleteRow(
             offset: exerciseSwipeOffsetBinding(for: exercise.id),
             isRemoving: exerciseRemovingBinding(for: exercise.id),
             activeRegionMaxY: 116,
@@ -352,9 +346,9 @@ struct HistoryDetailView: View {
                 exerciseIndexTitle: "Exercise \(index + 1)",
                 targetRepMin: exercise.targetRepMin,
                 targetRepMax: exercise.targetRepMax,
-                previousBySetIndex: previousByExerciseID[exercise.id] ?? [:],
-                personalRecordSummaryKinds: personalRecordPresentationByExerciseID[exercise.id]?.summaryKinds ?? [],
-                personalRecordKindsBySetID: personalRecordPresentationByExerciseID[exercise.id]?.setKindsBySetID ?? [:],
+                previousBySetIndex: previousSets,
+                personalRecordSummaryKinds: personalRecordPresentation?.summaryKinds ?? [],
+                personalRecordKindsBySetID: personalRecordPresentation?.setKindsBySetID ?? [:],
                 preferredLoadUnit: preferredLoadUnit,
                 restSeconds: restBinding(for: exercise),
                 setDrafts: setDraftsBinding(for: exercise),

@@ -9,6 +9,10 @@ struct MainTabView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isKeyboardVisible = false
 
+    private var overlayAnimation: Animation {
+        WGJMotion.overlayAnimation(reduceMotion: reduceMotion)
+    }
+
     var body: some View {
         @Bindable var tabState = tabState
         @Bindable var workoutCompletionPresentationState = workoutCompletionPresentationState
@@ -52,11 +56,11 @@ struct MainTabView: View {
                 .wgjTabChrome()
 
                 overlayChrome(bottomSafeAreaInset: bottomSafeAreaInset)
+                    .animation(overlayAnimation, value: activeWorkoutPresentationState.isActiveWorkoutStripCollapsed)
+                    .animation(overlayAnimation, value: restTimerState.restTimerPopup?.id)
+                    .animation(overlayAnimation, value: isKeyboardVisible)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-            .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: activeWorkoutPresentationState.isActiveWorkoutStripCollapsed)
-            .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: restTimerState.restTimerPopup?.id)
-            .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: isKeyboardVisible)
             .sheet(isPresented: Binding(
                 get: {
                     activeWorkoutPresentationState.isActiveWorkoutPresented && activeWorkoutPresentationState.activeSessionID != nil

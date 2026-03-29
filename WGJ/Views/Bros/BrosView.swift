@@ -1,3 +1,4 @@
+import ImageIO
 import SwiftData
 import SwiftUI
 import UIKit
@@ -655,7 +656,7 @@ struct BrosView: View {
             }
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 12) {
+                LazyHStack(alignment: .top, spacing: 12) {
                     ForEach(snapshot.members) { member in
                         memberCard(member, snapshot: snapshot)
                     }
@@ -789,7 +790,10 @@ struct BrosView: View {
         snapshot: BrosFeedSnapshot,
         currentUserRecordName: String
     ) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        let reactionCounts = Dictionary(grouping: event.reactions, by: \.emoji).mapValues(\.count)
+        let selectedEmoji = event.reactions.first(where: { $0.userRecordName == currentUserRecordName })?.emoji
+
+        return VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 12) {
                 BroAvatarView(
                     imageData: event.actorAvatarImageData,
@@ -902,7 +906,11 @@ struct BrosView: View {
                 }
             }
 
-            reactionBar(event: event, currentUserRecordName: currentUserRecordName)
+            reactionBar(
+                event: event,
+                counts: reactionCounts,
+                selectedEmoji: selectedEmoji
+            )
         }
         .padding(WGJSpacing.card)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -928,10 +936,11 @@ struct BrosView: View {
             }
     }
 
-    private func reactionBar(event: BroFeedEvent, currentUserRecordName: String) -> some View {
-        let counts = Dictionary(grouping: event.reactions, by: \.emoji).mapValues(\.count)
-        let selectedEmoji = event.reactions.first(where: { $0.userRecordName == currentUserRecordName })?.emoji
-
+    private func reactionBar(
+        event: BroFeedEvent,
+        counts: [BroReactionKind: Int],
+        selectedEmoji: BroReactionKind?
+    ) -> some View {
         return ViewThatFits(in: .horizontal) {
             HStack(spacing: 8) {
                 reactionButtons(
@@ -1510,13 +1519,40 @@ private struct BroAvatarView: View {
             return
         }
 
-        let decodedImage = await Task.detached(priority: .utility) { () -> UIImage? in
-            let baseImage = UIImage(data: imageData)
-            return baseImage?.preparingForDisplay() ?? baseImage
-        }.value
+        let decodedImage = await AvatarImageDecoder.decode(
+            imageData,
+            maxPixelSize: min(size * 2, 256)
+        )
 
         guard !Task.isCancelled else { return }
         image = decodedImage
+    }
+}
+
+private enum AvatarImageDecoder {
+    static func decode(_ data: Data, maxPixelSize: CGFloat) async -> UIImage? {
+        let displayScale = await MainActor.run { UIScreen.main.scale }
+
+        return await Task.detached(priority: .utility) {
+            let options = [kCGImageSourceShouldCache: false] as CFDictionary
+            guard let source = CGImageSourceCreateWithData(data as CFData, options) else {
+                return UIImage(data: data)
+            }
+
+            let thumbnailOptions = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceThumbnailMaxPixelSize: Int(maxPixelSize),
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: false,
+            ] as CFDictionary
+
+            if let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions) {
+                return UIImage(cgImage: cgImage, scale: displayScale, orientation: .up)
+            }
+
+            return UIImage(data: data)
+        }
+        .value
     }
 }
 

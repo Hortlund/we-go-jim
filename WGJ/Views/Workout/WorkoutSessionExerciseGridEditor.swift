@@ -29,6 +29,8 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private let externalIsExpanded: Binding<Bool>?
     @State private var localIsExpanded: Bool
+    @State private var rowSnapshots: [WorkoutSessionExerciseSetRowDisplaySnapshot]
+    @State private var cachedCompletedSetCount: Int
     @State private var exerciseSwipeOffset: CGFloat = 0
     @State private var exerciseSwipeRemoving = false
     @State private var setSwipeOffsets: [UUID: CGFloat] = [:]
@@ -97,6 +99,20 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.onExerciseSettings = onExerciseSettings
         self.onExerciseDelete = onExerciseDelete
         self._localIsExpanded = State(initialValue: isExpanded?.wrappedValue ?? initiallyExpanded)
+        let initialRows = Self.makeDisplayRows(
+            setDrafts: setDrafts.wrappedValue,
+            previousBySetIndex: previousBySetIndex,
+            targetRepMin: targetRepMin,
+            targetRepMax: targetRepMax,
+            restSeconds: restSeconds.wrappedValue,
+            formatWeight: { WGJFormatters.decimalString($0) }
+        )
+        self._rowSnapshots = State(initialValue: initialRows)
+        self._cachedCompletedSetCount = State(
+            initialValue: initialRows.reduce(0) { partialResult, row in
+                partialResult + (row.set.isCompleted ? 1 : 0)
+            }
+        )
     }
 
     var body: some View {
@@ -117,6 +133,22 @@ struct WorkoutSessionExerciseGridEditor: View {
                 RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
                     .stroke(WGJTheme.success.opacity(0.34), lineWidth: 1.2)
             }
+        }
+        .onAppear(perform: refreshDisplayRows)
+        .onChange(of: _setDrafts.wrappedValue) { _, _ in
+            refreshDisplayRows()
+        }
+        .onChange(of: previousBySetIndex) { _, _ in
+            refreshDisplayRows()
+        }
+        .onChange(of: restSeconds) { _, _ in
+            refreshDisplayRows()
+        }
+        .onChange(of: targetRepMin) { _, _ in
+            refreshDisplayRows()
+        }
+        .onChange(of: targetRepMax) { _, _ in
+            refreshDisplayRows()
         }
     }
 
@@ -266,13 +298,13 @@ struct WorkoutSessionExerciseGridEditor: View {
             VStack(alignment: .leading, spacing: 10) {
                 Menu {
                     ForEach(restPresets, id: \.self) { value in
-                        Button(formattedRest(value)) {
+                        Button(Self.formattedRest(value)) {
                             updateRest(value)
                         }
                     }
                 } label: {
                     HStack(spacing: 8) {
-                        Label(formattedRest(restSeconds), systemImage: "timer")
+                        Label(Self.formattedRest(restSeconds), systemImage: "timer")
                             .monospacedDigit()
 
                         Spacer()
@@ -716,14 +748,14 @@ struct WorkoutSessionExerciseGridEditor: View {
 
             Menu {
                 ForEach(restPresets, id: \.self) { value in
-                    Button(formattedRest(value)) {
+                    Button(Self.formattedRest(value)) {
                         updateSetRest(value, at: index)
                     }
                 }
 
                 Divider()
 
-                Button("Use exercise default (\(formattedRest(restSeconds)))") {
+                Button("Use exercise default (\(Self.formattedRest(restSeconds)))") {
                     updateSetRest(restSeconds, at: index)
                 }
 
@@ -1004,11 +1036,11 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private var displayRows: [WorkoutSessionExerciseSetRowDisplaySnapshot] {
-        buildDisplayRows()
+        rowSnapshots
     }
 
     private var completedSetCount: Int {
-        setDrafts.filter(\.isCompleted).count
+        cachedCompletedSetCount
     }
 
     private var isExerciseCompleted: Bool {
@@ -1191,10 +1223,31 @@ struct WorkoutSessionExerciseGridEditor: View {
         }
     }
 
-    private func buildDisplayRows() -> [WorkoutSessionExerciseSetRowDisplaySnapshot] {
+    private func refreshDisplayRows() {
+        let snapshot = Self.makeDisplayRows(
+            setDrafts: _setDrafts.wrappedValue,
+            previousBySetIndex: previousBySetIndex,
+            targetRepMin: targetRepMin,
+            targetRepMax: targetRepMax,
+            restSeconds: restSeconds,
+            formatWeight: formatWeight
+        )
+        rowSnapshots = snapshot
+        cachedCompletedSetCount = snapshot.reduce(0) { partialResult, row in
+            partialResult + (row.set.isCompleted ? 1 : 0)
+        }
+    }
+
+    private static func makeDisplayRows(
+        setDrafts: [WorkoutSessionSetDraft],
+        previousBySetIndex: [Int: WorkoutPreviousSetSnapshot],
+        targetRepMin: Int?,
+        targetRepMax: Int?,
+        restSeconds: Int,
+        formatWeight: (Double) -> String
+    ) -> [WorkoutSessionExerciseSetRowDisplaySnapshot] {
         var rows: [WorkoutSessionExerciseSetRowDisplaySnapshot] = []
         rows.reserveCapacity(setDrafts.count)
-
         var workingSetNumber = 0
 
         for (index, draft) in setDrafts.enumerated() {
@@ -1219,9 +1272,9 @@ struct WorkoutSessionExerciseGridEditor: View {
                     set: draft,
                     badgeTitle: label.badgeTitle,
                     title: label.title,
-                    previousSummary: previousSummaryText(for: previousBySetIndex[index]),
-                    metadataLine: metadataLine(for: draft),
-                    targetWeightText: targetWeightText(for: draft),
+                    previousSummary: previousSummaryText(for: previousBySetIndex[index], formatWeight: formatWeight),
+                    metadataLine: metadataLine(for: draft, restSeconds: restSeconds),
+                    targetWeightText: targetWeightText(for: draft, formatWeight: formatWeight),
                     targetRepsText: targetRepsText(for: draft),
                     progressReference: WorkoutSetProgressReference.make(
                         draft: draft,
@@ -1238,7 +1291,10 @@ struct WorkoutSessionExerciseGridEditor: View {
         return rows
     }
 
-    private func previousSummaryText(for snapshot: WorkoutPreviousSetSnapshot?) -> String {
+    private static func previousSummaryText(
+        for snapshot: WorkoutPreviousSetSnapshot?,
+        formatWeight: (Double) -> String
+    ) -> String {
         guard let snapshot else {
             return "No previous log for this slot."
         }
@@ -1255,22 +1311,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         return "Previous \(previousText)"
     }
 
-    private func applyPreviousPerformance(at index: Int) {
-        guard setDrafts.indices.contains(index), let previous = previousBySetIndex[index] else { return }
-        guard !setDrafts[index].isLocked else { return }
-
-        setDrafts[index].actualWeight = previous.weight
-        setDrafts[index].actualReps = previous.reps
-        setDrafts[index].actualLoadUnit = previous.unit
-
-        if !manualCompletionMode {
-            setDrafts[index].isCompleted = previous.weight != nil || previous.reps != nil
-        }
-
-        notifyChanged()
-    }
-
-    private func metadataLine(for set: WorkoutSessionSetDraft) -> String? {
+    private static func metadataLine(for set: WorkoutSessionSetDraft, restSeconds: Int) -> String? {
         var parts: [String] = []
 
         if set.isLocked {
@@ -1285,7 +1326,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         return parts.joined(separator: " • ")
     }
 
-    private func targetWeightText(for set: WorkoutSessionSetDraft) -> String? {
+    private static func targetWeightText(for set: WorkoutSessionSetDraft, formatWeight: (Double) -> String) -> String? {
         guard let targetWeight = set.targetWeight else {
             return nil
         }
@@ -1293,12 +1334,42 @@ struct WorkoutSessionExerciseGridEditor: View {
         return "Target \(formatWeight(targetWeight)) \(set.targetLoadUnit.shortLabel)"
     }
 
-    private func targetRepsText(for set: WorkoutSessionSetDraft) -> String? {
+    private static func targetRepsText(for set: WorkoutSessionSetDraft) -> String? {
         guard let targetReps = set.targetReps else {
             return nil
         }
 
         return "Target \(targetReps)"
+    }
+
+    private static func completionButtonTitle(restSeconds: Int) -> String {
+        let restLabel = restSeconds > 0 ? " + Rest \(formattedRest(restSeconds))" : ""
+        return "Complete Set\(restLabel)"
+    }
+
+    private static func formattedRest(_ seconds: Int) -> String {
+        let mins = max(0, seconds) / 60
+        let secs = max(0, seconds) % 60
+        return String(format: "%d:%02d", mins, secs)
+    }
+
+    private static func restLabel(for seconds: Int) -> String {
+        seconds <= 0 ? "No rest" : formattedRest(seconds)
+    }
+
+    private func applyPreviousPerformance(at index: Int) {
+        guard setDrafts.indices.contains(index), let previous = previousBySetIndex[index] else { return }
+        guard !setDrafts[index].isLocked else { return }
+
+        setDrafts[index].actualWeight = previous.weight
+        setDrafts[index].actualReps = previous.reps
+        setDrafts[index].actualLoadUnit = previous.unit
+
+        if !manualCompletionMode {
+            setDrafts[index].isCompleted = previous.weight != nil || previous.reps != nil
+        }
+
+        notifyChanged()
     }
 
     private func setTitle(for index: Int) -> String {
@@ -1364,12 +1435,6 @@ struct WorkoutSessionExerciseGridEditor: View {
         return WGJTheme.accentBlue.opacity(0.18)
     }
 
-    private func formattedRest(_ seconds: Int) -> String {
-        let mins = max(0, seconds) / 60
-        let secs = max(0, seconds) % 60
-        return String(format: "%d:%02d", mins, secs)
-    }
-
     private func updateRest(_ seconds: Int) {
         let previousDefaultRest = restSeconds
         let normalized = max(0, min(3600, seconds))
@@ -1386,7 +1451,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func restLabel(for seconds: Int) -> String {
-        seconds <= 0 ? "No rest" : formattedRest(seconds)
+        seconds <= 0 ? "No rest" : Self.formattedRest(seconds)
     }
 
     private func completionRow(for row: WorkoutSessionExerciseSetRowDisplaySnapshot) -> some View {
@@ -1431,11 +1496,6 @@ struct WorkoutSessionExerciseGridEditor: View {
                 .disabled(set.isLocked)
             }
         }
-    }
-
-    private func completionButtonTitle(restSeconds: Int) -> String {
-        let restLabel = restSeconds > 0 ? " + Rest \(formattedRest(restSeconds))" : ""
-        return "Complete Set\(restLabel)"
     }
 
     private func toggleCompletion(at index: Int) {

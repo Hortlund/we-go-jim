@@ -42,14 +42,22 @@ private struct WGJKeyboardVisibilityModifier: ViewModifier {
             }
             .onPreferenceChange(WGJKeyboardMaxYPreferenceKey.self) { updatedMaxY in
                 guard updatedMaxY > 0 else { return }
+                guard abs(updatedMaxY - viewMaxY) > 0.5 else { return }
                 viewMaxY = updatedMaxY
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
-                isVisible = WGJKeyboard.isVisible(from: notification, viewMaxY: viewMaxY)
+                updateVisibility(
+                    WGJKeyboard.isVisible(from: notification, viewMaxY: viewMaxY)
+                )
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-                isVisible = false
+                updateVisibility(false)
             }
+    }
+
+    private func updateVisibility(_ newValue: Bool) {
+        guard isVisible != newValue else { return }
+        isVisible = newValue
     }
 }
 

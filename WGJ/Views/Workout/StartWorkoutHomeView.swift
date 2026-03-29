@@ -273,7 +273,9 @@ struct StartWorkoutHomeView: View {
     }
 
     private func templateRow(_ template: WorkoutTemplate) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let destinationFolders = folders.filter { $0.id != template.folderID }
+
+        return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(template.name)
@@ -307,7 +309,7 @@ struct StartWorkoutHomeView: View {
                             }
                         }
 
-                        ForEach(folders.filter { $0.id != template.folderID }) { folder in
+                        ForEach(destinationFolders) { folder in
                             Button(folder.name) {
                                 moveTemplate(templateID: template.id, toFolderID: folder.id)
                             }
@@ -447,7 +449,7 @@ struct StartWorkoutHomeView: View {
     }
 
     private var templateLibraryStamp: StartWorkoutTemplateLibraryStamp {
-        StartWorkoutTemplateLibraryStamp(folders: folders, templates: templates)
+        _controller.wrappedValue.templateLibraryStamp
     }
 
     private func rebuiltTemplateSections() -> [StartWorkoutTemplateSection] {
@@ -604,7 +606,7 @@ struct StartWorkoutHomeView: View {
     }
 
     private var sessionDataStamp: StartWorkoutSessionStamp {
-        StartWorkoutSessionStamp(sessions: sessions)
+        _controller.wrappedValue.sessionDataStamp
     }
 
     private func recomputeSessionDerivedState() {
@@ -724,6 +726,8 @@ struct StartWorkoutSessionStamp: Hashable {
     let completedTemplateSessionCount: Int
     let latestCompletedSessionUpdate: TimeInterval
 
+    static let empty = StartWorkoutSessionStamp(sessions: [])
+
     init(sessions: [WorkoutSession]) {
         var count = 0
         var latestUpdate = 0.0
@@ -744,6 +748,8 @@ struct StartWorkoutTemplateLibraryStamp: Hashable {
     let templateCount: Int
     let latestTemplateUpdate: TimeInterval
 
+    static let empty = StartWorkoutTemplateLibraryStamp(folders: [], templates: [])
+
     init(folders: [TemplateFolder], templates: [WorkoutTemplate]) {
         folderCount = folders.count
         latestFolderUpdate = folders
@@ -762,6 +768,8 @@ final class StartWorkoutHomeController {
     var folders: [TemplateFolder] = []
     var templates: [WorkoutTemplate] = []
     var completedSessions: [WorkoutSession] = []
+    var templateLibraryStamp = StartWorkoutTemplateLibraryStamp.empty
+    var sessionDataStamp = StartWorkoutSessionStamp.empty
 
     func reload(modelContext: ModelContext) throws {
         let templateRepository = TemplateRepository(modelContext: modelContext)
@@ -792,6 +800,8 @@ final class StartWorkoutHomeController {
             return $0.name.localizedStandardCompare($1.name) == .orderedAscending
         }
         completedSessions = try sessionRepository.completedSessions()
+        templateLibraryStamp = StartWorkoutTemplateLibraryStamp(folders: loadedFolders, templates: templates)
+        sessionDataStamp = StartWorkoutSessionStamp(sessions: completedSessions)
     }
 }
 
@@ -882,6 +892,8 @@ struct StartWorkoutTemplatePreview: Identifiable, Equatable {
     let name: String
     let notes: String?
     let exercises: [Exercise]
+    let totalPlannedSets: Int
+    let averageRestSummary: String?
 
     init(template: WorkoutTemplate) {
         id = template.id
@@ -894,6 +906,23 @@ struct StartWorkoutTemplatePreview: Identifiable, Equatable {
         exercises = (template.exercises ?? [])
             .sorted { $0.sortOrder < $1.sortOrder }
             .map(Exercise.init(templateExercise:))
+        totalPlannedSets = exercises.reduce(0) { partialResult, exercise in
+            partialResult + exercise.plannedSetCount
+        }
+
+        let rests = exercises.map(\.restSeconds).filter { $0 > 0 }
+        if rests.isEmpty {
+            averageRestSummary = nil
+        } else {
+            let average = Int((Double(rests.reduce(0, +)) / Double(rests.count)).rounded())
+            averageRestSummary = Self.formattedRest(average)
+        }
+    }
+
+    private static func formattedRest(_ seconds: Int) -> String {
+        let minutes = seconds / 60
+        let remainingSeconds = seconds % 60
+        return "\(minutes):\(String(format: "%02d", remainingSeconds))"
     }
 }
 
@@ -929,17 +958,7 @@ private struct TemplateStartPreviewSheet: View {
     }
 
     private var totalPlannedSets: Int {
-        orderedExercises.reduce(0) { partialResult, exercise in
-            partialResult + exercise.plannedSetCount
-        }
-    }
-
-    private var averageRestSummary: String? {
-        let rests = orderedExercises.map(\.restSeconds).filter { $0 > 0 }
-        guard !rests.isEmpty else { return nil }
-
-        let average = Int((Double(rests.reduce(0, +)) / Double(rests.count)).rounded())
-        return formattedRest(average)
+        preview.totalPlannedSets
     }
 
     var body: some View {
@@ -1093,7 +1112,7 @@ private struct TemplateStartPreviewSheet: View {
             tint: WGJTheme.accentCyan
         )
 
-        if let averageRestSummary {
+        if let averageRestSummary = preview.averageRestSummary {
             WGJMetricPill(
                 systemImage: "timer",
                 value: averageRestSummary,

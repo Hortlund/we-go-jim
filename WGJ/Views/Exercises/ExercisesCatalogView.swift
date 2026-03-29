@@ -69,22 +69,7 @@ struct ExercisesCatalogView: View {
         WorkoutSessionRepository(modelContext: modelContext)
     }
 
-    private var catalogRepository: ExerciseCatalogRepository {
-        ExerciseCatalogRepository(modelContext: modelContext)
-    }
-
     private let indexRailWidth: CGFloat = 28
-
-    private var syncStateStamp: TimeInterval {
-        controller.syncStateStamp
-    }
-
-    private var catalogDataStamp: ExercisesCatalogDataStamp {
-        ExercisesCatalogDataStamp(
-            exercises: catalogExercises,
-            syncStateStamp: syncStateStamp
-        )
-    }
 
     private var contentTrailingPadding: CGFloat {
         shouldShowIndexRail ? indexRailWidth : 0
@@ -116,6 +101,8 @@ struct ExercisesCatalogView: View {
     }
 
     var body: some View {
+        let catalogRepository = ExerciseCatalogRepository(modelContext: modelContext)
+
         ScrollViewReader { proxy in
             ZStack(alignment: .trailing) {
                 ScrollView {
@@ -144,7 +131,7 @@ struct ExercisesCatalogView: View {
                                             LazyVStack(alignment: .leading, spacing: 0) {
                                                 ForEach(section.rows) { row in
                                                     if let exercise = exerciseByUUID[row.id] {
-                                                        exerciseRow(exercise)
+                                                        exerciseRow(exercise, repository: catalogRepository)
                                                     }
                                                 }
                                             }
@@ -254,9 +241,6 @@ struct ExercisesCatalogView: View {
                 await bootstrapCatalogIfNeeded()
             }
         }
-        .task(id: catalogDataStamp) {
-            rebuildCatalogCache()
-        }
         .onChange(of: query) { _, newValue in
             debounceQuery(newValue)
         }
@@ -331,11 +315,7 @@ struct ExercisesCatalogView: View {
                 }
             }
         } label: {
-            compactFilterPill(
-                selectedPrimaryMuscleID.flatMap { id in
-                    viewModel.availableMuscles.first(where: { $0.id == id })?.name
-                } ?? "Any Body Part"
-            )
+            compactFilterPill(viewModel.muscleName(for: selectedPrimaryMuscleID) ?? "Any Body Part")
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("exercises-body-part-filter")
@@ -381,19 +361,22 @@ struct ExercisesCatalogView: View {
             .wgjCardContainer(cornerRadius: WGJRadius.control)
     }
 
-    private func exerciseRow(_ exercise: ExerciseCatalogItem) -> some View {
-        HStack(spacing: 10) {
+    private func exerciseRow(
+        _ exercise: ExerciseCatalogItem,
+        repository: ExerciseCatalogRepository
+    ) -> some View {
+        return HStack(spacing: 10) {
             NavigationLink {
                 ExerciseDetailDestinationView(
                     exercise: exercise,
-                    repository: catalogRepository,
+                    repository: repository,
                     actionTitle: isPickerMode ? "Add to Template" : "Add to Workout",
                     onSelect: {
                         handleSelection(exercise)
                     }
                 )
             } label: {
-                ExerciseCatalogRowContent(exercise: exercise, repository: catalogRepository)
+                ExerciseCatalogRowContent(exercise: exercise, repository: repository)
             }
             .buttonStyle(.plain)
 
@@ -415,12 +398,13 @@ struct ExercisesCatalogView: View {
     }
 
     private func rebuildCatalogCache() {
+        let exercises = catalogExercises
         WGJPerformance.measure("catalog.rebuild") {
-            exerciseByUUID = Dictionary(uniqueKeysWithValues: catalogExercises.map { ($0.remoteUUID, $0) })
-            viewModel.rebuildCatalog(from: catalogExercises)
+            exerciseByUUID = Dictionary(uniqueKeysWithValues: exercises.map { ($0.remoteUUID, $0) })
+            viewModel.rebuildCatalog(from: exercises)
         }
         recomputeSections()
-        if catalogExercises.isEmpty {
+        if exercises.isEmpty {
             if loadState == .loading {
                 loadState = .failed
             }
@@ -575,6 +559,7 @@ struct ExercisesCatalogView: View {
         loadState = .loading
         isBootstrappingCatalog = true
         defer { isBootstrappingCatalog = false }
+        let catalogRepository = ExerciseCatalogRepository(modelContext: modelContext)
 
         do {
             try catalogRepository.ensureSeedImportedIfNeeded()
@@ -587,6 +572,8 @@ struct ExercisesCatalogView: View {
     }
 
     private func saveCustomExercise() {
+        let catalogRepository = ExerciseCatalogRepository(modelContext: modelContext)
+
         do {
             let created = try catalogRepository.createCustomExercise(draft: customExerciseDraft)
             try controller.reload(modelContext: modelContext)
@@ -620,19 +607,18 @@ struct ExercisesCatalogView: View {
 final class ExercisesCatalogController {
     var catalogExercises: [ExerciseCatalogItem] = []
     var muscleGroups: [MuscleGroup] = []
-    var syncStateStamp: TimeInterval = 0
 
     func reload(modelContext: ModelContext) throws {
         let repository = ExerciseCatalogRepository(modelContext: modelContext)
         catalogExercises = try repository.allExercises()
         muscleGroups = try repository.availableMuscles()
-        syncStateStamp = repository.syncState()?.lastSuccessfulSyncAt?.timeIntervalSinceReferenceDate ?? 0
     }
 }
 
 @MainActor
 @Observable
 final class ExercisesCatalogViewModel {
+    private(set) var availableMuscleNamesByID: [Int: String] = [:]
     private(set) var availableMuscles: [(id: Int, name: String)] = []
     private(set) var availableCategories: [String] = []
     private(set) var sections: [ExercisesSectionSnapshot] = []
@@ -679,6 +665,7 @@ final class ExercisesCatalogViewModel {
 
         allRows = rows
         totalSectionCount = Set(rows.map(\.indexKey)).count
+        availableMuscleNamesByID = muscleNameByID
         availableMuscles = muscleNameByID
             .map { ($0.key, $0.value) }
             .sorted { $0.1.localizedStandardCompare($1.1) == .orderedAscending }
@@ -727,6 +714,11 @@ final class ExercisesCatalogViewModel {
             return ExercisesSectionSnapshot(id: key, title: key, rows: rows)
         }
     }
+
+    func muscleName(for muscleID: Int?) -> String? {
+        guard let muscleID else { return nil }
+        return availableMuscleNamesByID[muscleID]
+    }
 }
 
 struct ExerciseCatalogRowSnapshot: Identifiable, Equatable {
@@ -742,22 +734,6 @@ struct ExercisesSectionSnapshot: Identifiable, Equatable {
     let id: String
     let title: String
     let rows: [ExerciseCatalogRowSnapshot]
-}
-
-struct ExercisesCatalogDataStamp: Hashable {
-    let exerciseCount: Int
-    let visibleExerciseCount: Int
-    let latestExerciseUpdate: TimeInterval
-    let syncStateStamp: TimeInterval
-
-    init(exercises: [ExerciseCatalogItem], syncStateStamp: TimeInterval) {
-        exerciseCount = exercises.count
-        visibleExerciseCount = exercises.filter { !$0.isHidden }.count
-        latestExerciseUpdate = exercises
-            .map { $0.updatedAt.timeIntervalSinceReferenceDate }
-            .max() ?? 0
-        self.syncStateStamp = syncStateStamp
-    }
 }
 
 struct ExerciseDetailDestinationView: View {

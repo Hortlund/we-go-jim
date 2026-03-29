@@ -109,13 +109,15 @@ struct HistoryOverviewView: View {
     }
 
     private func selectedDayFilterCard(_ day: Date) -> some View {
-        HStack(spacing: 12) {
+        let dayStart = startOfDay(for: day)
+        let workoutCount = controller.snapshot.workoutCountsByDay[dayStart, default: 0]
+
+        return HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(day.formatted(date: .complete, time: .omitted))
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(WGJTheme.textPrimary)
 
-                let workoutCount = controller.snapshot.workoutCountsByDay[startOfDay(for: day), default: 0]
                 Text("\(workoutCount) logged workout\(workoutCount == 1 ? "" : "s")")
                     .font(.caption)
                     .foregroundStyle(WGJTheme.textSecondary)
@@ -235,25 +237,23 @@ enum HistoryOverviewSnapshotBuilder {
         calendar: Calendar = .current
     ) -> HistoryOverviewSnapshot {
         let completedSessions = sessions.filter { $0.status == .completed }
+        let selectedDayStart = selectedDayFilter.map { startOfDay(for: $0, calendar: calendar) }
 
         var workoutCountsByDay: [Date: Int] = [:]
+        var sessionsByMonth: [Date: [WorkoutSession]] = [:]
         for session in completedSessions {
-            let day = startOfDay(for: session.endedAt ?? session.startedAt, calendar: calendar)
+            let sessionDate = session.endedAt ?? session.startedAt
+            let day = startOfDay(for: sessionDate, calendar: calendar)
             workoutCountsByDay[day, default: 0] += 1
+            let shouldIncludeSession = selectedDayStart.map { $0 == day } ?? true
+            if shouldIncludeSession {
+                let month = startOfMonth(for: sessionDate, calendar: calendar)
+                sessionsByMonth[month, default: []].append(session)
+            }
         }
 
-        let filteredSessions = completedSessions.filter { session in
-            guard let selectedDayFilter else { return true }
-            return startOfDay(for: session.endedAt ?? session.startedAt, calendar: calendar)
-                == startOfDay(for: selectedDayFilter, calendar: calendar)
-        }
-
-        let grouped = Dictionary(grouping: filteredSessions) { session in
-            startOfMonth(for: session.endedAt ?? session.startedAt, calendar: calendar)
-        }
-
-        let sections = grouped.keys.sorted(by: >).map { key in
-            let orderedSessions = grouped[key, default: []].sorted { lhs, rhs in
+        let sections = sessionsByMonth.keys.sorted(by: >).map { key in
+            let orderedSessions = sessionsByMonth[key, default: []].sorted { lhs, rhs in
                 (lhs.endedAt ?? lhs.startedAt) > (rhs.endedAt ?? rhs.startedAt)
             }
 
@@ -271,7 +271,9 @@ enum HistoryOverviewSnapshotBuilder {
     }
 
     private static func makeCardData(_ session: WorkoutSession) -> HistorySessionCardData {
-        HistorySessionCardData(
+        let summary = summaryRows(for: session)
+
+        return HistorySessionCardData(
             id: session.id.uuidString,
             sessionID: session.id,
             name: session.name,
@@ -279,8 +281,8 @@ enum HistoryOverviewSnapshotBuilder {
             durationText: formattedDuration(session.durationSeconds),
             volumeText: formattedVolume(session.totalVolume),
             prsText: "\(session.prHitsCount) PRs",
-            exerciseRows: exerciseSummaryRows(for: session),
-            bestSetRows: bestSetSummaryRows(for: session)
+            exerciseRows: summary.exerciseRows,
+            bestSetRows: summary.bestSetRows
         )
     }
 
@@ -306,21 +308,23 @@ enum HistoryOverviewSnapshotBuilder {
         return "\(WGJFormatters.integerString(volume)) kg"
     }
 
-    private static func exerciseSummaryRows(for session: WorkoutSession) -> [String] {
+    private static func summaryRows(for session: WorkoutSession) -> (exerciseRows: [String], bestSetRows: [String]) {
         let exercises = (session.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
-        return exercises.prefix(6).map { exercise in
-            let count = (exercise.sets ?? []).count
-            return "\(count) x \(exercise.exerciseNameSnapshot)"
+        var exerciseRows: [String] = []
+        var bestSetRows: [String] = []
+        exerciseRows.reserveCapacity(min(6, exercises.count))
+        bestSetRows.reserveCapacity(min(6, exercises.count))
+
+        for exercise in exercises.prefix(6) {
+            let sets = (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
+            exerciseRows.append("\(sets.count) x \(exercise.exerciseNameSnapshot)")
+            bestSetRows.append(bestSetLine(for: sets))
         }
+
+        return (exerciseRows, bestSetRows)
     }
 
-    private static func bestSetSummaryRows(for session: WorkoutSession) -> [String] {
-        let exercises = (session.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
-        return exercises.prefix(6).map(bestSetLine)
-    }
-
-    private static func bestSetLine(for exercise: WorkoutSessionExercise) -> String {
-        let sets = (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
+    private static func bestSetLine(for sets: [WorkoutSessionSet]) -> String {
         var bestScore = -1.0
         var bestLine = "-"
 

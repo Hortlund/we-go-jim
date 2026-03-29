@@ -33,7 +33,7 @@ struct TemplateDetailView: View {
 
     @State private var loadedTemplateExerciseIDs: [UUID] = []
     @State private var hasLoadedExerciseStateOnce = false
-    @State private var catalogByUUID: [String: ExerciseCatalogItem] = [:]
+    @State private var recommendationByExerciseID: [UUID: TemplateExerciseRecommendation?] = [:]
     @State private var isExpandedByExerciseID: [UUID: Bool] = [:]
     @State private var errorMessage = ""
     @State private var showingError = false
@@ -130,11 +130,8 @@ struct TemplateDetailView: View {
         } message: {
             Text(errorMessage)
         }
-        .task(id: templateExercises.map(\.id)) {
-            await loadSetDraftsIfNeeded()
-        }
-        .task(id: templateExercises.map(\.catalogExerciseUUID)) {
-            await loadCatalogMatches()
+        .task(id: templateExerciseIdentityStamp) {
+            await loadExerciseStateIfNeeded()
         }
         .onDisappear {
             flushPendingSaves()
@@ -173,7 +170,9 @@ struct TemplateDetailView: View {
     }
 
     private var exercisesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let rows = exerciseRows
+
+        return LazyVStack(alignment: .leading, spacing: 12) {
             WGJActionHeader(
                 "Exercises",
                 subtitle: templateExercises.isEmpty
@@ -210,50 +209,50 @@ struct TemplateDetailView: View {
                 }
             }
 
-            ForEach(Array(templateExercises.enumerated()), id: \.element.id) { index, templateExercise in
-                templateExerciseSection(templateExercise, index: index)
-                    .id(templateExercise.id)
+            ForEach(rows) { row in
+                templateExerciseSection(row)
+                    .id(row.id)
                     .transition(exerciseCardTransition)
             }
         }
     }
 
-    private func templateExerciseSection(_ templateExercise: TemplateExercise, index: Int) -> some View {
+    private func templateExerciseSection(_ row: TemplateExerciseRowData) -> some View {
         SwipeDeleteRow(
-            offset: exerciseSwipeOffsetBinding(for: templateExercise.id),
-            isRemoving: exerciseRemovingBinding(for: templateExercise.id),
+            offset: exerciseSwipeOffsetBinding(for: row.id),
+            isRemoving: exerciseRemovingBinding(for: row.id),
             activeRegionMaxY: 116,
             gestureStrategy: .simultaneous
         ) {
-            removeExercise(templateExerciseID: templateExercise.id)
+            removeExercise(templateExerciseID: row.id)
         } content: {
             TemplateExercisePrescriptionEditor(
-                exerciseName: templateExercise.exerciseNameSnapshot,
-                muscleSummary: templateExercise.muscleSummarySnapshot,
-                category: templateExercise.categorySnapshot,
+                exerciseName: row.exercise.exerciseNameSnapshot,
+                muscleSummary: row.exercise.muscleSummarySnapshot,
+                category: row.exercise.categorySnapshot,
                 infoDestination: AnyView(
-                    TemplateExerciseDetailDestinationView(templateExercise: templateExercise)
+                    TemplateExerciseDetailDestinationView(templateExercise: row.exercise)
                 ),
-                recommendation: templateRecommendation(for: templateExercise),
+                recommendation: row.recommendation,
                 initiallyExpanded: false,
-                isExpanded: isExpandedBinding(for: templateExercise.id),
-                exerciseIndexTitle: "Exercise \(index + 1)",
+                isExpanded: isExpandedBinding(for: row.id),
+                exerciseIndexTitle: "Exercise \(row.index + 1)",
                 preferredLoadUnit: preferredLoadUnit,
-                targetRepMin: targetRepMinBinding(for: templateExercise),
-                targetRepMax: targetRepMaxBinding(for: templateExercise),
-                restSeconds: restSecondsBinding(for: templateExercise),
-                setDrafts: setDraftsBinding(for: templateExercise),
+                targetRepMin: targetRepMinBinding(for: row.exercise),
+                targetRepMax: targetRepMaxBinding(for: row.exercise),
+                restSeconds: restSecondsBinding(for: row.exercise),
+                setDrafts: setDraftsBinding(for: row.exercise),
                 onSetDraftsChanged: { drafts in
-                    persistSetDrafts(templateExerciseID: templateExercise.id, drafts: drafts)
+                    persistSetDrafts(templateExerciseID: row.id, drafts: drafts)
                 },
                 onRepRangeChanged: { min, max in
-                    persistRepRange(templateExerciseID: templateExercise.id, minReps: min, maxReps: max)
+                    persistRepRange(templateExerciseID: row.id, minReps: min, maxReps: max)
                 },
                 onRestChanged: { value in
-                    persistRestSeconds(templateExerciseID: templateExercise.id, restSeconds: value)
+                    persistRestSeconds(templateExerciseID: row.id, restSeconds: value)
                 },
                 onExerciseDelete: {
-                    removeExercise(templateExerciseID: templateExercise.id)
+                    removeExercise(templateExerciseID: row.id)
                 }
             )
         }
@@ -558,7 +557,10 @@ struct TemplateDetailView: View {
         )
     }
 
-    private func templateRecommendation(for exercise: TemplateExercise) -> TemplateExerciseRecommendation? {
+    private func templateRecommendation(
+        for exercise: TemplateExercise,
+        catalogByUUID: [String: ExerciseCatalogItem]
+    ) -> TemplateExerciseRecommendation? {
         guard isTrainingGuidanceEnabled else { return nil }
         if let catalogExercise = catalogByUUID[exercise.catalogExerciseUUID] {
             return guidanceService.templateRecommendation(for: catalogExercise)
@@ -574,10 +576,20 @@ struct TemplateDetailView: View {
         )
     }
 
+    @MainActor
+    private func loadExerciseStateIfNeeded() async {
+        await loadSetDraftsIfNeeded()
+        await loadCatalogMatches()
+    }
+
+    @MainActor
     private func loadCatalogMatches() async {
         do {
-            catalogByUUID = try ExerciseCatalogRepository(modelContext: modelContext)
+            let matches = try ExerciseCatalogRepository(modelContext: modelContext)
                 .exerciseMap(for: templateExercises.map(\.catalogExerciseUUID))
+            recommendationByExerciseID = Dictionary(uniqueKeysWithValues: templateExercises.map { exercise in
+                (exercise.id, templateRecommendation(for: exercise, catalogByUUID: matches))
+            })
         } catch {
             showError(error)
         }
@@ -625,6 +637,24 @@ struct TemplateDetailView: View {
 
     private var exerciseCardTransition: AnyTransition {
         WGJMotion.cardTransition(reduceMotion: reduceMotion)
+    }
+
+    private var templateExerciseIdentityStamp: TemplateExerciseIdentityStamp {
+        TemplateExerciseIdentityStamp(
+            ids: templateExercises.map(\.id),
+            catalogExerciseUUIDs: templateExercises.map(\.catalogExerciseUUID)
+        )
+    }
+
+    private var exerciseRows: [TemplateExerciseRowData] {
+        templateExercises.enumerated().map { index, exercise in
+            TemplateExerciseRowData(
+                id: exercise.id,
+                index: index,
+                exercise: exercise,
+                recommendation: recommendationByExerciseID[exercise.id] ?? nil
+            )
+        }
     }
 }
 
@@ -703,6 +733,18 @@ private struct TemplateExerciseDetailDestinationView: View {
 private struct RepRangeDraft: Equatable {
     var min: Int?
     var max: Int?
+}
+
+private struct TemplateExerciseIdentityStamp: Hashable {
+    let ids: [UUID]
+    let catalogExerciseUUIDs: [String]
+}
+
+private struct TemplateExerciseRowData: Identifiable {
+    let id: UUID
+    let index: Int
+    let exercise: TemplateExercise
+    let recommendation: TemplateExerciseRecommendation?
 }
 
 #Preview {

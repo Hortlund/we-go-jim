@@ -34,13 +34,15 @@ struct FolderDetailView: View {
     }
 
     var body: some View {
+        let folderTemplates = templatesInFolder
+
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                headerCard
+            LazyVStack(alignment: .leading, spacing: 16) {
+                headerCard(templatesCount: folderTemplates.count)
 
                 headerActions
 
-                if templatesInFolder.isEmpty {
+                if folderTemplates.isEmpty {
                     WGJEmptyStateCard(
                         title: "No templates in this folder",
                         message: "Create a new template or add an existing one to start organizing workouts here.",
@@ -48,7 +50,7 @@ struct FolderDetailView: View {
                     )
                 }
 
-                ForEach(templatesInFolder) { template in
+                ForEach(folderTemplates) { template in
                     templateCard(template)
                 }
             }
@@ -70,10 +72,10 @@ struct FolderDetailView: View {
         }
     }
 
-    private var headerCard: some View {
+    private func headerCard(templatesCount: Int) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             WGJSectionHeader("Folder", subtitle: folderName)
-            Text("\(templatesInFolder.count) templates")
+            Text("\(templatesCount) templates")
                 .font(.caption)
                 .foregroundStyle(WGJTheme.accentCyan)
         }
@@ -119,7 +121,9 @@ struct FolderDetailView: View {
     }
 
     private func templateCard(_ template: WorkoutTemplate) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let destinationFolders = folders.filter { $0.id != folderID }
+
+        return VStack(alignment: .leading, spacing: 10) {
             NavigationLink {
                 TemplateDetailView(templateID: template.id)
             } label: {
@@ -157,7 +161,7 @@ struct FolderDetailView: View {
                         moveTemplate(templateID: template.id, toFolderID: nil)
                     }
 
-                    ForEach(folders.filter { $0.id != folderID }) { destination in
+                    ForEach(destinationFolders) { destination in
                         Button(destination.name) {
                             moveTemplate(templateID: template.id, toFolderID: destination.id)
                         }
@@ -186,10 +190,12 @@ struct FolderDetailView: View {
     }
 
     private var addExistingSheet: some View {
-        NavigationStack {
+        let templatesToAdd = availableTemplates
+
+        return NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    if availableTemplates.isEmpty {
+                    if templatesToAdd.isEmpty {
                         WGJEmptyStateCard(
                             title: "Nothing to add",
                             message: "Every template is already in this folder.",
@@ -197,7 +203,7 @@ struct FolderDetailView: View {
                         )
                     }
 
-                    ForEach(availableTemplates) { template in
+                    ForEach(templatesToAdd) { template in
                         Button {
                             moveTemplate(templateID: template.id, toFolderID: folderID)
                             showingAddExistingTemplate = false

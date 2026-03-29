@@ -130,10 +130,6 @@ struct ActiveWorkoutView: View {
             }
             .padding(16)
             .animation(WGJMotion.cardAnimation(reduceMotion: reduceMotion), value: exerciseListAnimationToken)
-            .animation(
-                WGJMotion.overlayAnimation(reduceMotion: reduceMotion),
-                value: restTimerState.restTimerPopup?.id
-            )
         }
         .scrollDismissesKeyboard(.interactively)
         .wgjScreenBackground()
@@ -155,25 +151,32 @@ struct ActiveWorkoutView: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if !isKeyboardVisible, !isEndingSession, let session, session.status == .active {
-                ActiveWorkoutBottomDock(
-                    session: session,
-                    isCancelArmed: isCancelArmed,
-                    reduceMotion: reduceMotion,
-                    onArmCancel: {
-                        dismissKeyboard()
-                        showingFinishConfirmation = false
-                        isCancelArmed = true
-                    },
-                    onKeepWorkout: {
-                        isCancelArmed = false
-                    },
-                    onDiscardWorkout: {
-                        cancelWorkout()
-                    }
-                )
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+            Group {
+                if !isKeyboardVisible, !isEndingSession, let session, session.status == .active {
+                    ActiveWorkoutBottomDock(
+                        session: session,
+                        isCancelArmed: isCancelArmed,
+                        reduceMotion: reduceMotion,
+                        onArmCancel: {
+                            dismissKeyboard()
+                            showingFinishConfirmation = false
+                            isCancelArmed = true
+                        },
+                        onKeepWorkout: {
+                            isCancelArmed = false
+                        },
+                        onDiscardWorkout: {
+                            cancelWorkout()
+                        }
+                    )
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
             }
+            .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: isKeyboardVisible)
+            .animation(
+                WGJMotion.overlayAnimation(reduceMotion: reduceMotion),
+                value: restTimerState.restTimerPopup?.id
+            )
         }
         .wgjTrackKeyboardVisibility($isKeyboardVisible)
         .sheet(isPresented: $showingExercisePicker) {
@@ -230,7 +233,6 @@ struct ActiveWorkoutView: View {
         } message: {
             Text($0.summary)
         }
-        .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: isKeyboardVisible)
         .background {
             WorkoutRestTimerExpiryObserver()
         }
