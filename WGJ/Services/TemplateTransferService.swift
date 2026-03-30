@@ -69,10 +69,7 @@ enum TemplateTransferError: LocalizedError, Equatable {
 }
 
 extension UTType {
-    static let wgjTemplate = UTType(
-        exportedAs: TemplateTransferFileFormat.typeIdentifier,
-        conformingTo: .json
-    )
+    static let wgjTemplate = UTType(importedAs: TemplateTransferFileFormat.typeIdentifier)
 }
 
 @MainActor
