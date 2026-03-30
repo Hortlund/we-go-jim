@@ -12,12 +12,14 @@ struct ContentView: View {
 
     @State private var appPhase: AppPhase = .splash
     @State private var appTabState = AppTabState()
+    @State private var templateFileOpenState = TemplateFileOpenState()
     @State private var workoutCompletionPresentationState = WorkoutCompletionPresentationState()
     @State private var activeWorkoutPresentationState = ActiveWorkoutPresentationState()
     @State private var restTimerState = RestTimerState()
     @State private var catalogSyncCoordinator = CatalogSyncCoordinator()
     @State private var socialMaintenanceScheduler = SocialMaintenanceScheduler()
     @State private var isPreparingMainPhase = false
+    @State private var hasInstalledUITestPendingTemplate = false
 
     var body: some View {
         Group {
@@ -36,6 +38,7 @@ struct ContentView: View {
             }
         }
         .environment(appTabState)
+        .environment(templateFileOpenState)
         .environment(workoutCompletionPresentationState)
         .environment(activeWorkoutPresentationState)
         .environment(restTimerState)
@@ -43,6 +46,7 @@ struct ContentView: View {
         .tint(WGJTheme.accent)
         .preferredColorScheme(.dark)
         .task {
+            installUITestPendingTemplateIfNeeded()
             requestAppMaintenance()
             updateIdleTimerState()
         }
@@ -55,8 +59,12 @@ struct ContentView: View {
         .onChange(of: appPhase) { _, newPhase in
             if newPhase == .main {
                 requestAppMaintenance()
+                routePendingTemplateFileIfNeeded()
             }
             updateIdleTimerState()
+        }
+        .onOpenURL { url in
+            handleIncomingTemplateFileURL(url)
         }
         .onChange(of: storedProfiles.first?.keepsScreenAwake) { _, _ in
             updateIdleTimerState()
@@ -101,6 +109,52 @@ struct ContentView: View {
         guard appPhase != .main else { return }
         withAnimation(.easeInOut(duration: 0.2)) {
             appPhase = .main
+        }
+    }
+
+    private func handleIncomingTemplateFileURL(_ url: URL) {
+        guard templateFileOpenState.enqueueIfSupported(url: url) else {
+            return
+        }
+
+        routePendingTemplateFileIfNeeded()
+    }
+
+    private func routePendingTemplateFileIfNeeded() {
+        templateFileOpenState.routePendingRequestIfNeeded(
+            appPhase: appPhase,
+            tabState: appTabState
+        )
+    }
+
+    private func installUITestPendingTemplateIfNeeded() {
+        guard hasInstalledUITestPendingTemplate == false else {
+            return
+        }
+
+        hasInstalledUITestPendingTemplate = true
+
+        let environment = ProcessInfo.processInfo.environment
+        guard let payload = environment["UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64"],
+              let data = Data(base64Encoded: payload)
+        else {
+            return
+        }
+
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("UITestTemplateOpen")
+            .appendingPathExtension(TemplateTransferFileFormat.filenameExtension)
+
+        do {
+            if FileManager.default.fileExists(atPath: fileURL.path) {
+                try FileManager.default.removeItem(at: fileURL)
+            }
+            try data.write(to: fileURL, options: .atomic)
+            handleIncomingTemplateFileURL(fileURL)
+        } catch {
+            #if DEBUG
+            print("Could not install UI test template open payload: \(error)")
+            #endif
         }
     }
 
@@ -184,12 +238,6 @@ struct ContentView: View {
     private func updateIdleTimerState() {
         UIApplication.shared.isIdleTimerDisabled = shouldKeepScreenAwake
     }
-}
-
-private enum AppPhase {
-    case splash
-    case login
-    case main
 }
 
 private enum AppStartupRouting {

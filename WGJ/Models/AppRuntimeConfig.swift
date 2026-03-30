@@ -58,6 +58,12 @@ extension Notification.Name {
     static let wgjDidDeleteAllUserData = Notification.Name("wgj.didDeleteAllUserData")
 }
 
+enum AppPhase {
+    case splash
+    case login
+    case main
+}
+
 enum AppMainTab: Hashable {
     case profile
     case history
@@ -66,10 +72,64 @@ enum AppMainTab: Hashable {
     case bros
 }
 
+struct PendingTemplateFileOpen: Equatable, Identifiable {
+    let requestID: UUID
+    let fileURL: URL
+
+    init(fileURL: URL, requestID: UUID = UUID()) {
+        self.requestID = requestID
+        self.fileURL = fileURL
+    }
+
+    var id: UUID { requestID }
+}
+
 @MainActor
 @Observable
 final class AppTabState {
     var selectedTab: AppMainTab = .startWorkout
+}
+
+@MainActor
+@Observable
+final class TemplateFileOpenState {
+    var pendingRequest: PendingTemplateFileOpen?
+
+    @discardableResult
+    func enqueueIfSupported(url: URL) -> Bool {
+        guard Self.supports(url: url) else {
+            return false
+        }
+
+        pendingRequest = PendingTemplateFileOpen(fileURL: url)
+        return true
+    }
+
+    func routePendingRequestIfNeeded(appPhase: AppPhase, tabState: AppTabState) {
+        guard appPhase == .main, pendingRequest != nil else {
+            return
+        }
+
+        tabState.selectedTab = .startWorkout
+    }
+
+    func clear(requestID: UUID) {
+        guard pendingRequest?.requestID == requestID else {
+            return
+        }
+
+        pendingRequest = nil
+    }
+
+    static func supports(url: URL) -> Bool {
+        guard url.isFileURL else {
+            return false
+        }
+
+        return url.pathExtension.localizedCaseInsensitiveCompare(
+            TemplateTransferFileFormat.filenameExtension
+        ) == .orderedSame
+    }
 }
 
 @MainActor

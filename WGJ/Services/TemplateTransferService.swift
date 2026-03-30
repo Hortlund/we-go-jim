@@ -2,6 +2,11 @@ import Foundation
 import SwiftData
 import UniformTypeIdentifiers
 
+enum TemplateTransferFileFormat {
+    static let typeIdentifier = "com.hortlund.wgj.template"
+    static let filenameExtension = "wgjtemplate"
+}
+
 struct TemplateTransferEnvelope: Codable, Equatable {
     static let currentFormatVersion = 1
 
@@ -64,7 +69,10 @@ enum TemplateTransferError: LocalizedError, Equatable {
 }
 
 extension UTType {
-    static let wgjTemplate = UTType(exportedAs: "com.hortlund.wgj.template", conformingTo: .json)
+    static let wgjTemplate = UTType(
+        exportedAs: TemplateTransferFileFormat.typeIdentifier,
+        conformingTo: .json
+    )
 }
 
 @MainActor
@@ -279,6 +287,6 @@ final class TemplateTransferService {
         .joined()
         let normalized = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolved = normalized.isEmpty ? ReviewTextKind.templateName.fallbackValue : normalized
-        return "\(resolved).wgjtemplate"
+        return "\(resolved).\(TemplateTransferFileFormat.filenameExtension)"
     }
 }

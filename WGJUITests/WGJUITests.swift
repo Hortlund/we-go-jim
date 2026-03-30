@@ -91,6 +91,23 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testTemplateFileLaunchHookImportsAndShowsPreview() throws {
+        let app = launchApp(launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Launch Hook Template",
+                notes: "Imported from launch hook"
+            ),
+        ])
+
+        let previewSheet = identifiedElement("template-preview-sheet", in: app)
+        XCTAssertTrue(previewSheet.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Launch Hook Template"].waitForExistence(timeout: 5))
+
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(app.staticTexts["Launch Hook Template"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testSettingsLegalSupportNavigation() throws {
         let app = launchApp()
 
@@ -313,12 +330,16 @@ final class WGJUITests: XCTestCase {
         XCTAssertEqual(repsField.value as? String, "8")
     }
 
-    private func launchApp() -> XCUIApplication {
+    private func launchApp(
+        launchArguments extraLaunchArguments: [String] = [],
+        launchEnvironment extraLaunchEnvironment: [String: String] = [:]
+    ) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = [
             "UITEST_SKIP_SPLASH",
             "UITEST_IN_MEMORY_STORE",
-        ]
+        ] + extraLaunchArguments
+        app.launchEnvironment = extraLaunchEnvironment
         app.launch()
         authenticateIfNeeded(app)
         XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 5))
@@ -340,5 +361,20 @@ final class WGJUITests: XCTestCase {
 
     private func identifiedElement(_ identifier: String, in app: XCUIApplication) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+    }
+
+    private func makeTemplateOpenPayloadBase64(name: String, notes: String) -> String {
+        let payload: [String: Any] = [
+            "formatVersion": 1,
+            "exportedAt": ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: 0)),
+            "template": [
+                "name": name,
+                "notes": notes,
+                "exercises": [],
+            ],
+        ]
+
+        let data = try! JSONSerialization.data(withJSONObject: payload, options: [])
+        return data.base64EncodedString()
     }
 }

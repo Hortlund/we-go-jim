@@ -8,6 +8,7 @@ struct StartWorkoutHomeView: View {
     @Environment(\.isTabActive) private var isTabActive
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
+    @Environment(TemplateFileOpenState.self) private var templateFileOpenState
 
     @State private var expandedFolderIDs = StartWorkoutFolderExpansionPersistence.load()
     @State private var selectedTemplatePreview: StartWorkoutTemplatePreview?
@@ -24,6 +25,7 @@ struct StartWorkoutHomeView: View {
     @State private var pendingFolderDeletion: StartWorkoutPendingFolderDeletion?
     @State private var showingTemplateImporter = false
     @State private var templateShareSheet: StartWorkoutTemplateShareSheet?
+    @State private var directOpenImportRequestID: UUID?
 
     @State private var errorMessage = ""
     @State private var showingError = false
@@ -164,6 +166,9 @@ struct StartWorkoutHomeView: View {
         }
         .task(id: sessionDataStamp) {
             recomputeSessionDerivedState()
+        }
+        .task(id: pendingTemplateFileTaskKey) {
+            importPendingTemplateFileIfNeeded()
         }
     }
 
@@ -716,6 +721,13 @@ struct StartWorkoutHomeView: View {
         _controller.wrappedValue.sessionDataStamp
     }
 
+    private var pendingTemplateFileTaskKey: PendingTemplateFileTaskKey {
+        PendingTemplateFileTaskKey(
+            requestID: templateFileOpenState.pendingRequest?.requestID,
+            isTabActive: isTabActive
+        )
+    }
+
     private func recomputeSessionDerivedState() {
         var completedByTemplateID: [UUID: Date] = [:]
 
@@ -869,19 +881,47 @@ struct StartWorkoutHomeView: View {
     private func handleTemplateImport(_ result: Result<URL, Error>) {
         switch result {
         case .success(let fileURL):
-            do {
-                let importedTemplate = try templateTransferService.importTemplate(from: fileURL)
-                expandedFolderIDs[TemplateRepository.unfiledFolderID] = true
-                persistExpandedFolderState()
-                try controller.reload(modelContext: modelContext)
-                selectedTemplatePreview = StartWorkoutTemplatePreview(template: importedTemplate)
-            } catch {
-                showError(error)
-            }
+            importTemplate(from: fileURL)
         case .failure(let error):
             guard !isUserCancelledImport(error) else {
                 return
             }
+            showError(error)
+        }
+    }
+
+    private func importPendingTemplateFileIfNeeded() {
+        guard isTabActive, let pendingRequest = templateFileOpenState.pendingRequest else {
+            return
+        }
+        guard directOpenImportRequestID != pendingRequest.requestID else {
+            return
+        }
+
+        directOpenImportRequestID = pendingRequest.requestID
+        defer {
+            if directOpenImportRequestID == pendingRequest.requestID {
+                directOpenImportRequestID = nil
+            }
+        }
+
+        importTemplate(from: pendingRequest.fileURL, clearingPendingRequestID: pendingRequest.requestID)
+    }
+
+    private func importTemplate(from fileURL: URL, clearingPendingRequestID requestID: UUID? = nil) {
+        defer {
+            if let requestID {
+                templateFileOpenState.clear(requestID: requestID)
+            }
+        }
+
+        do {
+            let importedTemplate = try templateTransferService.importTemplate(from: fileURL)
+            expandedFolderIDs[TemplateRepository.unfiledFolderID] = true
+            persistExpandedFolderState()
+            try controller.reload(modelContext: modelContext)
+            selectedTemplatePreview = StartWorkoutTemplatePreview(template: importedTemplate)
+        } catch {
             showError(error)
         }
     }
@@ -1304,6 +1344,7 @@ private struct TemplateStartPreviewSheet: View {
                 }
             }
             .padding(16)
+            .accessibilityIdentifier("template-preview-sheet")
             .wgjGlassContainer(spacing: 16)
             .wgjSheetSurface()
             .navigationTitle("Template")
@@ -1553,11 +1594,17 @@ private struct TemplateStartPreviewSheet: View {
 
 }
 
+private struct PendingTemplateFileTaskKey: Hashable {
+    let requestID: UUID?
+    let isTabActive: Bool
+}
+
 #Preview {
     NavigationStack {
         StartWorkoutHomeView()
     }
     .environment(ActiveWorkoutPresentationState())
+    .environment(TemplateFileOpenState())
     .modelContainer(for: [
         ExerciseCatalogItem.self,
         MuscleGroup.self,

@@ -190,6 +190,7 @@ private struct LazyTabContainer<Content: View>: View {
 #Preview {
     MainTabView()
         .environment(AppTabState())
+        .environment(TemplateFileOpenState())
         .environment(AppNotificationRouter.shared)
         .environment(WorkoutCompletionPresentationState())
         .environment(ActiveWorkoutPresentationState())

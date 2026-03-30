@@ -195,6 +195,33 @@ struct TemplateTransferServiceTests {
     }
 
     @Test
+    func importFromFileURLKeepsCopySuffixesForRepeatedDirectOpens() throws {
+        let context = try makeInMemoryContext()
+        let service = TemplateTransferService(modelContext: context)
+        let fileURL = try makeTransferFileURL(
+            envelope: TemplateTransferEnvelope(
+                template: TemplateTransferTemplate(
+                    name: "Shared Push",
+                    notes: "Friend copy",
+                    exercises: []
+                )
+            )
+        )
+
+        defer {
+            try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent())
+        }
+
+        let firstImportedTemplate = try service.importTemplate(from: fileURL)
+        let secondImportedTemplate = try service.importTemplate(from: fileURL)
+
+        #expect(firstImportedTemplate.name == "Shared Push")
+        #expect(secondImportedTemplate.name == "Shared Push Copy")
+        #expect(firstImportedTemplate.folderID == TemplateRepository.unfiledFolderID)
+        #expect(secondImportedTemplate.folderID == TemplateRepository.unfiledFolderID)
+    }
+
+    @Test
     func importRejectsMalformedFile() throws {
         let context = try makeInMemoryContext()
         let service = TemplateTransferService(modelContext: context)
@@ -226,6 +253,32 @@ struct TemplateTransferServiceTests {
             #expect(error == .unsupportedVersion(99))
         } catch {
             Issue.record("Expected TemplateTransferError.unsupportedVersion, got \(error)")
+        }
+    }
+
+    @Test
+    func importFromFileURLRejectsMalformedFile() throws {
+        let context = try makeInMemoryContext()
+        let service = TemplateTransferService(modelContext: context)
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let fileURL = directoryURL
+            .appendingPathComponent("broken")
+            .appendingPathExtension(TemplateTransferFileFormat.filenameExtension)
+
+        try FileManager.default.createDirectory(
+            at: directoryURL,
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
+        try Data("bad json".utf8).write(to: fileURL, options: .atomic)
+
+        defer {
+            try? FileManager.default.removeItem(at: directoryURL)
+        }
+
+        #expect(throws: TemplateTransferError.self) {
+            try service.importTemplate(from: fileURL)
         }
     }
 
@@ -262,5 +315,21 @@ struct TemplateTransferServiceTests {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         return try encoder.encode(envelope)
+    }
+
+    private func makeTransferFileURL(envelope: TemplateTransferEnvelope) throws -> URL {
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let fileURL = directoryURL
+            .appendingPathComponent("shared-template")
+            .appendingPathExtension(TemplateTransferFileFormat.filenameExtension)
+
+        try FileManager.default.createDirectory(
+            at: directoryURL,
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
+        try encoded(envelope).write(to: fileURL, options: .atomic)
+        return fileURL
     }
 }
