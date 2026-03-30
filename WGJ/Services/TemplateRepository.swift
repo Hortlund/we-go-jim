@@ -199,6 +199,29 @@ final class TemplateRepository {
         try modelContext.save()
     }
 
+    func moveFolder(id: UUID, toIndex destinationIndex: Int) throws {
+        var orderedFolders = try folders()
+
+        guard let currentIndex = orderedFolders.firstIndex(where: { $0.id == id }) else {
+            throw TemplateRepositoryError.folderNotFound
+        }
+
+        let clampedDestination = max(0, min(destinationIndex, orderedFolders.count - 1))
+        guard currentIndex != clampedDestination else {
+            return
+        }
+
+        let movingFolder = orderedFolders.remove(at: currentIndex)
+        orderedFolders.insert(movingFolder, at: clampedDestination)
+
+        for (index, folder) in orderedFolders.enumerated() {
+            folder.sortOrder = index
+            folder.updatedAt = .now
+        }
+
+        try modelContext.save()
+    }
+
     func deleteFolder(id: UUID) throws {
         guard let folder = try folder(id: id) else {
             throw TemplateRepositoryError.folderNotFound

@@ -57,9 +57,10 @@ struct SplashView: View {
                         .font(.system(size: 40, weight: .bold, design: .rounded))
                         .foregroundStyle(Color.white.opacity(0.96))
 
-                    Text("Train together. Lift harder.")
+                    Text("All you bro, PR or ER")
                         .font(.system(size: 16, weight: .medium, design: .rounded))
                         .foregroundStyle(WGJTheme.textSecondary)
+                        .multilineTextAlignment(.center)
                 }
 
                 Spacer()

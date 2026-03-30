@@ -1,3 +1,4 @@
+import Foundation
 import SwiftData
 import SwiftUI
 
@@ -7,7 +8,7 @@ struct StartWorkoutHomeView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
 
-    @State private var expandedFolderIDs: [UUID: Bool] = [:]
+    @State private var expandedFolderIDs = StartWorkoutFolderExpansionPersistence.load()
     @State private var selectedTemplatePreview: StartWorkoutTemplatePreview?
     @State private var templateEditorContext: StartWorkoutTemplateEditorContext?
     @State private var controller = StartWorkoutHomeController()
@@ -19,6 +20,7 @@ struct StartWorkoutHomeView: View {
     @State private var templateSectionsSnapshot: [StartWorkoutTemplateSection] = []
     @State private var conflictingActiveSessionID: UUID?
     @State private var showingActiveWorkoutConflict = false
+    @State private var pendingFolderDeletion: StartWorkoutPendingFolderDeletion?
 
     @State private var errorMessage = ""
     @State private var showingError = false
@@ -109,6 +111,28 @@ struct StartWorkoutHomeView: View {
         } message: {
             Text("Finish or cancel the current workout before starting a new one.")
         }
+        .confirmationDialog(
+            "Delete folder?",
+            isPresented: Binding(
+                get: { pendingFolderDeletion != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        pendingFolderDeletion = nil
+                    }
+                }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingFolderDeletion
+        ) { folder in
+            Button("Delete Folder", role: .destructive) {
+                deleteFolder(folder.id)
+            }
+            Button("Cancel", role: .cancel) {
+                pendingFolderDeletion = nil
+            }
+        } message: { folder in
+            Text(folderDeletionMessage(for: folder))
+        }
         .task(id: isTabActive) {
             guard isTabActive else { return }
             await reloadHomeSnapshot()
@@ -179,6 +203,7 @@ struct StartWorkoutHomeView: View {
 
     private func templateSectionCard(_ section: StartWorkoutTemplateSection) -> some View {
         let isExpanded = isSectionExpanded(section.id)
+        let folder = folder(for: section.id)
 
         return VStack(spacing: 0) {
             HStack(alignment: .center, spacing: 12) {
@@ -197,13 +222,15 @@ struct StartWorkoutHomeView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                if !section.isUnfiled {
+                if let folder {
                     Button {
                         createTemplate(in: section.folderIDForCreation)
                     } label: {
                         StartWorkoutUtilityIcon(systemImage: "plus", tint: WGJTheme.accentBlue)
                     }
                     .buttonStyle(.plain)
+
+                    folderActionsMenu(for: folder)
                 }
 
                 Button {
@@ -385,6 +412,41 @@ struct StartWorkoutHomeView: View {
         .buttonStyle(WGJCompactGhostButtonStyle())
     }
 
+    private func folderActionsMenu(for folder: TemplateFolder) -> some View {
+        Menu {
+            Button {
+                beginEditing(folder: folder)
+            } label: {
+                Label("Edit Folder", systemImage: "pencil")
+            }
+
+            Button {
+                moveFolder(folder.id, by: -1)
+            } label: {
+                Label("Move Up", systemImage: "arrow.up")
+            }
+            .disabled(!canMoveFolderUp(folder.id))
+
+            Button {
+                moveFolder(folder.id, by: 1)
+            } label: {
+                Label("Move Down", systemImage: "arrow.down")
+            }
+            .disabled(!canMoveFolderDown(folder.id))
+
+            Divider()
+
+            Button(role: .destructive) {
+                requestFolderDeletion(folder)
+            } label: {
+                Label("Delete Folder", systemImage: "trash")
+            }
+        } label: {
+            StartWorkoutUtilityIcon(systemImage: "ellipsis", tint: WGJTheme.textSecondary)
+        }
+        .buttonStyle(.plain)
+    }
+
     private func emptySectionState(_ section: StartWorkoutTemplateSection) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(section.isUnfiled ? "No unfiled templates yet" : "No templates in this folder yet")
@@ -489,6 +551,7 @@ struct StartWorkoutHomeView: View {
         templateSectionsSnapshot = WGJPerformance.measure("start-workout.template-sections") {
             rebuiltTemplateSections()
         }
+        synchronizeExpandedFolderState()
     }
 
     private func isSectionExpanded(_ sectionID: UUID) -> Bool {
@@ -500,9 +563,11 @@ struct StartWorkoutHomeView: View {
     }
 
     private func toggleSectionExpansion(_ sectionID: UUID) {
+        let nextState = !isSectionExpanded(sectionID)
         withAnimation(folderExpansionAnimation) {
-            expandedFolderIDs[sectionID] = !isSectionExpanded(sectionID)
+            expandedFolderIDs[sectionID] = nextState
         }
+        persistExpandedFolderState()
     }
 
     private var folderExpansionAnimation: Animation {
@@ -636,6 +701,12 @@ struct StartWorkoutHomeView: View {
         showingFolderEditor = true
     }
 
+    private func beginEditing(folder: TemplateFolder) {
+        editingFolderID = folder.id
+        folderNameDraft = folder.name
+        showingFolderEditor = true
+    }
+
     private func saveFolderDraft() {
         do {
             if let folderID = editingFolderID {
@@ -644,6 +715,37 @@ struct StartWorkoutHomeView: View {
                 try templateRepository.createFolder(name: folderNameDraft)
             }
             showingFolderEditor = false
+            reloadHomeSnapshotIfActive()
+        } catch {
+            showError(error)
+        }
+    }
+
+    private func moveFolder(_ folderID: UUID, by delta: Int) {
+        guard let currentIndex = folderIndex(for: folderID) else {
+            return
+        }
+
+        do {
+            try templateRepository.moveFolder(id: folderID, toIndex: currentIndex + delta)
+            reloadHomeSnapshotIfActive()
+        } catch {
+            showError(error)
+        }
+    }
+
+    private func requestFolderDeletion(_ folder: TemplateFolder) {
+        pendingFolderDeletion = StartWorkoutPendingFolderDeletion(
+            id: folder.id,
+            name: folder.name,
+            templateCount: (folder.templates ?? []).count
+        )
+    }
+
+    private func deleteFolder(_ folderID: UUID) {
+        do {
+            try templateRepository.deleteFolder(id: folderID)
+            pendingFolderDeletion = nil
             reloadHomeSnapshotIfActive()
         } catch {
             showError(error)
@@ -719,6 +821,52 @@ struct StartWorkoutHomeView: View {
     private func showError(_ error: Error) {
         errorMessage = String(describing: error)
         showingError = true
+    }
+
+    private func synchronizeExpandedFolderState() {
+        let validFolderIDs = Set(folders.map(\.id)).union([TemplateRepository.unfiledFolderID])
+        let sanitized = StartWorkoutFolderExpansionPersistence.sanitized(
+            expandedFolderIDs,
+            validFolderIDs: validFolderIDs
+        )
+
+        guard sanitized != expandedFolderIDs else { return }
+        expandedFolderIDs = sanitized
+        persistExpandedFolderState()
+    }
+
+    private func persistExpandedFolderState() {
+        StartWorkoutFolderExpansionPersistence.save(expandedFolderIDs)
+    }
+
+    private func folder(for folderID: UUID) -> TemplateFolder? {
+        folders.first(where: { $0.id == folderID })
+    }
+
+    private func folderIndex(for folderID: UUID) -> Int? {
+        folders.firstIndex(where: { $0.id == folderID })
+    }
+
+    private func canMoveFolderUp(_ folderID: UUID) -> Bool {
+        guard let index = folderIndex(for: folderID) else {
+            return false
+        }
+        return index > 0
+    }
+
+    private func canMoveFolderDown(_ folderID: UUID) -> Bool {
+        guard let index = folderIndex(for: folderID) else {
+            return false
+        }
+        return index < folders.count - 1
+    }
+
+    private func folderDeletionMessage(for folder: StartWorkoutPendingFolderDeletion) -> String {
+        if folder.templateCount == 0 {
+            return "This removes \(folder.name) from your template library."
+        }
+
+        return "This deletes \(folder.name) and its \(sectionCountText(folder.templateCount)) from your template library."
     }
 }
 
@@ -821,6 +969,52 @@ private struct StartWorkoutTemplateEditorContext: Identifiable {
     let id = UUID()
     let folderID: UUID?
     let templateID: UUID?
+}
+
+private struct StartWorkoutPendingFolderDeletion: Identifiable {
+    let id: UUID
+    let name: String
+    let templateCount: Int
+}
+
+enum StartWorkoutFolderExpansionPersistence {
+    static let defaultsKey = "startWorkoutHome.expandedFolders.v1"
+
+    static func load(defaults: UserDefaults = .standard) -> [UUID: Bool] {
+        guard let data = defaults.data(forKey: defaultsKey),
+              let decoded = try? JSONDecoder().decode([String: Bool].self, from: data)
+        else {
+            return [:]
+        }
+
+        var expandedFolders: [UUID: Bool] = [:]
+        expandedFolders.reserveCapacity(decoded.count)
+
+        for (rawID, isExpanded) in decoded {
+            guard let id = UUID(uuidString: rawID) else { continue }
+            expandedFolders[id] = isExpanded
+        }
+
+        return expandedFolders
+    }
+
+    static func save(_ expandedFolders: [UUID: Bool], defaults: UserDefaults = .standard) {
+        guard !expandedFolders.isEmpty else {
+            defaults.removeObject(forKey: defaultsKey)
+            return
+        }
+
+        let payload = Dictionary(uniqueKeysWithValues: expandedFolders.map { ($0.key.uuidString, $0.value) })
+        guard let data = try? JSONEncoder().encode(payload) else { return }
+        defaults.set(data, forKey: defaultsKey)
+    }
+
+    static func sanitized(
+        _ expandedFolders: [UUID: Bool],
+        validFolderIDs: Set<UUID>
+    ) -> [UUID: Bool] {
+        expandedFolders.filter { validFolderIDs.contains($0.key) }
+    }
 }
 
 private struct StartWorkoutUtilityIcon: View {
