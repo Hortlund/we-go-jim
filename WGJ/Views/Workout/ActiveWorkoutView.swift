@@ -1176,6 +1176,7 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
             showsSetProgressChip: false,
             manualCompletionMode: true,
             enablesHeaderSwipeDelete: true,
+            emphasizesExerciseCompletion: true,
             onSetDraftsChanged: onSetDraftsChanged,
             onRestChanged: onRestChanged,
             onSetCompletionChange: onSetCompletionChange,

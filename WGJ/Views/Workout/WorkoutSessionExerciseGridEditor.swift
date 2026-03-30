@@ -21,6 +21,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     var showsSetProgressChip: Bool
     var manualCompletionMode: Bool
     var enablesHeaderSwipeDelete: Bool
+    var emphasizesExerciseCompletion: Bool
     var onSetDraftsChanged: (([WorkoutSessionSetDraft]) -> Void)?
     var onRestChanged: ((Int) -> Void)?
     var onSetCompletionChange: ((UUID, String, Int, Bool) -> Void)?
@@ -69,6 +70,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         showsSetProgressChip: Bool = true,
         manualCompletionMode: Bool = false,
         enablesHeaderSwipeDelete: Bool = false,
+        emphasizesExerciseCompletion: Bool = false,
         onSetDraftsChanged: (([WorkoutSessionSetDraft]) -> Void)? = nil,
         onRestChanged: ((Int) -> Void)? = nil,
         onSetCompletionChange: ((UUID, String, Int, Bool) -> Void)? = nil,
@@ -93,6 +95,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.showsSetProgressChip = showsSetProgressChip
         self.manualCompletionMode = manualCompletionMode
         self.enablesHeaderSwipeDelete = enablesHeaderSwipeDelete
+        self.emphasizesExerciseCompletion = emphasizesExerciseCompletion
         self.onSetDraftsChanged = onSetDraftsChanged
         self.onRestChanged = onRestChanged
         self.onSetCompletionChange = onSetCompletionChange
@@ -127,13 +130,28 @@ struct WorkoutSessionExerciseGridEditor: View {
             }
         }
         .padding(16)
+        .background {
+            if shouldEmphasizeCompletedExercise {
+                RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
+                    .fill(completedExerciseCardFill)
+            }
+        }
         .wgjCardContainer(strong: true)
         .overlay {
             if isExerciseCompleted {
                 RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
-                    .stroke(WGJTheme.success.opacity(0.34), lineWidth: 1.2)
+                    .stroke(
+                        WGJTheme.success.opacity(shouldEmphasizeCompletedExercise ? 0.60 : 0.34),
+                        lineWidth: shouldEmphasizeCompletedExercise ? 2 : 1.2
+                    )
             }
         }
+        .shadow(
+            color: shouldEmphasizeCompletedExercise ? WGJTheme.success.opacity(0.12) : .clear,
+            radius: 16,
+            x: 0,
+            y: 8
+        )
         .onAppear(perform: refreshDisplayRows)
         .onChange(of: _setDrafts.wrappedValue) { _, _ in
             refreshDisplayRows()
@@ -175,18 +193,22 @@ struct WorkoutSessionExerciseGridEditor: View {
                 if let exerciseIndexTitle {
                     Text(exerciseIndexTitle.uppercased())
                         .font(.caption.weight(.bold))
-                        .foregroundStyle(WGJTheme.accentCyan)
+                        .foregroundStyle(shouldEmphasizeCompletedExercise ? WGJTheme.success : WGJTheme.accentCyan)
                 }
 
                 Text(exerciseName)
                     .font(.title3.weight(.semibold))
-                    .foregroundStyle(WGJTheme.accentBlue)
+                    .foregroundStyle(shouldEmphasizeCompletedExercise ? WGJTheme.success : WGJTheme.accentBlue)
                     .wgjSingleLineText(scale: 0.8)
 
                 Text(summaryLine)
                     .font(.subheadline)
                     .foregroundStyle(WGJTheme.textSecondary)
                     .lineLimit(2)
+
+                if shouldEmphasizeCompletedExercise {
+                    completedExerciseBadge
+                }
 
                 if let overloadFeedback {
                     Text(overloadFeedback.text)
@@ -903,11 +925,20 @@ struct WorkoutSessionExerciseGridEditor: View {
     private func headerIcon(symbol: String) -> some View {
         Image(systemName: symbol)
             .font(.title3)
-            .foregroundStyle(WGJTheme.accentBlue)
+            .foregroundStyle(shouldEmphasizeCompletedExercise ? WGJTheme.success : WGJTheme.accentBlue)
             .frame(width: 34, height: 34)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(WGJTheme.field)
+                    .fill(shouldEmphasizeCompletedExercise ? WGJTheme.success.opacity(0.14) : WGJTheme.field)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(
+                                shouldEmphasizeCompletedExercise
+                                    ? WGJTheme.success.opacity(0.24)
+                                    : WGJTheme.outline.opacity(0.36),
+                                lineWidth: 1
+                            )
+                    )
             )
     }
 
@@ -997,6 +1028,34 @@ struct WorkoutSessionExerciseGridEditor: View {
         "\(completedSetCount)/\(setDrafts.count) sets done"
     }
 
+    private var completedExerciseCardFill: LinearGradient {
+        LinearGradient(
+            colors: [
+                WGJTheme.success.opacity(0.18),
+                WGJTheme.cardStrong.opacity(0.98),
+                WGJTheme.success.opacity(0.12),
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    private var completedExerciseBadge: some View {
+        Label("Exercise complete", systemImage: "checkmark.seal.fill")
+            .font(.caption.weight(.bold))
+            .foregroundStyle(WGJTheme.success)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                Capsule()
+                    .fill(WGJTheme.success.opacity(0.14))
+                    .overlay(
+                        Capsule()
+                            .stroke(WGJTheme.success.opacity(0.28), lineWidth: 1)
+                    )
+            )
+    }
+
     private func toggleExpanded() {
         if isExpanded {
             dismissInputFocus()
@@ -1054,6 +1113,10 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private var isExerciseCompleted: Bool {
         !setDrafts.isEmpty && completedSetCount == setDrafts.count
+    }
+
+    private var shouldEmphasizeCompletedExercise: Bool {
+        emphasizesExerciseCompletion && isExerciseCompleted
     }
 
     private func inputFocus(for index: Int, metric: SetInputFocus.Metric) -> SetInputFocus {
