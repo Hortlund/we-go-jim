@@ -417,17 +417,7 @@ private struct HistorySessionCardView: View, Equatable {
                     }
                 }
 
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: 12) {
-                        summaryColumn(title: "Exercise", rows: card.exerciseRows)
-                        summaryColumn(title: "Best Set", rows: card.bestSetRows)
-                    }
-
-                    VStack(alignment: .leading, spacing: 12) {
-                        summaryColumn(title: "Exercise", rows: card.exerciseRows)
-                        summaryColumn(title: "Best Set", rows: card.bestSetRows)
-                    }
-                }
+                summarySection
             }
             .padding(14)
             .wgjCardContainer(strong: true)
@@ -435,22 +425,73 @@ private struct HistorySessionCardView: View, Equatable {
         .buttonStyle(.plain)
     }
 
-    private func summaryColumn(title: String, rows: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(WGJTheme.textPrimary)
+    private var summaryRows: [HistorySessionSummaryRow] {
+        let rowCount = max(card.exerciseRows.count, card.bestSetRows.count)
 
-            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
-                Text(row)
-                    .font(.body)
-                    .foregroundStyle(WGJTheme.textSecondary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+        return (0..<rowCount).map { index in
+            HistorySessionSummaryRow(
+                id: index,
+                exercise: card.exerciseRows.indices.contains(index) ? card.exerciseRows[index] : "-",
+                bestSet: card.bestSetRows.indices.contains(index) ? card.bestSetRows[index] : "-"
+            )
+        }
+    }
+
+    private var summarySection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                summaryExerciseHeader
+                summaryBestSetHeader
+            }
+
+            ForEach(summaryRows) { row in
+                HStack(alignment: .top, spacing: 10) {
+                    summaryExerciseValue(row.exercise)
+                    summaryBestSetValue(row.bestSet)
+                        .monospacedDigit()
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
+
+    private var summaryExerciseHeader: some View {
+        Text("Exercise")
+            .font(.headline.weight(.semibold))
+            .foregroundStyle(WGJTheme.textPrimary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var summaryBestSetHeader: some View {
+        Text("Best Set")
+            .font(.headline.weight(.semibold))
+            .foregroundStyle(WGJTheme.textPrimary)
+            .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private func summaryExerciseValue(_ value: String) -> some View {
+        Text(value)
+            .font(.body)
+            .foregroundStyle(WGJTheme.textSecondary)
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func summaryBestSetValue(_ value: String) -> some View {
+        Text(value)
+            .font(.body.weight(.medium))
+            .foregroundStyle(WGJTheme.textPrimary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.82)
+            .fixedSize(horizontal: true, vertical: false)
+    }
+}
+
+private struct HistorySessionSummaryRow: Identifiable {
+    let id: Int
+    let exercise: String
+    let bestSet: String
 }
 
 private struct HistoryWorkoutCalendarSheet: View {
