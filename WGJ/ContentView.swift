@@ -132,6 +132,9 @@ struct ContentView: View {
         await WGJPerformance.measureAsync("bros.refresh-membership") {
             await service.refreshLocalMembershipState()
         }
+        await WGJPerformance.measureAsync("bros.sync-notifications") {
+            try? await service.syncReactionNotificationSubscription()
+        }
         await WGJPerformance.measureAsync("bros.flush-outbox") {
             await service.flushOutbox()
         }

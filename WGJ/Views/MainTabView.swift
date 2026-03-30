@@ -3,6 +3,7 @@ import SwiftData
 
 struct MainTabView: View {
     @Environment(AppTabState.self) private var tabState
+    @Environment(AppNotificationRouter.self) private var notificationRouter
     @Environment(WorkoutCompletionPresentationState.self) private var workoutCompletionPresentationState
     @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
     @Environment(RestTimerState.self) private var restTimerState
@@ -86,6 +87,11 @@ struct MainTabView: View {
                     .interactiveDismissDisabled()
             }
             .wgjTrackKeyboardVisibility($isKeyboardVisible)
+            .task(id: notificationRouter.routeRequestID) {
+                guard let requestedTab = notificationRouter.requestedTab else { return }
+                tabState.selectedTab = requestedTab
+                notificationRouter.consumeRequestedTab()
+            }
             .onChange(of: activeWorkoutPresentationState.activeSessionID) { _, newValue in
                 if newValue == nil {
                     activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
@@ -184,6 +190,7 @@ private struct LazyTabContainer<Content: View>: View {
 #Preview {
     MainTabView()
         .environment(AppTabState())
+        .environment(AppNotificationRouter.shared)
         .environment(WorkoutCompletionPresentationState())
         .environment(ActiveWorkoutPresentationState())
         .environment(RestTimerState())

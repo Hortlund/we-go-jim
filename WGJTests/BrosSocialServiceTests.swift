@@ -1149,6 +1149,371 @@ struct BrosSocialServiceTests {
         }
     }
 
+    @Test
+    func setReactionCreatesReactionRecordForOtherMembersPost() async throws {
+        let context = try makeInMemoryContext()
+        let memberRecord = makeMembershipRecord(
+            recordName: "membership-circle-1-user-2",
+            circleID: "circle-1",
+            userRecordName: "user-2",
+            joinedAt: Date(timeIntervalSince1970: 120),
+            role: .member,
+            displayName: "Brody"
+        )
+        let eventRecord = makeWorkoutFeedEventRecord(
+            recordName: "workout-user-1",
+            circleID: "circle-1",
+            actorUserRecordName: "user-1",
+            actorMembershipID: "membership-circle-1-user-1",
+            actorDisplayName: "Atlas",
+            createdAt: Date(timeIntervalSince1970: 180),
+            workoutName: "Push Day"
+        )
+
+        let store = TestBrosCloudStore()
+        store.currentUserRecordNameValue = "user-2"
+        store.queryRecordsHandler = { recordType, predicate, _, _ in
+            if recordType == "BroMembership",
+               predicate.predicateFormat.contains("userRecordName")
+            {
+                return [memberRecord]
+            }
+            return []
+        }
+        store.fetchRecordHandler = { recordType, recordName in
+            switch (recordType, recordName) {
+            case ("BroFeedEvent", eventRecord.recordID.recordName):
+                return eventRecord
+            case ("BroReaction", BrosRecordNames.reactionRecordName(eventID: eventRecord.recordID.recordName, userRecordName: "user-2")):
+                return nil
+            default:
+                return nil
+            }
+        }
+
+        var savedRecords: [CKRecord] = []
+        var deletedRecordIDs: [CKRecord.ID] = []
+        store.saveHandler = { records, recordIDs in
+            savedRecords = records
+            deletedRecordIDs = recordIDs
+        }
+
+        let service = CloudKitBrosSocialService(modelContext: context, cloudStore: store)
+        try await service.setReaction(eventID: eventRecord.recordID.recordName, kind: .fire)
+
+        #expect(savedRecords.count == 1)
+        #expect(savedRecords.first?.recordType == "BroReaction")
+        #expect(savedRecords.first?["eventID"] as? String == eventRecord.recordID.recordName)
+        #expect(savedRecords.first?["userRecordName"] as? String == "user-2")
+        #expect(savedRecords.first?["targetUserRecordName"] as? String == "user-1")
+        #expect(savedRecords.first?["emoji"] as? String == BroReactionKind.fire.rawValue)
+        #expect(savedRecords.first?["reactionID"] as? String == BrosRecordNames.reactionRecordName(
+            eventID: eventRecord.recordID.recordName,
+            userRecordName: "user-2"
+        ))
+        #expect(deletedRecordIDs.isEmpty)
+        #expect(savedRecords.contains(where: { $0.recordType == "BroFeedEvent" }) == false)
+    }
+
+    @Test
+    func setReactionRejectsOwnEvent() async throws {
+        let context = try makeInMemoryContext()
+        let ownerRecord = makeMembershipRecord(
+            recordName: "membership-circle-1-user-1",
+            circleID: "circle-1",
+            userRecordName: "user-1",
+            joinedAt: Date(timeIntervalSince1970: 100),
+            role: .owner,
+            displayName: "Atlas"
+        )
+        let eventRecord = makeWorkoutFeedEventRecord(
+            recordName: "workout-user-1",
+            circleID: "circle-1",
+            actorUserRecordName: "user-1",
+            actorMembershipID: ownerRecord.recordID.recordName,
+            actorDisplayName: "Atlas",
+            createdAt: Date(timeIntervalSince1970: 180),
+            workoutName: "Push Day"
+        )
+
+        let store = TestBrosCloudStore()
+        store.currentUserRecordNameValue = "user-1"
+        store.queryRecordsHandler = { recordType, predicate, _, _ in
+            if recordType == "BroMembership",
+               predicate.predicateFormat.contains("userRecordName")
+            {
+                return [ownerRecord]
+            }
+            return []
+        }
+        store.fetchRecordHandler = { recordType, recordName in
+            if recordType == "BroFeedEvent", recordName == eventRecord.recordID.recordName {
+                return eventRecord
+            }
+            return nil
+        }
+
+        let service = CloudKitBrosSocialService(modelContext: context, cloudStore: store)
+
+        do {
+            try await service.setReaction(eventID: eventRecord.recordID.recordName, kind: .flex)
+            Issue.record("Expected own-event reaction to be rejected")
+        } catch let error as BrosSocialServiceError {
+            #expect(error == .cannotReactToOwnEvent)
+        } catch {
+            Issue.record("Expected BrosSocialServiceError.cannotReactToOwnEvent, got \(error)")
+        }
+    }
+
+    @Test
+    func fetchSnapshotPrefersReactionRecordsAndHidesActorSelfReactions() async throws {
+        let context = try makeInMemoryContext()
+        let joinedAt = Date(timeIntervalSince1970: 100)
+        let profile = try ProfileRepository(modelContext: context).loadOrCreateProfile()
+        profile.updateBrosMembership(
+            circleID: "circle-1",
+            membershipID: "membership-circle-1-user-2",
+            userRecordName: "user-2",
+            joinedAt: joinedAt,
+            role: .member
+        )
+        profile.displayName = "Local Brody"
+        profile.updatedAt = Date(timeIntervalSince1970: 500)
+        try context.save()
+
+        let ownerMembership = makeMembershipRecord(
+            recordName: "membership-circle-1-user-1",
+            circleID: "circle-1",
+            userRecordName: "user-1",
+            joinedAt: Date(timeIntervalSince1970: 100),
+            role: .owner,
+            displayName: "Atlas"
+        )
+        let memberMembership = makeMembershipRecord(
+            recordName: "membership-circle-1-user-2",
+            circleID: "circle-1",
+            userRecordName: "user-2",
+            joinedAt: joinedAt,
+            role: .member,
+            displayName: "Brody"
+        )
+        let eventRecord = makeWorkoutFeedEventRecord(
+            recordName: "workout-user-1",
+            circleID: "circle-1",
+            actorUserRecordName: "user-1",
+            actorMembershipID: ownerMembership.recordID.recordName,
+            actorDisplayName: "Atlas",
+            createdAt: Date(timeIntervalSince1970: 180),
+            workoutName: "Push Day",
+            reactions: [
+                BroReactionSummary(userRecordName: "user-1", emoji: .fire, displayName: "Atlas"),
+                BroReactionSummary(userRecordName: "user-2", emoji: .flex, displayName: "Brody"),
+            ]
+        )
+        let circleRecord = makeCircleRecord(
+            circleID: "circle-1",
+            inviteCode: "ABC123",
+            memberLimit: 4,
+            memberRecordNames: [
+                ownerMembership.recordID.recordName,
+                memberMembership.recordID.recordName,
+            ],
+            feedEventRecordNames: [eventRecord.recordID.recordName]
+        )
+        let authoritativeReaction = makeReactionRecord(
+            recordName: BrosRecordNames.reactionRecordName(eventID: eventRecord.recordID.recordName, userRecordName: "user-2"),
+            circleID: "circle-1",
+            eventID: eventRecord.recordID.recordName,
+            userRecordName: "user-2",
+            targetUserRecordName: "user-1",
+            emoji: .clap
+        )
+        let actorSelfReaction = makeReactionRecord(
+            recordName: BrosRecordNames.reactionRecordName(eventID: eventRecord.recordID.recordName, userRecordName: "user-1"),
+            circleID: "circle-1",
+            eventID: eventRecord.recordID.recordName,
+            userRecordName: "user-1",
+            targetUserRecordName: "user-1",
+            emoji: .goat
+        )
+
+        let store = TestBrosCloudStore()
+        store.currentUserRecordNameValue = "user-2"
+        store.fetchRecordHandler = { recordType, recordName in
+            switch (recordType, recordName) {
+            case ("BroMembership", memberMembership.recordID.recordName):
+                return memberMembership
+            case ("BroCircle", "circle-1"):
+                return circleRecord
+            default:
+                return nil
+            }
+        }
+        store.fetchRecordsHandler = { recordType, recordNames in
+            switch recordType {
+            case "BroMembership":
+                if Set(recordNames) == Set([ownerMembership.recordID.recordName, memberMembership.recordID.recordName]) {
+                    return [ownerMembership, memberMembership]
+                }
+            case "BroFeedEvent":
+                if recordNames == [eventRecord.recordID.recordName] {
+                    return [eventRecord]
+                }
+            default:
+                break
+            }
+            return []
+        }
+        store.queryRecordsHandler = { recordType, predicate, _, _ in
+            switch recordType {
+            case "BroMembership":
+                if predicate.predicateFormat.contains("circleID") {
+                    return [ownerMembership, memberMembership]
+                }
+            case "BroFeedEvent":
+                if predicate.predicateFormat.contains("circleID") {
+                    return [eventRecord]
+                }
+            case "BroReaction":
+                if predicate.predicateFormat.contains("circleID") {
+                    return [authoritativeReaction, actorSelfReaction]
+                }
+            default:
+                break
+            }
+            return []
+        }
+
+        let service = CloudKitBrosSocialService(modelContext: context, cloudStore: store)
+        let snapshot = try await service.fetchSnapshot()
+        let resolved = try #require(snapshot)
+        let firstEvent = try #require(resolved.feedEvents.first)
+
+        #expect(firstEvent.reactions == [
+            BroReactionSummary(userRecordName: "user-2", emoji: .clap, displayName: "Local Brody"),
+        ])
+    }
+
+    @Test
+    func flushOutboxDeletesReactionsWhenFeedEventIsDeleted() async throws {
+        struct DeletePayload: Codable {
+            let recordName: String
+        }
+
+        let context = try makeInMemoryContext()
+        let eventRecord = makeWorkoutFeedEventRecord(
+            recordName: "workout-user-1",
+            circleID: "circle-1",
+            actorUserRecordName: "user-1",
+            actorMembershipID: "membership-circle-1-user-1",
+            actorDisplayName: "Atlas",
+            createdAt: Date(timeIntervalSince1970: 180),
+            workoutName: "Push Day"
+        )
+        let circleRecord = makeCircleRecord(
+            circleID: "circle-1",
+            inviteCode: "ABC123",
+            memberLimit: 4,
+            feedEventRecordNames: [eventRecord.recordID.recordName]
+        )
+        let reactionRecord = makeReactionRecord(
+            recordName: BrosRecordNames.reactionRecordName(eventID: eventRecord.recordID.recordName, userRecordName: "user-2"),
+            circleID: "circle-1",
+            eventID: eventRecord.recordID.recordName,
+            userRecordName: "user-2",
+            targetUserRecordName: "user-1",
+            emoji: .fire
+        )
+        let payloadData = try JSONEncoder().encode(DeletePayload(recordName: eventRecord.recordID.recordName))
+        context.insert(
+            SocialOutboxItem(
+                idempotencyKey: "delete_\(eventRecord.recordID.recordName)",
+                operation: .deleteRecord,
+                payloadData: payloadData
+            )
+        )
+        try context.save()
+
+        let store = TestBrosCloudStore()
+        store.fetchRecordHandler = { recordType, recordName in
+            switch (recordType, recordName) {
+            case ("BroFeedEvent", eventRecord.recordID.recordName):
+                return eventRecord
+            case ("BroCircle", "circle-1"):
+                return circleRecord
+            default:
+                return nil
+            }
+        }
+        store.queryRecordsHandler = { recordType, predicate, _, _ in
+            if recordType == "BroReaction",
+               predicate.predicateFormat.contains("circleID")
+            {
+                return [reactionRecord]
+            }
+            return []
+        }
+
+        var deletedRecordIDs: [CKRecord.ID] = []
+        store.saveHandler = { _, recordIDs in
+            deletedRecordIDs = recordIDs
+        }
+
+        let service = CloudKitBrosSocialService(modelContext: context, cloudStore: store)
+        await service.flushOutbox()
+
+        #expect(deletedRecordIDs.map(\.recordName).sorted() == [
+            eventRecord.recordID.recordName,
+            reactionRecord.recordID.recordName,
+        ].sorted())
+        #expect(try context.fetch(FetchDescriptor<SocialOutboxItem>()).isEmpty)
+    }
+
+    @Test
+    func syncReactionNotificationSubscriptionCreatesAndDeletesStableSubscription() async throws {
+        let context = try makeInMemoryContext()
+        let profile = try ProfileRepository(modelContext: context).loadOrCreateProfile()
+        profile.updateBrosMembership(
+            circleID: "circle-1",
+            membershipID: "membership-circle-1-user-2",
+            userRecordName: "user-2",
+            joinedAt: Date(timeIntervalSince1970: 120),
+            role: .member
+        )
+        try context.save()
+
+        let store = TestBrosCloudStore()
+        store.currentUserRecordNameValue = "user-2"
+
+        var savedSubscriptions: [CKSubscription] = []
+        var deletedSubscriptionIDs: [CKSubscription.ID] = []
+        store.saveSubscriptionsHandler = { subscriptions, subscriptionIDs in
+            savedSubscriptions = subscriptions
+            deletedSubscriptionIDs = subscriptionIDs
+        }
+
+        let service = CloudKitBrosSocialService(
+            modelContext: context,
+            cloudStore: store,
+            reactionNotificationRegistrar: { true }
+        )
+
+        try await service.syncReactionNotificationSubscription()
+
+        let savedSubscription = try #require(savedSubscriptions.first as? CKQuerySubscription)
+        #expect(savedSubscription.subscriptionID == BrosRecordNames.reactionNotificationSubscriptionID(userRecordName: "user-2"))
+        #expect(savedSubscription.recordType == "BroReaction")
+        #expect(savedSubscription.notificationInfo?.category == AppNotificationManager.brosReactionCategoryIdentifier)
+        #expect(deletedSubscriptionIDs.isEmpty)
+
+        profile.clearBrosMembership()
+        try context.save()
+
+        try await service.syncReactionNotificationSubscription()
+
+        #expect(deletedSubscriptionIDs == [BrosRecordNames.reactionNotificationSubscriptionID(userRecordName: "user-2")])
+    }
+
     private func makeEvent(id: String, createdAt: Date) -> BroFeedEvent {
         BroFeedEvent(
             id: id,
@@ -1251,6 +1616,30 @@ struct BrosSocialServiceTests {
         return record
     }
 
+    private func makeReactionRecord(
+        recordName: String,
+        circleID: String,
+        eventID: String,
+        userRecordName: String,
+        targetUserRecordName: String,
+        emoji: BroReactionKind,
+        createdAt: Date = Date(timeIntervalSince1970: 200)
+    ) -> CKRecord {
+        let record = CKRecord(
+            recordType: "BroReaction",
+            recordID: CKRecord.ID(recordName: recordName)
+        )
+        record["reactionID"] = recordName as CKRecordValue
+        record["circleID"] = circleID as CKRecordValue
+        record["eventID"] = eventID as CKRecordValue
+        record["userRecordName"] = userRecordName as CKRecordValue
+        record["targetUserRecordName"] = targetUserRecordName as CKRecordValue
+        record["emoji"] = emoji.rawValue as CKRecordValue
+        record["createdAt"] = createdAt as CKRecordValue
+        record["updatedAt"] = createdAt as CKRecordValue
+        return record
+    }
+
     private func makeCircleRecord(
         circleID: String,
         inviteCode: String,
@@ -1283,6 +1672,7 @@ private final class TestBrosCloudStore: BrosCloudStore {
     var fetchRecordHandler: (String, String) async throws -> CKRecord? = { _, _ in nil }
     var fetchRecordsHandler: (String, [String]) async throws -> [CKRecord] = { _, _ in [] }
     var saveHandler: ([CKRecord], [CKRecord.ID]) async throws -> Void = { _, _ in }
+    var saveSubscriptionsHandler: ([CKSubscription], [CKSubscription.ID]) async throws -> Void = { _, _ in }
 
     func currentUserRecordName() async throws -> String {
         currentUserRecordNameValue
@@ -1307,5 +1697,9 @@ private final class TestBrosCloudStore: BrosCloudStore {
 
     func save(records: [CKRecord], deleting recordIDs: [CKRecord.ID]) async throws {
         try await saveHandler(records, recordIDs)
+    }
+
+    func save(subscriptions: [CKSubscription], deleting subscriptionIDs: [CKSubscription.ID]) async throws {
+        try await saveSubscriptionsHandler(subscriptions, subscriptionIDs)
     }
 }

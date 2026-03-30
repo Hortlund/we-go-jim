@@ -145,6 +145,7 @@ final class BrosViewModel {
         await runMutation(.createCircle) { [self] in
             let service = try service(modelContext: modelContext)
             let snapshot = try await service.createCircle(memberLimit: self.circleMemberLimit)
+            try? await service.syncReactionNotificationSubscription()
             self.state = .active(snapshot)
             self.joinCode = ""
             self.circleMemberLimit = BrosSocialRules.defaultMemberLimit
@@ -180,6 +181,7 @@ final class BrosViewModel {
             let service = try service(modelContext: modelContext)
             let snapshot = try await service
                 .joinCircle(inviteCode: self.joinCode)
+            try? await service.syncReactionNotificationSubscription()
             self.state = .active(snapshot)
             self.joinCode = ""
             self.scheduleBackgroundHydration(modelContext: modelContext)
@@ -191,6 +193,7 @@ final class BrosViewModel {
         await runMutation(.leaveCircle) { [self] in
             let service = try service(modelContext: modelContext)
             try await service.leaveCircle()
+            try? await service.syncReactionNotificationSubscription()
             self.state = .onboarding
             self.joinCode = ""
             self.circleMemberLimit = BrosSocialRules.defaultMemberLimit
@@ -457,8 +460,80 @@ struct BroCircleManagementPresentation: Equatable {
     }
 }
 
+struct BroReactionSummaryChipPresentation: Identifiable, Equatable {
+    let emoji: BroReactionKind
+    let count: Int
+    let reactions: [BroReactionSummary]
+
+    var id: String { emoji.id }
+}
+
+struct BroReactionDetailPresentation: Identifiable, Equatable {
+    struct Reactor: Identifiable, Equatable {
+        let userRecordName: String
+        let displayName: String
+
+        var id: String { userRecordName }
+    }
+
+    let eventID: String
+    let emoji: BroReactionKind
+    let reactors: [Reactor]
+
+    var id: String { "\(eventID)_\(emoji.id)" }
+}
+
+struct BroReactionBarPresentation: Equatable {
+    let eventID: String
+    let selectedEmoji: BroReactionKind?
+    let showsPicker: Bool
+    let summaryChips: [BroReactionSummaryChipPresentation]
+
+    init(event: BroFeedEvent, currentUserRecordName: String) {
+        eventID = event.id
+        selectedEmoji = event.reactions.first(where: { $0.userRecordName == currentUserRecordName })?.emoji
+        showsPicker = event.actorUserRecordName != currentUserRecordName
+        summaryChips = BroReactionKind.allCases.compactMap { emoji in
+            let reactions = event.reactions.filter { $0.emoji == emoji }
+            guard !reactions.isEmpty else { return nil }
+            return BroReactionSummaryChipPresentation(
+                emoji: emoji,
+                count: reactions.count,
+                reactions: reactions
+            )
+        }
+    }
+
+    func detailPresentation(for emoji: BroReactionKind) -> BroReactionDetailPresentation? {
+        guard let chip = summaryChips.first(where: { $0.emoji == emoji }) else {
+            return nil
+        }
+
+        return BroReactionDetailPresentation(
+            eventID: eventID,
+            emoji: emoji,
+            reactors: chip.reactions
+                .map { reaction in
+                    BroReactionDetailPresentation.Reactor(
+                        userRecordName: reaction.userRecordName,
+                        displayName: Self.resolvedDisplayName(reaction.displayName)
+                    )
+                }
+                .sorted {
+                    $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+                }
+        )
+    }
+
+    private static func resolvedDisplayName(_ value: String?) -> String {
+        let trimmed = (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Bro" : trimmed
+    }
+}
+
 struct BrosView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(AppNotificationRouter.self) private var notificationRouter
     @Environment(\.isTabActive) private var isTabActive
     @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
     @Environment(\.cloudSyncErrorDescription) private var cloudSyncErrorDescription
@@ -471,6 +546,7 @@ struct BrosView: View {
     @State private var supportNoticeTitle = ""
     @State private var supportNoticeMessage = ""
     @State private var showingSupportNotice = false
+    @State private var reactionDetailPresentation: BroReactionDetailPresentation?
 
     private var blockedRepository: BlockedBroRepository {
         BlockedBroRepository(modelContext: modelContext)
@@ -516,6 +592,15 @@ struct BrosView: View {
             )
             rebuildFilteredSnapshot()
         }
+        .task(id: notificationRouter.brosRefreshRequestID) {
+            guard notificationRouter.brosRefreshRequestID != nil, isTabActive else { return }
+            reloadBlockedBros()
+            await viewModel.refresh(
+                modelContext: modelContext,
+                cloudSyncEnabled: cloudSyncEnabled,
+                cloudSyncErrorDescription: cloudSyncErrorDescription
+            )
+        }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active, isTabActive else { return }
             reloadBlockedBros()
@@ -551,6 +636,9 @@ struct BrosView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(supportNoticeMessage)
+        }
+        .sheet(item: $reactionDetailPresentation) { presentation in
+            BroReactionDetailSheet(presentation: presentation)
         }
     }
 
@@ -838,8 +926,10 @@ struct BrosView: View {
         snapshot: BrosFeedSnapshot,
         currentUserRecordName: String
     ) -> some View {
-        let reactionCounts = Dictionary(grouping: event.reactions, by: \.emoji).mapValues(\.count)
-        let selectedEmoji = event.reactions.first(where: { $0.userRecordName == currentUserRecordName })?.emoji
+        let reactionPresentation = BroReactionBarPresentation(
+            event: event,
+            currentUserRecordName: currentUserRecordName
+        )
 
         return VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 12) {
@@ -954,11 +1044,7 @@ struct BrosView: View {
                 }
             }
 
-            reactionBar(
-                event: event,
-                counts: reactionCounts,
-                selectedEmoji: selectedEmoji
-            )
+            reactionBar(event: event, presentation: reactionPresentation)
         }
         .padding(WGJSpacing.card)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -984,34 +1070,105 @@ struct BrosView: View {
             }
     }
 
+    @ViewBuilder
     private func reactionBar(
         event: BroFeedEvent,
-        counts: [BroReactionKind: Int],
-        selectedEmoji: BroReactionKind?
+        presentation: BroReactionBarPresentation
     ) -> some View {
-        return ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) {
-                reactionButtons(
-                    event: event,
-                    counts: counts,
-                    selectedEmoji: selectedEmoji
-                )
-            }
+        if !presentation.summaryChips.isEmpty || presentation.showsPicker {
+            VStack(alignment: .leading, spacing: 10) {
+                if !presentation.summaryChips.isEmpty {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) {
+                            reactionSummaryButtons(presentation)
+                        }
 
-            VStack(alignment: .leading, spacing: 8) {
-                reactionButtons(
-                    event: event,
-                    counts: counts,
-                    selectedEmoji: selectedEmoji
-                )
+                        VStack(alignment: .leading, spacing: 8) {
+                            reactionSummaryButtons(presentation)
+                        }
+                    }
+                }
+
+                if presentation.showsPicker {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) {
+                            reactionPickerButtons(
+                                event: event,
+                                selectedEmoji: presentation.selectedEmoji
+                            )
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            reactionPickerButtons(
+                                event: event,
+                                selectedEmoji: presentation.selectedEmoji
+                            )
+                        }
+                    }
+                }
             }
         }
     }
 
     @ViewBuilder
-    private func reactionButtons(
+    private func reactionSummaryButtons(_ presentation: BroReactionBarPresentation) -> some View {
+        ForEach(presentation.summaryChips) { chip in
+            Button {
+                reactionDetailPresentation = presentation.detailPresentation(for: chip.emoji)
+            } label: {
+                HStack(spacing: 6) {
+                    Text(chip.emoji.rawValue)
+                        .font(.subheadline)
+
+                    Text("\(chip.count)")
+                        .font(.caption.weight(.semibold))
+                }
+                .foregroundStyle(
+                    presentation.selectedEmoji == chip.emoji ? WGJTheme.textInverse : WGJTheme.textPrimary
+                )
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background {
+                    Capsule()
+                        .fill(
+                            presentation.selectedEmoji == chip.emoji
+                                ? AnyShapeStyle(WGJTheme.accentBlue)
+                                : AnyShapeStyle(WGJTheme.fieldStrong.opacity(0.96))
+                        )
+                        .overlay {
+                            Capsule()
+                                .fill(
+                                    presentation.selectedEmoji == chip.emoji
+                                        ? WGJTheme.accentCyan.opacity(0.26)
+                                        : WGJTheme.card.opacity(0.54)
+                                )
+                        }
+                        .overlay {
+                            Capsule()
+                                .stroke(
+                                    presentation.selectedEmoji == chip.emoji
+                                        ? Color.white.opacity(0.18)
+                                        : WGJTheme.outline.opacity(0.84),
+                                    lineWidth: 1
+                                )
+                        }
+                        .wgjCapsuleGlass(
+                            tint: presentation.selectedEmoji == chip.emoji
+                                ? WGJTheme.accentBlue.opacity(0.18)
+                                : WGJTheme.card.opacity(0.12)
+                        )
+                }
+            }
+            .buttonStyle(.plain)
+            .onLongPressGesture {
+                reactionDetailPresentation = presentation.detailPresentation(for: chip.emoji)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func reactionPickerButtons(
         event: BroFeedEvent,
-        counts: [BroReactionKind: Int],
         selectedEmoji: BroReactionKind?
     ) -> some View {
         ForEach(BroReactionKind.allCases) { emoji in
@@ -1024,15 +1181,8 @@ struct BrosView: View {
                     )
                 }
             } label: {
-                HStack(spacing: 6) {
-                    Text(emoji.rawValue)
-                        .font(.subheadline)
-
-                    if let count = counts[emoji], count > 0 {
-                        Text("\(count)")
-                            .font(.caption.weight(.semibold))
-                    }
-                }
+                Text(emoji.rawValue)
+                    .font(.subheadline)
                 .foregroundStyle(selectedEmoji == emoji ? WGJTheme.textInverse : WGJTheme.textPrimary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
@@ -1579,6 +1729,58 @@ private struct BroCircleManagementView: View {
     }
 }
 
+private struct BroReactionDetailSheet: View {
+    let presentation: BroReactionDetailPresentation
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: WGJSpacing.section) {
+                    WGJRootHeader(
+                        "Reaction Details",
+                        subtitle: "\(presentation.emoji.rawValue) \(presentation.reactors.count) bro\(presentation.reactors.count == 1 ? "" : "s")"
+                    )
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(presentation.reactors) { reactor in
+                            HStack(spacing: 12) {
+                                Text(presentation.emoji.rawValue)
+                                    .font(.title3)
+
+                                Text(reactor.displayName)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(WGJTheme.textPrimary)
+
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, WGJSpacing.card)
+                            .padding(.vertical, 12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background {
+                                RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
+                                    .fill(WGJTheme.fieldStrong.opacity(0.92))
+                                    .overlay {
+                                        RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
+                                            .stroke(WGJTheme.outline.opacity(0.68), lineWidth: 1)
+                                    }
+                            }
+                        }
+                    }
+                    .padding(WGJSpacing.card)
+                    .wgjCardContainer()
+                }
+                .padding(WGJSpacing.page)
+                .padding(.top, 8)
+                .padding(.bottom, 12)
+            }
+            .wgjScreenBackground()
+            .navigationTitle("Reactions")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .presentationDetents([.medium, .large])
+    }
+}
+
 private struct BroAvatarView: View {
     let imageData: Data?
     let name: String
@@ -1676,6 +1878,7 @@ private enum AvatarImageDecoder {
     NavigationStack {
         BrosView()
     }
+    .environment(AppNotificationRouter.shared)
     .modelContainer(for: [
         ExerciseCatalogItem.self,
         MuscleGroup.self,

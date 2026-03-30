@@ -22,6 +22,7 @@ struct WGJApp: App {
             ContentView()
                 .environment(\.cloudSyncEnabled, bootstrap.cloudSyncEnabled)
                 .environment(\.cloudSyncErrorDescription, bootstrap.cloudSyncErrorDescription)
+                .environment(AppNotificationRouter.shared)
         }
         .modelContainer(bootstrap.container)
     }

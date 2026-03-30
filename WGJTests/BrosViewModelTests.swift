@@ -78,6 +78,57 @@ struct BrosViewModelTests {
         #expect(!presentation.allowsMemberRemoval)
     }
 
+    @Test
+    func reactionBarPresentationHidesPickerForOwnEvent() {
+        let presentation = BroReactionBarPresentation(
+            event: makeReactionEvent(
+                actorUserRecordName: "user-1",
+                reactions: [
+                    BroReactionSummary(userRecordName: "user-2", emoji: .fire, displayName: "Brody"),
+                ]
+            ),
+            currentUserRecordName: "user-1"
+        )
+
+        #expect(!presentation.showsPicker)
+        #expect(presentation.summaryChips.map(\.emoji) == [.fire])
+    }
+
+    @Test
+    func reactionBarPresentationShowsPickerForOtherEvent() {
+        let presentation = BroReactionBarPresentation(
+            event: makeReactionEvent(
+                actorUserRecordName: "user-1",
+                reactions: [
+                    BroReactionSummary(userRecordName: "user-2", emoji: .bolt, displayName: "Brody"),
+                ]
+            ),
+            currentUserRecordName: "user-2"
+        )
+
+        #expect(presentation.showsPicker)
+        #expect(presentation.selectedEmoji == .bolt)
+    }
+
+    @Test
+    func reactionBarPresentationOrdersSummaryChipsByEmojiAndSkipsZeros() {
+        let presentation = BroReactionBarPresentation(
+            event: makeReactionEvent(
+                actorUserRecordName: "user-1",
+                reactions: [
+                    BroReactionSummary(userRecordName: "user-2", emoji: .goat, displayName: "Brody"),
+                    BroReactionSummary(userRecordName: "user-3", emoji: .fire, displayName: "Brock"),
+                    BroReactionSummary(userRecordName: "user-4", emoji: .fire, displayName: "Brawn"),
+                    BroReactionSummary(userRecordName: "user-5", emoji: .clap, displayName: "Beast"),
+                ]
+            ),
+            currentUserRecordName: "user-2"
+        )
+
+        #expect(presentation.summaryChips.map(\.emoji) == [.fire, .clap, .goat])
+        #expect(presentation.summaryChips.map(\.count) == [2, 1, 1])
+    }
+
     private func makeInMemoryContext() throws -> ModelContext {
         let schema = Schema([
             UserProfile.self,
@@ -134,6 +185,31 @@ struct BrosViewModelTests {
             feedEvents: []
         )
     }
+
+    private func makeReactionEvent(
+        actorUserRecordName: String,
+        reactions: [BroReactionSummary]
+    ) -> BroFeedEvent {
+        BroFeedEvent(
+            id: "event-1",
+            circleID: "circle-1",
+            actorUserRecordName: actorUserRecordName,
+            actorMembershipID: "membership-circle-1-\(actorUserRecordName)",
+            actorDisplayName: "Atlas",
+            actorAvatarImageData: nil,
+            createdAt: Date(timeIntervalSince1970: 200),
+            kind: .workoutCompleted,
+            workout: BroWorkoutFeedSnapshot(
+                workoutName: "Push",
+                durationSeconds: 3600,
+                totalVolume: 1000,
+                prCount: 1,
+                exercisePreview: ["Bench Press"]
+            ),
+            pr: nil,
+            reactions: reactions
+        )
+    }
 }
 
 @MainActor
@@ -169,6 +245,8 @@ private final class StubBrosSocialService: BrosSocialService {
     func removeMember(membershipID: String) async throws { }
 
     func setReaction(eventID: String, kind: BroReactionKind) async throws { }
+
+    func syncReactionNotificationSubscription() async throws { }
 
     func queueCompletedSessionPublish(sessionID: UUID) throws { }
 

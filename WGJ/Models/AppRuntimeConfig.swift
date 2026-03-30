@@ -72,6 +72,28 @@ final class AppTabState {
     var selectedTab: AppMainTab = .startWorkout
 }
 
+@MainActor
+@Observable
+final class AppNotificationRouter {
+    static let shared = AppNotificationRouter()
+
+    var requestedTab: AppMainTab?
+    var routeRequestID: UUID?
+    var brosRefreshRequestID: UUID?
+
+    private init() { }
+
+    func openBros() {
+        requestedTab = .bros
+        routeRequestID = UUID()
+        brosRefreshRequestID = UUID()
+    }
+
+    func consumeRequestedTab() {
+        requestedTab = nil
+    }
+}
+
 struct WorkoutCompletionPresentation: Identifiable, Equatable {
     let sessionID: UUID
 
@@ -275,7 +297,7 @@ extension EnvironmentValues {
 final class RestTimerNotificationManager {
     static let shared = RestTimerNotificationManager()
 
-    private let notificationIdentifierPrefix = "wgj.activeWorkout.restTimer"
+    private let notificationIdentifierPrefix = AppNotificationManager.restTimerIdentifierPrefix
     private var schedulingTask: Task<Void, Never>?
     private var schedulingGeneration = 0
     private var currentNotificationIdentifier: String?
@@ -283,7 +305,7 @@ final class RestTimerNotificationManager {
     private init() { }
 
     func configureNotifications() {
-        UNUserNotificationCenter.current().delegate = RestTimerNotificationDelegate.shared
+        AppNotificationManager.shared.configureNotifications()
     }
 
     func scheduleRestTimer(seconds: Int, exerciseName: String, setLabel: String) {
@@ -297,19 +319,7 @@ final class RestTimerNotificationManager {
         schedulingTask = Task { @MainActor [weak self] in
             guard let self else { return }
             let center = UNUserNotificationCenter.current()
-            let settings = await center.notificationSettings()
-            let isAuthorized: Bool
-
-            switch settings.authorizationStatus {
-            case .authorized, .provisional, .ephemeral:
-                isAuthorized = true
-            case .notDetermined:
-                isAuthorized = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
-            case .denied:
-                isAuthorized = false
-            @unknown default:
-                isAuthorized = false
-            }
+            let isAuthorized = await AppNotificationManager.shared.requestAlertAuthorizationIfNeeded()
 
             guard isAuthorized else {
                 if self.currentNotificationIdentifier == notificationIdentifier {
@@ -374,15 +384,99 @@ final class RestTimerNotificationManager {
     }
 }
 
-final class RestTimerNotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
-    static let shared = RestTimerNotificationDelegate()
+final class AppNotificationManager {
+    static let shared = AppNotificationManager()
+
+    static let brosReactionCategoryIdentifier = "wgj.bros.reaction"
+    static let restTimerIdentifierPrefix = "wgj.activeWorkout.restTimer"
+
+    private init() { }
+
+    @MainActor
+    func configureNotifications() {
+        let center = UNUserNotificationCenter.current()
+        center.delegate = WGJNotificationCenterDelegate.shared
+        center.setNotificationCategories([
+            UNNotificationCategory(
+                identifier: Self.brosReactionCategoryIdentifier,
+                actions: [],
+                intentIdentifiers: [],
+                options: []
+            )
+        ])
+    }
+
+    @MainActor
+    func requestAlertAuthorizationIfNeeded() async -> Bool {
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+
+        switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            return true
+        case .notDetermined:
+            return (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+        case .denied:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+
+    @MainActor
+    func enableRemoteReactionNotifications() async -> Bool {
+        let isAuthorized = await requestAlertAuthorizationIfNeeded()
+        guard isAuthorized else { return false }
+        UIApplication.shared.registerForRemoteNotifications()
+        return true
+    }
+
+    func isRestTimerNotification(_ notification: UNNotification) -> Bool {
+        notification.request.identifier.hasPrefix(Self.restTimerIdentifierPrefix)
+    }
+
+    func isBrosReactionNotification(_ notification: UNNotification) -> Bool {
+        notification.request.content.categoryIdentifier == Self.brosReactionCategoryIdentifier
+    }
+}
+
+final class WGJNotificationCenterDelegate: NSObject, UNUserNotificationCenterDelegate {
+    static let shared = WGJNotificationCenterDelegate()
 
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([])
+        if AppNotificationManager.shared.isRestTimerNotification(notification) {
+            completionHandler([])
+            return
+        }
+
+        if AppNotificationManager.shared.isBrosReactionNotification(notification) {
+            completionHandler([.banner, .list, .sound, .badge])
+            return
+        }
+
+        completionHandler([.banner, .list, .sound, .badge])
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier,
+              AppNotificationManager.shared.isBrosReactionNotification(response.notification)
+        else {
+            completionHandler()
+            return
+        }
+
+        Task { @MainActor in
+            AppNotificationRouter.shared.openBros()
+            completionHandler()
+        }
     }
 }
 

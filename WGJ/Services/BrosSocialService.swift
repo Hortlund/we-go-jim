@@ -94,6 +94,7 @@ enum BrosSocialServiceError: LocalizedError, Equatable {
     case memberLimitBelowCurrentMemberCount
     case notInCircle
     case memberNotFound
+    case cannotReactToOwnEvent
     case ownerCannotRemoveSelf
     case permissions
     case accountUnavailable
@@ -115,6 +116,8 @@ enum BrosSocialServiceError: LocalizedError, Equatable {
             return "You are not currently in a bro circle."
         case .memberNotFound:
             return "That bro could not be found."
+        case .cannotReactToOwnEvent:
+            return "You cannot react to your own workout or PR."
         case .ownerCannotRemoveSelf:
             return "Use Leave Circle instead of removing yourself."
         case .permissions:
@@ -145,6 +148,13 @@ enum BrosRecordNames {
 
     static func reactionRecordName(eventID: String, userRecordName: String) -> String {
         "reaction_\(eventID)_\(userRecordName)"
+    }
+
+    static func reactionNotificationSubscriptionID(userRecordName: String) -> String {
+        let normalized = userRecordName
+            .lowercased()
+            .replacingOccurrences(of: "[^a-z0-9]+", with: "_", options: .regularExpression)
+        return "bros_reaction_notifications_\(normalized)"
     }
 
     static func membershipRecordName(circleID: String, userRecordName: String) -> String {
@@ -349,6 +359,7 @@ protocol BrosSocialService {
     func deleteCurrentUserData() async throws
     func removeMember(membershipID: String) async throws
     func setReaction(eventID: String, kind: BroReactionKind) async throws
+    func syncReactionNotificationSubscription() async throws
     func queueCompletedSessionPublish(sessionID: UUID) throws
     func queueDeletedSession(sessionID: UUID) throws
     func queueCurrentProfileSync() throws
@@ -367,6 +378,7 @@ protocol BrosCloudStore {
     func fetchRecord(recordType: String, recordName: String) async throws -> CKRecord?
     func fetchRecords(recordType: String, recordNames: [String]) async throws -> [CKRecord]
     func save(records: [CKRecord], deleting recordIDs: [CKRecord.ID]) async throws
+    func save(subscriptions: [CKSubscription], deleting subscriptionIDs: [CKSubscription.ID]) async throws
 }
 
 @MainActor
@@ -492,6 +504,15 @@ struct CloudKitBrosCloudStore: BrosCloudStore {
             atomically: true
         )
     }
+
+    func save(subscriptions: [CKSubscription], deleting subscriptionIDs: [CKSubscription.ID]) async throws {
+        guard !subscriptions.isEmpty || !subscriptionIDs.isEmpty else { return }
+
+        _ = try await database.modifySubscriptions(
+            saving: subscriptions,
+            deleting: subscriptionIDs
+        )
+    }
 }
 
 @MainActor
@@ -541,6 +562,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
 
         static let reactionID = "reactionID"
         static let emoji = "emoji"
+        static let targetUserRecordName = "targetUserRecordName"
     }
 
     private struct PendingWorkoutEventPayload: Codable {
@@ -589,6 +611,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
     private let cloudStore: any BrosCloudStore
     private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
+    private let reactionNotificationRegistrar: @MainActor () async -> Bool
 
     nonisolated static func shouldTreatAsEmptyQueryResult(_ error: Error, recordType: String) -> Bool {
         let nsError = error as NSError
@@ -637,10 +660,14 @@ final class CloudKitBrosSocialService: BrosSocialService {
 
     init(
         modelContext: ModelContext,
-        cloudStore: any BrosCloudStore
+        cloudStore: any BrosCloudStore,
+        reactionNotificationRegistrar: @escaping @MainActor () async -> Bool = {
+            await AppNotificationManager.shared.enableRemoteReactionNotifications()
+        }
     ) {
         self.modelContext = modelContext
         self.cloudStore = cloudStore
+        self.reactionNotificationRegistrar = reactionNotificationRegistrar
     }
 
     func refreshLocalMembershipState() async {
@@ -748,24 +775,12 @@ final class CloudKitBrosSocialService: BrosSocialService {
         let feedEventResolution = try await feedEventResolutionTask
         let eventRecords = feedEventResolution.records
 
-        var legacyReactionsByEventID: [String: [BroReactionSummary]] = [:]
-        if eventRecords.contains(where: { $0[Field.reactionsPayload] == nil }) {
-            do {
-                let reactionRecords = try await reactionRecords(circleID: circle.circleID)
-                legacyReactionsByEventID = Dictionary(
-                    grouping: reactionRecords.compactMap(reactionSummary(from:)),
-                    by: \.eventID
-                )
-                .mapValues { values in
-                    values.map(\.reaction)
-                }
-            } catch {
-                if Self.shouldTreatAsEmptyQueryResult(error, recordType: RecordType.reaction) {
-                    legacyReactionsByEventID = [:]
-                } else {
-                    throw error
-                }
-            }
+        let authoritativeReactionsByEventID = Dictionary(
+            grouping: try await bestEffortReactionRecords(circleID: circle.circleID).compactMap(reactionSummary(from:)),
+            by: \.eventID
+        )
+        .mapValues { values in
+            values.map(\.reaction)
         }
 
         var recordsToBackfill: [CKRecord] = []
@@ -774,20 +789,15 @@ final class CloudKitBrosSocialService: BrosSocialService {
         }
 
         let visibleEvents = eventRecords.compactMap { record -> BroFeedEvent? in
-            let embeddedReactions = embeddedReactions(from: record)
-            let mergedReactions = BrosCloudRecordCoder.mergedReactions(
-                embedded: embeddedReactions,
-                legacy: legacyReactionsByEventID[record.recordID.recordName] ?? []
-            )
-            if mergedReactions != embeddedReactions {
-                setEmbeddedReactions(mergedReactions, on: record)
-                recordsToBackfill.append(record)
-            }
-
             return mapFeedEvent(
                 from: record,
                 membersByRecordName: membersByRecordName,
-                reactions: mergedReactions
+                reactions: resolvedReactions(
+                    embedded: embeddedReactions(from: record),
+                    authoritative: authoritativeReactionsByEventID[record.recordID.recordName] ?? [],
+                    actorUserRecordName: record[Field.actorUserRecordName] as? String,
+                    membersByRecordName: membersByRecordName
+                )
             )
         }
 
@@ -1059,6 +1069,10 @@ final class CloudKitBrosSocialService: BrosSocialService {
 
         var recordsToSave: [CKRecord] = []
         var recordIDsToDelete: [CKRecord.ID] = [membershipRecord.recordID]
+        let currentUserReactionRecordIDs = try await bestEffortReactionRecords(userRecordName: userRecordName)
+            .filter { ($0[Field.circleID] as? String) == currentMember.circleID }
+            .map(\.recordID)
+        recordIDsToDelete.append(contentsOf: currentUserReactionRecordIDs)
         let remainingMemberRecordNames = membershipResolution.canWriteBackIndex
             ? BrosCloudRecordCoder.normalizedRecordNames(
                 (recordNames(from: circleRecord, field: Field.memberRecordNames) ?? members.map(\.recordID.recordName))
@@ -1187,9 +1201,19 @@ final class CloudKitBrosSocialService: BrosSocialService {
                     .filter { !removedFeedEventRecordNames.contains($0) }
             )
             : nil
+        let reactionRecords = try await bestEffortReactionRecords(circleID: currentMember.circleID)
+        recordIDsToDelete.formUnion(
+            reactionRecords
+                .filter { reactionRecord in
+                    let reactionUserRecordName = reactionRecord[Field.userRecordName] as? String
+                    let reactionEventID = reactionRecord[Field.eventID] as? String
+                    return reactionUserRecordName == userRecordName
+                        || removedFeedEventRecordNames.contains(reactionEventID ?? "")
+                }
+                .map(\.recordID)
+        )
 
         for eventRecord in feedEvents {
-            let eventID = eventRecord.recordID.recordName
             if (eventRecord[Field.actorUserRecordName] as? String) == userRecordName {
                 recordIDsToDelete.insert(eventRecord.recordID)
             } else {
@@ -1200,13 +1224,6 @@ final class CloudKitBrosSocialService: BrosSocialService {
                     eventRecord[Field.updatedAt] = Date() as CKRecordValue
                     recordsToSave.append(eventRecord)
                 }
-            }
-
-            if let legacyReactionRecord = try await fetchRecord(
-                recordType: RecordType.reaction,
-                recordName: BrosRecordNames.reactionRecordName(eventID: eventID, userRecordName: userRecordName)
-            ) {
-                recordIDsToDelete.insert(legacyReactionRecord.recordID)
             }
         }
 
@@ -1316,28 +1333,51 @@ final class CloudKitBrosSocialService: BrosSocialService {
         guard (eventRecord[Field.circleID] as? String) == currentMember.circleID else {
             throw BrosSocialServiceError.memberNotFound
         }
+        guard (eventRecord[Field.actorUserRecordName] as? String) != userRecordName else {
+            throw BrosSocialServiceError.cannotReactToOwnEvent
+        }
 
         let recordName = BrosRecordNames.reactionRecordName(eventID: eventID, userRecordName: userRecordName)
-        let existingLegacyRecord = try await fetchRecord(recordType: RecordType.reaction, recordName: recordName)
-        let embeddedReactions = embeddedReactions(from: eventRecord)
-        let legacyReactions = existingLegacyRecord.flatMap(reactionSummary(from:)).map { [$0.reaction] } ?? []
-        let mergedReactions = BrosCloudRecordCoder.mergedReactions(
-            embedded: embeddedReactions,
-            legacy: legacyReactions
-        )
-        let updatedReactions = BrosCloudRecordCoder.updatedReactions(
-            current: mergedReactions,
-            userRecordName: userRecordName,
-            tapped: kind,
-            displayName: currentMember.displayName
-        )
+        let existingReactionRecord = try await fetchRecord(recordType: RecordType.reaction, recordName: recordName)
+        let existingEmoji = existingReactionRecord
+            .flatMap(reactionSummary(from:))?
+            .reaction
+            .emoji
+        let resolvedEmoji = BrosSocialRules.resolvedReaction(existing: existingEmoji, tapped: kind)
 
-        setEmbeddedReactions(updatedReactions, on: eventRecord)
-        eventRecord[Field.updatedAt] = Date() as CKRecordValue
+        if let resolvedEmoji {
+            let reactionRecord = existingReactionRecord
+                ?? CKRecord(recordType: RecordType.reaction, recordID: CKRecord.ID(recordName: recordName))
+            applyReactionFields(
+                reactionRecord,
+                reactionID: recordName,
+                circleID: currentMember.circleID,
+                eventID: eventID,
+                userRecordName: userRecordName,
+                targetUserRecordName: eventRecord[Field.actorUserRecordName] as? String ?? "",
+                emoji: resolvedEmoji,
+                createdAt: existingReactionRecord?[Field.createdAt] as? Date ?? .now
+            )
+            try await save(records: [reactionRecord], deleting: [])
+        } else if let existingReactionRecord {
+            try await save(records: [], deleting: [existingReactionRecord.recordID])
+        }
+    }
 
+    func syncReactionNotificationSubscription() async throws {
+        let userRecordName = try await currentUserRecordName()
+        let subscriptionID = BrosRecordNames.reactionNotificationSubscriptionID(userRecordName: userRecordName)
+        let profile = try? ProfileRepository(modelContext: modelContext).loadOrCreateProfile()
+
+        guard hasLocalMembership(profile) else {
+            try? await save(subscriptions: [], deleting: [subscriptionID])
+            return
+        }
+
+        _ = await reactionNotificationRegistrar()
         try await save(
-            records: [eventRecord],
-            deleting: existingLegacyRecord.map { [$0.recordID] } ?? []
+            subscriptions: [makeReactionNotificationSubscription(targetUserRecordName: userRecordName)],
+            deleting: []
         )
     }
 
@@ -1746,6 +1786,17 @@ final class CloudKitBrosSocialService: BrosSocialService {
         }
     }
 
+    private func bestEffortReactionRecords(userRecordName: String) async throws -> [CKRecord] {
+        do {
+            return try await reactionRecords(userRecordName: userRecordName)
+        } catch {
+            guard Self.shouldTreatAsEmptyQueryResult(error, recordType: RecordType.reaction) else {
+                throw error
+            }
+            return []
+        }
+    }
+
     private func recordNames(from record: CKRecord, field: String) -> [String]? {
         if let names = record[field] as? [String] {
             return BrosCloudRecordCoder.normalizedRecordNames(names)
@@ -1907,6 +1958,13 @@ final class CloudKitBrosSocialService: BrosSocialService {
         try await cloudStore.save(records: records, deleting: recordIDs)
     }
 
+    private func save(
+        subscriptions: [CKSubscription],
+        deleting subscriptionIDs: [CKSubscription.ID] = []
+    ) async throws {
+        try await cloudStore.save(subscriptions: subscriptions, deleting: subscriptionIDs)
+    }
+
     private func memberSummary(from record: CKRecord) async throws -> BroMemberSummary {
         let avatarImageData: Data?
         if AppRuntimeConfig.reviewPolicy.syncBrosAvatars {
@@ -1997,6 +2055,30 @@ final class CloudKitBrosSocialService: BrosSocialService {
                 displayName: nil
             )
         )
+    }
+
+    private func resolvedReactions(
+        embedded: [BroReactionSummary],
+        authoritative: [BroReactionSummary],
+        actorUserRecordName: String?,
+        membersByRecordName: [String: BroMemberSummary]
+    ) -> [BroReactionSummary] {
+        let merged = BrosCloudRecordCoder.mergedReactions(
+            embedded: authoritative,
+            legacy: embedded
+        )
+
+        return merged.compactMap { reaction in
+            guard reaction.userRecordName != actorUserRecordName else {
+                return nil
+            }
+
+            return BroReactionSummary(
+                userRecordName: reaction.userRecordName,
+                emoji: reaction.emoji,
+                displayName: membersByRecordName[reaction.userRecordName]?.displayName ?? reaction.displayName
+            )
+        }
     }
 
     private func mapFeedEvent(
@@ -2111,6 +2193,44 @@ final class CloudKitBrosSocialService: BrosSocialService {
         }
     }
 
+    private func applyReactionFields(
+        _ record: CKRecord,
+        reactionID: String,
+        circleID: String,
+        eventID: String,
+        userRecordName: String,
+        targetUserRecordName: String,
+        emoji: BroReactionKind,
+        createdAt: Date
+    ) {
+        record[Field.reactionID] = reactionID as CKRecordValue
+        record[Field.circleID] = circleID as CKRecordValue
+        record[Field.eventID] = eventID as CKRecordValue
+        record[Field.userRecordName] = userRecordName as CKRecordValue
+        record[Field.targetUserRecordName] = targetUserRecordName as CKRecordValue
+        record[Field.emoji] = emoji.rawValue as CKRecordValue
+        record[Field.createdAt] = createdAt as CKRecordValue
+        record[Field.updatedAt] = Date() as CKRecordValue
+    }
+
+    private func makeReactionNotificationSubscription(targetUserRecordName: String) -> CKQuerySubscription {
+        let subscriptionID = BrosRecordNames.reactionNotificationSubscriptionID(userRecordName: targetUserRecordName)
+        let subscription = CKQuerySubscription(
+            recordType: RecordType.reaction,
+            predicate: NSPredicate(format: "%K == %@", Field.targetUserRecordName, targetUserRecordName),
+            subscriptionID: subscriptionID,
+            options: [.firesOnRecordCreation]
+        )
+        subscription.notificationInfo = CKSubscription.NotificationInfo(
+            alertBody: "A bro reacted to your workout or PR.",
+            title: "New Bro Reaction",
+            soundName: "default",
+            shouldBadge: true,
+            category: AppNotificationManager.brosReactionCategoryIdentifier
+        )
+        return subscription
+    }
+
     private func publishWorkoutEvent(_ payload: PendingWorkoutEventPayload) async throws {
         let record = (try await fetchRecord(recordType: RecordType.feedEvent, recordName: payload.recordName))
             ?? CKRecord(recordType: RecordType.feedEvent, recordID: CKRecord.ID(recordName: payload.recordName))
@@ -2198,6 +2318,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
         if let record = try await fetchRecord(recordType: RecordType.feedEvent, recordName: recordName) {
             let circleID = record[Field.circleID] as? String ?? ""
             var recordsToSave: [CKRecord] = []
+            var recordIDsToDelete = [record.recordID]
             if let circleRecord = try await circleRecord(circleID: circleID) {
                 let currentEventRecordNames = recordNames(from: circleRecord, field: Field.feedEventRecordNames) ?? []
                 setRecordNames(
@@ -2210,7 +2331,12 @@ final class CloudKitBrosSocialService: BrosSocialService {
                 circleRecord[Field.updatedAt] = Date() as CKRecordValue
                 recordsToSave.append(circleRecord)
             }
-            try await save(records: recordsToSave, deleting: [record.recordID])
+            recordIDsToDelete.append(
+                contentsOf: try await bestEffortReactionRecords(circleID: circleID)
+                    .filter { ($0[Field.eventID] as? String) == recordName }
+                    .map(\.recordID)
+            )
+            try await save(records: recordsToSave, deleting: recordIDsToDelete)
             return
         }
 
