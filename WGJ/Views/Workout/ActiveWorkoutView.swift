@@ -85,7 +85,9 @@ struct ActiveWorkoutView: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 16) {
+            // Exercise cards change height aggressively as sets complete, and a non-lazy
+            // stack keeps the scroll position stable when a completed card collapses.
+            VStack(alignment: .leading, spacing: 16) {
                 if let session {
                     ActiveWorkoutHeaderCard(
                         sessionNameDraft: $sessionNameDraft,
@@ -176,7 +178,7 @@ struct ActiveWorkoutView: View {
                         }
                     )
                     .equatable()
-                        .transition(exerciseCardTransition)
+                    .transition(exerciseCardTransition)
                 }
 
                 if !sessionExercises.isEmpty {
