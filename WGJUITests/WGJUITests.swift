@@ -69,6 +69,28 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testTemplateImportAndExportControlsSmoke() throws {
+        let app = launchApp()
+
+        tapTab("Start Workout", in: app)
+        XCTAssertTrue(identifiedElement("start-workout-import-template-button", in: app).waitForExistence(timeout: 5))
+
+        app.buttons["start-workout-new-template-button"].tap()
+        let templateNameField = app.textFields["template-editor-name-field"]
+        XCTAssertTrue(templateNameField.waitForExistence(timeout: 5))
+        templateNameField.tap()
+        templateNameField.typeText("Smoke Export Template")
+        app.buttons["template-editor-save-button"].tap()
+        XCTAssertTrue(app.staticTexts["Smoke Export Template"].waitForExistence(timeout: 5))
+
+        let actionsButton = identifiedElement("start-workout-template-actions-button", in: app)
+        XCTAssertTrue(actionsButton.waitForExistence(timeout: 5))
+        actionsButton.tap()
+
+        XCTAssertTrue(identifiedElement("start-workout-template-export-button", in: app).waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testSettingsLegalSupportNavigation() throws {
         let app = launchApp()
 

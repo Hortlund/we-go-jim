@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct StartWorkoutHomeView: View {
     @Environment(\.modelContext) private var modelContext
@@ -21,6 +22,8 @@ struct StartWorkoutHomeView: View {
     @State private var conflictingActiveSessionID: UUID?
     @State private var showingActiveWorkoutConflict = false
     @State private var pendingFolderDeletion: StartWorkoutPendingFolderDeletion?
+    @State private var showingTemplateImporter = false
+    @State private var templateShareSheet: StartWorkoutTemplateShareSheet?
 
     @State private var errorMessage = ""
     @State private var showingError = false
@@ -31,6 +34,10 @@ struct StartWorkoutHomeView: View {
 
     private var workoutRepository: WorkoutSessionRepository {
         WorkoutSessionRepository(modelContext: modelContext)
+    }
+
+    private var templateTransferService: TemplateTransferService {
+        TemplateTransferService(modelContext: modelContext)
     }
 
     private var folders: [TemplateFolder] {
@@ -80,8 +87,16 @@ struct StartWorkoutHomeView: View {
                 },
                 onEdit: {
                     editTemplate(templateID: preview.templateID, folderID: preview.folderID)
+                },
+                onExport: {
+                    exportTemplate(templateID: preview.templateID)
                 }
             )
+        }
+        .sheet(item: $templateShareSheet) { sheet in
+            WGJActivityShareSheet(activityItems: [sheet.fileURL]) {
+                cleanupExportedFile(at: sheet.fileURL)
+            }
         }
         .sheet(item: $templateEditorContext, onDismiss: reloadHomeSnapshotIfActive) { context in
             TemplateEditorView(folderID: context.folderID, templateID: context.templateID)
@@ -100,6 +115,12 @@ struct StartWorkoutHomeView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(errorMessage)
+        }
+        .fileImporter(
+            isPresented: $showingTemplateImporter,
+            allowedContentTypes: [.wgjTemplate]
+        ) { result in
+            handleTemplateImport(result)
         }
         .alert("Workout already in progress", isPresented: $showingActiveWorkoutConflict) {
             Button("Resume Current Workout") {
@@ -329,6 +350,13 @@ struct StartWorkoutHomeView: View {
                         Label("Edit", systemImage: "pencil")
                     }
 
+                    Button {
+                        exportTemplate(templateID: template.id)
+                    } label: {
+                        Label("Export / Share", systemImage: "square.and.arrow.up")
+                    }
+                    .accessibilityIdentifier("start-workout-template-export-button")
+
                     Menu {
                         if template.folderID != TemplateRepository.unfiledFolderID {
                             Button("Unfiled") {
@@ -354,6 +382,7 @@ struct StartWorkoutHomeView: View {
                     StartWorkoutUtilityIcon(systemImage: "ellipsis", tint: WGJTheme.textSecondary)
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("start-workout-template-actions-button")
             }
 
             ViewThatFits(in: .horizontal) {
@@ -477,12 +506,14 @@ struct StartWorkoutHomeView: View {
             HStack(spacing: 10) {
                 addTemplateButton
                 addFolderButton
+                importTemplateButton
                 Spacer(minLength: 0)
             }
 
             VStack(alignment: .leading, spacing: 10) {
                 addTemplateButton
                 addFolderButton
+                importTemplateButton
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -508,6 +539,17 @@ struct StartWorkoutHomeView: View {
         }
         .buttonStyle(WGJCompactGhostButtonStyle())
         .accessibilityIdentifier("start-workout-new-folder-button")
+    }
+
+    private var importTemplateButton: some View {
+        Button {
+            showingTemplateImporter = true
+        } label: {
+            Label("Import Template", systemImage: "square.and.arrow.down")
+                .wgjSingleLineText(scale: 0.82)
+        }
+        .buttonStyle(WGJCompactGhostButtonStyle())
+        .accessibilityIdentifier("start-workout-import-template-button")
     }
 
     private var templateLibraryStamp: StartWorkoutTemplateLibraryStamp {
@@ -819,8 +861,49 @@ struct StartWorkoutHomeView: View {
     }
 
     private func showError(_ error: Error) {
-        errorMessage = String(describing: error)
+        let message = error.localizedDescription
+        errorMessage = message.isEmpty ? String(describing: error) : message
         showingError = true
+    }
+
+    private func handleTemplateImport(_ result: Result<URL, Error>) {
+        switch result {
+        case .success(let fileURL):
+            do {
+                let importedTemplate = try templateTransferService.importTemplate(from: fileURL)
+                expandedFolderIDs[TemplateRepository.unfiledFolderID] = true
+                persistExpandedFolderState()
+                try controller.reload(modelContext: modelContext)
+                selectedTemplatePreview = StartWorkoutTemplatePreview(template: importedTemplate)
+            } catch {
+                showError(error)
+            }
+        case .failure(let error):
+            guard !isUserCancelledImport(error) else {
+                return
+            }
+            showError(error)
+        }
+    }
+
+    private func exportTemplate(templateID: UUID) {
+        do {
+            let fileURL = try templateTransferService.writeExportFile(templateID: templateID)
+            templateShareSheet = StartWorkoutTemplateShareSheet(fileURL: fileURL)
+        } catch {
+            showError(error)
+        }
+    }
+
+    private func cleanupExportedFile(at fileURL: URL) {
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            try? FileManager.default.removeItem(at: fileURL)
+        }
+    }
+
+    private func isUserCancelledImport(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.code == NSUserCancelledError
     }
 
     private func synchronizeExpandedFolderState() {
@@ -977,6 +1060,11 @@ private struct StartWorkoutPendingFolderDeletion: Identifiable {
     let templateCount: Int
 }
 
+private struct StartWorkoutTemplateShareSheet: Identifiable {
+    let id = UUID()
+    let fileURL: URL
+}
+
 enum StartWorkoutFolderExpansionPersistence {
     static let defaultsKey = "startWorkoutHome.expandedFolders.v1"
 
@@ -1124,6 +1212,7 @@ private struct TemplateStartPreviewSheet: View {
     let preview: StartWorkoutTemplatePreview
     let onStart: () -> Void
     let onEdit: () -> Void
+    let onExport: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dismiss) private var dismiss
@@ -1224,6 +1313,16 @@ private struct TemplateStartPreviewSheet: View {
                     Button("Cancel") {
                         dismiss()
                     }
+                }
+
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        dismiss()
+                        onExport()
+                    } label: {
+                        Label("Export / Share", systemImage: "square.and.arrow.up")
+                    }
+                    .accessibilityIdentifier("template-preview-export-button")
                 }
             }
         }

@@ -751,6 +751,26 @@ final class TemplateRepository {
     }
 
     func setExercises(templateID: UUID, drafts: [TemplateExerciseDraft]) throws {
+        try replaceExercises(
+            templateID: templateID,
+            drafts: drafts,
+            appliesDefaultSetPlansWhenEmpty: true
+        )
+    }
+
+    func importExercises(templateID: UUID, drafts: [TemplateExerciseDraft]) throws {
+        try replaceExercises(
+            templateID: templateID,
+            drafts: drafts,
+            appliesDefaultSetPlansWhenEmpty: false
+        )
+    }
+
+    private func replaceExercises(
+        templateID: UUID,
+        drafts: [TemplateExerciseDraft],
+        appliesDefaultSetPlansWhenEmpty: Bool
+    ) throws {
         guard let template = try template(id: templateID) else {
             throw TemplateRepositoryError.templateNotFound
         }
@@ -778,7 +798,7 @@ final class TemplateRepository {
             )
             modelContext.insert(exercise)
 
-            let sets = draft.setDrafts.isEmpty
+            let sets = draft.setDrafts.isEmpty && appliesDefaultSetPlansWhenEmpty
                 ? TemplateExerciseDraft.defaultSetDrafts(loadUnit: preferredLoadUnit())
                 : draft.setDrafts
             var createdSets: [TemplateExerciseSet] = []
