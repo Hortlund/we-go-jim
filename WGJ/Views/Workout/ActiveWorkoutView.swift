@@ -327,13 +327,16 @@ struct ActiveWorkoutView: View {
     }
 
     private var finishToolbarButton: some View {
-        Button("Finish") {
+        let finishConfirmationContent = makeFinishConfirmationContent()
+
+        return Button("Finish") {
             presentFinishConfirmation()
         }
         .disabled(isEndingSession || session == nil || sessionExercises.isEmpty || session?.status != .active)
         .accessibilityIdentifier("active-workout-finish-button")
         .popover(isPresented: $showingFinishConfirmation, attachmentAnchor: .point(.bottom), arrowEdge: .top) {
             ActiveWorkoutFinishPopover(
+                content: finishConfirmationContent,
                 onFinish: confirmFinishWorkout,
                 onCancel: { showingFinishConfirmation = false }
             )
@@ -1070,6 +1073,15 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
+    private func makeFinishConfirmationContent() -> ActiveWorkoutFinishConfirmationContent {
+        ActiveWorkoutFinishConfirmationContent(
+            exerciseDrafts: sessionExercises.map { exercise in
+                setDraftsByExerciseID[exercise.id] ?? makeDrafts(from: exercise)
+            }
+        )
+    }
+
+    @MainActor
     private func orderedSessionSets(for exercise: WorkoutSessionExercise) -> [WorkoutSessionSet] {
         (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
     }
@@ -1343,22 +1355,23 @@ struct WorkoutRestTimerExpiryObserver: View {
 }
 
 private struct ActiveWorkoutFinishPopover: View {
+    let content: ActiveWorkoutFinishConfirmationContent
     let onFinish: () -> Void
     let onCancel: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "checkmark.circle.fill")
+                Image(systemName: content.iconSystemName)
                     .font(.title3)
-                    .foregroundStyle(WGJTheme.success)
+                    .foregroundStyle(content.hasIncompleteWork ? WGJTheme.warning : WGJTheme.success)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Finish Workout?")
+                    Text(content.title)
                         .font(.headline.weight(.semibold))
                         .foregroundStyle(WGJTheme.textPrimary)
 
-                    Text("This will close the active workout and add it to your history.")
+                    Text(content.message)
                         .font(.subheadline)
                         .foregroundStyle(WGJTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1366,17 +1379,79 @@ private struct ActiveWorkoutFinishPopover: View {
             }
 
             HStack(spacing: 10) {
-                Button("Not yet", action: onCancel)
+                Button(content.cancelButtonTitle, action: onCancel)
                     .buttonStyle(WGJGhostButtonStyle())
 
-                Button("Finish and Save", action: onFinish)
-                    .buttonStyle(WGJCompactPrimaryButtonStyle())
+                if content.hasIncompleteWork {
+                    Button(content.confirmButtonTitle, action: onFinish)
+                        .buttonStyle(WGJDestructiveButtonStyle())
+                } else {
+                    Button(content.confirmButtonTitle, action: onFinish)
+                        .buttonStyle(WGJCompactPrimaryButtonStyle())
+                }
             }
         }
         .padding(14)
-        .frame(width: 300, alignment: .leading)
+        .frame(width: 320, alignment: .leading)
         .wgjCardContainer(strong: true, cornerRadius: 18)
         .padding(6)
+    }
+}
+
+struct ActiveWorkoutFinishConfirmationContent: Equatable {
+    let incompleteExerciseCount: Int
+    let incompleteSetCount: Int
+
+    init(exerciseDrafts: [[WorkoutSessionSetDraft]]) {
+        var incompleteExerciseCount = 0
+        var incompleteSetCount = 0
+
+        for drafts in exerciseDrafts {
+            let unfinishedSetCount = drafts.filter { !$0.isCompleted }.count
+            if unfinishedSetCount > 0 || drafts.isEmpty {
+                incompleteExerciseCount += 1
+                incompleteSetCount += unfinishedSetCount
+            }
+        }
+
+        self.incompleteExerciseCount = incompleteExerciseCount
+        self.incompleteSetCount = incompleteSetCount
+    }
+
+    var hasIncompleteWork: Bool {
+        incompleteExerciseCount > 0 || incompleteSetCount > 0
+    }
+
+    var title: String {
+        hasIncompleteWork ? "Finish With Unfinished Work?" : "Finish Workout?"
+    }
+
+    var message: String {
+        guard hasIncompleteWork else {
+            return "This will close the active workout and add it to your history."
+        }
+
+        if incompleteSetCount > 0 {
+            return "You still have \(countText(incompleteSetCount, singular: "unfinished set")) across \(countText(incompleteExerciseCount, singular: "exercise")). Finish anyway or go back and finish them."
+        }
+
+        return "You still have \(countText(incompleteExerciseCount, singular: "unfinished exercise")). Finish anyway or go back before closing this workout."
+    }
+
+    var confirmButtonTitle: String {
+        hasIncompleteWork ? "Finish Anyway" : "Finish and Save"
+    }
+
+    var cancelButtonTitle: String {
+        hasIncompleteWork ? "Keep Logging" : "Not yet"
+    }
+
+    var iconSystemName: String {
+        hasIncompleteWork ? "exclamationmark.triangle.fill" : "checkmark.circle.fill"
+    }
+
+    private func countText(_ count: Int, singular: String) -> String {
+        "\(count) \(singular)" + (count == 1 ? "" : "s")
     }
 }
 
