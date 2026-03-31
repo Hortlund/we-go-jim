@@ -36,6 +36,8 @@ struct WorkoutSessionExerciseGridEditor: View {
     @State private var exerciseSwipeRemoving = false
     @State private var setSwipeOffsets: [UUID: CGFloat] = [:]
     @State private var setSwipeRemoving: [UUID: Bool] = [:]
+    @State private var repsInputTextBySetID: [UUID: String] = [:]
+    @State private var weightInputTextBySetID: [UUID: String] = [:]
     @FocusState private var focusedInput: SetInputFocus?
 
     private let restPresets = [10, 15, 20, 30, 45, 60, 75, 90, 105, 120, 150, 180, 210, 240]
@@ -155,6 +157,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         .onAppear(perform: refreshDisplayRows)
         .onChange(of: _setDrafts.wrappedValue) { _, _ in
             refreshDisplayRows()
+            pruneInputDrafts()
         }
         .onChange(of: previousBySetIndex) { _, _ in
             refreshDisplayRows()
@@ -167,6 +170,12 @@ struct WorkoutSessionExerciseGridEditor: View {
         }
         .onChange(of: targetRepMax) { _, _ in
             refreshDisplayRows()
+        }
+        .onChange(of: focusedInput) { previousFocus, newFocus in
+            guard previousFocus != newFocus else { return }
+            if let previousFocus {
+                clearInputDraft(for: previousFocus)
+            }
         }
     }
 
@@ -1140,26 +1149,42 @@ struct WorkoutSessionExerciseGridEditor: View {
     private func repsTextBinding(for index: Int) -> Binding<String> {
         Binding(
             get: {
-                guard setDrafts.indices.contains(index), let value = setDrafts[index].actualReps else {
+                guard setDrafts.indices.contains(index) else {
+                    return ""
+                }
+                let setID = setDrafts[index].id
+                if isInputFocused(.reps, at: index), let draft = repsInputTextBySetID[setID] {
+                    return draft
+                }
+                guard let value = setDrafts[index].actualReps else {
                     return ""
                 }
                 return "\(value)"
             },
             set: { newValue in
                 guard setDrafts.indices.contains(index) else { return }
+                let setID = setDrafts[index].id
+                repsInputTextBySetID[setID] = newValue
                 let cleaned = newValue.filter(\.isNumber)
+                let updatedReps = cleaned.isEmpty ? nil : Int(cleaned)
+                var didChange = false
 
-                if cleaned.isEmpty {
-                    setDrafts[index].actualReps = nil
-                } else {
-                    setDrafts[index].actualReps = Int(cleaned)
+                if setDrafts[index].actualReps != updatedReps {
+                    setDrafts[index].actualReps = updatedReps
+                    didChange = true
                 }
 
                 if !manualCompletionMode {
-                    setDrafts[index].isCompleted =
-                        (setDrafts[index].actualReps != nil || setDrafts[index].actualWeight != nil)
+                    let isCompleted = (setDrafts[index].actualReps != nil || setDrafts[index].actualWeight != nil)
+                    if setDrafts[index].isCompleted != isCompleted {
+                        setDrafts[index].isCompleted = isCompleted
+                        didChange = true
+                    }
                 }
-                notifyChanged()
+
+                if didChange {
+                    notifyChanged()
+                }
             }
         )
     }
@@ -1167,26 +1192,50 @@ struct WorkoutSessionExerciseGridEditor: View {
     private func weightTextBinding(for index: Int) -> Binding<String> {
         Binding(
             get: {
-                guard setDrafts.indices.contains(index), let value = setDrafts[index].actualWeight else {
+                guard setDrafts.indices.contains(index) else {
+                    return ""
+                }
+                let setID = setDrafts[index].id
+                if isInputFocused(.weight, at: index), let draft = weightInputTextBySetID[setID] {
+                    return draft
+                }
+                guard let value = setDrafts[index].actualWeight else {
                     return ""
                 }
                 return formatWeight(value)
             },
             set: { newValue in
                 guard setDrafts.indices.contains(index) else { return }
+                let setID = setDrafts[index].id
+                weightInputTextBySetID[setID] = newValue
                 let normalized = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                let updatedWeight: Double?
+                var didChange = false
 
                 if normalized.isEmpty {
-                    setDrafts[index].actualWeight = nil
+                    updatedWeight = nil
                 } else if let parsed = WGJFormatters.parseLocalizedDecimal(normalized) {
-                    setDrafts[index].actualWeight = max(0, parsed)
+                    updatedWeight = max(0, parsed)
+                } else {
+                    updatedWeight = setDrafts[index].actualWeight
+                }
+
+                if setDrafts[index].actualWeight != updatedWeight {
+                    setDrafts[index].actualWeight = updatedWeight
+                    didChange = true
                 }
 
                 if !manualCompletionMode {
-                    setDrafts[index].isCompleted =
-                        (setDrafts[index].actualReps != nil || setDrafts[index].actualWeight != nil)
+                    let isCompleted = (setDrafts[index].actualReps != nil || setDrafts[index].actualWeight != nil)
+                    if setDrafts[index].isCompleted != isCompleted {
+                        setDrafts[index].isCompleted = isCompleted
+                        didChange = true
+                    }
                 }
-                notifyChanged()
+
+                if didChange {
+                    notifyChanged()
+                }
             }
         )
     }
@@ -1594,6 +1643,25 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func formatWeight(_ value: Double) -> String {
         WGJFormatters.decimalString(value)
+    }
+
+    private func pruneInputDrafts() {
+        let validSetIDs = Set(setDrafts.map(\.id))
+        repsInputTextBySetID = repsInputTextBySetID.filter { validSetIDs.contains($0.key) }
+        weightInputTextBySetID = weightInputTextBySetID.filter { validSetIDs.contains($0.key) }
+
+        if let focusedInput, !validSetIDs.contains(focusedInput.setID) {
+            self.focusedInput = nil
+        }
+    }
+
+    private func clearInputDraft(for focus: SetInputFocus) {
+        switch focus.metric {
+        case .weight:
+            weightInputTextBySetID[focus.setID] = nil
+        case .reps:
+            repsInputTextBySetID[focus.setID] = nil
+        }
     }
 
     private func setSwipeOffsetBinding(for setID: UUID) -> Binding<CGFloat> {

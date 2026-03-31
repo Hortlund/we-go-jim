@@ -42,12 +42,24 @@ enum WGJFormatters {
 
     static func parseLocalizedDecimal(_ text: String) -> Double? {
         let separator = Locale.current.decimalSeparator ?? "."
-        let normalized = text
+        let normalized = normalizedLocalizedDecimalText(text, separator: separator)
+
+        guard !normalized.isEmpty else { return nil }
+        if let parsed = decimalFormatter.number(from: normalized)?.doubleValue {
+            return parsed
+        }
+
+        guard normalized.hasSuffix(separator) else { return nil }
+        let trimmed = String(normalized.dropLast(separator.count))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return decimalFormatter.number(from: trimmed)?.doubleValue
+    }
+
+    private static func normalizedLocalizedDecimalText(_ text: String, separator: String) -> String {
+        text
             .replacingOccurrences(of: ",", with: separator)
             .replacingOccurrences(of: ".", with: separator)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !normalized.isEmpty else { return nil }
-        return decimalFormatter.number(from: normalized)?.doubleValue
     }
 }
