@@ -44,7 +44,8 @@ enum AppRuntimeConfig {
             return false
         }
 
-        return FileManager.default.url(forUbiquityContainerIdentifier: cloudKitContainerIdentifier) != nil
+        // `url(forUbiquityContainerIdentifier:)` checks iCloud Drive containers, not CloudKit-only setup.
+        return !cloudKitContainerIdentifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     static func makeCloudKitContainer() -> CKContainer? {

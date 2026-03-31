@@ -171,7 +171,7 @@ struct ContentView: View {
             activeWorkoutPresentationState.restoreActiveSessionIfNeeded(modelContext: modelContext)
             restTimerState.clearExpiredRestTimerIfNeeded()
             catalogSyncCoordinator.primeLocalCatalogIfNeeded(modelContext: modelContext)
-            try? WorkoutSessionRepository(modelContext: modelContext).backfillCompletedSessionSummariesIfNeeded()
+            _ = try? WorkoutSessionRepository(modelContext: modelContext).backfillCompletedSessionSummariesIfNeeded()
             await runSocialMaintenance()
         }
     }

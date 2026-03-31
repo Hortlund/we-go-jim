@@ -301,6 +301,21 @@ private enum WorkoutMetricsPolicy {
         }
     }
 
+    nonisolated static func bestSetWeightText(_ value: Double) -> String {
+        value.formatted(.number.precision(.fractionLength(0...2)))
+    }
+
+    nonisolated static func bestSetUnitText(_ unit: TemplateLoadUnit) -> String {
+        switch unit {
+        case .kg:
+            return "kg"
+        case .lb:
+            return "lb"
+        case .bodyweight:
+            return "BW"
+        }
+    }
+
     nonisolated static func bestSetPresentation(from sets: [WorkoutSessionSet]) -> BestSetPresentation? {
         let workingMetrics = completedWorkingMetrics(from: sets)
         let weightedMetrics = workingMetrics.compactMap { metric -> WeightedWorkingSetMetric? in
@@ -315,7 +330,7 @@ private enum WorkoutMetricsPolicy {
             return isBetterWeightedMetric(metric, than: currentBest) ? metric : currentBest
         }) {
             return BestSetPresentation(
-                displayText: "\(WGJFormatters.decimalString(bestWeightedMetric.weight)) \(bestWeightedMetric.unit.shortLabel) x \(bestWeightedMetric.reps)"
+                displayText: "\(bestSetWeightText(bestWeightedMetric.weight)) \(bestSetUnitText(bestWeightedMetric.unit)) x \(bestWeightedMetric.reps)"
             )
         }
 
