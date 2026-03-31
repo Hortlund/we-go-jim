@@ -1388,9 +1388,22 @@ private struct ActiveWorkoutCancelSection: View {
                 Button(action: onArmCancel) {
                     Label("Cancel Workout", systemImage: "xmark.circle.fill")
                         .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
                         .foregroundStyle(WGJTheme.danger)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(WGJTheme.field.opacity(0.74))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .stroke(WGJTheme.danger.opacity(0.38), lineWidth: 1)
+                                )
+                                .wgjRoundedGlass(
+                                    cornerRadius: 12,
+                                    tint: WGJTheme.danger.opacity(0.12),
+                                    interactive: true
+                                )
+                        )
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("active-workout-cancel-button")
