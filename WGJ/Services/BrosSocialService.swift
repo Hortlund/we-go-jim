@@ -647,11 +647,13 @@ final class CloudKitBrosSocialService: BrosSocialService {
         return CloudKitBrosSocialService(modelContext: modelContext)
     }
 
-    convenience init(
+    convenience init?(
         modelContext: ModelContext,
         container: CKContainer? = nil
     ) {
-        let resolvedContainer = container ?? CKContainer(identifier: AppRuntimeConfig.cloudKitContainerIdentifier)
+        guard let resolvedContainer = container ?? AppRuntimeConfig.makeCloudKitContainer() else {
+            return nil
+        }
         self.init(
             modelContext: modelContext,
             cloudStore: CloudKitBrosCloudStore(container: resolvedContainer)

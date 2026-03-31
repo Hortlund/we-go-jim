@@ -354,6 +354,7 @@ struct StartWorkoutHomeView: View {
                     } label: {
                         Label("Edit", systemImage: "pencil")
                     }
+                    .accessibilityIdentifier("start-workout-template-edit-menu-button")
 
                     Button {
                         exportTemplate(templateID: template.id)
@@ -444,6 +445,7 @@ struct StartWorkoutHomeView: View {
                 .frame(maxWidth: .infinity)
         }
         .buttonStyle(WGJCompactGhostButtonStyle())
+        .accessibilityIdentifier("start-workout-template-inline-edit-button")
     }
 
     private func folderActionsMenu(for folder: TemplateFolder) -> some View {

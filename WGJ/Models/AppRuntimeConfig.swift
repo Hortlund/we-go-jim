@@ -1,3 +1,4 @@
+import CloudKit
 import Foundation
 import SwiftData
 import SwiftUI
@@ -18,6 +19,10 @@ struct CloudSyncEventSummary: Equatable {
     let errorDescription: String?
 }
 
+enum CloudKitContainerAvailabilityError: Error {
+    case unavailable
+}
+
 enum AppRuntimeConfig {
     static let supportEmail = "support@wegojim.app"
     static let privacyPolicyURL: URL? = nil
@@ -27,6 +32,26 @@ enum AppRuntimeConfig {
         brosEnabled: true,
         syncBrosAvatars: true
     )
+
+    static var isRunningTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    }
+
+    static var canUseConfiguredCloudKitContainer: Bool {
+        guard !isRunningTests else {
+            return false
+        }
+
+        return FileManager.default.url(forUbiquityContainerIdentifier: cloudKitContainerIdentifier) != nil
+    }
+
+    static func makeCloudKitContainer() -> CKContainer? {
+        guard canUseConfiguredCloudKitContainer else {
+            return nil
+        }
+
+        return CKContainer(identifier: cloudKitContainerIdentifier)
+    }
 }
 
 @MainActor
@@ -51,6 +76,9 @@ final class AppRuntimeState {
 
     var isBrosCloudAvailable: Bool {
         AppRuntimeConfig.reviewPolicy.brosEnabled
+            && cloudSyncEnabled
+            && cloudSyncErrorDescription == nil
+            && AppRuntimeConfig.canUseConfiguredCloudKitContainer
     }
 }
 

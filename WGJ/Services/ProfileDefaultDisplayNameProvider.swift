@@ -6,13 +6,17 @@ protocol ProfileDefaultDisplayNameProviding {
 }
 
 struct ICloudProfileDefaultDisplayNameProvider: ProfileDefaultDisplayNameProviding {
-    private let container: CKContainer
+    private let container: CKContainer?
 
     init(container: CKContainer? = nil) {
-        self.container = container ?? CKContainer(identifier: AppRuntimeConfig.cloudKitContainerIdentifier)
+        self.container = container ?? AppRuntimeConfig.makeCloudKitContainer()
     }
 
     func defaultDisplayName() async -> String? {
+        guard let container else {
+            return nil
+        }
+
         do {
             let userRecordID = try await container.userRecordID()
             let participant = try await container.shareParticipant(forUserRecordID: userRecordID)

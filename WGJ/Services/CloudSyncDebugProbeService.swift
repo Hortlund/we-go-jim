@@ -33,13 +33,10 @@ struct CloudSyncDebugProbeService {
         static let buildConfiguration = "buildConfiguration"
     }
 
-    private let container: CKContainer
-    private let database: CKDatabase
+    private let database: CKDatabase?
 
     init(container: CKContainer? = nil) {
-        let resolvedContainer = container ?? CKContainer(identifier: AppRuntimeConfig.cloudKitContainerIdentifier)
-        self.container = resolvedContainer
-        self.database = resolvedContainer.privateCloudDatabase
+        self.database = (container ?? AppRuntimeConfig.makeCloudKitContainer())?.privateCloudDatabase
     }
 
     func writeProbe(
@@ -47,6 +44,7 @@ struct CloudSyncDebugProbeService {
         templateCount: Int,
         workoutCount: Int
     ) async throws -> CloudSyncDebugProbeDescriptor {
+        let database = try requireDatabase()
         let recordID = CKRecord.ID(recordName: CloudSyncDebugProbeDescriptor.recordName)
         let record = try await existingRecord(recordID: recordID)
             ?? CKRecord(recordType: CloudSyncDebugProbeDescriptor.recordType, recordID: recordID)
@@ -78,6 +76,7 @@ struct CloudSyncDebugProbeService {
     }
 
     func verifyProbe() async throws -> CloudSyncDebugProbeVerification {
+        _ = try requireDatabase()
         let recordID = CKRecord.ID(recordName: CloudSyncDebugProbeDescriptor.recordName)
         let directRecord = try await existingRecord(recordID: recordID)
 
@@ -104,6 +103,7 @@ struct CloudSyncDebugProbeService {
     }
 
     private func existingRecord(recordID: CKRecord.ID) async throws -> CKRecord? {
+        let database = try requireDatabase()
         do {
             let results = try await database.records(for: [recordID])
             guard let result = results[recordID] else {
@@ -129,6 +129,7 @@ struct CloudSyncDebugProbeService {
     }
 
     private func queriedProbeRecord() async throws -> CKRecord? {
+        let database = try requireDatabase()
         let query = CKQuery(
             recordType: CloudSyncDebugProbeDescriptor.recordType,
             predicate: NSPredicate(
@@ -149,6 +150,14 @@ struct CloudSyncDebugProbeService {
         }
 
         return nil
+    }
+
+    private func requireDatabase() throws -> CKDatabase {
+        guard let database else {
+            throw CloudKitContainerAvailabilityError.unavailable
+        }
+
+        return database
     }
 
     private var buildConfiguration: String {

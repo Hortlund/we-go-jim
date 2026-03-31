@@ -91,6 +91,36 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testTemplateEditFlowSmoke() throws {
+        let app = launchApp()
+
+        tapTab("Start Workout", in: app)
+
+        app.buttons["start-workout-new-template-button"].tap()
+        let templateNameField = app.textFields["template-editor-name-field"]
+        XCTAssertTrue(templateNameField.waitForExistence(timeout: 5))
+        templateNameField.tap()
+        templateNameField.typeText("Editable Template")
+        app.buttons["template-editor-save-button"].tap()
+        XCTAssertTrue(app.staticTexts["Editable Template"].waitForExistence(timeout: 5))
+
+        let actionsButton = identifiedElement("start-workout-template-actions-button", in: app)
+        XCTAssertTrue(actionsButton.waitForExistence(timeout: 5))
+        actionsButton.tap()
+
+        let editButton = identifiedElement("start-workout-template-edit-menu-button", in: app)
+        XCTAssertTrue(editButton.waitForExistence(timeout: 5))
+        editButton.tap()
+
+        XCTAssertTrue(templateNameField.waitForExistence(timeout: 5))
+        templateNameField.tap()
+        templateNameField.typeText(" Updated")
+        app.buttons["template-editor-save-button"].tap()
+
+        XCTAssertTrue(app.staticTexts["Editable Template Updated"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testTemplateFileLaunchHookImportsAndShowsPreview() throws {
         let app = launchApp(launchEnvironment: [
             "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(

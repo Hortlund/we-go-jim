@@ -23,14 +23,18 @@ protocol CloudAccountStatusClient {
 }
 
 struct CKContainerAccountStatusClient: CloudAccountStatusClient {
-    let container: CKContainer
+    let container: CKContainer?
 
     init(container: CKContainer? = nil) {
-        self.container = container ?? CKContainer(identifier: AppRuntimeConfig.cloudKitContainerIdentifier)
+        self.container = container ?? AppRuntimeConfig.makeCloudKitContainer()
     }
 
     func accountStatus() async throws -> CKAccountStatus {
-        try await withCheckedThrowingContinuation { continuation in
+        guard let container else {
+            throw CloudKitContainerAvailabilityError.unavailable
+        }
+
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<CKAccountStatus, any Error>) in
             container.accountStatus { status, error in
                 if let error {
                     continuation.resume(throwing: error)

@@ -155,7 +155,7 @@ enum TemplateRepositoryError: Error {
 
 @MainActor
 final class TemplateRepository {
-    static let unfiledFolderID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+    nonisolated static let unfiledFolderID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
 
     private let modelContext: ModelContext
 

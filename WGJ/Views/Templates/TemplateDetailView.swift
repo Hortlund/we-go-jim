@@ -264,8 +264,7 @@ struct TemplateDetailView: View {
         withAnimation(WGJMotion.quickAnimation(reduceMotion: reduceMotion)) {
             do {
                 try repository.removeExercise(templateID: templateID, templateExerciseID: templateExerciseID)
-                isExpandedByExerciseID[templateExerciseID] = nil
-                clearExerciseSwipeState(for: templateExerciseID)
+                discardExerciseState(for: templateExerciseID)
             } catch {
                 capturedError = error
             }
@@ -437,6 +436,8 @@ struct TemplateDetailView: View {
     @MainActor
     private func loadSetDraftsIfNeeded() async {
         let currentIDs = templateExercises.map(\.id)
+        let currentIDSet = Set(currentIDs)
+        discardRemovedExerciseState(keeping: currentIDSet)
         guard currentIDs != loadedTemplateExerciseIDs else {
             if !hasLoadedExerciseStateOnce {
                 hasLoadedExerciseStateOnce = true
@@ -468,7 +469,6 @@ struct TemplateDetailView: View {
             restSecondsByExerciseID = loadedRests
             lastPersistedRestSecondsByExerciseID = loadedRests
             let previousIDs = Set(loadedTemplateExerciseIDs)
-            let currentIDSet = Set(currentIDs)
             isExpandedByExerciseID = isExpandedByExerciseID.filter { currentIDSet.contains($0.key) }
             for exerciseID in currentIDs where isExpandedByExerciseID[exerciseID] == nil {
                 let isNewExercise = previousIDs.contains(exerciseID) == false
@@ -619,6 +619,47 @@ struct TemplateDetailView: View {
     private func clearExerciseSwipeState(for exerciseID: UUID) {
         exerciseSwipeOffsets[exerciseID] = nil
         exerciseSwipeRemoving[exerciseID] = nil
+    }
+
+    @MainActor
+    private func discardRemovedExerciseState(keeping currentIDs: Set<UUID>) {
+        let knownIDs =
+            Set(loadedTemplateExerciseIDs)
+            .union(setDraftsByExerciseID.keys)
+            .union(lastPersistedSetDraftsByExerciseID.keys)
+            .union(repRangeByExerciseID.keys)
+            .union(lastPersistedRepRangeByExerciseID.keys)
+            .union(restSecondsByExerciseID.keys)
+            .union(lastPersistedRestSecondsByExerciseID.keys)
+            .union(pendingSetSaveTasks.keys)
+            .union(pendingRepRangeSaveTasks.keys)
+            .union(pendingRestSaveTasks.keys)
+            .union(recommendationByExerciseID.keys)
+            .union(isExpandedByExerciseID.keys)
+            .union(exerciseSwipeOffsets.keys)
+            .union(exerciseSwipeRemoving.keys)
+
+        for exerciseID in knownIDs where !currentIDs.contains(exerciseID) {
+            discardExerciseState(for: exerciseID)
+        }
+    }
+
+    @MainActor
+    private func discardExerciseState(for exerciseID: UUID) {
+        pendingSetSaveTasks.removeValue(forKey: exerciseID)?.cancel()
+        pendingRepRangeSaveTasks.removeValue(forKey: exerciseID)?.cancel()
+        pendingRestSaveTasks.removeValue(forKey: exerciseID)?.cancel()
+
+        setDraftsByExerciseID[exerciseID] = nil
+        lastPersistedSetDraftsByExerciseID[exerciseID] = nil
+        repRangeByExerciseID[exerciseID] = nil
+        lastPersistedRepRangeByExerciseID[exerciseID] = nil
+        restSecondsByExerciseID[exerciseID] = nil
+        lastPersistedRestSecondsByExerciseID[exerciseID] = nil
+        recommendationByExerciseID[exerciseID] = nil
+        isExpandedByExerciseID[exerciseID] = nil
+        loadedTemplateExerciseIDs.removeAll { $0 == exerciseID }
+        clearExerciseSwipeState(for: exerciseID)
     }
 
     private func exerciseSwipeOffsetBinding(for exerciseID: UUID) -> Binding<CGFloat> {
