@@ -14,15 +14,12 @@ struct BundleExerciseSeedLoader: ExerciseSeedLoading {
     }
 
     func loadSeed() throws -> ExerciseSeedPayload {
-        if let url = bundle.url(forResource: fileName, withExtension: "json") {
-            let data = try Data(contentsOf: url)
-            return try JSONDecoder().decode(ExerciseSeedPayload.self, from: data)
-        }
-
-        guard let fallbackData = fallbackSeedJSON.data(using: .utf8) else {
+        guard let url = bundle.url(forResource: fileName, withExtension: "json") else {
             throw ExerciseSeedLoaderError.seedNotFound
         }
-        return try JSONDecoder().decode(ExerciseSeedPayload.self, from: fallbackData)
+
+        let data = try Data(contentsOf: url)
+        return try JSONDecoder().decode(ExerciseSeedPayload.self, from: data)
     }
 }
 
@@ -84,38 +81,3 @@ struct SeedExercise: Decodable, Sendable {
         case isCurated = "is_curated"
     }
 }
-
-private let fallbackSeedJSON = #"""
-{
-  "version": 1,
-  "generatedAt": "2026-02-06T00:00:00Z",
-  "muscles": [
-    { "id": 1, "name": "Biceps", "name_en": "Biceps" },
-    { "id": 2, "name": "Shoulders", "name_en": "Shoulders" },
-    { "id": 3, "name": "Chest", "name_en": "Chest" },
-    { "id": 4, "name": "Back", "name_en": "Back" },
-    { "id": 5, "name": "Quadriceps", "name_en": "Quadriceps" },
-    { "id": 6, "name": "Hamstrings", "name_en": "Hamstrings" },
-    { "id": 7, "name": "Glutes", "name_en": "Glutes" }
-  ],
-  "exercises": [
-    {
-      "remote_id": 1,
-      "uuid": "seed-back-squat",
-      "name": "Barbell Back Squat",
-      "aliases": ["Squat"],
-      "category": "Legs",
-      "equipment": "Barbell,Rack",
-      "instructions": "Brace your torso, sit between your hips, keep the bar over mid-foot, and drive up without letting your knees cave in.",
-      "primary_muscles": [5],
-      "secondary_muscles": [7,6],
-      "image_url": "",
-      "source_url": "",
-      "license_name": "Bundled with WGJ",
-      "license_url": "",
-      "license_author": "WGJ",
-      "is_curated": true
-    }
-  ]
-}
-"""#

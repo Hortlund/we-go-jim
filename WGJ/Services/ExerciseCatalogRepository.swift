@@ -5,7 +5,6 @@ import UIKit
 @MainActor
 protocol ExerciseCatalogRepositoryProtocol {
     func ensureSeedImportedIfNeeded() throws
-    func refreshCatalog(force: Bool) async throws
     func searchExercises(query: String, filters: ExerciseFilters) throws -> [ExerciseCatalogItem]
     func groupedByMuscle(primaryOnly: Bool) throws -> [ExerciseMuscleGroupSection]
     func exerciseMap(for remoteUUIDs: [String]) throws -> [String: ExerciseCatalogItem]
@@ -64,10 +63,6 @@ final class ExerciseCatalogRepository: ExerciseCatalogRepositoryProtocol {
             modelContext: modelContext,
             seedLoader: BundleExerciseSeedLoader()
         )
-    }
-
-    func refreshCatalog(force: Bool) async throws {
-        try await syncService.refreshCatalog(force: force)
     }
 
     func ensureSeedImportedIfNeeded() throws {

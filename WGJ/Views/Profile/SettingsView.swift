@@ -12,7 +12,6 @@ struct SettingsView: View {
     @Query private var templates: [WorkoutTemplate]
     @Query private var sessions: [WorkoutSession]
 
-    @State private var isReloadingLibrary = false
     @State private var libraryStatusText = "Not loaded yet"
     @State private var weeklyGoal = 4
     @State private var isTrainingGuidanceEnabled = true
@@ -43,24 +42,10 @@ struct SettingsView: View {
                 WGJRootHeader("Settings", subtitle: "Manage the catalog, training preferences, privacy, and support.")
 
                 VStack(alignment: .leading, spacing: 10) {
-                    WGJSectionHeader("Library", subtitle: "Inspect and reload the bundled exercise database.")
+                    WGJSectionHeader("Library", subtitle: "Inspect the bundled on-device exercise database.")
 
                     infoRow("Visible exercises", value: "\(catalogExercises.filter { !$0.isHidden }.count)")
                     infoRow("Library status", value: libraryStatusText)
-
-                    Button {
-                        beginCatalogRefresh()
-                    } label: {
-                        if isReloadingLibrary {
-                            ProgressView()
-                                .frame(maxWidth: .infinity)
-                        } else {
-                            Label("Reload Library", systemImage: "arrow.clockwise")
-                                .frame(maxWidth: .infinity)
-                        }
-                    }
-                    .buttonStyle(WGJPrimaryButtonStyle())
-                    .disabled(isReloadingLibrary)
                 }
                 .padding(14)
                 .wgjCardContainer(strong: true)
@@ -368,12 +353,6 @@ struct SettingsView: View {
         }
     }
 
-    private func beginCatalogRefresh() {
-        Task {
-            await refreshCatalog(force: true)
-        }
-    }
-
     private func infoRow(_ title: String, value: String) -> some View {
         HStack(alignment: .firstTextBaseline) {
             Text(title)
@@ -410,39 +389,20 @@ struct SettingsView: View {
         }
     }
 
-    private func refreshCatalog(force: Bool) async {
-        isReloadingLibrary = true
-        defer { isReloadingLibrary = false }
-
-        do {
-            try catalogRepository.ensureSeedImportedIfNeeded()
-            try await catalogRepository.refreshCatalog(force: force)
-            refreshLibraryStatusText()
-        } catch {
-            showError(error)
-        }
-    }
-
     private func refreshLibraryStatusText() {
         guard let state = catalogRepository.syncState() else {
             libraryStatusText = "Not loaded yet"
             return
         }
 
-        if let lastReload = state.lastSuccessfulSyncAt {
-            let versionText = state.seedVersion > 0 ? "v\(state.seedVersion)" : "unknown version"
-            libraryStatusText = "\(versionText), reloaded \(lastReload.formatted(date: .abbreviated, time: .shortened))"
-            return
-        }
-
         if let error = state.lastErrorMessage, !error.isEmpty {
-            libraryStatusText = "Reload failed"
+            libraryStatusText = "Import failed"
             return
         }
 
         if let importedAt = state.seedImportedAt {
             let versionText = state.seedVersion > 0 ? "v\(state.seedVersion)" : "unknown version"
-            libraryStatusText = "\(versionText), imported \(importedAt.formatted(date: .abbreviated, time: .shortened))"
+            libraryStatusText = "\(versionText), on device since \(importedAt.formatted(date: .abbreviated, time: .shortened))"
             return
         }
 

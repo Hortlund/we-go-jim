@@ -1,6 +1,6 @@
 {
-  "version": 2,
-  "generatedAt": "2026-03-13T00:00:00Z",
+  "version": 3,
+  "generatedAt": "2026-03-31T00:00:00Z",
   "muscles": [
     {
       "id": 1,
@@ -61,6 +61,16 @@
       "id": 12,
       "name": "Traps",
       "name_en": "Traps"
+    },
+    {
+      "id": 13,
+      "name": "Adductors",
+      "name_en": "Adductors"
+    },
+    {
+      "id": 14,
+      "name": "Abductors",
+      "name_en": "Abductors"
     }
   ],
   "exercises": [
@@ -312,7 +322,9 @@
       "uuid": "seed-dips",
       "name": "Parallel Bar Dips",
       "aliases": [
-        "Dips"
+        "Dips",
+        "Triceps Dip",
+        "Triceps Dips"
       ],
       "category": "Arms",
       "equipment": "Dip station",
@@ -1821,7 +1833,10 @@
       "remote_id": 1080,
       "uuid": "seed-reverse-pec-deck",
       "name": "Reverse Pec Deck",
-      "aliases": [],
+      "aliases": [
+        "Machine Rear Delt Fly",
+        "Rear Delt Fly Machine"
+      ],
       "category": "Shoulders",
       "equipment": "Machine",
       "instructions": "Set the seat so your shoulders match the handles, open the arms wide, and pause with the rear delts squeezed.",
@@ -2180,7 +2195,9 @@
       "remote_id": 1097,
       "uuid": "seed-reverse-curl",
       "name": "Reverse Curl",
-      "aliases": [],
+      "aliases": [
+        "Barbell Reverse Curl"
+      ],
       "category": "Arms",
       "equipment": "EZ Bar",
       "instructions": "Use an overhand grip, keep the wrists stacked, and curl smoothly without letting the elbows flare.",
@@ -2396,7 +2413,10 @@
       "remote_id": 1107,
       "uuid": "seed-machine-dip",
       "name": "Machine Dip",
-      "aliases": [],
+      "aliases": [
+        "Machine Triceps Dip",
+        "Dip Machine"
+      ],
       "category": "Arms",
       "equipment": "Machine",
       "instructions": "Keep your chest slightly forward, lower under control, and drive through the handles to full elbow extension.",
@@ -4238,6 +4258,610 @@
       "secondary_muscles": [
         7,
         11
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1193,
+      "uuid": "seed-weighted-dip",
+      "name": "Weighted Dip",
+      "aliases": [
+        "Weighted Triceps Dip"
+      ],
+      "category": "Arms",
+      "equipment": "Dip Belt,Dip Station",
+      "instructions": "Stay stacked over the bars, lower under control, and keep the added load from swinging before you drive to lockout.",
+      "primary_muscles": [
+        8
+      ],
+      "secondary_muscles": [
+        3,
+        2
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1194,
+      "uuid": "seed-assisted-dip",
+      "name": "Assisted Dip",
+      "aliases": [],
+      "category": "Arms",
+      "equipment": "Assisted Dip Machine",
+      "instructions": "Stay tall through the chest, use only enough assistance to keep the rep smooth, and finish each lockout under control.",
+      "primary_muscles": [
+        8
+      ],
+      "secondary_muscles": [
+        3,
+        2
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1195,
+      "uuid": "seed-chest-dip",
+      "name": "Chest Dip",
+      "aliases": [],
+      "category": "Chest",
+      "equipment": "Dip Station",
+      "instructions": "Lean slightly forward, let the elbows travel back naturally, and press up while keeping tension through the chest.",
+      "primary_muscles": [
+        3
+      ],
+      "secondary_muscles": [
+        8,
+        2
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1196,
+      "uuid": "seed-machine-preacher-curl",
+      "name": "Machine Preacher Curl",
+      "aliases": [],
+      "category": "Arms",
+      "equipment": "Machine",
+      "instructions": "Glue the upper arms to the pad, curl through the full range, and lower slowly without losing the shoulder position.",
+      "primary_muscles": [
+        1
+      ],
+      "secondary_muscles": [
+        11
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1197,
+      "uuid": "seed-barbell-wrist-curl",
+      "name": "Barbell Wrist Curl",
+      "aliases": [],
+      "category": "Arms",
+      "equipment": "Barbell,Bench",
+      "instructions": "Let the bar roll into the fingers, curl the hands up hard, and keep the forearms pinned to the bench the whole set.",
+      "primary_muscles": [
+        11
+      ],
+      "secondary_muscles": [
+        1
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1198,
+      "uuid": "seed-reverse-wrist-curl",
+      "name": "Reverse Wrist Curl",
+      "aliases": [],
+      "category": "Arms",
+      "equipment": "Barbell,Bench",
+      "instructions": "Rest the forearms flat, lift through the knuckles, and control the negative without letting the wrists collapse.",
+      "primary_muscles": [
+        11
+      ],
+      "secondary_muscles": [
+        1
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1199,
+      "uuid": "seed-behind-the-back-wrist-curl",
+      "name": "Behind the Back Wrist Curl",
+      "aliases": [],
+      "category": "Arms",
+      "equipment": "Barbell,Rack",
+      "instructions": "Stand tall, hold the bar behind the thighs, and curl through the fingers and wrists without shrugging the shoulders.",
+      "primary_muscles": [
+        11
+      ],
+      "secondary_muscles": [
+        1
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1200,
+      "uuid": "seed-dumbbell-wrist-curl",
+      "name": "Dumbbell Wrist Curl",
+      "aliases": [],
+      "category": "Arms",
+      "equipment": "Dumbbells,Bench",
+      "instructions": "Use a smooth curl through the wrist, keep the forearm planted, and avoid turning the movement into an elbow flexion.",
+      "primary_muscles": [
+        11
+      ],
+      "secondary_muscles": [
+        1
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1201,
+      "uuid": "seed-wrist-roller",
+      "name": "Wrist Roller",
+      "aliases": [],
+      "category": "Arms",
+      "equipment": "Wrist Roller",
+      "instructions": "Keep the arms straight at shoulder height, roll the load smoothly, and control the unwind instead of dropping it.",
+      "primary_muscles": [
+        11
+      ],
+      "secondary_muscles": [
+        2
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1202,
+      "uuid": "seed-zottman-curl",
+      "name": "Zottman Curl",
+      "aliases": [],
+      "category": "Arms",
+      "equipment": "Dumbbells",
+      "instructions": "Curl with a supinated grip, rotate at the top, and lower under control with the palms facing down.",
+      "primary_muscles": [
+        1
+      ],
+      "secondary_muscles": [
+        11
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1203,
+      "uuid": "seed-hip-adduction-machine",
+      "name": "Hip Adduction Machine",
+      "aliases": [
+        "Adductor Machine"
+      ],
+      "category": "Legs",
+      "equipment": "Machine",
+      "instructions": "Stay tall against the pad, bring the legs together without bouncing, and keep tension through the full range.",
+      "primary_muscles": [
+        13
+      ],
+      "secondary_muscles": [
+        5
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1204,
+      "uuid": "seed-hip-abduction-machine",
+      "name": "Hip Abduction Machine",
+      "aliases": [
+        "Abductor Machine"
+      ],
+      "category": "Legs",
+      "equipment": "Machine",
+      "instructions": "Brace into the seat, drive the knees apart, and pause before controlling the return all the way in.",
+      "primary_muscles": [
+        14
+      ],
+      "secondary_muscles": [
+        7
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1205,
+      "uuid": "seed-cable-hip-adduction",
+      "name": "Cable Hip Adduction",
+      "aliases": [],
+      "category": "Legs",
+      "equipment": "Cable,Ankle Strap",
+      "instructions": "Stand tall, sweep the working leg across the body, and keep the torso quiet so the hip does the work.",
+      "primary_muscles": [
+        13
+      ],
+      "secondary_muscles": [
+        7
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1206,
+      "uuid": "seed-cable-hip-abduction",
+      "name": "Cable Hip Abduction",
+      "aliases": [],
+      "category": "Legs",
+      "equipment": "Cable,Ankle Strap",
+      "instructions": "Hold a stable support, move the leg out from the hip, and keep the toes pointed forward throughout the rep.",
+      "primary_muscles": [
+        14
+      ],
+      "secondary_muscles": [
+        7
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1207,
+      "uuid": "seed-smith-machine-hip-thrust",
+      "name": "Smith Machine Hip Thrust",
+      "aliases": [],
+      "category": "Legs",
+      "equipment": "Smith Machine,Bench",
+      "instructions": "Set the bench under the shoulder blades, tuck the ribs down, and drive the hips up without arching the low back.",
+      "primary_muscles": [
+        7
+      ],
+      "secondary_muscles": [
+        6
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1208,
+      "uuid": "seed-machine-hip-thrust",
+      "name": "Machine Hip Thrust",
+      "aliases": [],
+      "category": "Legs",
+      "equipment": "Machine",
+      "instructions": "Brace the trunk first, drive through the heels, and squeeze the glutes at the top without overextending.",
+      "primary_muscles": [
+        7
+      ],
+      "secondary_muscles": [
+        6
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1209,
+      "uuid": "seed-45-degree-back-extension",
+      "name": "45 Degree Back Extension",
+      "aliases": [
+        "Hyperextension"
+      ],
+      "category": "Back",
+      "equipment": "Hyperextension Bench",
+      "instructions": "Hinge from the hips, keep the spine long, and raise only until your body is in a straight line.",
+      "primary_muscles": [
+        4
+      ],
+      "secondary_muscles": [
+        7,
+        6
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1210,
+      "uuid": "seed-reverse-hyperextension",
+      "name": "Reverse Hyperextension",
+      "aliases": [
+        "Reverse Hyper"
+      ],
+      "category": "Back",
+      "equipment": "Reverse Hyper Machine",
+      "instructions": "Brace the trunk into the pad, swing only through the hips, and stop when the glutes are fully squeezed.",
+      "primary_muscles": [
+        7
+      ],
+      "secondary_muscles": [
+        6,
+        4
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1211,
+      "uuid": "seed-barbell-shrug",
+      "name": "Barbell Shrug",
+      "aliases": [],
+      "category": "Shoulders",
+      "equipment": "Barbell",
+      "instructions": "Stand tall, pull the shoulders straight up, and pause hard at the top without rolling the shoulders forward.",
+      "primary_muscles": [
+        12
+      ],
+      "secondary_muscles": [
+        2
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1212,
+      "uuid": "seed-dumbbell-shrug",
+      "name": "Dumbbell Shrug",
+      "aliases": [],
+      "category": "Shoulders",
+      "equipment": "Dumbbells",
+      "instructions": "Keep the bells close to your sides, elevate the shoulders smoothly, and lower under full control each rep.",
+      "primary_muscles": [
+        12
+      ],
+      "secondary_muscles": [
+        2
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1213,
+      "uuid": "seed-machine-shrug",
+      "name": "Machine Shrug",
+      "aliases": [],
+      "category": "Shoulders",
+      "equipment": "Machine",
+      "instructions": "Lock in the torso, lift the shoulders straight up into the pads or handles, and control the descent.",
+      "primary_muscles": [
+        12
+      ],
+      "secondary_muscles": [
+        2
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1214,
+      "uuid": "seed-landmine-row",
+      "name": "Landmine Row",
+      "aliases": [],
+      "category": "Back",
+      "equipment": "Landmine",
+      "instructions": "Brace your stance, pull the handle toward the hip or lower ribs, and avoid jerking with the torso.",
+      "primary_muscles": [
+        4
+      ],
+      "secondary_muscles": [
+        1,
+        2
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1215,
+      "uuid": "seed-cable-upright-row",
+      "name": "Cable Upright Row",
+      "aliases": [],
+      "category": "Shoulders",
+      "equipment": "Cable",
+      "instructions": "Lead with the elbows, keep the cable close, and stop before the range turns into shoulder irritation.",
+      "primary_muscles": [
+        2
+      ],
+      "secondary_muscles": [
+        12
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1216,
+      "uuid": "seed-donkey-calf-raise",
+      "name": "Donkey Calf Raise",
+      "aliases": [],
+      "category": "Legs",
+      "equipment": "Calf Raise Machine",
+      "instructions": "Stretch fully at the bottom, drive through the big toe, and pause at the top instead of bouncing through reps.",
+      "primary_muscles": [
+        9
+      ],
+      "secondary_muscles": [
+        6
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1217,
+      "uuid": "seed-single-leg-standing-calf-raise",
+      "name": "Single Leg Standing Calf Raise",
+      "aliases": [],
+      "category": "Legs",
+      "equipment": "Step,Bodyweight",
+      "instructions": "Use a full stretch, stay balanced through the foot, and rise straight up without twisting through the ankle.",
+      "primary_muscles": [
+        9
+      ],
+      "secondary_muscles": [
+        10
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1218,
+      "uuid": "seed-seated-dumbbell-calf-raise",
+      "name": "Seated Dumbbell Calf Raise",
+      "aliases": [],
+      "category": "Legs",
+      "equipment": "Dumbbell,Bench",
+      "instructions": "Set the dumbbell securely over the knee, drive the heel up hard, and control the stretch between every rep.",
+      "primary_muscles": [
+        9
+      ],
+      "secondary_muscles": [
+        6
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1219,
+      "uuid": "seed-sissy-squat",
+      "name": "Sissy Squat",
+      "aliases": [],
+      "category": "Legs",
+      "equipment": "Bodyweight,Support",
+      "instructions": "Stay tall through the hips, let the knees travel forward, and keep constant tension on the quads the whole set.",
+      "primary_muscles": [
+        5
+      ],
+      "secondary_muscles": [
+        10
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1220,
+      "uuid": "seed-copenhagen-plank",
+      "name": "Copenhagen Plank",
+      "aliases": [],
+      "category": "Core",
+      "equipment": "Bench",
+      "instructions": "Keep a straight line from shoulder to ankle, crush the bench with the top leg, and do not let the hips sag.",
+      "primary_muscles": [
+        13
+      ],
+      "secondary_muscles": [
+        10
       ],
       "image_url": "",
       "source_url": "",

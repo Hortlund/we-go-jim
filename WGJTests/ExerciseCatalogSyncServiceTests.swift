@@ -14,10 +14,16 @@ struct ExerciseCatalogSyncServiceTests {
 
         let data = try Data(contentsOf: seedURL)
         let payload = try JSONDecoder().decode(ExerciseSeedPayload.self, from: data)
+        let exerciseNames = Set(payload.exercises.map(\.name))
 
-        #expect(payload.muscles.count >= 10)
-        #expect(payload.exercises.count >= 150)
+        #expect(payload.muscles.count >= 14)
+        #expect(payload.exercises.count >= 220)
         #expect(payload.exercises.allSatisfy { !($0.instructions ?? "").isEmpty })
+        #expect(exerciseNames.contains("Hip Adduction Machine"))
+        #expect(exerciseNames.contains("Hip Abduction Machine"))
+        #expect(exerciseNames.contains("Barbell Wrist Curl"))
+        #expect(exerciseNames.contains("Weighted Dip"))
+        #expect(payload.exercises.first(where: { $0.name == "Reverse Pec Deck" })?.aliases.contains("Machine Rear Delt Fly") == true)
     }
 
     @Test
@@ -81,7 +87,7 @@ struct ExerciseCatalogSyncServiceTests {
             seedLoader: StaticSeedLoader(payload: SeedFixtures.updatedPayload),
             nowProvider: { Date(timeIntervalSince1970: 1_700_000_100) }
         )
-        try await refreshService.refreshCatalog(force: true)
+        try refreshService.reloadSeedCatalog()
 
         let exercises = try context.fetch(
             FetchDescriptor<ExerciseCatalogItem>(
@@ -89,13 +95,12 @@ struct ExerciseCatalogSyncServiceTests {
             )
         )
         let bench = try #require(exercises.first(where: { $0.remoteUUID == "seed-bench" }))
-        let squat = try #require(exercises.first(where: { $0.remoteUUID == "seed-squat" }))
         let custom = try #require(exercises.first(where: { $0.sourceName == "custom" }))
 
         #expect(bench.displayName == "Bench Press Updated")
         #expect(bench.instructionTextValue == "Keep your shoulder blades tucked, touch low on the chest, and press in a stable bar path.")
         #expect(!bench.isHidden)
-        #expect(squat.isHidden)
+        #expect(exercises.contains(where: { $0.remoteUUID == "seed-squat" }) == false)
         #expect(!custom.isHidden)
         #expect(custom.displayName == "My Custom Row")
     }

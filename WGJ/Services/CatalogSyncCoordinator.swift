@@ -4,12 +4,6 @@ import SwiftData
 @MainActor
 @Observable
 final class CatalogSyncCoordinator {
-    enum SyncReason {
-        case appLaunch
-        case appForeground
-        case manual
-    }
-
     private var isPrimingLocalCatalog = false
     private(set) var hasPrimedLocalCatalog = false
 
@@ -27,12 +21,5 @@ final class CatalogSyncCoordinator {
         } catch {
             // Priming errors are surfaced by view-level empty/retry states.
         }
-    }
-
-    func scheduleStaleSyncIfNeeded(
-        modelContext: ModelContext,
-        reason _: SyncReason
-    ) {
-        primeLocalCatalogIfNeeded(modelContext: modelContext)
     }
 }

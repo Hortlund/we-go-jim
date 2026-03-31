@@ -43,7 +43,7 @@ final class ExerciseCatalogSyncService {
         try importSeed(payload: payload)
     }
 
-    func refreshCatalog(force _: Bool) async throws {
+    func reloadSeedCatalog() throws {
         let payload = try seedLoader.loadSeed()
         try importSeed(payload: payload)
     }
@@ -107,7 +107,7 @@ final class ExerciseCatalogSyncService {
             }
 
             for exercise in existing where exercise.sourceName != "custom" && !seenUUIDs.contains(exercise.remoteUUID) {
-                exercise.isHidden = true
+                modelContext.delete(exercise)
             }
 
             state.seedVersion = payload.version

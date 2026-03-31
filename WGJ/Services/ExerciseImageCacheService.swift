@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 import ImageIO
 import SwiftData
@@ -8,13 +7,11 @@ import UIKit
 final class ExerciseImageCacheService {
     private let modelContext: ModelContext
     private let fileManager: FileManager
-    private let cacheSizeLimitBytes: Int
     private let metadataFlushDelay: Duration = .seconds(6)
     private let minimumAccessUpdateInterval: TimeInterval = 180
     private let decodedThumbnailMaxPixelSize = 640
     private var metadataSaveTask: Task<Void, Never>?
     private var hasPendingMetadataSave = false
-    private var cachedDiskUsageBytes: Int?
 
     private static let sharedMemoryImageCache: NSCache<NSString, UIImage> = {
         let cache = NSCache<NSString, UIImage>()
@@ -25,12 +22,10 @@ final class ExerciseImageCacheService {
 
     init(
         modelContext: ModelContext,
-        fileManager: FileManager = .default,
-        cacheSizeLimitBytes: Int = 120 * 1024 * 1024
+        fileManager: FileManager = .default
     ) {
         self.modelContext = modelContext
         self.fileManager = fileManager
-        self.cacheSizeLimitBytes = cacheSizeLimitBytes
     }
 
     deinit {
@@ -42,7 +37,8 @@ final class ExerciseImageCacheService {
             return nil
         }
 
-        let cacheKey = NSString(string: imageAsset.remoteURL)
+        let cacheToken = imageAsset.localPath ?? imageAsset.remoteURL
+        let cacheKey = NSString(string: cacheToken)
         if let cached = Self.sharedMemoryImageCache.object(forKey: cacheKey) {
             markAssetAccessed(imageAsset)
             return cached
@@ -54,16 +50,7 @@ final class ExerciseImageCacheService {
             return cached
         }
 
-        if let downloaded = await downloadImage(for: imageAsset) {
-            Self.sharedMemoryImageCache.setObject(downloaded, forKey: cacheKey)
-            return downloaded
-        }
-
         return nil
-    }
-
-    func precacheIfNeeded(for exercise: ExerciseCatalogItem) async {
-        _ = await image(for: exercise)
     }
 
     private func loadCachedImage(from asset: ExerciseImageAsset) async -> UIImage? {
@@ -76,7 +63,6 @@ final class ExerciseImageCacheService {
               let data = await readData(from: fileURL),
               let image = await decodeImage(from: data)
         else {
-            adjustCachedDiskUsage(by: -max(asset.fileSizeBytes, 0))
             asset.localPath = nil
             asset.fileSizeBytes = 0
             scheduleMetadataSave()
@@ -84,38 +70,6 @@ final class ExerciseImageCacheService {
         }
 
         return image
-    }
-
-    private func downloadImage(for asset: ExerciseImageAsset) async -> UIImage? {
-        guard let remoteURL = URL(string: asset.remoteURL) else {
-            return nil
-        }
-
-        do {
-            let (data, response) = try await URLSession.shared.data(from: remoteURL)
-            guard let httpResponse = response as? HTTPURLResponse,
-                  (200 ..< 300).contains(httpResponse.statusCode),
-                  let image = await decodeImage(from: data)
-            else {
-                return nil
-            }
-
-            try ensureCacheDirectoryExists()
-            let fileName = makeFileName(for: remoteURL)
-            let destination = cacheDirectoryURL.appendingPathComponent(fileName)
-            try await writeData(data, to: destination)
-
-            let previousSize = max(asset.fileSizeBytes, 0)
-            asset.localPath = fileName
-            asset.fileSizeBytes = data.count
-            asset.lastAccessedAt = .now
-            try? modelContext.save()
-            adjustCachedDiskUsage(by: data.count - previousSize)
-            evictIfNeededIfRequired()
-            return image
-        } catch {
-            return nil
-        }
     }
 
     private func markAssetAccessed(_ asset: ExerciseImageAsset) {
@@ -149,66 +103,9 @@ final class ExerciseImageCacheService {
         metadataSaveTask = nil
     }
 
-    private func evictIfNeededIfRequired() {
-        let totalBytes = currentDiskUsageBytes()
-        guard totalBytes > cacheSizeLimitBytes else {
-            return
-        }
-        evictIfNeeded(currentBytes: totalBytes)
-    }
-
-    private func evictIfNeeded(currentBytes: Int) {
-        let descriptor = FetchDescriptor<ExerciseImageAsset>()
-        guard var assets = try? modelContext.fetch(descriptor) else {
-            return
-        }
-
-        var totalBytes = currentBytes
-
-        assets = assets
-            .filter { $0.localPath != nil }
-            .sorted { $0.lastAccessedAt < $1.lastAccessedAt }
-
-        for asset in assets where totalBytes > cacheSizeLimitBytes {
-            guard let localPath = asset.localPath else { continue }
-            let url = makeFileURL(for: localPath)
-            try? fileManager.removeItem(at: url)
-
-            totalBytes -= max(asset.fileSizeBytes, 0)
-            asset.localPath = nil
-            asset.fileSizeBytes = 0
-        }
-
-        cachedDiskUsageBytes = max(0, totalBytes)
-        try? modelContext.save()
-    }
-
-    private func currentDiskUsageBytes() -> Int {
-        if let cachedDiskUsageBytes {
-            return cachedDiskUsageBytes
-        }
-
-        let descriptor = FetchDescriptor<ExerciseImageAsset>()
-        let totalBytes = (try? modelContext.fetch(descriptor))?
-            .reduce(0) { partialResult, asset in
-                partialResult + max(asset.fileSizeBytes, 0)
-            } ?? 0
-        cachedDiskUsageBytes = totalBytes
-        return totalBytes
-    }
-
-    private func adjustCachedDiskUsage(by delta: Int) {
-        guard let cachedDiskUsageBytes else { return }
-        self.cachedDiskUsageBytes = max(0, cachedDiskUsageBytes + delta)
-    }
-
     private var cacheDirectoryURL: URL {
         let base = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first!
         return base.appendingPathComponent("ExerciseImages", isDirectory: true)
-    }
-
-    private func ensureCacheDirectoryExists() throws {
-        try fileManager.createDirectory(at: cacheDirectoryURL, withIntermediateDirectories: true)
     }
 
     private func makeFileURL(for localPath: String) -> URL {
@@ -218,23 +115,9 @@ final class ExerciseImageCacheService {
         return cacheDirectoryURL.appendingPathComponent(localPath)
     }
 
-    private func makeFileName(for remoteURL: URL) -> String {
-        let hashData = SHA256.hash(data: Data(remoteURL.absoluteString.utf8))
-        let hash = hashData.map { String(format: "%02x", $0) }.joined()
-        let ext = remoteURL.pathExtension.isEmpty ? "img" : remoteURL.pathExtension
-        return "\(hash).\(ext)"
-    }
-
     private func readData(from fileURL: URL) async -> Data? {
         await Task.detached(priority: .utility) {
             try? Data(contentsOf: fileURL)
-        }
-        .value
-    }
-
-    private func writeData(_ data: Data, to destination: URL) async throws {
-        try await Task.detached(priority: .utility) {
-            try data.write(to: destination, options: .atomic)
         }
         .value
     }
