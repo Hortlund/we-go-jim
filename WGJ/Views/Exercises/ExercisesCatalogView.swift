@@ -560,13 +560,28 @@ struct ExercisesCatalogView: View {
         isBootstrappingCatalog = true
         defer { isBootstrappingCatalog = false }
         let catalogRepository = ExerciseCatalogRepository(modelContext: modelContext)
+        var bootstrapError: Error?
 
         do {
             try catalogRepository.ensureSeedImportedIfNeeded()
+        } catch {
+            bootstrapError = error
+        }
+
+        do {
             try controller.reload(modelContext: modelContext)
         } catch {
             loadState = .failed
-            showError(error)
+            showError(bootstrapError ?? error)
+            rebuildCatalogCache()
+            return
+        }
+
+        if controller.catalogExercises.isEmpty, let bootstrapError {
+            loadState = .failed
+            showError(bootstrapError)
+        } else {
+            loadState = .ready
         }
         rebuildCatalogCache()
     }

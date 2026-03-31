@@ -173,7 +173,7 @@ struct ActiveWorkoutView: View {
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 Group {
-                    if !isKeyboardVisible, !isEndingSession, let session, session.status == .active {
+                    if shouldShowBottomDock, let session {
                         ActiveWorkoutBottomDock(
                             session: session,
                             reduceMotion: reduceMotion
@@ -188,7 +188,10 @@ struct ActiveWorkoutView: View {
                 )
             }
             .wgjTrackKeyboardVisibility($isKeyboardVisible)
-            .sheet(isPresented: $showingExercisePicker) {
+            .sheet(isPresented: $showingExercisePicker, onDismiss: {
+                dismissKeyboard()
+                isKeyboardVisible = false
+            }) {
                 ExercisePickerView(repository: catalogRepository) { exercise in
                     addExercise(exercise)
                 }
@@ -251,6 +254,25 @@ struct ActiveWorkoutView: View {
 
     private var session: WorkoutSession? {
         sessions.first
+    }
+
+    private var shouldShowBottomDock: Bool {
+        guard !isKeyboardVisible, !isEndingSession, let session, session.status == .active else {
+            return false
+        }
+
+        return restTimerState.restTimerRemaining() != nil
+            || restTimerState.restTimerPopup != nil
+            || hasLoggedWorkoutProgress
+    }
+
+    private var hasLoggedWorkoutProgress: Bool {
+        sessionExercises.contains { exercise in
+            let drafts = setDraftsByExerciseID[exercise.id] ?? makeDrafts(from: exercise)
+            return drafts.contains { draft in
+                draft.isCompleted || draft.actualReps != nil || draft.actualWeight != nil
+            }
+        }
     }
 
     private var exerciseHydrationStamp: ActiveWorkoutExerciseStateStamp {
@@ -429,6 +451,7 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func loadExerciseStateIfNeeded() async {
+        discardRemovedExerciseState(keeping: Set(sessionExercises.map(\.id)))
         let currentStamp = exerciseHydrationStamp
         guard currentStamp != loadedExerciseStateStamp else { return }
 
@@ -713,26 +736,15 @@ struct ActiveWorkoutView: View {
 
     private func removeExercise(exerciseID: UUID) {
         var capturedError: Error?
-        let removedSetIDs = Set((setDraftsByExerciseID[exerciseID] ?? []).map(\.id))
 
         withAnimation(WGJMotion.quickAnimation(reduceMotion: reduceMotion)) {
             do {
                 try sessionRepository.removeExercise(sessionID: sessionID, sessionExerciseID: exerciseID)
-                setDraftsByExerciseID.removeValue(forKey: exerciseID)
-                lastPersistedDraftsByExerciseID.removeValue(forKey: exerciseID)
-                restByExerciseID.removeValue(forKey: exerciseID)
-                lastPersistedRestByExerciseID.removeValue(forKey: exerciseID)
-                previousByExerciseID.removeValue(forKey: exerciseID)
-                overloadFeedbackByExerciseID.removeValue(forKey: exerciseID)
+                discardExerciseState(for: exerciseID)
                 loadedExerciseStateStamp = nil
             } catch {
                 capturedError = error
             }
-        }
-
-        if let restTimerSourceSetID = restTimerState.restTimerSourceSetID,
-           removedSetIDs.contains(restTimerSourceSetID) {
-            restTimerState.clearRestTimer(sourceSetID: restTimerSourceSetID)
         }
 
         if let capturedError {
@@ -1121,6 +1133,42 @@ struct ActiveWorkoutView: View {
 
     private func dismissKeyboard() {
         WGJKeyboard.dismiss()
+    }
+
+    @MainActor
+    private func discardRemovedExerciseState(keeping currentIDs: Set<UUID>) {
+        let knownIDs =
+            Set(setDraftsByExerciseID.keys)
+            .union(lastPersistedDraftsByExerciseID.keys)
+            .union(restByExerciseID.keys)
+            .union(lastPersistedRestByExerciseID.keys)
+            .union(previousByExerciseID.keys)
+            .union(overloadFeedbackByExerciseID.keys)
+            .union(pendingSaveTasks.keys)
+            .union(pendingRestTasks.keys)
+
+        for exerciseID in knownIDs where !currentIDs.contains(exerciseID) {
+            discardExerciseState(for: exerciseID)
+        }
+    }
+
+    @MainActor
+    private func discardExerciseState(for exerciseID: UUID) {
+        let removedSetIDs = Set((setDraftsByExerciseID[exerciseID] ?? []).map(\.id))
+
+        pendingSaveTasks.removeValue(forKey: exerciseID)?.cancel()
+        pendingRestTasks.removeValue(forKey: exerciseID)?.cancel()
+        setDraftsByExerciseID[exerciseID] = nil
+        lastPersistedDraftsByExerciseID[exerciseID] = nil
+        restByExerciseID[exerciseID] = nil
+        lastPersistedRestByExerciseID[exerciseID] = nil
+        previousByExerciseID[exerciseID] = nil
+        overloadFeedbackByExerciseID[exerciseID] = nil
+
+        if let restTimerSourceSetID = restTimerState.restTimerSourceSetID,
+           removedSetIDs.contains(restTimerSourceSetID) {
+            restTimerState.clearRestTimer(sourceSetID: restTimerSourceSetID)
+        }
     }
 
     private func presentFinishConfirmation() {

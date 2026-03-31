@@ -34,7 +34,9 @@ enum AppRuntimeConfig {
     )
 
     static var isRunningTests: Bool {
-        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        let processInfo = ProcessInfo.processInfo
+        return processInfo.environment["XCTestConfigurationFilePath"] != nil
+            || processInfo.arguments.contains("UITEST_IN_MEMORY_STORE")
     }
 
     static var canUseConfiguredCloudKitContainer: Bool {
@@ -496,6 +498,10 @@ final class AppNotificationManager {
 
     @MainActor
     func requestAlertAuthorizationIfNeeded() async -> Bool {
+        guard !AppRuntimeConfig.isRunningTests else {
+            return false
+        }
+
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
 

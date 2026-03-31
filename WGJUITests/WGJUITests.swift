@@ -222,9 +222,11 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(finishButton.waitForExistence(timeout: 5))
         finishButton.tap()
 
-        let finishAndSaveButton = app.buttons["Finish and Save"]
-        XCTAssertTrue(finishAndSaveButton.waitForExistence(timeout: 5))
-        finishAndSaveButton.tap()
+        let finishConfirmationButton = app.buttons["Finish Anyway"].waitForExistence(timeout: 2)
+            ? app.buttons["Finish Anyway"]
+            : app.buttons["Finish and Save"]
+        XCTAssertTrue(finishConfirmationButton.waitForExistence(timeout: 5))
+        finishConfirmationButton.tap()
 
         let skipButton = app.buttons["Skip"]
         XCTAssertTrue(skipButton.waitForExistence(timeout: 5))

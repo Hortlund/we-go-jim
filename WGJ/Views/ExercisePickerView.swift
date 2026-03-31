@@ -14,6 +14,7 @@ struct ExercisePickerView: View {
     var body: some View {
         NavigationStack {
             ExercisesCatalogView(mode: .pick(onSelect: { selected in
+                WGJKeyboard.dismiss()
                 onSelect(selected)
                 dismiss()
             }))
@@ -23,6 +24,7 @@ struct ExercisePickerView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
+                        WGJKeyboard.dismiss()
                         dismiss()
                     }
                 }
