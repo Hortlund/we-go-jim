@@ -32,9 +32,9 @@ struct WorkoutMetricsServiceTests {
         try sessionRepository.addExercise(sessionID: first.id, catalogItem: exercise)
         let firstExercise = try sessionRepository.sessionExercises(sessionID: first.id).first!
         var firstDrafts = try sessionRepository.setDrafts(sessionExerciseID: firstExercise.id)
-        firstDrafts[0].actualWeight = 100
-        firstDrafts[0].actualReps = 5
-        firstDrafts[0].isCompleted = true
+        firstDrafts[1].actualWeight = 100
+        firstDrafts[1].actualReps = 5
+        firstDrafts[1].isCompleted = true
         try sessionRepository.saveSetDrafts(sessionExerciseID: firstExercise.id, drafts: firstDrafts)
         try sessionRepository.finishSession(sessionID: first.id)
 
@@ -42,12 +42,12 @@ struct WorkoutMetricsServiceTests {
         try sessionRepository.addExercise(sessionID: second.id, catalogItem: exercise)
         let secondExercise = try sessionRepository.sessionExercises(sessionID: second.id).first!
         var secondDrafts = try sessionRepository.setDrafts(sessionExerciseID: secondExercise.id)
-        secondDrafts[0].actualWeight = 102.5
-        secondDrafts[0].actualReps = 5
-        secondDrafts[0].isCompleted = true
-        secondDrafts[1].actualWeight = 90
-        secondDrafts[1].actualReps = 10
+        secondDrafts[1].actualWeight = 102.5
+        secondDrafts[1].actualReps = 5
         secondDrafts[1].isCompleted = true
+        secondDrafts[2].actualWeight = 90
+        secondDrafts[2].actualReps = 10
+        secondDrafts[2].isCompleted = true
         try sessionRepository.saveSetDrafts(sessionExerciseID: secondExercise.id, drafts: secondDrafts)
         try sessionRepository.finishSession(sessionID: second.id)
 
@@ -74,10 +74,10 @@ struct WorkoutMetricsServiceTests {
         try sessionRepository.addExercise(sessionID: baseline.id, catalogItem: exercise)
         let baselineExercise = try sessionRepository.sessionExercises(sessionID: baseline.id).first!
         var baselineDrafts = try sessionRepository.setDrafts(sessionExerciseID: baselineExercise.id)
-        baselineDrafts[0].actualWeight = 200
-        baselineDrafts[0].actualReps = 5
-        baselineDrafts[0].actualLoadUnit = .lb
-        baselineDrafts[0].isCompleted = true
+        baselineDrafts[1].actualWeight = 200
+        baselineDrafts[1].actualReps = 5
+        baselineDrafts[1].actualLoadUnit = .lb
+        baselineDrafts[1].isCompleted = true
         try sessionRepository.saveSetDrafts(sessionExerciseID: baselineExercise.id, drafts: baselineDrafts)
         try sessionRepository.finishSession(sessionID: baseline.id)
 
@@ -85,10 +85,10 @@ struct WorkoutMetricsServiceTests {
         try sessionRepository.addExercise(sessionID: current.id, catalogItem: exercise)
         let currentExercise = try sessionRepository.sessionExercises(sessionID: current.id).first!
         var currentDrafts = try sessionRepository.setDrafts(sessionExerciseID: currentExercise.id)
-        currentDrafts[0].actualWeight = 100
-        currentDrafts[0].actualReps = 5
-        currentDrafts[0].actualLoadUnit = .kg
-        currentDrafts[0].isCompleted = true
+        currentDrafts[1].actualWeight = 100
+        currentDrafts[1].actualReps = 5
+        currentDrafts[1].actualLoadUnit = .kg
+        currentDrafts[1].isCompleted = true
         try sessionRepository.saveSetDrafts(sessionExerciseID: currentExercise.id, drafts: currentDrafts)
         try sessionRepository.finishSession(sessionID: current.id)
 
@@ -116,9 +116,9 @@ struct WorkoutMetricsServiceTests {
         try sessionRepository.addExercise(sessionID: baseline.id, catalogItem: exercise)
         let baselineExercise = try sessionRepository.sessionExercises(sessionID: baseline.id).first!
         var baselineDrafts = try sessionRepository.setDrafts(sessionExerciseID: baselineExercise.id)
-        baselineDrafts[0].actualWeight = 100
-        baselineDrafts[0].actualReps = 5
-        baselineDrafts[0].isCompleted = true
+        baselineDrafts[1].actualWeight = 100
+        baselineDrafts[1].actualReps = 5
+        baselineDrafts[1].isCompleted = true
         try sessionRepository.saveSetDrafts(sessionExerciseID: baselineExercise.id, drafts: baselineDrafts)
         try sessionRepository.finishSession(sessionID: baseline.id)
 
@@ -126,12 +126,12 @@ struct WorkoutMetricsServiceTests {
         try sessionRepository.addExercise(sessionID: current.id, catalogItem: exercise)
         let currentExercise = try sessionRepository.sessionExercises(sessionID: current.id).first!
         var currentDrafts = try sessionRepository.setDrafts(sessionExerciseID: currentExercise.id)
-        currentDrafts[0].actualWeight = 102.5
-        currentDrafts[0].actualReps = 5
-        currentDrafts[0].isCompleted = true
-        currentDrafts[1].actualWeight = 90
-        currentDrafts[1].actualReps = 10
+        currentDrafts[1].actualWeight = 102.5
+        currentDrafts[1].actualReps = 5
         currentDrafts[1].isCompleted = true
+        currentDrafts[2].actualWeight = 90
+        currentDrafts[2].actualReps = 10
+        currentDrafts[2].isCompleted = true
         try sessionRepository.saveSetDrafts(sessionExerciseID: currentExercise.id, drafts: currentDrafts)
         try sessionRepository.finishSession(sessionID: current.id)
 
@@ -162,9 +162,9 @@ struct WorkoutMetricsServiceTests {
         try sessionRepository.addExercise(sessionID: baseline.id, catalogItem: exercise)
         let baselineExercise = try sessionRepository.sessionExercises(sessionID: baseline.id).first!
         var baselineDrafts = try sessionRepository.setDrafts(sessionExerciseID: baselineExercise.id)
-        baselineDrafts[0].actualWeight = 100
-        baselineDrafts[0].actualReps = 5
-        baselineDrafts[0].isCompleted = true
+        baselineDrafts[1].actualWeight = 100
+        baselineDrafts[1].actualReps = 5
+        baselineDrafts[1].isCompleted = true
         try sessionRepository.saveSetDrafts(sessionExerciseID: baselineExercise.id, drafts: baselineDrafts)
         try sessionRepository.finishSession(sessionID: baseline.id)
 
@@ -172,12 +172,12 @@ struct WorkoutMetricsServiceTests {
         try sessionRepository.addExercise(sessionID: current.id, catalogItem: exercise)
         let currentExercise = try sessionRepository.sessionExercises(sessionID: current.id).first!
         var currentDrafts = try sessionRepository.setDrafts(sessionExerciseID: currentExercise.id)
-        currentDrafts[0].actualWeight = 102.5
-        currentDrafts[0].actualReps = 5
-        currentDrafts[0].isCompleted = true
-        currentDrafts[1].actualWeight = 100
-        currentDrafts[1].actualReps = 6
+        currentDrafts[1].actualWeight = 102.5
+        currentDrafts[1].actualReps = 5
         currentDrafts[1].isCompleted = true
+        currentDrafts[2].actualWeight = 100
+        currentDrafts[2].actualReps = 6
+        currentDrafts[2].isCompleted = true
         try sessionRepository.saveSetDrafts(sessionExerciseID: currentExercise.id, drafts: currentDrafts)
         try sessionRepository.finishSession(sessionID: current.id)
 
@@ -187,8 +187,137 @@ struct WorkoutMetricsServiceTests {
         )
 
         #expect(achievements.count == 2)
-        #expect(achievementsBySetID[currentDrafts[0].id]?.kinds == [.strength, .weight, .volume])
-        #expect(achievementsBySetID[currentDrafts[1].id]?.kinds == [.strength, .reps, .volume])
+        #expect(achievementsBySetID[currentDrafts[1].id]?.kinds == [.strength, .weight, .volume])
+        #expect(achievementsBySetID[currentDrafts[2].id]?.kinds == [.strength, .reps, .volume])
+    }
+
+    @Test
+    func sessionSummaryExcludesWarmupsAndNormalizesMixedUnitsForVolume() throws {
+        let context = try makeInMemoryContext()
+        let sessionRepository = WorkoutSessionRepository(modelContext: context)
+        let metrics = WorkoutMetricsService(modelContext: context)
+
+        let exercise = ExerciseCatalogItem(
+            remoteUUID: "summary-mixed-volume",
+            displayName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(exercise)
+
+        let session = try sessionRepository.createEmptySession(name: "Push")
+        try sessionRepository.addExercise(sessionID: session.id, catalogItem: exercise)
+        let sessionExercise = try #require(try sessionRepository.sessionExercises(sessionID: session.id).first)
+        var drafts = try sessionRepository.setDrafts(sessionExerciseID: sessionExercise.id)
+        drafts[0].actualWeight = 225
+        drafts[0].actualReps = 1
+        drafts[0].actualLoadUnit = .lb
+        drafts[0].isCompleted = true
+        drafts[1].actualWeight = 100
+        drafts[1].actualReps = 5
+        drafts[1].actualLoadUnit = .kg
+        drafts[1].isCompleted = true
+        drafts[2].actualWeight = 100
+        drafts[2].actualReps = 5
+        drafts[2].actualLoadUnit = .lb
+        drafts[2].isCompleted = true
+        try sessionRepository.saveSetDrafts(sessionExerciseID: sessionExercise.id, drafts: drafts)
+        try sessionRepository.finishSession(sessionID: session.id)
+
+        let summary = try metrics.sessionSummary(sessionID: session.id)
+        let expectedVolume = 100 * 5 + (100 * 0.45359237 * 5)
+
+        #expect(abs(summary.totalVolume - expectedVolume) < 0.01)
+        #expect(summary.prHitsCount == 1)
+    }
+
+    @Test
+    func bodyweightSetsCanCreateRepPRsWithoutAddingVolume() throws {
+        let context = try makeInMemoryContext()
+        let sessionRepository = WorkoutSessionRepository(modelContext: context)
+        let metrics = WorkoutMetricsService(modelContext: context)
+
+        let exercise = ExerciseCatalogItem(
+            remoteUUID: "bodyweight-pr-pullup",
+            displayName: "Pull Up",
+            categoryName: "Back",
+            equipmentSummary: "Bodyweight",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(exercise)
+
+        let baseline = try sessionRepository.createEmptySession(name: "Baseline")
+        try sessionRepository.addExercise(sessionID: baseline.id, catalogItem: exercise)
+        let baselineExercise = try #require(try sessionRepository.sessionExercises(sessionID: baseline.id).first)
+        var baselineDrafts = try sessionRepository.setDrafts(sessionExerciseID: baselineExercise.id)
+        baselineDrafts[1].actualReps = 10
+        baselineDrafts[1].actualLoadUnit = .bodyweight
+        baselineDrafts[1].isCompleted = true
+        try sessionRepository.saveSetDrafts(sessionExerciseID: baselineExercise.id, drafts: baselineDrafts)
+        try sessionRepository.finishSession(sessionID: baseline.id)
+
+        let current = try sessionRepository.createEmptySession(name: "Current")
+        try sessionRepository.addExercise(sessionID: current.id, catalogItem: exercise)
+        let currentExercise = try #require(try sessionRepository.sessionExercises(sessionID: current.id).first)
+        var currentDrafts = try sessionRepository.setDrafts(sessionExerciseID: currentExercise.id)
+        currentDrafts[0].actualReps = 15
+        currentDrafts[0].actualLoadUnit = .bodyweight
+        currentDrafts[0].isCompleted = true
+        currentDrafts[1].actualReps = 12
+        currentDrafts[1].actualLoadUnit = .bodyweight
+        currentDrafts[1].isCompleted = true
+        try sessionRepository.saveSetDrafts(sessionExerciseID: currentExercise.id, drafts: currentDrafts)
+        try sessionRepository.finishSession(sessionID: current.id)
+
+        let achievements = try metrics.sessionSetPRAchievements(sessionID: current.id)
+        let refreshed = try sessionRepository.session(id: current.id)
+
+        #expect(achievements.count == 1)
+        #expect(achievements.first?.kinds == [.reps])
+        #expect(achievements.first?.weight == nil)
+        #expect((refreshed?.totalVolume ?? -1) == 0)
+        #expect((refreshed?.prHitsCount ?? 0) == 1)
+        #expect(try metrics.sessionPRAchievements(sessionID: current.id).isEmpty)
+    }
+
+    @Test
+    func targetOnlyCompletedSetsDoNotCreateMetrics() throws {
+        let context = try makeInMemoryContext()
+        let sessionRepository = WorkoutSessionRepository(modelContext: context)
+        let metrics = WorkoutMetricsService(modelContext: context)
+
+        let exercise = ExerciseCatalogItem(
+            remoteUUID: "target-only-bench",
+            displayName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(exercise)
+
+        let session = try sessionRepository.createEmptySession(name: "Target Only")
+        try sessionRepository.addExercise(sessionID: session.id, catalogItem: exercise)
+        let sessionExercise = try #require(try sessionRepository.sessionExercises(sessionID: session.id).first)
+        var drafts = try sessionRepository.setDrafts(sessionExerciseID: sessionExercise.id)
+        drafts[1].targetWeight = 100
+        drafts[1].targetReps = 8
+        drafts[1].isCompleted = true
+        drafts[2].targetWeight = 110
+        drafts[2].targetReps = 6
+        drafts[2].isCompleted = true
+        try sessionRepository.saveSetDrafts(sessionExerciseID: sessionExercise.id, drafts: drafts)
+        try sessionRepository.finishSession(sessionID: session.id)
+
+        let summary = try metrics.sessionSummary(sessionID: session.id)
+
+        #expect(summary.totalVolume == 0)
+        #expect(summary.prHitsCount == 0)
+        #expect(try metrics.sessionSetPRAchievements(sessionID: session.id).isEmpty)
+        #expect(try metrics.sessionPRAchievements(sessionID: session.id).isEmpty)
     }
 
     @Test
@@ -260,9 +389,9 @@ struct WorkoutMetricsServiceTests {
         try sessionRepository.addExercise(sessionID: session.id, catalogItem: exercise)
         let sessionExercise = try sessionRepository.sessionExercises(sessionID: session.id).first!
         var drafts = try sessionRepository.setDrafts(sessionExerciseID: sessionExercise.id)
-        drafts[0].actualWeight = 100
-        drafts[0].actualReps = 5
-        drafts[0].isCompleted = true
+        drafts[1].actualWeight = 100
+        drafts[1].actualReps = 5
+        drafts[1].isCompleted = true
         try sessionRepository.saveSetDrafts(sessionExerciseID: sessionExercise.id, drafts: drafts)
         try sessionRepository.finishSession(sessionID: session.id)
 
@@ -298,10 +427,10 @@ struct WorkoutMetricsServiceTests {
         try sessionRepository.addExercise(sessionID: first.id, catalogItem: exercise)
         let firstExercise = try sessionRepository.sessionExercises(sessionID: first.id).first!
         var firstDrafts = try sessionRepository.setDrafts(sessionExerciseID: firstExercise.id)
-        firstDrafts[0].actualWeight = 200
-        firstDrafts[0].actualReps = 5
-        firstDrafts[0].actualLoadUnit = .lb
-        firstDrafts[0].isCompleted = true
+        firstDrafts[1].actualWeight = 200
+        firstDrafts[1].actualReps = 5
+        firstDrafts[1].actualLoadUnit = .lb
+        firstDrafts[1].isCompleted = true
         try sessionRepository.saveSetDrafts(sessionExerciseID: firstExercise.id, drafts: firstDrafts)
         try sessionRepository.finishSession(sessionID: first.id)
 
@@ -309,10 +438,10 @@ struct WorkoutMetricsServiceTests {
         try sessionRepository.addExercise(sessionID: second.id, catalogItem: exercise)
         let secondExercise = try sessionRepository.sessionExercises(sessionID: second.id).first!
         var secondDrafts = try sessionRepository.setDrafts(sessionExerciseID: secondExercise.id)
-        secondDrafts[0].actualWeight = 100
-        secondDrafts[0].actualReps = 5
-        secondDrafts[0].actualLoadUnit = .kg
-        secondDrafts[0].isCompleted = true
+        secondDrafts[1].actualWeight = 100
+        secondDrafts[1].actualReps = 5
+        secondDrafts[1].actualLoadUnit = .kg
+        secondDrafts[1].isCompleted = true
         try sessionRepository.saveSetDrafts(sessionExerciseID: secondExercise.id, drafts: secondDrafts)
         try sessionRepository.finishSession(sessionID: second.id)
 
@@ -521,10 +650,10 @@ struct WorkoutMetricsServiceTests {
             try sessionRepository.addExercise(sessionID: session.id, catalogItem: exercise)
             let sessionExercise = try sessionRepository.sessionExercises(sessionID: session.id).first!
             var drafts = try sessionRepository.setDrafts(sessionExerciseID: sessionExercise.id)
-            drafts[0].actualWeight = 80 + Double(offset)
-            drafts[0].actualReps = 5
-            drafts[0].actualLoadUnit = .kg
-            drafts[0].isCompleted = true
+            drafts[1].actualWeight = 80 + Double(offset)
+            drafts[1].actualReps = 5
+            drafts[1].actualLoadUnit = .kg
+            drafts[1].isCompleted = true
             try sessionRepository.saveSetDrafts(sessionExerciseID: sessionExercise.id, drafts: drafts)
             try sessionRepository.finishSession(sessionID: session.id)
 
@@ -561,10 +690,10 @@ struct WorkoutMetricsServiceTests {
         try sessionRepository.addExercise(sessionID: first.id, catalogItem: exercise)
         let firstExercise = try sessionRepository.sessionExercises(sessionID: first.id).first!
         var firstDrafts = try sessionRepository.setDrafts(sessionExerciseID: firstExercise.id)
-        firstDrafts[0].actualWeight = 100
-        firstDrafts[0].actualReps = 5
-        firstDrafts[0].actualLoadUnit = .kg
-        firstDrafts[0].isCompleted = true
+        firstDrafts[1].actualWeight = 100
+        firstDrafts[1].actualReps = 5
+        firstDrafts[1].actualLoadUnit = .kg
+        firstDrafts[1].isCompleted = true
         try sessionRepository.saveSetDrafts(sessionExerciseID: firstExercise.id, drafts: firstDrafts)
         try sessionRepository.finishSession(sessionID: first.id)
 
@@ -572,10 +701,10 @@ struct WorkoutMetricsServiceTests {
         try sessionRepository.addExercise(sessionID: second.id, catalogItem: exercise)
         let secondExercise = try sessionRepository.sessionExercises(sessionID: second.id).first!
         var secondDrafts = try sessionRepository.setDrafts(sessionExerciseID: secondExercise.id)
-        secondDrafts[0].actualWeight = 1
-        secondDrafts[0].actualReps = 12
-        secondDrafts[0].actualLoadUnit = .bodyweight
-        secondDrafts[0].isCompleted = true
+        secondDrafts[1].actualWeight = 1
+        secondDrafts[1].actualReps = 12
+        secondDrafts[1].actualLoadUnit = .bodyweight
+        secondDrafts[1].isCompleted = true
         try sessionRepository.saveSetDrafts(sessionExerciseID: secondExercise.id, drafts: secondDrafts)
         try sessionRepository.finishSession(sessionID: second.id)
 
@@ -583,10 +712,10 @@ struct WorkoutMetricsServiceTests {
         try sessionRepository.addExercise(sessionID: third.id, catalogItem: exercise)
         let thirdExercise = try sessionRepository.sessionExercises(sessionID: third.id).first!
         var thirdDrafts = try sessionRepository.setDrafts(sessionExerciseID: thirdExercise.id)
-        thirdDrafts[0].actualWeight = 220
-        thirdDrafts[0].actualReps = 5
-        thirdDrafts[0].actualLoadUnit = .lb
-        thirdDrafts[0].isCompleted = true
+        thirdDrafts[1].actualWeight = 220
+        thirdDrafts[1].actualReps = 5
+        thirdDrafts[1].actualLoadUnit = .lb
+        thirdDrafts[1].isCompleted = true
         try sessionRepository.saveSetDrafts(sessionExerciseID: thirdExercise.id, drafts: thirdDrafts)
         try sessionRepository.finishSession(sessionID: third.id)
 
@@ -626,10 +755,10 @@ struct WorkoutMetricsServiceTests {
         try sessionRepository.addExercise(sessionID: first.id, catalogItem: bench)
         let firstExercise = try sessionRepository.sessionExercises(sessionID: first.id).first!
         var firstDrafts = try sessionRepository.setDrafts(sessionExerciseID: firstExercise.id)
-        firstDrafts[0].actualWeight = 90
-        firstDrafts[0].actualReps = 5
-        firstDrafts[0].actualLoadUnit = .kg
-        firstDrafts[0].isCompleted = true
+        firstDrafts[1].actualWeight = 90
+        firstDrafts[1].actualReps = 5
+        firstDrafts[1].actualLoadUnit = .kg
+        firstDrafts[1].isCompleted = true
         try sessionRepository.saveSetDrafts(sessionExerciseID: firstExercise.id, drafts: firstDrafts)
         try sessionRepository.finishSession(sessionID: first.id)
 
@@ -637,10 +766,10 @@ struct WorkoutMetricsServiceTests {
         try sessionRepository.addExercise(sessionID: second.id, catalogItem: pullUp)
         let secondExercise = try sessionRepository.sessionExercises(sessionID: second.id).first!
         var secondDrafts = try sessionRepository.setDrafts(sessionExerciseID: secondExercise.id)
-        secondDrafts[0].actualWeight = 1
-        secondDrafts[0].actualReps = 10
-        secondDrafts[0].actualLoadUnit = .bodyweight
-        secondDrafts[0].isCompleted = true
+        secondDrafts[1].actualWeight = 1
+        secondDrafts[1].actualReps = 10
+        secondDrafts[1].actualLoadUnit = .bodyweight
+        secondDrafts[1].isCompleted = true
         try sessionRepository.saveSetDrafts(sessionExerciseID: secondExercise.id, drafts: secondDrafts)
         try sessionRepository.finishSession(sessionID: second.id)
 
@@ -691,10 +820,10 @@ struct WorkoutMetricsServiceTests {
         try sessionRepository.addExercise(sessionID: session.id, catalogItem: exercise)
         let sessionExercise = try #require(try sessionRepository.sessionExercises(sessionID: session.id).first)
         var drafts = try sessionRepository.setDrafts(sessionExerciseID: sessionExercise.id)
-        drafts[0].actualWeight = 100
-        drafts[0].actualReps = 5
-        drafts[0].actualLoadUnit = .kg
-        drafts[0].isCompleted = true
+        drafts[1].actualWeight = 100
+        drafts[1].actualReps = 5
+        drafts[1].actualLoadUnit = .kg
+        drafts[1].isCompleted = true
         try sessionRepository.saveSetDrafts(sessionExerciseID: sessionExercise.id, drafts: drafts)
         try sessionRepository.finishSession(sessionID: session.id)
 

@@ -718,6 +718,7 @@ final class WorkoutSession {
     var durationSeconds: Int = 0
     var totalVolume: Double = 0
     var prHitsCount: Int = 0
+    var summaryMetricsVersion: Int = 0
     var notes: String = ""
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
@@ -739,6 +740,7 @@ final class WorkoutSession {
         durationSeconds: Int = 0,
         totalVolume: Double = 0,
         prHitsCount: Int = 0,
+        summaryMetricsVersion: Int = 0,
         notes: String = "",
         createdAt: Date = .now,
         updatedAt: Date = .now
@@ -752,6 +754,7 @@ final class WorkoutSession {
         self.durationSeconds = durationSeconds
         self.totalVolume = totalVolume
         self.prHitsCount = prHitsCount
+        self.summaryMetricsVersion = summaryMetricsVersion
         self.notes = notes
         self.createdAt = createdAt
         self.updatedAt = updatedAt

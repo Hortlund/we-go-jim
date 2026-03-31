@@ -303,7 +303,7 @@ struct WorkoutCompletionPersonalRecord: Identifiable, Equatable {
     let id: String
     let exerciseName: String
     let performanceText: String
-    let estimatedOneRepMaxText: String
+    let detailText: String
 }
 
 struct WorkoutCompletionExerciseRecap: Identifiable, Equatable {
@@ -333,15 +333,8 @@ enum WorkoutCompletionSnapshotBuilder {
             partialResult + data.completedSetCount
         }
         let personalRecords = try WorkoutMetricsService(modelContext: modelContext)
-            .sessionPRAchievements(sessionID: sessionID)
-            .map { achievement in
-                WorkoutCompletionPersonalRecord(
-                    id: achievement.id,
-                    exerciseName: achievement.exerciseName,
-                    performanceText: "\(WGJFormatters.decimalString(achievement.weight)) \(achievement.loadUnit.shortLabel) x \(achievement.reps)",
-                    estimatedOneRepMaxText: "\(WGJFormatters.oneDecimalString(achievement.estimatedOneRepMax)) \(achievement.loadUnit.shortLabel) e1RM"
-                )
-            }
+            .sessionSetPRAchievements(sessionID: sessionID)
+            .map(makePersonalRecord)
 
         let prHeadline: String
         let prSupportText: String
@@ -387,32 +380,40 @@ enum WorkoutCompletionSnapshotBuilder {
                 exerciseName: exercise.exerciseNameSnapshot,
                 completedSetCount: completedSets.count,
                 totalSetCount: sets.count,
-                bestSetText: bestSetText(for: completedSets)
+                bestSetText: WorkoutMetricsService.bestSetText(for: sets, emptyText: "No working set logged")
             )
         )
     }
 
-    private static func bestSetText(for sets: [WorkoutSessionSet]) -> String {
-        var bestScore = -1.0
-        var bestLine = "No completed set logged"
+    private static func makePersonalRecord(_ achievement: SessionSetPRAchievement) -> WorkoutCompletionPersonalRecord {
+        WorkoutCompletionPersonalRecord(
+            id: achievement.id,
+            exerciseName: achievement.exerciseName,
+            performanceText: performanceText(for: achievement),
+            detailText: detailText(for: achievement)
+        )
+    }
 
-        for set in sets {
-            let reps = set.actualReps ?? set.targetReps
-            let weight = set.actualWeight ?? set.targetWeight
-            let unit = set.actualWeight != nil ? set.actualLoadUnit : set.targetLoadUnit
-
-            if let reps, let weight {
-                let score = weight * Double(max(1, reps))
-                if score > bestScore {
-                    bestScore = score
-                    bestLine = "\(WGJFormatters.decimalString(weight)) \(unit.shortLabel) x \(reps)"
-                }
-            } else if let reps, bestScore < 0 {
-                bestLine = "\(reps) reps"
-            }
+    private static func performanceText(for achievement: SessionSetPRAchievement) -> String {
+        if let weight = achievement.weight, achievement.loadUnit != .bodyweight {
+            return "\(WGJFormatters.decimalString(weight)) \(achievement.loadUnit.shortLabel) x \(achievement.reps)"
         }
 
-        return bestLine
+        return "\(achievement.reps) reps"
+    }
+
+    private static func detailText(for achievement: SessionSetPRAchievement) -> String {
+        let kindsText = achievement.kinds.map(\.title).joined(separator: " + ") + " PR"
+
+        if achievement.kinds.contains(.strength), let estimatedOneRepMax = achievement.estimatedOneRepMax {
+            return "\(kindsText) · \(WGJFormatters.oneDecimalString(estimatedOneRepMax)) \(achievement.loadUnit.shortLabel) e1RM"
+        }
+
+        if achievement.kinds.contains(.volume), let volume = achievement.volume {
+            return "\(kindsText) · \(WGJFormatters.integerString(volume)) kg volume"
+        }
+
+        return kindsText
     }
 
     private static func orderedSessionSets(for exercise: WorkoutSessionExercise) -> [WorkoutSessionSet] {
@@ -510,7 +511,7 @@ private struct WorkoutCompletionPersonalRecordCard: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(WGJTheme.accentGold)
 
-                Text(record.estimatedOneRepMaxText)
+                Text(record.detailText)
                     .font(.caption)
                     .foregroundStyle(WGJTheme.textSecondary)
             }

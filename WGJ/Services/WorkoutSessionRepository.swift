@@ -270,8 +270,12 @@ final class WorkoutSessionRepository {
         }
 
         let normalizedRest = sanitizedRest(restSeconds)
+        let previousRest = exercise.restSeconds
         exercise.restSeconds = normalizedRest
         for set in exercise.sets ?? [] where !set.isLocked {
+            guard set.restSeconds == previousRest else {
+                continue
+            }
             set.restSeconds = normalizedRest
             set.updatedAt = .now
         }
@@ -518,8 +522,10 @@ final class WorkoutSessionRepository {
         session.durationSeconds = max(0, Int((session.endedAt ?? .now).timeIntervalSince(session.startedAt)))
 
         let metrics = WorkoutMetricsService(modelContext: modelContext)
-        session.totalVolume = try metrics.totalVolume(sessionID: sessionID)
-        session.prHitsCount = try metrics.countPRHits(sessionID: sessionID)
+        let summary = try metrics.sessionSummary(sessionID: sessionID)
+        session.totalVolume = summary.totalVolume
+        session.prHitsCount = summary.prHitsCount
+        session.summaryMetricsVersion = WorkoutMetricsService.currentSummaryMetricsVersion
         session.updatedAt = .now
 
         try modelContext.save()
@@ -544,8 +550,10 @@ final class WorkoutSessionRepository {
         }
 
         let metrics = WorkoutMetricsService(modelContext: modelContext)
-        session.totalVolume = try metrics.totalVolume(sessionID: sessionID)
-        session.prHitsCount = try metrics.countPRHits(sessionID: sessionID)
+        let summary = try metrics.sessionSummary(sessionID: sessionID)
+        session.totalVolume = summary.totalVolume
+        session.prHitsCount = summary.prHitsCount
+        session.summaryMetricsVersion = WorkoutMetricsService.currentSummaryMetricsVersion
 
         if session.status == .completed {
             let end = session.endedAt ?? .now
@@ -554,6 +562,31 @@ final class WorkoutSessionRepository {
 
         session.updatedAt = .now
         try modelContext.save()
+    }
+
+    @discardableResult
+    func backfillCompletedSessionSummariesIfNeeded() throws -> Int {
+        let sessions = try completedSessions()
+        let staleSessions = sessions.filter {
+            $0.summaryMetricsVersion < WorkoutMetricsService.currentSummaryMetricsVersion
+        }
+        guard !staleSessions.isEmpty else {
+            return 0
+        }
+
+        let metrics = WorkoutMetricsService(modelContext: modelContext)
+        let now = Date()
+
+        for session in staleSessions {
+            let summary = try metrics.sessionSummary(sessionID: session.id)
+            session.totalVolume = summary.totalVolume
+            session.prHitsCount = summary.prHitsCount
+            session.summaryMetricsVersion = WorkoutMetricsService.currentSummaryMetricsVersion
+            session.updatedAt = now
+        }
+
+        try modelContext.save()
+        return staleSessions.count
     }
 
     func deleteSession(id: UUID) throws {

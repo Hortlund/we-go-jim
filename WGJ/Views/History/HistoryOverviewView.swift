@@ -325,26 +325,7 @@ enum HistoryOverviewSnapshotBuilder {
     }
 
     private static func bestSetLine(for sets: [WorkoutSessionSet]) -> String {
-        var bestScore = -1.0
-        var bestLine = "-"
-
-        for set in sets {
-            let reps = set.actualReps ?? set.targetReps
-            let weight = set.actualWeight ?? set.targetWeight
-            let unit = set.actualWeight != nil ? set.actualLoadUnit : set.targetLoadUnit
-
-            if let reps, let weight {
-                let score = weight * Double(max(1, reps))
-                if score > bestScore {
-                    bestScore = score
-                    bestLine = "\(WGJFormatters.decimalString(weight)) \(unit.shortLabel) x \(reps)"
-                }
-            } else if let reps, bestScore < 0 {
-                bestLine = "\(reps) reps"
-            }
-        }
-
-        return bestLine
+        WorkoutMetricsService.bestSetText(for: sets)
     }
 
     private static func startOfMonth(for date: Date, calendar: Calendar) -> Date {

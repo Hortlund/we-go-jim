@@ -30,10 +30,10 @@ struct WorkoutSessionRepositoryTests {
 
         var drafts = try repository.setDrafts(sessionExerciseID: exercise.id)
         #expect(drafts.count == 3)
-        drafts[0].actualWeight = 100
-        drafts[0].actualReps = 5
-        drafts[0].actualLoadUnit = .kg
-        drafts[0].isCompleted = true
+        drafts[1].actualWeight = 100
+        drafts[1].actualReps = 5
+        drafts[1].actualLoadUnit = .kg
+        drafts[1].isCompleted = true
         try repository.saveSetDrafts(sessionExerciseID: exercise.id, drafts: drafts)
 
         try repository.finishSession(sessionID: session.id, notes: "Solid day")
@@ -193,6 +193,51 @@ struct WorkoutSessionRepositoryTests {
         #expect(templateExercise?.exerciseNameSnapshot == "Deadlift")
         #expect(setDrafts.first?.targetWeight == 180)
         #expect(setDrafts.first?.targetReps == 3)
+    }
+
+    @Test
+    func backfillCompletedSessionSummariesUpdatesStaleMetricVersions() throws {
+        let context = try makeInMemoryContext()
+        let repository = WorkoutSessionRepository(modelContext: context)
+
+        let item = ExerciseCatalogItem(
+            remoteUUID: "backfill-bench-1",
+            displayName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(item)
+
+        let session = try repository.createEmptySession(name: "Push Day")
+        try repository.addExercise(sessionID: session.id, catalogItem: item)
+        let exercise = try #require(try repository.sessionExercises(sessionID: session.id).first)
+        var drafts = try repository.setDrafts(sessionExerciseID: exercise.id)
+        drafts[0].actualWeight = 200
+        drafts[0].actualReps = 1
+        drafts[0].actualLoadUnit = .lb
+        drafts[0].isCompleted = true
+        drafts[1].actualWeight = 100
+        drafts[1].actualReps = 5
+        drafts[1].actualLoadUnit = .kg
+        drafts[1].isCompleted = true
+        try repository.saveSetDrafts(sessionExerciseID: exercise.id, drafts: drafts)
+        try repository.finishSession(sessionID: session.id)
+
+        let stored = try #require(try repository.session(id: session.id))
+        stored.totalVolume = 999
+        stored.prHitsCount = 99
+        stored.summaryMetricsVersion = 0
+        try context.save()
+
+        let updatedCount = try repository.backfillCompletedSessionSummariesIfNeeded()
+        let refreshed = try #require(try repository.session(id: session.id))
+
+        #expect(updatedCount == 1)
+        #expect(abs(refreshed.totalVolume - 500) < 0.01)
+        #expect(refreshed.prHitsCount == 1)
+        #expect(refreshed.summaryMetricsVersion == WorkoutMetricsService.currentSummaryMetricsVersion)
     }
 
     @Test

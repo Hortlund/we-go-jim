@@ -22,6 +22,11 @@ struct SessionPRAchievement: Identifiable, Equatable {
     let loadUnit: TemplateLoadUnit
 }
 
+struct WorkoutSessionSummaryMetrics: Equatable {
+    let totalVolume: Double
+    let prHitsCount: Int
+}
+
 enum WorkoutPersonalRecordKind: String, Identifiable, CaseIterable, Equatable, Hashable, Comparable {
     case strength
     case weight
@@ -85,10 +90,10 @@ struct SessionSetPRAchievement: Identifiable, Equatable {
     let catalogExerciseUUID: String
     let exerciseName: String
     let kinds: [WorkoutPersonalRecordKind]
-    let estimatedOneRepMax: Double
-    let weight: Double
+    let estimatedOneRepMax: Double?
+    let weight: Double?
     let reps: Int
-    let volume: Double
+    let volume: Double?
     let loadUnit: TemplateLoadUnit
 }
 
@@ -165,8 +170,221 @@ struct ProfileDashboardSnapshot: Equatable {
     let activityDays: [ProfileActivityDay]
 }
 
+private struct WeightedWorkingSetMetric: Equatable {
+    let setID: UUID
+    let sortOrder: Int
+    let weight: Double
+    let reps: Int
+    let unit: TemplateLoadUnit
+}
+
+private struct BodyweightWorkingSetMetric: Equatable {
+    let setID: UUID
+    let sortOrder: Int
+    let reps: Int
+}
+
+private enum CompletedWorkingSetMetric: Equatable {
+    case weighted(WeightedWorkingSetMetric)
+    case bodyweight(BodyweightWorkingSetMetric)
+
+    var setID: UUID {
+        switch self {
+        case let .weighted(metric):
+            return metric.setID
+        case let .bodyweight(metric):
+            return metric.setID
+        }
+    }
+
+    var reps: Int {
+        switch self {
+        case let .weighted(metric):
+            return metric.reps
+        case let .bodyweight(metric):
+            return metric.reps
+        }
+    }
+
+    var sortOrder: Int {
+        switch self {
+        case let .weighted(metric):
+            return metric.sortOrder
+        case let .bodyweight(metric):
+            return metric.sortOrder
+        }
+    }
+
+    var loadUnit: TemplateLoadUnit {
+        switch self {
+        case let .weighted(metric):
+            return metric.unit
+        case .bodyweight:
+            return .bodyweight
+        }
+    }
+}
+
+private struct BestSetPresentation: Equatable {
+    let displayText: String
+}
+
+private enum WorkoutMetricsPolicy {
+    static let summaryMetricsVersion = 1
+
+    nonisolated static func estimatedOneRepMax(weight: Double, reps: Int) -> Double {
+        guard reps > 0 else { return weight }
+        if reps == 1 { return weight }
+        return weight * (1 + (Double(reps) / 30.0))
+    }
+
+    nonisolated static func normalizedLoad(_ value: Double, unit: TemplateLoadUnit) -> Double {
+        switch unit {
+        case .kg:
+            return value
+        case .lb:
+            return value * 0.45359237
+        case .bodyweight:
+            return value
+        }
+    }
+
+    nonisolated static func completedWorkingMetric(from set: WorkoutSessionSet) -> CompletedWorkingSetMetric? {
+        guard set.isCompleted, !set.isWarmup else {
+            return nil
+        }
+
+        guard let actualReps = set.actualReps, actualReps > 0 else {
+            return nil
+        }
+
+        switch set.actualLoadUnit {
+        case .kg, .lb:
+            guard let actualWeight = set.actualWeight, actualWeight > 0 else {
+                return nil
+            }
+
+            return .weighted(
+                WeightedWorkingSetMetric(
+                    setID: set.id,
+                    sortOrder: set.sortOrder,
+                    weight: actualWeight,
+                    reps: actualReps,
+                    unit: set.actualLoadUnit
+                )
+            )
+        case .bodyweight:
+            return .bodyweight(
+                BodyweightWorkingSetMetric(
+                    setID: set.id,
+                    sortOrder: set.sortOrder,
+                    reps: actualReps
+                )
+            )
+        }
+    }
+
+    nonisolated static func completedWorkingMetrics(from sets: [WorkoutSessionSet]) -> [CompletedWorkingSetMetric] {
+        sets
+            .sorted { $0.sortOrder < $1.sortOrder }
+            .compactMap { set in
+                completedWorkingMetric(from: set)
+            }
+    }
+
+    nonisolated static func completedWeightedWorkingMetrics(from sets: [WorkoutSessionSet]) -> [WeightedWorkingSetMetric] {
+        completedWorkingMetrics(from: sets).compactMap { metric -> WeightedWorkingSetMetric? in
+            guard case let .weighted(weightedMetric) = metric else {
+                return nil
+            }
+            return weightedMetric
+        }
+    }
+
+    nonisolated static func bestSetPresentation(from sets: [WorkoutSessionSet]) -> BestSetPresentation? {
+        let workingMetrics = completedWorkingMetrics(from: sets)
+        let weightedMetrics = workingMetrics.compactMap { metric -> WeightedWorkingSetMetric? in
+            guard case let .weighted(weightedMetric) = metric else {
+                return nil
+            }
+            return weightedMetric
+        }
+
+        if let bestWeightedMetric = weightedMetrics.reduce(nil as WeightedWorkingSetMetric?, { currentBest, metric in
+            guard let currentBest else { return metric }
+            return isBetterWeightedMetric(metric, than: currentBest) ? metric : currentBest
+        }) {
+            return BestSetPresentation(
+                displayText: "\(WGJFormatters.decimalString(bestWeightedMetric.weight)) \(bestWeightedMetric.unit.shortLabel) x \(bestWeightedMetric.reps)"
+            )
+        }
+
+        let bodyweightMetrics = workingMetrics.compactMap { metric -> BodyweightWorkingSetMetric? in
+            guard case let .bodyweight(bodyweightMetric) = metric else {
+                return nil
+            }
+            return bodyweightMetric
+        }
+
+        if let bestBodyweightMetric = bodyweightMetrics.reduce(nil as BodyweightWorkingSetMetric?, { currentBest, metric in
+            guard let currentBest else { return metric }
+            return isBetterBodyweightMetric(metric, than: currentBest) ? metric : currentBest
+        }) {
+            return BestSetPresentation(displayText: "\(bestBodyweightMetric.reps) reps")
+        }
+
+        return nil
+    }
+
+    nonisolated static func bestSetText(from sets: [WorkoutSessionSet], emptyText: String) -> String {
+        bestSetPresentation(from: sets)?.displayText ?? emptyText
+    }
+
+    nonisolated static func normalizedEstimatedOneRepMax(for metric: WeightedWorkingSetMetric) -> Double {
+        normalizedLoad(estimatedOneRepMax(weight: metric.weight, reps: metric.reps), unit: metric.unit)
+    }
+
+    nonisolated static func normalizedWeight(for metric: WeightedWorkingSetMetric) -> Double {
+        normalizedLoad(metric.weight, unit: metric.unit)
+    }
+
+    nonisolated static func normalizedVolume(for metric: WeightedWorkingSetMetric) -> Double {
+        normalizedWeight(for: metric) * Double(metric.reps)
+    }
+
+    nonisolated static func isBetterWeightedMetric(_ candidate: WeightedWorkingSetMetric, than existing: WeightedWorkingSetMetric) -> Bool {
+        let candidateOneRepMax = normalizedEstimatedOneRepMax(for: candidate)
+        let existingOneRepMax = normalizedEstimatedOneRepMax(for: existing)
+        if candidateOneRepMax != existingOneRepMax {
+            return candidateOneRepMax > existingOneRepMax
+        }
+
+        let candidateWeight = normalizedWeight(for: candidate)
+        let existingWeight = normalizedWeight(for: existing)
+        if candidateWeight != existingWeight {
+            return candidateWeight > existingWeight
+        }
+
+        if candidate.reps != existing.reps {
+            return candidate.reps > existing.reps
+        }
+
+        return candidate.sortOrder < existing.sortOrder
+    }
+
+    nonisolated static func isBetterBodyweightMetric(_ candidate: BodyweightWorkingSetMetric, than existing: BodyweightWorkingSetMetric) -> Bool {
+        if candidate.reps != existing.reps {
+            return candidate.reps > existing.reps
+        }
+
+        return candidate.sortOrder < existing.sortOrder
+    }
+}
+
 @MainActor
 final class WorkoutMetricsService {
+    static let currentSummaryMetricsVersion = WorkoutMetricsPolicy.summaryMetricsVersion
+
     private let modelContext: ModelContext
     private let calendar: Calendar
     private let repository: WorkoutSessionRepository
@@ -179,10 +397,12 @@ final class WorkoutMetricsService {
         self.repository = WorkoutSessionRepository(modelContext: modelContext)
     }
 
+    static func bestSetText(for sets: [WorkoutSessionSet], emptyText: String = "-") -> String {
+        WorkoutMetricsPolicy.bestSetText(from: sets, emptyText: emptyText)
+    }
+
     func estimatedOneRepMax(weight: Double, reps: Int) -> Double {
-        guard reps > 0 else { return weight }
-        if reps == 1 { return weight }
-        return weight * (1 + (Double(reps) / 30.0))
+        WorkoutMetricsPolicy.estimatedOneRepMax(weight: weight, reps: reps)
     }
 
     func bestEstimatedOneRepMax(
@@ -200,35 +420,15 @@ final class WorkoutMetricsService {
             if let date, entry.completedAt >= date {
                 continue
             }
-            guard let comparisonOneRepMax = entry.comparisonOneRepMax else { continue }
-            best = max(best ?? 0, comparisonOneRepMax)
+            guard let weightedOneRepMaxInKilograms = entry.weightedOneRepMaxInKilograms else { continue }
+            best = max(best ?? 0, weightedOneRepMaxInKilograms)
         }
 
         return best
     }
 
     func countPRHits(sessionID: UUID) throws -> Int {
-        guard let session = try session(id: sessionID) else { return 0 }
-
-        var hits = 0
-        for exercise in orderedSessionExercises(session) {
-            var runningBest = try bestEstimatedOneRepMax(
-                for: exercise.catalogExerciseUUID,
-                before: session.startedAt,
-                excludingSessionID: session.id
-            ) ?? 0
-
-            for set in orderedSessionSets(exercise) where set.isCompleted {
-                guard let value = metricInput(from: set) else { continue }
-                let oneRM = comparisonOneRepMax(weight: value.weight, reps: value.reps, unit: value.unit)
-                if oneRM > runningBest {
-                    hits += 1
-                    runningBest = oneRM
-                }
-            }
-        }
-
-        return hits
+        try sessionSetPRAchievements(sessionID: sessionID).count
     }
 
     func sessionPRAchievements(sessionID: UUID) throws -> [SessionPRAchievement] {
@@ -243,36 +443,35 @@ final class WorkoutMetricsService {
                 before: session.startedAt,
                 excludingSessionID: session.id
             ) ?? 0
-            var bestAchievement: SessionPRAchievement?
+            var bestMetric: WeightedWorkingSetMetric?
 
-            for set in orderedSessionSets(exercise) where set.isCompleted {
-                guard let value = metricInput(from: set) else { continue }
-                let oneRM = estimatedOneRepMax(weight: value.weight, reps: value.reps)
-                let comparisonOneRM = normalizedLoadForComparison(oneRM, unit: value.unit)
+            for metric in completedWeightedWorkingSetMetrics(for: exercise) {
+                let oneRM = estimatedOneRepMax(weight: metric.weight, reps: metric.reps)
+                let comparisonOneRM = normalizedLoadForComparison(oneRM, unit: metric.unit)
                 guard comparisonOneRM > runningBest else { continue }
 
                 runningBest = comparisonOneRM
-                let achievement = SessionPRAchievement(
-                    id: "\(session.id.uuidString.lowercased())_\(exercise.catalogExerciseUUID.lowercased())",
-                    catalogExerciseUUID: exercise.catalogExerciseUUID,
-                    exerciseName: exercise.exerciseNameSnapshot,
-                    estimatedOneRepMax: oneRM,
-                    weight: value.weight,
-                    reps: value.reps,
-                    loadUnit: value.unit
-                )
-
-                if let currentBest = bestAchievement {
-                    if achievement.estimatedOneRepMax > currentBest.estimatedOneRepMax {
-                        bestAchievement = achievement
+                if let currentBest = bestMetric {
+                    if WorkoutMetricsPolicy.isBetterWeightedMetric(metric, than: currentBest) {
+                        bestMetric = metric
                     }
                 } else {
-                    bestAchievement = achievement
+                    bestMetric = metric
                 }
             }
 
-            if let bestAchievement {
-                achievements.append(bestAchievement)
+            if let bestMetric {
+                achievements.append(
+                    SessionPRAchievement(
+                        id: "\(session.id.uuidString.lowercased())_\(exercise.catalogExerciseUUID.lowercased())",
+                        catalogExerciseUUID: exercise.catalogExerciseUUID,
+                        exerciseName: exercise.exerciseNameSnapshot,
+                        estimatedOneRepMax: estimatedOneRepMax(weight: bestMetric.weight, reps: bestMetric.reps),
+                        weight: bestMetric.weight,
+                        reps: bestMetric.reps,
+                        loadUnit: bestMetric.unit
+                    )
+                )
             }
         }
 
@@ -291,51 +490,62 @@ final class WorkoutMetricsService {
                 excludingSessionID: session.id
             )
 
-            for set in orderedSessionSets(exercise) where set.isCompleted {
-                guard let value = metricInput(from: set) else { continue }
-
-                let estimatedOneRepMax = self.estimatedOneRepMax(weight: value.weight, reps: value.reps)
-                let comparisonOneRepMax = normalizedLoadForComparison(estimatedOneRepMax, unit: value.unit)
-                let normalizedWeight = normalizedLoadForComparison(value.weight, unit: value.unit)
-                let normalizedVolume = normalizedWeight * Double(value.reps)
-
+            for metric in completedWorkingSetMetrics(for: exercise) {
                 var kinds: [WorkoutPersonalRecordKind] = []
+                var estimatedOneRepMaxValue: Double?
+                var weight: Double?
+                var volume: Double?
 
-                if comparisonOneRepMax > runningBest.strength {
-                    runningBest.strength = comparisonOneRepMax
-                    kinds.append(.strength)
+                switch metric {
+                case let .weighted(weightedMetric):
+                    let oneRepMax = estimatedOneRepMax(weight: weightedMetric.weight, reps: weightedMetric.reps)
+                    let comparisonOneRepMax = normalizedLoadForComparison(oneRepMax, unit: weightedMetric.unit)
+                    let normalizedWeight = normalizedLoadForComparison(weightedMetric.weight, unit: weightedMetric.unit)
+                    let normalizedVolume = normalizedWeight * Double(weightedMetric.reps)
+
+                    if comparisonOneRepMax > runningBest.strength {
+                        runningBest.strength = comparisonOneRepMax
+                        kinds.append(.strength)
+                    }
+
+                    if normalizedWeight > runningBest.weight {
+                        runningBest.weight = normalizedWeight
+                        kinds.append(.weight)
+                    }
+
+                    if normalizedVolume > runningBest.volume {
+                        runningBest.volume = normalizedVolume
+                        kinds.append(.volume)
+                    }
+
+                    estimatedOneRepMaxValue = oneRepMax
+                    weight = weightedMetric.weight
+                    volume = normalizedVolume
+
+                case .bodyweight:
+                    break
                 }
 
-                if normalizedWeight > runningBest.weight {
-                    runningBest.weight = normalizedWeight
-                    kinds.append(.weight)
-                }
-
-                if value.reps > runningBest.reps {
-                    runningBest.reps = value.reps
+                if metric.reps > runningBest.reps {
+                    runningBest.reps = metric.reps
                     kinds.append(.reps)
-                }
-
-                if normalizedVolume > runningBest.volume {
-                    runningBest.volume = normalizedVolume
-                    kinds.append(.volume)
                 }
 
                 guard !kinds.isEmpty else { continue }
 
                 achievements.append(
                     SessionSetPRAchievement(
-                        id: "\(session.id.uuidString.lowercased())_\(set.id.uuidString.lowercased())",
+                        id: "\(session.id.uuidString.lowercased())_\(metric.setID.uuidString.lowercased())",
                         sessionExerciseID: exercise.id,
-                        setID: set.id,
+                        setID: metric.setID,
                         catalogExerciseUUID: exercise.catalogExerciseUUID,
                         exerciseName: exercise.exerciseNameSnapshot,
                         kinds: kinds.sorted(),
-                        estimatedOneRepMax: estimatedOneRepMax,
-                        weight: value.weight,
-                        reps: value.reps,
-                        volume: value.weight * Double(value.reps),
-                        loadUnit: value.unit
+                        estimatedOneRepMax: estimatedOneRepMaxValue,
+                        weight: weight,
+                        reps: metric.reps,
+                        volume: volume,
+                        loadUnit: metric.loadUnit
                     )
                 )
             }
@@ -346,22 +556,18 @@ final class WorkoutMetricsService {
 
     func totalVolume(sessionID: UUID) throws -> Double {
         guard let session = try session(id: sessionID) else { return 0 }
+        return totalWeightedVolume(for: session)
+    }
 
-        var total = 0.0
-        for exercise in orderedSessionExercises(session) {
-            for set in orderedSessionSets(exercise) where set.isCompleted {
-                if let actualWeight = set.actualWeight, let actualReps = set.actualReps {
-                    total += actualWeight * Double(max(0, actualReps))
-                    continue
-                }
-
-                if let targetWeight = set.targetWeight, let targetReps = set.targetReps {
-                    total += targetWeight * Double(max(0, targetReps))
-                }
-            }
+    func sessionSummary(sessionID: UUID) throws -> WorkoutSessionSummaryMetrics {
+        guard let session = try session(id: sessionID) else {
+            return WorkoutSessionSummaryMetrics(totalVolume: 0, prHitsCount: 0)
         }
 
-        return total
+        return WorkoutSessionSummaryMetrics(
+            totalVolume: totalWeightedVolume(for: session),
+            prHitsCount: try sessionSetPRAchievements(sessionID: sessionID).count
+        )
     }
 
     func personalRecords(limit: Int = 8) throws -> [WorkoutPRRecord] {
@@ -601,57 +807,51 @@ final class WorkoutMetricsService {
                         ?? WorkingExerciseHistoryEntry(exerciseName: exercise.exerciseNameSnapshot)
                     historyEntry.exerciseName = exercise.exerciseNameSnapshot
 
-                    for set in orderedSessionSets(exercise) where set.isCompleted {
-                        if let value = metricInput(from: set) {
-                            let oneRM = estimatedOneRepMax(weight: value.weight, reps: value.reps)
-                            let comparisonValue = normalizedLoadForComparison(oneRM, unit: value.unit)
-                            historyEntry.comparisonOneRepMax = max(
-                                historyEntry.comparisonOneRepMax ?? 0,
-                                comparisonValue
-                            )
+                    for weightedMetric in completedWeightedWorkingSetMetrics(for: exercise) {
+                        let weightedOneRepMaxInKilograms = normalizedLoadForComparison(
+                            estimatedOneRepMax(weight: weightedMetric.weight, reps: weightedMetric.reps),
+                            unit: weightedMetric.unit
+                        )
+                        historyEntry.comparisonOneRepMax = max(
+                            historyEntry.comparisonOneRepMax ?? 0,
+                            weightedOneRepMaxInKilograms
+                        )
 
-                            let record = WorkoutPRRecord(
-                                id: exercise.catalogExerciseUUID,
-                                catalogExerciseUUID: exercise.catalogExerciseUUID,
-                                exerciseName: exercise.exerciseNameSnapshot,
-                                estimatedOneRepMax: oneRM,
-                                weight: value.weight,
-                                reps: value.reps,
-                                loadUnit: value.unit,
-                                achievedAt: completedAt
-                            )
+                        let record = WorkoutPRRecord(
+                            id: exercise.catalogExerciseUUID,
+                            catalogExerciseUUID: exercise.catalogExerciseUUID,
+                            exerciseName: exercise.exerciseNameSnapshot,
+                            estimatedOneRepMax: estimatedOneRepMax(weight: weightedMetric.weight, reps: weightedMetric.reps),
+                            weight: weightedMetric.weight,
+                            reps: weightedMetric.reps,
+                            loadUnit: weightedMetric.unit,
+                            achievedAt: completedAt
+                        )
 
-                            if let existing = bestPRByExercise[exercise.catalogExerciseUUID] {
-                                if isBetterPRRecord(record, than: existing) {
-                                    bestPRByExercise[exercise.catalogExerciseUUID] = record
-                                }
-                            } else {
+                        if let existing = bestPRByExercise[exercise.catalogExerciseUUID] {
+                            if isBetterPRRecord(record, than: existing) {
                                 bestPRByExercise[exercise.catalogExerciseUUID] = record
                             }
+                        } else {
+                            bestPRByExercise[exercise.catalogExerciseUUID] = record
                         }
 
-                        if let weightedValue = weightedMetricInput(from: set) {
-                            let weightedOneRepMaxInKilograms = normalizedLoadForComparison(
-                                estimatedOneRepMax(weight: weightedValue.weight, reps: weightedValue.reps),
-                                unit: weightedValue.unit
-                            )
-                            if let currentBest = historyEntry.weightedOneRepMaxInKilograms {
-                                if weightedOneRepMaxInKilograms > currentBest {
-                                    historyEntry.weightedOneRepMaxInKilograms = weightedOneRepMaxInKilograms
-                                    historyEntry.weightedOneRepMaxUnit = weightedValue.unit
-                                }
-                            } else {
+                        if let currentBest = historyEntry.weightedOneRepMaxInKilograms {
+                            if weightedOneRepMaxInKilograms > currentBest {
                                 historyEntry.weightedOneRepMaxInKilograms = weightedOneRepMaxInKilograms
-                                historyEntry.weightedOneRepMaxUnit = weightedValue.unit
+                                historyEntry.weightedOneRepMaxUnit = weightedMetric.unit
                             }
-
-                            historyEntry.totalWeightedVolumeInKilograms += normalizedLoadForComparison(
-                                weightedValue.weight,
-                                unit: weightedValue.unit
-                            ) * Double(weightedValue.reps)
-                            historyEntry.weightedVolumeUnit = weightedValue.unit
-                            historyEntry.hasWeightedMetrics = true
+                        } else {
+                            historyEntry.weightedOneRepMaxInKilograms = weightedOneRepMaxInKilograms
+                            historyEntry.weightedOneRepMaxUnit = weightedMetric.unit
                         }
+
+                        historyEntry.totalWeightedVolumeInKilograms += normalizedLoadForComparison(
+                            weightedMetric.weight,
+                            unit: weightedMetric.unit
+                        ) * Double(weightedMetric.reps)
+                        historyEntry.weightedVolumeUnit = weightedMetric.unit
+                        historyEntry.hasWeightedMetrics = true
                     }
 
                     perSessionHistory[exercise.catalogExerciseUUID] = historyEntry
@@ -711,24 +911,20 @@ final class WorkoutMetricsService {
         (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
     }
 
-    private func metricInput(from set: WorkoutSessionSet) -> (weight: Double, reps: Int, unit: TemplateLoadUnit)? {
-        if let actualWeight = set.actualWeight, let actualReps = set.actualReps, actualWeight > 0, actualReps > 0 {
-            return (actualWeight, actualReps, set.actualLoadUnit)
-        }
-
-        if let targetWeight = set.targetWeight, let targetReps = set.targetReps, targetWeight > 0, targetReps > 0 {
-            return (targetWeight, targetReps, set.targetLoadUnit)
-        }
-
-        return nil
+    private func completedWorkingSetMetrics(for exercise: WorkoutSessionExercise) -> [CompletedWorkingSetMetric] {
+        WorkoutMetricsPolicy.completedWorkingMetrics(from: orderedSessionSets(exercise))
     }
 
-    private func weightedMetricInput(from set: WorkoutSessionSet) -> (weight: Double, reps: Int, unit: TemplateLoadUnit)? {
-        guard let value = metricInput(from: set), value.unit != .bodyweight else {
-            return nil
-        }
+    private func completedWeightedWorkingSetMetrics(for exercise: WorkoutSessionExercise) -> [WeightedWorkingSetMetric] {
+        WorkoutMetricsPolicy.completedWeightedWorkingMetrics(from: orderedSessionSets(exercise))
+    }
 
-        return value
+    private func totalWeightedVolume(for session: WorkoutSession) -> Double {
+        orderedSessionExercises(session).reduce(into: 0.0) { total, exercise in
+            for metric in completedWeightedWorkingSetMetrics(for: exercise) {
+                total += normalizedLoadForComparison(metric.weight, unit: metric.unit) * Double(metric.reps)
+            }
+        }
     }
 
     private func currentGoal() throws -> Int {
@@ -762,22 +958,23 @@ final class WorkoutMetricsService {
             }
 
             for exercise in orderedSessionExercises(session) where exercise.catalogExerciseUUID == catalogExerciseUUID {
-                for set in orderedSessionSets(exercise) where set.isCompleted {
-                    guard let value = metricInput(from: set) else { continue }
+                for metric in completedWorkingSetMetrics(for: exercise) {
+                    if case let .weighted(weightedMetric) = metric {
+                        peaks.strength = max(
+                            peaks.strength,
+                            comparisonOneRepMax(weight: weightedMetric.weight, reps: weightedMetric.reps, unit: weightedMetric.unit)
+                        )
+                        peaks.weight = max(
+                            peaks.weight,
+                            normalizedLoadForComparison(weightedMetric.weight, unit: weightedMetric.unit)
+                        )
+                        peaks.volume = max(
+                            peaks.volume,
+                            normalizedLoadForComparison(weightedMetric.weight, unit: weightedMetric.unit) * Double(weightedMetric.reps)
+                        )
+                    }
 
-                    peaks.strength = max(
-                        peaks.strength,
-                        comparisonOneRepMax(weight: value.weight, reps: value.reps, unit: value.unit)
-                    )
-                    peaks.weight = max(
-                        peaks.weight,
-                        normalizedLoadForComparison(value.weight, unit: value.unit)
-                    )
-                    peaks.reps = max(peaks.reps, value.reps)
-                    peaks.volume = max(
-                        peaks.volume,
-                        normalizedLoadForComparison(value.weight, unit: value.unit) * Double(value.reps)
-                    )
+                    peaks.reps = max(peaks.reps, metric.reps)
                 }
             }
         }
@@ -894,14 +1091,7 @@ final class WorkoutMetricsService {
     }
 
     private func normalizedLoadForComparison(_ value: Double, unit: TemplateLoadUnit) -> Double {
-        switch unit {
-        case .kg:
-            return value
-        case .lb:
-            return value * 0.45359237
-        case .bodyweight:
-            return value
-        }
+        WorkoutMetricsPolicy.normalizedLoad(value, unit: unit)
     }
 
     private func displayValue(_ valueInKilograms: Double, unit: TemplateLoadUnit) -> Double {
