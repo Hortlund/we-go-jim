@@ -84,216 +84,164 @@ struct ActiveWorkoutView: View {
     }
 
     var body: some View {
-        ScrollView {
-            // Exercise cards change height aggressively as sets complete, and a non-lazy
-            // stack keeps the scroll position stable when a completed card collapses.
-            VStack(alignment: .leading, spacing: 16) {
-                if let session {
-                    ActiveWorkoutHeaderCard(
-                        sessionNameDraft: $sessionNameDraft,
-                        notesDraft: $notesDraft,
-                        session: session,
-                        exerciseCount: sessionExercises.count,
-                        onSubmit: persistSessionMeta
-                    )
-                    exercisesSectionHeader
-                } else {
-                    WGJEmptyStateCard(
-                        title: "Workout session not found",
-                        message: "This active workout could not be loaded.",
-                        icon: "exclamationmark.triangle"
-                    )
-                }
+        ScrollViewReader { scrollProxy in
+            ScrollView {
+                // Exercise cards change height aggressively as sets complete, and a non-lazy
+                // stack keeps the scroll position stable when a completed card collapses.
+                VStack(alignment: .leading, spacing: 16) {
+                    if let session {
+                        ActiveWorkoutHeaderCard(
+                            sessionNameDraft: $sessionNameDraft,
+                            notesDraft: $notesDraft,
+                            session: session,
+                            exerciseCount: sessionExercises.count,
+                            onSubmit: persistSessionMeta
+                        )
+                        exercisesSectionHeader
+                    } else {
+                        WGJEmptyStateCard(
+                            title: "Workout session not found",
+                            message: "This active workout could not be loaded.",
+                            icon: "exclamationmark.triangle"
+                        )
+                    }
 
-                if sessionExercises.isEmpty {
-                    WGJEmptyStateCard(
-                        title: "No exercises added",
-                        message: "Add exercises to start logging sets in this workout.",
-                        icon: "list.bullet.rectangle"
-                    ) {
-                        Button("Add Exercise") {
-                            showingExercisePicker = true
+                    if sessionExercises.isEmpty {
+                        WGJEmptyStateCard(
+                            title: "No exercises added",
+                            message: "Add exercises to start logging sets in this workout.",
+                            icon: "list.bullet.rectangle"
+                        ) {
+                            Button("Add Exercise") {
+                                showingExercisePicker = true
+                            }
+                            .buttonStyle(WGJPrimaryButtonStyle())
+                            .accessibilityIdentifier("active-workout-empty-add-exercise-button")
                         }
-                        .buttonStyle(WGJPrimaryButtonStyle())
-                        .accessibilityIdentifier("active-workout-empty-add-exercise-button")
+                    }
+
+                    ForEach(Array(sessionExercises.enumerated()), id: \.element.id) { index, exercise in
+                        exerciseRow(
+                            for: exercise,
+                            index: index,
+                            scrollProxy: scrollProxy
+                        )
+                    }
+
+                    if !sessionExercises.isEmpty {
+                        addExerciseButton(title: "Add another exercise")
+                            .disabled(session == nil)
                     }
                 }
+                .padding(16)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .wgjScreenBackground()
+            .wgjNavigationChrome()
+            .navigationTitle("Active Workout")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItemGroup(placement: .topBarLeading) {
+                    Button {
+                        minimizeWorkout()
+                    } label: {
+                        Label("Minimize", systemImage: "chevron.down")
+                    }
+                    .accessibilityIdentifier("active-workout-minimize-button")
+                }
 
-                ForEach(Array(sessionExercises.enumerated()), id: \.element.id) { index, exercise in
-                    ActiveWorkoutExerciseRowView(
-                        exerciseID: exercise.id,
-                        exerciseName: exercise.exerciseNameSnapshot,
-                        muscleSummary: exercise.muscleSummarySnapshot,
-                        category: exercise.categorySnapshot,
-                        exerciseIndexTitle: "Exercise \(index + 1)",
-                        targetRepMin: exercise.targetRepMin,
-                        targetRepMax: exercise.targetRepMax,
-                        previousBySetIndex: previousByExerciseID[exercise.id] ?? [:],
-                        overloadFeedback: overloadFeedbackByExerciseID[exercise.id],
-                        preferredLoadUnit: preferredLoadUnit,
-                        restSeconds: resolvedRest(for: exercise),
-                        setDrafts: resolvedDrafts(for: exercise),
-                        isExpanded: cardStateController.isExpanded(for: exercise.id),
-                        currentRestSeconds: {
-                            resolvedRest(for: exercise)
-                        },
-                        currentSetDrafts: {
-                            resolvedDrafts(for: exercise)
-                        },
-                        currentIsExpanded: {
-                            cardStateController.isExpanded(for: exercise.id)
-                        },
-                        onSetDraftsBindingChanged: { updated in
-                            updateDraftsValue(updated, for: exercise.id)
-                        },
-                        onRestBindingChanged: { updated in
-                            updateRestValue(updated, for: exercise.id)
-                        },
-                        onExpandedChanged: { isExpanded in
-                            cardStateController.setExpanded(isExpanded, for: exercise.id)
-                        },
-                        onSetDraftsChanged: { drafts in
-                            handleDraftsChanged(drafts, for: exercise)
-                        },
-                        onRestChanged: { rest in
-                            persistRest(sessionExerciseID: exercise.id, restSeconds: rest)
-                        },
-                        onSetCompletionChange: { setID, setLabel, restSeconds, isCompleted in
-                            if isCompleted {
-                                restTimerState.startRestTimer(
-                                    seconds: restSeconds,
-                                    exerciseName: exercise.exerciseNameSnapshot,
-                                    setLabel: setLabel,
-                                    sourceSetID: setID
-                                )
-                            } else {
-                                restTimerState.clearRestTimer(sourceSetID: setID)
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    finishToolbarButton
+                }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                Group {
+                    if !isKeyboardVisible, !isEndingSession, let session, session.status == .active {
+                        ActiveWorkoutBottomDock(
+                            session: session,
+                            isCancelArmed: isCancelArmed,
+                            reduceMotion: reduceMotion,
+                            onArmCancel: {
+                                dismissKeyboard()
+                                showingFinishConfirmation = false
+                                isCancelArmed = true
+                            },
+                            onKeepWorkout: {
+                                isCancelArmed = false
+                            },
+                            onDiscardWorkout: {
+                                cancelWorkout()
                             }
-                        },
-                        onExerciseSettings: {
-                            showExerciseSettings(for: exercise)
-                        },
-                        onExerciseDelete: {
-                            removeExercise(exerciseID: exercise.id)
-                        }
-                    )
-                    .equatable()
-                    .transition(exerciseCardTransition)
+                        )
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
                 }
-
-                if !sessionExercises.isEmpty {
-                    addExerciseButton(title: "Add another exercise")
-                        .disabled(session == nil)
+                .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: isKeyboardVisible)
+                .animation(
+                    WGJMotion.overlayAnimation(reduceMotion: reduceMotion),
+                    value: restTimerState.restTimerPopup?.id
+                )
+            }
+            .wgjTrackKeyboardVisibility($isKeyboardVisible)
+            .sheet(isPresented: $showingExercisePicker) {
+                ExercisePickerView(repository: catalogRepository) { exercise in
+                    addExercise(exercise)
                 }
+                .wgjSheetSurface()
             }
-            .padding(16)
-        }
-        .scrollDismissesKeyboard(.interactively)
-        .wgjScreenBackground()
-        .wgjNavigationChrome()
-        .navigationTitle("Active Workout")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItemGroup(placement: .topBarLeading) {
-                Button {
-                    minimizeWorkout()
-                } label: {
-                    Label("Minimize", systemImage: "chevron.down")
+            .sheet(item: $exerciseSettingsDraft) { draft in
+                ActiveWorkoutExerciseSettingsSheet(
+                    draft: draft,
+                    onSave: saveExerciseSettings
+                )
+                .wgjSheetSurface()
+            }
+            .sheet(isPresented: $showingSaveTemplateSheet, onDismiss: handleSaveTemplateSheetDismissed) {
+                ActiveWorkoutSaveTemplateSheet(
+                    templateNameDraft: $templateNameDraft,
+                    templateFolderID: $templateFolderID,
+                    folders: saveTemplateFolders,
+                    onSkip: skipSavingSessionAsTemplate,
+                    onSave: saveSessionAsTemplate
+                )
+                .interactiveDismissDisabled()
+            }
+            .task {
+                await bootstrapIfNeeded()
+            }
+            .task(id: session?.statusRaw) {
+                await reconcileSessionLifecycleIfNeeded()
+            }
+            .task(id: exerciseHydrationStamp) {
+                await loadExerciseStateIfNeeded()
+            }
+            .onDisappear {
+                isCancelArmed = false
+                pendingCompletionTask?.cancel()
+                pendingCompletionTask = nil
+                flushPendingSaves()
+            }
+            .alert("Workout Error", isPresented: $showingError) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(errorMessage)
+            }
+            .alert("Update Template?", isPresented: templateUpdatePromptBinding, presenting: pendingTemplateUpdatePreview) { preview in
+                Button("Update Template") {
+                    applyTemplateUpdate(preview)
                 }
-                .accessibilityIdentifier("active-workout-minimize-button")
-            }
-
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                finishToolbarButton
-            }
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            Group {
-                if !isKeyboardVisible, !isEndingSession, let session, session.status == .active {
-                    ActiveWorkoutBottomDock(
-                        session: session,
-                        isCancelArmed: isCancelArmed,
-                        reduceMotion: reduceMotion,
-                        onArmCancel: {
-                            dismissKeyboard()
-                            showingFinishConfirmation = false
-                            isCancelArmed = true
-                        },
-                        onKeepWorkout: {
-                            isCancelArmed = false
-                        },
-                        onDiscardWorkout: {
-                            cancelWorkout()
-                        }
-                    )
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                Button("Keep Template", role: .cancel) {
+                    pendingTemplateUpdatePreview = nil
+                    presentWorkoutCompletionSummary()
                 }
+            } message: {
+                Text($0.summary)
             }
-            .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: isKeyboardVisible)
-            .animation(
-                WGJMotion.overlayAnimation(reduceMotion: reduceMotion),
-                value: restTimerState.restTimerPopup?.id
-            )
-        }
-        .wgjTrackKeyboardVisibility($isKeyboardVisible)
-        .sheet(isPresented: $showingExercisePicker) {
-            ExercisePickerView(repository: catalogRepository) { exercise in
-                addExercise(exercise)
+            .background {
+                WorkoutRestTimerExpiryObserver()
             }
-            .wgjSheetSurface()
+            .wgjMinimalKeyboardToolbar()
         }
-        .sheet(item: $exerciseSettingsDraft) { draft in
-            ActiveWorkoutExerciseSettingsSheet(
-                draft: draft,
-                onSave: saveExerciseSettings
-            )
-            .wgjSheetSurface()
-        }
-        .sheet(isPresented: $showingSaveTemplateSheet, onDismiss: handleSaveTemplateSheetDismissed) {
-            ActiveWorkoutSaveTemplateSheet(
-                templateNameDraft: $templateNameDraft,
-                templateFolderID: $templateFolderID,
-                folders: saveTemplateFolders,
-                onSkip: skipSavingSessionAsTemplate,
-                onSave: saveSessionAsTemplate
-            )
-            .interactiveDismissDisabled()
-        }
-        .task {
-            await bootstrapIfNeeded()
-        }
-        .task(id: session?.statusRaw) {
-            await reconcileSessionLifecycleIfNeeded()
-        }
-        .task(id: exerciseHydrationStamp) {
-            await loadExerciseStateIfNeeded()
-        }
-        .onDisappear {
-            isCancelArmed = false
-            pendingCompletionTask?.cancel()
-            pendingCompletionTask = nil
-            flushPendingSaves()
-        }
-        .alert("Workout Error", isPresented: $showingError) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text(errorMessage)
-        }
-        .alert("Update Template?", isPresented: templateUpdatePromptBinding, presenting: pendingTemplateUpdatePreview) { preview in
-            Button("Update Template") {
-                applyTemplateUpdate(preview)
-            }
-            Button("Keep Template", role: .cancel) {
-                pendingTemplateUpdatePreview = nil
-                presentWorkoutCompletionSummary()
-            }
-        } message: {
-            Text($0.summary)
-        }
-        .background {
-            WorkoutRestTimerExpiryObserver()
-        }
-        .wgjMinimalKeyboardToolbar()
     }
 
     private var session: WorkoutSession? {
@@ -355,6 +303,77 @@ struct ActiveWorkoutView: View {
         }
         .buttonStyle(WGJGhostButtonStyle())
         .accessibilityIdentifier("active-workout-add-exercise-button")
+    }
+
+    @MainActor
+    private func exerciseRow(
+        for exercise: WorkoutSessionExercise,
+        index: Int,
+        scrollProxy: ScrollViewProxy
+    ) -> some View {
+        let exerciseID = exercise.id
+        let exerciseName = exercise.exerciseNameSnapshot
+
+        return ActiveWorkoutExerciseRowView(
+            exerciseID: exerciseID,
+            exerciseName: exerciseName,
+            muscleSummary: exercise.muscleSummarySnapshot,
+            category: exercise.categorySnapshot,
+            exerciseIndexTitle: "Exercise \(index + 1)",
+            targetRepMin: exercise.targetRepMin,
+            targetRepMax: exercise.targetRepMax,
+            previousBySetIndex: previousByExerciseID[exerciseID] ?? [:],
+            overloadFeedback: overloadFeedbackByExerciseID[exerciseID],
+            preferredLoadUnit: preferredLoadUnit,
+            restSeconds: resolvedRest(for: exercise),
+            setDrafts: resolvedDrafts(for: exercise),
+            isExpanded: cardStateController.isExpanded(for: exerciseID),
+            currentRestSeconds: {
+                resolvedRest(for: exercise)
+            },
+            currentSetDrafts: {
+                resolvedDrafts(for: exercise)
+            },
+            currentIsExpanded: {
+                cardStateController.isExpanded(for: exerciseID)
+            },
+            onSetDraftsBindingChanged: { updated in
+                updateDraftsValue(updated, for: exerciseID)
+            },
+            onRestBindingChanged: { updated in
+                updateRestValue(updated, for: exerciseID)
+            },
+            onExpandedChanged: { isExpanded in
+                cardStateController.setExpanded(isExpanded, for: exerciseID)
+            },
+            onSetDraftsChanged: { drafts in
+                handleDraftsChanged(drafts, for: exercise, scrollProxy: scrollProxy)
+            },
+            onRestChanged: { rest in
+                persistRest(sessionExerciseID: exerciseID, restSeconds: rest)
+            },
+            onSetCompletionChange: { setID, setLabel, restSeconds, isCompleted in
+                if isCompleted {
+                    restTimerState.startRestTimer(
+                        seconds: restSeconds,
+                        exerciseName: exerciseName,
+                        setLabel: setLabel,
+                        sourceSetID: setID
+                    )
+                } else {
+                    restTimerState.clearRestTimer(sourceSetID: setID)
+                }
+            },
+            onExerciseSettings: {
+                showExerciseSettings(for: exercise)
+            },
+            onExerciseDelete: {
+                removeExercise(exerciseID: exerciseID)
+            }
+        )
+        .equatable()
+        .id(exerciseID)
+        .transition(exerciseCardTransition)
     }
 
     @MainActor
@@ -800,10 +819,28 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
-    private func handleDraftsChanged(_ drafts: [WorkoutSessionSetDraft], for exercise: WorkoutSessionExercise) {
+    private func handleDraftsChanged(
+        _ drafts: [WorkoutSessionSetDraft],
+        for exercise: WorkoutSessionExercise,
+        scrollProxy: ScrollViewProxy
+    ) {
         let isCompleted = isExerciseCompleted(drafts)
         if cardStateController.didCompleteCurrentCycle(for: exercise.id) != isCompleted {
-            cardStateController.updateCompletion(for: exercise.id, isCompleted: isCompleted)
+            let completedExerciseIDs = completedExerciseIDs(
+                updating: exercise.id,
+                with: drafts
+            )
+            withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
+                let nextExerciseID = cardStateController.updateCompletion(
+                    for: exercise.id,
+                    isCompleted: isCompleted,
+                    orderedExerciseIDs: sessionExercises.map(\.id),
+                    completedExerciseIDs: completedExerciseIDs
+                )
+                if let nextExerciseID {
+                    scrollProxy.scrollTo(nextExerciseID, anchor: .top)
+                }
+            }
         }
         syncOverloadFeedback(for: exercise, drafts: drafts)
         persistDrafts(sessionExerciseID: exercise.id, drafts: drafts)
@@ -828,6 +865,25 @@ struct ActiveWorkoutView: View {
 
     private func isExerciseCompleted(_ drafts: [WorkoutSessionSetDraft]) -> Bool {
         !drafts.isEmpty && drafts.allSatisfy(\.isCompleted)
+    }
+
+    @MainActor
+    private func completedExerciseIDs(
+        updating exerciseID: UUID,
+        with drafts: [WorkoutSessionSetDraft]
+    ) -> Set<UUID> {
+        Set(
+            sessionExercises.compactMap { candidate in
+                let candidateDrafts: [WorkoutSessionSetDraft]
+                if candidate.id == exerciseID {
+                    candidateDrafts = drafts
+                } else {
+                    candidateDrafts = setDraftsByExerciseID[candidate.id] ?? makeDrafts(from: candidate)
+                }
+
+                return isExerciseCompleted(candidateDrafts) ? candidate.id : nil
+            }
+        )
     }
 
     @MainActor
