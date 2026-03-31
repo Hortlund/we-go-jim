@@ -132,6 +132,23 @@ struct ActiveWorkoutView: View {
                         addExerciseButton(title: "Add another exercise")
                             .disabled(session == nil)
                     }
+
+                    if let session, session.status == .active, !isEndingSession {
+                        ActiveWorkoutCancelSection(
+                            isCancelArmed: isCancelArmed,
+                            onArmCancel: {
+                                dismissKeyboard()
+                                showingFinishConfirmation = false
+                                isCancelArmed = true
+                            },
+                            onKeepWorkout: {
+                                isCancelArmed = false
+                            },
+                            onDiscardWorkout: {
+                                cancelWorkout()
+                            }
+                        )
+                    }
                 }
                 .padding(16)
             }
@@ -159,19 +176,7 @@ struct ActiveWorkoutView: View {
                     if !isKeyboardVisible, !isEndingSession, let session, session.status == .active {
                         ActiveWorkoutBottomDock(
                             session: session,
-                            isCancelArmed: isCancelArmed,
-                            reduceMotion: reduceMotion,
-                            onArmCancel: {
-                                dismissKeyboard()
-                                showingFinishConfirmation = false
-                                isCancelArmed = true
-                            },
-                            onKeepWorkout: {
-                                isCancelArmed = false
-                            },
-                            onDiscardWorkout: {
-                                cancelWorkout()
-                            }
+                            reduceMotion: reduceMotion
                         )
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
@@ -1301,11 +1306,7 @@ private struct ActiveWorkoutBottomDock: View {
     @Environment(RestTimerState.self) private var restTimerState
 
     let session: WorkoutSession?
-    let isCancelArmed: Bool
     let reduceMotion: Bool
-    let onArmCancel: () -> Void
-    let onKeepWorkout: () -> Void
-    let onDiscardWorkout: () -> Void
 
     var body: some View {
         VStack(spacing: 8) {
@@ -1322,6 +1323,29 @@ private struct ActiveWorkoutBottomDock: View {
             if let session {
                 ActiveWorkoutActivityTimerDock(session: session)
             }
+        }
+        .wgjGlassContainer(spacing: 8)
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 10)
+        .background(WGJTheme.bgBase.opacity(0.97))
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(WGJTheme.accentBlue.opacity(0.18))
+                .frame(height: 1)
+        }
+    }
+}
+
+private struct ActiveWorkoutCancelSection: View {
+    let isCancelArmed: Bool
+    let onArmCancel: () -> Void
+    let onKeepWorkout: () -> Void
+    let onDiscardWorkout: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            WGJSectionHeader("Danger Zone", subtitle: "Placed at the end of the workout to reduce accidental taps.")
 
             if isCancelArmed {
                 cancelConfirmation
@@ -1347,18 +1371,11 @@ private struct ActiveWorkoutBottomDock: View {
                         )
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("active-workout-cancel-button")
             }
         }
-        .wgjGlassContainer(spacing: 8)
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 10)
-        .background(WGJTheme.bgBase.opacity(0.97))
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(WGJTheme.accentBlue.opacity(0.18))
-                .frame(height: 1)
-        }
+        .padding(14)
+        .wgjCardContainer()
     }
 
     private var cancelConfirmation: some View {
@@ -1377,10 +1394,12 @@ private struct ActiveWorkoutBottomDock: View {
             HStack(spacing: 10) {
                 Button("Keep Workout", action: onKeepWorkout)
                     .buttonStyle(WGJGhostButtonStyle())
+                    .accessibilityIdentifier("active-workout-keep-button")
 
                 Button("Discard Workout", action: onDiscardWorkout)
                     .buttonStyle(WGJPrimaryButtonStyle())
                     .tint(WGJTheme.danger)
+                    .accessibilityIdentifier("active-workout-discard-button")
             }
         }
         .padding(14)
