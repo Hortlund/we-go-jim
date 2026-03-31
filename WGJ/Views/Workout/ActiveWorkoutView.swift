@@ -261,18 +261,7 @@ struct ActiveWorkoutView: View {
             return false
         }
 
-        return restTimerState.restTimerRemaining() != nil
-            || restTimerState.restTimerPopup != nil
-            || hasLoggedWorkoutProgress
-    }
-
-    private var hasLoggedWorkoutProgress: Bool {
-        sessionExercises.contains { exercise in
-            let drafts = setDraftsByExerciseID[exercise.id] ?? makeDrafts(from: exercise)
-            return drafts.contains { draft in
-                draft.isCompleted || draft.actualReps != nil || draft.actualWeight != nil
-            }
-        }
+        return true
     }
 
     private var exerciseHydrationStamp: ActiveWorkoutExerciseStateStamp {
@@ -1392,38 +1381,21 @@ private struct ActiveWorkoutCancelSection: View {
     let onDiscardWorkout: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            WGJSectionHeader("Danger Zone", subtitle: "Placed at the end of the workout to reduce accidental taps.")
-
+        Group {
             if isCancelArmed {
                 cancelConfirmation
             } else {
                 Button(action: onArmCancel) {
                     Label("Cancel Workout", systemImage: "xmark.circle.fill")
                         .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
                         .foregroundStyle(WGJTheme.danger)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(WGJTheme.field.opacity(0.74))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .stroke(WGJTheme.danger.opacity(0.38), lineWidth: 1)
-                                )
-                                .wgjRoundedGlass(
-                                    cornerRadius: 12,
-                                    tint: WGJTheme.danger.opacity(0.12),
-                                    interactive: true
-                                )
-                        )
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 4)
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("active-workout-cancel-button")
             }
         }
-        .padding(14)
-        .wgjCardContainer()
     }
 
     private var cancelConfirmation: some View {

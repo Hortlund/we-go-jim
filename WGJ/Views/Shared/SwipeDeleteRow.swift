@@ -11,6 +11,14 @@ private enum SwipeDeleteDragIntent {
     case vertical
 }
 
+private struct SwipeDeleteRowWidthPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 struct SwipeDeleteRow<Content: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -78,14 +86,16 @@ struct SwipeDeleteRow<Content: View>: View {
             .background(
                 GeometryReader { geometry in
                     Color.clear
-                        .onAppear {
-                            rowWidth = geometry.size.width
-                        }
-                        .onChange(of: geometry.size.width) { _, newValue in
-                            rowWidth = newValue
-                        }
+                        .preference(
+                            key: SwipeDeleteRowWidthPreferenceKey.self,
+                            value: geometry.size.width
+                        )
                 }
             )
+            .onPreferenceChange(SwipeDeleteRowWidthPreferenceKey.self) { newValue in
+                guard abs(rowWidth - newValue) > 0.5 else { return }
+                rowWidth = newValue
+            }
     }
 
     private var deleteThreshold: CGFloat {

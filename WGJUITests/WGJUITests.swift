@@ -178,6 +178,9 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(startButton.waitForExistence(timeout: 5))
         startButton.tap()
 
+        let elapsedTimer = identifiedElement("active-workout-elapsed-timer", in: app)
+        XCTAssertTrue(elapsedTimer.waitForExistence(timeout: 5))
+
         let minimizeButton = app.buttons["active-workout-minimize-button"]
         XCTAssertTrue(minimizeButton.waitForExistence(timeout: 5))
         minimizeButton.tap()
