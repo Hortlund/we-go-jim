@@ -173,11 +173,9 @@ struct StartWorkoutHomeView: View {
     }
 
     private var quickStartSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            WGJActionHeader("Quick Start", subtitle: "Start logging without picking a template.")
-
+        VStack(alignment: .leading, spacing: 12) {
             ViewThatFits(in: .horizontal) {
-                HStack(alignment: .center, spacing: 16) {
+                HStack(alignment: .top, spacing: 14) {
                     quickStartCopy
                     Spacer(minLength: 0)
                     startEmptyWorkoutButton
@@ -189,17 +187,17 @@ struct StartWorkoutHomeView: View {
                 }
             }
         }
-        .padding(16)
+        .padding(14)
         .wgjCardContainer(strong: true)
     }
 
     private var quickStartCopy: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Empty workout")
+            Text("Quick Start")
                 .font(.headline.weight(.semibold))
                 .foregroundStyle(WGJTheme.textPrimary)
 
-            Text("Use this when you want to log freeform or build the session as you go.")
+            Text("No template needed. Log freeform or build the session as you go.")
                 .font(.subheadline)
                 .foregroundStyle(WGJTheme.textSecondary)
         }
@@ -211,17 +209,37 @@ struct StartWorkoutHomeView: View {
             requestStartEmptyWorkout()
         } label: {
             Label("Start Empty", systemImage: "play.fill")
-                .frame(maxWidth: .infinity)
+                .wgjSingleLineText(scale: 0.84)
         }
-        .buttonStyle(WGJPrimaryButtonStyle())
+        .buttonStyle(WGJCompactPrimaryButtonStyle())
         .accessibilityIdentifier("start-workout-empty-button")
     }
 
     private var templateWorkspaceSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            WGJActionHeader("Template Library", subtitle: "Expand a folder only when you want to see what is inside.")
+        VStack(alignment: .leading, spacing: 12) {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 14) {
+                    WGJSectionHeader(
+                        "Template Library",
+                        subtitle: "Keep the main create action close and the organizing tools lighter."
+                    )
 
-            templateHeaderActions
+                    Spacer(minLength: 0)
+
+                    addTemplateButton
+                }
+
+                VStack(alignment: .leading, spacing: 12) {
+                    WGJSectionHeader(
+                        "Template Library",
+                        subtitle: "Keep the main create action close and the organizing tools lighter."
+                    )
+
+                    addTemplateButton
+                }
+            }
+
+            templateLibraryUtilityRow
         }
         .padding(14)
         .wgjCardContainer(strong: true)
@@ -501,17 +519,15 @@ struct StartWorkoutHomeView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var templateHeaderActions: some View {
+    private var templateLibraryUtilityRow: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: 10) {
-                addTemplateButton
+            HStack(spacing: 8) {
                 addFolderButton
                 importTemplateButton
                 Spacer(minLength: 0)
             }
 
-            VStack(alignment: .leading, spacing: 10) {
-                addTemplateButton
+            VStack(alignment: .leading, spacing: 8) {
                 addFolderButton
                 importTemplateButton
             }
@@ -534,10 +550,14 @@ struct StartWorkoutHomeView: View {
         Button {
             beginCreatingFolder()
         } label: {
-            Label("New Folder", systemImage: "folder.badge.plus")
-                .wgjSingleLineText(scale: 0.82)
+            StartWorkoutInlineActionLabel(
+                title: "Folder",
+                systemImage: "folder.badge.plus",
+                tint: WGJTheme.accentGold
+            )
         }
-        .buttonStyle(WGJCompactGhostButtonStyle())
+        .buttonStyle(.plain)
+        .accessibilityLabel("New Folder")
         .accessibilityIdentifier("start-workout-new-folder-button")
     }
 
@@ -545,10 +565,14 @@ struct StartWorkoutHomeView: View {
         Button {
             showingTemplateImporter = true
         } label: {
-            Label("Import Template", systemImage: "square.and.arrow.down")
-                .wgjSingleLineText(scale: 0.82)
+            StartWorkoutInlineActionLabel(
+                title: "Import",
+                systemImage: "square.and.arrow.down",
+                tint: WGJTheme.accentBlue
+            )
         }
-        .buttonStyle(WGJCompactGhostButtonStyle())
+        .buttonStyle(.plain)
+        .accessibilityLabel("Import Template")
         .accessibilityIdentifier("start-workout-import-template-button")
     }
 
@@ -1161,6 +1185,39 @@ private struct StartWorkoutUtilityIcon: View {
                             .stroke(WGJTheme.outline.opacity(0.82), lineWidth: 1)
                     }
             }
+    }
+}
+
+private struct StartWorkoutInlineActionLabel: View {
+    let title: String
+    let systemImage: String
+    var tint: Color = WGJTheme.accentBlue
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(tint)
+
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(WGJTheme.textPrimary)
+                .wgjSingleLineText(scale: 0.84)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(WGJTheme.fieldStrong.opacity(0.96))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(WGJTheme.cardElevated.opacity(0.22))
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(WGJTheme.outline.opacity(0.72), lineWidth: 1)
+                }
+        }
     }
 }
 
