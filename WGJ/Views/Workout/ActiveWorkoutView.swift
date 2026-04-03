@@ -341,15 +341,6 @@ struct ActiveWorkoutView: View {
             restSeconds: resolvedRest(for: exercise),
             setDrafts: resolvedDrafts(for: exercise),
             isExpanded: cardStateController.isExpanded(for: exerciseID),
-            currentRestSeconds: {
-                resolvedRest(for: exercise)
-            },
-            currentSetDrafts: {
-                resolvedDrafts(for: exercise)
-            },
-            currentIsExpanded: {
-                cardStateController.isExpanded(for: exerciseID)
-            },
             onSetDraftsBindingChanged: { updated in
                 updateDraftsValue(updated, for: exerciseID)
             },
@@ -363,6 +354,7 @@ struct ActiveWorkoutView: View {
                 handleDraftsChanged(drafts, for: exercise, scrollProxy: scrollProxy)
             },
             onRestChanged: { rest in
+                updateRestValue(rest, for: exerciseID)
                 persistRest(sessionExerciseID: exerciseID, restSeconds: rest)
             },
             onSetCompletionChange: { setID, setLabel, restSeconds, isCompleted in
@@ -443,23 +435,32 @@ struct ActiveWorkoutView: View {
 
         let result = WGJPerformance.measure("active-workout.hydrate.local") { () -> ActiveWorkoutHydrationResult in
             var loadedDrafts: [UUID: [WorkoutSessionSetDraft]] = [:]
+            var persistedDrafts: [UUID: [WorkoutSessionSetDraft]] = [:]
             var loadedRests: [UUID: Int] = [:]
+            let catalogByUUID = (try? catalogRepository.exerciseMap(
+                for: sessionExercises.map(\.catalogExerciseUUID)
+            )) ?? [:]
 
             for exercise in sessionExercises {
                 let drafts = makeDrafts(from: exercise)
-                loadedDrafts[exercise.id] = drafts
+                loadedDrafts[exercise.id] = normalizedDraftsForActiveLogging(
+                    drafts,
+                    catalogExercise: catalogByUUID[exercise.catalogExerciseUUID]
+                )
+                persistedDrafts[exercise.id] = drafts
                 loadedRests[exercise.id] = exercise.restSeconds
             }
 
             return ActiveWorkoutHydrationResult(
                 draftsByExerciseID: loadedDrafts,
+                persistedDraftsByExerciseID: persistedDrafts,
                 restsByExerciseID: loadedRests,
                 previousByExerciseID: [:]
             )
         }
 
         setDraftsByExerciseID = result.draftsByExerciseID
-        lastPersistedDraftsByExerciseID = result.draftsByExerciseID
+        lastPersistedDraftsByExerciseID = result.persistedDraftsByExerciseID
         restByExerciseID = result.restsByExerciseID
         lastPersistedRestByExerciseID = result.restsByExerciseID
         previousByExerciseID = previousByExerciseID.filter { result.draftsByExerciseID[$0.key] != nil }
@@ -761,6 +762,7 @@ struct ActiveWorkoutView: View {
         for exercise: WorkoutSessionExercise,
         scrollProxy: ScrollViewProxy
     ) {
+        updateDraftsValue(drafts, for: exercise.id)
         let isCompleted = isExerciseCompleted(drafts)
         let previouslyCompleted = cardStateController.didCompleteCurrentCycle(for: exercise.id)
         if previouslyCompleted != isCompleted {
@@ -1100,6 +1102,38 @@ struct ActiveWorkoutView: View {
         orderedSessionSets(for: exercise).map(WorkoutSessionSetDraft.init(model:))
     }
 
+    private func normalizedDraftsForActiveLogging(
+        _ drafts: [WorkoutSessionSetDraft],
+        catalogExercise: ExerciseCatalogItem?
+    ) -> [WorkoutSessionSetDraft] {
+        guard TemplateLoadUnit.inferredDefault(
+            fromEquipmentSummary: catalogExercise?.equipmentSummary ?? ""
+        ) == .bodyweight else {
+            return drafts
+        }
+
+        var normalized = drafts
+        var changed = false
+
+        for index in normalized.indices {
+            guard normalized[index].targetWeight == nil, normalized[index].actualWeight == nil else {
+                continue
+            }
+
+            if normalized[index].targetLoadUnit != .bodyweight {
+                normalized[index].targetLoadUnit = .bodyweight
+                changed = true
+            }
+
+            if normalized[index].actualLoadUnit != .bodyweight {
+                normalized[index].actualLoadUnit = .bodyweight
+                changed = true
+            }
+        }
+
+        return changed ? normalized : drafts
+    }
+
     @MainActor
     private func applyPersistedRestChange(
         sessionExerciseID: UUID,
@@ -1142,9 +1176,6 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
     let setDrafts: [WorkoutSessionSetDraft]
     let isExpanded: Bool
 
-    let currentRestSeconds: () -> Int
-    let currentSetDrafts: () -> [WorkoutSessionSetDraft]
-    let currentIsExpanded: () -> Bool
     let onSetDraftsBindingChanged: ([WorkoutSessionSetDraft]) -> Void
     let onRestBindingChanged: (Int) -> Void
     let onExpandedChanged: (Bool) -> Void
@@ -1153,6 +1184,61 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
     let onSetCompletionChange: (UUID, String, Int, Bool) -> Void
     let onExerciseSettings: () -> Void
     let onExerciseDelete: () -> Void
+
+    @State private var localRestSeconds: Int
+    @State private var localSetDrafts: [WorkoutSessionSetDraft]
+    @State private var pendingRestSyncTask: Task<Void, Never>?
+    @State private var pendingDraftSyncTask: Task<Void, Never>?
+
+    private let bindingSyncDebounce = Duration.milliseconds(120)
+
+    init(
+        exerciseID: UUID,
+        exerciseName: String,
+        muscleSummary: String,
+        category: String,
+        exerciseIndexTitle: String,
+        targetRepMin: Int?,
+        targetRepMax: Int?,
+        previousBySetIndex: [Int: WorkoutPreviousSetSnapshot],
+        guidance: ActiveWorkoutExerciseGuidancePresentation?,
+        preferredLoadUnit: TemplateLoadUnit,
+        restSeconds: Int,
+        setDrafts: [WorkoutSessionSetDraft],
+        isExpanded: Bool,
+        onSetDraftsBindingChanged: @escaping ([WorkoutSessionSetDraft]) -> Void,
+        onRestBindingChanged: @escaping (Int) -> Void,
+        onExpandedChanged: @escaping (Bool) -> Void,
+        onSetDraftsChanged: @escaping ([WorkoutSessionSetDraft]) -> Void,
+        onRestChanged: @escaping (Int) -> Void,
+        onSetCompletionChange: @escaping (UUID, String, Int, Bool) -> Void,
+        onExerciseSettings: @escaping () -> Void,
+        onExerciseDelete: @escaping () -> Void
+    ) {
+        self.exerciseID = exerciseID
+        self.exerciseName = exerciseName
+        self.muscleSummary = muscleSummary
+        self.category = category
+        self.exerciseIndexTitle = exerciseIndexTitle
+        self.targetRepMin = targetRepMin
+        self.targetRepMax = targetRepMax
+        self.previousBySetIndex = previousBySetIndex
+        self.guidance = guidance
+        self.preferredLoadUnit = preferredLoadUnit
+        self.restSeconds = restSeconds
+        self.setDrafts = setDrafts
+        self.isExpanded = isExpanded
+        self.onSetDraftsBindingChanged = onSetDraftsBindingChanged
+        self.onRestBindingChanged = onRestBindingChanged
+        self.onExpandedChanged = onExpandedChanged
+        self.onSetDraftsChanged = onSetDraftsChanged
+        self.onRestChanged = onRestChanged
+        self.onSetCompletionChange = onSetCompletionChange
+        self.onExerciseSettings = onExerciseSettings
+        self.onExerciseDelete = onExerciseDelete
+        self._localRestSeconds = State(initialValue: restSeconds)
+        self._localSetDrafts = State(initialValue: setDrafts)
+    }
 
     static func == (lhs: ActiveWorkoutExerciseRowView, rhs: ActiveWorkoutExerciseRowView) -> Bool {
         lhs.exerciseID == rhs.exerciseID
@@ -1182,15 +1268,15 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
             guidance: guidance,
             preferredLoadUnit: preferredLoadUnit,
             restSeconds: Binding(
-                get: { currentRestSeconds() },
-                set: { onRestBindingChanged($0) }
+                get: { localRestSeconds },
+                set: { localRestSeconds = $0 }
             ),
             setDrafts: Binding(
-                get: { currentSetDrafts() },
-                set: { onSetDraftsBindingChanged($0) }
+                get: { localSetDrafts },
+                set: { localSetDrafts = $0 }
             ),
             isExpanded: Binding(
-                get: { currentIsExpanded() },
+                get: { isExpanded },
                 set: { onExpandedChanged($0) }
             ),
             showsInlineExerciseControls: false,
@@ -1204,6 +1290,55 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
             onExerciseSettings: onExerciseSettings,
             onExerciseDelete: onExerciseDelete
         )
+        .onChange(of: restSeconds) { _, newValue in
+            guard localRestSeconds != newValue else { return }
+            localRestSeconds = newValue
+        }
+        .onChange(of: setDrafts) { _, newValue in
+            guard localSetDrafts != newValue else { return }
+            localSetDrafts = newValue
+        }
+        .onChange(of: localRestSeconds) { _, newValue in
+            scheduleRestBindingSync(newValue)
+        }
+        .onChange(of: localSetDrafts) { _, newValue in
+            scheduleDraftBindingSync(newValue)
+        }
+        .onDisappear(perform: flushBindingSyncs)
+    }
+
+    private func scheduleRestBindingSync(_ restSeconds: Int) {
+        pendingRestSyncTask?.cancel()
+        pendingRestSyncTask = Task { @MainActor in
+            try? await Task.sleep(for: bindingSyncDebounce)
+            guard !Task.isCancelled else { return }
+            pendingRestSyncTask = nil
+            onRestBindingChanged(restSeconds)
+        }
+    }
+
+    private func scheduleDraftBindingSync(_ drafts: [WorkoutSessionSetDraft]) {
+        pendingDraftSyncTask?.cancel()
+        pendingDraftSyncTask = Task { @MainActor in
+            try? await Task.sleep(for: bindingSyncDebounce)
+            guard !Task.isCancelled else { return }
+            pendingDraftSyncTask = nil
+            onSetDraftsBindingChanged(drafts)
+        }
+    }
+
+    private func flushBindingSyncs() {
+        if pendingRestSyncTask != nil {
+            pendingRestSyncTask?.cancel()
+            pendingRestSyncTask = nil
+            onRestBindingChanged(localRestSeconds)
+        }
+
+        if pendingDraftSyncTask != nil {
+            pendingDraftSyncTask?.cancel()
+            pendingDraftSyncTask = nil
+            onSetDraftsBindingChanged(localSetDrafts)
+        }
     }
 }
 
@@ -1628,6 +1763,7 @@ private struct ActiveWorkoutExerciseSettingsDraft: Identifiable, Equatable {
 
 private struct ActiveWorkoutHydrationResult {
     let draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
+    let persistedDraftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
     let restsByExerciseID: [UUID: Int]
     let previousByExerciseID: [UUID: [Int: WorkoutPreviousSetSnapshot]]
 }

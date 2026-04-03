@@ -140,7 +140,12 @@ final class WorkoutSessionRepository {
             }
 
             if createdSets.isEmpty {
-                createdSets = defaultSessionSets(sessionExerciseID: exercise.id, restSeconds: exercise.restSeconds, sessionExercise: exercise)
+                createdSets = defaultSessionSets(
+                    sessionExerciseID: exercise.id,
+                    restSeconds: exercise.restSeconds,
+                    loadUnit: preferredLoadUnit(),
+                    sessionExercise: exercise
+                )
             }
 
             exercise.sets = createdSets
@@ -236,7 +241,13 @@ final class WorkoutSessionRepository {
         )
         modelContext.insert(created)
 
-        let sets = defaultSessionSets(sessionExerciseID: created.id, restSeconds: created.restSeconds, sessionExercise: created)
+        let sets = defaultSessionSets(
+            sessionExerciseID: created.id,
+            restSeconds: created.restSeconds,
+            loadUnit: TemplateLoadUnit.inferredDefault(fromEquipmentSummary: catalogItem.equipmentSummary)
+                ?? preferredLoadUnit(),
+            sessionExercise: created
+        )
         created.sets = sets
 
         session.updatedAt = .now
@@ -666,9 +677,9 @@ final class WorkoutSessionRepository {
     private func defaultSessionSets(
         sessionExerciseID: UUID,
         restSeconds: Int,
+        loadUnit: TemplateLoadUnit,
         sessionExercise: WorkoutSessionExercise
     ) -> [WorkoutSessionSet] {
-        let defaultLoadUnit = preferredLoadUnit()
         let defaults = [0, 1, 2].map { index in
             WorkoutSessionSet(
                 sessionExerciseID: sessionExerciseID,
@@ -677,10 +688,10 @@ final class WorkoutSessionRepository {
                 restSeconds: sanitizedRest(restSeconds),
                 targetReps: nil,
                 targetWeight: nil,
-                targetLoadUnit: defaultLoadUnit,
+                targetLoadUnit: loadUnit,
                 actualReps: nil,
                 actualWeight: nil,
-                actualLoadUnit: defaultLoadUnit,
+                actualLoadUnit: loadUnit,
                 isCompleted: false,
                 isLocked: false,
                 sessionExercise: sessionExercise

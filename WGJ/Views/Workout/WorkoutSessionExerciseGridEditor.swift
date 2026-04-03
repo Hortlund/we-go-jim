@@ -39,10 +39,12 @@ struct WorkoutSessionExerciseGridEditor: View {
     @State private var repsInputTextBySetID: [UUID: String] = [:]
     @State private var weightInputTextBySetID: [UUID: String] = [:]
     @State private var pendingDraftChangeNotificationTask: Task<Void, Never>?
+    @State private var pendingDisplayRefreshTask: Task<Void, Never>?
     @FocusState private var focusedInput: SetInputFocus?
 
     private let restPresets = [10, 15, 20, 30, 45, 60, 75, 90, 105, 120, 150, 180, 210, 240]
     private let inputChangeNotificationDebounce = Duration.milliseconds(180)
+    private let displayRefreshDebounce = Duration.milliseconds(90)
 
     private struct SetInputFocus: Hashable {
         let setID: UUID
@@ -157,9 +159,9 @@ struct WorkoutSessionExerciseGridEditor: View {
             y: 8
         )
         .onAppear(perform: refreshDisplayRows)
-        .onDisappear(perform: flushPendingDraftChangeNotification)
+        .onDisappear(perform: flushPendingEditorState)
         .onChange(of: _setDrafts.wrappedValue) { _, _ in
-            refreshDisplayRows()
+            scheduleDisplayRefresh()
             pruneInputDrafts()
         }
         .onChange(of: previousBySetIndex) { _, _ in
@@ -179,6 +181,9 @@ struct WorkoutSessionExerciseGridEditor: View {
             if let previousFocus {
                 flushPendingDraftChangeNotification()
                 clearInputDraft(for: previousFocus)
+            }
+            if newFocus == nil {
+                flushPendingDisplayRefresh()
             }
         }
     }
@@ -703,6 +708,8 @@ struct WorkoutSessionExerciseGridEditor: View {
         TextField("0", text: repsTextBinding(for: index))
             .keyboardType(.numberPad)
             .submitLabel(.done)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled(true)
             .font(.system(.title3, design: .rounded).weight(.semibold))
             .monospacedDigit()
             .focused($focusedInput, equals: inputFocus(for: index, metric: .reps))
@@ -719,6 +726,8 @@ struct WorkoutSessionExerciseGridEditor: View {
             TextField("0", text: weightTextBinding(for: index))
                 .keyboardType(.decimalPad)
                 .submitLabel(.next)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled(true)
                 .font(.system(.title3, design: .rounded).weight(.semibold))
                 .monospacedDigit()
                 .focused($focusedInput, equals: inputFocus(for: index, metric: .weight))
@@ -729,7 +738,16 @@ struct WorkoutSessionExerciseGridEditor: View {
             WGJActionMenuButton("Load Unit", titleVisibility: .hidden) {
                 ForEach(TemplateLoadUnit.allCases) { unit in
                     Button(unit.shortLabel) {
+                        let setID = setDrafts[index].id
+                        let hadWeight = setDrafts[index].actualWeight != nil
                         setDrafts[index].actualLoadUnit = unit
+                        if unit == .bodyweight {
+                            setDrafts[index].actualWeight = nil
+                            weightInputTextBySetID[setID] = ""
+                        }
+                        if unit != .bodyweight || hadWeight {
+                            scheduleDisplayRefresh()
+                        }
                         notifyChanged()
                     }
                 }
@@ -1227,6 +1245,20 @@ struct WorkoutSessionExerciseGridEditor: View {
                     didChange = true
                 }
 
+                let fallbackWeightedUnit = resolvedWeightedLoadUnit(for: setDrafts[index])
+                if let updatedWeight, updatedWeight > 0 {
+                    if setDrafts[index].actualLoadUnit == .bodyweight {
+                        setDrafts[index].actualLoadUnit = fallbackWeightedUnit
+                        didChange = true
+                    }
+                } else if updatedWeight == nil,
+                          setDrafts[index].targetLoadUnit == .bodyweight,
+                          setDrafts[index].actualLoadUnit != .bodyweight
+                {
+                    setDrafts[index].actualLoadUnit = .bodyweight
+                    didChange = true
+                }
+
                 if !manualCompletionMode {
                     let isCompleted = (setDrafts[index].actualReps != nil || setDrafts[index].actualWeight != nil)
                     if setDrafts[index].isCompleted != isCompleted {
@@ -1339,6 +1371,9 @@ struct WorkoutSessionExerciseGridEditor: View {
         let set = setDrafts[index]
         setDrafts[index].actualReps = nil
         setDrafts[index].actualWeight = nil
+        if setDrafts[index].targetLoadUnit == .bodyweight {
+            setDrafts[index].actualLoadUnit = .bodyweight
+        }
         setDrafts[index].isCompleted = false
         notifyChanged()
         if set.isCompleted {
@@ -1359,6 +1394,35 @@ struct WorkoutSessionExerciseGridEditor: View {
         cachedCompletedSetCount = snapshot.reduce(0) { partialResult, row in
             partialResult + (row.set.isCompleted ? 1 : 0)
         }
+    }
+
+    private func scheduleDisplayRefresh() {
+        guard focusedInput != nil else {
+            pendingDisplayRefreshTask?.cancel()
+            pendingDisplayRefreshTask = nil
+            refreshDisplayRows()
+            return
+        }
+
+        pendingDisplayRefreshTask?.cancel()
+        pendingDisplayRefreshTask = Task { @MainActor in
+            try? await Task.sleep(for: displayRefreshDebounce)
+            guard !Task.isCancelled else { return }
+            pendingDisplayRefreshTask = nil
+            refreshDisplayRows()
+        }
+    }
+
+    private func flushPendingDisplayRefresh() {
+        guard pendingDisplayRefreshTask != nil else { return }
+        pendingDisplayRefreshTask?.cancel()
+        pendingDisplayRefreshTask = nil
+        refreshDisplayRows()
+    }
+
+    private func flushPendingEditorState() {
+        flushPendingDisplayRefresh()
+        flushPendingDraftChangeNotification()
     }
 
     private static func makeDisplayRows(
@@ -1518,6 +1582,15 @@ struct WorkoutSessionExerciseGridEditor: View {
             isCompleted: false,
             isLocked: false
         )
+    }
+
+    private func resolvedWeightedLoadUnit(for set: WorkoutSessionSetDraft) -> TemplateLoadUnit {
+        switch set.targetLoadUnit {
+        case .kg, .lb:
+            return set.targetLoadUnit
+        case .bodyweight:
+            return preferredLoadUnit
+        }
     }
 
     private func setCardFill(for set: WorkoutSessionSetDraft, hasPersonalRecord: Bool) -> Color {

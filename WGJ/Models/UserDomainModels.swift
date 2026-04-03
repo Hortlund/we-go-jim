@@ -29,6 +29,19 @@ enum TemplateLoadUnit: String, Codable, CaseIterable, Equatable, Identifiable {
             return "BW"
         }
     }
+
+    static func inferredDefault(fromEquipmentSummary equipmentSummary: String) -> TemplateLoadUnit? {
+        let normalized = equipmentSummary.folding(
+            options: [.caseInsensitive, .diacriticInsensitive],
+            locale: .current
+        )
+
+        guard normalized.contains("bodyweight") || normalized.contains("body weight") else {
+            return nil
+        }
+
+        return .bodyweight
+    }
 }
 
 enum PreferredWeightUnit: String, Codable, CaseIterable, Equatable, Identifiable {

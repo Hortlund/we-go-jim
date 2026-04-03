@@ -654,7 +654,7 @@ private final class WorkoutForegroundAlertSoundPlayer {
 
     private func shouldPlayAlertSound() -> Bool {
         let session = AVAudioSession.sharedInstance()
-        return !session.secondaryAudioShouldBeSilencedHint
+        return !session.secondaryAudioShouldBeSilencedHint && !session.isOtherAudioPlaying
     }
 
     private func deactivateAudioSessionIfIdle() {
@@ -803,7 +803,7 @@ final class RestTimerNotificationManager {
             content.title = "Rest complete"
             content.subtitle = exerciseName
             content.body = "Back for \(setLabel)"
-            content.sound = .default
+            content.sound = nil
             content.interruptionLevel = style.notificationInterruptionLevel
 
             let trigger = UNTimeIntervalNotificationTrigger(

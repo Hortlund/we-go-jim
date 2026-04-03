@@ -21,6 +21,47 @@ struct WGJTests {
     }
 
     @Test
+    func workoutSessionRepositoryDefaultsBodyweightExercisesToBodyweightLoadUnit() throws {
+        let context = try makeInMemoryContext()
+        let repository = WorkoutSessionRepository(modelContext: context)
+
+        let session = try repository.createEmptySession(name: "Bodyweight")
+        let exercise = ExerciseCatalogItem(
+            remoteUUID: "seed-hanging-leg-raise",
+            displayName: "Hanging Leg Raise",
+            categoryName: "Abs",
+            equipmentSummary: "Bodyweight",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(exercise)
+
+        try repository.addExercise(sessionID: session.id, catalogItem: exercise)
+        let sessionExercise = try #require(try repository.sessionExercises(sessionID: session.id).first)
+        let drafts = try repository.setDrafts(sessionExerciseID: sessionExercise.id)
+
+        #expect(!drafts.isEmpty)
+        #expect(drafts.allSatisfy { $0.targetLoadUnit == .bodyweight && $0.actualLoadUnit == .bodyweight })
+    }
+
+    @Test
+    func templateExerciseDraftDefaultsBodyweightExercisesToBodyweightLoadUnit() {
+        let exercise = ExerciseCatalogItem(
+            remoteUUID: "seed-decline-crunch",
+            displayName: "Decline Crunch",
+            categoryName: "Abs",
+            equipmentSummary: "Body Weight, Bench",
+            isCurated: true,
+            sourceName: "seed"
+        )
+
+        let draft = TemplateExerciseDraft(catalogItem: exercise, preferredLoadUnit: .kg)
+
+        #expect(!draft.setDrafts.isEmpty)
+        #expect(draft.setDrafts.allSatisfy { $0.loadUnit == .bodyweight })
+    }
+
+    @Test
     func durationFormatterBuildsElapsedLabels() {
         let reference = Date(timeIntervalSinceReferenceDate: 1_000)
         let oneMinuteFive = Date(timeIntervalSinceReferenceDate: 1_065)

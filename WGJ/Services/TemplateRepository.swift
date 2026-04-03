@@ -128,7 +128,10 @@ struct TemplateExerciseDraft: Identifiable, Equatable {
         self.targetRepMin = nil
         self.targetRepMax = nil
         self.restSeconds = 120
-        self.setDrafts = Self.defaultSetDrafts(loadUnit: preferredLoadUnit)
+        self.setDrafts = Self.defaultSetDrafts(
+            loadUnit: TemplateLoadUnit.inferredDefault(fromEquipmentSummary: catalogItem.equipmentSummary)
+                ?? preferredLoadUnit
+        )
     }
 
     static func defaultSetDrafts(count: Int = 3, loadUnit: TemplateLoadUnit = .kg) -> [TemplateExerciseSetDraft] {
