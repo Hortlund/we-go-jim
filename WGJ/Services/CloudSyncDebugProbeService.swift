@@ -13,7 +13,7 @@ struct CloudSyncDebugProbeDescriptor: Equatable {
     let workoutCount: Int
 
     var databaseName: String { "Private Database" }
-    var consoleEnvironmentName: String { "Development" }
+    var consoleEnvironmentName: String { AppRuntimeConfig.cloudKitConsoleEnvironmentName }
 }
 
 struct CloudSyncDebugProbeVerification: Equatable {

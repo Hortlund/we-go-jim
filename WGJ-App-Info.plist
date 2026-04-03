@@ -3,11 +3,15 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>We Go Jim</string>
+	<string>$(WGJ_APP_DISPLAY_NAME)</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>WGJAppEnvironment</key>
+	<string>$(WGJ_APP_ENVIRONMENT)</string>
+	<key>WGJCloudKitContainerIdentifier</key>
+	<string>$(WGJ_CLOUDKIT_CONTAINER_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>

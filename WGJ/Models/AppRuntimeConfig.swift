@@ -23,15 +23,60 @@ enum CloudKitContainerAvailabilityError: Error {
     case unavailable
 }
 
+enum AppEnvironment: String {
+    case development
+    case production
+
+    var displayName: String {
+        switch self {
+        case .development:
+            return "Development"
+        case .production:
+            return "Production"
+        }
+    }
+
+    var cloudKitConsoleEnvironmentName: String {
+        switch self {
+        case .development:
+            return "Development"
+        case .production:
+            return "Production"
+        }
+    }
+}
+
 enum AppRuntimeConfig {
+    private enum InfoKey {
+        static let appEnvironment = "WGJAppEnvironment"
+        static let cloudKitContainerIdentifier = "WGJCloudKitContainerIdentifier"
+    }
+
     static let supportEmail = "support@wegojim.app"
     static let privacyPolicyURL: URL? = nil
     static let supportURL: URL? = nil
-    static let cloudKitContainerIdentifier = "iCloud.se.highball.WeGoJim"
     static let reviewPolicy = AppReviewPolicy(
         brosEnabled: true,
         syncBrosAvatars: true
     )
+
+    static var appEnvironment: AppEnvironment {
+        guard let rawValue = infoString(for: InfoKey.appEnvironment)?.lowercased(),
+              let environment = AppEnvironment(rawValue: rawValue)
+        else {
+            return .production
+        }
+
+        return environment
+    }
+
+    static var cloudKitConsoleEnvironmentName: String {
+        appEnvironment.cloudKitConsoleEnvironmentName
+    }
+
+    static var cloudKitContainerIdentifier: String {
+        normalizedInfoString(for: InfoKey.cloudKitContainerIdentifier) ?? "iCloud.se.highball.WeGoJim"
+    }
 
     static var isRunningTests: Bool {
         let processInfo = ProcessInfo.processInfo
@@ -54,6 +99,21 @@ enum AppRuntimeConfig {
         }
 
         return CKContainer(identifier: cloudKitContainerIdentifier)
+    }
+
+    private static func infoString(for key: String) -> String? {
+        Bundle.main.object(forInfoDictionaryKey: key) as? String
+    }
+
+    private static func normalizedInfoString(for key: String) -> String? {
+        guard let value = infoString(for: key)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty
+        else {
+            return nil
+        }
+
+        return value
     }
 }
 

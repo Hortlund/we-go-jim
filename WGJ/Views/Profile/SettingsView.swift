@@ -187,7 +187,10 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     WGJSectionHeader("Debug", subtitle: "Developer-only utilities for local testing.")
 
+                    infoRow("App environment", value: AppRuntimeConfig.appEnvironment.displayName)
+                    infoRow("Bundle ID", value: Bundle.main.bundleIdentifier ?? "Unknown")
                     infoRow("Cloud mode", value: cloudSyncEnabled ? "CloudKit enabled" : "Local fallback")
+                    infoRow("CloudKit environment", value: AppRuntimeConfig.cloudKitConsoleEnvironmentName)
                     infoRow("iCloud account", value: cloudAccountStatusText)
                     infoRow("Profiles", value: "\(profiles.count)")
                     infoRow("Templates", value: "\(templates.count)")
