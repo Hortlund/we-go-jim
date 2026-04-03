@@ -9,7 +9,6 @@ enum BrosMutationAction: Equatable {
     case joinCircle
     case leaveCircle
     case removeMember
-    case toggleReaction
 }
 
 enum BroMemberLimitSaveState: Equatable {
@@ -42,6 +41,7 @@ final class BrosViewModel {
     private var hasLoaded = false
     private var isSnapshotRefreshInFlight = false
     private var pendingOutboxHydration = false
+    private var pendingReactionEventIDs: Set<String> = []
     private var outboxFlushTask: Task<Void, Never>?
     private var memberLimitFeedbackTask: Task<Void, Never>?
     private(set) var lastSuccessfulSnapshotRefreshAt: Date?
@@ -125,7 +125,16 @@ final class BrosViewModel {
 
         do {
             if let snapshot = try await service.fetchSnapshot() {
-                state = .active(snapshot)
+                if case .active(let currentSnapshot) = state, !pendingReactionEventIDs.isEmpty {
+                    state = .active(
+                        snapshotPreservingPendingReactions(
+                            freshSnapshot: snapshot,
+                            currentSnapshot: currentSnapshot
+                        )
+                    )
+                } else {
+                    state = .active(snapshot)
+                }
             } else {
                 state = .onboarding
             }
@@ -145,10 +154,10 @@ final class BrosViewModel {
         await runMutation(.createCircle) { [self] in
             let service = try service(modelContext: modelContext)
             let snapshot = try await service.createCircle(memberLimit: self.circleMemberLimit)
-            try? await service.syncReactionNotificationSubscription()
             self.state = .active(snapshot)
             self.joinCode = ""
             self.circleMemberLimit = BrosSocialRules.defaultMemberLimit
+            self.scheduleReactionNotificationSync(modelContext: modelContext)
             self.scheduleBackgroundHydration(modelContext: modelContext)
         }
     }
@@ -181,9 +190,9 @@ final class BrosViewModel {
             let service = try service(modelContext: modelContext)
             let snapshot = try await service
                 .joinCircle(inviteCode: self.joinCode)
-            try? await service.syncReactionNotificationSubscription()
             self.state = .active(snapshot)
             self.joinCode = ""
+            self.scheduleReactionNotificationSync(modelContext: modelContext)
             self.scheduleBackgroundHydration(modelContext: modelContext)
         }
     }
@@ -193,10 +202,10 @@ final class BrosViewModel {
         await runMutation(.leaveCircle) { [self] in
             let service = try service(modelContext: modelContext)
             try await service.leaveCircle()
-            try? await service.syncReactionNotificationSubscription()
             self.state = .onboarding
             self.joinCode = ""
             self.circleMemberLimit = BrosSocialRules.defaultMemberLimit
+            self.scheduleReactionNotificationSync(modelContext: modelContext)
         }
     }
 
@@ -215,19 +224,40 @@ final class BrosViewModel {
                     )
                 )
             }
-            if let snapshot = try await service.fetchSnapshot() {
-                self.state = .active(snapshot)
-            }
+            self.scheduleBackgroundHydration(modelContext: modelContext)
         }
     }
 
     func toggleReaction(eventID: String, emoji: BroReactionKind, modelContext: ModelContext) async {
         clearMemberLimitSaveFeedback()
-        await runMutation(.toggleReaction) { [self] in
-            let service = try service(modelContext: modelContext)
-            try await service.setReaction(eventID: eventID, kind: emoji)
-            if let snapshot = try await service.fetchSnapshot() {
-                self.state = .active(snapshot)
+        guard !pendingReactionEventIDs.contains(eventID) else { return }
+        guard case .active(let snapshot) = state else { return }
+        guard let optimisticSnapshot = optimisticSnapshotByTogglingReaction(
+            eventID: eventID,
+            emoji: emoji,
+            snapshot: snapshot
+        ) else {
+            return
+        }
+
+        let originalReactions = reactions(forEventID: eventID, in: snapshot)
+        state = .active(optimisticSnapshot)
+        pendingReactionEventIDs.insert(eventID)
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            do {
+                let service = try self.service(modelContext: modelContext)
+                try await service.setReaction(eventID: eventID, kind: emoji)
+                self.pendingReactionEventIDs.remove(eventID)
+                self.lastSuccessfulSnapshotRefreshAt = nil
+                guard !Task.isCancelled else { return }
+                await self.hydrateActiveSnapshot(modelContext: modelContext)
+            } catch {
+                self.pendingReactionEventIDs.remove(eventID)
+                self.restoreReactionState(forEventID: eventID, reactions: originalReactions)
+                self.errorMessage = error.localizedDescription
             }
         }
     }
@@ -255,8 +285,12 @@ final class BrosViewModel {
     }
 
     func refreshActiveSnapshotIfNeeded(modelContext: ModelContext) async {
-        guard pendingAction == nil, !isSnapshotRefreshInFlight else { return }
+        guard pendingAction == nil, pendingReactionEventIDs.isEmpty, !isSnapshotRefreshInFlight else { return }
         await hydrateActiveSnapshot(modelContext: modelContext)
+    }
+
+    func isReactionPending(eventID: String) -> Bool {
+        pendingReactionEventIDs.contains(eventID)
     }
 
     @discardableResult
@@ -283,6 +317,19 @@ final class BrosViewModel {
         }
     }
 
+    private func scheduleReactionNotificationSync(modelContext: ModelContext) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            do {
+                let service = try self.service(modelContext: modelContext)
+                try await service.syncReactionNotificationSubscription()
+            } catch {
+                // Leave the current screen state alone if notification sync fails.
+            }
+        }
+    }
+
     private func scheduleOutboxFlush(modelContext: ModelContext) {
         guard outboxFlushTask == nil else { return }
 
@@ -306,7 +353,7 @@ final class BrosViewModel {
     }
 
     private func hydrateSnapshotAfterOutboxFlush(modelContext: ModelContext) async {
-        guard pendingAction == nil, !isSnapshotRefreshInFlight else { return }
+        guard pendingAction == nil, pendingReactionEventIDs.isEmpty, !isSnapshotRefreshInFlight else { return }
 
         isSnapshotRefreshInFlight = true
         defer { isSnapshotRefreshInFlight = false }
@@ -328,7 +375,7 @@ final class BrosViewModel {
 
     private func hydrateActiveSnapshot(modelContext: ModelContext) async {
         guard case .active = state else { return }
-        guard !isSnapshotRefreshInFlight else { return }
+        guard pendingReactionEventIDs.isEmpty, !isSnapshotRefreshInFlight else { return }
 
         isSnapshotRefreshInFlight = true
         defer { isSnapshotRefreshInFlight = false }
@@ -393,6 +440,133 @@ final class BrosViewModel {
             self?.memberLimitSaveState = .idle
             self?.memberLimitFeedbackTask = nil
         }
+    }
+
+    private func optimisticSnapshotByTogglingReaction(
+        eventID: String,
+        emoji: BroReactionKind,
+        snapshot: BrosFeedSnapshot
+    ) -> BrosFeedSnapshot? {
+        guard snapshot.feedEvents.contains(where: { $0.id == eventID }) else {
+            return nil
+        }
+
+        let currentUserRecordName = snapshot.currentMember.userRecordName
+        let currentDisplayName = snapshot.currentMember.displayName
+
+        let updatedEvents = snapshot.feedEvents.map { event in
+            guard event.id == eventID else { return event }
+
+            let existingEmoji = event.reactions.first(where: { $0.userRecordName == currentUserRecordName })?.emoji
+            let resolvedEmoji = BrosSocialRules.resolvedReaction(existing: existingEmoji, tapped: emoji)
+            var updatedReactions = event.reactions.filter { $0.userRecordName != currentUserRecordName }
+
+            if let resolvedEmoji {
+                updatedReactions.append(
+                    BroReactionSummary(
+                        userRecordName: currentUserRecordName,
+                        emoji: resolvedEmoji,
+                        displayName: currentDisplayName
+                    )
+                )
+            }
+
+            return BroFeedEvent(
+                id: event.id,
+                circleID: event.circleID,
+                actorUserRecordName: event.actorUserRecordName,
+                actorMembershipID: event.actorMembershipID,
+                actorDisplayName: event.actorDisplayName,
+                actorAvatarImageData: event.actorAvatarImageData,
+                createdAt: event.createdAt,
+                kind: event.kind,
+                workout: event.workout,
+                pr: event.pr,
+                reactions: updatedReactions
+            )
+        }
+
+        return BrosFeedSnapshot(
+            circle: snapshot.circle,
+            currentMember: snapshot.currentMember,
+            members: snapshot.members,
+            feedEvents: updatedEvents
+        )
+    }
+
+    private func reactions(
+        forEventID eventID: String,
+        in snapshot: BrosFeedSnapshot
+    ) -> [BroReactionSummary] {
+        snapshot.feedEvents.first(where: { $0.id == eventID })?.reactions ?? []
+    }
+
+    private func restoreReactionState(forEventID eventID: String, reactions: [BroReactionSummary]) {
+        guard case .active(let snapshot) = state else { return }
+
+        let updatedEvents = snapshot.feedEvents.map { event in
+            guard event.id == eventID else { return event }
+
+            return BroFeedEvent(
+                id: event.id,
+                circleID: event.circleID,
+                actorUserRecordName: event.actorUserRecordName,
+                actorMembershipID: event.actorMembershipID,
+                actorDisplayName: event.actorDisplayName,
+                actorAvatarImageData: event.actorAvatarImageData,
+                createdAt: event.createdAt,
+                kind: event.kind,
+                workout: event.workout,
+                pr: event.pr,
+                reactions: reactions
+            )
+        }
+
+        state = .active(
+            BrosFeedSnapshot(
+                circle: snapshot.circle,
+                currentMember: snapshot.currentMember,
+                members: snapshot.members,
+                feedEvents: updatedEvents
+            )
+        )
+    }
+
+    private func snapshotPreservingPendingReactions(
+        freshSnapshot: BrosFeedSnapshot,
+        currentSnapshot: BrosFeedSnapshot
+    ) -> BrosFeedSnapshot {
+        guard !pendingReactionEventIDs.isEmpty else {
+            return freshSnapshot
+        }
+
+        let currentEventsByID = Dictionary(uniqueKeysWithValues: currentSnapshot.feedEvents.map { ($0.id, $0) })
+        let mergedEvents = freshSnapshot.feedEvents.map { event in
+            guard pendingReactionEventIDs.contains(event.id), let currentEvent = currentEventsByID[event.id] else {
+                return event
+            }
+
+            return BroFeedEvent(
+                id: event.id,
+                circleID: event.circleID,
+                actorUserRecordName: event.actorUserRecordName,
+                actorMembershipID: event.actorMembershipID,
+                actorDisplayName: event.actorDisplayName,
+                actorAvatarImageData: event.actorAvatarImageData,
+                createdAt: event.createdAt,
+                kind: event.kind,
+                workout: event.workout,
+                pr: event.pr,
+                reactions: currentEvent.reactions
+            )
+        }
+
+        return BrosFeedSnapshot(
+            circle: freshSnapshot.circle,
+            currentMember: freshSnapshot.currentMember,
+            members: freshSnapshot.members,
+            feedEvents: mergedEvents
+        )
     }
 }
 
@@ -1218,7 +1392,7 @@ struct BrosView: View {
                 }
             }
             .buttonStyle(.plain)
-            .disabled(viewModel.isBusy)
+            .disabled(viewModel.pendingAction != nil || viewModel.isReactionPending(eventID: event.id))
         }
     }
 

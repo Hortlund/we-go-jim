@@ -47,6 +47,101 @@ struct BrosViewModelTests {
     }
 
     @Test
+    func toggleReactionAppliesOptimisticStateBeforeCloudKitCompletes() async throws {
+        let context = try makeInMemoryContext()
+        let service = StubBrosSocialService()
+        service.shouldSuspendReaction = true
+
+        let initialSnapshot = makeSnapshot(
+            displayName: "Brody",
+            role: .member,
+            feedEvents: [
+                makeReactionEvent(actorUserRecordName: "user-1", reactions: []),
+            ]
+        )
+        let authoritativeSnapshot = makeSnapshot(
+            displayName: "Brody",
+            role: .member,
+            feedEvents: [
+                makeReactionEvent(
+                    actorUserRecordName: "user-1",
+                    reactions: [
+                        BroReactionSummary(userRecordName: "user-2", emoji: .fire, displayName: "Brody"),
+                    ]
+                ),
+            ]
+        )
+        service.snapshot = authoritativeSnapshot
+
+        let viewModel = BrosViewModel(
+            accountStatusProvider: { .available },
+            serviceFactory: { _ in service }
+        )
+        viewModel.state = .active(initialSnapshot)
+
+        await viewModel.toggleReaction(
+            eventID: "event-1",
+            emoji: .fire,
+            modelContext: context
+        )
+
+        #expect(viewModel.state == .active(authoritativeSnapshot))
+        await Task.yield()
+        #expect(service.setReactionEventIDs == ["event-1"])
+        #expect(service.setReactionKinds == [.fire])
+        #expect(service.fetchSnapshotCallCount == 0)
+        #expect(viewModel.isReactionPending(eventID: "event-1"))
+
+        service.resumeReaction()
+        await Task.yield()
+        await Task.yield()
+
+        #expect(service.fetchSnapshotCallCount == 1)
+        #expect(viewModel.state == .active(authoritativeSnapshot))
+        #expect(!viewModel.isReactionPending(eventID: "event-1"))
+    }
+
+    @Test
+    func toggleReactionRestoresPreviousStateWhenCloudKitWriteFails() async throws {
+        let context = try makeInMemoryContext()
+        let service = StubBrosSocialService()
+        service.shouldSuspendReaction = true
+
+        let initialSnapshot = makeSnapshot(
+            displayName: "Brody",
+            role: .member,
+            feedEvents: [
+                makeReactionEvent(actorUserRecordName: "user-1", reactions: []),
+            ]
+        )
+
+        let viewModel = BrosViewModel(
+            accountStatusProvider: { .available },
+            serviceFactory: { _ in service }
+        )
+        viewModel.state = .active(initialSnapshot)
+
+        await viewModel.toggleReaction(
+            eventID: "event-1",
+            emoji: .bolt,
+            modelContext: context
+        )
+
+        await Task.yield()
+        #expect(viewModel.isReactionPending(eventID: "event-1"))
+
+        service.reactionError = BrosSocialServiceError.unavailable
+        service.resumeReaction()
+        await Task.yield()
+        await Task.yield()
+
+        #expect(viewModel.state == .active(initialSnapshot))
+        #expect(viewModel.errorMessage == BrosSocialServiceError.unavailable.localizedDescription)
+        #expect(service.fetchSnapshotCallCount == 0)
+        #expect(!viewModel.isReactionPending(eventID: "event-1"))
+    }
+
+    @Test
     func ownerCircleManagementPresentationShowsOwnerControls() {
         let presentation = BroCircleManagementPresentation(
             snapshot: makeSnapshot(displayName: "Atlas", role: .owner)
@@ -145,7 +240,8 @@ struct BrosViewModelTests {
 
     private func makeSnapshot(
         displayName: String,
-        role: BroMembershipRole = .owner
+        role: BroMembershipRole = .owner,
+        feedEvents: [BroFeedEvent] = []
     ) -> BrosFeedSnapshot {
         let currentMember = BroMemberSummary(
             id: role == .owner ? "membership-circle-1-user-1" : "membership-circle-1-user-2",
@@ -182,7 +278,7 @@ struct BrosViewModelTests {
             ),
             currentMember: currentMember,
             members: members,
-            feedEvents: []
+            feedEvents: feedEvents
         )
     }
 
@@ -217,13 +313,21 @@ private final class StubBrosSocialService: BrosSocialService {
     var didRefreshLocalMembershipState = false
     var didFlushOutbox = false
     var snapshot: BrosFeedSnapshot?
+    var fetchSnapshotCallCount = 0
+    var setReactionEventIDs: [String] = []
+    var setReactionKinds: [BroReactionKind] = []
+    var shouldSuspendReaction = false
+    var reactionError: Error?
+
+    private var reactionContinuation: CheckedContinuation<Void, Never>?
 
     func refreshLocalMembershipState() async {
         didRefreshLocalMembershipState = true
     }
 
     func fetchSnapshot() async throws -> BrosFeedSnapshot? {
-        snapshot
+        fetchSnapshotCallCount += 1
+        return snapshot
     }
 
     func createCircle(memberLimit: Int) async throws -> BrosFeedSnapshot {
@@ -244,7 +348,20 @@ private final class StubBrosSocialService: BrosSocialService {
 
     func removeMember(membershipID: String) async throws { }
 
-    func setReaction(eventID: String, kind: BroReactionKind) async throws { }
+    func setReaction(eventID: String, kind: BroReactionKind) async throws {
+        setReactionEventIDs.append(eventID)
+        setReactionKinds.append(kind)
+
+        if shouldSuspendReaction {
+            await withCheckedContinuation { continuation in
+                reactionContinuation = continuation
+            }
+        }
+
+        if let reactionError {
+            throw reactionError
+        }
+    }
 
     func syncReactionNotificationSubscription() async throws { }
 
@@ -256,5 +373,11 @@ private final class StubBrosSocialService: BrosSocialService {
 
     func flushOutbox() async {
         didFlushOutbox = true
+    }
+
+    func resumeReaction() {
+        shouldSuspendReaction = false
+        reactionContinuation?.resume()
+        reactionContinuation = nil
     }
 }
