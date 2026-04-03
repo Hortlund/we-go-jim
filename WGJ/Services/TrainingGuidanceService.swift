@@ -41,27 +41,54 @@ struct ProgressiveOverloadCue: Equatable {
     let suggestedPercentRange: ClosedRange<Double>?
 }
 
-struct ActiveWorkoutProgressiveOverloadPresentation: Equatable {
-    let text: String
+struct ActiveWorkoutExerciseGuidancePresentation: Equatable {
+    let title: String
+    let summary: String
     let tone: TrainingGuidanceTone
 
-    static func make(from cue: ProgressiveOverloadCue?, isExerciseCompleted: Bool) -> ActiveWorkoutProgressiveOverloadPresentation? {
-        guard isExerciseCompleted, let cue else { return nil }
-
-        let percentRange = cue.suggestedPercentRange.map {
-            "\(WGJFormatters.oneDecimalString($0.lowerBound))-\(WGJFormatters.oneDecimalString($0.upperBound))%"
+    static func make(
+        recommendation: TemplateExerciseRecommendation,
+        cue: ProgressiveOverloadCue?,
+        isExerciseCompleted: Bool
+    ) -> ActiveWorkoutExerciseGuidancePresentation {
+        guard isExerciseCompleted, let cue else {
+            return ActiveWorkoutExerciseGuidancePresentation(
+                title: recommendation.title,
+                summary: recommendation.summary,
+                tone: recommendation.tone
+            )
         }
 
         switch cue.direction {
         case .increaseLoad:
-            let text = percentRange.map { "Add \($0) next time." } ?? cue.title
-            return ActiveWorkoutProgressiveOverloadPresentation(text: text, tone: cue.tone)
+            let summary = cue.suggestedPercentRange.map { percentRange in
+                "Add \(formattedPercentRange(percentRange)) next time, or use the smallest clean plate jump."
+            } ?? cue.summary
+            return ActiveWorkoutExerciseGuidancePresentation(
+                title: cue.title,
+                summary: summary,
+                tone: cue.tone
+            )
         case .decreaseLoad:
-            let text = percentRange.map { "Reduce \($0) next time." } ?? cue.title
-            return ActiveWorkoutProgressiveOverloadPresentation(text: text, tone: cue.tone)
+            let summary = cue.suggestedPercentRange.map { percentRange in
+                "Reduce \(formattedPercentRange(percentRange)) next time, or take the smallest clean plate drop."
+            } ?? cue.summary
+            return ActiveWorkoutExerciseGuidancePresentation(
+                title: cue.title,
+                summary: summary,
+                tone: cue.tone
+            )
         case .stayCourse:
-            return nil
+            return ActiveWorkoutExerciseGuidancePresentation(
+                title: cue.title,
+                summary: cue.summary,
+                tone: cue.tone
+            )
         }
+    }
+
+    private static func formattedPercentRange(_ range: ClosedRange<Double>) -> String {
+        "\(WGJFormatters.oneDecimalString(range.lowerBound))-\(WGJFormatters.oneDecimalString(range.upperBound))%"
     }
 }
 
@@ -208,12 +235,21 @@ struct TrainingGuidanceService {
         "fly",
     ]
 
-    func templateRecommendation(for exercise: ExerciseCatalogItem?) -> TemplateExerciseRecommendation? {
-        guard let exercise else { return nil }
+    func templateRecommendation(for exercise: ExerciseCatalogItem?) -> TemplateExerciseRecommendation {
+        guard let exercise else {
+            return templateRecommendation(
+                for: TrainingGuidanceCatalogSnapshot(
+                    exerciseName: "",
+                    categoryName: "",
+                    equipmentSummary: "",
+                    primaryMuscleNames: ""
+                )
+            )
+        }
         return templateRecommendation(for: TrainingGuidanceCatalogSnapshot(exercise: exercise))
     }
 
-    func templateRecommendation(for exercise: TrainingGuidanceCatalogSnapshot) -> TemplateExerciseRecommendation? {
+    func templateRecommendation(for exercise: TrainingGuidanceCatalogSnapshot) -> TemplateExerciseRecommendation {
         switch classification(for: exercise) {
         case .lowerBodyCompound:
             return TemplateExerciseRecommendation(
@@ -259,8 +295,28 @@ struct TrainingGuidanceService {
                 suggestedRepRange: 8...15,
                 suggestedRestSeconds: 45...75
             )
-        case .conditioning, .unknown:
-            return nil
+        case .conditioning:
+            return TemplateExerciseRecommendation(
+                classification: .conditioning,
+                tone: .accent,
+                title: "Keep conditioning repeatable",
+                summary: "Try 1-2 ramp-up rounds, 3-5 hard rounds, 8-20 reps or 20-60 sec efforts, and 45-90 sec recovery.",
+                suggestedWarmupSets: 1...2,
+                suggestedWorkingSets: 3...5,
+                suggestedRepRange: 8...20,
+                suggestedRestSeconds: 45...90
+            )
+        case .unknown:
+            return TemplateExerciseRecommendation(
+                classification: .unknown,
+                tone: .accent,
+                title: "Solid default structure",
+                summary: "Try 1-2 warmups, 3 working sets, 8-12 reps, and 60-120 sec rest. Adjust once the lift settles in.",
+                suggestedWarmupSets: 1...2,
+                suggestedWorkingSets: 3...3,
+                suggestedRepRange: 8...12,
+                suggestedRestSeconds: 60...120
+            )
         }
     }
 

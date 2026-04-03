@@ -294,7 +294,8 @@ struct TemplateEditorView: View {
                 id: draftStore.id,
                 index: index,
                 draftStore: draftStore,
-                recommendation: recommendationByExerciseID[draftStore.id] ?? nil
+                recommendation: recommendationByExerciseID[draftStore.id]
+                    ?? templateRecommendation(for: draftStore, catalogByUUID: [:])
             )
         }
     }

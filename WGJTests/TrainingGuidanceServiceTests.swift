@@ -17,11 +17,11 @@ struct TrainingGuidanceServiceTests {
             )
         )
 
-        #expect(recommendation?.classification == .lowerBodyCompound)
-        #expect(recommendation?.suggestedWarmupSets == 2...2)
-        #expect(recommendation?.suggestedWorkingSets == 3...4)
-        #expect(recommendation?.suggestedRepRange == 5...8)
-        #expect(recommendation?.suggestedRestSeconds == 120...180)
+        #expect(recommendation.classification == .lowerBodyCompound)
+        #expect(recommendation.suggestedWarmupSets == 2...2)
+        #expect(recommendation.suggestedWorkingSets == 3...4)
+        #expect(recommendation.suggestedRepRange == 5...8)
+        #expect(recommendation.suggestedRestSeconds == 120...180)
     }
 
     @Test
@@ -35,9 +35,9 @@ struct TrainingGuidanceServiceTests {
             )
         )
 
-        #expect(recommendation?.classification == .upperBodyCompound)
-        #expect(recommendation?.suggestedWarmupSets == 1...2)
-        #expect(recommendation?.suggestedRepRange == 6...10)
+        #expect(recommendation.classification == .upperBodyCompound)
+        #expect(recommendation.suggestedWarmupSets == 1...2)
+        #expect(recommendation.suggestedRepRange == 6...10)
     }
 
     @Test
@@ -51,10 +51,10 @@ struct TrainingGuidanceServiceTests {
             )
         )
 
-        #expect(recommendation?.classification == .isolation)
-        #expect(recommendation?.suggestedWarmupSets == 0...1)
-        #expect(recommendation?.suggestedRepRange == 10...15)
-        #expect(recommendation?.suggestedRestSeconds == 45...90)
+        #expect(recommendation.classification == .isolation)
+        #expect(recommendation.suggestedWarmupSets == 0...1)
+        #expect(recommendation.suggestedRepRange == 10...15)
+        #expect(recommendation.suggestedRestSeconds == 45...90)
     }
 
     @Test
@@ -68,13 +68,13 @@ struct TrainingGuidanceServiceTests {
             )
         )
 
-        #expect(recommendation?.classification == .core)
-        #expect(recommendation?.suggestedWarmupSets == 0...1)
-        #expect(recommendation?.suggestedRepRange == 8...15)
+        #expect(recommendation.classification == .core)
+        #expect(recommendation.suggestedWarmupSets == 0...1)
+        #expect(recommendation.suggestedRepRange == 8...15)
     }
 
     @Test
-    func conditioningRecommendationIsHiddenInV1() {
+    func conditioningRecommendationUsesConditioningDefaults() {
         let recommendation = service.templateRecommendation(
             for: TrainingGuidanceCatalogSnapshot(
                 exerciseName: "Assault Bike Sprint",
@@ -84,17 +84,29 @@ struct TrainingGuidanceServiceTests {
             )
         )
 
-        #expect(recommendation == nil)
-        #expect(
-            service.classification(
-                for: TrainingGuidanceCatalogSnapshot(
-                    exerciseName: "Assault Bike Sprint",
-                    categoryName: "Conditioning",
-                    equipmentSummary: "Bike",
-                    primaryMuscleNames: ""
-                )
-            ) == .conditioning
+        #expect(recommendation.classification == .conditioning)
+        #expect(recommendation.suggestedWarmupSets == 1...2)
+        #expect(recommendation.suggestedWorkingSets == 3...5)
+        #expect(recommendation.suggestedRepRange == 8...20)
+        #expect(recommendation.suggestedRestSeconds == 45...90)
+    }
+
+    @Test
+    func unknownRecommendationFallsBackToGeneralDefaults() {
+        let recommendation = service.templateRecommendation(
+            for: TrainingGuidanceCatalogSnapshot(
+                exerciseName: "Machine Thing",
+                categoryName: "",
+                equipmentSummary: "",
+                primaryMuscleNames: ""
+            )
         )
+
+        #expect(recommendation.classification == .unknown)
+        #expect(recommendation.suggestedWarmupSets == 1...2)
+        #expect(recommendation.suggestedWorkingSets == 3...3)
+        #expect(recommendation.suggestedRepRange == 8...12)
+        #expect(recommendation.suggestedRestSeconds == 60...120)
     }
 
     @Test
@@ -218,14 +230,16 @@ struct TrainingGuidanceServiceTests {
     }
 
     @Test
-    func activeWorkoutPresentationShowsOnlyActionableCue() {
+    func activeWorkoutGuidanceUpgradesToIncreaseCueWhenCompleted() {
+        let snapshot = TrainingGuidanceCatalogSnapshot(
+            exerciseName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell",
+            primaryMuscleNames: "Chest"
+        )
+        let recommendation = service.templateRecommendation(for: snapshot)
         let cue = service.progressiveOverloadCue(
-            for: TrainingGuidanceCatalogSnapshot(
-                exerciseName: "Bench Press",
-                categoryName: "Chest",
-                equipmentSummary: "Barbell",
-                primaryMuscleNames: "Chest"
-            ),
+            for: snapshot,
             targetRepMin: 6,
             targetRepMax: 8,
             setDrafts: [
@@ -234,25 +248,59 @@ struct TrainingGuidanceServiceTests {
             ]
         )
 
-        let presentation = ActiveWorkoutProgressiveOverloadPresentation.make(
-            from: cue,
+        let presentation = ActiveWorkoutExerciseGuidancePresentation.make(
+            recommendation: recommendation,
+            cue: cue,
             isExerciseCompleted: true
         )
 
         let expectedRange = "\(WGJFormatters.oneDecimalString(2.5))-5%"
-        #expect(presentation?.text == "Add \(expectedRange) next time.")
-        #expect(presentation?.tone == .success)
+        #expect(presentation.title == "Increase load next time")
+        #expect(presentation.summary == "Add \(expectedRange) next time, or use the smallest clean plate jump.")
+        #expect(presentation.tone == .success)
     }
 
     @Test
-    func activeWorkoutPresentationHidesNeutralCue() {
+    func activeWorkoutGuidanceUsesRecommendationUntilExerciseCompletes() {
+        let snapshot = TrainingGuidanceCatalogSnapshot(
+            exerciseName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell",
+            primaryMuscleNames: "Chest"
+        )
+        let recommendation = service.templateRecommendation(for: snapshot)
         let cue = service.progressiveOverloadCue(
-            for: TrainingGuidanceCatalogSnapshot(
-                exerciseName: "Bench Press",
-                categoryName: "Chest",
-                equipmentSummary: "Barbell",
-                primaryMuscleNames: "Chest"
-            ),
+            for: snapshot,
+            targetRepMin: 6,
+            targetRepMax: 8,
+            setDrafts: [
+                makeWorkoutSet(reps: 9, weight: 100, completed: true),
+                makeWorkoutSet(reps: 10, weight: 100, completed: false),
+            ]
+        )
+
+        let presentation = ActiveWorkoutExerciseGuidancePresentation.make(
+            recommendation: recommendation,
+            cue: cue,
+            isExerciseCompleted: false
+        )
+
+        #expect(presentation.title == recommendation.title)
+        #expect(presentation.summary == recommendation.summary)
+        #expect(presentation.tone == recommendation.tone)
+    }
+
+    @Test
+    func activeWorkoutGuidanceShowsStayCourseCueWhenCompletedInsideRange() {
+        let snapshot = TrainingGuidanceCatalogSnapshot(
+            exerciseName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell",
+            primaryMuscleNames: "Chest"
+        )
+        let recommendation = service.templateRecommendation(for: snapshot)
+        let cue = service.progressiveOverloadCue(
+            for: snapshot,
             targetRepMin: 6,
             targetRepMax: 8,
             setDrafts: [
@@ -261,12 +309,15 @@ struct TrainingGuidanceServiceTests {
             ]
         )
 
-        #expect(
-            ActiveWorkoutProgressiveOverloadPresentation.make(
-                from: cue,
-                isExerciseCompleted: true
-            ) == nil
+        let presentation = ActiveWorkoutExerciseGuidancePresentation.make(
+            recommendation: recommendation,
+            cue: cue,
+            isExerciseCompleted: true
         )
+
+        #expect(presentation.title == "Stay here until you own the range")
+        #expect(presentation.summary == "Keep the load steady until your working sets consistently land inside 6-8 reps.")
+        #expect(presentation.tone == .accent)
     }
 
     @Test

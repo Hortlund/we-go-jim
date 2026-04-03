@@ -693,7 +693,8 @@ struct TemplateDetailView: View {
                 id: exercise.id,
                 index: index,
                 exercise: exercise,
-                recommendation: recommendationByExerciseID[exercise.id] ?? nil
+                recommendation: recommendationByExerciseID[exercise.id]
+                    ?? templateRecommendation(for: exercise, catalogByUUID: [:])
             )
         }
     }

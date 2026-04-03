@@ -11,7 +11,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     let previousBySetIndex: [Int: WorkoutPreviousSetSnapshot]
     let personalRecordSummaryKinds: [WorkoutPersonalRecordKind]
     let personalRecordKindsBySetID: [UUID: [WorkoutPersonalRecordKind]]
-    let overloadFeedback: ActiveWorkoutProgressiveOverloadPresentation?
+    let guidance: ActiveWorkoutExerciseGuidancePresentation?
     let preferredLoadUnit: TemplateLoadUnit
 
     @Binding var restSeconds: Int
@@ -62,7 +62,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         previousBySetIndex: [Int: WorkoutPreviousSetSnapshot],
         personalRecordSummaryKinds: [WorkoutPersonalRecordKind] = [],
         personalRecordKindsBySetID: [UUID: [WorkoutPersonalRecordKind]] = [:],
-        overloadFeedback: ActiveWorkoutProgressiveOverloadPresentation? = nil,
+        guidance: ActiveWorkoutExerciseGuidancePresentation? = nil,
         preferredLoadUnit: TemplateLoadUnit = .kg,
         restSeconds: Binding<Int>,
         setDrafts: Binding<[WorkoutSessionSetDraft]>,
@@ -88,7 +88,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.previousBySetIndex = previousBySetIndex
         self.personalRecordSummaryKinds = personalRecordSummaryKinds
         self.personalRecordKindsBySetID = personalRecordKindsBySetID
-        self.overloadFeedback = overloadFeedback
+        self.guidance = guidance
         self.preferredLoadUnit = preferredLoadUnit
         self._restSeconds = restSeconds
         self._setDrafts = setDrafts
@@ -219,11 +219,13 @@ struct WorkoutSessionExerciseGridEditor: View {
                     completedExerciseBadge
                 }
 
-                if let overloadFeedback {
-                    Text(overloadFeedback.text)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(feedbackTint(for: overloadFeedback.tone))
-                        .lineLimit(2)
+                if let guidance {
+                    TrainingGuidanceBannerView(
+                        title: guidance.title,
+                        message: guidance.summary,
+                        tone: guidance.tone,
+                        compact: true
+                    )
                 }
 
                 if !personalRecordSummaryKinds.isEmpty {
@@ -958,17 +960,6 @@ struct WorkoutSessionExerciseGridEditor: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(WGJTheme.textSecondary)
-    }
-
-    private func feedbackTint(for tone: TrainingGuidanceTone) -> Color {
-        switch tone {
-        case .accent:
-            return WGJTheme.accentBlue
-        case .success:
-            return WGJTheme.success
-        case .caution:
-            return WGJTheme.accentGold
-        }
     }
 
     private func progressToneColor(for tone: WorkoutSetProgressTone) -> Color {
