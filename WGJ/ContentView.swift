@@ -48,6 +48,7 @@ struct ContentView: View {
         .task {
             installUITestPendingTemplateIfNeeded()
             requestAppMaintenance()
+            syncWorkoutNotificationPreferences()
             updateIdleTimerState()
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -68,6 +69,9 @@ struct ContentView: View {
         }
         .onChange(of: storedProfiles.first?.keepsScreenAwake) { _, _ in
             updateIdleTimerState()
+        }
+        .onChange(of: storedProfiles.first?.workoutNotificationStyleRaw) { _, _ in
+            syncWorkoutNotificationPreferences()
         }
         .onReceive(NotificationCenter.default.publisher(for: .wgjDidDeleteAllUserData)) { _ in
             resetToStartupFlow()
@@ -226,10 +230,19 @@ struct ContentView: View {
         let repository = ProfileRepository(modelContext: modelContext)
 
         do {
-            _ = try await repository.bootstrapProfileIdentity(cloudSyncEnabled: cloudSyncEnabled)
+            let profile = try await repository.bootstrapProfileIdentity(cloudSyncEnabled: cloudSyncEnabled)
+            AppRuntimeState.shared.updateWorkoutNotificationStyle(profile.workoutNotificationStyle)
         } catch {
-            _ = try? repository.loadOrCreateProfile()
+            if let profile = try? repository.loadOrCreateProfile() {
+                AppRuntimeState.shared.updateWorkoutNotificationStyle(profile.workoutNotificationStyle)
+            }
         }
+    }
+
+    private func syncWorkoutNotificationPreferences() {
+        AppRuntimeState.shared.updateWorkoutNotificationStyle(
+            storedProfiles.first?.workoutNotificationStyle ?? .timeSensitive
+        )
     }
 
     private var shouldKeepScreenAwake: Bool {

@@ -129,6 +129,13 @@ final class ProfileRepository {
         try modelContext.save()
     }
 
+    func updateWorkoutNotificationStyle(_ style: WorkoutNotificationStyle) throws {
+        let profile = try loadOrCreateProfile()
+        profile.workoutNotificationStyle = style
+        profile.updatedAt = .now
+        try modelContext.save()
+    }
+
     private func resolvedDefaultDisplayName(
         cloudSyncEnabled: Bool,
         defaultDisplayNameProvider: any ProfileDefaultDisplayNameProviding

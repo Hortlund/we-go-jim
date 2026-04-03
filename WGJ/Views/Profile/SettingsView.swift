@@ -17,6 +17,7 @@ struct SettingsView: View {
     @State private var isTrainingGuidanceEnabled = true
     @State private var keepsScreenAwake = false
     @State private var preferredWeightUnit: PreferredWeightUnit = .kg
+    @State private var workoutNotificationStyle: WorkoutNotificationStyle = .timeSensitive
     @State private var hasLoadedProfile = false
     @State private var cloudAccountStatus: AccountStatus = .checking
     @State private var isWritingCloudProbe = false
@@ -114,6 +115,33 @@ struct SettingsView: View {
                         Text("Used for new weighted sets and new template set plans. Existing entries keep their saved units.")
                             .font(.caption)
                             .foregroundStyle(WGJTheme.textSecondary)
+                    }
+                }
+                .padding(14)
+                .wgjCardContainer()
+
+                VStack(alignment: .leading, spacing: 10) {
+                    WGJSectionHeader("Workout Alerts", subtitle: "Choose how aggressively rest timer alerts interrupt you.")
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Rest timer alert style")
+                            .foregroundStyle(WGJTheme.textPrimary)
+
+                        Picker("Rest timer alert style", selection: $workoutNotificationStyle) {
+                            ForEach(WorkoutNotificationStyle.allCases) { style in
+                                Text(style.title).tag(style)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+
+                        Text(workoutNotificationStyle.subtitle)
+                            .font(.caption)
+                            .foregroundStyle(WGJTheme.textSecondary)
+
+                        Text("Critical alerts are not available in this build. Apple requires a special entitlement and extra approval before a workout notification can bypass Silent Mode in the background.")
+                            .font(.caption)
+                            .foregroundStyle(WGJTheme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 .padding(14)
@@ -349,6 +377,10 @@ struct SettingsView: View {
             guard hasLoadedProfile else { return }
             savePreferredWeightUnitPreference(newValue)
         }
+        .onChange(of: workoutNotificationStyle) { _, newValue in
+            guard hasLoadedProfile else { return }
+            saveWorkoutNotificationStylePreference(newValue)
+        }
         .alert("Settings Error", isPresented: $showingError) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -387,6 +419,7 @@ struct SettingsView: View {
             isTrainingGuidanceEnabled = profile.isTrainingGuidanceEnabled
             keepsScreenAwake = profile.keepsScreenAwake
             preferredWeightUnit = profile.preferredWeightUnit
+            workoutNotificationStyle = profile.workoutNotificationStyle
         } catch {
             showError(error)
         }
@@ -520,6 +553,15 @@ struct SettingsView: View {
     private func savePreferredWeightUnitPreference(_ unit: PreferredWeightUnit) {
         do {
             try profileRepository.updatePreferredWeightUnit(unit)
+        } catch {
+            showError(error)
+        }
+    }
+
+    private func saveWorkoutNotificationStylePreference(_ style: WorkoutNotificationStyle) {
+        do {
+            try profileRepository.updateWorkoutNotificationStyle(style)
+            AppRuntimeState.shared.updateWorkoutNotificationStyle(style)
         } catch {
             showError(error)
         }

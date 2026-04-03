@@ -262,8 +262,7 @@ struct WorkoutCompletionSummaryView: View {
         guard !hasTriggeredCelebration else { return }
         hasTriggeredCelebration = true
 
-        let feedbackGenerator = UINotificationFeedbackGenerator()
-        feedbackGenerator.notificationOccurred(.success)
+        WorkoutFeedbackCenter.shared.workoutCompleted()
 
         guard !reduceMotion else { return }
         showsConfetti = true

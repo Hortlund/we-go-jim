@@ -373,6 +373,7 @@ struct ActiveWorkoutView: View {
             },
             onSetCompletionChange: { setID, setLabel, restSeconds, isCompleted in
                 if isCompleted {
+                    WorkoutFeedbackCenter.shared.setCompleted()
                     restTimerState.startRestTimer(
                         seconds: restSeconds,
                         exerciseName: exerciseName,
@@ -772,7 +773,8 @@ struct ActiveWorkoutView: View {
         scrollProxy: ScrollViewProxy
     ) {
         let isCompleted = isExerciseCompleted(drafts)
-        if cardStateController.didCompleteCurrentCycle(for: exercise.id) != isCompleted {
+        let previouslyCompleted = cardStateController.didCompleteCurrentCycle(for: exercise.id)
+        if previouslyCompleted != isCompleted {
             let completedExerciseIDs = completedExerciseIDs(
                 updating: exercise.id,
                 with: drafts
@@ -787,6 +789,9 @@ struct ActiveWorkoutView: View {
                 if let nextExerciseID {
                     scrollProxy.scrollTo(nextExerciseID, anchor: .top)
                 }
+            }
+            if isCompleted {
+                WorkoutFeedbackCenter.shared.exerciseCompleted()
             }
         }
         persistDrafts(sessionExerciseID: exercise.id, drafts: drafts)

@@ -606,6 +606,18 @@ struct WGJTests {
     }
 
     @Test
+    func profileRepositoryPersistsWorkoutNotificationStyle() throws {
+        let context = try makeInMemoryContext()
+        let repository = ProfileRepository(modelContext: context)
+
+        _ = try repository.loadOrCreateProfile()
+        try repository.updateWorkoutNotificationStyle(.standard)
+
+        let updated = try repository.currentProfile()
+        #expect(updated?.workoutNotificationStyle == .standard)
+    }
+
+    @Test
     func profileRepositoryPersistsPreferredWeightUnit() throws {
         let context = try makeInMemoryContext()
         let repository = ProfileRepository(modelContext: context)

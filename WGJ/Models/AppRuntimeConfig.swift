@@ -1,3 +1,5 @@
+import AVFoundation
+import AudioToolbox
 import CloudKit
 import Foundation
 import SwiftData
@@ -125,6 +127,7 @@ final class AppRuntimeState {
     var cloudSyncEnabled = false
     var cloudSyncErrorDescription: String?
     var latestCloudSyncEvent: CloudSyncEventSummary?
+    var workoutNotificationStyle: WorkoutNotificationStyle = .timeSensitive
 
     private init() { }
 
@@ -137,11 +140,35 @@ final class AppRuntimeState {
         latestCloudSyncEvent = summary
     }
 
+    func updateWorkoutNotificationStyle(_ style: WorkoutNotificationStyle) {
+        workoutNotificationStyle = style
+    }
+
     var isBrosCloudAvailable: Bool {
         AppRuntimeConfig.reviewPolicy.brosEnabled
             && cloudSyncEnabled
             && cloudSyncErrorDescription == nil
             && AppRuntimeConfig.canUseConfiguredCloudKitContainer
+    }
+}
+
+extension WorkoutNotificationStyle {
+    var notificationInterruptionLevel: UNNotificationInterruptionLevel {
+        switch self {
+        case .standard:
+            return .active
+        case .timeSensitive:
+            return .timeSensitive
+        }
+    }
+
+    var usesEnhancedRestTimerFeedback: Bool {
+        switch self {
+        case .standard:
+            return false
+        case .timeSensitive:
+            return true
+        }
     }
 }
 
@@ -354,7 +381,8 @@ final class RestTimerState {
         RestTimerNotificationManager.shared.scheduleRestTimer(
             seconds: normalized,
             exerciseName: exerciseName,
-            setLabel: setLabel
+            setLabel: setLabel,
+            style: AppRuntimeState.shared.workoutNotificationStyle
         )
     }
 
@@ -397,6 +425,7 @@ final class RestTimerState {
         let exerciseName = restTimerExerciseName
         let setLabel = restTimerSetLabel
         clearRestTimer(cancelNotification: false)
+        WorkoutFeedbackCenter.shared.restTimerCompleted(style: AppRuntimeState.shared.workoutNotificationStyle)
         showRestTimerPopup(exerciseName: exerciseName, setLabel: setLabel)
     }
 
@@ -429,11 +458,8 @@ final class RestTimerState {
         let popup = RestTimerPopup(title: "Rest complete", message: message)
         restTimerPopup = popup
 
-        let feedbackGenerator = UINotificationFeedbackGenerator()
-        feedbackGenerator.notificationOccurred(.success)
-
         restTimerPopupDismissTask = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(2.6))
+            try? await Task.sleep(for: .seconds(3.2))
             guard !Task.isCancelled, restTimerPopup?.id == popup.id else { return }
             restTimerPopup = nil
             restTimerPopupDismissTask = nil
@@ -445,6 +471,230 @@ struct RestTimerPopup: Identifiable, Equatable {
     let id = UUID()
     let title: String
     let message: String?
+}
+
+@MainActor
+final class WorkoutFeedbackCenter {
+    static let shared = WorkoutFeedbackCenter()
+
+    private let soundPlayer = WorkoutForegroundAlertSoundPlayer()
+    private var hapticPatternTask: Task<Void, Never>?
+
+    private init() { }
+
+    func setCompleted() {
+        guard !AppRuntimeConfig.isRunningTests else { return }
+        perform(.impact(style: .rigid, intensity: 0.92))
+    }
+
+    func exerciseCompleted() {
+        guard !AppRuntimeConfig.isRunningTests else { return }
+        runHapticPattern([
+            HapticStep(delay: .zero, command: .notification(.success)),
+        ])
+    }
+
+    func workoutCompleted() {
+        guard !AppRuntimeConfig.isRunningTests else { return }
+        runHapticPattern([
+            HapticStep(delay: .zero, command: .notification(.success)),
+            HapticStep(delay: .milliseconds(120), command: .impact(style: .heavy, intensity: 0.88)),
+        ])
+    }
+
+    func restTimerCompleted(style: WorkoutNotificationStyle) {
+        guard !AppRuntimeConfig.isRunningTests else { return }
+        if style.usesEnhancedRestTimerFeedback {
+            soundPlayer.playRestTimerAlert()
+            runHapticPattern([
+                HapticStep(delay: .zero, command: .vibrate),
+                HapticStep(delay: .zero, command: .notification(.warning)),
+                HapticStep(delay: .milliseconds(180), command: .impact(style: .heavy, intensity: 1.0)),
+                HapticStep(delay: .milliseconds(120), command: .vibrate),
+            ])
+        } else {
+            runHapticPattern([
+                HapticStep(delay: .zero, command: .notification(.warning)),
+                HapticStep(delay: .milliseconds(120), command: .impact(style: .medium, intensity: 0.72)),
+            ])
+        }
+    }
+
+    private func runHapticPattern(_ steps: [HapticStep]) {
+        hapticPatternTask?.cancel()
+        hapticPatternTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            for step in steps {
+                if step.delay > .zero {
+                    try? await Task.sleep(for: step.delay)
+                }
+                guard !Task.isCancelled else { return }
+                self.perform(step.command)
+            }
+
+            self.hapticPatternTask = nil
+        }
+    }
+
+    private func perform(_ command: HapticCommand) {
+        switch command {
+        case let .notification(type):
+            let generator = UINotificationFeedbackGenerator()
+            generator.prepare()
+            generator.notificationOccurred(type)
+        case let .impact(style, intensity):
+            let generator = UIImpactFeedbackGenerator(style: style)
+            generator.prepare()
+            generator.impactOccurred(intensity: intensity)
+        case .vibrate:
+            AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
+        }
+    }
+
+    private struct HapticStep {
+        let delay: Duration
+        let command: HapticCommand
+    }
+
+    private enum HapticCommand {
+        case notification(UINotificationFeedbackGenerator.FeedbackType)
+        case impact(style: UIImpactFeedbackGenerator.FeedbackStyle, intensity: CGFloat)
+        case vibrate
+    }
+}
+
+@MainActor
+private final class WorkoutForegroundAlertSoundPlayer {
+    private enum ToneSegment {
+        case tone(frequency: Double, duration: Double, amplitude: Float)
+        case silence(duration: Double)
+
+        func frameCount(sampleRate: Double) -> Int {
+            switch self {
+            case let .tone(_, duration, _), let .silence(duration):
+                return max(1, Int((duration * sampleRate).rounded()))
+            }
+        }
+    }
+
+    private let sampleRate = 44_100.0
+    private let format: AVAudioFormat
+    private let engine = AVAudioEngine()
+    private let playerNode = AVAudioPlayerNode()
+
+    init() {
+        format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
+        engine.attach(playerNode)
+        engine.connect(playerNode, to: engine.mainMixerNode, format: format)
+    }
+
+    func playRestTimerAlert() {
+        guard let buffer = makeBuffer(for: restTimerSegments()) else { return }
+
+        do {
+            try activateAudioSession()
+            if !engine.isRunning {
+                try engine.start()
+            }
+            playerNode.stop()
+            playerNode.scheduleBuffer(buffer) { [weak self] in
+                Task { @MainActor [weak self] in
+                    self?.deactivateAudioSessionIfIdle()
+                }
+            }
+            playerNode.play()
+        } catch {
+            #if DEBUG
+            print("Foreground alert sound failed: \(error)")
+            #endif
+        }
+    }
+
+    private func activateAudioSession() throws {
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+        try session.setActive(true)
+    }
+
+    private func deactivateAudioSessionIfIdle() {
+        guard !playerNode.isPlaying else { return }
+        playerNode.stop()
+        engine.stop()
+        try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+    }
+
+    private func restTimerSegments() -> [ToneSegment] {
+        [
+            .tone(frequency: 880, duration: 0.16, amplitude: 0.30),
+            .silence(duration: 0.05),
+            .tone(frequency: 988, duration: 0.16, amplitude: 0.30),
+            .silence(duration: 0.08),
+            .tone(frequency: 1_318, duration: 0.22, amplitude: 0.34),
+        ]
+    }
+
+    private func makeBuffer(for segments: [ToneSegment]) -> AVAudioPCMBuffer? {
+        let totalFrameCount = segments.reduce(0) { partialResult, segment in
+            partialResult + segment.frameCount(sampleRate: sampleRate)
+        }
+        guard totalFrameCount > 0 else { return nil }
+
+        guard let buffer = AVAudioPCMBuffer(
+            pcmFormat: format,
+            frameCapacity: AVAudioFrameCount(totalFrameCount)
+        ) else {
+            return nil
+        }
+
+        buffer.frameLength = AVAudioFrameCount(totalFrameCount)
+        guard let samples = buffer.floatChannelData?[0] else { return nil }
+
+        var writeIndex = 0
+        var phase = 0.0
+
+        for segment in segments {
+            let frameCount = segment.frameCount(sampleRate: sampleRate)
+            switch segment {
+            case let .tone(frequency, _, amplitude):
+                let phaseIncrement = (2.0 * Double.pi * frequency) / sampleRate
+                for frame in 0..<frameCount {
+                    let envelope = envelopeGain(frame: frame, totalFrames: frameCount)
+                    samples[writeIndex] = Float(sin(phase)) * amplitude * envelope
+                    phase += phaseIncrement
+                    if phase >= 2.0 * Double.pi {
+                        phase -= 2.0 * Double.pi
+                    }
+                    writeIndex += 1
+                }
+            case .silence:
+                for _ in 0..<frameCount {
+                    samples[writeIndex] = 0
+                    writeIndex += 1
+                }
+            }
+        }
+
+        return buffer
+    }
+
+    private func envelopeGain(frame: Int, totalFrames: Int) -> Float {
+        guard totalFrames > 4 else { return 1 }
+
+        let rampFrames = min(Int(sampleRate * 0.012), totalFrames / 2)
+        guard rampFrames > 0 else { return 1 }
+
+        if frame < rampFrames {
+            return Float(frame) / Float(rampFrames)
+        }
+
+        let tailStart = totalFrames - rampFrames
+        if frame >= tailStart {
+            return Float(totalFrames - frame) / Float(rampFrames)
+        }
+
+        return 1
+    }
 }
 
 private struct WGJTabActiveKey: EnvironmentKey {
@@ -482,7 +732,12 @@ final class RestTimerNotificationManager {
         AppNotificationManager.shared.configureNotifications()
     }
 
-    func scheduleRestTimer(seconds: Int, exerciseName: String, setLabel: String) {
+    func scheduleRestTimer(
+        seconds: Int,
+        exerciseName: String,
+        setLabel: String,
+        style: WorkoutNotificationStyle
+    ) {
         schedulingGeneration += 1
         let generation = schedulingGeneration
         clearCurrentRestTimerNotifications()
@@ -506,8 +761,10 @@ final class RestTimerNotificationManager {
 
             let content = UNMutableNotificationContent()
             content.title = "Rest complete"
-            content.body = "\(exerciseName) · \(setLabel)"
+            content.subtitle = exerciseName
+            content.body = "Back for \(setLabel)"
             content.sound = .default
+            content.interruptionLevel = style.notificationInterruptionLevel
 
             let trigger = UNTimeIntervalNotificationTrigger(
                 timeInterval: TimeInterval(max(1, seconds)),

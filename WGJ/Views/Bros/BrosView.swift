@@ -957,9 +957,9 @@ struct BrosView: View {
         VStack(alignment: .leading, spacing: 14) {
             WGJActionHeader("Circle", subtitle: "Your current roster") {
                 HStack(spacing: 8) {
-                    WGJMetricPill(
-                        systemImage: "person.3.sequence.fill",
-                        value: "\(snapshot.members.count)/\(snapshot.circle.memberLimit)"
+                    BroCircleMemberCountPill(
+                        currentCount: snapshot.members.count,
+                        memberLimit: snapshot.circle.memberLimit
                     )
                     circleManagementButton(snapshot)
                 }
@@ -1532,6 +1532,21 @@ struct BrosView: View {
     }
 }
 
+private struct BroCircleMemberCountPill: View {
+    let currentCount: Int
+    let memberLimit: Int
+
+    var body: some View {
+        WGJMetricPill(
+            systemImage: "person.3.sequence.fill",
+            value: "\(currentCount)/\(memberLimit)"
+        )
+        .fixedSize(horizontal: true, vertical: false)
+        .layoutPriority(1)
+        .accessibilityLabel("\(currentCount) of \(memberLimit) bros in this circle")
+    }
+}
+
 private struct BroCircleManagementView: View {
     @Bindable var viewModel: BrosViewModel
     let snapshot: BrosFeedSnapshot
@@ -1610,9 +1625,9 @@ private struct BroCircleManagementView: View {
             )
 
             HStack(spacing: 8) {
-                WGJMetricPill(
-                    systemImage: "person.3.sequence.fill",
-                    value: "\(snapshot.members.count)/\(snapshot.circle.memberLimit)"
+                BroCircleMemberCountPill(
+                    currentCount: snapshot.members.count,
+                    memberLimit: snapshot.circle.memberLimit
                 )
 
                 memberBadge(
@@ -1668,9 +1683,9 @@ private struct BroCircleManagementView: View {
                 subtitle: "Choose the total member cap for this circle."
             )
 
-            WGJMetricPill(
-                systemImage: "person.3.sequence.fill",
-                value: "\(snapshot.members.count)/\(memberLimitDraft)"
+            BroCircleMemberCountPill(
+                currentCount: snapshot.members.count,
+                memberLimit: memberLimitDraft
             )
 
             Stepper(value: $memberLimitDraft, in: ownerEditableLimitRange) {
@@ -1787,9 +1802,9 @@ private struct BroCircleManagementView: View {
     private var membersSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             WGJActionHeader("Members", subtitle: "Names, avatars, and athlete types shown here come from each bro's profile.") {
-                WGJMetricPill(
-                    systemImage: "person.3.sequence.fill",
-                    value: "\(snapshot.members.count)/\(snapshot.circle.memberLimit)"
+                BroCircleMemberCountPill(
+                    currentCount: snapshot.members.count,
+                    memberLimit: snapshot.circle.memberLimit
                 )
             }
 

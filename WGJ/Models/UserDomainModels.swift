@@ -56,6 +56,31 @@ enum PreferredWeightUnit: String, Codable, CaseIterable, Equatable, Identifiable
     }
 }
 
+enum WorkoutNotificationStyle: String, Codable, CaseIterable, Equatable, Identifiable {
+    case standard
+    case timeSensitive
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .standard:
+            return "Standard"
+        case .timeSensitive:
+            return "Time Sensitive"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .standard:
+            return "Uses the normal notification path with lighter in-app feedback."
+        case .timeSensitive:
+            return "Uses a stronger in-app alarm and a Time Sensitive system alert when iOS allows it."
+        }
+    }
+}
+
 enum ProfileAthleteType: String, Codable, CaseIterable, Equatable, Identifiable {
     case strengthTraining
     case powerlifting
@@ -331,6 +356,7 @@ final class UserProfile {
     var athleteTypeRaw: String?
     var avatarImageData: Data?
     var preferredWeightUnitRaw: String = PreferredWeightUnit.kg.rawValue
+    var workoutNotificationStyleRaw: String = WorkoutNotificationStyle.timeSensitive.rawValue
     var weeklyWorkoutGoal: Int = 4
     var isTrainingGuidanceEnabled: Bool = true
     var keepsScreenAwake: Bool = false
@@ -367,6 +393,11 @@ final class UserProfile {
         set { preferredWeightUnitRaw = newValue.rawValue }
     }
 
+    var workoutNotificationStyle: WorkoutNotificationStyle {
+        get { WorkoutNotificationStyle(rawValue: workoutNotificationStyleRaw) ?? .timeSensitive }
+        set { workoutNotificationStyleRaw = newValue.rawValue }
+    }
+
     var preferredLoadUnit: TemplateLoadUnit {
         preferredWeightUnit.templateLoadUnit
     }
@@ -377,6 +408,7 @@ final class UserProfile {
         athleteType: ProfileAthleteType? = nil,
         avatarImageData: Data? = nil,
         preferredWeightUnit: PreferredWeightUnit = .kg,
+        workoutNotificationStyle: WorkoutNotificationStyle = .timeSensitive,
         weeklyWorkoutGoal: Int = 4,
         isTrainingGuidanceEnabled: Bool = true,
         keepsScreenAwake: Bool = false,
@@ -393,6 +425,7 @@ final class UserProfile {
         self.athleteTypeRaw = athleteType?.rawValue
         self.avatarImageData = avatarImageData
         self.preferredWeightUnitRaw = preferredWeightUnit.rawValue
+        self.workoutNotificationStyleRaw = workoutNotificationStyle.rawValue
         self.weeklyWorkoutGoal = max(1, min(14, weeklyWorkoutGoal))
         self.isTrainingGuidanceEnabled = isTrainingGuidanceEnabled
         self.keepsScreenAwake = keepsScreenAwake
