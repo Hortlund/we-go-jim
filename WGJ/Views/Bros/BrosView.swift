@@ -1068,9 +1068,6 @@ struct BrosView: View {
                 viewModel: viewModel,
                 snapshot: snapshot,
                 presentation: presentation,
-                onCopyInviteCode: {
-                    copyInviteCode(snapshot.circle.inviteCode)
-                },
                 onLeaveCircle: {
                     Task {
                         await viewModel.leaveCircle(modelContext: modelContext)
@@ -1414,15 +1411,6 @@ struct BrosView: View {
         return "\(formatted) kg"
     }
 
-    private func copyInviteCode(_ inviteCode: String) {
-        UIPasteboard.general.string = inviteCode
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
-        showSupportNotice(
-            title: "Invite Code Copied",
-            message: "\(inviteCode) is ready to share."
-        )
-    }
-
     private func resolvedDisplayName(_ value: String) -> String {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "Bro" : trimmed
@@ -1551,18 +1539,17 @@ private struct BroCircleManagementView: View {
     @Bindable var viewModel: BrosViewModel
     let snapshot: BrosFeedSnapshot
     let presentation: BroCircleManagementPresentation
-    let onCopyInviteCode: () -> Void
     let onLeaveCircle: () -> Void
     let onRemoveMember: (BroMemberSummary) -> Void
     let onUpdateMemberLimit: (Int) -> Void
 
     @State private var memberLimitDraft: Int
+    @State private var showingInviteCodeCopiedNotice = false
 
     init(
         viewModel: BrosViewModel,
         snapshot: BrosFeedSnapshot,
         presentation: BroCircleManagementPresentation,
-        onCopyInviteCode: @escaping () -> Void,
         onLeaveCircle: @escaping () -> Void,
         onRemoveMember: @escaping (BroMemberSummary) -> Void,
         onUpdateMemberLimit: @escaping (Int) -> Void
@@ -1570,7 +1557,6 @@ private struct BroCircleManagementView: View {
         self.viewModel = viewModel
         self.snapshot = snapshot
         self.presentation = presentation
-        self.onCopyInviteCode = onCopyInviteCode
         self.onLeaveCircle = onLeaveCircle
         self.onRemoveMember = onRemoveMember
         self.onUpdateMemberLimit = onUpdateMemberLimit
@@ -1612,6 +1598,11 @@ private struct BroCircleManagementView: View {
             if memberLimitDraft < newValue {
                 memberLimitDraft = newValue
             }
+        }
+        .alert("Invite Code Copied", isPresented: $showingInviteCodeCopiedNotice) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("\(snapshot.circle.inviteCode) is ready to share.")
         }
     }
 
@@ -1660,7 +1651,7 @@ private struct BroCircleManagementView: View {
                 Spacer(minLength: 12)
 
                 Button {
-                    onCopyInviteCode()
+                    copyInviteCode()
                 } label: {
                     Label("Copy", systemImage: "doc.on.doc")
                 }
@@ -1905,6 +1896,12 @@ private struct BroCircleManagementView: View {
     private func resolvedDisplayName(_ value: String) -> String {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "Bro" : trimmed
+    }
+
+    private func copyInviteCode() {
+        UIPasteboard.general.string = snapshot.circle.inviteCode
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        showingInviteCodeCopiedNotice = true
     }
 
     private var ownerEditableLimitRange: ClosedRange<Int> {
