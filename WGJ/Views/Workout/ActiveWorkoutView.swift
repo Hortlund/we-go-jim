@@ -1717,7 +1717,7 @@ private struct ActiveWorkoutExerciseSettingsSheet: View {
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(WGJTheme.textSecondary)
 
-                        Menu {
+                        WGJActionMenuButton("Default Rest") {
                             ForEach(restPresets, id: \.self) { value in
                                 Button(formattedRest(value)) {
                                     draft.restSeconds = value

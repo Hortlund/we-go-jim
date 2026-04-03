@@ -365,7 +365,7 @@ private struct HistorySessionCardView: View, Equatable {
 
                     Spacer()
 
-                    Menu {
+                    WGJActionMenuButton("Workout Actions") {
                         Button(role: .destructive, action: onDelete) {
                             Label("Delete", systemImage: "trash")
                         }
@@ -378,7 +378,6 @@ private struct HistorySessionCardView: View, Equatable {
                                     .fill(WGJTheme.field)
                             )
                     }
-                    .buttonStyle(.plain)
                     .foregroundStyle(WGJTheme.accentBlue)
                 }
 

@@ -815,7 +815,7 @@ struct BrosView: View {
                 Spacer(minLength: 0)
 
                 if snapshot.isCurrentUserOwner, member.id != snapshot.currentMember.id {
-                    Menu {
+                    WGJActionMenuButton("Member Actions") {
                         Button(role: .destructive) {
                             Task {
                                 await viewModel.removeMember(membershipID: member.id, modelContext: modelContext)
@@ -957,7 +957,7 @@ struct BrosView: View {
                     eventKindBadge(event.kind)
 
                     if event.actorUserRecordName != currentUserRecordName {
-                        Menu {
+                        WGJActionMenuButton("Post Actions") {
                             Button {
                                 reportEvent(snapshot: snapshot, event: event)
                             } label: {
@@ -1660,7 +1660,7 @@ private struct BroCircleManagementView: View {
             Spacer(minLength: 12)
 
             if presentation.allowsMemberRemoval, member.id != snapshot.currentMember.id {
-                Menu {
+                WGJActionMenuButton("Member Actions") {
                     Button(role: .destructive) {
                         onRemoveMember(member)
                     } label: {

@@ -317,7 +317,7 @@ struct TemplateExercisePrescriptionEditor: View {
             tint: WGJTheme.accentBlue
         ) {
             VStack(alignment: .leading, spacing: 10) {
-                Menu {
+                WGJActionMenuButton("Default Rest") {
                     ForEach(restPresets, id: \.self) { value in
                         Button(formattedRest(value)) {
                             updateRest(value)
@@ -481,7 +481,7 @@ struct TemplateExercisePrescriptionEditor: View {
     }
 
     private var headerMenu: some View {
-        Menu {
+        WGJActionMenuButton("Exercise Actions") {
             if let onMoveUp {
                 Button {
                     onMoveUp()
@@ -501,10 +501,6 @@ struct TemplateExercisePrescriptionEditor: View {
             }
 
             if let onExerciseDelete {
-                if onMoveUp != nil || onMoveDown != nil {
-                    Divider()
-                }
-
                 Button(role: .destructive) {
                     onExerciseDelete()
                 } label: {
@@ -514,7 +510,6 @@ struct TemplateExercisePrescriptionEditor: View {
         } label: {
             headerIcon(symbol: "ellipsis.circle")
         }
-        .buttonStyle(.plain)
     }
 
     private var hasHeaderMenu: Bool {
@@ -1196,7 +1191,7 @@ private struct TemplateExerciseSetCardView: View, Equatable {
             .multilineTextAlignment(.center)
             .disabled(set.isLocked)
 
-            Menu {
+            WGJActionMenuButton("Load Unit", titleVisibility: .hidden) {
                 ForEach(TemplateLoadUnit.allCases) { unit in
                     Button(unit.shortLabel) {
                         onLoadUnitChanged(unit)
@@ -1237,7 +1232,7 @@ private struct TemplateExerciseSetCardView: View, Equatable {
     }
 
     private var setMenu: some View {
-        Menu {
+        WGJActionMenuButton("Set Actions") {
             Button {
                 onInsertBelow()
             } label: {
@@ -1264,32 +1259,26 @@ private struct TemplateExerciseSetCardView: View, Equatable {
             }
             .disabled(!canMoveDown)
 
-            Menu {
-                ForEach(restPresets, id: \.self) { value in
-                    Button(formattedRest(value)) {
-                        onSetRestChanged(value)
-                    }
+            ForEach(restPresets, id: \.self) { value in
+                Button("Set rest to \(formattedRest(value))") {
+                    onSetRestChanged(value)
                 }
+            }
 
-                Divider()
+            Button("Use exercise default (\(formattedRest(defaultRestSeconds)))") {
+                onSetRestChanged(defaultRestSeconds)
+            }
 
-                Button("Use exercise default (\(formattedRest(defaultRestSeconds)))") {
-                    onSetRestChanged(defaultRestSeconds)
-                }
+            Button("Reduce rest by 15 sec") {
+                onSetRestChanged(set.restSeconds - 15)
+            }
 
-                Button("-15 sec") {
-                    onSetRestChanged(set.restSeconds - 15)
-                }
+            Button("Increase rest by 15 sec") {
+                onSetRestChanged(set.restSeconds + 15)
+            }
 
-                Button("+15 sec") {
-                    onSetRestChanged(set.restSeconds + 15)
-                }
-
-                Button("No rest") {
-                    onSetRestChanged(0)
-                }
-            } label: {
-                Label("Set rest", systemImage: "timer")
+            Button("No rest") {
+                onSetRestChanged(0)
             }
 
             Button {
@@ -1306,8 +1295,6 @@ private struct TemplateExerciseSetCardView: View, Equatable {
                 }
             }
 
-            Divider()
-
             Button(role: .destructive) {
                 onDelete()
             } label: {
@@ -1323,7 +1310,6 @@ private struct TemplateExerciseSetCardView: View, Equatable {
                         .fill(WGJTheme.field)
                 )
         }
-        .buttonStyle(.plain)
     }
 
     private func metricField<Content: View>(

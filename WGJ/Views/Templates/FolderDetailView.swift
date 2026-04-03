@@ -156,7 +156,7 @@ struct FolderDetailView: View {
                 }
                 .buttonStyle(WGJGhostButtonStyle())
 
-                Menu {
+                WGJActionMenuButton("Move Template") {
                     Button("Unfiled") {
                         moveTemplate(templateID: template.id, toFolderID: nil)
                     }

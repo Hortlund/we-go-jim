@@ -239,7 +239,7 @@ struct WorkoutSessionExerciseGridEditor: View {
 
             VStack(spacing: 8) {
                 if onExerciseSettings != nil || onExerciseDelete != nil {
-                    Menu {
+                    WGJActionMenuButton("Exercise Actions") {
                         if let onExerciseSettings {
                             Button {
                                 onExerciseSettings()
@@ -258,7 +258,6 @@ struct WorkoutSessionExerciseGridEditor: View {
                     } label: {
                         headerIcon(symbol: "ellipsis.circle")
                     }
-                    .buttonStyle(.plain)
                 }
 
                 Button {
@@ -329,7 +328,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             tint: WGJTheme.accentBlue
         ) {
             VStack(alignment: .leading, spacing: 10) {
-                Menu {
+                WGJActionMenuButton("Default Rest") {
                     ForEach(restPresets, id: \.self) { value in
                         Button(Self.formattedRest(value)) {
                             updateRest(value)
@@ -711,7 +710,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                 .disabled(isLocked)
                 .accessibilityIdentifier("workout-set-\(index)-weight-field")
 
-            Menu {
+            WGJActionMenuButton("Load Unit", titleVisibility: .hidden) {
                 ForEach(TemplateLoadUnit.allCases) { unit in
                     Button(unit.shortLabel) {
                         setDrafts[index].actualLoadUnit = unit
@@ -759,7 +758,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         let isLocked = setDrafts[index].isLocked
         let currentRest = setDrafts[index].restSeconds
 
-        return Menu {
+        return WGJActionMenuButton("Set Actions") {
             Button {
                 insertSet(after: index)
             } label: {
@@ -788,32 +787,30 @@ struct WorkoutSessionExerciseGridEditor: View {
             }
             .disabled(isLocked || index == setDrafts.count - 1 || setDrafts[index + 1].isLocked)
 
-            Menu {
-                ForEach(restPresets, id: \.self) { value in
-                    Button(Self.formattedRest(value)) {
-                        updateSetRest(value, at: index)
-                    }
+            ForEach(restPresets, id: \.self) { value in
+                Button("Set rest to \(Self.formattedRest(value))") {
+                    updateSetRest(value, at: index)
                 }
+                .disabled(isLocked)
+            }
 
-                Divider()
+            Button("Use exercise default (\(Self.formattedRest(restSeconds)))") {
+                updateSetRest(restSeconds, at: index)
+            }
+            .disabled(isLocked)
 
-                Button("Use exercise default (\(Self.formattedRest(restSeconds)))") {
-                    updateSetRest(restSeconds, at: index)
-                }
+            Button("Reduce rest by 15 sec") {
+                updateSetRest(currentRest - 15, at: index)
+            }
+            .disabled(isLocked)
 
-                Button("-15 sec") {
-                    updateSetRest(currentRest - 15, at: index)
-                }
+            Button("Increase rest by 15 sec") {
+                updateSetRest(currentRest + 15, at: index)
+            }
+            .disabled(isLocked)
 
-                Button("+15 sec") {
-                    updateSetRest(currentRest + 15, at: index)
-                }
-
-                Button("No rest") {
-                    updateSetRest(0, at: index)
-                }
-            } label: {
-                Label("Set rest", systemImage: "timer")
+            Button("No rest") {
+                updateSetRest(0, at: index)
             }
             .disabled(isLocked)
 
@@ -852,8 +849,6 @@ struct WorkoutSessionExerciseGridEditor: View {
                 }
                 .disabled(isLocked)
             }
-
-            Divider()
 
             Button(role: .destructive) {
                 removeSet(at: index)

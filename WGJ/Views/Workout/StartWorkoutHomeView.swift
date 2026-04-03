@@ -348,7 +348,7 @@ struct StartWorkoutHomeView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                Menu {
+                WGJActionMenuButton("Template Actions") {
                     Button {
                         editTemplate(template)
                     } label: {
@@ -363,20 +363,16 @@ struct StartWorkoutHomeView: View {
                     }
                     .accessibilityIdentifier("start-workout-template-export-button")
 
-                    Menu {
-                        if template.folderID != TemplateRepository.unfiledFolderID {
-                            Button("Unfiled") {
-                                moveTemplate(templateID: template.id, toFolderID: nil)
-                            }
+                    if template.folderID != TemplateRepository.unfiledFolderID {
+                        Button("Move to Unfiled") {
+                            moveTemplate(templateID: template.id, toFolderID: nil)
                         }
+                    }
 
-                        ForEach(destinationFolders) { folder in
-                            Button(folder.name) {
-                                moveTemplate(templateID: template.id, toFolderID: folder.id)
-                            }
+                    ForEach(destinationFolders) { folder in
+                        Button("Move to \(folder.name)") {
+                            moveTemplate(templateID: template.id, toFolderID: folder.id)
                         }
-                    } label: {
-                        Label("Move", systemImage: "folder")
                     }
 
                     Button(role: .destructive) {
@@ -449,7 +445,7 @@ struct StartWorkoutHomeView: View {
     }
 
     private func folderActionsMenu(for folder: TemplateFolder) -> some View {
-        Menu {
+        WGJActionMenuButton("Folder Actions") {
             Button {
                 beginEditing(folder: folder)
             } label: {
@@ -470,8 +466,6 @@ struct StartWorkoutHomeView: View {
             }
             .disabled(!canMoveFolderDown(folder.id))
 
-            Divider()
-
             Button(role: .destructive) {
                 requestFolderDeletion(folder)
             } label: {
@@ -480,7 +474,6 @@ struct StartWorkoutHomeView: View {
         } label: {
             StartWorkoutUtilityIcon(systemImage: "ellipsis", tint: WGJTheme.textSecondary)
         }
-        .buttonStyle(.plain)
     }
 
     private func emptySectionState(_ section: StartWorkoutTemplateSection) -> some View {

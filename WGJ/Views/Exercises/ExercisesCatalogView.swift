@@ -304,7 +304,7 @@ struct ExercisesCatalogView: View {
     }
 
     private var bodyPartFilter: some View {
-        Menu {
+        WGJActionMenuButton("Body Part Filter") {
             Button("Any Body Part") {
                 selectedPrimaryMuscleID = nil
             }
@@ -317,12 +317,11 @@ struct ExercisesCatalogView: View {
         } label: {
             compactFilterPill(viewModel.muscleName(for: selectedPrimaryMuscleID) ?? "Any Body Part")
         }
-        .buttonStyle(.plain)
         .accessibilityIdentifier("exercises-body-part-filter")
     }
 
     private var categoryFilter: some View {
-        Menu {
+        WGJActionMenuButton("Category Filter") {
             Button("Any Category") {
                 selectedCategory = nil
             }
@@ -335,7 +334,6 @@ struct ExercisesCatalogView: View {
         } label: {
             compactFilterPill(selectedCategory ?? "Any Category")
         }
-        .buttonStyle(.plain)
         .accessibilityIdentifier("exercises-category-filter")
     }
 
@@ -1092,7 +1090,7 @@ private struct CustomExerciseEditorView: View {
                 .font(.headline)
                 .foregroundStyle(WGJTheme.textPrimary)
 
-            Menu {
+            WGJActionMenuButton("Muscle Filters") {
                 ForEach(availableMuscles.filter { allowedIDs.contains($0.remoteID) }, id: \.remoteID) { muscle in
                     Button {
                         onToggle(muscle.remoteID)
@@ -1119,7 +1117,6 @@ private struct CustomExerciseEditorView: View {
                 .frame(minHeight: 48)
                 .wgjCardContainer(cornerRadius: WGJRadius.control)
             }
-            .buttonStyle(.plain)
         }
     }
 

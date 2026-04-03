@@ -215,7 +215,7 @@ struct TemplatesOverviewView: View {
                 }
                 .buttonStyle(WGJGhostButtonStyle())
 
-                Menu {
+                WGJActionMenuButton("Move Template") {
                     if template.folderID != TemplateRepository.unfiledFolderID {
                         Button("Unfiled") {
                             moveTemplate(templateID: template.id, toFolderID: nil)

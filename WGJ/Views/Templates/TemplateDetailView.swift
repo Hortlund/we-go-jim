@@ -83,32 +83,28 @@ struct TemplateDetailView: View {
         .toolbar {
             if let template {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
+                    WGJActionMenuButton("Template Actions") {
                         Button {
                             showingEditor = true
                         } label: {
                             Label("Edit Template", systemImage: "pencil")
                         }
 
-                        Menu {
-                            if template.folderID != TemplateRepository.unfiledFolderID {
-                                Button("Move to Unfiled") {
-                                    moveTemplate(toFolderID: nil)
-                                }
+                        if template.folderID != TemplateRepository.unfiledFolderID {
+                            Button("Move to Unfiled") {
+                                moveTemplate(toFolderID: nil)
                             }
+                        }
 
-                            if destinationFolders(for: template).isEmpty {
-                                Button("No other folders") { }
-                                    .disabled(true)
-                            } else {
-                                ForEach(destinationFolders(for: template)) { folder in
-                                    Button(folder.name) {
-                                        moveTemplate(toFolderID: folder.id)
-                                    }
+                        if destinationFolders(for: template).isEmpty {
+                            Button("No other folders") { }
+                                .disabled(true)
+                        } else {
+                            ForEach(destinationFolders(for: template)) { folder in
+                                Button("Move to \(folder.name)") {
+                                    moveTemplate(toFolderID: folder.id)
                                 }
                             }
-                        } label: {
-                            Label("Move to Folder", systemImage: "folder.badge.plus")
                         }
                     } label: {
                         Label("Actions", systemImage: "ellipsis.circle")
