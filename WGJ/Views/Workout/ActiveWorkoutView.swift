@@ -51,6 +51,8 @@ struct ActiveWorkoutView: View {
     @State private var errorMessage = ""
     @State private var showingError = false
 
+    private let interactivePersistenceDebounce = Duration.milliseconds(550)
+
     private var sessionRepository: WorkoutSessionRepository {
         WorkoutSessionRepository(modelContext: modelContext)
     }
@@ -605,7 +607,7 @@ struct ActiveWorkoutView: View {
 
         pendingSaveTasks[sessionExerciseID]?.cancel()
         pendingSaveTasks[sessionExerciseID] = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(320))
+            try? await Task.sleep(for: interactivePersistenceDebounce)
             guard !Task.isCancelled else { return }
 
             let latest = setDraftsByExerciseID[sessionExerciseID] ?? drafts
@@ -633,7 +635,7 @@ struct ActiveWorkoutView: View {
 
         pendingRestTasks[sessionExerciseID]?.cancel()
         pendingRestTasks[sessionExerciseID] = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(320))
+            try? await Task.sleep(for: interactivePersistenceDebounce)
             guard !Task.isCancelled else { return }
 
             let latest = restByExerciseID[sessionExerciseID] ?? normalized
@@ -1673,21 +1675,14 @@ private struct ActiveWorkoutExerciseStateStamp: Hashable {
 
     private struct Entry: Hashable {
         let id: UUID
-        let exerciseUpdatedAt: TimeInterval
-        let restSeconds: Int
-        let setCount: Int
-        let latestSetUpdate: TimeInterval
+        let orderedSetIDs: [UUID]
 
         @MainActor
         init(exercise: WorkoutSessionExercise) {
             id = exercise.id
-            exerciseUpdatedAt = exercise.updatedAt.timeIntervalSinceReferenceDate
-            restSeconds = exercise.restSeconds
-            let sets = exercise.sets ?? []
-            setCount = sets.count
-            latestSetUpdate = sets
-                .map { $0.updatedAt.timeIntervalSinceReferenceDate }
-                .max() ?? 0
+            orderedSetIDs = (exercise.sets ?? [])
+                .sorted { $0.sortOrder < $1.sortOrder }
+                .map(\.id)
         }
     }
 }

@@ -270,6 +270,9 @@ final class WorkoutSessionRepository {
         }
 
         let normalizedRest = sanitizedRest(restSeconds)
+        guard exercise.restSeconds != normalizedRest else {
+            return
+        }
         let previousRest = exercise.restSeconds
         exercise.restSeconds = normalizedRest
         for set in exercise.sets ?? [] where !set.isLocked {
@@ -280,7 +283,6 @@ final class WorkoutSessionRepository {
             set.updatedAt = .now
         }
         exercise.updatedAt = .now
-        exercise.session?.updatedAt = .now
         try modelContext.save()
     }
 
@@ -290,10 +292,12 @@ final class WorkoutSessionRepository {
         }
 
         let normalized = sanitizedRepRange(min: minReps, max: maxReps)
+        guard exercise.targetRepMin != normalized.min || exercise.targetRepMax != normalized.max else {
+            return
+        }
         exercise.targetRepMin = normalized.min
         exercise.targetRepMax = normalized.max
         exercise.updatedAt = .now
-        exercise.session?.updatedAt = .now
         try modelContext.save()
     }
 
@@ -361,43 +365,44 @@ final class WorkoutSessionRepository {
         let existing = exercise.sets ?? []
         let existingByID = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
         let incomingIDs = Set(drafts.map(\.id))
+        let existingOrderedIDs = existing
+            .sorted { $0.sortOrder < $1.sortOrder }
+            .map(\.id)
+        let incomingOrderedIDs = drafts.map(\.id)
+        let now = Date()
+        var didMutateExerciseStructure = existingOrderedIDs != incomingOrderedIDs
 
         for set in existing where !incomingIDs.contains(set.id) {
             modelContext.delete(set)
+            didMutateExerciseStructure = true
         }
 
         var updatedSets: [WorkoutSessionSet] = []
         updatedSets.reserveCapacity(drafts.count)
         for (index, draft) in drafts.enumerated() {
-            let set = existingByID[draft.id] ?? WorkoutSessionSet(
-                id: draft.id,
-                sessionExerciseID: sessionExerciseID,
-                sessionExercise: exercise
-            )
-
-            if set.modelContext == nil {
+            let set: WorkoutSessionSet
+            if let existingSet = existingByID[draft.id] {
+                set = existingSet
+            } else {
+                set = WorkoutSessionSet(
+                    id: draft.id,
+                    sessionExerciseID: sessionExerciseID,
+                    sessionExercise: exercise
+                )
                 modelContext.insert(set)
+                didMutateExerciseStructure = true
             }
 
-            set.sortOrder = index
-            set.isWarmup = draft.isWarmup
-            set.restSeconds = sanitizedRest(draft.restSeconds)
-            set.targetReps = sanitizedReps(draft.targetReps)
-            set.targetWeight = sanitizedWeight(draft.targetWeight)
-            set.targetLoadUnit = draft.targetLoadUnit
-            set.actualReps = sanitizedReps(draft.actualReps)
-            set.actualWeight = sanitizedWeight(draft.actualWeight)
-            set.actualLoadUnit = draft.actualLoadUnit
-            set.isCompleted = draft.isCompleted
-            set.isLocked = draft.isLocked
-            set.updatedAt = .now
+            let didMutateSet = apply(draft: draft, to: set, sortOrder: index)
+            if didMutateSet {
+                set.updatedAt = now
+            }
             updatedSets.append(set)
         }
 
-        exercise.sets = updatedSets
-        exercise.updatedAt = .now
-        if let parent = exercise.session {
-            parent.updatedAt = .now
+        if didMutateExerciseStructure {
+            exercise.sets = updatedSets
+            exercise.updatedAt = now
         }
 
         try modelContext.save()
@@ -712,5 +717,65 @@ final class WorkoutSessionRepository {
         let chosenReps = set.actualReps ?? set.targetReps
         let chosenUnit = set.actualWeight != nil ? set.actualLoadUnit : set.targetLoadUnit
         return WorkoutPreviousSetSnapshot(reps: chosenReps, weight: chosenWeight, unit: chosenUnit)
+    }
+
+    private func apply(
+        draft: WorkoutSessionSetDraft,
+        to set: WorkoutSessionSet,
+        sortOrder: Int
+    ) -> Bool {
+        let normalizedRest = sanitizedRest(draft.restSeconds)
+        let normalizedTargetReps = sanitizedReps(draft.targetReps)
+        let normalizedTargetWeight = sanitizedWeight(draft.targetWeight)
+        let normalizedActualReps = sanitizedReps(draft.actualReps)
+        let normalizedActualWeight = sanitizedWeight(draft.actualWeight)
+        var didChange = false
+
+        if set.sortOrder != sortOrder {
+            set.sortOrder = sortOrder
+            didChange = true
+        }
+        if set.isWarmup != draft.isWarmup {
+            set.isWarmup = draft.isWarmup
+            didChange = true
+        }
+        if set.restSeconds != normalizedRest {
+            set.restSeconds = normalizedRest
+            didChange = true
+        }
+        if set.targetReps != normalizedTargetReps {
+            set.targetReps = normalizedTargetReps
+            didChange = true
+        }
+        if set.targetWeight != normalizedTargetWeight {
+            set.targetWeight = normalizedTargetWeight
+            didChange = true
+        }
+        if set.targetLoadUnit != draft.targetLoadUnit {
+            set.targetLoadUnit = draft.targetLoadUnit
+            didChange = true
+        }
+        if set.actualReps != normalizedActualReps {
+            set.actualReps = normalizedActualReps
+            didChange = true
+        }
+        if set.actualWeight != normalizedActualWeight {
+            set.actualWeight = normalizedActualWeight
+            didChange = true
+        }
+        if set.actualLoadUnit != draft.actualLoadUnit {
+            set.actualLoadUnit = draft.actualLoadUnit
+            didChange = true
+        }
+        if set.isCompleted != draft.isCompleted {
+            set.isCompleted = draft.isCompleted
+            didChange = true
+        }
+        if set.isLocked != draft.isLocked {
+            set.isLocked = draft.isLocked
+            didChange = true
+        }
+
+        return didChange
     }
 }
