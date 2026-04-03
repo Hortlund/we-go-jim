@@ -479,18 +479,28 @@ final class WorkoutFeedbackCenter {
 
     private let soundPlayer = WorkoutForegroundAlertSoundPlayer()
     private var hapticPatternTask: Task<Void, Never>?
+    private let notificationGenerator = UINotificationFeedbackGenerator()
+    private let mediumImpactGenerator = UIImpactFeedbackGenerator(style: .medium)
+    private let heavyImpactGenerator = UIImpactFeedbackGenerator(style: .heavy)
+    private let rigidImpactGenerator = UIImpactFeedbackGenerator(style: .rigid)
 
-    private init() { }
+    private init() {
+        prepareGenerators()
+    }
 
     func setCompleted() {
         guard !AppRuntimeConfig.isRunningTests else { return }
-        perform(.impact(style: .rigid, intensity: 0.92))
+        runHapticPattern([
+            HapticStep(delay: .zero, command: .impact(style: .heavy, intensity: 1.0)),
+            HapticStep(delay: .milliseconds(70), command: .impact(style: .rigid, intensity: 0.88)),
+        ])
     }
 
     func exerciseCompleted() {
         guard !AppRuntimeConfig.isRunningTests else { return }
         runHapticPattern([
             HapticStep(delay: .zero, command: .notification(.success)),
+            HapticStep(delay: .milliseconds(70), command: .impact(style: .heavy, intensity: 0.96)),
         ])
     }
 
@@ -498,7 +508,8 @@ final class WorkoutFeedbackCenter {
         guard !AppRuntimeConfig.isRunningTests else { return }
         runHapticPattern([
             HapticStep(delay: .zero, command: .notification(.success)),
-            HapticStep(delay: .milliseconds(120), command: .impact(style: .heavy, intensity: 0.88)),
+            HapticStep(delay: .milliseconds(75), command: .impact(style: .heavy, intensity: 1.0)),
+            HapticStep(delay: .milliseconds(95), command: .impact(style: .rigid, intensity: 0.9)),
         ])
     }
 
@@ -509,13 +520,14 @@ final class WorkoutFeedbackCenter {
             runHapticPattern([
                 HapticStep(delay: .zero, command: .vibrate),
                 HapticStep(delay: .zero, command: .notification(.warning)),
-                HapticStep(delay: .milliseconds(180), command: .impact(style: .heavy, intensity: 1.0)),
-                HapticStep(delay: .milliseconds(120), command: .vibrate),
+                HapticStep(delay: .milliseconds(140), command: .impact(style: .heavy, intensity: 1.0)),
+                HapticStep(delay: .milliseconds(90), command: .impact(style: .rigid, intensity: 0.9)),
+                HapticStep(delay: .milliseconds(100), command: .vibrate),
             ])
         } else {
             runHapticPattern([
                 HapticStep(delay: .zero, command: .notification(.warning)),
-                HapticStep(delay: .milliseconds(120), command: .impact(style: .medium, intensity: 0.72)),
+                HapticStep(delay: .milliseconds(90), command: .impact(style: .heavy, intensity: 0.92)),
             ])
         }
     }
@@ -534,22 +546,44 @@ final class WorkoutFeedbackCenter {
             }
 
             self.hapticPatternTask = nil
+            self.prepareGenerators()
         }
     }
 
     private func perform(_ command: HapticCommand) {
         switch command {
         case let .notification(type):
-            let generator = UINotificationFeedbackGenerator()
-            generator.prepare()
-            generator.notificationOccurred(type)
+            notificationGenerator.prepare()
+            notificationGenerator.notificationOccurred(type)
         case let .impact(style, intensity):
-            let generator = UIImpactFeedbackGenerator(style: style)
+            let generator = impactGenerator(for: style)
             generator.prepare()
             generator.impactOccurred(intensity: intensity)
         case .vibrate:
             AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
         }
+    }
+
+    private func impactGenerator(for style: UIImpactFeedbackGenerator.FeedbackStyle) -> UIImpactFeedbackGenerator {
+        switch style {
+        case .medium:
+            return mediumImpactGenerator
+        case .heavy:
+            return heavyImpactGenerator
+        case .rigid:
+            return rigidImpactGenerator
+        case .light, .soft:
+            return UIImpactFeedbackGenerator(style: style)
+        @unknown default:
+            return UIImpactFeedbackGenerator(style: style)
+        }
+    }
+
+    private func prepareGenerators() {
+        notificationGenerator.prepare()
+        mediumImpactGenerator.prepare()
+        heavyImpactGenerator.prepare()
+        rigidImpactGenerator.prepare()
     }
 
     private struct HapticStep {
@@ -590,6 +624,7 @@ private final class WorkoutForegroundAlertSoundPlayer {
     }
 
     func playRestTimerAlert() {
+        guard shouldPlayAlertSound() else { return }
         guard let buffer = makeBuffer(for: restTimerSegments()) else { return }
 
         do {
@@ -613,8 +648,13 @@ private final class WorkoutForegroundAlertSoundPlayer {
 
     private func activateAudioSession() throws {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+        try session.setCategory(.ambient, mode: .default, options: [.mixWithOthers])
         try session.setActive(true)
+    }
+
+    private func shouldPlayAlertSound() -> Bool {
+        let session = AVAudioSession.sharedInstance()
+        return !session.secondaryAudioShouldBeSilencedHint
     }
 
     private func deactivateAudioSessionIfIdle() {

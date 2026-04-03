@@ -38,9 +38,11 @@ struct WorkoutSessionExerciseGridEditor: View {
     @State private var setSwipeRemoving: [UUID: Bool] = [:]
     @State private var repsInputTextBySetID: [UUID: String] = [:]
     @State private var weightInputTextBySetID: [UUID: String] = [:]
+    @State private var pendingDraftChangeNotificationTask: Task<Void, Never>?
     @FocusState private var focusedInput: SetInputFocus?
 
     private let restPresets = [10, 15, 20, 30, 45, 60, 75, 90, 105, 120, 150, 180, 210, 240]
+    private let inputChangeNotificationDebounce = Duration.milliseconds(180)
 
     private struct SetInputFocus: Hashable {
         let setID: UUID
@@ -155,6 +157,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             y: 8
         )
         .onAppear(perform: refreshDisplayRows)
+        .onDisappear(perform: flushPendingDraftChangeNotification)
         .onChange(of: _setDrafts.wrappedValue) { _, _ in
             refreshDisplayRows()
             pruneInputDrafts()
@@ -174,6 +177,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         .onChange(of: focusedInput) { previousFocus, newFocus in
             guard previousFocus != newFocus else { return }
             if let previousFocus {
+                flushPendingDraftChangeNotification()
                 clearInputDraft(for: previousFocus)
             }
         }
@@ -568,21 +572,32 @@ struct WorkoutSessionExerciseGridEditor: View {
             }
 
             if showsSecondaryRow {
-                HStack(alignment: .top, spacing: 10) {
-                    if let statusText = reference.statusText {
-                        progressStatusChip(text: statusText, tone: reference.statusTone)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        Spacer(minLength: 0)
-                    }
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .center, spacing: 10) {
+                        if let statusText = reference.statusText {
+                            progressStatusChip(text: statusText, tone: reference.statusTone)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
 
-                    applyPreviousButton(at: index)
-                        .fixedSize(horizontal: true, vertical: false)
-                        .opacity(canApplyPrevious ? 1 : 0)
-                        .allowsHitTesting(canApplyPrevious)
-                        .accessibilityHidden(!canApplyPrevious)
+                        if canApplyPrevious {
+                            applyPreviousButton(at: index)
+                                .fixedSize(horizontal: true, vertical: false)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        if let statusText = reference.statusText {
+                            progressStatusChip(text: statusText, tone: reference.statusTone)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+
+                        if canApplyPrevious {
+                            applyPreviousButton(at: index)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
             }
         }
         .padding(12)
@@ -605,9 +620,10 @@ struct WorkoutSessionExerciseGridEditor: View {
             Text(value)
                 .font(.subheadline.monospacedDigit().weight(.semibold))
                 .foregroundStyle(tint)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .allowsTightening(true)
+                .lineLimit(2)
+                .minimumScaleFactor(0.82)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .layoutPriority(1)
@@ -617,16 +633,16 @@ struct WorkoutSessionExerciseGridEditor: View {
         Text(text)
             .font(.caption.weight(.semibold))
             .foregroundStyle(progressToneColor(for: tone))
-            .lineLimit(2)
+            .lineLimit(3)
             .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(
-                Capsule()
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(progressToneColor(for: tone).opacity(0.12))
                     .overlay(
-                        Capsule()
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
                             .stroke(progressToneColor(for: tone).opacity(0.22), lineWidth: 1)
                     )
             )
@@ -1169,7 +1185,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                 }
 
                 if didChange {
-                    notifyChanged()
+                    scheduleDraftChangeNotification()
                 }
             }
         )
@@ -1220,7 +1236,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                 }
 
                 if didChange {
-                    notifyChanged()
+                    scheduleDraftChangeNotification()
                 }
             }
         )
@@ -1624,6 +1640,25 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func notifyChanged() {
+        pendingDraftChangeNotificationTask?.cancel()
+        pendingDraftChangeNotificationTask = nil
+        onSetDraftsChanged?(setDrafts)
+    }
+
+    private func scheduleDraftChangeNotification() {
+        pendingDraftChangeNotificationTask?.cancel()
+        pendingDraftChangeNotificationTask = Task { @MainActor in
+            try? await Task.sleep(for: inputChangeNotificationDebounce)
+            guard !Task.isCancelled else { return }
+            pendingDraftChangeNotificationTask = nil
+            onSetDraftsChanged?(setDrafts)
+        }
+    }
+
+    private func flushPendingDraftChangeNotification() {
+        guard pendingDraftChangeNotificationTask != nil else { return }
+        pendingDraftChangeNotificationTask?.cancel()
+        pendingDraftChangeNotificationTask = nil
         onSetDraftsChanged?(setDrafts)
     }
 

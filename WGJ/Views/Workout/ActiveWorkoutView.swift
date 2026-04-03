@@ -12,8 +12,6 @@ struct ActiveWorkoutView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let sessionID: UUID
-    private let guidanceService = TrainingGuidanceService()
-
     @Query private var sessions: [WorkoutSession]
     @Query private var sessionExercises: [WorkoutSessionExercise]
 
@@ -45,7 +43,6 @@ struct ActiveWorkoutView: View {
     @State private var templateFolderID: UUID?
     @State private var saveTemplateFolders: [TemplateFolder] = []
     @State private var preferredLoadUnit: TemplateLoadUnit = .kg
-    @State private var trainingGuidanceEnabled = true
     @State private var isKeyboardVisible = false
 
     @State private var errorMessage = ""
@@ -339,10 +336,7 @@ struct ActiveWorkoutView: View {
             targetRepMin: exercise.targetRepMin,
             targetRepMax: exercise.targetRepMax,
             previousBySetIndex: previousByExerciseID[exerciseID] ?? [:],
-            guidance: activeWorkoutGuidance(
-                for: exercise,
-                drafts: resolvedDrafts(for: exercise)
-            ),
+            guidance: nil,
             preferredLoadUnit: preferredLoadUnit,
             restSeconds: resolvedRest(for: exercise),
             setDrafts: resolvedDrafts(for: exercise),
@@ -434,7 +428,6 @@ struct ActiveWorkoutView: View {
         notesDraft = session.notes
         if let profile = try? ProfileRepository(modelContext: modelContext).currentProfile() {
             preferredLoadUnit = profile.preferredLoadUnit
-            trainingGuidanceEnabled = profile.isTrainingGuidanceEnabled
         }
         if session.templateID == nil {
             templateNameDraft = session.name == "Empty Workout" ? "New Template" : session.name
@@ -762,10 +755,6 @@ struct ActiveWorkoutView: View {
         )
     }
 
-    private var isTrainingGuidanceEnabled: Bool {
-        trainingGuidanceEnabled
-    }
-
     @MainActor
     private func handleDraftsChanged(
         _ drafts: [WorkoutSessionSetDraft],
@@ -799,33 +788,6 @@ struct ActiveWorkoutView: View {
 
     private func isExerciseCompleted(_ drafts: [WorkoutSessionSetDraft]) -> Bool {
         !drafts.isEmpty && drafts.allSatisfy(\.isCompleted)
-    }
-
-    private func activeWorkoutGuidance(
-        for exercise: WorkoutSessionExercise,
-        drafts: [WorkoutSessionSetDraft]
-    ) -> ActiveWorkoutExerciseGuidancePresentation? {
-        guard isTrainingGuidanceEnabled else { return nil }
-
-        let snapshot = TrainingGuidanceCatalogSnapshot(
-            exerciseName: exercise.exerciseNameSnapshot,
-            categoryName: exercise.categorySnapshot,
-            equipmentSummary: "",
-            primaryMuscleNames: exercise.muscleSummarySnapshot
-        )
-        let recommendation = guidanceService.templateRecommendation(for: snapshot)
-        let cue = guidanceService.progressiveOverloadCue(
-            for: snapshot,
-            targetRepMin: exercise.targetRepMin,
-            targetRepMax: exercise.targetRepMax,
-            setDrafts: drafts
-        )
-
-        return ActiveWorkoutExerciseGuidancePresentation.make(
-            recommendation: recommendation,
-            cue: cue,
-            isExerciseCompleted: isExerciseCompleted(drafts)
-        )
     }
 
     @MainActor
