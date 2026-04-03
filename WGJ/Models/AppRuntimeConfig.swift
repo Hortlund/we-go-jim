@@ -273,6 +273,14 @@ final class ActiveWorkoutPresentationState {
     var isActiveWorkoutStripCollapsed = false
 
     func present(sessionID: UUID) {
+        guard
+            activeSessionID != sessionID
+                || !isActiveWorkoutPresented
+                || isActiveWorkoutStripCollapsed
+        else {
+            return
+        }
+
         activeSessionID = sessionID
         isActiveWorkoutPresented = true
         isActiveWorkoutStripCollapsed = false
@@ -283,11 +291,17 @@ final class ActiveWorkoutPresentationState {
             clearPresentation()
             return
         }
+        guard isActiveWorkoutPresented || !isActiveWorkoutStripCollapsed else {
+            return
+        }
         isActiveWorkoutPresented = false
         isActiveWorkoutStripCollapsed = true
     }
 
     func clearPresentation() {
+        guard activeSessionID != nil || isActiveWorkoutPresented || isActiveWorkoutStripCollapsed else {
+            return
+        }
         activeSessionID = nil
         isActiveWorkoutPresented = false
         isActiveWorkoutStripCollapsed = false
@@ -437,10 +451,19 @@ private struct WGJTabActiveKey: EnvironmentKey {
     static let defaultValue = false
 }
 
+private struct WGJActiveWorkoutOverlayBottomInsetKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 0
+}
+
 extension EnvironmentValues {
     var isTabActive: Bool {
         get { self[WGJTabActiveKey.self] }
         set { self[WGJTabActiveKey.self] = newValue }
+    }
+
+    var activeWorkoutOverlayBottomInset: CGFloat {
+        get { self[WGJActiveWorkoutOverlayBottomInsetKey.self] }
+        set { self[WGJActiveWorkoutOverlayBottomInsetKey.self] = newValue }
     }
 }
 

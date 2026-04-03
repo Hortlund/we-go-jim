@@ -445,30 +445,20 @@ struct ActiveWorkoutView: View {
         let currentStamp = exerciseHydrationStamp
         guard currentStamp != loadedExerciseStateStamp else { return }
 
-        let result = WGJPerformance.measure("active-workout.hydrate") { () -> ActiveWorkoutHydrationResult in
+        let result = WGJPerformance.measure("active-workout.hydrate.local") { () -> ActiveWorkoutHydrationResult in
             var loadedDrafts: [UUID: [WorkoutSessionSetDraft]] = [:]
             var loadedRests: [UUID: Int] = [:]
-            var loadedPrevious: [UUID: [Int: WorkoutPreviousSetSnapshot]] = [:]
-            let startedAt = session?.startedAt ?? .now
-            let requestedExerciseUUIDs = Array(Set(sessionExercises.map(\.catalogExerciseUUID)))
-            let previousMaps = (try? sessionRepository.previousSetMaps(
-                forExercises: requestedExerciseUUIDs,
-                before: startedAt,
-                excludingSessionID: sessionID
-            )) ?? [:]
 
             for exercise in sessionExercises {
                 let drafts = makeDrafts(from: exercise)
                 loadedDrafts[exercise.id] = drafts
                 loadedRests[exercise.id] = exercise.restSeconds
-                let base = previousMaps[exercise.catalogExerciseUUID] ?? [:]
-                loadedPrevious[exercise.id] = resolvedPreviousMap(baseMap: base, maxSetCount: drafts.count)
             }
 
             return ActiveWorkoutHydrationResult(
                 draftsByExerciseID: loadedDrafts,
                 restsByExerciseID: loadedRests,
-                previousByExerciseID: loadedPrevious
+                previousByExerciseID: [:]
             )
         }
 
@@ -476,7 +466,7 @@ struct ActiveWorkoutView: View {
         lastPersistedDraftsByExerciseID = result.draftsByExerciseID
         restByExerciseID = result.restsByExerciseID
         lastPersistedRestByExerciseID = result.restsByExerciseID
-        previousByExerciseID = result.previousByExerciseID
+        previousByExerciseID = previousByExerciseID.filter { result.draftsByExerciseID[$0.key] != nil }
         let completedExerciseIDs = Set(
             result.draftsByExerciseID.compactMap { exerciseID, drafts in
                 isExerciseCompleted(drafts) ? exerciseID : nil
@@ -491,6 +481,15 @@ struct ActiveWorkoutView: View {
             )
         )
         loadedExerciseStateStamp = currentStamp
+
+        await Task.yield()
+        guard !Task.isCancelled, currentStamp == exerciseHydrationStamp else { return }
+
+        let loadedPrevious = WGJPerformance.measure("active-workout.hydrate.history") {
+            loadPreviousByExerciseID(using: result.draftsByExerciseID)
+        }
+        guard !Task.isCancelled, currentStamp == exerciseHydrationStamp else { return }
+        previousByExerciseID = loadedPrevious
     }
 
     @MainActor
@@ -569,6 +568,33 @@ struct ActiveWorkoutView: View {
         }
 
         return resolved
+    }
+
+    @MainActor
+    private func loadPreviousByExerciseID(
+        using draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
+    ) -> [UUID: [Int: WorkoutPreviousSetSnapshot]] {
+        let startedAt = session?.startedAt ?? .now
+        let requestedExerciseUUIDs = Array(Set(sessionExercises.map(\.catalogExerciseUUID)))
+        let previousMaps = (try? sessionRepository.previousSetMaps(
+            forExercises: requestedExerciseUUIDs,
+            before: startedAt,
+            excludingSessionID: sessionID
+        )) ?? [:]
+
+        var loadedPrevious: [UUID: [Int: WorkoutPreviousSetSnapshot]] = [:]
+        loadedPrevious.reserveCapacity(sessionExercises.count)
+
+        for exercise in sessionExercises {
+            let drafts = draftsByExerciseID[exercise.id] ?? makeDrafts(from: exercise)
+            let base = previousMaps[exercise.catalogExerciseUUID] ?? [:]
+            loadedPrevious[exercise.id] = resolvedPreviousMap(
+                baseMap: base,
+                maxSetCount: drafts.count
+            )
+        }
+
+        return loadedPrevious
     }
 
     @MainActor

@@ -2,6 +2,10 @@ import SwiftUI
 import SwiftData
 
 struct MainTabView: View {
+    private static let activeWorkoutStripBottomGap: CGFloat = 45
+    private static let activeWorkoutStripFallbackHeight: CGFloat = 64
+    private static let activeWorkoutScrollClearance: CGFloat = 18
+
     @Environment(AppTabState.self) private var tabState
     @Environment(AppNotificationRouter.self) private var notificationRouter
     @Environment(WorkoutCompletionPresentationState.self) private var workoutCompletionPresentationState
@@ -9,6 +13,7 @@ struct MainTabView: View {
     @Environment(RestTimerState.self) private var restTimerState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isKeyboardVisible = false
+    @State private var activeWorkoutStripHeight = Self.activeWorkoutStripFallbackHeight
 
     private var overlayAnimation: Animation {
         WGJMotion.overlayAnimation(reduceMotion: reduceMotion)
@@ -55,6 +60,7 @@ struct MainTabView: View {
                 }
                 .tint(WGJTheme.accentBlue)
                 .wgjTabChrome()
+                .environment(\.activeWorkoutOverlayBottomInset, activeWorkoutOverlayBottomInset)
 
                 overlayChrome(bottomSafeAreaInset: bottomSafeAreaInset)
                     .animation(overlayAnimation, value: activeWorkoutPresentationState.isActiveWorkoutStripCollapsed)
@@ -62,6 +68,9 @@ struct MainTabView: View {
                     .animation(overlayAnimation, value: isKeyboardVisible)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .onPreferenceChange(ActiveWorkoutStripHeightPreferenceKey.self) { newValue in
+                activeWorkoutStripHeight = max(newValue, Self.activeWorkoutStripFallbackHeight)
+            }
             .sheet(isPresented: Binding(
                 get: {
                     activeWorkoutPresentationState.isActiveWorkoutPresented && activeWorkoutPresentationState.activeSessionID != nil
@@ -102,6 +111,17 @@ struct MainTabView: View {
         }
     }
 
+    private var activeWorkoutOverlayBottomInset: CGFloat {
+        guard activeWorkoutPresentationState.activeSessionID != nil,
+              activeWorkoutPresentationState.isActiveWorkoutStripCollapsed,
+              !isKeyboardVisible
+        else {
+            return 0
+        }
+
+        return activeWorkoutStripHeight + Self.activeWorkoutScrollClearance
+    }
+
     private func rootTab<Content: View>(
         _ tab: AppMainTab,
         title: String,
@@ -118,12 +138,23 @@ struct MainTabView: View {
     @ViewBuilder
     private func overlayChrome(bottomSafeAreaInset: CGFloat) -> some View {
         ZStack(alignment: .bottom) {
+            Color.clear
+                .preference(key: ActiveWorkoutStripHeightPreferenceKey.self, value: 0)
+
             if let activeSessionID = activeWorkoutPresentationState.activeSessionID,
                activeWorkoutPresentationState.isActiveWorkoutStripCollapsed,
                !isKeyboardVisible
             {
                 ActiveWorkoutStripView(sessionID: activeSessionID) {
                     activeWorkoutPresentationState.present(sessionID: activeSessionID)
+                }
+                .background {
+                    GeometryReader { geometry in
+                        Color.clear.preference(
+                            key: ActiveWorkoutStripHeightPreferenceKey.self,
+                            value: geometry.size.height
+                        )
+                    }
                 }
                 .padding(.bottom, activeWorkoutStripBottomLift(bottomSafeAreaInset: bottomSafeAreaInset))
                 .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -150,7 +181,7 @@ struct MainTabView: View {
     }
 
     private func activeWorkoutStripBottomLift(bottomSafeAreaInset: CGFloat) -> CGFloat {
-        bottomSafeAreaInset + 45
+        bottomSafeAreaInset + Self.activeWorkoutStripBottomGap
     }
 
     private func popupBottomLift(bottomSafeAreaInset: CGFloat) -> CGFloat {
@@ -158,6 +189,14 @@ struct MainTabView: View {
             return activeWorkoutStripBottomLift(bottomSafeAreaInset: bottomSafeAreaInset) + 82
         }
         return bottomSafeAreaInset + 72
+    }
+}
+
+private struct ActiveWorkoutStripHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
