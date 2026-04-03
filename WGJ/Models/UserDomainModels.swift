@@ -8,6 +8,17 @@ enum TemplateLoadUnit: String, Codable, CaseIterable, Equatable, Identifiable {
 
     var id: String { rawValue }
 
+    var progressiveLoadStep: Double? {
+        switch self {
+        case .kg:
+            return 2.5
+        case .lb:
+            return 5
+        case .bodyweight:
+            return nil
+        }
+    }
+
     var shortLabel: String {
         switch self {
         case .kg:

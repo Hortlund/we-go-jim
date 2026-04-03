@@ -109,6 +109,11 @@ struct TemplateExercisePrescriptionEditor: View {
                 }
 
                 controlsSection
+
+                if let recommendation {
+                    setupTipsSection(recommendation: recommendation)
+                }
+
                 setsSection(presentation: presentation)
             }
         }
@@ -194,6 +199,87 @@ struct TemplateExercisePrescriptionEditor: View {
                 restControl
             }
         }
+    }
+
+    private func setupTipsSection(recommendation: TemplateExerciseRecommendation) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Setup Tips")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(WGJTheme.textSecondary)
+
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 10) {
+                    setupTipCard(
+                        title: "Rep Range",
+                        value: recommendedRepRangeText(recommendation),
+                        detail: repRangeTipDetail(recommendation),
+                        tint: WGJTheme.accentGold
+                    )
+
+                    setupTipCard(
+                        title: "Rest",
+                        value: recommendedRestRangeText(recommendation),
+                        detail: restTipDetail(recommendation),
+                        tint: WGJTheme.accentBlue
+                    )
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    setupTipCard(
+                        title: "Rep Range",
+                        value: recommendedRepRangeText(recommendation),
+                        detail: repRangeTipDetail(recommendation),
+                        tint: WGJTheme.accentGold
+                    )
+
+                    setupTipCard(
+                        title: "Rest",
+                        value: recommendedRestRangeText(recommendation),
+                        detail: restTipDetail(recommendation),
+                        tint: WGJTheme.accentBlue
+                    )
+                }
+            }
+
+            setupTipCard(
+                title: "Set Structure",
+                value: recommendedSetStructureText(recommendation),
+                detail: setStructureTipDetail(recommendation),
+                tint: WGJTheme.accentCyan
+            )
+        }
+    }
+
+    private func setupTipCard(
+        title: String,
+        value: String,
+        detail: String,
+        tint: Color
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title.uppercased())
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(tint)
+
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(WGJTheme.textPrimary)
+
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(WGJTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(tint.opacity(0.09))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(tint.opacity(0.18), lineWidth: 1)
+                )
+        )
     }
 
     private var repRangeControl: some View {
@@ -525,6 +611,85 @@ struct TemplateExercisePrescriptionEditor: View {
         case (nil, nil):
             return "No rep range"
         }
+    }
+
+    private func recommendedRepRangeText(_ recommendation: TemplateExerciseRecommendation) -> String {
+        formattedRepRange(recommendation.suggestedRepRange) + " reps"
+    }
+
+    private func recommendedRestRangeText(_ recommendation: TemplateExerciseRecommendation) -> String {
+        formattedRestRange(recommendation.suggestedRestSeconds)
+    }
+
+    private func recommendedSetStructureText(_ recommendation: TemplateExerciseRecommendation) -> String {
+        let warmups = formattedCountRange(recommendation.suggestedWarmupSets, singular: "warmup", plural: "warmups")
+        let workingSets = formattedCountRange(recommendation.suggestedWorkingSets, singular: "working set", plural: "working sets")
+        return "\(warmups) · \(workingSets)"
+    }
+
+    private func repRangeTipDetail(_ recommendation: TemplateExerciseRecommendation) -> String {
+        switch (targetRepMin, targetRepMax) {
+        case let (min?, max?) where min >= recommendation.suggestedRepRange.lowerBound && max <= recommendation.suggestedRepRange.upperBound:
+            return "Current target \(repRangeSummary) sits inside the usual sweet spot for this lift."
+        case let (min?, max?):
+            let current = min == max ? "\(min) reps" : "\(min)-\(max) reps"
+            return "Current target is \(current). A cleaner starting window here is \(recommendedRepRangeText(recommendation))."
+        case let (min?, nil):
+            return "Current target is \(min)+ reps. A cleaner starting window here is \(recommendedRepRangeText(recommendation))."
+        case let (nil, max?):
+            return "Current target tops out at \(max). A cleaner starting window here is \(recommendedRepRangeText(recommendation))."
+        case (nil, nil):
+            return "Start here if you want the working sets and overload targets to track cleanly."
+        }
+    }
+
+    private func restTipDetail(_ recommendation: TemplateExerciseRecommendation) -> String {
+        let currentRestText = restLabel(for: restSeconds)
+        let recommendedText = recommendedRestRangeText(recommendation)
+
+        if recommendation.suggestedRestSeconds.contains(restSeconds) {
+            return "Current default rest \(currentRestText) sits inside the suggested window."
+        }
+
+        return "Current default rest is \(currentRestText). Suggested window here is \(recommendedText)."
+    }
+
+    private func setStructureTipDetail(_ recommendation: TemplateExerciseRecommendation) -> String {
+        let warmupCount = setDrafts.filter(\.isWarmup).count
+        let workingCount = max(0, setDrafts.count - warmupCount)
+        let currentPlan = "\(warmupCount) warmup\(warmupCount == 1 ? "" : "s") · \(workingCount) working"
+
+        let warmupsOkay = recommendation.suggestedWarmupSets.contains(warmupCount)
+        let workingOkay = recommendation.suggestedWorkingSets.contains(workingCount)
+        if warmupsOkay && workingOkay {
+            return "Current plan \(currentPlan) already lines up well with the usual setup for this lift."
+        }
+
+        return "Current plan is \(currentPlan). Use the warmup and working-set mix above as the default starting structure."
+    }
+
+    private func formattedRepRange(_ range: ClosedRange<Int>) -> String {
+        range.lowerBound == range.upperBound
+            ? "\(range.lowerBound)"
+            : "\(range.lowerBound)-\(range.upperBound)"
+    }
+
+    private func formattedRestRange(_ range: ClosedRange<Int>) -> String {
+        "\(restLabel(for: range.lowerBound))-\(restLabel(for: range.upperBound))"
+    }
+
+    private func formattedCountRange(
+        _ range: ClosedRange<Int>,
+        singular: String,
+        plural: String
+    ) -> String {
+        if range.lowerBound == range.upperBound {
+            let count = range.lowerBound
+            let label = count == 1 ? singular : plural
+            return "\(count) \(label)"
+        }
+
+        return "\(range.lowerBound)-\(range.upperBound) \(plural)"
     }
 
     private func toggleExpanded() {

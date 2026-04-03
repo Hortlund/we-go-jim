@@ -127,7 +127,11 @@ struct TrainingGuidanceServiceTests {
         )
 
         #expect(cue?.direction == .increaseLoad)
-        #expect(cue?.suggestedPercentRange == 2.5...5)
+        #expect(cue?.suggestedNextLoad == 102.5)
+        #expect(cue?.suggestedLoadUnit == .kg)
+        #expect(cue?.suggestedRepRange == 6...8)
+        let increaseWeightText = "\(WGJFormatters.decimalString(102.5)) kg"
+        #expect(cue?.summary == "Last working sets cleared the range. Next time try \(increaseWeightText) and build back to 6-8 reps.")
     }
 
     @Test
@@ -148,7 +152,11 @@ struct TrainingGuidanceServiceTests {
         )
 
         #expect(cue?.direction == .decreaseLoad)
-        #expect(cue?.suggestedPercentRange == 5...10)
+        #expect(cue?.suggestedNextLoad == 137.5)
+        #expect(cue?.suggestedLoadUnit == .kg)
+        #expect(cue?.suggestedRepRange == 5...8)
+        let decreaseWeightText = "\(WGJFormatters.decimalString(137.5)) kg"
+        #expect(cue?.summary == "Last working sets missed the range. Drop to \(decreaseWeightText) and rebuild to 5-8 reps.")
     }
 
     @Test
@@ -169,7 +177,9 @@ struct TrainingGuidanceServiceTests {
         )
 
         #expect(cue?.direction == .stayCourse)
-        #expect(cue?.suggestedPercentRange == nil)
+        #expect(cue?.suggestedNextLoad == 100)
+        #expect(cue?.suggestedLoadUnit == .kg)
+        #expect(cue?.suggestedRepRange == 6...8)
     }
 
     @Test
@@ -254,9 +264,9 @@ struct TrainingGuidanceServiceTests {
             isExerciseCompleted: true
         )
 
-        let expectedRange = "\(WGJFormatters.oneDecimalString(2.5))-5%"
         #expect(presentation.title == "Increase load next time")
-        #expect(presentation.summary == "Add \(expectedRange) next time, or use the smallest clean plate jump.")
+        let nextWeightText = "\(WGJFormatters.decimalString(102.5)) kg"
+        #expect(presentation.summary == "Last working sets cleared the range. Next time try \(nextWeightText) and build back to 6-8 reps.")
         #expect(presentation.tone == .success)
     }
 
@@ -316,7 +326,7 @@ struct TrainingGuidanceServiceTests {
         )
 
         #expect(presentation.title == "Stay here until you own the range")
-        #expect(presentation.summary == "Keep the load steady until your working sets consistently land inside 6-8 reps.")
+        #expect(presentation.summary == "Keep 100 kg until every working set lands in 6-8 reps.")
         #expect(presentation.tone == .accent)
     }
 

@@ -41,7 +41,8 @@ struct WorkoutSetProgressReferenceTests {
             targetRepMax: 10
         )
 
-        #expect(reference?.aimValue == "Small jump above 100 kg")
+        let nextWeightText = WGJFormatters.decimalString(102.5)
+        #expect(reference?.aimValue == "\(nextWeightText) kg x 6-10")
     }
 
     @Test

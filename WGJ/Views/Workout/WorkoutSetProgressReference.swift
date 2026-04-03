@@ -118,11 +118,23 @@ struct WorkoutSetProgressReference: Equatable {
                     return "\(weightText) x \(reps + 1)"
                 }
 
-                return "Small jump above \(weightText)"
+                return nextLoadAim(
+                    from: previous,
+                    repText: "\(targetRepMin)-\(targetRepMax)",
+                    formatWeight: formatWeight
+                )
             }
 
             if let targetReps = draft.targetReps, reps < targetReps {
                 return "\(weightText) x \(targetReps)"
+            }
+
+            if let targetReps = draft.targetReps {
+                return nextLoadAim(
+                    from: previous,
+                    repText: "\(targetReps)",
+                    formatWeight: formatWeight
+                )
             }
 
             return "\(weightText) x \(reps + 1)"
@@ -254,6 +266,23 @@ struct WorkoutSetProgressReference: Equatable {
 
     private static func positiveRepDeltaText(_ delta: Int) -> String {
         "+\(delta) rep\(delta == 1 ? "" : "s")"
+    }
+
+    private static func nextLoadAim(
+        from previous: WorkoutPreviousSetSnapshot,
+        repText: String,
+        formatWeight: (Double) -> String
+    ) -> String {
+        guard
+            let previousWeight = previous.weight,
+            let step = previous.unit.progressiveLoadStep
+        else {
+            let weightText = previous.weight.map { "\(formatWeight($0)) \(previous.unit.shortLabel)" } ?? previous.unit.shortLabel
+            return "Small jump above \(weightText)"
+        }
+
+        let nextWeight = previousWeight + step
+        return "\(formatWeight(nextWeight)) \(previous.unit.shortLabel) x \(repText)"
     }
 
     private static func hasReusableValues(in previous: WorkoutPreviousSetSnapshot) -> Bool {

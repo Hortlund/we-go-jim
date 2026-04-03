@@ -38,7 +38,9 @@ struct ProgressiveOverloadCue: Equatable {
     let title: String
     let summary: String
     let direction: ProgressiveOverloadDirection
-    let suggestedPercentRange: ClosedRange<Double>?
+    let suggestedNextLoad: Double?
+    let suggestedLoadUnit: TemplateLoadUnit?
+    let suggestedRepRange: ClosedRange<Int>?
 }
 
 struct ActiveWorkoutExerciseGuidancePresentation: Equatable {
@@ -58,37 +60,11 @@ struct ActiveWorkoutExerciseGuidancePresentation: Equatable {
                 tone: recommendation.tone
             )
         }
-
-        switch cue.direction {
-        case .increaseLoad:
-            let summary = cue.suggestedPercentRange.map { percentRange in
-                "Add \(formattedPercentRange(percentRange)) next time, or use the smallest clean plate jump."
-            } ?? cue.summary
-            return ActiveWorkoutExerciseGuidancePresentation(
-                title: cue.title,
-                summary: summary,
-                tone: cue.tone
-            )
-        case .decreaseLoad:
-            let summary = cue.suggestedPercentRange.map { percentRange in
-                "Reduce \(formattedPercentRange(percentRange)) next time, or take the smallest clean plate drop."
-            } ?? cue.summary
-            return ActiveWorkoutExerciseGuidancePresentation(
-                title: cue.title,
-                summary: summary,
-                tone: cue.tone
-            )
-        case .stayCourse:
-            return ActiveWorkoutExerciseGuidancePresentation(
-                title: cue.title,
-                summary: cue.summary,
-                tone: cue.tone
-            )
-        }
-    }
-
-    private static func formattedPercentRange(_ range: ClosedRange<Double>) -> String {
-        "\(WGJFormatters.oneDecimalString(range.lowerBound))-\(WGJFormatters.oneDecimalString(range.upperBound))%"
+        return ActiveWorkoutExerciseGuidancePresentation(
+            title: cue.title,
+            summary: cue.summary,
+            tone: cue.tone
+        )
     }
 }
 
@@ -358,15 +334,12 @@ struct TrainingGuidanceService {
         }
 
         let classification = classification(for: exercise)
-        let percentRange = suggestedPercentRange(for: classification)
         let actualReps = qualifyingSets.compactMap(\.actualReps)
+        let repRange = targetRepMin...targetRepMax
+        let referenceSet = qualifyingSets.last
 
         if actualReps.allSatisfy({ $0 > targetRepMax }) {
-            let summary = overloadSummary(
-                prefix: "You beat the top of the range on every working set.",
-                percentRange: percentRange,
-                fallback: "Increase the load next time."
-            )
+            let summary = increaseLoadSummary(referenceSet: referenceSet, repRange: repRange)
 
             return ProgressiveOverloadCue(
                 classification: classification,
@@ -374,16 +347,14 @@ struct TrainingGuidanceService {
                 title: "Increase load next time",
                 summary: summary,
                 direction: .increaseLoad,
-                suggestedPercentRange: percentRange
+                suggestedNextLoad: adjustedLoad(for: referenceSet, direction: .increaseLoad),
+                suggestedLoadUnit: referenceSet?.actualLoadUnit,
+                suggestedRepRange: repRange
             )
         }
 
         if actualReps.allSatisfy({ $0 < targetRepMin }) {
-            let summary = overloadSummary(
-                prefix: "You landed below the bottom of the range on every working set.",
-                percentRange: percentRange,
-                fallback: "Reduce the load next time."
-            )
+            let summary = decreaseLoadSummary(referenceSet: referenceSet, repRange: repRange)
 
             return ProgressiveOverloadCue(
                 classification: classification,
@@ -391,7 +362,9 @@ struct TrainingGuidanceService {
                 title: "Reduce load next time",
                 summary: summary,
                 direction: .decreaseLoad,
-                suggestedPercentRange: percentRange
+                suggestedNextLoad: adjustedLoad(for: referenceSet, direction: .decreaseLoad),
+                suggestedLoadUnit: referenceSet?.actualLoadUnit,
+                suggestedRepRange: repRange
             )
         }
 
@@ -399,9 +372,11 @@ struct TrainingGuidanceService {
             classification: classification,
             tone: .accent,
             title: "Stay here until you own the range",
-            summary: "Keep the load steady until your working sets consistently land inside \(targetRepMin)-\(targetRepMax) reps.",
+            summary: stayCourseSummary(referenceSet: referenceSet, repRange: repRange),
             direction: .stayCourse,
-            suggestedPercentRange: nil
+            suggestedNextLoad: referenceSet?.actualWeight,
+            suggestedLoadUnit: referenceSet?.actualLoadUnit,
+            suggestedRepRange: repRange
         )
     }
 
@@ -451,24 +426,80 @@ struct TrainingGuidanceService {
         keywords.contains { haystack.contains($0) }
     }
 
-    private func suggestedPercentRange(for classification: TrainingExerciseClassification) -> ClosedRange<Double>? {
-        switch classification {
-        case .lowerBodyCompound:
-            return 5...10
-        case .upperBodyCompound, .isolation, .core, .unknown:
-            return 2.5...5
-        case .conditioning:
+    private func adjustedLoad(
+        for referenceSet: WorkoutSessionSetDraft?,
+        direction: ProgressiveOverloadDirection
+    ) -> Double? {
+        guard
+            let referenceSet,
+            let weight = referenceSet.actualWeight,
+            let step = referenceSet.actualLoadUnit.progressiveLoadStep
+        else {
             return nil
+        }
+
+        switch direction {
+        case .increaseLoad:
+            return weight + step
+        case .decreaseLoad:
+            return max(0, weight - step)
+        case .stayCourse:
+            return weight
         }
     }
 
-    private func overloadSummary(prefix: String, percentRange: ClosedRange<Double>?, fallback: String) -> String {
-        guard let percentRange else {
-            return "\(prefix) \(fallback)"
+    private func increaseLoadSummary(
+        referenceSet: WorkoutSessionSetDraft?,
+        repRange: ClosedRange<Int>
+    ) -> String {
+        guard let loadText = adjustedLoadText(for: referenceSet, direction: .increaseLoad) else {
+            return "Last working sets cleared the range. Add load next time and build back to \(repRangeText(repRange))."
         }
 
-        let lowerBound = WGJFormatters.oneDecimalString(percentRange.lowerBound)
-        let upperBound = WGJFormatters.oneDecimalString(percentRange.upperBound)
-        return "\(prefix) Try \(lowerBound)-\(upperBound)% more load, or the smallest available plate jump."
+        return "Last working sets cleared the range. Next time try \(loadText) and build back to \(repRangeText(repRange))."
+    }
+
+    private func decreaseLoadSummary(
+        referenceSet: WorkoutSessionSetDraft?,
+        repRange: ClosedRange<Int>
+    ) -> String {
+        guard let loadText = adjustedLoadText(for: referenceSet, direction: .decreaseLoad) else {
+            return "Last working sets missed the range. Drop the load a touch and rebuild to \(repRangeText(repRange))."
+        }
+
+        return "Last working sets missed the range. Drop to \(loadText) and rebuild to \(repRangeText(repRange))."
+    }
+
+    private func stayCourseSummary(
+        referenceSet: WorkoutSessionSetDraft?,
+        repRange: ClosedRange<Int>
+    ) -> String {
+        guard
+            let referenceSet,
+            let weight = referenceSet.actualWeight
+        else {
+            return "Keep the load steady until your working sets consistently land inside \(repRangeText(repRange))."
+        }
+
+        let loadText = "\(WGJFormatters.decimalString(weight)) \(referenceSet.actualLoadUnit.shortLabel)"
+        return "Keep \(loadText) until every working set lands in \(repRangeText(repRange))."
+    }
+
+    private func adjustedLoadText(
+        for referenceSet: WorkoutSessionSetDraft?,
+        direction: ProgressiveOverloadDirection
+    ) -> String? {
+        guard
+            let referenceSet,
+            let adjustedLoad = adjustedLoad(for: referenceSet, direction: direction)
+        else {
+            return nil
+        }
+
+        return "\(WGJFormatters.decimalString(adjustedLoad)) \(referenceSet.actualLoadUnit.shortLabel)"
+    }
+
+    private func repRangeText(_ repRange: ClosedRange<Int>) -> String {
+        "\(repRange.lowerBound)-\(repRange.upperBound) reps"
     }
 }
