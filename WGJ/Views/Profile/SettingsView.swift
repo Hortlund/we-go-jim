@@ -121,7 +121,7 @@ struct SettingsView: View {
                 .wgjCardContainer()
 
                 VStack(alignment: .leading, spacing: 10) {
-                    WGJSectionHeader("Workout Alerts", subtitle: "Choose how aggressively rest timer alerts interrupt you.")
+                    WGJSectionHeader("Workout Alerts", subtitle: "Choose how noticeable rest timer alerts feel in the app and in the background.")
 
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Rest timer alert style")

@@ -1,4 +1,3 @@
-import AVFoundation
 import AudioToolbox
 import CloudKit
 import Foundation
@@ -162,14 +161,34 @@ extension WorkoutNotificationStyle {
         }
     }
 
-    var usesEnhancedRestTimerFeedback: Bool {
+    // Foreground rest timer feedback stays haptic-only so external audio keeps playing.
+    var foregroundRestTimerAlertPolicy: RestTimerForegroundAlertPolicy {
         switch self {
         case .standard:
-            return false
+            return RestTimerForegroundAlertPolicy(
+                playsSound: false,
+                usesEnhancedHaptics: false
+            )
         case .timeSensitive:
-            return true
+            return RestTimerForegroundAlertPolicy(
+                playsSound: false,
+                usesEnhancedHaptics: true
+            )
         }
     }
+}
+
+struct RestTimerForegroundAlertPolicy: Equatable {
+    let playsSound: Bool
+    let usesEnhancedHaptics: Bool
+}
+
+struct RestTimerNotificationDescriptor: Equatable {
+    let title: String
+    let subtitle: String
+    let body: String
+    let usesDefaultSound: Bool
+    let interruptionLevel: UNNotificationInterruptionLevel
 }
 
 extension Notification.Name {
@@ -489,7 +508,6 @@ struct RestTimerPopup: Identifiable, Equatable {
 final class WorkoutFeedbackCenter {
     static let shared = WorkoutFeedbackCenter()
 
-    private let soundPlayer = WorkoutForegroundAlertSoundPlayer()
     private var hapticPatternTask: Task<Void, Never>?
     private let notificationGenerator = UINotificationFeedbackGenerator()
     private let mediumImpactGenerator = UIImpactFeedbackGenerator(style: .medium)
@@ -527,8 +545,8 @@ final class WorkoutFeedbackCenter {
 
     func restTimerCompleted(style: WorkoutNotificationStyle) {
         guard !AppRuntimeConfig.isRunningTests else { return }
-        if style.usesEnhancedRestTimerFeedback {
-            soundPlayer.playRestTimerAlert()
+        let policy = style.foregroundRestTimerAlertPolicy
+        if policy.usesEnhancedHaptics {
             runHapticPattern([
                 HapticStep(delay: .zero, command: .vibrate),
                 HapticStep(delay: .zero, command: .notification(.warning)),
@@ -610,145 +628,6 @@ final class WorkoutFeedbackCenter {
     }
 }
 
-@MainActor
-private final class WorkoutForegroundAlertSoundPlayer {
-    private enum ToneSegment {
-        case tone(frequency: Double, duration: Double, amplitude: Float)
-        case silence(duration: Double)
-
-        func frameCount(sampleRate: Double) -> Int {
-            switch self {
-            case let .tone(_, duration, _), let .silence(duration):
-                return max(1, Int((duration * sampleRate).rounded()))
-            }
-        }
-    }
-
-    private let sampleRate = 44_100.0
-    private let format: AVAudioFormat
-    private let engine = AVAudioEngine()
-    private let playerNode = AVAudioPlayerNode()
-
-    init() {
-        format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
-        engine.attach(playerNode)
-        engine.connect(playerNode, to: engine.mainMixerNode, format: format)
-    }
-
-    func playRestTimerAlert() {
-        guard shouldPlayAlertSound() else { return }
-        guard let buffer = makeBuffer(for: restTimerSegments()) else { return }
-
-        do {
-            try activateAudioSession()
-            if !engine.isRunning {
-                try engine.start()
-            }
-            playerNode.stop()
-            playerNode.scheduleBuffer(buffer) { [weak self] in
-                Task { @MainActor [weak self] in
-                    self?.deactivateAudioSessionIfIdle()
-                }
-            }
-            playerNode.play()
-        } catch {
-            #if DEBUG
-            print("Foreground alert sound failed: \(error)")
-            #endif
-        }
-    }
-
-    private func activateAudioSession() throws {
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.ambient, mode: .default, options: [.mixWithOthers])
-        try session.setActive(true)
-    }
-
-    private func shouldPlayAlertSound() -> Bool {
-        let session = AVAudioSession.sharedInstance()
-        return !session.secondaryAudioShouldBeSilencedHint && !session.isOtherAudioPlaying
-    }
-
-    private func deactivateAudioSessionIfIdle() {
-        guard !playerNode.isPlaying else { return }
-        playerNode.stop()
-        engine.stop()
-        try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
-    }
-
-    private func restTimerSegments() -> [ToneSegment] {
-        [
-            .tone(frequency: 880, duration: 0.16, amplitude: 0.30),
-            .silence(duration: 0.05),
-            .tone(frequency: 988, duration: 0.16, amplitude: 0.30),
-            .silence(duration: 0.08),
-            .tone(frequency: 1_318, duration: 0.22, amplitude: 0.34),
-        ]
-    }
-
-    private func makeBuffer(for segments: [ToneSegment]) -> AVAudioPCMBuffer? {
-        let totalFrameCount = segments.reduce(0) { partialResult, segment in
-            partialResult + segment.frameCount(sampleRate: sampleRate)
-        }
-        guard totalFrameCount > 0 else { return nil }
-
-        guard let buffer = AVAudioPCMBuffer(
-            pcmFormat: format,
-            frameCapacity: AVAudioFrameCount(totalFrameCount)
-        ) else {
-            return nil
-        }
-
-        buffer.frameLength = AVAudioFrameCount(totalFrameCount)
-        guard let samples = buffer.floatChannelData?[0] else { return nil }
-
-        var writeIndex = 0
-        var phase = 0.0
-
-        for segment in segments {
-            let frameCount = segment.frameCount(sampleRate: sampleRate)
-            switch segment {
-            case let .tone(frequency, _, amplitude):
-                let phaseIncrement = (2.0 * Double.pi * frequency) / sampleRate
-                for frame in 0..<frameCount {
-                    let envelope = envelopeGain(frame: frame, totalFrames: frameCount)
-                    samples[writeIndex] = Float(sin(phase)) * amplitude * envelope
-                    phase += phaseIncrement
-                    if phase >= 2.0 * Double.pi {
-                        phase -= 2.0 * Double.pi
-                    }
-                    writeIndex += 1
-                }
-            case .silence:
-                for _ in 0..<frameCount {
-                    samples[writeIndex] = 0
-                    writeIndex += 1
-                }
-            }
-        }
-
-        return buffer
-    }
-
-    private func envelopeGain(frame: Int, totalFrames: Int) -> Float {
-        guard totalFrames > 4 else { return 1 }
-
-        let rampFrames = min(Int(sampleRate * 0.012), totalFrames / 2)
-        guard rampFrames > 0 else { return 1 }
-
-        if frame < rampFrames {
-            return Float(frame) / Float(rampFrames)
-        }
-
-        let tailStart = totalFrames - rampFrames
-        if frame >= tailStart {
-            return Float(totalFrames - frame) / Float(rampFrames)
-        }
-
-        return 1
-    }
-}
-
 private struct WGJTabActiveKey: EnvironmentKey {
     static let defaultValue = false
 }
@@ -811,12 +690,12 @@ final class RestTimerNotificationManager {
             }
             guard !Task.isCancelled, generation == self.schedulingGeneration else { return }
 
-            let content = UNMutableNotificationContent()
-            content.title = "Rest complete"
-            content.subtitle = exerciseName
-            content.body = "Back for \(setLabel)"
-            content.sound = nil
-            content.interruptionLevel = style.notificationInterruptionLevel
+            let descriptor = Self.notificationDescriptor(
+                exerciseName: exerciseName,
+                setLabel: setLabel,
+                style: style
+            )
+            let content = Self.makeNotificationContent(from: descriptor)
 
             let trigger = UNTimeIntervalNotificationTrigger(
                 timeInterval: TimeInterval(max(1, seconds)),
@@ -846,6 +725,30 @@ final class RestTimerNotificationManager {
         schedulingTask?.cancel()
         schedulingTask = nil
         clearCurrentRestTimerNotifications()
+    }
+
+    static func notificationDescriptor(
+        exerciseName: String,
+        setLabel: String,
+        style: WorkoutNotificationStyle
+    ) -> RestTimerNotificationDescriptor {
+        RestTimerNotificationDescriptor(
+            title: "Rest complete",
+            subtitle: exerciseName,
+            body: "Back for \(setLabel)",
+            usesDefaultSound: true,
+            interruptionLevel: style.notificationInterruptionLevel
+        )
+    }
+
+    private static func makeNotificationContent(from descriptor: RestTimerNotificationDescriptor) -> UNMutableNotificationContent {
+        let content = UNMutableNotificationContent()
+        content.title = descriptor.title
+        content.subtitle = descriptor.subtitle
+        content.body = descriptor.body
+        content.sound = descriptor.usesDefaultSound ? .default : nil
+        content.interruptionLevel = descriptor.interruptionLevel
+        return content
     }
 
     private func clearCurrentRestTimerNotifications() {
@@ -930,22 +833,32 @@ final class AppNotificationManager {
 final class WGJNotificationCenterDelegate: NSObject, UNUserNotificationCenterDelegate {
     static let shared = WGJNotificationCenterDelegate()
 
+    static func presentationOptions(
+        isRestTimerNotification: Bool,
+        isBrosReactionNotification: Bool
+    ) -> UNNotificationPresentationOptions {
+        if isRestTimerNotification {
+            return []
+        }
+
+        if isBrosReactionNotification {
+            return [.banner, .list, .sound, .badge]
+        }
+
+        return [.banner, .list, .sound, .badge]
+    }
+
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        if AppNotificationManager.shared.isRestTimerNotification(notification) {
-            completionHandler([])
-            return
-        }
-
-        if AppNotificationManager.shared.isBrosReactionNotification(notification) {
-            completionHandler([.banner, .list, .sound, .badge])
-            return
-        }
-
-        completionHandler([.banner, .list, .sound, .badge])
+        completionHandler(
+            Self.presentationOptions(
+                isRestTimerNotification: AppNotificationManager.shared.isRestTimerNotification(notification),
+                isBrosReactionNotification: AppNotificationManager.shared.isBrosReactionNotification(notification)
+            )
+        )
     }
 
     func userNotificationCenter(

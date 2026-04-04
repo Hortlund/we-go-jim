@@ -87,9 +87,9 @@ enum WorkoutNotificationStyle: String, Codable, CaseIterable, Equatable, Identif
     var subtitle: String {
         switch self {
         case .standard:
-            return "Uses the normal notification path with lighter in-app feedback."
+            return "Uses the normal system notification sound in the background with lighter in-app haptics."
         case .timeSensitive:
-            return "Uses a stronger in-app alarm and a Time Sensitive system alert when iOS allows it."
+            return "Uses stronger in-app haptics and a Time Sensitive system alert when iOS allows it."
         }
     }
 }
