@@ -428,25 +428,23 @@ final class WorkoutSessionRepository {
         before date: Date,
         excludingSessionID: UUID?
     ) throws -> WorkoutSessionSet? {
-        let factsByExercise = try projectedPreviousFacts(
+        let exercisesByCatalogUUID = try latestPreviousExercises(
             forExercises: [catalogExerciseUUID],
             before: date,
             excludingSessionID: excludingSessionID
         )
 
-        let baseFacts = factsByExercise[catalogExerciseUUID] ?? [:]
-        guard !baseFacts.isEmpty else { return nil }
+        guard let exercise = exercisesByCatalogUUID[catalogExerciseUUID] else {
+            return nil
+        }
 
-        let targetFact = baseFacts[setIndex] ?? baseFacts[baseFacts.keys.max() ?? setIndex]
-        guard let sessionSetID = targetFact?.sessionSetID else { return nil }
+        let orderedSets = (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
+        guard !orderedSets.isEmpty else { return nil }
+        if let exact = orderedSets.first(where: { $0.sortOrder == setIndex }) {
+            return exact
+        }
 
-        let descriptor = FetchDescriptor<WorkoutSessionSet>(
-            predicate: #Predicate { set in
-                set.id == sessionSetID
-            }
-        )
-
-        return try modelContext.fetch(descriptor).first
+        return orderedSets.last
     }
 
     func previousSetMap(
@@ -494,21 +492,18 @@ final class WorkoutSessionRepository {
         )
         guard !requested.isEmpty else { return [:] }
 
-        let factsByExercise = try projectedPreviousFacts(
+        let exercisesByCatalogUUID = try latestPreviousExercises(
             forExercises: Array(requested),
             before: date,
             excludingSessionID: excludingSessionID
         )
 
-        return factsByExercise.mapValues { facts in
-            Dictionary(uniqueKeysWithValues: facts.values.map { fact in
+        return exercisesByCatalogUUID.mapValues { exercise in
+            let orderedSets = (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
+            return Dictionary(uniqueKeysWithValues: orderedSets.map { set in
                 (
-                    fact.setIndex,
-                    WorkoutPreviousSetSnapshot(
-                        reps: fact.reps,
-                        weight: fact.weight,
-                        unit: fact.loadUnit
-                    )
+                    set.sortOrder,
+                    previousSnapshot(from: set)
                 )
             })
         }
@@ -578,12 +573,15 @@ final class WorkoutSessionRepository {
 
     @discardableResult
     func backfillCompletedSessionSummariesIfNeeded() throws -> Int {
-        _ = try historyProjectionRepository.backfillIfNeeded(persistChanges: false)
+        let rebuiltProjectionCount = try historyProjectionRepository.backfillIfNeeded(persistChanges: false)
         let sessions = try completedSessions()
         let staleSessions = sessions.filter {
             $0.summaryMetricsVersion < WorkoutMetricsService.currentSummaryMetricsVersion
         }
         guard !staleSessions.isEmpty else {
+            if rebuiltProjectionCount > 0 {
+                try modelContext.save()
+            }
             return 0
         }
 
@@ -726,34 +724,109 @@ final class WorkoutSessionRepository {
         return WorkoutPreviousSetSnapshot(reps: chosenReps, weight: chosenWeight, unit: chosenUnit)
     }
 
-    private func projectedPreviousFacts(
+    private func latestPreviousExercises(
         forExercises catalogExerciseUUIDs: [String],
         before date: Date,
         excludingSessionID: UUID?
-    ) throws -> [String: [Int: CompletedSetFact]] {
+    ) throws -> [String: WorkoutSessionExercise] {
+        let requested = Set(
+            catalogExerciseUUIDs
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        )
+        guard !requested.isEmpty else { return [:] }
+
+        var latestSessionIDByExercise = try latestProjectedSessionIDs(
+            forExercises: requested,
+            before: date,
+            excludingSessionID: excludingSessionID
+        )
+
+        let unresolved = requested.subtracting(latestSessionIDByExercise.keys)
+        if !unresolved.isEmpty {
+            let fallbackSessionIDs = try latestCanonicalSessionIDs(
+                forExercises: unresolved,
+                before: date,
+                excludingSessionID: excludingSessionID
+            )
+            for (catalogExerciseUUID, sessionID) in fallbackSessionIDs {
+                latestSessionIDByExercise[catalogExerciseUUID] = sessionID
+            }
+        }
+
+        guard !latestSessionIDByExercise.isEmpty else { return [:] }
+
+        var exercisesBySessionID: [UUID: [WorkoutSessionExercise]] = [:]
+        for sessionID in Set(latestSessionIDByExercise.values) {
+            exercisesBySessionID[sessionID] = try sessionExercises(sessionID: sessionID)
+        }
+
+        var resolved: [String: WorkoutSessionExercise] = [:]
+        resolved.reserveCapacity(latestSessionIDByExercise.count)
+
+        for (catalogExerciseUUID, sessionID) in latestSessionIDByExercise {
+            guard let exercises = exercisesBySessionID[sessionID] else { continue }
+            let chosenExercise = exercises
+                .filter { $0.catalogExerciseUUID == catalogExerciseUUID }
+                .sorted { $0.sortOrder < $1.sortOrder }
+                .first
+            if let chosenExercise {
+                resolved[catalogExerciseUUID] = chosenExercise
+            }
+        }
+
+        return resolved
+    }
+
+    private func latestProjectedSessionIDs(
+        forExercises requested: Set<String>,
+        before date: Date,
+        excludingSessionID: UUID?
+    ) throws -> [String: UUID] {
         _ = try historyProjectionRepository.backfillIfNeeded(persistChanges: false)
-        let requested = Set(catalogExerciseUUIDs)
         let facts = try historyProjectionRepository.allFacts()
         var chosenSessionByExercise: [String: UUID] = [:]
-        var results: [String: [Int: CompletedSetFact]] = [:]
 
-        for fact in facts where !fact.isWarmup {
+        for fact in facts {
             guard requested.contains(fact.catalogExerciseUUID) else { continue }
             if let excludingSessionID, fact.sessionID == excludingSessionID {
                 continue
             }
             guard fact.completedAt < date else { continue }
-
-            if let chosenSessionID = chosenSessionByExercise[fact.catalogExerciseUUID] {
-                guard chosenSessionID == fact.sessionID else { continue }
-            } else {
-                chosenSessionByExercise[fact.catalogExerciseUUID] = fact.sessionID
-            }
-
-            results[fact.catalogExerciseUUID, default: [:]][fact.setIndex] = fact
+            guard chosenSessionByExercise[fact.catalogExerciseUUID] == nil else { continue }
+            chosenSessionByExercise[fact.catalogExerciseUUID] = fact.sessionID
         }
 
-        return results
+        return chosenSessionByExercise
+    }
+
+    private func latestCanonicalSessionIDs(
+        forExercises requested: Set<String>,
+        before date: Date,
+        excludingSessionID: UUID?
+    ) throws -> [String: UUID] {
+        guard !requested.isEmpty else { return [:] }
+
+        let sessions = try completedSessions(before: date, excludingSessionID: excludingSessionID)
+        var chosenSessionByExercise: [String: UUID] = [:]
+
+        for session in sessions {
+            for exercise in orderedSessionExercises(session) {
+                guard requested.contains(exercise.catalogExerciseUUID) else { continue }
+                guard chosenSessionByExercise[exercise.catalogExerciseUUID] == nil else { continue }
+                chosenSessionByExercise[exercise.catalogExerciseUUID] = session.id
+            }
+
+            if chosenSessionByExercise.count == requested.count {
+                break
+            }
+        }
+
+        return chosenSessionByExercise
+    }
+
+    private func orderedSessionExercises(_ session: WorkoutSession) -> [WorkoutSessionExercise] {
+        (session.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
     }
 
     private func apply(

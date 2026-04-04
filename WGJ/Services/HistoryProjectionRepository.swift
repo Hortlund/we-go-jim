@@ -199,9 +199,9 @@ final class HistoryProjectionRepository {
                 return nil
             }
 
-            let normalizedWeightKg = WorkoutMetricsPolicy.normalizedLoad(weight, unit: set.actualLoadUnit)
-            let estimatedOneRepMaxKg = WorkoutMetricsPolicy.normalizedLoad(
-                WorkoutMetricsPolicy.estimatedOneRepMax(weight: weight, reps: reps),
+            let normalizedWeightKg = normalizedLoad(weight, unit: set.actualLoadUnit)
+            let estimatedOneRepMaxKg = normalizedLoad(
+                estimatedOneRepMax(weight: weight, reps: reps),
                 unit: set.actualLoadUnit
             )
 
@@ -257,6 +257,23 @@ final class HistoryProjectionRepository {
         }
 
         return latest
+    }
+
+    private func estimatedOneRepMax(weight: Double, reps: Int) -> Double {
+        guard reps > 0 else { return weight }
+        if reps == 1 { return weight }
+        return weight * (1 + (Double(reps) / 30.0))
+    }
+
+    private func normalizedLoad(_ value: Double, unit: TemplateLoadUnit) -> Double {
+        switch unit {
+        case .kg:
+            return value
+        case .lb:
+            return value * 0.45359237
+        case .bodyweight:
+            return value
+        }
     }
 }
 

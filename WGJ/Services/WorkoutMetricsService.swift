@@ -229,7 +229,7 @@ private struct BestSetPresentation: Equatable {
     let displayText: String
 }
 
-enum WorkoutMetricsPolicy {
+private enum WorkoutMetricsPolicy {
     static let summaryMetricsVersion = 1
 
     nonisolated static func estimatedOneRepMax(weight: Double, reps: Int) -> Double {

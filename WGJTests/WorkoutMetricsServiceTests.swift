@@ -408,6 +408,39 @@ struct WorkoutMetricsServiceTests {
     }
 
     @Test
+    func profileDashboardSnapshotCountsCompletedWorkoutsWithoutProjectedSetFacts() throws {
+        let context = try makeInMemoryContext()
+        let sessionRepository = WorkoutSessionRepository(modelContext: context)
+        let metrics = WorkoutMetricsService(modelContext: context)
+
+        let exercise = ExerciseCatalogItem(
+            remoteUUID: "dashboard-no-facts",
+            displayName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(exercise)
+
+        let session = try sessionRepository.createEmptySession(name: "Target Only")
+        try sessionRepository.addExercise(sessionID: session.id, catalogItem: exercise)
+        let sessionExercise = try #require(try sessionRepository.sessionExercises(sessionID: session.id).first)
+        var drafts = try sessionRepository.setDrafts(sessionExerciseID: sessionExercise.id)
+        drafts[1].targetWeight = 100
+        drafts[1].targetReps = 8
+        drafts[1].isCompleted = true
+        try sessionRepository.saveSetDrafts(sessionExerciseID: sessionExercise.id, drafts: drafts)
+        try sessionRepository.finishSession(sessionID: session.id)
+
+        let snapshot = try metrics.profileDashboardSnapshot(prLimit: 5, weeks: 4)
+        #expect(snapshot.overviewStats.totalWorkouts == 1)
+        #expect(snapshot.personalRecords.isEmpty)
+        #expect(snapshot.topExercises.isEmpty)
+        #expect(snapshot.activityDays.count == 42)
+    }
+
+    @Test
     func profileDashboardSnapshotChoosesBestPRAcrossMixedUnits() throws {
         let context = try makeInMemoryContext()
         let sessionRepository = WorkoutSessionRepository(modelContext: context)
