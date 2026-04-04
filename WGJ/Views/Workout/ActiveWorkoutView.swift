@@ -946,9 +946,8 @@ struct ActiveWorkoutView: View {
         pendingCompletionAfterSaveTemplateSheet = false
         exerciseSettingsDraft = nil
         pendingTemplateUpdatePreview = nil
-        workoutCompletionPresentationState.present(sessionID: sessionID)
+        workoutCompletionPresentationState.queueAfterActiveWorkoutDismiss(sessionID: sessionID)
         activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
-        dismiss()
     }
 
     private func minimizeWorkout() {

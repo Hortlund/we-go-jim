@@ -84,7 +84,9 @@ struct MainTabView: View {
                         activeWorkoutPresentationState.collapseActiveWorkout()
                     }
                 }
-            )) {
+            ), onDismiss: {
+                workoutCompletionPresentationState.presentQueuedIfNeeded()
+            }) {
                 if let activeSessionID = activeWorkoutPresentationState.activeSessionID {
                     NavigationStack {
                         ActiveWorkoutView(sessionID: activeSessionID)

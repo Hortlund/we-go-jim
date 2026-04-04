@@ -282,9 +282,21 @@ struct WorkoutCompletionPresentation: Identifiable, Equatable {
 @Observable
 final class WorkoutCompletionPresentationState {
     var presentedWorkout: WorkoutCompletionPresentation?
+    @ObservationIgnored private var queuedWorkout: WorkoutCompletionPresentation?
 
     func present(sessionID: UUID) {
+        queuedWorkout = nil
         presentedWorkout = WorkoutCompletionPresentation(sessionID: sessionID)
+    }
+
+    func queueAfterActiveWorkoutDismiss(sessionID: UUID) {
+        queuedWorkout = WorkoutCompletionPresentation(sessionID: sessionID)
+    }
+
+    func presentQueuedIfNeeded() {
+        guard presentedWorkout == nil, let queuedWorkout else { return }
+        presentedWorkout = queuedWorkout
+        self.queuedWorkout = nil
     }
 
     func dismiss() {
