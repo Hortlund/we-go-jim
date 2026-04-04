@@ -842,10 +842,8 @@ struct ActiveWorkoutView: View {
     ) -> ActiveWorkoutExerciseGuidancePresentation? {
         guard isTrainingGuidanceEnabled else { return nil }
 
-        let recommendation: TemplateExerciseRecommendation
         let cue: ProgressiveOverloadCue?
         if let catalogExercise = catalogMatchesByUUID[exercise.catalogExerciseUUID] {
-            recommendation = guidanceService.templateRecommendation(for: catalogExercise)
             cue = guidanceService.progressiveOverloadCue(
                 for: catalogExercise,
                 targetRepMin: exercise.targetRepMin,
@@ -859,7 +857,6 @@ struct ActiveWorkoutView: View {
                 equipmentSummary: "",
                 primaryMuscleNames: exercise.muscleSummarySnapshot
             )
-            recommendation = guidanceService.templateRecommendation(for: snapshot)
             cue = guidanceService.progressiveOverloadCue(
                 for: snapshot,
                 targetRepMin: exercise.targetRepMin,
@@ -868,11 +865,7 @@ struct ActiveWorkoutView: View {
             )
         }
 
-        return ActiveWorkoutExerciseGuidancePresentation.make(
-            recommendation: recommendation,
-            cue: cue,
-            isExerciseCompleted: isExerciseCompleted(drafts)
-        )
+        return ActiveWorkoutExerciseGuidancePresentation.make(cue: cue)
     }
 
     @MainActor

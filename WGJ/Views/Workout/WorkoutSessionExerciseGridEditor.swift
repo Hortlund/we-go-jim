@@ -310,7 +310,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     private var repRangeControl: some View {
         compactControlCard(
             title: "Rep Range",
-            subtitle: "Template guide for the set entries below.",
+            subtitle: "Target range for the set entries below.",
             tint: WGJTheme.accentGold
         ) {
             HStack(spacing: 10) {
@@ -983,7 +983,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             return category
         }
 
-        return "Log the set values separately from the template target."
+        return "Track the working sets below."
     }
 
     private var headerSummaryChips: some View {

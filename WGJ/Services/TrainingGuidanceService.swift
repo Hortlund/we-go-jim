@@ -49,17 +49,10 @@ struct ActiveWorkoutExerciseGuidancePresentation: Equatable {
     let tone: TrainingGuidanceTone
 
     static func make(
-        recommendation: TemplateExerciseRecommendation,
-        cue: ProgressiveOverloadCue?,
-        isExerciseCompleted: Bool
-    ) -> ActiveWorkoutExerciseGuidancePresentation {
-        guard isExerciseCompleted, let cue else {
-            return ActiveWorkoutExerciseGuidancePresentation(
-                title: recommendation.title,
-                summary: recommendation.summary,
-                tone: recommendation.tone
-            )
-        }
+        cue: ProgressiveOverloadCue?
+    ) -> ActiveWorkoutExerciseGuidancePresentation? {
+        guard let cue else { return nil }
+
         return ActiveWorkoutExerciseGuidancePresentation(
             title: cue.title,
             summary: cue.summary,

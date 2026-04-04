@@ -247,7 +247,6 @@ struct TrainingGuidanceServiceTests {
             equipmentSummary: "Barbell",
             primaryMuscleNames: "Chest"
         )
-        let recommendation = service.templateRecommendation(for: snapshot)
         let cue = service.progressiveOverloadCue(
             for: snapshot,
             targetRepMin: 6,
@@ -258,46 +257,19 @@ struct TrainingGuidanceServiceTests {
             ]
         )
 
-        let presentation = ActiveWorkoutExerciseGuidancePresentation.make(
-            recommendation: recommendation,
-            cue: cue,
-            isExerciseCompleted: true
-        )
+        let presentation = ActiveWorkoutExerciseGuidancePresentation.make(cue: cue)
 
-        #expect(presentation.title == "Increase load next time")
+        #expect(presentation?.title == "Increase load next time")
         let nextWeightText = "\(WGJFormatters.decimalString(102.5)) kg"
-        #expect(presentation.summary == "Last working sets cleared the range. Next time try \(nextWeightText) and build back to 6-8 reps.")
-        #expect(presentation.tone == .success)
+        #expect(presentation?.summary == "Last working sets cleared the range. Next time try \(nextWeightText) and build back to 6-8 reps.")
+        #expect(presentation?.tone == .success)
     }
 
     @Test
-    func activeWorkoutGuidanceUsesRecommendationUntilExerciseCompletes() {
-        let snapshot = TrainingGuidanceCatalogSnapshot(
-            exerciseName: "Bench Press",
-            categoryName: "Chest",
-            equipmentSummary: "Barbell",
-            primaryMuscleNames: "Chest"
-        )
-        let recommendation = service.templateRecommendation(for: snapshot)
-        let cue = service.progressiveOverloadCue(
-            for: snapshot,
-            targetRepMin: 6,
-            targetRepMax: 8,
-            setDrafts: [
-                makeWorkoutSet(reps: 9, weight: 100, completed: true),
-                makeWorkoutSet(reps: 10, weight: 100, completed: false),
-            ]
-        )
+    func activeWorkoutGuidanceIsNilWithoutOverloadCue() {
+        let presentation = ActiveWorkoutExerciseGuidancePresentation.make(cue: nil)
 
-        let presentation = ActiveWorkoutExerciseGuidancePresentation.make(
-            recommendation: recommendation,
-            cue: cue,
-            isExerciseCompleted: false
-        )
-
-        #expect(presentation.title == recommendation.title)
-        #expect(presentation.summary == recommendation.summary)
-        #expect(presentation.tone == recommendation.tone)
+        #expect(presentation == nil)
     }
 
     @Test
@@ -308,7 +280,6 @@ struct TrainingGuidanceServiceTests {
             equipmentSummary: "Barbell",
             primaryMuscleNames: "Chest"
         )
-        let recommendation = service.templateRecommendation(for: snapshot)
         let cue = service.progressiveOverloadCue(
             for: snapshot,
             targetRepMin: 6,
@@ -319,15 +290,11 @@ struct TrainingGuidanceServiceTests {
             ]
         )
 
-        let presentation = ActiveWorkoutExerciseGuidancePresentation.make(
-            recommendation: recommendation,
-            cue: cue,
-            isExerciseCompleted: true
-        )
+        let presentation = ActiveWorkoutExerciseGuidancePresentation.make(cue: cue)
 
-        #expect(presentation.title == "Stay here until you own the range")
-        #expect(presentation.summary == "Keep 100 kg until every working set lands in 6-8 reps.")
-        #expect(presentation.tone == .accent)
+        #expect(presentation?.title == "Stay here until you own the range")
+        #expect(presentation?.summary == "Keep 100 kg until every working set lands in 6-8 reps.")
+        #expect(presentation?.tone == .accent)
     }
 
     @Test
