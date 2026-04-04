@@ -1237,6 +1237,7 @@ struct StartWorkoutTemplatePreview: Identifiable, Equatable {
         let id: UUID
         let sortOrder: Int
         let exerciseName: String
+        let focusArea: String?
         let descriptor: String?
         let targetRepMin: Int?
         let targetRepMax: Int?
@@ -1247,10 +1248,12 @@ struct StartWorkoutTemplatePreview: Identifiable, Equatable {
             id = templateExercise.id
             sortOrder = templateExercise.sortOrder
             exerciseName = templateExercise.exerciseNameSnapshot
-            descriptor = Self.makeDescriptor(
+            let resolvedDescriptor = Self.makeDescriptor(
                 muscleSummary: templateExercise.muscleSummarySnapshot,
                 category: templateExercise.categorySnapshot
             )
+            focusArea = resolvedDescriptor
+            descriptor = resolvedDescriptor
             targetRepMin = templateExercise.targetRepMin
             targetRepMax = templateExercise.targetRepMax
             restSeconds = templateExercise.restSeconds
@@ -1277,7 +1280,7 @@ struct StartWorkoutTemplatePreview: Identifiable, Equatable {
     let notes: String?
     let exercises: [Exercise]
     let totalPlannedSets: Int
-    let averageRestSummary: String?
+    let focusAreaSummary: String?
 
     init(template: WorkoutTemplate) {
         id = template.id
@@ -1294,19 +1297,18 @@ struct StartWorkoutTemplatePreview: Identifiable, Equatable {
             partialResult + exercise.plannedSetCount
         }
 
-        let rests = exercises.map(\.restSeconds).filter { $0 > 0 }
-        if rests.isEmpty {
-            averageRestSummary = nil
+        let focusAreas = Set(exercises.compactMap(\.focusArea).map(Self.normalizedFocusArea))
+        if focusAreas.isEmpty {
+            focusAreaSummary = nil
         } else {
-            let average = Int((Double(rests.reduce(0, +)) / Double(rests.count)).rounded())
-            averageRestSummary = Self.formattedRest(average)
+            focusAreaSummary = "\(focusAreas.count) focus area" + (focusAreas.count == 1 ? "" : "s")
         }
     }
 
-    private static func formattedRest(_ seconds: Int) -> String {
-        let minutes = seconds / 60
-        let remainingSeconds = seconds % 60
-        return "\(minutes):\(String(format: "%02d", remainingSeconds))"
+    private static func normalizedFocusArea(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
     }
 }
 
@@ -1316,30 +1318,10 @@ private struct TemplateStartPreviewSheet: View {
     let onEdit: () -> Void
     let onExport: () -> Void
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dismiss) private var dismiss
-    @State private var showingAllExercises = false
-
-    private let collapsedExerciseCount = 5
 
     private var orderedExercises: [StartWorkoutTemplatePreview.Exercise] {
         preview.exercises
-    }
-
-    private var visibleExercises: [StartWorkoutTemplatePreview.Exercise] {
-        guard orderedExercises.count > collapsedExerciseCount, !showingAllExercises else {
-            return orderedExercises
-        }
-
-        return Array(orderedExercises.prefix(collapsedExerciseCount))
-    }
-
-    private var hasExtraExercises: Bool {
-        orderedExercises.count > collapsedExerciseCount
-    }
-
-    private var hiddenExerciseCount: Int {
-        max(0, orderedExercises.count - visibleExercises.count)
     }
 
     private var totalPlannedSets: Int {
@@ -1361,31 +1343,20 @@ private struct TemplateStartPreviewSheet: View {
                     VStack(alignment: .leading, spacing: 12) {
                         WGJActionHeader(
                             "Exercise Order",
-                            subtitle: hasExtraExercises && !showingAllExercises
-                                ? "Showing the first \(visibleExercises.count) before you start."
-                                : "A light read of the full session."
+                            subtitle: "Everything in order before you start."
                         )
 
                         ScrollView {
                             VStack(spacing: 0) {
-                                ForEach(Array(visibleExercises.enumerated()), id: \.element.id) { index, exercise in
+                                ForEach(Array(orderedExercises.enumerated()), id: \.element.id) { index, exercise in
                                     previewExerciseRow(exercise, index: index + 1)
 
-                                    if index < visibleExercises.count - 1 {
+                                    if index < orderedExercises.count - 1 {
                                         Rectangle()
                                             .fill(WGJTheme.rowDivider.opacity(0.42))
                                             .frame(height: 1)
                                             .padding(.leading, 60)
                                     }
-                                }
-
-                                if hasExtraExercises {
-                                    Rectangle()
-                                        .fill(WGJTheme.rowDivider.opacity(0.42))
-                                        .frame(height: 1)
-                                        .padding(.leading, 60)
-
-                                    expandExercisesButton
                                 }
                             }
                             .wgjCardContainer()
@@ -1508,10 +1479,10 @@ private struct TemplateStartPreviewSheet: View {
             tint: WGJTheme.accentCyan
         )
 
-        if let averageRestSummary = preview.averageRestSummary {
+        if let focusAreaSummary = preview.focusAreaSummary {
             WGJMetricPill(
-                systemImage: "timer",
-                value: averageRestSummary,
+                systemImage: "bolt.fill",
+                value: focusAreaSummary,
                 tint: WGJTheme.accentGold
             )
         }
@@ -1559,40 +1530,7 @@ private struct TemplateStartPreviewSheet: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var expandExercisesButton: some View {
-        Button {
-            withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
-                showingAllExercises.toggle()
-            }
-        } label: {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(showingAllExercises ? "Show less" : "\(hiddenExerciseCount) more exercises")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(WGJTheme.textPrimary)
-
-                    Text(
-                        showingAllExercises
-                            ? "Collapse the longer list and keep this preview tight."
-                            : "Expand to see the full order before you start."
-                    )
-                    .font(.caption)
-                    .foregroundStyle(WGJTheme.textSecondary)
-                }
-
-                Spacer(minLength: 12)
-
-                Image(systemName: showingAllExercises ? "chevron.up" : "chevron.down")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(WGJTheme.accentBlue)
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+        .accessibilityIdentifier("template-preview-exercise-row-\(index)")
     }
 
     private func primaryPrescriptionText(for exercise: StartWorkoutTemplatePreview.Exercise) -> String {

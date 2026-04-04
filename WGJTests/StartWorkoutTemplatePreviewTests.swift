@@ -51,6 +51,7 @@ struct StartWorkoutTemplatePreviewTests {
         #expect(snapshot.exercises.map(\.exerciseName) == ["Shoulder Press", "Incline Press"])
         #expect(snapshot.exercises.map(\.plannedSetCount) == [3, 2])
         #expect(snapshot.exercises.map(\.descriptor) == ["Shoulders", "Upper chest"])
+        #expect(snapshot.focusAreaSummary == "2 focus areas")
     }
 
     @Test
@@ -80,5 +81,43 @@ struct StartWorkoutTemplatePreviewTests {
         #expect(snapshot.exercises.count == 1)
         #expect(snapshot.exercises[0].descriptor == nil)
         #expect(snapshot.exercises[0].plannedSetCount == 3)
+        #expect(snapshot.focusAreaSummary == nil)
+    }
+
+    @Test
+    func snapshotCountsUniqueFocusAreasOnce() {
+        let template = WorkoutTemplate(
+            folderID: UUID(),
+            name: "Chest Day",
+            notes: ""
+        )
+
+        let benchPress = TemplateExercise(
+            templateID: template.id,
+            catalogExerciseUUID: "bench-1",
+            exerciseNameSnapshot: "Bench Press",
+            categorySnapshot: "Chest",
+            muscleSummarySnapshot: "",
+            restSeconds: 120,
+            sortOrder: 0,
+            template: template
+        )
+
+        let inclinePress = TemplateExercise(
+            templateID: template.id,
+            catalogExerciseUUID: "bench-2",
+            exerciseNameSnapshot: "Incline Bench Press",
+            categorySnapshot: "Chest",
+            muscleSummarySnapshot: " ",
+            restSeconds: 150,
+            sortOrder: 1,
+            template: template
+        )
+
+        template.exercises = [benchPress, inclinePress]
+
+        let snapshot = StartWorkoutTemplatePreview(template: template)
+
+        #expect(snapshot.focusAreaSummary == "1 focus area")
     }
 }

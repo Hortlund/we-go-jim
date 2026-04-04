@@ -138,6 +138,83 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testTemplatePreviewShowsAllExercisesByDefault() throws {
+        let app = launchApp(launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Full Preview Template",
+                notes: "Make the whole session visible up front.",
+                exercises: [
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "full-preview-1",
+                        exerciseNameSnapshot: "Bench Press",
+                        categorySnapshot: "Chest",
+                        muscleSummarySnapshot: "Chest",
+                        targetRepMin: 6,
+                        targetRepMax: 8,
+                        restSeconds: 120,
+                        sets: [templatePayloadSet(targetReps: 6, targetWeight: 100, loadUnit: "kg", restSeconds: 120, isWarmup: false)]
+                    ),
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "full-preview-2",
+                        exerciseNameSnapshot: "Incline Press",
+                        categorySnapshot: "Chest",
+                        muscleSummarySnapshot: "Upper chest",
+                        targetRepMin: 8,
+                        targetRepMax: 10,
+                        restSeconds: 90,
+                        sets: [templatePayloadSet(targetReps: 8, targetWeight: 80, loadUnit: "kg", restSeconds: 90, isWarmup: false)]
+                    ),
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "full-preview-3",
+                        exerciseNameSnapshot: "Shoulder Press",
+                        categorySnapshot: "Shoulders",
+                        muscleSummarySnapshot: "Front delts",
+                        targetRepMin: 8,
+                        targetRepMax: 10,
+                        restSeconds: 90,
+                        sets: [templatePayloadSet(targetReps: 8, targetWeight: 50, loadUnit: "kg", restSeconds: 90, isWarmup: false)]
+                    ),
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "full-preview-4",
+                        exerciseNameSnapshot: "Cable Fly",
+                        categorySnapshot: "Chest",
+                        muscleSummarySnapshot: "Chest",
+                        targetRepMin: 12,
+                        targetRepMax: 15,
+                        restSeconds: 60,
+                        sets: [templatePayloadSet(targetReps: 12, targetWeight: 20, loadUnit: "kg", restSeconds: 60, isWarmup: false)]
+                    ),
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "full-preview-5",
+                        exerciseNameSnapshot: "Lateral Raise",
+                        categorySnapshot: "Shoulders",
+                        muscleSummarySnapshot: "Side delts",
+                        targetRepMin: 12,
+                        targetRepMax: 15,
+                        restSeconds: 60,
+                        sets: [templatePayloadSet(targetReps: 12, targetWeight: 12, loadUnit: "kg", restSeconds: 60, isWarmup: false)]
+                    ),
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "full-preview-6",
+                        exerciseNameSnapshot: "Triceps Pushdown",
+                        categorySnapshot: "Arms",
+                        muscleSummarySnapshot: "Triceps",
+                        targetRepMin: 10,
+                        targetRepMax: 12,
+                        restSeconds: 60,
+                        sets: [templatePayloadSet(targetReps: 10, targetWeight: 35, loadUnit: "kg", restSeconds: 60, isWarmup: false)]
+                    ),
+                ]
+            ),
+        ])
+
+        let previewSheet = identifiedElement("template-preview-sheet", in: app)
+        XCTAssertTrue(previewSheet.waitForExistence(timeout: 5))
+        XCTAssertTrue(identifiedElement("template-preview-exercise-row-6", in: app).waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Triceps Pushdown"].exists)
+    }
+
+    @MainActor
     func testSettingsLegalSupportNavigation() throws {
         let app = launchApp()
 
