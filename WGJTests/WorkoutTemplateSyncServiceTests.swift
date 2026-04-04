@@ -12,13 +12,11 @@ struct WorkoutTemplateSyncServiceTests {
         let sessionRepository = WorkoutSessionRepository(modelContext: context)
         let syncService = WorkoutTemplateSyncService(modelContext: context)
 
-        let bench = ExerciseCatalogItem(
+        let bench = catalogItem(
             remoteUUID: "sync-bench-1",
             displayName: "Bench Press",
             categoryName: "Chest",
-            equipmentSummary: "Barbell",
-            isCurated: true,
-            sourceName: "seed"
+            equipmentSummary: "Barbell"
         )
         context.insert(bench)
 
@@ -43,7 +41,7 @@ struct WorkoutTemplateSyncServiceTests {
         )
 
         let session = try sessionRepository.createSessionFromTemplate(templateID: template.id)
-        let exercise = try sessionRepository.sessionExercises(sessionID: session.id).first!
+        let exercise = try #require(try sessionRepository.sessionExercises(sessionID: session.id).first)
         var drafts = try sessionRepository.setDrafts(sessionExerciseID: exercise.id)
         drafts[0].actualWeight = 102.5
         drafts[0].actualReps = 7
@@ -55,19 +53,17 @@ struct WorkoutTemplateSyncServiceTests {
     }
 
     @Test
-    func previewDetectsTemplateOwnedChanges() throws {
+    func previewIncludesEditedSettingDetailsForRepRangeRestAndSetLayout() throws {
         let context = try makeInMemoryContext()
         let templateRepository = TemplateRepository(modelContext: context)
         let sessionRepository = WorkoutSessionRepository(modelContext: context)
         let syncService = WorkoutTemplateSyncService(modelContext: context)
 
-        let row = ExerciseCatalogItem(
+        let row = catalogItem(
             remoteUUID: "sync-row-1",
             displayName: "Barbell Row",
             categoryName: "Back",
-            equipmentSummary: "Barbell",
-            isCurated: true,
-            sourceName: "seed"
+            equipmentSummary: "Barbell"
         )
         context.insert(row)
 
@@ -92,31 +88,105 @@ struct WorkoutTemplateSyncServiceTests {
         )
 
         let session = try sessionRepository.createSessionFromTemplate(templateID: template.id)
-        let exercise = try sessionRepository.sessionExercises(sessionID: session.id).first!
+        let exercise = try #require(try sessionRepository.sessionExercises(sessionID: session.id).first)
         try sessionRepository.updateExerciseRepRange(sessionExerciseID: exercise.id, minReps: 6, maxReps: 8)
         try sessionRepository.updateExerciseRest(sessionExerciseID: exercise.id, restSeconds: 150)
         try sessionRepository.addSet(sessionExerciseID: exercise.id)
         try sessionRepository.finishSession(sessionID: session.id)
 
-        let preview = try syncService.previewTemplateUpdate(forSessionID: session.id)
-        #expect(preview?.changedExerciseCount == 1)
-        #expect(preview?.summary.contains("1 exercise") == true)
+        let preview = try #require(try syncService.previewTemplateUpdate(forSessionID: session.id))
+        #expect(preview.addedExercises.isEmpty)
+        #expect(preview.removedExercises.isEmpty)
+        #expect(preview.reorderedExercises.isEmpty)
+        #expect(preview.editedExercises.count == 1)
+        #expect(preview.summary.contains("edited exercise"))
+
+        let edited = try #require(preview.editedExercises.first)
+        #expect(edited.changes.contains(where: { $0.contains("Rep range") }))
+        #expect(edited.changes.contains(where: { $0.contains("Rest") }))
+        #expect(edited.changes.contains(where: { $0.contains("Set count") }))
     }
 
     @Test
-    func applyTemplateUpdateUsesLoggedActualValues() throws {
+    func previewTreatsTemplateSwapAsRemoveAddAndReorder() throws {
         let context = try makeInMemoryContext()
         let templateRepository = TemplateRepository(modelContext: context)
         let sessionRepository = WorkoutSessionRepository(modelContext: context)
         let syncService = WorkoutTemplateSyncService(modelContext: context)
 
-        let squat = ExerciseCatalogItem(
-            remoteUUID: "sync-squat-1",
+        let bench = catalogItem(
+            remoteUUID: "sync-bench-structure",
+            displayName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell"
+        )
+        let row = catalogItem(
+            remoteUUID: "sync-row-structure",
+            displayName: "Barbell Row",
+            categoryName: "Back",
+            equipmentSummary: "Barbell"
+        )
+        let squat = catalogItem(
+            remoteUUID: "sync-squat-structure",
             displayName: "Back Squat",
             categoryName: "Legs",
-            equipmentSummary: "Barbell",
-            isCurated: true,
-            sourceName: "seed"
+            equipmentSummary: "Barbell"
+        )
+        let curl = catalogItem(
+            remoteUUID: "sync-curl-structure",
+            displayName: "Hammer Curl",
+            categoryName: "Arms",
+            equipmentSummary: "Dumbbell"
+        )
+        context.insert(bench)
+        context.insert(row)
+        context.insert(squat)
+        context.insert(curl)
+
+        let template = try makeTemplate(
+            name: "Full Body",
+            exercises: [
+                draft(for: bench, minReps: 6, maxReps: 8, restSeconds: 120, targetWeight: 100),
+                draft(for: row, minReps: 8, maxReps: 10, restSeconds: 120, targetWeight: 80),
+                draft(for: squat, minReps: 5, maxReps: 8, restSeconds: 180, targetWeight: 140),
+            ],
+            repository: templateRepository
+        )
+
+        let session = try sessionRepository.createSessionFromTemplate(templateID: template.id)
+        let exercises = try sessionRepository.sessionExercises(sessionID: session.id)
+        let benchExercise = try #require(exercises.first(where: { $0.catalogExerciseUUID == bench.remoteUUID }))
+        let rowExercise = try #require(exercises.first(where: { $0.catalogExerciseUUID == row.remoteUUID }))
+        let squatExercise = try #require(exercises.first(where: { $0.catalogExerciseUUID == squat.remoteUUID }))
+
+        try sessionRepository.removeExercise(sessionID: session.id, sessionExerciseID: benchExercise.id)
+        try sessionRepository.addExercise(sessionID: session.id, catalogItem: curl)
+
+        rowExercise.sortOrder = 1
+        squatExercise.sortOrder = 0
+        try context.save()
+        try sessionRepository.finishSession(sessionID: session.id)
+
+        let preview = try #require(try syncService.previewTemplateUpdate(forSessionID: session.id))
+        #expect(preview.addedExercises.map(\.catalogExerciseUUID) == [curl.remoteUUID])
+        #expect(preview.removedExercises.map(\.catalogExerciseUUID) == [bench.remoteUUID])
+        #expect(preview.reorderedExercises.count == 2)
+        #expect(preview.reorderedExercises.contains(where: { $0.catalogExerciseUUID == row.remoteUUID }))
+        #expect(preview.reorderedExercises.contains(where: { $0.catalogExerciseUUID == squat.remoteUUID }))
+    }
+
+    @Test
+    func applyTemplateUpdateKeepsActualLogsOutOfTemplateTargets() throws {
+        let context = try makeInMemoryContext()
+        let templateRepository = TemplateRepository(modelContext: context)
+        let sessionRepository = WorkoutSessionRepository(modelContext: context)
+        let syncService = WorkoutTemplateSyncService(modelContext: context)
+
+        let squat = catalogItem(
+            remoteUUID: "sync-squat-targets",
+            displayName: "Back Squat",
+            categoryName: "Legs",
+            equipmentSummary: "Barbell"
         )
         context.insert(squat)
 
@@ -141,7 +211,7 @@ struct WorkoutTemplateSyncServiceTests {
         )
 
         let session = try sessionRepository.createSessionFromTemplate(templateID: template.id)
-        let exercise = try sessionRepository.sessionExercises(sessionID: session.id).first!
+        let exercise = try #require(try sessionRepository.sessionExercises(sessionID: session.id).first)
         try sessionRepository.updateExerciseRest(sessionExerciseID: exercise.id, restSeconds: 210)
         var drafts = try sessionRepository.setDrafts(sessionExerciseID: exercise.id)
         drafts[1].actualWeight = 165
@@ -150,48 +220,41 @@ struct WorkoutTemplateSyncServiceTests {
         try sessionRepository.saveSetDrafts(sessionExerciseID: exercise.id, drafts: drafts)
         try sessionRepository.finishSession(sessionID: session.id)
 
-        let preview = try syncService.previewTemplateUpdate(forSessionID: session.id)
-        #expect(preview != nil)
-        try syncService.applyTemplateUpdate(try #require(preview))
+        let preview = try #require(try syncService.previewTemplateUpdate(forSessionID: session.id))
+        try syncService.applyTemplateUpdate(preview)
 
-        let templateExercise = try templateRepository.exercises(in: template.id).first
-        let updatedSetDrafts = try templateExercise.map { try templateRepository.setDrafts(for: $0.id) } ?? []
+        let templateExercise = try #require(try templateRepository.exercises(in: template.id).first)
+        let updatedSetDrafts = try templateRepository.setDrafts(for: templateExercise.id)
 
-        #expect(templateExercise?.restSeconds == 210)
-        #expect(updatedSetDrafts[1].targetWeight == 165)
-        #expect(updatedSetDrafts[1].targetReps == 6)
+        #expect(templateExercise.restSeconds == 210)
+        #expect(updatedSetDrafts[1].targetWeight == 160)
+        #expect(updatedSetDrafts[1].targetReps == 5)
     }
 
     @Test
-    func applyTemplateUpdateDoesNotMutateTemplateRoster() throws {
+    func applyTemplateUpdateMutatesRosterAndPreservesMatchedExerciseIdentity() throws {
         let context = try makeInMemoryContext()
         let templateRepository = TemplateRepository(modelContext: context)
         let sessionRepository = WorkoutSessionRepository(modelContext: context)
         let syncService = WorkoutTemplateSyncService(modelContext: context)
 
-        let bench = ExerciseCatalogItem(
-            remoteUUID: "sync-bench-2",
+        let bench = catalogItem(
+            remoteUUID: "sync-bench-apply",
             displayName: "Bench Press",
             categoryName: "Chest",
-            equipmentSummary: "Barbell",
-            isCurated: true,
-            sourceName: "seed"
+            equipmentSummary: "Barbell"
         )
-        let row = ExerciseCatalogItem(
-            remoteUUID: "sync-row-2",
+        let row = catalogItem(
+            remoteUUID: "sync-row-apply",
             displayName: "Seated Row",
             categoryName: "Back",
-            equipmentSummary: "Cable",
-            isCurated: true,
-            sourceName: "seed"
+            equipmentSummary: "Cable"
         )
-        let curl = ExerciseCatalogItem(
-            remoteUUID: "sync-curl-2",
-            displayName: "Curl",
+        let curl = catalogItem(
+            remoteUUID: "sync-curl-apply",
+            displayName: "Hammer Curl",
             categoryName: "Arms",
-            equipmentSummary: "Dumbbell",
-            isCurated: true,
-            sourceName: "seed"
+            equipmentSummary: "Dumbbell"
         )
         context.insert(bench)
         context.insert(row)
@@ -200,43 +263,85 @@ struct WorkoutTemplateSyncServiceTests {
         let template = try makeTemplate(
             name: "Upper",
             exercises: [
-                TemplateExerciseDraft(
-                    catalogExerciseUUID: bench.remoteUUID,
-                    exerciseNameSnapshot: bench.displayName,
-                    categorySnapshot: bench.categoryName,
-                    muscleSummarySnapshot: bench.primaryMuscleNames,
-                    targetRepMin: 6,
-                    targetRepMax: 8,
-                    restSeconds: 120,
-                    setDrafts: [TemplateExerciseSetDraft(targetReps: 6, targetWeight: 100, loadUnit: .kg, restSeconds: 120)]
-                ),
-                TemplateExerciseDraft(
-                    catalogExerciseUUID: row.remoteUUID,
-                    exerciseNameSnapshot: row.displayName,
-                    categorySnapshot: row.categoryName,
-                    muscleSummarySnapshot: row.primaryMuscleNames,
-                    targetRepMin: 8,
-                    targetRepMax: 10,
-                    restSeconds: 90,
-                    setDrafts: [TemplateExerciseSetDraft(targetReps: 10, targetWeight: 60, loadUnit: .kg, restSeconds: 90)]
-                ),
+                draft(for: bench, minReps: 6, maxReps: 8, restSeconds: 120, targetWeight: 100),
+                draft(for: row, minReps: 8, maxReps: 10, restSeconds: 90, targetWeight: 60),
+            ],
+            repository: templateRepository
+        )
+        let originalExercises = try templateRepository.exercises(in: template.id)
+        let originalRowID = try #require(originalExercises.first(where: { $0.catalogExerciseUUID == row.remoteUUID })).id
+
+        let session = try sessionRepository.createSessionFromTemplate(templateID: template.id)
+        let exercises = try sessionRepository.sessionExercises(sessionID: session.id)
+        let benchExercise = try #require(exercises.first(where: { $0.catalogExerciseUUID == bench.remoteUUID }))
+        let rowExercise = try #require(exercises.first(where: { $0.catalogExerciseUUID == row.remoteUUID }))
+
+        try sessionRepository.removeExercise(sessionID: session.id, sessionExerciseID: benchExercise.id)
+        try sessionRepository.addExercise(sessionID: session.id, catalogItem: curl)
+        try sessionRepository.updateExerciseRest(sessionExerciseID: rowExercise.id, restSeconds: 150)
+
+        let refreshedExercises = try sessionRepository.sessionExercises(sessionID: session.id)
+        let curlExercise = try #require(refreshedExercises.first(where: { $0.catalogExerciseUUID == curl.remoteUUID }))
+        rowExercise.sortOrder = 0
+        curlExercise.sortOrder = 1
+        try context.save()
+        try sessionRepository.finishSession(sessionID: session.id)
+
+        let preview = try #require(try syncService.previewTemplateUpdate(forSessionID: session.id))
+        try syncService.applyTemplateUpdate(preview)
+
+        let updatedExercises = try templateRepository.exercises(in: template.id)
+        #expect(updatedExercises.map(\.catalogExerciseUUID) == [row.remoteUUID, curl.remoteUUID])
+        let updatedRow = try #require(updatedExercises.first(where: { $0.catalogExerciseUUID == row.remoteUUID }))
+        #expect(updatedRow.id == originalRowID)
+        #expect(updatedRow.restSeconds == 150)
+    }
+
+    @Test
+    func applyTemplateUpdatePreservesMatchedExerciseOrderChanges() throws {
+        let context = try makeInMemoryContext()
+        let templateRepository = TemplateRepository(modelContext: context)
+        let sessionRepository = WorkoutSessionRepository(modelContext: context)
+        let syncService = WorkoutTemplateSyncService(modelContext: context)
+
+        let bench = catalogItem(
+            remoteUUID: "sync-bench-order",
+            displayName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell"
+        )
+        let row = catalogItem(
+            remoteUUID: "sync-row-order",
+            displayName: "Barbell Row",
+            categoryName: "Back",
+            equipmentSummary: "Barbell"
+        )
+        context.insert(bench)
+        context.insert(row)
+
+        let template = try makeTemplate(
+            name: "Push Pull",
+            exercises: [
+                draft(for: bench, minReps: 6, maxReps: 8, restSeconds: 120, targetWeight: 100),
+                draft(for: row, minReps: 8, maxReps: 10, restSeconds: 120, targetWeight: 80),
             ],
             repository: templateRepository
         )
 
         let session = try sessionRepository.createSessionFromTemplate(templateID: template.id)
-        let benchExercise = try #require(try sessionRepository.sessionExercises(sessionID: session.id).first(where: { $0.catalogExerciseUUID == bench.remoteUUID }))
-        try sessionRepository.updateExerciseRest(sessionExerciseID: benchExercise.id, restSeconds: 150)
-        try sessionRepository.addExercise(sessionID: session.id, catalogItem: curl)
+        let exercises = try sessionRepository.sessionExercises(sessionID: session.id)
+        let benchExercise = try #require(exercises.first(where: { $0.catalogExerciseUUID == bench.remoteUUID }))
+        let rowExercise = try #require(exercises.first(where: { $0.catalogExerciseUUID == row.remoteUUID }))
+        benchExercise.sortOrder = 1
+        rowExercise.sortOrder = 0
+        try context.save()
         try sessionRepository.finishSession(sessionID: session.id)
 
-        let preview = try syncService.previewTemplateUpdate(forSessionID: session.id)
-        #expect(preview?.changedExerciseCount == 1)
-        try syncService.applyTemplateUpdate(try #require(preview))
+        let preview = try #require(try syncService.previewTemplateUpdate(forSessionID: session.id))
+        try syncService.applyTemplateUpdate(preview)
 
         let updatedExercises = try templateRepository.exercises(in: template.id)
-        #expect(updatedExercises.count == 2)
-        #expect(Set(updatedExercises.map(\.catalogExerciseUUID)) == Set([bench.remoteUUID, row.remoteUUID]))
+        #expect(updatedExercises.map(\.catalogExerciseUUID) == [row.remoteUUID, bench.remoteUUID])
     }
 
     private func makeTemplate(
@@ -247,6 +352,49 @@ struct WorkoutTemplateSyncServiceTests {
         let template = try repository.createTemplate(name: name, notes: "")
         try repository.setExercises(templateID: template.id, drafts: exercises)
         return template
+    }
+
+    private func draft(
+        for item: ExerciseCatalogItem,
+        minReps: Int?,
+        maxReps: Int?,
+        restSeconds: Int,
+        targetWeight: Double
+    ) -> TemplateExerciseDraft {
+        TemplateExerciseDraft(
+            catalogExerciseUUID: item.remoteUUID,
+            exerciseNameSnapshot: item.displayName,
+            categorySnapshot: item.categoryName,
+            muscleSummarySnapshot: item.primaryMuscleNames,
+            targetRepMin: minReps,
+            targetRepMax: maxReps,
+            restSeconds: restSeconds,
+            setDrafts: [
+                TemplateExerciseSetDraft(
+                    targetReps: minReps,
+                    targetWeight: targetWeight,
+                    loadUnit: .kg,
+                    restSeconds: restSeconds,
+                    isWarmup: true
+                ),
+            ]
+        )
+    }
+
+    private func catalogItem(
+        remoteUUID: String,
+        displayName: String,
+        categoryName: String,
+        equipmentSummary: String
+    ) -> ExerciseCatalogItem {
+        ExerciseCatalogItem(
+            remoteUUID: remoteUUID,
+            displayName: displayName,
+            categoryName: categoryName,
+            equipmentSummary: equipmentSummary,
+            isCurated: true,
+            sourceName: "seed"
+        )
     }
 
     private func makeInMemoryContext() throws -> ModelContext {

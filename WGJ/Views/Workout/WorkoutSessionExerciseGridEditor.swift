@@ -449,7 +449,7 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func setCard(_ row: WorkoutSessionExerciseSetRowDisplaySnapshot) -> some View {
         let set = row.set
-        let progressReference = row.progressReference
+        let inlineHintPresentation = row.inlineHintPresentation
         let personalRecordKinds = personalRecordKindsBySetID[row.id] ?? []
         let hasPersonalRecord = !personalRecordKinds.isEmpty
 
@@ -477,7 +477,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                         }
                     }
 
-                    if !manualCompletionMode || progressReference == nil {
+                    if !manualCompletionMode || inlineHintPresentation == nil {
                         Text(row.previousSummary)
                             .font(.caption)
                             .foregroundStyle(WGJTheme.textSecondary)
@@ -502,10 +502,6 @@ struct WorkoutSessionExerciseGridEditor: View {
                 setMenu(at: row.index)
             }
 
-            if manualCompletionMode, let progressReference {
-                progressReferenceStrip(progressReference, at: row.index)
-            }
-
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .top, spacing: 12) {
                     metricField(title: "Weight", supporting: row.targetWeightText) {
@@ -528,6 +524,10 @@ struct WorkoutSessionExerciseGridEditor: View {
                 }
             }
 
+            if manualCompletionMode, let inlineHintPresentation {
+                inlineHintRow(inlineHintPresentation, at: row.index)
+            }
+
             if manualCompletionMode {
                 completionRow(for: row)
             }
@@ -544,102 +544,54 @@ struct WorkoutSessionExerciseGridEditor: View {
         )
     }
 
-    private func progressReferenceStrip(_ reference: WorkoutSetProgressReference, at index: Int) -> some View {
-        let canApplyPrevious = reference.canReusePrevious && !setDrafts[index].isLocked
-        let showsSecondaryRow = canApplyPrevious || reference.statusText != nil
+    private func inlineHintRow(_ presentation: WorkoutSetInlineHintPresentation, at index: Int) -> some View {
+        let canApplyPrevious = presentation.canApplyPrevious && !setDrafts[index].isLocked
 
-        return VStack(alignment: .leading, spacing: 10) {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 12) {
-                    progressReferenceMetric(
-                        title: "Last",
-                        value: reference.lastValue,
-                        tint: WGJTheme.textPrimary
-                    )
+        return ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 8) {
+                    inlineHintAim(presentation.aimText)
 
-                    Rectangle()
-                        .fill(WGJTheme.rowDivider)
-                        .frame(width: 1)
-                        .padding(.vertical, 2)
-
-                    progressReferenceMetric(
-                        title: "Aim",
-                        value: reference.aimValue,
-                        tint: WGJTheme.accentBlue
-                    )
+                    if let statusText = presentation.statusText {
+                        progressStatusChip(text: statusText, tone: presentation.statusTone)
+                    }
                 }
 
-                VStack(alignment: .leading, spacing: 10) {
-                    progressReferenceMetric(
-                        title: "Last",
-                        value: reference.lastValue,
-                        tint: WGJTheme.textPrimary
-                    )
+                Spacer(minLength: 8)
 
-                    progressReferenceMetric(
-                        title: "Aim",
-                        value: reference.aimValue,
-                        tint: WGJTheme.accentBlue
-                    )
+                if canApplyPrevious {
+                    applyPreviousButton(at: index)
+                        .fixedSize(horizontal: true, vertical: false)
                 }
             }
 
-            if showsSecondaryRow {
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .center, spacing: 10) {
-                        if let statusText = reference.statusText {
-                            progressStatusChip(text: statusText, tone: reference.statusTone)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
+            VStack(alignment: .leading, spacing: 8) {
+                inlineHintAim(presentation.aimText)
 
-                        if canApplyPrevious {
-                            applyPreviousButton(at: index)
-                                .fixedSize(horizontal: true, vertical: false)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let statusText = presentation.statusText {
+                    progressStatusChip(text: statusText, tone: presentation.statusTone)
+                }
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        if let statusText = reference.statusText {
-                            progressStatusChip(text: statusText, tone: reference.statusTone)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-
-                        if canApplyPrevious {
-                            applyPreviousButton(at: index)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                if canApplyPrevious {
+                    applyPreviousButton(at: index)
                 }
             }
         }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(WGJTheme.cardElevated.opacity(0.72))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(WGJTheme.accentBlue.opacity(0.18), lineWidth: 1)
-                )
-        )
+        .padding(.horizontal, 2)
     }
 
-    private func progressReferenceMetric(title: String, value: String, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title.uppercased())
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(WGJTheme.textTertiary)
-
-            Text(value)
-                .font(.subheadline.monospacedDigit().weight(.semibold))
-                .foregroundStyle(tint)
+    private func inlineHintAim(_ text: String) -> some View {
+        Label {
+            Text(text)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(WGJTheme.accentBlue)
                 .lineLimit(2)
-                .minimumScaleFactor(0.82)
-                .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: "target")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(WGJTheme.accentBlue)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .layoutPriority(1)
     }
 
     private func progressStatusChip(text: String, tone: WorkoutSetProgressTone) -> some View {
@@ -666,7 +618,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         Button {
             applyPreviousPerformance(at: index)
         } label: {
-            Label("Use Last", systemImage: "arrow.down.left.circle.fill")
+            Label("Fill Last", systemImage: "arrow.down.left.circle.fill")
                 .font(.caption.weight(.bold))
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
@@ -713,35 +665,47 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func repsField(at index: Int) -> some View {
-        TextField("0", text: repsTextBinding(for: index))
-            .keyboardType(.numberPad)
-            .submitLabel(.done)
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled(true)
-            .font(.system(.title3, design: .rounded).weight(.semibold))
-            .monospacedDigit()
-            .focused($focusedInput, equals: inputFocus(for: index, metric: .reps))
-            .multilineTextAlignment(.center)
-            .disabled(setDrafts[index].isLocked)
-            .accessibilityIdentifier("workout-set-\(index)-reps-field")
-            .metricInputShell(isFocused: isInputFocused(.reps, at: index))
+        ZStack {
+            if shouldShowRepsGhost(at: index), let ghostText = repsGhostText(at: index) {
+                ghostValueText(ghostText, accessibilityIdentifier: "workout-set-\(index)-reps-ghost")
+            }
+
+            TextField(shouldShowRepsGhost(at: index) ? "" : "0", text: repsTextBinding(for: index))
+                .keyboardType(.numberPad)
+                .submitLabel(.done)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled(true)
+                .font(.system(.title3, design: .rounded).weight(.semibold))
+                .monospacedDigit()
+                .focused($focusedInput, equals: inputFocus(for: index, metric: .reps))
+                .multilineTextAlignment(.center)
+                .disabled(setDrafts[index].isLocked)
+                .accessibilityIdentifier("workout-set-\(index)-reps-field")
+        }
+        .metricInputShell(isFocused: isInputFocused(.reps, at: index))
     }
 
     private func loadField(at index: Int) -> some View {
         let isLocked = setDrafts[index].isLocked
 
         return HStack(spacing: 6) {
-            TextField("0", text: weightTextBinding(for: index))
-                .keyboardType(.decimalPad)
-                .submitLabel(.next)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled(true)
-                .font(.system(.title3, design: .rounded).weight(.semibold))
-                .monospacedDigit()
-                .focused($focusedInput, equals: inputFocus(for: index, metric: .weight))
-                .multilineTextAlignment(.center)
-                .disabled(isLocked)
-                .accessibilityIdentifier("workout-set-\(index)-weight-field")
+            ZStack {
+                if shouldShowWeightGhost(at: index), let ghostText = weightGhostText(at: index) {
+                    ghostValueText(ghostText, accessibilityIdentifier: "workout-set-\(index)-weight-ghost")
+                }
+
+                TextField(shouldShowWeightGhost(at: index) ? "" : "0", text: weightTextBinding(for: index))
+                    .keyboardType(.decimalPad)
+                    .submitLabel(.next)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled(true)
+                    .font(.system(.title3, design: .rounded).weight(.semibold))
+                    .monospacedDigit()
+                    .focused($focusedInput, equals: inputFocus(for: index, metric: .weight))
+                    .multilineTextAlignment(.center)
+                    .disabled(isLocked)
+                    .accessibilityIdentifier("workout-set-\(index)-weight-field")
+            }
 
             WGJActionMenuButton("Load Unit", titleVisibility: .hidden) {
                 ForEach(TemplateLoadUnit.allCases) { unit in
@@ -1160,6 +1124,35 @@ struct WorkoutSessionExerciseGridEditor: View {
         SetInputFocus(setID: setDrafts[index].id, metric: metric)
     }
 
+    private func inlineHintPresentation(at index: Int) -> WorkoutSetInlineHintPresentation? {
+        guard setDrafts.indices.contains(index) else { return nil }
+        return WorkoutSetInlineHintPresentation.make(
+            draft: setDrafts[index],
+            previous: previousBySetIndex[index],
+            targetRepMin: targetRepMin,
+            targetRepMax: targetRepMax,
+            formatWeight: formatWeight
+        )
+    }
+
+    private func weightGhostText(at index: Int) -> String? {
+        inlineHintPresentation(at: index)?.weightGhostText
+    }
+
+    private func repsGhostText(at index: Int) -> String? {
+        inlineHintPresentation(at: index)?.repsGhostText
+    }
+
+    private func shouldShowWeightGhost(at index: Int) -> Bool {
+        guard setDrafts.indices.contains(index), !isInputFocused(.weight, at: index) else { return false }
+        return setDrafts[index].actualWeight == nil && weightGhostText(at: index) != nil
+    }
+
+    private func shouldShowRepsGhost(at index: Int) -> Bool {
+        guard setDrafts.indices.contains(index), !isInputFocused(.reps, at: index) else { return false }
+        return setDrafts[index].actualReps == nil && repsGhostText(at: index) != nil
+    }
+
     private func isInputFocused(_ metric: SetInputFocus.Metric, at index: Int) -> Bool {
         guard setDrafts.indices.contains(index) else { return false }
         return focusedInput == inputFocus(for: index, metric: metric)
@@ -1471,7 +1464,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                     metadataLine: metadataLine(for: draft, restSeconds: restSeconds),
                     targetWeightText: targetWeightText(for: draft, formatWeight: formatWeight),
                     targetRepsText: targetRepsText(for: draft),
-                    progressReference: WorkoutSetProgressReference.make(
+                    inlineHintPresentation: WorkoutSetInlineHintPresentation.make(
                         draft: draft,
                         previous: previousBySetIndex[index],
                         targetRepMin: targetRepMin,
@@ -1810,6 +1803,16 @@ private extension View {
     }
 }
 
+private func ghostValueText(_ text: String, accessibilityIdentifier: String) -> some View {
+    Text(text)
+        .font(.system(.title3, design: .rounded).weight(.semibold))
+        .foregroundStyle(WGJTheme.textTertiary.opacity(0.72))
+        .monospacedDigit()
+        .frame(maxWidth: .infinity)
+        .allowsHitTesting(false)
+        .accessibilityIdentifier(accessibilityIdentifier)
+}
+
 private struct WorkoutSessionExerciseSetRowLabel {
     let badgeTitle: String
     let title: String
@@ -1825,6 +1828,60 @@ private struct WorkoutSessionExerciseSetRowDisplaySnapshot: Identifiable, Equata
     let metadataLine: String?
     let targetWeightText: String?
     let targetRepsText: String?
-    let progressReference: WorkoutSetProgressReference?
+    let inlineHintPresentation: WorkoutSetInlineHintPresentation?
     let completionButtonTitle: String
+}
+
+struct WorkoutSetInlineHintPresentation: Equatable {
+    let weightGhostText: String?
+    let repsGhostText: String?
+    let aimText: String
+    let statusText: String?
+    let statusTone: WorkoutSetProgressTone
+    let canApplyPrevious: Bool
+
+    static func make(
+        draft: WorkoutSessionSetDraft,
+        previous: WorkoutPreviousSetSnapshot?,
+        targetRepMin: Int?,
+        targetRepMax: Int?,
+        formatWeight: (Double) -> String = { WGJFormatters.decimalString($0) }
+    ) -> WorkoutSetInlineHintPresentation? {
+        guard let reference = WorkoutSetProgressReference.make(
+            draft: draft,
+            previous: previous,
+            targetRepMin: targetRepMin,
+            targetRepMax: targetRepMax,
+            formatWeight: formatWeight
+        ) else {
+            return nil
+        }
+
+        return WorkoutSetInlineHintPresentation(
+            weightGhostText: weightGhostText(from: previous, formatWeight: formatWeight),
+            repsGhostText: repsGhostText(from: previous),
+            aimText: reference.aimValue,
+            statusText: reference.statusText,
+            statusTone: reference.statusTone,
+            canApplyPrevious: reference.canReusePrevious
+        )
+    }
+
+    private static func weightGhostText(
+        from previous: WorkoutPreviousSetSnapshot?,
+        formatWeight: (Double) -> String
+    ) -> String? {
+        guard let previous else { return nil }
+
+        if previous.unit == .bodyweight {
+            return "BW"
+        }
+
+        guard let weight = previous.weight else { return nil }
+        return formatWeight(weight)
+    }
+
+    private static func repsGhostText(from previous: WorkoutPreviousSetSnapshot?) -> String? {
+        previous?.reps.map(String.init)
+    }
 }

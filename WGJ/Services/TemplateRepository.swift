@@ -651,6 +651,74 @@ final class TemplateRepository {
         try modelContext.save()
     }
 
+    func applyWorkoutTemplateSync(
+        templateID: UUID,
+        exercises mutations: [WorkoutTemplateSyncExerciseMutation]
+    ) throws {
+        guard let template = try template(id: templateID) else {
+            throw TemplateRepositoryError.templateNotFound
+        }
+
+        let orderedExistingExercises = (template.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
+        let existingByCatalogUUID = Dictionary(
+            uniqueKeysWithValues: orderedExistingExercises.map { ($0.catalogExerciseUUID, $0) }
+        )
+        let desiredCatalogUUIDs = Set(mutations.map(\.catalogExerciseUUID))
+
+        for exercise in orderedExistingExercises where !desiredCatalogUUIDs.contains(exercise.catalogExerciseUUID) {
+            modelContext.delete(exercise)
+        }
+
+        var updatedExercises: [TemplateExercise] = []
+        updatedExercises.reserveCapacity(mutations.count)
+
+        for (index, mutation) in mutations.enumerated() {
+            let normalizedRange = sanitizedRepRange(min: mutation.targetRepMin, max: mutation.targetRepMax)
+            let normalizedRest = sanitizedRestSeconds(mutation.restSeconds)
+            let exercise = existingByCatalogUUID[mutation.catalogExerciseUUID] ?? TemplateExercise(
+                templateID: templateID,
+                catalogExerciseUUID: mutation.catalogExerciseUUID,
+                exerciseNameSnapshot: mutation.exerciseNameSnapshot,
+                categorySnapshot: mutation.categorySnapshot,
+                muscleSummarySnapshot: mutation.muscleSummarySnapshot,
+                targetRepMin: normalizedRange.min,
+                targetRepMax: normalizedRange.max,
+                restSeconds: normalizedRest,
+                sortOrder: index,
+                template: template
+            )
+
+            if exercise.modelContext == nil {
+                modelContext.insert(exercise)
+            }
+
+            exercise.templateID = templateID
+            exercise.template = template
+            exercise.catalogExerciseUUID = mutation.catalogExerciseUUID
+            exercise.exerciseNameSnapshot = mutation.exerciseNameSnapshot
+            exercise.categorySnapshot = mutation.categorySnapshot
+            exercise.muscleSummarySnapshot = mutation.muscleSummarySnapshot
+            exercise.targetRepMin = normalizedRange.min
+            exercise.targetRepMax = normalizedRange.max
+            exercise.restSeconds = normalizedRest
+            exercise.sortOrder = index
+
+            syncSetStructure(
+                for: exercise,
+                desiredDrafts: mutation.setDrafts,
+                defaultRestSeconds: normalizedRest
+            )
+
+            normalizeWarmupSet(for: exercise)
+            exercise.updatedAt = .now
+            updatedExercises.append(exercise)
+        }
+
+        template.exercises = updatedExercises
+        template.updatedAt = .now
+        try modelContext.save()
+    }
+
     func ensureDefaultSetPlans(templateID: UUID, defaultCount: Int = 3) throws {
         guard let template = try template(id: templateID) else {
             throw TemplateRepositoryError.templateNotFound
@@ -946,6 +1014,54 @@ final class TemplateRepository {
     private func orderedSetDrafts(for exercise: TemplateExercise) -> [TemplateExerciseSetDraft] {
         let ordered = (exercise.prescribedSets ?? []).sorted { $0.sortOrder < $1.sortOrder }
         return ordered.map(TemplateExerciseSetDraft.init(model:))
+    }
+
+    private func syncSetStructure(
+        for exercise: TemplateExercise,
+        desiredDrafts: [TemplateExerciseSetDraft],
+        defaultRestSeconds: Int
+    ) {
+        let existingSets = (exercise.prescribedSets ?? []).sorted { $0.sortOrder < $1.sortOrder }
+        var updatedSets: [TemplateExerciseSet] = []
+        updatedSets.reserveCapacity(desiredDrafts.count)
+
+        for (index, draft) in desiredDrafts.enumerated() {
+            let modelSet = existingSets.indices.contains(index)
+                ? existingSets[index]
+                : TemplateExerciseSet(
+                    templateExerciseID: exercise.id,
+                    sortOrder: index,
+                    restSeconds: defaultRestSeconds,
+                    templateExercise: exercise
+                )
+
+            if modelSet.modelContext == nil {
+                modelContext.insert(modelSet)
+            }
+
+            if hasTargetDelta(modelSet: modelSet, draft: draft) {
+                modelSet.previousTargetReps = modelSet.targetReps
+                modelSet.previousTargetWeight = modelSet.targetWeight
+                modelSet.previousLoadUnit = modelSet.loadUnit
+            }
+
+            modelSet.templateExerciseID = exercise.id
+            modelSet.sortOrder = index
+            modelSet.targetReps = sanitizedReps(draft.targetReps)
+            modelSet.targetWeight = sanitizedWeight(draft.targetWeight)
+            modelSet.loadUnit = draft.loadUnit
+            modelSet.restSeconds = sanitizedRestSeconds(draft.restSeconds)
+            modelSet.isWarmup = draft.isWarmup
+            modelSet.isLocked = draft.isLocked
+            modelSet.updatedAt = .now
+            updatedSets.append(modelSet)
+        }
+
+        for extraSet in existingSets.dropFirst(desiredDrafts.count) {
+            modelContext.delete(extraSet)
+        }
+
+        exercise.prescribedSets = updatedSets
     }
 
     private func normalizeWarmupSet(for exercise: TemplateExercise) {

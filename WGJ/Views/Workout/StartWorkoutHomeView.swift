@@ -1641,6 +1641,7 @@ private struct TemplateStartPreviewSheet: View {
                 .frame(maxWidth: .infinity)
         }
         .buttonStyle(WGJPrimaryButtonStyle())
+        .accessibilityIdentifier("template-preview-start-button")
     }
 
     private var editAction: some View {
@@ -1652,6 +1653,7 @@ private struct TemplateStartPreviewSheet: View {
                 .frame(maxWidth: .infinity)
         }
         .buttonStyle(WGJGhostButtonStyle())
+        .accessibilityIdentifier("template-preview-edit-button")
     }
 
 }

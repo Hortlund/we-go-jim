@@ -438,12 +438,108 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(selectExerciseButton.waitForExistence(timeout: 15))
         selectExerciseButton.tap()
 
+        let weightGhost = identifiedElement("workout-set-0-weight-ghost", in: app)
+        let repsGhost = identifiedElement("workout-set-0-reps-ghost", in: app)
+        XCTAssertTrue(weightGhost.waitForExistence(timeout: 5))
+        XCTAssertTrue(repsGhost.waitForExistence(timeout: 5))
+
         let useLastButton = identifiedElement("workout-set-0-use-last-button", in: app)
         XCTAssertTrue(useLastButton.waitForExistence(timeout: 5))
         useLastButton.tap()
 
-        XCTAssertEqual(weightField.value as? String, "100")
-        XCTAssertEqual(repsField.value as? String, "8")
+        let reopenedWeightField = identifiedElement("workout-set-0-weight-field", in: app)
+        let reopenedRepsField = identifiedElement("workout-set-0-reps-field", in: app)
+        XCTAssertEqual(reopenedWeightField.value as? String, "100")
+        XCTAssertEqual(reopenedRepsField.value as? String, "8")
+    }
+
+    @MainActor
+    func testTemplateWorkoutFinishKeepTemplatePreservesOriginalStructure() throws {
+        let app = launchApp(launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Keep Template Workout",
+                notes: "UI test template",
+                exercises: [
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "template-keep-bench",
+                        exerciseNameSnapshot: "Bench Press",
+                        categorySnapshot: "Chest",
+                        muscleSummarySnapshot: "Chest",
+                        targetRepMin: 6,
+                        targetRepMax: 8,
+                        restSeconds: 120,
+                        sets: [
+                            templatePayloadSet(
+                                targetReps: 6,
+                                targetWeight: 100,
+                                loadUnit: "kg",
+                                restSeconds: 120,
+                                isWarmup: true
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+        ])
+
+        startPreviewedTemplateWorkout(in: app)
+        addSetToCurrentExercise(in: app)
+        finishTemplateWorkout(in: app)
+
+        let reviewSheet = identifiedElement("active-workout-template-review-sheet", in: app)
+        XCTAssertTrue(reviewSheet.waitForExistence(timeout: 5))
+        app.buttons["active-workout-template-review-keep-button"].tap()
+
+        confirmWorkoutCompletion(in: app)
+        tapTab("Start Workout", in: app)
+        restartImportedTemplateWorkout(in: app)
+
+        XCTAssertTrue(identifiedElement("workout-set-0-weight-field", in: app).waitForExistence(timeout: 5))
+        XCTAssertFalse(identifiedElement("workout-set-1-weight-field", in: app).waitForExistence(timeout: 1))
+    }
+
+    @MainActor
+    func testTemplateWorkoutFinishUpdateTemplateAppliesNewStructure() throws {
+        let app = launchApp(launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Apply Template Workout",
+                notes: "UI test template",
+                exercises: [
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "template-apply-bench",
+                        exerciseNameSnapshot: "Bench Press",
+                        categorySnapshot: "Chest",
+                        muscleSummarySnapshot: "Chest",
+                        targetRepMin: 6,
+                        targetRepMax: 8,
+                        restSeconds: 120,
+                        sets: [
+                            templatePayloadSet(
+                                targetReps: 6,
+                                targetWeight: 100,
+                                loadUnit: "kg",
+                                restSeconds: 120,
+                                isWarmup: true
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+        ])
+
+        startPreviewedTemplateWorkout(in: app)
+        addSetToCurrentExercise(in: app)
+        finishTemplateWorkout(in: app)
+
+        let reviewSheet = identifiedElement("active-workout-template-review-sheet", in: app)
+        XCTAssertTrue(reviewSheet.waitForExistence(timeout: 5))
+        app.buttons["active-workout-template-review-apply-button"].tap()
+
+        confirmWorkoutCompletion(in: app)
+        tapTab("Start Workout", in: app)
+        restartImportedTemplateWorkout(in: app)
+
+        XCTAssertTrue(identifiedElement("workout-set-1-weight-field", in: app).waitForExistence(timeout: 5))
     }
 
     private func launchApp(
@@ -504,18 +600,120 @@ final class WGJUITests: XCTestCase {
         }
     }
 
-    private func makeTemplateOpenPayloadBase64(name: String, notes: String) -> String {
+    private func startPreviewedTemplateWorkout(in app: XCUIApplication) {
+        let previewSheet = identifiedElement("template-preview-sheet", in: app)
+        XCTAssertTrue(previewSheet.waitForExistence(timeout: 5))
+
+        let startButton = identifiedElement("template-preview-start-button", in: app)
+        if startButton.waitForExistence(timeout: 2) {
+            startButton.tap()
+        } else {
+            let labeledButtons = app.buttons.matching(NSPredicate(format: "label == %@", "Start Workout"))
+            let fallbackButton = labeledButtons
+                .allElementsBoundByIndex
+                .first(where: \.isHittable)
+                ?? labeledButtons.element(boundBy: max(0, labeledButtons.count - 1))
+            XCTAssertTrue(fallbackButton.waitForExistence(timeout: 5))
+            fallbackButton.tap()
+        }
+
+        XCTAssertTrue(app.buttons["active-workout-finish-button"].waitForExistence(timeout: 5))
+    }
+
+    private func restartImportedTemplateWorkout(in app: XCUIApplication) {
+        let startButton = app.buttons["Start"].firstMatch
+        XCTAssertTrue(startButton.waitForExistence(timeout: 5))
+        startButton.tap()
+        startPreviewedTemplateWorkout(in: app)
+    }
+
+    private func addSetToCurrentExercise(in app: XCUIApplication) {
+        let addSetButton = app.buttons["Add Set"].firstMatch
+        XCTAssertTrue(addSetButton.waitForExistence(timeout: 5))
+        addSetButton.tap()
+    }
+
+    private func finishTemplateWorkout(in app: XCUIApplication) {
+        let finishButton = app.buttons["active-workout-finish-button"]
+        XCTAssertTrue(finishButton.waitForExistence(timeout: 5))
+        finishButton.tap()
+
+        let finishConfirmationButton = app.buttons["Finish Anyway"].waitForExistence(timeout: 2)
+            ? app.buttons["Finish Anyway"]
+            : app.buttons["Finish and Save"]
+        XCTAssertTrue(finishConfirmationButton.waitForExistence(timeout: 5))
+        finishConfirmationButton.tap()
+    }
+
+    private func confirmWorkoutCompletion(in app: XCUIApplication) {
+        let summary = identifiedElement("workout-completion-summary", in: app)
+        XCTAssertTrue(summary.waitForExistence(timeout: 5))
+
+        let confirmButton = identifiedElement("workout-completion-confirm-button", in: app)
+        XCTAssertTrue(confirmButton.waitForExistence(timeout: 5))
+        confirmButton.tap()
+    }
+
+    private func makeTemplateOpenPayloadBase64(
+        name: String,
+        notes: String,
+        exercises: [[String: Any]] = []
+    ) -> String {
         let payload: [String: Any] = [
             "formatVersion": 1,
             "exportedAt": ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: 0)),
             "template": [
                 "name": name,
                 "notes": notes,
-                "exercises": [],
+                "exercises": exercises,
             ],
         ]
 
         let data = try! JSONSerialization.data(withJSONObject: payload, options: [])
         return data.base64EncodedString()
+    }
+
+    private func templatePayloadExercise(
+        catalogExerciseUUID: String,
+        exerciseNameSnapshot: String,
+        categorySnapshot: String,
+        muscleSummarySnapshot: String,
+        targetRepMin: Int?,
+        targetRepMax: Int?,
+        restSeconds: Int,
+        sets: [[String: Any]]
+    ) -> [String: Any] {
+        var payload: [String: Any] = [
+            "catalogExerciseUUID": catalogExerciseUUID,
+            "exerciseNameSnapshot": exerciseNameSnapshot,
+            "categorySnapshot": categorySnapshot,
+            "muscleSummarySnapshot": muscleSummarySnapshot,
+            "restSeconds": restSeconds,
+            "sets": sets,
+        ]
+
+        payload["targetRepMin"] = targetRepMin
+        payload["targetRepMax"] = targetRepMax
+        return payload
+    }
+
+    private func templatePayloadSet(
+        targetReps: Int?,
+        targetWeight: Double?,
+        loadUnit: String,
+        restSeconds: Int,
+        isWarmup: Bool,
+        isLocked: Bool = false
+    ) -> [String: Any] {
+        var payload: [String: Any] = [
+            "loadUnit": loadUnit,
+            "restSeconds": restSeconds,
+            "isWarmup": isWarmup,
+            "isLocked": isLocked,
+        ]
+
+        payload["targetReps"] = targetReps
+        payload["targetWeight"] = targetWeight
+        return payload
     }
 }

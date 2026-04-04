@@ -14,6 +14,7 @@ struct ActiveWorkoutView: View {
     private let sessionID: UUID
     @Query private var sessions: [ActiveWorkoutDraftSession]
     @Query private var sessionExercises: [ActiveWorkoutDraftExercise]
+    @Query private var profiles: [UserProfile]
 
     @State private var hasBootstrapped = false
     @State private var setDraftsByExerciseID: [UUID: [WorkoutSessionSetDraft]] = [:]
@@ -25,6 +26,7 @@ struct ActiveWorkoutView: View {
     @State private var pendingRestTasks: [UUID: Task<Void, Never>] = [:]
 
     @State private var previousByExerciseID: [UUID: [Int: WorkoutPreviousSetSnapshot]] = [:]
+    @State private var catalogMatchesByUUID: [String: ExerciseCatalogItem] = [:]
     @State private var loadedExerciseStateStamp: ActiveWorkoutExerciseStateStamp?
     @State private var cardStateController = ActiveWorkoutExerciseCardStateController()
 
@@ -53,6 +55,7 @@ struct ActiveWorkoutView: View {
     private let cancelSectionFocusSpacerHeight: CGFloat = 160
     private let cancelSectionDockClearanceHeight: CGFloat = 96
     private let cancelSectionScrollTarget = ActiveWorkoutScrollTarget.cancelSection
+    private let guidanceService = TrainingGuidanceService()
 
     private var activeWorkoutRepository: ActiveWorkoutDraftRepository {
         ActiveWorkoutDraftRepository(modelContext: modelContext)
@@ -233,6 +236,19 @@ struct ActiveWorkoutView: View {
                 )
                 .interactiveDismissDisabled()
             }
+            .sheet(item: $pendingTemplateUpdatePreview) { preview in
+                ActiveWorkoutTemplateSyncReviewSheet(
+                    preview: preview,
+                    onKeepTemplate: {
+                        pendingTemplateUpdatePreview = nil
+                        presentWorkoutCompletionSummary()
+                    },
+                    onUpdateTemplate: {
+                        applyTemplateUpdate(preview)
+                    }
+                )
+                .interactiveDismissDisabled()
+            }
             .task {
                 await bootstrapIfNeeded()
             }
@@ -256,17 +272,6 @@ struct ActiveWorkoutView: View {
                 Button("OK", role: .cancel) { }
             } message: {
                 Text(errorMessage)
-            }
-            .alert("Update Template?", isPresented: templateUpdatePromptBinding, presenting: pendingTemplateUpdatePreview) { preview in
-                Button("Update Template") {
-                    applyTemplateUpdate(preview)
-                }
-                Button("Keep Template", role: .cancel) {
-                    pendingTemplateUpdatePreview = nil
-                    presentWorkoutCompletionSummary()
-                }
-            } message: {
-                Text($0.summary)
             }
             .background {
                 WorkoutRestTimerExpiryObserver()
@@ -360,6 +365,7 @@ struct ActiveWorkoutView: View {
     ) -> some View {
         let exerciseID = exercise.id
         let exerciseName = exercise.exerciseNameSnapshot
+        let drafts = resolvedDrafts(for: exercise)
 
         return ActiveWorkoutExerciseRowView(
             exerciseID: exerciseID,
@@ -371,10 +377,10 @@ struct ActiveWorkoutView: View {
             targetRepMin: exercise.targetRepMin,
             targetRepMax: exercise.targetRepMax,
             previousBySetIndex: previousByExerciseID[exerciseID] ?? [:],
-            guidance: nil,
+            guidance: guidancePresentation(for: exercise, drafts: drafts),
             preferredLoadUnit: preferredLoadUnit,
             restSeconds: resolvedRest(for: exercise),
-            setDrafts: resolvedDrafts(for: exercise),
+            setDrafts: drafts,
             isExpanded: cardStateController.isExpanded(for: exerciseID),
             onSetDraftsBindingChanged: { updated in
                 updateDraftsValue(updated, for: exerciseID)
@@ -488,7 +494,8 @@ struct ActiveWorkoutView: View {
                 draftsByExerciseID: loadedDrafts,
                 persistedDraftsByExerciseID: persistedDrafts,
                 restsByExerciseID: loadedRests,
-                previousByExerciseID: [:]
+                previousByExerciseID: [:],
+                catalogMatchesByUUID: catalogByUUID
             )
         }
 
@@ -496,6 +503,7 @@ struct ActiveWorkoutView: View {
         lastPersistedDraftsByExerciseID = result.persistedDraftsByExerciseID
         restByExerciseID = result.restsByExerciseID
         lastPersistedRestByExerciseID = result.restsByExerciseID
+        catalogMatchesByUUID = result.catalogMatchesByUUID
         previousByExerciseID = previousByExerciseID.filter { result.draftsByExerciseID[$0.key] != nil }
         let completedExerciseIDs = Set(
             result.draftsByExerciseID.compactMap { exerciseID, drafts in
@@ -787,17 +795,6 @@ struct ActiveWorkoutView: View {
         }
     }
 
-    private var templateUpdatePromptBinding: Binding<Bool> {
-        Binding(
-            get: { pendingTemplateUpdatePreview != nil },
-            set: { isPresented in
-                if !isPresented {
-                    pendingTemplateUpdatePreview = nil
-                }
-            }
-        )
-    }
-
     @MainActor
     private func handleDraftsChanged(
         _ drafts: [WorkoutSessionSetDraft],
@@ -832,6 +829,50 @@ struct ActiveWorkoutView: View {
 
     private func isExerciseCompleted(_ drafts: [WorkoutSessionSetDraft]) -> Bool {
         !drafts.isEmpty && drafts.allSatisfy(\.isCompleted)
+    }
+
+    private var isTrainingGuidanceEnabled: Bool {
+        profiles.first?.isTrainingGuidanceEnabled ?? true
+    }
+
+    @MainActor
+    private func guidancePresentation(
+        for exercise: ActiveWorkoutDraftExercise,
+        drafts: [WorkoutSessionSetDraft]
+    ) -> ActiveWorkoutExerciseGuidancePresentation? {
+        guard isTrainingGuidanceEnabled else { return nil }
+
+        let recommendation: TemplateExerciseRecommendation
+        let cue: ProgressiveOverloadCue?
+        if let catalogExercise = catalogMatchesByUUID[exercise.catalogExerciseUUID] {
+            recommendation = guidanceService.templateRecommendation(for: catalogExercise)
+            cue = guidanceService.progressiveOverloadCue(
+                for: catalogExercise,
+                targetRepMin: exercise.targetRepMin,
+                targetRepMax: exercise.targetRepMax,
+                setDrafts: drafts
+            )
+        } else {
+            let snapshot = TrainingGuidanceCatalogSnapshot(
+                exerciseName: exercise.exerciseNameSnapshot,
+                categoryName: exercise.categorySnapshot,
+                equipmentSummary: "",
+                primaryMuscleNames: exercise.muscleSummarySnapshot
+            )
+            recommendation = guidanceService.templateRecommendation(for: snapshot)
+            cue = guidanceService.progressiveOverloadCue(
+                for: snapshot,
+                targetRepMin: exercise.targetRepMin,
+                targetRepMax: exercise.targetRepMax,
+                setDrafts: drafts
+            )
+        }
+
+        return ActiveWorkoutExerciseGuidancePresentation.make(
+            recommendation: recommendation,
+            cue: cue,
+            isExerciseCompleted: isExerciseCompleted(drafts)
+        )
     }
 
     @MainActor
@@ -1814,6 +1855,7 @@ private struct ActiveWorkoutHydrationResult {
     let persistedDraftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
     let restsByExerciseID: [UUID: Int]
     let previousByExerciseID: [UUID: [Int: WorkoutPreviousSetSnapshot]]
+    let catalogMatchesByUUID: [String: ExerciseCatalogItem]
 }
 
 private struct ActiveWorkoutExerciseStateStamp: Hashable {
