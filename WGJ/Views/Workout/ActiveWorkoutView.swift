@@ -49,6 +49,7 @@ struct ActiveWorkoutView: View {
     @State private var showingError = false
 
     private let interactivePersistenceDebounce = Duration.milliseconds(550)
+    private let cancelSectionScrollTarget = ActiveWorkoutScrollTarget.cancelSection
 
     private var sessionRepository: WorkoutSessionRepository {
         WorkoutSessionRepository(modelContext: modelContext)
@@ -133,6 +134,11 @@ struct ActiveWorkoutView: View {
                     if let session, session.status == .active, !isEndingSession {
                         ActiveWorkoutCancelSection(
                             isCancelArmed: isCancelArmed,
+                            onCancelConfirmationPresented: {
+                                withAnimation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion)) {
+                                    scrollProxy.scrollTo(cancelSectionScrollTarget, anchor: .bottom)
+                                }
+                            },
                             onArmCancel: {
                                 dismissKeyboard()
                                 showingFinishConfirmation = false
@@ -145,6 +151,7 @@ struct ActiveWorkoutView: View {
                                 cancelWorkout()
                             }
                         )
+                        .id(cancelSectionScrollTarget)
                     }
                 }
                 .padding(16)
@@ -219,6 +226,12 @@ struct ActiveWorkoutView: View {
             }
             .task(id: exerciseHydrationStamp) {
                 await loadExerciseStateIfNeeded()
+            }
+            .onChange(of: isKeyboardVisible) { _, isVisible in
+                guard isCancelArmed, !isVisible else { return }
+                withAnimation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion)) {
+                    scrollProxy.scrollTo(cancelSectionScrollTarget, anchor: .bottom)
+                }
             }
             .onDisappear {
                 isCancelArmed = false
@@ -1160,6 +1173,10 @@ struct ActiveWorkoutView: View {
     }
 }
 
+private enum ActiveWorkoutScrollTarget: Hashable {
+    case cancelSection
+}
+
 private struct ActiveWorkoutExerciseRowView: View, Equatable {
     let exerciseID: UUID
     let exerciseName: String
@@ -1419,6 +1436,7 @@ private struct ActiveWorkoutBottomDock: View {
 
 private struct ActiveWorkoutCancelSection: View {
     let isCancelArmed: Bool
+    let onCancelConfirmationPresented: () -> Void
     let onArmCancel: () -> Void
     let onKeepWorkout: () -> Void
     let onDiscardWorkout: () -> Void
@@ -1478,6 +1496,7 @@ private struct ActiveWorkoutCancelSection: View {
                     .accessibilityIdentifier("active-workout-discard-button")
             }
         }
+        .onAppear(perform: onCancelConfirmationPresented)
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
