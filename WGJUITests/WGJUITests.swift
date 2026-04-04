@@ -280,6 +280,44 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testActiveWorkoutCancelConfirmationKeepsActionsVisible() throws {
+        let app = launchApp()
+
+        tapTab("Start Workout", in: app)
+
+        let startButton = app.buttons["start-workout-empty-button"]
+        XCTAssertTrue(startButton.waitForExistence(timeout: 5))
+        startButton.tap()
+
+        let addExerciseButton = app.buttons["active-workout-empty-add-exercise-button"]
+        XCTAssertTrue(addExerciseButton.waitForExistence(timeout: 5))
+        addExerciseButton.tap()
+
+        let searchField = app.textFields["exercises-search-field"]
+        XCTAssertTrue(searchField.waitForExistence(timeout: 5))
+        searchField.tap()
+        searchField.typeText("bench")
+
+        let selectExerciseButton = identifiedElement("exercise-picker-select-button", in: app)
+        XCTAssertTrue(selectExerciseButton.waitForExistence(timeout: 15))
+        selectExerciseButton.tap()
+
+        let cancelButton = identifiedElement("active-workout-cancel-button", in: app)
+        revealElement(cancelButton, in: app)
+        XCTAssertTrue(cancelButton.isHittable)
+        let elapsedTimer = identifiedElement("active-workout-elapsed-timer", in: app)
+        revealElementAbove(elapsedTimer, target: cancelButton, in: app)
+        cancelButton.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
+
+        let keepButton = app.buttons["Keep Workout"]
+        let discardButton = app.buttons["Discard Workout"]
+        XCTAssertTrue(keepButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(discardButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(keepButton.isHittable)
+        XCTAssertTrue(discardButton.isHittable)
+    }
+
+    @MainActor
     func testActiveWorkoutUseLastFillsPreviousPerformance() throws {
         let app = launchApp()
 
@@ -396,6 +434,31 @@ final class WGJUITests: XCTestCase {
 
     private func identifiedElement(_ identifier: String, in app: XCUIApplication) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+    }
+
+    private func revealElement(_ element: XCUIElement, in app: XCUIApplication, maxSwipes: Int = 6) {
+        XCTAssertTrue(element.waitForExistence(timeout: 5))
+
+        var remainingSwipes = maxSwipes
+        while !element.isHittable && remainingSwipes > 0 {
+            app.swipeUp()
+            remainingSwipes -= 1
+        }
+    }
+
+    private func revealElementAbove(
+        _ blocker: XCUIElement,
+        target: XCUIElement,
+        in app: XCUIApplication,
+        maxSwipes: Int = 4
+    ) {
+        guard blocker.waitForExistence(timeout: 2) else { return }
+
+        var remainingSwipes = maxSwipes
+        while target.frame.maxY > blocker.frame.minY && remainingSwipes > 0 {
+            app.swipeUp()
+            remainingSwipes -= 1
+        }
     }
 
     private func makeTemplateOpenPayloadBase64(name: String, notes: String) -> String {

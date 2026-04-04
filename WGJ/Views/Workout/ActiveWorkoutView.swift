@@ -49,6 +49,8 @@ struct ActiveWorkoutView: View {
     @State private var showingError = false
 
     private let interactivePersistenceDebounce = Duration.milliseconds(550)
+    private let cancelSectionFocusSpacerHeight: CGFloat = 160
+    private let cancelSectionDockClearanceHeight: CGFloat = 96
     private let cancelSectionScrollTarget = ActiveWorkoutScrollTarget.cancelSection
 
     private var sessionRepository: WorkoutSessionRepository {
@@ -135,9 +137,7 @@ struct ActiveWorkoutView: View {
                         ActiveWorkoutCancelSection(
                             isCancelArmed: isCancelArmed,
                             onCancelConfirmationPresented: {
-                                withAnimation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion)) {
-                                    scrollProxy.scrollTo(cancelSectionScrollTarget, anchor: .bottom)
-                                }
+                                focusCancelSection(using: scrollProxy)
                             },
                             onArmCancel: {
                                 dismissKeyboard()
@@ -152,6 +152,10 @@ struct ActiveWorkoutView: View {
                             }
                         )
                         .id(cancelSectionScrollTarget)
+
+                        Color.clear
+                            .frame(height: cancelSectionBottomSpacerHeight)
+                            .accessibilityHidden(true)
                     }
                 }
                 .padding(16)
@@ -229,9 +233,7 @@ struct ActiveWorkoutView: View {
             }
             .onChange(of: isKeyboardVisible) { _, isVisible in
                 guard isCancelArmed, !isVisible else { return }
-                withAnimation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion)) {
-                    scrollProxy.scrollTo(cancelSectionScrollTarget, anchor: .bottom)
-                }
+                focusCancelSection(using: scrollProxy)
             }
             .onDisappear {
                 isCancelArmed = false
@@ -272,6 +274,14 @@ struct ActiveWorkoutView: View {
         }
 
         return true
+    }
+
+    private var cancelSectionBottomSpacerHeight: CGFloat {
+        if isCancelArmed {
+            return cancelSectionFocusSpacerHeight
+        }
+
+        return shouldShowBottomDock ? cancelSectionDockClearanceHeight : 24
     }
 
     private var exerciseHydrationStamp: ActiveWorkoutExerciseStateStamp {
@@ -1096,6 +1106,21 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
+    private func focusCancelSection(using scrollProxy: ScrollViewProxy) {
+        withAnimation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion)) {
+            scrollProxy.scrollTo(cancelSectionScrollTarget, anchor: .center)
+        }
+
+        Task { @MainActor in
+            await Task.yield()
+            guard isCancelArmed else { return }
+            withAnimation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion)) {
+                scrollProxy.scrollTo(cancelSectionScrollTarget, anchor: .center)
+            }
+        }
+    }
+
+    @MainActor
     private func makeFinishConfirmationContent() -> ActiveWorkoutFinishConfirmationContent {
         ActiveWorkoutFinishConfirmationContent(
             exerciseDrafts: sessionExercises.map { exercise in
@@ -1499,6 +1524,7 @@ private struct ActiveWorkoutCancelSection: View {
         .onAppear(perform: onCancelConfirmationPresented)
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityIdentifier("active-workout-cancel-confirmation")
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(WGJTheme.field.opacity(0.82))
