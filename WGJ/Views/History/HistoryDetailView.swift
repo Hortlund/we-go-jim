@@ -25,7 +25,7 @@ struct HistoryDetailView: View {
     @State private var personalRecordSummary = HistoryWorkoutPersonalRecordSummary(highlightedSetCount: 0)
 
     @State private var showingExercisePicker = false
-    @State private var showingDeleteConfirmation = false
+    @State private var showingArchiveConfirmation = false
     @State private var errorMessage = ""
     @State private var showingError = false
     @State private var exerciseSwipeOffsets: [UUID: CGFloat] = [:]
@@ -103,10 +103,10 @@ struct HistoryDetailView: View {
         .navigationTitle("Workout")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button(role: .destructive) {
-                    showingDeleteConfirmation = true
+                Button {
+                    showingArchiveConfirmation = true
                 } label: {
-                    Label("Delete", systemImage: "trash")
+                    Label("Hide", systemImage: "archivebox")
                 }
             }
         }
@@ -116,9 +116,9 @@ struct HistoryDetailView: View {
             }
             .wgjSheetSurface()
         }
-        .confirmationDialog("Delete workout?", isPresented: $showingDeleteConfirmation, titleVisibility: .visible) {
-            Button("Delete Workout", role: .destructive) {
-                deleteSession()
+        .confirmationDialog("Hide workout?", isPresented: $showingArchiveConfirmation, titleVisibility: .visible) {
+            Button("Hide Workout") {
+                archiveSession()
             }
             Button("Cancel", role: .cancel) { }
         }
@@ -430,9 +430,9 @@ struct HistoryDetailView: View {
         }
     }
 
-    private func deleteSession() {
+    private func archiveSession() {
         do {
-            try sessionRepository.deleteSession(id: sessionID)
+            try sessionRepository.archiveSession(id: sessionID)
             dismiss()
         } catch {
             showError(error)

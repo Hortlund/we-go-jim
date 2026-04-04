@@ -191,8 +191,24 @@ final class WorkoutSessionRepository {
         return try modelContext.fetch(descriptor).first
     }
 
-    func completedSessions() throws -> [WorkoutSession] {
-        try completedSessions(before: nil, excludingSessionID: nil)
+    func completedSessions(includeArchived: Bool = false) throws -> [WorkoutSession] {
+        try completedSessions(before: nil, excludingSessionID: nil, includeArchived: includeArchived)
+    }
+
+    func archivedSessions() throws -> [WorkoutSession] {
+        try completedSessions(includeArchived: true)
+            .filter { $0.archivedAt != nil }
+            .sorted { lhs, rhs in
+                let lhsArchivedAt = lhs.archivedAt ?? .distantPast
+                let rhsArchivedAt = rhs.archivedAt ?? .distantPast
+                if lhsArchivedAt != rhsArchivedAt {
+                    return lhsArchivedAt > rhsArchivedAt
+                }
+
+                let lhsCompletedAt = lhs.endedAt ?? lhs.startedAt
+                let rhsCompletedAt = rhs.endedAt ?? rhs.startedAt
+                return lhsCompletedAt > rhsCompletedAt
+            }
     }
 
     func sessionExercises(sessionID: UUID) throws -> [WorkoutSessionExercise] {
@@ -550,6 +566,39 @@ final class WorkoutSessionRepository {
         try? CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)?.queueCompletedSessionPublish(sessionID: sessionID)
     }
 
+    func archiveSession(id: UUID) throws {
+        guard let session = try session(id: id) else {
+            throw WorkoutSessionRepositoryError.sessionNotFound
+        }
+        guard session.status == .completed else {
+            throw WorkoutSessionRepositoryError.invalidSessionState
+        }
+        guard session.archivedAt == nil else {
+            return
+        }
+
+        let now = Date()
+        session.archivedAt = now
+        session.updatedAt = now
+        try modelContext.save()
+    }
+
+    func restoreArchivedSession(id: UUID) throws {
+        guard let session = try session(id: id) else {
+            throw WorkoutSessionRepositoryError.sessionNotFound
+        }
+        guard session.status == .completed else {
+            throw WorkoutSessionRepositoryError.invalidSessionState
+        }
+        guard session.archivedAt != nil else {
+            return
+        }
+
+        session.archivedAt = nil
+        session.updatedAt = Date()
+        try modelContext.save()
+    }
+
     func cancelSession(sessionID: UUID) throws {
         guard let session = try session(id: sessionID) else {
             throw WorkoutSessionRepositoryError.sessionNotFound
@@ -588,7 +637,7 @@ final class WorkoutSessionRepository {
     @discardableResult
     func backfillCompletedSessionSummariesIfNeeded() throws -> Int {
         let rebuiltProjectionCount = try historyProjectionRepository.backfillIfNeeded(persistChanges: false)
-        let sessions = try completedSessions()
+        let sessions = try completedSessions(includeArchived: true)
         let staleSessions = sessions.filter {
             $0.summaryMetricsVersion < WorkoutMetricsService.currentSummaryMetricsVersion
         }
@@ -639,7 +688,8 @@ final class WorkoutSessionRepository {
 
     private func completedSessions(
         before date: Date?,
-        excludingSessionID: UUID?
+        excludingSessionID: UUID?,
+        includeArchived: Bool = false
     ) throws -> [WorkoutSession] {
         let completedStatus = WorkoutSessionStatus.completed.rawValue
 
@@ -679,7 +729,12 @@ final class WorkoutSessionRepository {
             )
         }
 
-        return try modelContext.fetch(descriptor)
+        let sessions = try modelContext.fetch(descriptor)
+        if includeArchived {
+            return sessions
+        }
+
+        return sessions.filter { $0.archivedAt == nil }
     }
 
     private func defaultSessionSets(
@@ -799,10 +854,19 @@ final class WorkoutSessionRepository {
     ) throws -> [String: UUID] {
         _ = try historyProjectionRepository.backfillIfNeeded(persistChanges: false)
         let facts = try historyProjectionRepository.allFacts()
+        let visibleSessionIDs = Set(
+            try completedSessions(
+                before: date,
+                excludingSessionID: excludingSessionID,
+                includeArchived: false
+            ).map(\.id)
+        )
+        guard !visibleSessionIDs.isEmpty else { return [:] }
         var chosenSessionByExercise: [String: UUID] = [:]
 
         for fact in facts {
             guard requested.contains(fact.catalogExerciseUUID) else { continue }
+            guard visibleSessionIDs.contains(fact.sessionID) else { continue }
             if let excludingSessionID, fact.sessionID == excludingSessionID {
                 continue
             }

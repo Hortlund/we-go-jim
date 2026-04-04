@@ -926,6 +926,7 @@ final class WorkoutSession {
     var prHitsCount: Int = 0
     var summaryMetricsVersion: Int = 0
     var notes: String = ""
+    var archivedAt: Date?
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
 
@@ -948,6 +949,7 @@ final class WorkoutSession {
         prHitsCount: Int = 0,
         summaryMetricsVersion: Int = 0,
         notes: String = "",
+        archivedAt: Date? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now
     ) {
@@ -962,6 +964,7 @@ final class WorkoutSession {
         self.prHitsCount = prHitsCount
         self.summaryMetricsVersion = summaryMetricsVersion
         self.notes = notes
+        self.archivedAt = archivedAt
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.exercises = []

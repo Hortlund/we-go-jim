@@ -385,6 +385,47 @@ struct WorkoutSessionRepositoryTests {
     }
 
     @Test
+    func archiveAndRestoreCompletedSessionKeepsCanonicalHistory() throws {
+        let context = try makeInMemoryContext()
+        let repository = WorkoutSessionRepository(modelContext: context)
+
+        let item = ExerciseCatalogItem(
+            remoteUUID: "archive-bench",
+            displayName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(item)
+
+        let session = try repository.createEmptySession(name: "Archive Me")
+        try repository.addExercise(sessionID: session.id, catalogItem: item)
+        let exercise = try #require(try repository.sessionExercises(sessionID: session.id).first)
+        var drafts = try repository.setDrafts(sessionExerciseID: exercise.id)
+        drafts[1].actualWeight = 100
+        drafts[1].actualReps = 5
+        drafts[1].isCompleted = true
+        try repository.saveSetDrafts(sessionExerciseID: exercise.id, drafts: drafts)
+        try repository.finishSession(sessionID: session.id)
+
+        try repository.archiveSession(id: session.id)
+
+        let archivedSession = try #require(try repository.session(id: session.id))
+        #expect(archivedSession.archivedAt != nil)
+        #expect(try repository.completedSessions().isEmpty)
+        #expect(try repository.completedSessions(includeArchived: true).count == 1)
+        #expect(try repository.archivedSessions().map(\.id) == [session.id])
+
+        try repository.restoreArchivedSession(id: session.id)
+
+        let restoredSession = try #require(try repository.session(id: session.id))
+        #expect(restoredSession.archivedAt == nil)
+        #expect(try repository.completedSessions().map(\.id) == [session.id])
+        #expect(try repository.archivedSessions().isEmpty)
+    }
+
+    @Test
     func cancelSessionDiscardsActiveWorkout() throws {
         let context = try makeInMemoryContext()
         let repository = WorkoutSessionRepository(modelContext: context)

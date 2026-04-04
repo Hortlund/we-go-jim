@@ -46,7 +46,7 @@ final class HistoryProjectionRepository {
 
     @discardableResult
     func backfillIfNeeded(persistChanges: Bool = true) throws -> Int {
-        let completedSessions = try sessionRepository.completedSessions()
+        let completedSessions = try sessionRepository.completedSessions(includeArchived: true)
         let validSessionIDs = Set(completedSessions.map(\.id))
         let existingFacts = try allFacts()
         let factsBySessionID = Dictionary(grouping: existingFacts, by: \.sessionID)

@@ -811,6 +811,76 @@ struct WorkoutMetricsServiceTests {
         #expect(options.first?.catalogExerciseUUID == bench.remoteUUID)
     }
 
+    @Test
+    func archivedSessionsAreIgnoredByMetricsAndPreviousSetLookupUntilRestored() throws {
+        let context = try makeInMemoryContext()
+        let sessionRepository = WorkoutSessionRepository(modelContext: context)
+
+        let exercise = ExerciseCatalogItem(
+            remoteUUID: "archived-metrics-bench",
+            displayName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(exercise)
+
+        let baseline = try sessionRepository.createEmptySession(name: "Baseline")
+        try sessionRepository.addExercise(sessionID: baseline.id, catalogItem: exercise)
+        let baselineExercise = try #require(try sessionRepository.sessionExercises(sessionID: baseline.id).first)
+        var baselineDrafts = try sessionRepository.setDrafts(sessionExerciseID: baselineExercise.id)
+        baselineDrafts[1].actualWeight = 100
+        baselineDrafts[1].actualReps = 5
+        baselineDrafts[1].isCompleted = true
+        try sessionRepository.saveSetDrafts(sessionExerciseID: baselineExercise.id, drafts: baselineDrafts)
+        try sessionRepository.finishSession(sessionID: baseline.id)
+
+        let current = try sessionRepository.createEmptySession(name: "Current")
+        try sessionRepository.addExercise(sessionID: current.id, catalogItem: exercise)
+        let currentExercise = try #require(try sessionRepository.sessionExercises(sessionID: current.id).first)
+        var currentDrafts = try sessionRepository.setDrafts(sessionExerciseID: currentExercise.id)
+        currentDrafts[1].actualWeight = 110
+        currentDrafts[1].actualReps = 5
+        currentDrafts[1].isCompleted = true
+        try sessionRepository.saveSetDrafts(sessionExerciseID: currentExercise.id, drafts: currentDrafts)
+        try sessionRepository.finishSession(sessionID: current.id)
+
+        var metrics = WorkoutMetricsService(modelContext: context)
+        #expect(try metrics.exerciseOneRepMaxTrend(for: exercise.remoteUUID, limit: 8).points.count == 2)
+        #expect(try metrics.profileDashboardSnapshot(prLimit: 5, weeks: 4).overviewStats.totalWorkouts == 2)
+        #expect(try sessionRepository.previousSet(
+            for: exercise.remoteUUID,
+            setIndex: 1,
+            before: .distantFuture,
+            excludingSessionID: nil
+        )?.actualWeight == 110)
+
+        try sessionRepository.archiveSession(id: current.id)
+
+        metrics = WorkoutMetricsService(modelContext: context)
+        #expect(try metrics.exerciseOneRepMaxTrend(for: exercise.remoteUUID, limit: 8).points.count == 1)
+        #expect(try metrics.profileDashboardSnapshot(prLimit: 5, weeks: 4).overviewStats.totalWorkouts == 1)
+        #expect(try sessionRepository.previousSet(
+            for: exercise.remoteUUID,
+            setIndex: 1,
+            before: .distantFuture,
+            excludingSessionID: nil
+        )?.actualWeight == 100)
+
+        try sessionRepository.restoreArchivedSession(id: current.id)
+
+        metrics = WorkoutMetricsService(modelContext: context)
+        #expect(try metrics.exerciseOneRepMaxTrend(for: exercise.remoteUUID, limit: 8).points.count == 2)
+        #expect(try metrics.profileDashboardSnapshot(prLimit: 5, weeks: 4).overviewStats.totalWorkouts == 2)
+        #expect(try sessionRepository.previousSet(
+            for: exercise.remoteUUID,
+            setIndex: 1,
+            before: .distantFuture,
+            excludingSessionID: nil
+        )?.actualWeight == 110)
+    }
+
     private func makeInMemoryContext() throws -> ModelContext {
         let schema = Schema([
             ExerciseCatalogItem.self,

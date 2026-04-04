@@ -29,6 +29,46 @@ struct TemplateRepositoryTests {
         #expect(movedToBottom.map(\.sortOrder) == [0, 1, 2])
     }
 
+    @Test
+    func deletingTemplatePreservesCompletedSessionHistoryAndFacts() throws {
+        let context = try makeInMemoryContext()
+        let templateRepository = TemplateRepository(modelContext: context)
+        let sessionRepository = WorkoutSessionRepository(modelContext: context)
+        let projectionRepository = HistoryProjectionRepository(modelContext: context)
+        let metrics = WorkoutMetricsService(modelContext: context)
+
+        let bench = ExerciseCatalogItem(
+            remoteUUID: "template-delete-history-bench",
+            displayName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(bench)
+
+        let template = try templateRepository.createTemplate(name: "Push", notes: "")
+        try templateRepository.addExercise(templateID: template.id, catalogItem: bench)
+
+        let session = try sessionRepository.createSessionFromTemplate(templateID: template.id)
+        let sessionExercise = try #require(try sessionRepository.sessionExercises(sessionID: session.id).first)
+        var drafts = try sessionRepository.setDrafts(sessionExerciseID: sessionExercise.id)
+        drafts[1].actualWeight = 100
+        drafts[1].actualReps = 5
+        drafts[1].isCompleted = true
+        try sessionRepository.saveSetDrafts(sessionExerciseID: sessionExercise.id, drafts: drafts)
+        try sessionRepository.finishSession(sessionID: session.id)
+
+        #expect(try projectionRepository.facts(forSessionID: session.id).count == 1)
+
+        try templateRepository.deleteTemplate(id: template.id)
+
+        #expect(try templateRepository.template(id: template.id) == nil)
+        #expect(try sessionRepository.session(id: session.id) != nil)
+        #expect(try projectionRepository.facts(forSessionID: session.id).count == 1)
+        #expect(try metrics.exerciseOneRepMaxTrend(for: bench.remoteUUID, limit: 8).points.count == 1)
+    }
+
     private func makeInMemoryContext() throws -> ModelContext {
         let schema = Schema([
             ExerciseCatalogItem.self,

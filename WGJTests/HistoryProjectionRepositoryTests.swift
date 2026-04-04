@@ -202,6 +202,39 @@ struct HistoryProjectionRepositoryTests {
         #expect(try projectionRepository.facts(forSessionID: session.id).count == 1)
     }
 
+    @Test
+    func backfillRebuildsArchivedSessionFactsForRestore() throws {
+        let context = try makeInMemoryContext()
+        let sessionRepository = WorkoutSessionRepository(modelContext: context)
+        let projectionRepository = HistoryProjectionRepository(modelContext: context)
+
+        let bench = ExerciseCatalogItem(
+            remoteUUID: "projection-archived-bench",
+            displayName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(bench)
+
+        let session = try makeCompletedSession(
+            named: "Archived",
+            weight: 95,
+            reps: 6,
+            exercise: bench,
+            sessionRepository: sessionRepository
+        )
+
+        try sessionRepository.archiveSession(id: session.id)
+        try projectionRepository.deleteFacts(forSessionID: session.id, persistChanges: false)
+        try context.save()
+
+        #expect(try projectionRepository.facts(forSessionID: session.id).isEmpty)
+        #expect(try projectionRepository.backfillIfNeeded() == 1)
+        #expect(try projectionRepository.facts(forSessionID: session.id).count == 1)
+    }
+
     private func makeInMemoryContext() throws -> ModelContext {
         let schema = Schema([
             ExerciseCatalogItem.self,

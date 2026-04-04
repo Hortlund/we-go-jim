@@ -8,6 +8,7 @@ struct HistoryOverviewView: View {
 
     @State private var selectedDayFilter: Date?
     @State private var showingWorkoutCalendar = false
+    @State private var showingArchivedWorkouts = false
     @State private var displayedCalendarMonth = Calendar.current.date(
         from: Calendar.current.dateComponents([.year, .month], from: Date())
     ) ?? Date()
@@ -24,6 +25,12 @@ struct HistoryOverviewView: View {
                     }
                     .buttonStyle(WGJGhostButtonStyle())
                     .accessibilityIdentifier("history-calendar-button")
+
+                    Button("Hidden") {
+                        showingArchivedWorkouts = true
+                    }
+                    .buttonStyle(WGJGhostButtonStyle())
+                    .accessibilityIdentifier("history-hidden-button")
                 }
 
                 if let selectedDayFilter {
@@ -60,6 +67,16 @@ struct HistoryOverviewView: View {
         .sheet(isPresented: $showingWorkoutCalendar) {
             workoutCalendarSheet
         }
+        .sheet(isPresented: $showingArchivedWorkouts, onDismiss: {
+            Task {
+                await reloadSnapshot()
+            }
+        }) {
+            NavigationStack {
+                HistoryArchivedWorkoutsSheet()
+            }
+            .presentationDetents([.large])
+        }
         .task(id: isTabActive) {
             guard isTabActive else { return }
             await reloadSnapshot()
@@ -88,7 +105,7 @@ struct HistoryOverviewView: View {
 
     private func historyCard(_ card: HistorySessionCardData) -> some View {
         HistorySessionCardView(card: card) {
-            deleteSession(card.sessionID)
+            archiveSession(card.sessionID)
         }
         .equatable()
     }
@@ -144,9 +161,9 @@ struct HistoryOverviewView: View {
         Calendar.current.startOfDay(for: date)
     }
 
-    private func deleteSession(_ id: UUID) {
+    private func archiveSession(_ id: UUID) {
         do {
-            try WorkoutSessionRepository(modelContext: modelContext).deleteSession(id: id)
+            try WorkoutSessionRepository(modelContext: modelContext).archiveSession(id: id)
             Task {
                 await reloadSnapshot()
             }
@@ -236,7 +253,9 @@ enum HistoryOverviewSnapshotBuilder {
         selectedDayFilter: Date?,
         calendar: Calendar = .current
     ) -> HistoryOverviewSnapshot {
-        let completedSessions = sessions.filter { $0.status == .completed }
+        let completedSessions = sessions.filter {
+            $0.status == .completed && $0.archivedAt == nil
+        }
         let selectedDayStart = selectedDayFilter.map { startOfDay(for: $0, calendar: calendar) }
 
         var workoutCountsByDay: [Date: Int] = [:]
@@ -340,7 +359,7 @@ enum HistoryOverviewSnapshotBuilder {
 
 private struct HistorySessionCardView: View, Equatable {
     let card: HistorySessionCardData
-    let onDelete: () -> Void
+    let onArchive: () -> Void
 
     static func == (lhs: HistorySessionCardView, rhs: HistorySessionCardView) -> Bool {
         lhs.card == rhs.card
@@ -366,8 +385,8 @@ private struct HistorySessionCardView: View, Equatable {
                     Spacer()
 
                     WGJActionMenuButton("Workout Actions") {
-                        Button(role: .destructive, action: onDelete) {
-                            Label("Delete", systemImage: "trash")
+                        Button(action: onArchive) {
+                            Label("Hide", systemImage: "archivebox")
                         }
                     } label: {
                         Image(systemName: "ellipsis")
@@ -472,6 +491,117 @@ private struct HistorySessionSummaryRow: Identifiable {
     let id: Int
     let exercise: String
     let bestSet: String
+}
+
+private struct HistoryArchivedWorkoutsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+
+    @State private var archivedSessions: [WorkoutSession] = []
+    @State private var errorMessage = ""
+    @State private var showingError = false
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 12) {
+                if archivedSessions.isEmpty {
+                    WGJEmptyStateCard(
+                        title: "No hidden workouts",
+                        message: "Workouts you hide from history will show up here so you can restore them later.",
+                        icon: "archivebox"
+                    )
+                } else {
+                    ForEach(archivedSessions, id: \.id) { session in
+                        archivedSessionCard(session)
+                    }
+                }
+            }
+            .padding(.top, 8)
+            .padding(16)
+        }
+        .wgjScreenBackground()
+        .navigationTitle("Hidden Workouts")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Done") {
+                    dismiss()
+                }
+            }
+        }
+        .task {
+            await loadArchivedSessions()
+        }
+        .alert("History Error", isPresented: $showingError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(errorMessage)
+        }
+    }
+
+    private func archivedSessionCard(_ session: WorkoutSession) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(session.name)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(WGJTheme.textPrimary)
+                .lineLimit(2)
+
+            Text((session.endedAt ?? session.startedAt).formatted(date: .abbreviated, time: .shortened))
+                .font(.headline)
+                .foregroundStyle(WGJTheme.textSecondary)
+
+            HStack(spacing: 12) {
+                WGJMetricPill(systemImage: "clock.fill", value: formattedDuration(session.durationSeconds))
+                WGJMetricPill(systemImage: "scalemass.fill", value: formattedVolume(session.totalVolume))
+            }
+
+            Button {
+                restoreSession(session.id)
+            } label: {
+                Label("Restore Workout", systemImage: "arrow.uturn.backward")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(WGJPrimaryButtonStyle())
+        }
+        .padding(14)
+        .wgjCardContainer(strong: true)
+    }
+
+    @MainActor
+    private func loadArchivedSessions() async {
+        do {
+            archivedSessions = try WorkoutSessionRepository(modelContext: modelContext).archivedSessions()
+        } catch {
+            errorMessage = String(describing: error)
+            showingError = true
+        }
+    }
+
+    private func restoreSession(_ sessionID: UUID) {
+        do {
+            try WorkoutSessionRepository(modelContext: modelContext).restoreArchivedSession(id: sessionID)
+            archivedSessions.removeAll { $0.id == sessionID }
+        } catch {
+            errorMessage = String(describing: error)
+            showingError = true
+        }
+    }
+
+    private func formattedDuration(_ seconds: Int) -> String {
+        let mins = max(0, seconds) / 60
+        let hours = mins / 60
+        let remMins = mins % 60
+        if hours > 0 {
+            return "\(hours)h \(remMins)m"
+        }
+        return "\(remMins)m"
+    }
+
+    private func formattedVolume(_ volume: Double) -> String {
+        if volume == 0 {
+            return "0 kg"
+        }
+        return "\(WGJFormatters.integerString(volume)) kg"
+    }
 }
 
 private struct HistoryWorkoutCalendarSheet: View {

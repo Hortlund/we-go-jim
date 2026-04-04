@@ -790,6 +790,10 @@ final class WorkoutMetricsService {
         try metricsSnapshot().completedSessions
     }
 
+    private func visibleCompletedSessionIDs() throws -> Set<UUID> {
+        Set(try repository.completedSessions().map(\.id))
+    }
+
     private func ensureHistoryFacts() throws {
         _ = try historyProjectionRepository.backfillIfNeeded(persistChanges: false)
     }
@@ -803,6 +807,7 @@ final class WorkoutMetricsService {
             try ensureHistoryFacts()
             let sessions = try repository.completedSessions()
             let facts = try historyProjectionRepository.allFacts()
+            let visibleSessionIDs = Set(sessions.map(\.id))
             var bestPRByExercise: [String: WorkoutPRRecord] = [:]
             var countsByWeek: [Date: Int] = [:]
             var countsByDay: [Date: Int] = [:]
@@ -834,6 +839,8 @@ final class WorkoutMetricsService {
             var countedExerciseKeys: Set<SessionExerciseHistoryKey> = []
 
             for fact in facts where !fact.isWarmup {
+                guard visibleSessionIDs.contains(fact.sessionID) else { continue }
+
                 let key = SessionExerciseHistoryKey(
                     sessionID: fact.sessionID,
                     catalogExerciseUUID: fact.catalogExerciseUUID
@@ -1005,9 +1012,11 @@ final class WorkoutMetricsService {
     ) throws -> PriorSetMetricPeaks {
         try ensureHistoryFacts()
         let facts = try historyProjectionRepository.allFacts()
+        let visibleSessionIDs = try visibleCompletedSessionIDs()
         var peaks = PriorSetMetricPeaks()
 
         for fact in facts where !fact.isWarmup && fact.catalogExerciseUUID == catalogExerciseUUID {
+            guard visibleSessionIDs.contains(fact.sessionID) else { continue }
             if let excludingSessionID, fact.sessionID == excludingSessionID {
                 continue
             }
