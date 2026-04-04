@@ -72,6 +72,9 @@ enum WorkoutSessionRepositoryError: Error {
 @MainActor
 final class WorkoutSessionRepository {
     private let modelContext: ModelContext
+    private var historyProjectionRepository: HistoryProjectionRepository {
+        HistoryProjectionRepository(modelContext: modelContext)
+    }
 
     init(modelContext: ModelContext) {
         self.modelContext = modelContext
@@ -425,27 +428,25 @@ final class WorkoutSessionRepository {
         before date: Date,
         excludingSessionID: UUID?
     ) throws -> WorkoutSessionSet? {
-        let sessions = try completedSessions(before: date, excludingSessionID: excludingSessionID)
+        let factsByExercise = try projectedPreviousFacts(
+            forExercises: [catalogExerciseUUID],
+            before: date,
+            excludingSessionID: excludingSessionID
+        )
 
-        for session in sessions {
-            let exercises = (session.exercises ?? [])
-                .filter { $0.catalogExerciseUUID == catalogExerciseUUID }
-                .sorted { $0.sortOrder < $1.sortOrder }
+        let baseFacts = factsByExercise[catalogExerciseUUID] ?? [:]
+        guard !baseFacts.isEmpty else { return nil }
 
-            guard let firstExercise = exercises.first else { continue }
-            let sets = (firstExercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
-            guard !sets.isEmpty else { continue }
+        let targetFact = baseFacts[setIndex] ?? baseFacts[baseFacts.keys.max() ?? setIndex]
+        guard let sessionSetID = targetFact?.sessionSetID else { return nil }
 
-            if sets.indices.contains(setIndex) {
-                return sets[setIndex]
+        let descriptor = FetchDescriptor<WorkoutSessionSet>(
+            predicate: #Predicate { set in
+                set.id == sessionSetID
             }
+        )
 
-            if let fallback = sets.last {
-                return fallback
-            }
-        }
-
-        return nil
+        return try modelContext.fetch(descriptor).first
     }
 
     func previousSetMap(
@@ -493,35 +494,24 @@ final class WorkoutSessionRepository {
         )
         guard !requested.isEmpty else { return [:] }
 
-        let sessions = try completedSessions(before: date, excludingSessionID: excludingSessionID)
-        var remaining = requested
-        var results: [String: [Int: WorkoutPreviousSetSnapshot]] = [:]
+        let factsByExercise = try projectedPreviousFacts(
+            forExercises: Array(requested),
+            before: date,
+            excludingSessionID: excludingSessionID
+        )
 
-        for session in sessions {
-            let exercises = (session.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
-            for exercise in exercises where remaining.contains(exercise.catalogExerciseUUID) {
-                let sets = (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
-                guard !sets.isEmpty else { continue }
-
-                var perIndex: [Int: WorkoutPreviousSetSnapshot] = [:]
-                perIndex.reserveCapacity(sets.count)
-
-                for (index, set) in sets.enumerated() {
-                    perIndex[index] = previousSnapshot(from: set)
-                }
-
-                if !perIndex.isEmpty {
-                    results[exercise.catalogExerciseUUID] = perIndex
-                    remaining.remove(exercise.catalogExerciseUUID)
-                }
-            }
-
-            if remaining.isEmpty {
-                break
-            }
+        return factsByExercise.mapValues { facts in
+            Dictionary(uniqueKeysWithValues: facts.values.map { fact in
+                (
+                    fact.setIndex,
+                    WorkoutPreviousSetSnapshot(
+                        reps: fact.reps,
+                        weight: fact.weight,
+                        unit: fact.loadUnit
+                    )
+                )
+            })
         }
-
-        return results
     }
 
     func finishSession(sessionID: UUID, notes: String? = nil) throws {
@@ -534,15 +524,18 @@ final class WorkoutSessionRepository {
         }
 
         session.status = .completed
-        session.endedAt = .now
+        let now = Date()
+        session.endedAt = now
         session.durationSeconds = max(0, Int((session.endedAt ?? .now).timeIntervalSince(session.startedAt)))
+        session.updatedAt = now
+
+        try historyProjectionRepository.rebuildFacts(forSessionID: sessionID, persistChanges: false)
 
         let metrics = WorkoutMetricsService(modelContext: modelContext)
         let summary = try metrics.sessionSummary(sessionID: sessionID)
         session.totalVolume = summary.totalVolume
         session.prHitsCount = summary.prHitsCount
         session.summaryMetricsVersion = WorkoutMetricsService.currentSummaryMetricsVersion
-        session.updatedAt = .now
 
         try modelContext.save()
         try? CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)?.queueCompletedSessionPublish(sessionID: sessionID)
@@ -565,6 +558,10 @@ final class WorkoutSessionRepository {
             throw WorkoutSessionRepositoryError.sessionNotFound
         }
 
+        let now = Date()
+        session.updatedAt = now
+        try historyProjectionRepository.rebuildFacts(forSessionID: sessionID, persistChanges: false)
+
         let metrics = WorkoutMetricsService(modelContext: modelContext)
         let summary = try metrics.sessionSummary(sessionID: sessionID)
         session.totalVolume = summary.totalVolume
@@ -576,12 +573,12 @@ final class WorkoutSessionRepository {
             session.durationSeconds = max(0, Int(end.timeIntervalSince(session.startedAt)))
         }
 
-        session.updatedAt = .now
         try modelContext.save()
     }
 
     @discardableResult
     func backfillCompletedSessionSummariesIfNeeded() throws -> Int {
+        _ = try historyProjectionRepository.backfillIfNeeded(persistChanges: false)
         let sessions = try completedSessions()
         let staleSessions = sessions.filter {
             $0.summaryMetricsVersion < WorkoutMetricsService.currentSummaryMetricsVersion
@@ -591,14 +588,12 @@ final class WorkoutSessionRepository {
         }
 
         let metrics = WorkoutMetricsService(modelContext: modelContext)
-        let now = Date()
 
         for session in staleSessions {
             let summary = try metrics.sessionSummary(sessionID: session.id)
             session.totalVolume = summary.totalVolume
             session.prHitsCount = summary.prHitsCount
             session.summaryMetricsVersion = WorkoutMetricsService.currentSummaryMetricsVersion
-            session.updatedAt = now
         }
 
         try modelContext.save()
@@ -611,6 +606,7 @@ final class WorkoutSessionRepository {
         }
 
         try? CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)?.queueDeletedSession(sessionID: id)
+        try historyProjectionRepository.deleteFacts(forSessionID: id, persistChanges: false)
         modelContext.delete(session)
         try modelContext.save()
     }
@@ -728,6 +724,36 @@ final class WorkoutSessionRepository {
         let chosenReps = set.actualReps ?? set.targetReps
         let chosenUnit = set.actualWeight != nil ? set.actualLoadUnit : set.targetLoadUnit
         return WorkoutPreviousSetSnapshot(reps: chosenReps, weight: chosenWeight, unit: chosenUnit)
+    }
+
+    private func projectedPreviousFacts(
+        forExercises catalogExerciseUUIDs: [String],
+        before date: Date,
+        excludingSessionID: UUID?
+    ) throws -> [String: [Int: CompletedSetFact]] {
+        _ = try historyProjectionRepository.backfillIfNeeded(persistChanges: false)
+        let requested = Set(catalogExerciseUUIDs)
+        let facts = try historyProjectionRepository.allFacts()
+        var chosenSessionByExercise: [String: UUID] = [:]
+        var results: [String: [Int: CompletedSetFact]] = [:]
+
+        for fact in facts where !fact.isWarmup {
+            guard requested.contains(fact.catalogExerciseUUID) else { continue }
+            if let excludingSessionID, fact.sessionID == excludingSessionID {
+                continue
+            }
+            guard fact.completedAt < date else { continue }
+
+            if let chosenSessionID = chosenSessionByExercise[fact.catalogExerciseUUID] {
+                guard chosenSessionID == fact.sessionID else { continue }
+            } else {
+                chosenSessionByExercise[fact.catalogExerciseUUID] = fact.sessionID
+            }
+
+            results[fact.catalogExerciseUUID, default: [:]][fact.setIndex] = fact
+        }
+
+        return results
     }
 
     private func apply(

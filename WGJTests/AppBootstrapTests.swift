@@ -13,11 +13,13 @@ struct AppBootstrapTests {
             "LocalCatalog",
             "UserData",
             "SocialOutbox",
+            "HistoryProjection",
         ])
         #expect(AppStoreLayout.storeFilePrefixes == [
             "LocalCatalog.store",
             "UserData.store",
             "SocialOutbox.store",
+            "HistoryProjection.store",
         ])
         #expect(!AppStoreLayout.storeFilePrefixes.contains("default.store"))
     }

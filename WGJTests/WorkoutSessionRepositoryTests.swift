@@ -415,6 +415,7 @@ struct WorkoutSessionRepositoryTests {
             WorkoutSession.self,
             WorkoutSessionExercise.self,
             WorkoutSessionSet.self,
+            CompletedSetFact.self,
             SocialOutboxItem.self,
         ])
 

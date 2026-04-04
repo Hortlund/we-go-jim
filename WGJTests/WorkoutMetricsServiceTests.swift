@@ -795,6 +795,7 @@ struct WorkoutMetricsServiceTests {
             WorkoutSession.self,
             WorkoutSessionExercise.self,
             WorkoutSessionSet.self,
+            CompletedSetFact.self,
             SocialOutboxItem.self,
         ])
 

@@ -935,3 +935,64 @@ final class WorkoutSessionSet {
         self.sessionExercise = sessionExercise
     }
 }
+
+@Model
+final class CompletedSetFact {
+    @Attribute(.unique) var sessionSetID: UUID = UUID()
+    var sessionID: UUID = UUID()
+    var sessionExerciseID: UUID = UUID()
+    var templateID: UUID?
+    var catalogExerciseUUID: String = ""
+    var exerciseNameSnapshot: String = ""
+    var completedAt: Date = Date()
+    var setIndex: Int = 0
+    var isWarmup: Bool = false
+    var reps: Int = 0
+    var weight: Double?
+    var loadUnitRaw: String = TemplateLoadUnit.kg.rawValue
+    var normalizedWeightKg: Double?
+    var estimatedOneRepMaxKg: Double?
+    var volumeKg: Double?
+    var sourceSessionUpdatedAt: Date = Date()
+
+    var loadUnit: TemplateLoadUnit {
+        get { TemplateLoadUnit(rawValue: loadUnitRaw) ?? .kg }
+        set { loadUnitRaw = newValue.rawValue }
+    }
+
+    init(
+        sessionSetID: UUID,
+        sessionID: UUID,
+        sessionExerciseID: UUID,
+        templateID: UUID? = nil,
+        catalogExerciseUUID: String,
+        exerciseNameSnapshot: String,
+        completedAt: Date,
+        setIndex: Int,
+        isWarmup: Bool,
+        reps: Int,
+        weight: Double? = nil,
+        loadUnit: TemplateLoadUnit,
+        normalizedWeightKg: Double? = nil,
+        estimatedOneRepMaxKg: Double? = nil,
+        volumeKg: Double? = nil,
+        sourceSessionUpdatedAt: Date
+    ) {
+        self.sessionSetID = sessionSetID
+        self.sessionID = sessionID
+        self.sessionExerciseID = sessionExerciseID
+        self.templateID = templateID
+        self.catalogExerciseUUID = catalogExerciseUUID
+        self.exerciseNameSnapshot = exerciseNameSnapshot
+        self.completedAt = completedAt
+        self.setIndex = setIndex
+        self.isWarmup = isWarmup
+        self.reps = max(0, reps)
+        self.weight = weight
+        self.loadUnitRaw = loadUnit.rawValue
+        self.normalizedWeightKg = normalizedWeightKg
+        self.estimatedOneRepMaxKg = estimatedOneRepMaxKg
+        self.volumeKg = volumeKg
+        self.sourceSessionUpdatedAt = sourceSessionUpdatedAt
+    }
+}

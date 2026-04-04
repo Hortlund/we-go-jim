@@ -175,6 +175,12 @@ struct ContentView: View {
             activeWorkoutPresentationState.restoreActiveSessionIfNeeded(modelContext: modelContext)
             restTimerState.clearExpiredRestTimerIfNeeded()
             catalogSyncCoordinator.primeLocalCatalogIfNeeded(modelContext: modelContext)
+            let rebuiltProjectionCount = (try? HistoryProjectionRepository(modelContext: modelContext).backfillIfNeeded(
+                persistChanges: false
+            )) ?? 0
+            if rebuiltProjectionCount > 0 {
+                try? modelContext.save()
+            }
             _ = try? WorkoutSessionRepository(modelContext: modelContext).backfillCompletedSessionSummariesIfNeeded()
             await runSocialMaintenance()
         }
@@ -335,6 +341,7 @@ enum BrosCleanStartPolicy {
             WorkoutSession.self,
             WorkoutSessionExercise.self,
             WorkoutSessionSet.self,
+            CompletedSetFact.self,
             SocialOutboxItem.self,
         ], inMemory: true)
 }

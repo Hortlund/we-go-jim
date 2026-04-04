@@ -116,6 +116,7 @@ struct WGJApp: App {
             WorkoutSession.self,
             WorkoutSessionExercise.self,
             WorkoutSessionSet.self,
+            CompletedSetFact.self,
             SocialOutboxItem.self,
             BlockedBro.self,
         ])
@@ -150,6 +151,10 @@ struct WGJApp: App {
             BlockedBro.self,
         ])
 
+        let historyProjectionSchema = Schema([
+            CompletedSetFact.self,
+        ])
+
         return [
             ModelConfiguration(
                 AppStoreLayout.localCatalogConfigurationName,
@@ -166,6 +171,12 @@ struct WGJApp: App {
             ModelConfiguration(
                 AppStoreLayout.socialOutboxConfigurationName,
                 schema: socialOutboxSchema,
+                isStoredInMemoryOnly: false,
+                cloudKitDatabase: .none
+            ),
+            ModelConfiguration(
+                AppStoreLayout.historyProjectionConfigurationName,
+                schema: historyProjectionSchema,
                 isStoredInMemoryOnly: false,
                 cloudKitDatabase: .none
             ),
@@ -223,10 +234,12 @@ enum AppStoreLayout {
     static let localCatalogConfigurationName = "LocalCatalog"
     static let userDataConfigurationName = "UserData"
     static let socialOutboxConfigurationName = "SocialOutbox"
+    static let historyProjectionConfigurationName = "HistoryProjection"
     static let configurationNames = [
         localCatalogConfigurationName,
         userDataConfigurationName,
         socialOutboxConfigurationName,
+        historyProjectionConfigurationName,
     ]
     static let storeFilePrefixes = configurationNames.map { "\($0).store" }
 }

@@ -60,6 +60,7 @@ final class AppDataDeletionService {
         try deleteAll(WorkoutSessionSet.self)
         try deleteAll(WorkoutSessionExercise.self)
         try deleteAll(WorkoutSession.self)
+        try deleteAll(CompletedSetFact.self)
         try deleteAll(TemplateExerciseSet.self)
         try deleteAll(TemplateExercise.self)
         try deleteAll(WorkoutTemplate.self)
