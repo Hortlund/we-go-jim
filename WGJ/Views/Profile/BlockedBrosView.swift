@@ -80,5 +80,10 @@ struct BlockedBrosView: View {
     NavigationStack {
         BlockedBrosView()
     }
-    .modelContainer(for: [BlockedBro.self], inMemory: true)
+    .modelContainer(for: [
+        BlockedBro.self,
+        ActiveWorkoutDraftSession.self,
+        ActiveWorkoutDraftExercise.self,
+        ActiveWorkoutDraftSet.self,
+    ], inMemory: true)
 }

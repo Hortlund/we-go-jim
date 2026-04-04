@@ -1,0 +1,627 @@
+import Foundation
+import SwiftData
+
+@MainActor
+final class ActiveWorkoutDraftRepository {
+    private let modelContext: ModelContext
+
+    private var completedSessionRepository: WorkoutSessionRepository {
+        WorkoutSessionRepository(modelContext: modelContext)
+    }
+
+    init(modelContext: ModelContext) {
+        self.modelContext = modelContext
+    }
+
+    private func preferredLoadUnit() -> TemplateLoadUnit {
+        let profileRepository = ProfileRepository(modelContext: modelContext)
+        return (try? profileRepository.currentProfile()?.preferredLoadUnit) ?? .kg
+    }
+
+    func createEmptySession(name: String = "Empty Workout") throws -> ActiveWorkoutDraftSession {
+        let cleanedName = ReviewModerationService.sanitizedForSharing(name, kind: .workoutName)
+        let created = ActiveWorkoutDraftSession(name: cleanedName)
+        modelContext.insert(created)
+        try modelContext.save()
+        return created
+    }
+
+    func createSessionFromTemplate(templateID: UUID) throws -> ActiveWorkoutDraftSession {
+        guard let template = try template(id: templateID) else {
+            throw WorkoutSessionRepositoryError.templateNotFound
+        }
+
+        let session = ActiveWorkoutDraftSession(
+            templateID: template.id,
+            name: ReviewModerationService.sanitizedForSharing(template.name, kind: .workoutName)
+        )
+        modelContext.insert(session)
+
+        let orderedExercises = (template.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
+        for (exerciseIndex, templateExercise) in orderedExercises.enumerated() {
+            let exercise = ActiveWorkoutDraftExercise(
+                sessionID: session.id,
+                catalogExerciseUUID: templateExercise.catalogExerciseUUID,
+                exerciseNameSnapshot: templateExercise.exerciseNameSnapshot,
+                categorySnapshot: templateExercise.categorySnapshot,
+                muscleSummarySnapshot: templateExercise.muscleSummarySnapshot,
+                targetRepMin: templateExercise.targetRepMin,
+                targetRepMax: templateExercise.targetRepMax,
+                restSeconds: templateExercise.restSeconds,
+                sortOrder: exerciseIndex,
+                session: session
+            )
+            modelContext.insert(exercise)
+
+            let orderedSets = (templateExercise.prescribedSets ?? []).sorted { $0.sortOrder < $1.sortOrder }
+            var createdSets: [ActiveWorkoutDraftSet] = []
+            for (setIndex, templateSet) in orderedSets.enumerated() {
+                let set = ActiveWorkoutDraftSet(
+                    sessionExerciseID: exercise.id,
+                    sortOrder: setIndex,
+                    isWarmup: templateSet.isWarmup,
+                    restSeconds: templateSet.restSeconds,
+                    targetReps: templateSet.targetReps,
+                    targetWeight: templateSet.targetWeight,
+                    targetLoadUnit: templateSet.loadUnit,
+                    actualReps: nil,
+                    actualWeight: nil,
+                    actualLoadUnit: templateSet.loadUnit,
+                    isCompleted: false,
+                    isLocked: templateSet.isLocked,
+                    sessionExercise: exercise
+                )
+                modelContext.insert(set)
+                createdSets.append(set)
+            }
+
+            if createdSets.isEmpty {
+                createdSets = defaultSessionSets(
+                    sessionExerciseID: exercise.id,
+                    restSeconds: exercise.restSeconds,
+                    loadUnit: preferredLoadUnit(),
+                    sessionExercise: exercise
+                )
+            }
+
+            exercise.sets = createdSets
+        }
+
+        try modelContext.save()
+        return session
+    }
+
+    func session(id: UUID) throws -> ActiveWorkoutDraftSession? {
+        let descriptor = FetchDescriptor<ActiveWorkoutDraftSession>(predicate: #Predicate { session in
+            session.id == id
+        })
+        return try modelContext.fetch(descriptor).first
+    }
+
+    func activeSession() throws -> ActiveWorkoutDraftSession? {
+        let localDrafts = try activeDraftSessions()
+        if let activeDraft = localDrafts.first {
+            try cleanLegacyActiveSessionIfNeeded()
+            return activeDraft
+        }
+
+        guard let legacySession = try completedSessionRepository.activeSession() else {
+            return nil
+        }
+
+        return try migrateLegacySession(legacySession)
+    }
+
+    func sessionExercises(sessionID: UUID) throws -> [ActiveWorkoutDraftExercise] {
+        let descriptor = FetchDescriptor<ActiveWorkoutDraftExercise>(
+            predicate: #Predicate { exercise in
+                exercise.sessionID == sessionID
+            },
+            sortBy: [SortDescriptor(\.sortOrder, order: .forward)]
+        )
+        return try modelContext.fetch(descriptor)
+    }
+
+    func setDrafts(sessionExerciseID: UUID) throws -> [WorkoutSessionSetDraft] {
+        guard let exercise = try sessionExercise(id: sessionExerciseID) else {
+            throw WorkoutSessionRepositoryError.sessionExerciseNotFound
+        }
+
+        return orderedSessionSets(for: exercise).map(WorkoutSessionSetDraft.init(model:))
+    }
+
+    func updateSessionName(sessionID: UUID, name: String) throws {
+        guard let session = try session(id: sessionID) else {
+            throw WorkoutSessionRepositoryError.sessionNotFound
+        }
+
+        let cleaned = try ReviewModerationService.validateUserInput(name, kind: .workoutName)
+        session.name = cleaned
+        session.updatedAt = .now
+        try modelContext.save()
+    }
+
+    func updateSessionNotes(sessionID: UUID, notes: String) throws {
+        guard let session = try session(id: sessionID) else {
+            throw WorkoutSessionRepositoryError.sessionNotFound
+        }
+
+        session.notes = notes
+        session.updatedAt = .now
+        try modelContext.save()
+    }
+
+    func addExercise(sessionID: UUID, catalogItem: ExerciseCatalogItem, restSeconds: Int = 120) throws {
+        guard let session = try session(id: sessionID) else {
+            throw WorkoutSessionRepositoryError.sessionNotFound
+        }
+
+        let existing = try sessionExercises(sessionID: sessionID)
+        if existing.contains(where: { $0.catalogExerciseUUID == catalogItem.remoteUUID }) {
+            return
+        }
+
+        let nextIndex = (existing.map(\.sortOrder).max() ?? -1) + 1
+        let created = ActiveWorkoutDraftExercise(
+            sessionID: sessionID,
+            catalogExerciseUUID: catalogItem.remoteUUID,
+            exerciseNameSnapshot: catalogItem.displayName,
+            categorySnapshot: catalogItem.categoryName,
+            muscleSummarySnapshot: catalogItem.primaryMuscleNames,
+            restSeconds: sanitizedRest(restSeconds),
+            sortOrder: nextIndex,
+            session: session
+        )
+        modelContext.insert(created)
+
+        let sets = defaultSessionSets(
+            sessionExerciseID: created.id,
+            restSeconds: created.restSeconds,
+            loadUnit: TemplateLoadUnit.inferredDefault(fromEquipmentSummary: catalogItem.equipmentSummary)
+                ?? preferredLoadUnit(),
+            sessionExercise: created
+        )
+        created.sets = sets
+
+        session.updatedAt = .now
+        try modelContext.save()
+    }
+
+    func removeExercise(sessionID: UUID, sessionExerciseID: UUID) throws {
+        guard let session = try session(id: sessionID) else {
+            throw WorkoutSessionRepositoryError.sessionNotFound
+        }
+
+        guard let exercise = try sessionExercise(id: sessionExerciseID) else {
+            throw WorkoutSessionRepositoryError.sessionExerciseNotFound
+        }
+
+        modelContext.delete(exercise)
+
+        let remaining = try sessionExercises(sessionID: sessionID)
+        for (index, row) in remaining.enumerated() {
+            row.sortOrder = index
+            row.updatedAt = .now
+        }
+
+        session.updatedAt = .now
+        try modelContext.save()
+    }
+
+    func updateExerciseRest(sessionExerciseID: UUID, restSeconds: Int) throws {
+        guard let exercise = try sessionExercise(id: sessionExerciseID) else {
+            throw WorkoutSessionRepositoryError.sessionExerciseNotFound
+        }
+
+        let normalizedRest = sanitizedRest(restSeconds)
+        guard exercise.restSeconds != normalizedRest else {
+            return
+        }
+
+        let previousRest = exercise.restSeconds
+        exercise.restSeconds = normalizedRest
+        for set in exercise.sets ?? [] where !set.isLocked {
+            guard set.restSeconds == previousRest else {
+                continue
+            }
+            set.restSeconds = normalizedRest
+            set.updatedAt = .now
+        }
+        exercise.updatedAt = .now
+        try modelContext.save()
+    }
+
+    func updateExerciseRepRange(sessionExerciseID: UUID, minReps: Int?, maxReps: Int?) throws {
+        guard let exercise = try sessionExercise(id: sessionExerciseID) else {
+            throw WorkoutSessionRepositoryError.sessionExerciseNotFound
+        }
+
+        let normalized = sanitizedRepRange(min: minReps, max: maxReps)
+        guard exercise.targetRepMin != normalized.min || exercise.targetRepMax != normalized.max else {
+            return
+        }
+        exercise.targetRepMin = normalized.min
+        exercise.targetRepMax = normalized.max
+        exercise.updatedAt = .now
+        try modelContext.save()
+    }
+
+    func saveSetDrafts(sessionExerciseID: UUID, drafts: [WorkoutSessionSetDraft]) throws {
+        guard let exercise = try sessionExercise(id: sessionExerciseID) else {
+            throw WorkoutSessionRepositoryError.sessionExerciseNotFound
+        }
+
+        let existing = exercise.sets ?? []
+        let existingByID = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
+        let incomingIDs = Set(drafts.map(\.id))
+        let existingOrderedIDs = orderedSessionSets(for: exercise).map(\.id)
+        let incomingOrderedIDs = drafts.map(\.id)
+        let now = Date()
+        var didMutateExerciseStructure = existingOrderedIDs != incomingOrderedIDs
+
+        for set in existing where !incomingIDs.contains(set.id) {
+            modelContext.delete(set)
+            didMutateExerciseStructure = true
+        }
+
+        var updatedSets: [ActiveWorkoutDraftSet] = []
+        updatedSets.reserveCapacity(drafts.count)
+        for (index, draft) in drafts.enumerated() {
+            let set: ActiveWorkoutDraftSet
+            if let existingSet = existingByID[draft.id] {
+                set = existingSet
+            } else {
+                set = ActiveWorkoutDraftSet(
+                    id: draft.id,
+                    sessionExerciseID: sessionExerciseID,
+                    sessionExercise: exercise
+                )
+                modelContext.insert(set)
+                didMutateExerciseStructure = true
+            }
+
+            let didMutateSet = apply(draft: draft, to: set, sortOrder: index)
+            if didMutateSet {
+                set.updatedAt = now
+            }
+            updatedSets.append(set)
+        }
+
+        if didMutateExerciseStructure {
+            exercise.sets = updatedSets
+            exercise.updatedAt = now
+        }
+
+        try modelContext.save()
+    }
+
+    func previousSetMaps(
+        forExercises catalogExerciseUUIDs: [String],
+        before date: Date,
+        excludingSessionID: UUID?
+    ) throws -> [String: [Int: WorkoutPreviousSetSnapshot]] {
+        try completedSessionRepository.previousSetMaps(
+            forExercises: catalogExerciseUUIDs,
+            before: date,
+            excludingSessionID: excludingSessionID
+        )
+    }
+
+    @discardableResult
+    func finishSession(sessionID: UUID, notes: String? = nil) throws -> UUID {
+        guard let draftSession = try session(id: sessionID) else {
+            throw WorkoutSessionRepositoryError.sessionNotFound
+        }
+
+        let completedSession = materializeCompletedSession(from: draftSession, notes: notes)
+        modelContext.delete(draftSession)
+        try modelContext.save()
+
+        try completedSessionRepository.recalculateSessionSummary(sessionID: completedSession.id)
+        try? CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)?
+            .queueCompletedSessionPublish(sessionID: completedSession.id)
+
+        return completedSession.id
+    }
+
+    func cancelSession(sessionID: UUID) throws {
+        guard let session = try session(id: sessionID) else {
+            throw WorkoutSessionRepositoryError.sessionNotFound
+        }
+
+        modelContext.delete(session)
+        try modelContext.save()
+    }
+
+    private func activeDraftSessions() throws -> [ActiveWorkoutDraftSession] {
+        var descriptor = FetchDescriptor<ActiveWorkoutDraftSession>(
+            sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+        )
+        descriptor.fetchLimit = 1
+        return try modelContext.fetch(descriptor)
+    }
+
+    private func cleanLegacyActiveSessionIfNeeded() throws {
+        guard let legacySession = try completedSessionRepository.activeSession() else {
+            return
+        }
+
+        modelContext.delete(legacySession)
+        try modelContext.save()
+    }
+
+    private func migrateLegacySession(_ legacySession: WorkoutSession) throws -> ActiveWorkoutDraftSession {
+        let draftSession = ActiveWorkoutDraftSession(
+            id: legacySession.id,
+            templateID: legacySession.templateID,
+            name: legacySession.name,
+            startedAt: legacySession.startedAt,
+            notes: legacySession.notes,
+            createdAt: legacySession.createdAt,
+            updatedAt: legacySession.updatedAt
+        )
+        modelContext.insert(draftSession)
+
+        var draftExercises: [ActiveWorkoutDraftExercise] = []
+        for legacyExercise in orderedSessionExercises(legacySession) {
+            let draftExercise = ActiveWorkoutDraftExercise(
+                id: legacyExercise.id,
+                sessionID: draftSession.id,
+                catalogExerciseUUID: legacyExercise.catalogExerciseUUID,
+                exerciseNameSnapshot: legacyExercise.exerciseNameSnapshot,
+                categorySnapshot: legacyExercise.categorySnapshot,
+                muscleSummarySnapshot: legacyExercise.muscleSummarySnapshot,
+                targetRepMin: legacyExercise.targetRepMin,
+                targetRepMax: legacyExercise.targetRepMax,
+                restSeconds: legacyExercise.restSeconds,
+                sortOrder: legacyExercise.sortOrder,
+                createdAt: legacyExercise.createdAt,
+                updatedAt: legacyExercise.updatedAt,
+                session: draftSession
+            )
+            modelContext.insert(draftExercise)
+
+            var draftSets: [ActiveWorkoutDraftSet] = []
+            let orderedSets = (legacyExercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
+            for legacySet in orderedSets {
+                let draftSet = ActiveWorkoutDraftSet(
+                    id: legacySet.id,
+                    sessionExerciseID: draftExercise.id,
+                    sortOrder: legacySet.sortOrder,
+                    isWarmup: legacySet.isWarmup,
+                    restSeconds: legacySet.restSeconds,
+                    targetReps: legacySet.targetReps,
+                    targetWeight: legacySet.targetWeight,
+                    targetLoadUnit: legacySet.targetLoadUnit,
+                    actualReps: legacySet.actualReps,
+                    actualWeight: legacySet.actualWeight,
+                    actualLoadUnit: legacySet.actualLoadUnit,
+                    isCompleted: legacySet.isCompleted,
+                    isLocked: legacySet.isLocked,
+                    createdAt: legacySet.createdAt,
+                    updatedAt: legacySet.updatedAt,
+                    sessionExercise: draftExercise
+                )
+                modelContext.insert(draftSet)
+                draftSets.append(draftSet)
+            }
+
+            draftExercise.sets = draftSets
+            draftExercises.append(draftExercise)
+        }
+
+        draftSession.exercises = draftExercises
+        modelContext.delete(legacySession)
+        try modelContext.save()
+        return draftSession
+    }
+
+    private func materializeCompletedSession(
+        from draftSession: ActiveWorkoutDraftSession,
+        notes: String?
+    ) -> WorkoutSession {
+        let completedAt = Date()
+        let completedSession = WorkoutSession(
+            id: draftSession.id,
+            templateID: draftSession.templateID,
+            name: draftSession.name,
+            status: .completed,
+            startedAt: draftSession.startedAt,
+            endedAt: completedAt,
+            durationSeconds: max(0, Int(completedAt.timeIntervalSince(draftSession.startedAt))),
+            totalVolume: 0,
+            prHitsCount: 0,
+            summaryMetricsVersion: 0,
+            notes: notes ?? draftSession.notes,
+            createdAt: draftSession.createdAt,
+            updatedAt: completedAt
+        )
+        modelContext.insert(completedSession)
+
+        var completedExercises: [WorkoutSessionExercise] = []
+        for draftExercise in orderedSessionExercises(draftSession) {
+            let completedExercise = WorkoutSessionExercise(
+                id: draftExercise.id,
+                sessionID: completedSession.id,
+                catalogExerciseUUID: draftExercise.catalogExerciseUUID,
+                exerciseNameSnapshot: draftExercise.exerciseNameSnapshot,
+                categorySnapshot: draftExercise.categorySnapshot,
+                muscleSummarySnapshot: draftExercise.muscleSummarySnapshot,
+                targetRepMin: draftExercise.targetRepMin,
+                targetRepMax: draftExercise.targetRepMax,
+                restSeconds: draftExercise.restSeconds,
+                sortOrder: draftExercise.sortOrder,
+                createdAt: draftExercise.createdAt,
+                updatedAt: draftExercise.updatedAt,
+                session: completedSession
+            )
+            modelContext.insert(completedExercise)
+
+            var completedSets: [WorkoutSessionSet] = []
+            for draftSet in orderedSessionSets(for: draftExercise) {
+                let completedSet = WorkoutSessionSet(
+                    id: draftSet.id,
+                    sessionExerciseID: completedExercise.id,
+                    sortOrder: draftSet.sortOrder,
+                    isWarmup: draftSet.isWarmup,
+                    restSeconds: draftSet.restSeconds,
+                    targetReps: draftSet.targetReps,
+                    targetWeight: draftSet.targetWeight,
+                    targetLoadUnit: draftSet.targetLoadUnit,
+                    actualReps: draftSet.actualReps,
+                    actualWeight: draftSet.actualWeight,
+                    actualLoadUnit: draftSet.actualLoadUnit,
+                    isCompleted: draftSet.isCompleted,
+                    isLocked: draftSet.isLocked,
+                    createdAt: draftSet.createdAt,
+                    updatedAt: draftSet.updatedAt,
+                    sessionExercise: completedExercise
+                )
+                modelContext.insert(completedSet)
+                completedSets.append(completedSet)
+            }
+
+            completedExercise.sets = completedSets
+            completedExercises.append(completedExercise)
+        }
+
+        completedSession.exercises = completedExercises
+        return completedSession
+    }
+
+    private func template(id: UUID) throws -> WorkoutTemplate? {
+        let descriptor = FetchDescriptor<WorkoutTemplate>(predicate: #Predicate { template in
+            template.id == id
+        })
+        return try modelContext.fetch(descriptor).first
+    }
+
+    private func sessionExercise(id: UUID) throws -> ActiveWorkoutDraftExercise? {
+        let descriptor = FetchDescriptor<ActiveWorkoutDraftExercise>(predicate: #Predicate { exercise in
+            exercise.id == id
+        })
+        return try modelContext.fetch(descriptor).first
+    }
+
+    private func defaultSessionSets(
+        sessionExerciseID: UUID,
+        restSeconds: Int,
+        loadUnit: TemplateLoadUnit,
+        sessionExercise: ActiveWorkoutDraftExercise
+    ) -> [ActiveWorkoutDraftSet] {
+        let defaults = [0, 1, 2].map { index in
+            ActiveWorkoutDraftSet(
+                sessionExerciseID: sessionExerciseID,
+                sortOrder: index,
+                isWarmup: index == 0,
+                restSeconds: sanitizedRest(restSeconds),
+                targetReps: nil,
+                targetWeight: nil,
+                targetLoadUnit: loadUnit,
+                actualReps: nil,
+                actualWeight: nil,
+                actualLoadUnit: loadUnit,
+                isCompleted: false,
+                isLocked: false,
+                sessionExercise: sessionExercise
+            )
+        }
+
+        for set in defaults {
+            modelContext.insert(set)
+        }
+
+        return defaults
+    }
+
+    private func sanitizedReps(_ reps: Int?) -> Int? {
+        guard let reps else { return nil }
+        return min(999, max(0, reps))
+    }
+
+    private func sanitizedWeight(_ weight: Double?) -> Double? {
+        guard let weight else { return nil }
+        return min(5000, max(0, weight))
+    }
+
+    private func sanitizedRepRange(min minReps: Int?, max maxReps: Int?) -> (min: Int?, max: Int?) {
+        (sanitizedReps(minReps), sanitizedReps(maxReps))
+    }
+
+    private func sanitizedRest(_ seconds: Int) -> Int {
+        min(3600, max(0, seconds))
+    }
+
+    private func orderedSessionExercises(_ session: WorkoutSession) -> [WorkoutSessionExercise] {
+        (session.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    private func orderedSessionExercises(_ session: ActiveWorkoutDraftSession) -> [ActiveWorkoutDraftExercise] {
+        (session.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    private func orderedSessionSets(for exercise: ActiveWorkoutDraftExercise) -> [ActiveWorkoutDraftSet] {
+        (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    private func apply(
+        draft: WorkoutSessionSetDraft,
+        to set: ActiveWorkoutDraftSet,
+        sortOrder: Int
+    ) -> Bool {
+        let normalizedRest = sanitizedRest(draft.restSeconds)
+        let normalizedTargetReps = sanitizedReps(draft.targetReps)
+        let normalizedTargetWeight = sanitizedWeight(draft.targetWeight)
+        let normalizedActualReps = sanitizedReps(draft.actualReps)
+        let normalizedActualWeight = sanitizedWeight(draft.actualWeight)
+        var didChange = false
+
+        if set.sortOrder != sortOrder {
+            set.sortOrder = sortOrder
+            didChange = true
+        }
+        if set.isWarmup != draft.isWarmup {
+            set.isWarmup = draft.isWarmup
+            didChange = true
+        }
+        if set.restSeconds != normalizedRest {
+            set.restSeconds = normalizedRest
+            didChange = true
+        }
+        if set.targetReps != normalizedTargetReps {
+            set.targetReps = normalizedTargetReps
+            didChange = true
+        }
+        if set.targetWeight != normalizedTargetWeight {
+            set.targetWeight = normalizedTargetWeight
+            didChange = true
+        }
+        if set.targetLoadUnit != draft.targetLoadUnit {
+            set.targetLoadUnit = draft.targetLoadUnit
+            didChange = true
+        }
+        if set.actualReps != normalizedActualReps {
+            set.actualReps = normalizedActualReps
+            didChange = true
+        }
+        if set.actualWeight != normalizedActualWeight {
+            set.actualWeight = normalizedActualWeight
+            didChange = true
+        }
+        if set.actualLoadUnit != draft.actualLoadUnit {
+            set.actualLoadUnit = draft.actualLoadUnit
+            didChange = true
+        }
+        if set.isCompleted != draft.isCompleted {
+            set.isCompleted = draft.isCompleted
+            didChange = true
+        }
+        if set.isLocked != draft.isLocked {
+            set.isLocked = draft.isLocked
+            didChange = true
+        }
+
+        return didChange
+    }
+}
+

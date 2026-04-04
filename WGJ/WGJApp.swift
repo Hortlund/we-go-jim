@@ -113,6 +113,9 @@ struct WGJApp: App {
             WorkoutTemplate.self,
             TemplateExercise.self,
             TemplateExerciseSet.self,
+            ActiveWorkoutDraftSession.self,
+            ActiveWorkoutDraftExercise.self,
+            ActiveWorkoutDraftSet.self,
             WorkoutSession.self,
             WorkoutSessionExercise.self,
             WorkoutSessionSet.self,
@@ -146,6 +149,12 @@ struct WGJApp: App {
             WorkoutSessionSet.self,
         ])
 
+        let activeWorkoutDraftSchema = Schema([
+            ActiveWorkoutDraftSession.self,
+            ActiveWorkoutDraftExercise.self,
+            ActiveWorkoutDraftSet.self,
+        ])
+
         let socialOutboxSchema = Schema([
             SocialOutboxItem.self,
             BlockedBro.self,
@@ -167,6 +176,12 @@ struct WGJApp: App {
                 schema: userDataSchema,
                 isStoredInMemoryOnly: false,
                 cloudKitDatabase: userDataCloudKitDatabase
+            ),
+            ModelConfiguration(
+                AppStoreLayout.activeWorkoutDraftConfigurationName,
+                schema: activeWorkoutDraftSchema,
+                isStoredInMemoryOnly: false,
+                cloudKitDatabase: .none
             ),
             ModelConfiguration(
                 AppStoreLayout.socialOutboxConfigurationName,
@@ -233,11 +248,13 @@ struct WGJApp: App {
 enum AppStoreLayout {
     static let localCatalogConfigurationName = "LocalCatalog"
     static let userDataConfigurationName = "UserData"
+    static let activeWorkoutDraftConfigurationName = "ActiveWorkoutDraft"
     static let socialOutboxConfigurationName = "SocialOutbox"
     static let historyProjectionConfigurationName = "HistoryProjection"
     static let configurationNames = [
         localCatalogConfigurationName,
         userDataConfigurationName,
+        activeWorkoutDraftConfigurationName,
         socialOutboxConfigurationName,
         historyProjectionConfigurationName,
     ]

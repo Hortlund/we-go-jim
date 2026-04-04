@@ -65,8 +65,8 @@ struct ExercisesCatalogView: View {
         return nil
     }
 
-    private var workoutRepository: WorkoutSessionRepository {
-        WorkoutSessionRepository(modelContext: modelContext)
+    private var activeWorkoutRepository: ActiveWorkoutDraftRepository {
+        ActiveWorkoutDraftRepository(modelContext: modelContext)
     }
 
     private let indexRailWidth: CGFloat = 28
@@ -247,6 +247,8 @@ struct ExercisesCatalogView: View {
         .onDisappear {
             queryDebounceTask?.cancel()
             queryDebounceTask = nil
+            isSearchFieldFocused = false
+            WGJKeyboard.dismiss()
         }
     }
 
@@ -485,6 +487,9 @@ struct ExercisesCatalogView: View {
     }
 
     private func handleSelection(_ exercise: ExerciseCatalogItem) {
+        isSearchFieldFocused = false
+        WGJKeyboard.dismiss()
+
         if let pickerSelectAction {
             pickerSelectAction(exercise)
             return
@@ -494,10 +499,14 @@ struct ExercisesCatalogView: View {
     }
 
     private func addExerciseToSessionOrPrompt(_ exercise: ExerciseCatalogItem) {
-        if let activeSessionID = activeWorkoutPresentationState.activeSessionID {
+        if let activeSessionID = resolvedActiveSessionIDForAdd() {
             do {
-                try workoutRepository.addExercise(sessionID: activeSessionID, catalogItem: exercise)
+                try activeWorkoutRepository.addExercise(sessionID: activeSessionID, catalogItem: exercise)
+                activeWorkoutPresentationState.restoreActiveSessionIfNeeded(modelContext: modelContext)
+                isSearchFieldFocused = false
+                WGJKeyboard.dismiss()
             } catch {
+                activeWorkoutPresentationState.clearPresentation()
                 showError(error)
             }
             return
@@ -510,27 +519,34 @@ struct ExercisesCatalogView: View {
     private func startSessionAndAddPendingExercise() {
         guard let pendingExerciseForAdd else { return }
         self.pendingExerciseForAdd = nil
+        isSearchFieldFocused = false
+        WGJKeyboard.dismiss()
 
         var createdSessionID: UUID?
         do {
-            if let activeSession = try workoutRepository.activeSession() {
-                try workoutRepository.addExercise(sessionID: activeSession.id, catalogItem: pendingExerciseForAdd)
+            if let activeSession = try activeWorkoutRepository.activeSession() {
+                try activeWorkoutRepository.addExercise(sessionID: activeSession.id, catalogItem: pendingExerciseForAdd)
                 activeWorkoutPresentationState.present(sessionID: activeSession.id)
                 appTabState.selectedTab = .startWorkout
                 return
             }
 
-            let created = try workoutRepository.createEmptySession()
+            let created = try activeWorkoutRepository.createEmptySession()
             createdSessionID = created.id
-            try workoutRepository.addExercise(sessionID: created.id, catalogItem: pendingExerciseForAdd)
+            try activeWorkoutRepository.addExercise(sessionID: created.id, catalogItem: pendingExerciseForAdd)
             activeWorkoutPresentationState.present(sessionID: created.id)
             appTabState.selectedTab = .startWorkout
         } catch {
             if let createdSessionID {
-                try? workoutRepository.cancelSession(sessionID: createdSessionID)
+                try? activeWorkoutRepository.cancelSession(sessionID: createdSessionID)
             }
             showError(error)
         }
+    }
+
+    private func resolvedActiveSessionIDForAdd() -> UUID? {
+        activeWorkoutPresentationState.restoreActiveSessionIfNeeded(modelContext: modelContext)
+        return activeWorkoutPresentationState.activeSessionID
     }
 
     private func scrollToTop(using proxy: ScrollViewProxy) {
@@ -1254,6 +1270,9 @@ private struct ExerciseCatalogThumbnail: View {
         WorkoutTemplate.self,
         TemplateExercise.self,
         TemplateExerciseSet.self,
+        ActiveWorkoutDraftSession.self,
+        ActiveWorkoutDraftExercise.self,
+        ActiveWorkoutDraftSet.self,
         WorkoutSession.self,
         WorkoutSessionExercise.self,
         WorkoutSessionSet.self,

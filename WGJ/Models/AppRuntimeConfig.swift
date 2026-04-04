@@ -372,7 +372,7 @@ final class ActiveWorkoutPresentationState {
     }
 
     func restoreActiveSessionIfNeeded(modelContext: ModelContext) {
-        let repository = WorkoutSessionRepository(modelContext: modelContext)
+        let repository = ActiveWorkoutDraftRepository(modelContext: modelContext)
         do {
             if let active = try repository.activeSession() {
                 activeSessionID = active.id

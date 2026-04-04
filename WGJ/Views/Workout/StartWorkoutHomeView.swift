@@ -35,8 +35,8 @@ struct StartWorkoutHomeView: View {
         TemplateRepository(modelContext: modelContext)
     }
 
-    private var workoutRepository: WorkoutSessionRepository {
-        WorkoutSessionRepository(modelContext: modelContext)
+    private var activeWorkoutRepository: ActiveWorkoutDraftRepository {
+        ActiveWorkoutDraftRepository(modelContext: modelContext)
     }
 
     private var templateTransferService: TemplateTransferService {
@@ -704,12 +704,12 @@ struct StartWorkoutHomeView: View {
 
     private func startEmptyWorkout() {
         do {
-            if let activeSession = try workoutRepository.activeSession() {
+            if let activeSession = try activeWorkoutRepository.activeSession() {
                 activeWorkoutPresentationState.present(sessionID: activeSession.id)
                 return
             }
 
-            let session = try workoutRepository.createEmptySession()
+            let session = try activeWorkoutRepository.createEmptySession()
             activeWorkoutPresentationState.present(sessionID: session.id)
         } catch {
             showError(error)
@@ -728,13 +728,13 @@ struct StartWorkoutHomeView: View {
 
     private func startFromTemplate(templateID: UUID) {
         do {
-            if let activeSession = try workoutRepository.activeSession() {
+            if let activeSession = try activeWorkoutRepository.activeSession() {
                 activeWorkoutPresentationState.present(sessionID: activeSession.id)
                 selectedTemplatePreview = nil
                 return
             }
 
-            let session = try workoutRepository.createSessionFromTemplate(templateID: templateID)
+            let session = try activeWorkoutRepository.createSessionFromTemplate(templateID: templateID)
             activeWorkoutPresentationState.present(sessionID: session.id)
             selectedTemplatePreview = nil
         } catch {
@@ -858,7 +858,7 @@ struct StartWorkoutHomeView: View {
     }
 
     private func activeSessionIDToResume() -> UUID? {
-        if let activeSession = try? workoutRepository.activeSession() {
+        if let activeSession = try? activeWorkoutRepository.activeSession() {
             return activeSession.id
         }
 
@@ -1680,6 +1680,9 @@ private struct PendingTemplateFileTaskKey: Hashable {
         WorkoutTemplate.self,
         TemplateExercise.self,
         TemplateExerciseSet.self,
+        ActiveWorkoutDraftSession.self,
+        ActiveWorkoutDraftExercise.self,
+        ActiveWorkoutDraftSet.self,
         WorkoutSession.self,
         WorkoutSessionExercise.self,
         WorkoutSessionSet.self,

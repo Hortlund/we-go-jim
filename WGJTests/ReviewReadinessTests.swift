@@ -138,6 +138,7 @@ struct ReviewReadinessTests {
         let context = try makeInMemoryContext()
         let templateRepository = TemplateRepository(modelContext: context)
         let sessionRepository = WorkoutSessionRepository(modelContext: context)
+        let activeWorkoutRepository = ActiveWorkoutDraftRepository(modelContext: context)
 
         let seededExercise = ExerciseCatalogItem(
             remoteUUID: "seed-bench",
@@ -188,6 +189,8 @@ struct ReviewReadinessTests {
 
         let session = try sessionRepository.createEmptySession(name: "Push Day")
         try sessionRepository.addExercise(sessionID: session.id, catalogItem: seededExercise)
+        let draftSession = try activeWorkoutRepository.createEmptySession(name: "Draft Push Day")
+        try activeWorkoutRepository.addExercise(sessionID: draftSession.id, catalogItem: seededExercise)
         try context.save()
 
         let service = AppDataDeletionService(
@@ -200,6 +203,9 @@ struct ReviewReadinessTests {
         #expect(try context.fetch(FetchDescriptor<ProfileWidgetConfig>()).isEmpty)
         #expect(try context.fetch(FetchDescriptor<TemplateFolder>()).isEmpty)
         #expect(try context.fetch(FetchDescriptor<WorkoutTemplate>()).isEmpty)
+        #expect(try context.fetch(FetchDescriptor<ActiveWorkoutDraftSession>()).isEmpty)
+        #expect(try context.fetch(FetchDescriptor<ActiveWorkoutDraftExercise>()).isEmpty)
+        #expect(try context.fetch(FetchDescriptor<ActiveWorkoutDraftSet>()).isEmpty)
         #expect(try context.fetch(FetchDescriptor<WorkoutSession>()).isEmpty)
         #expect(try context.fetch(FetchDescriptor<SocialOutboxItem>()).isEmpty)
         #expect(try context.fetch(FetchDescriptor<BlockedBro>()).isEmpty)
@@ -228,6 +234,9 @@ struct ReviewReadinessTests {
             WorkoutTemplate.self,
             TemplateExercise.self,
             TemplateExerciseSet.self,
+            ActiveWorkoutDraftSession.self,
+            ActiveWorkoutDraftExercise.self,
+            ActiveWorkoutDraftSet.self,
             WorkoutSession.self,
             WorkoutSessionExercise.self,
             WorkoutSessionSet.self,

@@ -59,6 +59,20 @@ struct WorkoutSessionSetDraft: Identifiable, Equatable {
         self.isCompleted = model.isCompleted
         self.isLocked = model.isLocked
     }
+
+    init(model: ActiveWorkoutDraftSet) {
+        self.id = model.id
+        self.isWarmup = model.isWarmup
+        self.restSeconds = model.restSeconds
+        self.targetReps = model.targetReps
+        self.targetWeight = model.targetWeight
+        self.targetLoadUnit = model.targetLoadUnit
+        self.actualReps = model.actualReps
+        self.actualWeight = model.actualWeight
+        self.actualLoadUnit = model.actualLoadUnit
+        self.isCompleted = model.isCompleted
+        self.isLocked = model.isLocked
+    }
 }
 
 enum WorkoutSessionRepositoryError: Error {

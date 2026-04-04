@@ -193,6 +193,47 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testExerciseCatalogAddAttachesToMinimizedActiveWorkout() throws {
+        let app = launchApp()
+
+        tapTab("Start Workout", in: app)
+        let startButton = app.buttons["start-workout-empty-button"]
+        XCTAssertTrue(startButton.waitForExistence(timeout: 5))
+        startButton.tap()
+
+        let minimizeButton = app.buttons["active-workout-minimize-button"]
+        XCTAssertTrue(minimizeButton.waitForExistence(timeout: 5))
+        minimizeButton.tap()
+
+        tapTab("Exercises", in: app)
+
+        let searchField = app.textFields["exercises-search-field"]
+        XCTAssertTrue(searchField.waitForExistence(timeout: 5))
+        searchField.tap()
+        searchField.typeText("bench")
+
+        let addButton = identifiedElement("exercise-catalog-add-button", in: app)
+        XCTAssertTrue(addButton.waitForExistence(timeout: 15))
+        addButton.tap()
+
+        let hideKeyboardButton = app.buttons["Hide"]
+        if hideKeyboardButton.waitForExistence(timeout: 1) {
+            hideKeyboardButton.tap()
+        }
+
+        tapTab("Start Workout", in: app)
+
+        let strip = identifiedElement("active-workout-strip", in: app)
+        XCTAssertTrue(strip.waitForExistence(timeout: 5))
+        strip.tap()
+
+        let benchExercise = identifiedElement("active-workout-exercise-seed-bench-press", in: app)
+        XCTAssertTrue(benchExercise.waitForExistence(timeout: 5))
+        XCTAssertTrue(identifiedElement("workout-set-0-weight-field", in: app).waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["active-workout-finish-button"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testWorkoutFinishShowsCelebrationBeforeHistory() throws {
         let app = launchApp()
 
@@ -365,9 +406,11 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(finishButton.waitForExistence(timeout: 5))
         finishButton.tap()
 
-        let finishAndSaveButton = app.buttons["Finish and Save"]
-        XCTAssertTrue(finishAndSaveButton.waitForExistence(timeout: 5))
-        finishAndSaveButton.tap()
+        let finishConfirmationButton = app.buttons["Finish Anyway"].waitForExistence(timeout: 2)
+            ? app.buttons["Finish Anyway"]
+            : app.buttons["Finish and Save"]
+        XCTAssertTrue(finishConfirmationButton.waitForExistence(timeout: 5))
+        finishConfirmationButton.tap()
 
         let skipButton = app.buttons["Skip"]
         XCTAssertTrue(skipButton.waitForExistence(timeout: 5))

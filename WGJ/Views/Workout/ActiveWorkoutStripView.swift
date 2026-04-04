@@ -8,7 +8,7 @@ struct ActiveWorkoutStripView: View {
     let sessionID: UUID
     let onExpand: () -> Void
 
-    @Query private var sessions: [WorkoutSession]
+    @Query private var sessions: [ActiveWorkoutDraftSession]
 
     init(sessionID: UUID, onExpand: @escaping () -> Void) {
         self.sessionID = sessionID
@@ -18,13 +18,13 @@ struct ActiveWorkoutStripView: View {
         })
     }
 
-    private var session: WorkoutSession? {
+    private var session: ActiveWorkoutDraftSession? {
         sessions.first
     }
 
     var body: some View {
         Group {
-            if let session, session.status == .active {
+            if let session {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     let status = statusPresentation(now: context.date)
 
@@ -80,14 +80,14 @@ struct ActiveWorkoutStripView: View {
                 }
             }
         }
-        .task(id: session?.statusRaw) {
+        .task(id: session?.id) {
             await reconcileSessionLifecycleIfNeeded()
         }
     }
 
     @MainActor
     private func reconcileSessionLifecycleIfNeeded() async {
-        guard let session, session.status == .active else {
+        guard session != nil else {
             activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
             return
         }
@@ -160,6 +160,9 @@ private struct ActiveWorkoutStripStatusPresentation {
             WorkoutTemplate.self,
             TemplateExercise.self,
             TemplateExerciseSet.self,
+            ActiveWorkoutDraftSession.self,
+            ActiveWorkoutDraftExercise.self,
+            ActiveWorkoutDraftSet.self,
             WorkoutSession.self,
             WorkoutSessionExercise.self,
             WorkoutSessionSet.self,

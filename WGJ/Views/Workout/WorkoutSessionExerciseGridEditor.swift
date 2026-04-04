@@ -6,6 +6,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     let muscleSummary: String
     let category: String
     let exerciseIndexTitle: String?
+    let exerciseAccessibilityIdentifier: String?
     let targetRepMin: Int?
     let targetRepMax: Int?
     let previousBySetIndex: [Int: WorkoutPreviousSetSnapshot]
@@ -61,6 +62,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         muscleSummary: String,
         category: String,
         exerciseIndexTitle: String? = nil,
+        exerciseAccessibilityIdentifier: String? = nil,
         targetRepMin: Int? = nil,
         targetRepMax: Int? = nil,
         previousBySetIndex: [Int: WorkoutPreviousSetSnapshot],
@@ -87,6 +89,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.muscleSummary = muscleSummary
         self.category = category
         self.exerciseIndexTitle = exerciseIndexTitle
+        self.exerciseAccessibilityIdentifier = exerciseAccessibilityIdentifier
         self.targetRepMin = targetRepMin
         self.targetRepMax = targetRepMax
         self.previousBySetIndex = previousBySetIndex
@@ -214,10 +217,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                         .foregroundStyle(shouldEmphasizeCompletedExercise ? WGJTheme.success : WGJTheme.accentCyan)
                 }
 
-                Text(exerciseName)
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(shouldEmphasizeCompletedExercise ? WGJTheme.success : WGJTheme.accentBlue)
-                    .wgjSingleLineText(scale: 0.8)
+                exerciseNameText
 
                 Text(summaryLine)
                     .font(.subheadline)
@@ -277,6 +277,14 @@ struct WorkoutSessionExerciseGridEditor: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    private var exerciseNameText: some View {
+        Text(exerciseName)
+            .font(.title3.weight(.semibold))
+            .foregroundStyle(shouldEmphasizeCompletedExercise ? WGJTheme.success : WGJTheme.accentBlue)
+            .wgjSingleLineText(scale: 0.8)
+            .accessibilityIdentifier(exerciseAccessibilityIdentifier ?? "")
     }
 
     private var controlsSection: some View {

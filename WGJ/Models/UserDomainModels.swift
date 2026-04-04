@@ -765,6 +765,155 @@ final class TemplateExerciseSet {
 }
 
 @Model
+final class ActiveWorkoutDraftSession {
+    var id: UUID = UUID()
+    var templateID: UUID?
+    var name: String = ""
+    var startedAt: Date = Date()
+    var notes: String = ""
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
+
+    @Relationship(deleteRule: .cascade, inverse: \ActiveWorkoutDraftExercise.session) var exercises: [ActiveWorkoutDraftExercise]?
+
+    init(
+        id: UUID = UUID(),
+        templateID: UUID? = nil,
+        name: String,
+        startedAt: Date = .now,
+        notes: String = "",
+        createdAt: Date = .now,
+        updatedAt: Date = .now
+    ) {
+        self.id = id
+        self.templateID = templateID
+        self.name = name
+        self.startedAt = startedAt
+        self.notes = notes
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.exercises = []
+    }
+}
+
+@Model
+final class ActiveWorkoutDraftExercise {
+    var id: UUID = UUID()
+    var sessionID: UUID = UUID()
+    var catalogExerciseUUID: String = ""
+    var exerciseNameSnapshot: String = ""
+    var categorySnapshot: String = ""
+    var muscleSummarySnapshot: String = ""
+    var targetRepMin: Int?
+    var targetRepMax: Int?
+    var restSeconds: Int = 120
+    var sortOrder: Int = 0
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
+
+    @Relationship var session: ActiveWorkoutDraftSession?
+    @Relationship(deleteRule: .cascade, inverse: \ActiveWorkoutDraftSet.sessionExercise) var sets: [ActiveWorkoutDraftSet]?
+
+    init(
+        id: UUID = UUID(),
+        sessionID: UUID,
+        catalogExerciseUUID: String,
+        exerciseNameSnapshot: String,
+        categorySnapshot: String,
+        muscleSummarySnapshot: String,
+        targetRepMin: Int? = nil,
+        targetRepMax: Int? = nil,
+        restSeconds: Int = 120,
+        sortOrder: Int = 0,
+        createdAt: Date = .now,
+        updatedAt: Date = .now,
+        session: ActiveWorkoutDraftSession? = nil
+    ) {
+        self.id = id
+        self.sessionID = sessionID
+        self.catalogExerciseUUID = catalogExerciseUUID
+        self.exerciseNameSnapshot = exerciseNameSnapshot
+        self.categorySnapshot = categorySnapshot
+        self.muscleSummarySnapshot = muscleSummarySnapshot
+        self.targetRepMin = targetRepMin
+        self.targetRepMax = targetRepMax
+        self.restSeconds = max(0, min(3600, restSeconds))
+        self.sortOrder = sortOrder
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.session = session
+        self.sets = []
+    }
+}
+
+@Model
+final class ActiveWorkoutDraftSet {
+    var id: UUID = UUID()
+    var sessionExerciseID: UUID = UUID()
+    var sortOrder: Int = 0
+    var isWarmup: Bool = false
+    var restSeconds: Int = 120
+    var targetReps: Int?
+    var targetWeight: Double?
+    var targetLoadUnitRaw: String = TemplateLoadUnit.kg.rawValue
+    var actualReps: Int?
+    var actualWeight: Double?
+    var actualLoadUnitRaw: String = TemplateLoadUnit.kg.rawValue
+    var isCompleted: Bool = false
+    var isLocked: Bool = false
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
+
+    @Relationship var sessionExercise: ActiveWorkoutDraftExercise?
+
+    var targetLoadUnit: TemplateLoadUnit {
+        get { TemplateLoadUnit(rawValue: targetLoadUnitRaw) ?? .kg }
+        set { targetLoadUnitRaw = newValue.rawValue }
+    }
+
+    var actualLoadUnit: TemplateLoadUnit {
+        get { TemplateLoadUnit(rawValue: actualLoadUnitRaw) ?? .kg }
+        set { actualLoadUnitRaw = newValue.rawValue }
+    }
+
+    init(
+        id: UUID = UUID(),
+        sessionExerciseID: UUID,
+        sortOrder: Int = 0,
+        isWarmup: Bool = false,
+        restSeconds: Int = 120,
+        targetReps: Int? = nil,
+        targetWeight: Double? = nil,
+        targetLoadUnit: TemplateLoadUnit = .kg,
+        actualReps: Int? = nil,
+        actualWeight: Double? = nil,
+        actualLoadUnit: TemplateLoadUnit = .kg,
+        isCompleted: Bool = false,
+        isLocked: Bool = false,
+        createdAt: Date = .now,
+        updatedAt: Date = .now,
+        sessionExercise: ActiveWorkoutDraftExercise? = nil
+    ) {
+        self.id = id
+        self.sessionExerciseID = sessionExerciseID
+        self.sortOrder = sortOrder
+        self.isWarmup = isWarmup
+        self.restSeconds = max(0, min(3600, restSeconds))
+        self.targetReps = targetReps
+        self.targetWeight = targetWeight
+        self.targetLoadUnitRaw = targetLoadUnit.rawValue
+        self.actualReps = actualReps
+        self.actualWeight = actualWeight
+        self.actualLoadUnitRaw = actualLoadUnit.rawValue
+        self.isCompleted = isCompleted
+        self.isLocked = isLocked
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.sessionExercise = sessionExercise
+    }
+}
+
+@Model
 final class WorkoutSession {
     var id: UUID = UUID()
     var templateID: UUID?

@@ -317,5 +317,8 @@ private struct FolderTemplateEditorContext: Identifiable {
         WorkoutTemplate.self,
         TemplateExercise.self,
         TemplateExerciseSet.self,
+        ActiveWorkoutDraftSession.self,
+        ActiveWorkoutDraftExercise.self,
+        ActiveWorkoutDraftSet.self,
     ], inMemory: true)
 }

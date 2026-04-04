@@ -227,6 +227,9 @@ struct BrosViewModelTests {
     private func makeInMemoryContext() throws -> ModelContext {
         let schema = Schema([
             UserProfile.self,
+            ActiveWorkoutDraftSession.self,
+            ActiveWorkoutDraftExercise.self,
+            ActiveWorkoutDraftSet.self,
             SocialOutboxItem.self,
         ])
         let configuration = ModelConfiguration(
