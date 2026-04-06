@@ -32,6 +32,19 @@ struct ActiveWorkoutDraftRepositoryTests {
         )
 
         let template = try templateRepository.createTemplate(name: "Push A", notes: "Heavy")
+        try templateRepository.setCardioBlocks(
+            templateID: template.id,
+            drafts: [
+                TemplateCardioBlockDraft(
+                    phase: .preWorkout,
+                    catalogExerciseUUID: item.remoteUUID,
+                    exerciseNameSnapshot: "Bike",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Warmup",
+                    targetDurationSeconds: 300
+                ),
+            ]
+        )
         try templateRepository.addExercise(templateID: template.id, catalogItem: item)
         let templateExercise = try #require(try templateRepository.exercises(in: template.id).first)
         try templateRepository.updateExerciseRepRange(
@@ -55,10 +68,13 @@ struct ActiveWorkoutDraftRepositoryTests {
         )
 
         let draftSession = try repository.createSessionFromTemplate(templateID: template.id)
+        let cardioBlocks = try repository.cardioBlocks(sessionID: draftSession.id)
         let draftExercise = try #require(try repository.sessionExercises(sessionID: draftSession.id).first)
         let draftSetDrafts = try repository.setDrafts(sessionExerciseID: draftExercise.id)
 
         #expect(draftSession.templateID == template.id)
+        #expect(cardioBlocks.map(\.phase) == [.preWorkout])
+        #expect(cardioBlocks.first?.targetDurationSeconds == 300)
         #expect(draftExercise.exerciseNameSnapshot == "Bench Press")
         #expect(draftExercise.targetRepMin == 6)
         #expect(draftExercise.targetRepMax == 8)
@@ -192,6 +208,33 @@ struct ActiveWorkoutDraftRepositoryTests {
     }
 
     @Test
+    func moveExercisePersistsDraftOrdering() throws {
+        let context = try makeInMemoryContext()
+        let repository = ActiveWorkoutDraftRepository(modelContext: context)
+
+        let bench = makeCatalogItem(
+            remoteUUID: "move-bench-1",
+            displayName: "Bench Press",
+            equipmentSummary: "Barbell",
+            context: context
+        )
+        let row = makeCatalogItem(
+            remoteUUID: "move-row-1",
+            displayName: "Barbell Row",
+            equipmentSummary: "Barbell",
+            context: context
+        )
+
+        let session = try repository.createEmptySession(name: "Upper")
+        try repository.addExercise(sessionID: session.id, catalogItem: bench)
+        try repository.addExercise(sessionID: session.id, catalogItem: row)
+
+        try repository.moveExercise(sessionID: session.id, fromOffsets: IndexSet(integer: 1), toOffset: 0)
+
+        #expect(try repository.sessionExercises(sessionID: session.id).map(\.catalogExerciseUUID) == [row.remoteUUID, bench.remoteUUID])
+    }
+
+    @Test
     func activeSessionMigratesLegacyCloudBackedWorkoutIntoDraftStore() throws {
         let context = try makeInMemoryContext()
         let legacyRepository = WorkoutSessionRepository(modelContext: context)
@@ -271,12 +314,15 @@ struct ActiveWorkoutDraftRepositoryTests {
             ProfileWidgetConfig.self,
             TemplateFolder.self,
             WorkoutTemplate.self,
+            TemplateCardioBlock.self,
             TemplateExercise.self,
             TemplateExerciseSet.self,
             ActiveWorkoutDraftSession.self,
+            ActiveWorkoutDraftCardioBlock.self,
             ActiveWorkoutDraftExercise.self,
             ActiveWorkoutDraftSet.self,
             WorkoutSession.self,
+            WorkoutSessionCardioBlock.self,
             WorkoutSessionExercise.self,
             WorkoutSessionSet.self,
             CompletedSetFact.self,
@@ -305,9 +351,11 @@ struct ActiveWorkoutDraftRepositoryTests {
                     ProfileWidgetConfig.self,
                     TemplateFolder.self,
                     WorkoutTemplate.self,
+                    TemplateCardioBlock.self,
                     TemplateExercise.self,
                     TemplateExerciseSet.self,
                     WorkoutSession.self,
+                    WorkoutSessionCardioBlock.self,
                     WorkoutSessionExercise.self,
                     WorkoutSessionSet.self,
                 ]),
@@ -318,6 +366,7 @@ struct ActiveWorkoutDraftRepositoryTests {
                 AppStoreLayout.activeWorkoutDraftConfigurationName,
                 schema: Schema([
                     ActiveWorkoutDraftSession.self,
+                    ActiveWorkoutDraftCardioBlock.self,
                     ActiveWorkoutDraftExercise.self,
                     ActiveWorkoutDraftSet.self,
                 ]),

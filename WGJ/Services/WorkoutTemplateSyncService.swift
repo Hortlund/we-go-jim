@@ -4,6 +4,9 @@ import SwiftData
 struct WorkoutTemplateSyncPreview: Equatable, Identifiable {
     let templateID: UUID
     let templateName: String
+    let addedCardioBlocks: [WorkoutTemplateSyncAddedCardioBlock]
+    let removedCardioBlocks: [WorkoutTemplateSyncRemovedCardioBlock]
+    let editedCardioBlocks: [WorkoutTemplateSyncEditedCardioBlock]
     let addedExercises: [WorkoutTemplateSyncAddedExercise]
     let removedExercises: [WorkoutTemplateSyncRemovedExercise]
     let reorderedExercises: [WorkoutTemplateSyncReorderedExercise]
@@ -13,11 +16,29 @@ struct WorkoutTemplateSyncPreview: Equatable, Identifiable {
     var id: UUID { templateID }
 
     var totalChangeCount: Int {
-        addedExercises.count + removedExercises.count + reorderedExercises.count + editedExercises.count
+        addedCardioBlocks.count
+            + removedCardioBlocks.count
+            + editedCardioBlocks.count
+            + addedExercises.count
+            + removedExercises.count
+            + reorderedExercises.count
+            + editedExercises.count
     }
 
     var summary: String {
         var parts: [String] = []
+
+        if !addedCardioBlocks.isEmpty {
+            parts.append(countText(addedCardioBlocks.count, singular: "added cardio block"))
+        }
+
+        if !removedCardioBlocks.isEmpty {
+            parts.append(countText(removedCardioBlocks.count, singular: "removed cardio block"))
+        }
+
+        if !editedCardioBlocks.isEmpty {
+            parts.append(countText(editedCardioBlocks.count, singular: "edited cardio block"))
+        }
 
         if !addedExercises.isEmpty {
             parts.append(countText(addedExercises.count, singular: "added exercise"))
@@ -41,6 +62,30 @@ struct WorkoutTemplateSyncPreview: Equatable, Identifiable {
     private func countText(_ count: Int, singular: String) -> String {
         "\(count) \(singular)" + (count == 1 ? "" : "s")
     }
+}
+
+struct WorkoutTemplateSyncAddedCardioBlock: Identifiable, Equatable {
+    let phase: WorkoutCardioPhase
+    let exerciseName: String
+    let summary: String
+
+    var id: String { phase.rawValue }
+}
+
+struct WorkoutTemplateSyncRemovedCardioBlock: Identifiable, Equatable {
+    let phase: WorkoutCardioPhase
+    let exerciseName: String
+    let summary: String
+
+    var id: String { phase.rawValue }
+}
+
+struct WorkoutTemplateSyncEditedCardioBlock: Identifiable, Equatable {
+    let phase: WorkoutCardioPhase
+    let exerciseName: String
+    let changes: [String]
+
+    var id: String { phase.rawValue }
 }
 
 struct WorkoutTemplateSyncAddedExercise: Identifiable, Equatable {
@@ -77,7 +122,17 @@ struct WorkoutTemplateSyncEditedExercise: Identifiable, Equatable {
 }
 
 struct WorkoutTemplateSyncMutation: Equatable {
+    let cardioBlocks: [WorkoutTemplateSyncCardioMutation]
     let exercises: [WorkoutTemplateSyncExerciseMutation]
+}
+
+struct WorkoutTemplateSyncCardioMutation: Equatable {
+    let phase: WorkoutCardioPhase
+    let catalogExerciseUUID: String
+    let exerciseNameSnapshot: String
+    let categorySnapshot: String
+    let muscleSummarySnapshot: String
+    let targetDurationSeconds: Int
 }
 
 struct WorkoutTemplateSyncExerciseMutation: Equatable {
@@ -111,12 +166,64 @@ final class WorkoutTemplateSyncService {
 
         let orderedTemplateExercises = (template.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
         let orderedSessionExercises = (session.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
+        let orderedTemplateCardioBlocks = orderedCardioBlocks(for: template)
+        let orderedSessionCardioBlocks = orderedCardioBlocks(for: session)
+        let templateCardioByPhase = Dictionary(
+            uniqueKeysWithValues: orderedTemplateCardioBlocks.map { ($0.phase, $0) }
+        )
+        let sessionCardioByPhase = Dictionary(
+            uniqueKeysWithValues: orderedSessionCardioBlocks.map { ($0.phase, $0) }
+        )
         let templateExercisesByUUID = Dictionary(
             uniqueKeysWithValues: orderedTemplateExercises.map { ($0.catalogExerciseUUID, $0) }
         )
         let sessionExercisesByUUID = Dictionary(
             uniqueKeysWithValues: orderedSessionExercises.map { ($0.catalogExerciseUUID, $0) }
         )
+
+        let addedCardioBlocks = orderedSessionCardioBlocks.compactMap { cardioBlock -> WorkoutTemplateSyncAddedCardioBlock? in
+            guard templateCardioByPhase[cardioBlock.phase] == nil else {
+                return nil
+            }
+
+            return WorkoutTemplateSyncAddedCardioBlock(
+                phase: cardioBlock.phase,
+                exerciseName: cardioBlock.exerciseNameSnapshot,
+                summary: cardioSummary(for: cardioBlock)
+            )
+        }
+
+        let removedCardioBlocks = orderedTemplateCardioBlocks.compactMap { cardioBlock -> WorkoutTemplateSyncRemovedCardioBlock? in
+            guard sessionCardioByPhase[cardioBlock.phase] == nil else {
+                return nil
+            }
+
+            return WorkoutTemplateSyncRemovedCardioBlock(
+                phase: cardioBlock.phase,
+                exerciseName: cardioBlock.exerciseNameSnapshot,
+                summary: cardioSummary(for: cardioBlock)
+            )
+        }
+
+        let editedCardioBlocks = orderedSessionCardioBlocks.compactMap { cardioBlock -> WorkoutTemplateSyncEditedCardioBlock? in
+            guard let templateCardioBlock = templateCardioByPhase[cardioBlock.phase] else {
+                return nil
+            }
+
+            let changes = editedCardioChangeSummaries(
+                templateCardioBlock: templateCardioBlock,
+                sessionCardioBlock: cardioBlock
+            )
+            guard !changes.isEmpty else {
+                return nil
+            }
+
+            return WorkoutTemplateSyncEditedCardioBlock(
+                phase: cardioBlock.phase,
+                exerciseName: cardioBlock.exerciseNameSnapshot,
+                changes: changes
+            )
+        }
 
         let addedExercises = orderedSessionExercises.compactMap { sessionExercise -> WorkoutTemplateSyncAddedExercise? in
             guard templateExercisesByUUID[sessionExercise.catalogExerciseUUID] == nil else {
@@ -181,6 +288,10 @@ final class WorkoutTemplateSyncService {
         }
 
         guard
+            !addedCardioBlocks.isEmpty
+                || !removedCardioBlocks.isEmpty
+                || !editedCardioBlocks.isEmpty
+                ||
             !addedExercises.isEmpty
                 || !removedExercises.isEmpty
                 || !reorderedExercises.isEmpty
@@ -192,11 +303,15 @@ final class WorkoutTemplateSyncService {
         return WorkoutTemplateSyncPreview(
             templateID: templateID,
             templateName: template.name,
+            addedCardioBlocks: addedCardioBlocks,
+            removedCardioBlocks: removedCardioBlocks,
+            editedCardioBlocks: editedCardioBlocks,
             addedExercises: addedExercises,
             removedExercises: removedExercises,
             reorderedExercises: reorderedExercises,
             editedExercises: editedExercises,
             mutation: WorkoutTemplateSyncMutation(
+                cardioBlocks: orderedSessionCardioBlocks.map(makeMutation(from:)),
                 exercises: orderedSessionExercises.map(makeMutation(from:))
             )
         )
@@ -206,7 +321,8 @@ final class WorkoutTemplateSyncService {
         let repository = TemplateRepository(modelContext: modelContext)
         try repository.applyWorkoutTemplateSync(
             templateID: preview.templateID,
-            exercises: preview.mutation.exercises
+            exercises: preview.mutation.exercises,
+            cardioBlocks: preview.mutation.cardioBlocks
         )
     }
 
@@ -234,6 +350,17 @@ final class WorkoutTemplateSyncService {
             targetRepMax: sessionExercise.targetRepMax,
             restSeconds: normalizedRest(sessionExercise.restSeconds),
             setDrafts: mappedSetDrafts(from: sessionExercise)
+        )
+    }
+
+    private func makeMutation(from cardioBlock: WorkoutSessionCardioBlock) -> WorkoutTemplateSyncCardioMutation {
+        WorkoutTemplateSyncCardioMutation(
+            phase: cardioBlock.phase,
+            catalogExerciseUUID: cardioBlock.catalogExerciseUUID,
+            exerciseNameSnapshot: cardioBlock.exerciseNameSnapshot,
+            categorySnapshot: cardioBlock.categorySnapshot,
+            muscleSummarySnapshot: cardioBlock.muscleSummarySnapshot,
+            targetDurationSeconds: normalizedCardioDuration(cardioBlock.targetDurationSeconds)
         )
     }
 
@@ -292,6 +419,28 @@ final class WorkoutTemplateSyncService {
         return changes
     }
 
+    private func editedCardioChangeSummaries(
+        templateCardioBlock: TemplateCardioBlock,
+        sessionCardioBlock: WorkoutSessionCardioBlock
+    ) -> [String] {
+        var changes: [String] = []
+
+        if templateCardioBlock.catalogExerciseUUID != sessionCardioBlock.catalogExerciseUUID {
+            changes.append(
+                "Exercise \(templateCardioBlock.exerciseNameSnapshot) -> \(sessionCardioBlock.exerciseNameSnapshot)"
+            )
+        }
+
+        let normalizedDuration = normalizedCardioDuration(sessionCardioBlock.targetDurationSeconds)
+        if templateCardioBlock.targetDurationSeconds != normalizedDuration {
+            changes.append(
+                "Duration \(formattedDuration(templateCardioBlock.targetDurationSeconds)) -> \(formattedDuration(normalizedDuration))"
+            )
+        }
+
+        return changes
+    }
+
     private func reorderedExercisePreviews(
         templateExercises: [TemplateExercise],
         sessionExercises: [WorkoutSessionExercise]
@@ -341,6 +490,22 @@ final class WorkoutTemplateSyncService {
         .joined(separator: " • ")
     }
 
+    private func cardioSummary(for cardioBlock: TemplateCardioBlock) -> String {
+        [
+            cardioBlock.phase.shortTitle,
+            formattedDuration(cardioBlock.targetDurationSeconds),
+        ]
+        .joined(separator: " • ")
+    }
+
+    private func cardioSummary(for cardioBlock: WorkoutSessionCardioBlock) -> String {
+        [
+            cardioBlock.phase.shortTitle,
+            formattedDuration(cardioBlock.targetDurationSeconds),
+        ]
+        .joined(separator: " • ")
+    }
+
     private func repRangeText(min: Int?, max: Int?) -> String {
         switch (min, max) {
         case let (min?, max?):
@@ -360,8 +525,19 @@ final class WorkoutTemplateSyncService {
         return String(format: "%d:%02d", mins, secs)
     }
 
+    private func formattedDuration(_ seconds: Int) -> String {
+        let safeSeconds = max(0, seconds)
+        let mins = safeSeconds / 60
+        let secs = safeSeconds % 60
+        return String(format: "%d:%02d", mins, secs)
+    }
+
     private func normalizedRest(_ seconds: Int) -> Int {
         min(3600, max(0, seconds))
+    }
+
+    private func normalizedCardioDuration(_ seconds: Int) -> Int {
+        min(24 * 60 * 60, max(0, seconds))
     }
 
     private func orderedSets(for exercise: TemplateExercise) -> [TemplateExerciseSet] {
@@ -370,6 +546,16 @@ final class WorkoutTemplateSyncService {
 
     private func orderedSets(for exercise: WorkoutSessionExercise) -> [WorkoutSessionSet] {
         (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    private func orderedCardioBlocks(for template: WorkoutTemplate) -> [TemplateCardioBlock] {
+        (template.cardioBlocks ?? [])
+            .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
+    }
+
+    private func orderedCardioBlocks(for session: WorkoutSession) -> [WorkoutSessionCardioBlock] {
+        (session.cardioBlocks ?? [])
+            .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
     }
 }
 

@@ -36,10 +36,33 @@ struct StartWorkoutTemplatePreviewTests {
             template: template
         )
 
+        let preCardio = TemplateCardioBlock(
+            templateID: template.id,
+            phase: .preWorkout,
+            catalogExerciseUUID: "bike-1",
+            exerciseNameSnapshot: "Bike",
+            categorySnapshot: "Cardio",
+            muscleSummarySnapshot: "Warmup",
+            targetDurationSeconds: 300,
+            template: template
+        )
+
+        let postCardio = TemplateCardioBlock(
+            templateID: template.id,
+            phase: .postWorkout,
+            catalogExerciseUUID: "treadmill-1",
+            exerciseNameSnapshot: "Incline Treadmill Walk",
+            categorySnapshot: "Cardio",
+            muscleSummarySnapshot: "Cooldown",
+            targetDurationSeconds: 1200,
+            template: template
+        )
+
         inclinePress.prescribedSets = [
             TemplateExerciseSet(templateExerciseID: inclinePress.id, sortOrder: 0, templateExercise: inclinePress),
             TemplateExerciseSet(templateExerciseID: inclinePress.id, sortOrder: 1, templateExercise: inclinePress),
         ]
+        template.cardioBlocks = [postCardio, preCardio]
         template.exercises = [inclinePress, shoulderPress]
 
         let snapshot = StartWorkoutTemplatePreview(template: template)
@@ -48,6 +71,10 @@ struct StartWorkoutTemplatePreviewTests {
         #expect(snapshot.folderID == TemplateRepository.unfiledFolderID)
         #expect(snapshot.name == "Push Day")
         #expect(snapshot.notes == "Heavy compounds first")
+        #expect(snapshot.preWorkoutCardio?.exerciseName == "Bike")
+        #expect(snapshot.preWorkoutCardio?.targetDurationSeconds == 300)
+        #expect(snapshot.postWorkoutCardio?.exerciseName == "Incline Treadmill Walk")
+        #expect(snapshot.postWorkoutCardio?.targetDurationSeconds == 1200)
         #expect(snapshot.exercises.map(\.exerciseName) == ["Shoulder Press", "Incline Press"])
         #expect(snapshot.exercises.map(\.plannedSetCount) == [3, 2])
         #expect(snapshot.exercises.map(\.descriptor) == ["Shoulders", "Upper chest"])

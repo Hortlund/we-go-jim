@@ -37,6 +37,25 @@ final class ActiveWorkoutDraftRepository {
         )
         modelContext.insert(session)
 
+        let orderedCardioBlocks = orderedTemplateCardioBlocks(template)
+        var createdCardioBlocks: [ActiveWorkoutDraftCardioBlock] = []
+        for templateCardioBlock in orderedCardioBlocks {
+            let cardioBlock = ActiveWorkoutDraftCardioBlock(
+                sessionID: session.id,
+                phase: templateCardioBlock.phase,
+                catalogExerciseUUID: templateCardioBlock.catalogExerciseUUID,
+                exerciseNameSnapshot: templateCardioBlock.exerciseNameSnapshot,
+                categorySnapshot: templateCardioBlock.categorySnapshot,
+                muscleSummarySnapshot: templateCardioBlock.muscleSummarySnapshot,
+                targetDurationSeconds: templateCardioBlock.targetDurationSeconds,
+                isCompleted: false,
+                session: session
+            )
+            modelContext.insert(cardioBlock)
+            createdCardioBlocks.append(cardioBlock)
+        }
+        session.cardioBlocks = createdCardioBlocks
+
         let orderedExercises = (template.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
         for (exerciseIndex, templateExercise) in orderedExercises.enumerated() {
             let exercise = ActiveWorkoutDraftExercise(
@@ -122,6 +141,26 @@ final class ActiveWorkoutDraftRepository {
         return try modelContext.fetch(descriptor)
     }
 
+    func cardioBlocks(sessionID: UUID) throws -> [ActiveWorkoutDraftCardioBlock] {
+        let descriptor = FetchDescriptor<ActiveWorkoutDraftCardioBlock>(
+            predicate: #Predicate { cardioBlock in
+                cardioBlock.sessionID == sessionID
+            }
+        )
+        return try modelContext.fetch(descriptor)
+            .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
+    }
+
+    func cardioBlock(sessionID: UUID, phase: WorkoutCardioPhase) throws -> ActiveWorkoutDraftCardioBlock? {
+        let phaseRaw = phase.rawValue
+        let descriptor = FetchDescriptor<ActiveWorkoutDraftCardioBlock>(
+            predicate: #Predicate { cardioBlock in
+                cardioBlock.sessionID == sessionID && cardioBlock.phaseRaw == phaseRaw
+            }
+        )
+        return try modelContext.fetch(descriptor).first
+    }
+
     func setDrafts(sessionExerciseID: UUID) throws -> [WorkoutSessionSetDraft] {
         guard let exercise = try sessionExercise(id: sessionExerciseID) else {
             throw WorkoutSessionRepositoryError.sessionExerciseNotFound
@@ -187,6 +226,33 @@ final class ActiveWorkoutDraftRepository {
         try modelContext.save()
     }
 
+    func moveExercise(sessionID: UUID, fromOffsets: IndexSet, toOffset: Int) throws {
+        guard let session = try session(id: sessionID) else {
+            throw WorkoutSessionRepositoryError.sessionNotFound
+        }
+
+        var ordered = try sessionExercises(sessionID: sessionID)
+        let movingItems = fromOffsets.sorted().map { ordered[$0] }
+        for index in fromOffsets.sorted(by: >) {
+            ordered.remove(at: index)
+        }
+
+        var destination = toOffset
+        let removedBeforeDestination = fromOffsets.filter { $0 < toOffset }.count
+        destination -= removedBeforeDestination
+        destination = max(0, min(destination, ordered.count))
+        ordered.insert(contentsOf: movingItems, at: destination)
+
+        for (index, exercise) in ordered.enumerated() {
+            exercise.sortOrder = index
+            exercise.updatedAt = .now
+        }
+
+        session.exercises = ordered
+        session.updatedAt = .now
+        try modelContext.save()
+    }
+
     func removeExercise(sessionID: UUID, sessionExerciseID: UUID) throws {
         guard let session = try session(id: sessionID) else {
             throw WorkoutSessionRepositoryError.sessionNotFound
@@ -204,6 +270,79 @@ final class ActiveWorkoutDraftRepository {
             row.updatedAt = .now
         }
 
+        session.updatedAt = .now
+        try modelContext.save()
+    }
+
+    func upsertCardioBlock(sessionID: UUID, draft: WorkoutCardioBlockDraft) throws {
+        guard let session = try session(id: sessionID) else {
+            throw WorkoutSessionRepositoryError.sessionNotFound
+        }
+
+        let cardioBlock = try cardioBlock(sessionID: sessionID, phase: draft.phase)
+            ?? ActiveWorkoutDraftCardioBlock(
+                id: draft.id,
+                sessionID: sessionID,
+                phase: draft.phase,
+                catalogExerciseUUID: draft.catalogExerciseUUID,
+                exerciseNameSnapshot: draft.exerciseNameSnapshot,
+                categorySnapshot: draft.categorySnapshot,
+                muscleSummarySnapshot: draft.muscleSummarySnapshot,
+                targetDurationSeconds: draft.targetDurationSeconds,
+                isCompleted: draft.isCompleted,
+                session: session
+            )
+
+        if cardioBlock.modelContext == nil {
+            modelContext.insert(cardioBlock)
+        }
+
+        cardioBlock.sessionID = sessionID
+        cardioBlock.session = session
+        cardioBlock.phase = draft.phase
+        cardioBlock.catalogExerciseUUID = draft.catalogExerciseUUID
+        cardioBlock.exerciseNameSnapshot = draft.exerciseNameSnapshot
+        cardioBlock.categorySnapshot = draft.categorySnapshot
+        cardioBlock.muscleSummarySnapshot = draft.muscleSummarySnapshot
+        cardioBlock.targetDurationSeconds = sanitizedCardioDuration(draft.targetDurationSeconds)
+        cardioBlock.isCompleted = draft.isCompleted
+        cardioBlock.updatedAt = .now
+
+        session.cardioBlocks = orderedCardioBlocks(session, adding: cardioBlock)
+        session.updatedAt = .now
+        try modelContext.save()
+    }
+
+    func setCardioCompletion(sessionID: UUID, phase: WorkoutCardioPhase, isCompleted: Bool) throws {
+        guard let session = try session(id: sessionID) else {
+            throw WorkoutSessionRepositoryError.sessionNotFound
+        }
+
+        guard let cardioBlock = try cardioBlock(sessionID: sessionID, phase: phase) else {
+            return
+        }
+
+        guard cardioBlock.isCompleted != isCompleted else {
+            return
+        }
+
+        cardioBlock.isCompleted = isCompleted
+        cardioBlock.updatedAt = .now
+        session.updatedAt = .now
+        try modelContext.save()
+    }
+
+    func removeCardioBlock(sessionID: UUID, phase: WorkoutCardioPhase) throws {
+        guard let session = try session(id: sessionID) else {
+            throw WorkoutSessionRepositoryError.sessionNotFound
+        }
+
+        guard let cardioBlock = try cardioBlock(sessionID: sessionID, phase: phase) else {
+            return
+        }
+
+        modelContext.delete(cardioBlock)
+        session.cardioBlocks = orderedCardioBlocks(session)
         session.updatedAt = .now
         try modelContext.save()
     }
@@ -362,6 +501,26 @@ final class ActiveWorkoutDraftRepository {
         )
         modelContext.insert(draftSession)
 
+        var draftCardioBlocks: [ActiveWorkoutDraftCardioBlock] = []
+        for legacyCardioBlock in orderedSessionCardioBlocks(legacySession) {
+            let draftCardioBlock = ActiveWorkoutDraftCardioBlock(
+                id: legacyCardioBlock.id,
+                sessionID: draftSession.id,
+                phase: legacyCardioBlock.phase,
+                catalogExerciseUUID: legacyCardioBlock.catalogExerciseUUID,
+                exerciseNameSnapshot: legacyCardioBlock.exerciseNameSnapshot,
+                categorySnapshot: legacyCardioBlock.categorySnapshot,
+                muscleSummarySnapshot: legacyCardioBlock.muscleSummarySnapshot,
+                targetDurationSeconds: legacyCardioBlock.targetDurationSeconds,
+                isCompleted: legacyCardioBlock.isCompleted,
+                createdAt: legacyCardioBlock.createdAt,
+                updatedAt: legacyCardioBlock.updatedAt,
+                session: draftSession
+            )
+            modelContext.insert(draftCardioBlock)
+            draftCardioBlocks.append(draftCardioBlock)
+        }
+
         var draftExercises: [ActiveWorkoutDraftExercise] = []
         for legacyExercise in orderedSessionExercises(legacySession) {
             let draftExercise = ActiveWorkoutDraftExercise(
@@ -410,6 +569,7 @@ final class ActiveWorkoutDraftRepository {
             draftExercises.append(draftExercise)
         }
 
+        draftSession.cardioBlocks = draftCardioBlocks
         draftSession.exercises = draftExercises
         modelContext.delete(legacySession)
         try modelContext.save()
@@ -437,6 +597,26 @@ final class ActiveWorkoutDraftRepository {
             updatedAt: completedAt
         )
         modelContext.insert(completedSession)
+
+        var completedCardioBlocks: [WorkoutSessionCardioBlock] = []
+        for draftCardioBlock in orderedSessionCardioBlocks(draftSession) {
+            let completedCardioBlock = WorkoutSessionCardioBlock(
+                id: draftCardioBlock.id,
+                sessionID: completedSession.id,
+                phase: draftCardioBlock.phase,
+                catalogExerciseUUID: draftCardioBlock.catalogExerciseUUID,
+                exerciseNameSnapshot: draftCardioBlock.exerciseNameSnapshot,
+                categorySnapshot: draftCardioBlock.categorySnapshot,
+                muscleSummarySnapshot: draftCardioBlock.muscleSummarySnapshot,
+                targetDurationSeconds: draftCardioBlock.targetDurationSeconds,
+                isCompleted: draftCardioBlock.isCompleted,
+                createdAt: draftCardioBlock.createdAt,
+                updatedAt: draftCardioBlock.updatedAt,
+                session: completedSession
+            )
+            modelContext.insert(completedCardioBlock)
+            completedCardioBlocks.append(completedCardioBlock)
+        }
 
         var completedExercises: [WorkoutSessionExercise] = []
         for draftExercise in orderedSessionExercises(draftSession) {
@@ -485,6 +665,7 @@ final class ActiveWorkoutDraftRepository {
             completedExercises.append(completedExercise)
         }
 
+        completedSession.cardioBlocks = completedCardioBlocks
         completedSession.exercises = completedExercises
         return completedSession
     }
@@ -552,12 +733,43 @@ final class ActiveWorkoutDraftRepository {
         min(3600, max(0, seconds))
     }
 
+    private func sanitizedCardioDuration(_ seconds: Int) -> Int {
+        min(24 * 60 * 60, max(0, seconds))
+    }
+
     private func orderedSessionExercises(_ session: WorkoutSession) -> [WorkoutSessionExercise] {
         (session.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
     }
 
     private func orderedSessionExercises(_ session: ActiveWorkoutDraftSession) -> [ActiveWorkoutDraftExercise] {
         (session.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    private func orderedTemplateCardioBlocks(_ template: WorkoutTemplate) -> [TemplateCardioBlock] {
+        (template.cardioBlocks ?? [])
+            .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
+    }
+
+    private func orderedSessionCardioBlocks(_ session: WorkoutSession) -> [WorkoutSessionCardioBlock] {
+        (session.cardioBlocks ?? [])
+            .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
+    }
+
+    private func orderedSessionCardioBlocks(_ session: ActiveWorkoutDraftSession) -> [ActiveWorkoutDraftCardioBlock] {
+        (session.cardioBlocks ?? [])
+            .filter { $0.modelContext != nil }
+            .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
+    }
+
+    private func orderedCardioBlocks(
+        _ session: ActiveWorkoutDraftSession,
+        adding cardioBlock: ActiveWorkoutDraftCardioBlock? = nil
+    ) -> [ActiveWorkoutDraftCardioBlock] {
+        var blocks = orderedSessionCardioBlocks(session)
+        if let cardioBlock, !blocks.contains(where: { $0.id == cardioBlock.id }) {
+            blocks.append(cardioBlock)
+        }
+        return blocks.sorted { $0.phase.sortOrder < $1.phase.sortOrder }
     }
 
     private func orderedSessionSets(for exercise: ActiveWorkoutDraftExercise) -> [ActiveWorkoutDraftSet] {
@@ -624,4 +836,3 @@ final class ActiveWorkoutDraftRepository {
         return didChange
     }
 }
-

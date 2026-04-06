@@ -176,6 +176,93 @@ struct WorkoutTemplateSyncServiceTests {
     }
 
     @Test
+    func previewAndApplyTemplateUpdateHandleCardioPhaseChanges() throws {
+        let context = try makeInMemoryContext()
+        let templateRepository = TemplateRepository(modelContext: context)
+        let sessionRepository = WorkoutSessionRepository(modelContext: context)
+        let syncService = WorkoutTemplateSyncService(modelContext: context)
+
+        let bike = catalogItem(
+            remoteUUID: "sync-cardio-bike",
+            displayName: "Bike",
+            categoryName: "Cardio",
+            equipmentSummary: "Bike"
+        )
+        let treadmill = catalogItem(
+            remoteUUID: "sync-cardio-treadmill",
+            displayName: "Incline Treadmill Walk",
+            categoryName: "Cardio",
+            equipmentSummary: "Treadmill"
+        )
+        let bench = catalogItem(
+            remoteUUID: "sync-cardio-bench",
+            displayName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell"
+        )
+        context.insert(bike)
+        context.insert(treadmill)
+        context.insert(bench)
+
+        let template = try makeTemplate(
+            name: "Hybrid",
+            exercises: [
+                draft(for: bench, minReps: 6, maxReps: 8, restSeconds: 120, targetWeight: 100),
+            ],
+            repository: templateRepository
+        )
+        try templateRepository.setCardioBlocks(
+            templateID: template.id,
+            drafts: [
+                TemplateCardioBlockDraft(
+                    phase: .preWorkout,
+                    catalogExerciseUUID: bike.remoteUUID,
+                    exerciseNameSnapshot: bike.displayName,
+                    categorySnapshot: bike.categoryName,
+                    muscleSummarySnapshot: "Warmup",
+                    targetDurationSeconds: 300
+                ),
+            ]
+        )
+
+        let session = try sessionRepository.createSessionFromTemplate(templateID: template.id)
+        let preCardio = try #require(try sessionRepository.sessionCardioBlocks(sessionID: session.id).first)
+        preCardio.catalogExerciseUUID = treadmill.remoteUUID
+        preCardio.exerciseNameSnapshot = treadmill.displayName
+        preCardio.categorySnapshot = treadmill.categoryName
+        preCardio.muscleSummarySnapshot = "Cooldown"
+        preCardio.targetDurationSeconds = 480
+
+        let postCardio = WorkoutSessionCardioBlock(
+            sessionID: session.id,
+            phase: .postWorkout,
+            catalogExerciseUUID: bike.remoteUUID,
+            exerciseNameSnapshot: bike.displayName,
+            categorySnapshot: bike.categoryName,
+            muscleSummarySnapshot: "Cooldown",
+            targetDurationSeconds: 1200,
+            isCompleted: false,
+            session: session
+        )
+        context.insert(postCardio)
+        session.cardioBlocks = [preCardio, postCardio]
+        try context.save()
+        try sessionRepository.finishSession(sessionID: session.id)
+
+        let preview = try #require(try syncService.previewTemplateUpdate(forSessionID: session.id))
+        #expect(preview.addedCardioBlocks.map(\.phase) == [.postWorkout])
+        #expect(preview.editedCardioBlocks.map(\.phase) == [.preWorkout])
+        #expect(preview.removedCardioBlocks.isEmpty)
+
+        try syncService.applyTemplateUpdate(preview)
+
+        let updatedCardio = try templateRepository.cardioBlocks(templateID: template.id)
+        #expect(updatedCardio.map(\.phase) == [.preWorkout, .postWorkout])
+        #expect(updatedCardio.map(\.exerciseNameSnapshot) == ["Incline Treadmill Walk", "Bike"])
+        #expect(updatedCardio.map(\.targetDurationSeconds) == [480, 1200])
+    }
+
+    @Test
     func applyTemplateUpdateKeepsActualLogsOutOfTemplateTargets() throws {
         let context = try makeInMemoryContext()
         let templateRepository = TemplateRepository(modelContext: context)
@@ -409,12 +496,15 @@ struct WorkoutTemplateSyncServiceTests {
             ProfileWidgetConfig.self,
             TemplateFolder.self,
             WorkoutTemplate.self,
+            TemplateCardioBlock.self,
             TemplateExercise.self,
             TemplateExerciseSet.self,
             ActiveWorkoutDraftSession.self,
+            ActiveWorkoutDraftCardioBlock.self,
             ActiveWorkoutDraftExercise.self,
             ActiveWorkoutDraftSet.self,
             WorkoutSession.self,
+            WorkoutSessionCardioBlock.self,
             WorkoutSessionExercise.self,
             WorkoutSessionSet.self,
             CompletedSetFact.self,

@@ -15,10 +15,12 @@ struct TemplateEditorView: View {
     @State private var templateName = ""
     @State private var templateNotes = ""
     @State private var exerciseDrafts: [TemplateExerciseDraftStore] = []
+    @State private var cardioDraftsByPhase: [WorkoutCardioPhase: TemplateCardioBlockDraft] = [:]
     @State private var recommendationByExerciseID: [UUID: TemplateExerciseRecommendation?] = [:]
 
     @State private var hasLoadedInitialData = false
-    @State private var showingExercisePicker = false
+    @State private var pickerTarget: TemplateEditorPickerTarget?
+    @State private var cardioSettingsDraft: WorkoutCardioSettingsDraft?
     @State private var errorMessage = ""
     @State private var showingError = false
 
@@ -44,7 +46,9 @@ struct TemplateEditorView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     templateMetaCard
+                    cardioSection(for: .preWorkout)
                     exercisesSection
+                    cardioSection(for: .postWorkout)
                 }
                 .padding(16)
             }
@@ -68,9 +72,18 @@ struct TemplateEditorView: View {
                     .accessibilityIdentifier("template-editor-save-button")
                 }
             }
-            .sheet(isPresented: $showingExercisePicker) {
+            .sheet(item: $pickerTarget) { target in
                 ExercisePickerView(repository: catalogRepository) { selected in
-                    appendExercise(catalogItem: selected)
+                    handlePickedExercise(selected, target: target)
+                }
+                .wgjSheetSurface()
+            }
+            .sheet(item: $cardioSettingsDraft) { draft in
+                WorkoutCardioSettingsSheet(draft: draft) { updatedDurationSeconds in
+                    updateCardioDuration(
+                        phase: draft.phase,
+                        targetDurationSeconds: updatedDurationSeconds
+                    )
                 }
                 .wgjSheetSurface()
             }
@@ -107,6 +120,77 @@ struct TemplateEditorView: View {
     }
 
     @ViewBuilder
+    private func cardioSection(for phase: WorkoutCardioPhase) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            WGJActionHeader(
+                phase.title,
+                subtitle: cardioSectionSubtitle(for: phase)
+            ) {
+                if cardioDraftsByPhase[phase] == nil {
+                    Button {
+                        pickerTarget = .cardio(phase)
+                    } label: {
+                        Label("Add", systemImage: "plus")
+                    }
+                    .buttonStyle(WGJPrimaryButtonStyle())
+                }
+            }
+
+            if let cardioDraft = cardioDraftsByPhase[phase] {
+                WorkoutCardioPhaseCard(
+                    phase: phase,
+                    exerciseName: cardioDraft.exerciseNameSnapshot,
+                    descriptor: cardioDescriptor(
+                        category: cardioDraft.categorySnapshot,
+                        muscleSummary: cardioDraft.muscleSummarySnapshot
+                    ),
+                    targetDurationSeconds: cardioDraft.targetDurationSeconds,
+                    footnote: cardioFootnote(for: phase)
+                ) {
+                    HStack(spacing: 10) {
+                        Button {
+                            cardioSettingsDraft = makeCardioSettingsDraft(from: cardioDraft)
+                        } label: {
+                            Label("Edit Duration", systemImage: "clock.badge")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(WGJGhostButtonStyle())
+                        .accessibilityIdentifier("template-editor-\(phase.rawValue)-edit-button")
+
+                        WGJActionMenuButton("Cardio Actions") {
+                            Button("Change Exercise") {
+                                pickerTarget = .cardio(phase)
+                            }
+
+                            Button("Remove", role: .destructive) {
+                                removeCardioBlock(phase: phase)
+                            }
+                        } label: {
+                            Label("Actions", systemImage: "ellipsis.circle")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(WGJGhostButtonStyle())
+                        .accessibilityIdentifier("template-editor-\(phase.rawValue)-actions-button")
+                    }
+                }
+                .accessibilityIdentifier("template-editor-\(phase.rawValue)-card")
+            } else {
+                WGJEmptyStateCard(
+                    title: "\(phase.shortTitle) not added",
+                    message: cardioEmptyStateMessage(for: phase),
+                    icon: phase.systemImage
+                ) {
+                    Button("Add \(phase.shortTitle)") {
+                        pickerTarget = .cardio(phase)
+                    }
+                    .buttonStyle(WGJPrimaryButtonStyle())
+                    .accessibilityIdentifier("template-editor-\(phase.rawValue)-add-button")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
     private var exercisesSection: some View {
         let rows = exerciseRows
 
@@ -121,7 +205,7 @@ struct TemplateEditorView: View {
                 subtitle: "Swipe from the top of a card to delete, or use the card menu to reorder."
             ) {
                 Button {
-                    showingExercisePicker = true
+                    pickerTarget = .exercise
                 } label: {
                     Label("Add", systemImage: "plus")
                 }
@@ -136,7 +220,7 @@ struct TemplateEditorView: View {
                 icon: "list.bullet.rectangle"
             ) {
                 Button("Add Exercise") {
-                    showingExercisePicker = true
+                    pickerTarget = .exercise
                 }
                 .buttonStyle(WGJPrimaryButtonStyle())
             }
@@ -182,6 +266,38 @@ struct TemplateEditorView: View {
         }
     }
 
+    private func handlePickedExercise(_ item: ExerciseCatalogItem, target: TemplateEditorPickerTarget) {
+        switch target {
+        case .exercise:
+            appendExercise(catalogItem: item)
+        case .cardio(let phase):
+            upsertCardioBlock(phase: phase, catalogItem: item)
+        }
+    }
+
+    private func upsertCardioBlock(phase: WorkoutCardioPhase, catalogItem: ExerciseCatalogItem) {
+        let existing = cardioDraftsByPhase[phase]
+        cardioDraftsByPhase[phase] = TemplateCardioBlockDraft(
+            id: existing?.id ?? UUID(),
+            phase: phase,
+            catalogExerciseUUID: catalogItem.remoteUUID,
+            exerciseNameSnapshot: catalogItem.displayName,
+            categorySnapshot: catalogItem.categoryName,
+            muscleSummarySnapshot: catalogItem.primaryMuscleNames,
+            targetDurationSeconds: existing?.targetDurationSeconds ?? phase.defaultDurationSeconds
+        )
+    }
+
+    private func updateCardioDuration(phase: WorkoutCardioPhase, targetDurationSeconds: Int) {
+        guard var draft = cardioDraftsByPhase[phase] else { return }
+        draft.targetDurationSeconds = targetDurationSeconds
+        cardioDraftsByPhase[phase] = draft
+    }
+
+    private func removeCardioBlock(phase: WorkoutCardioPhase) {
+        cardioDraftsByPhase[phase] = nil
+    }
+
     private func removeExercise(at index: Int) {
         guard exerciseDrafts.indices.contains(index) else { return }
         withAnimation(WGJMotion.quickAnimation(reduceMotion: reduceMotion)) {
@@ -211,12 +327,15 @@ struct TemplateEditorView: View {
     private func saveTemplate() {
         do {
             let drafts = exerciseDrafts.map(\.draft)
+            let cardioDrafts = WorkoutCardioPhase.allCases.compactMap { cardioDraftsByPhase[$0] }
             if let templateID {
                 try templateRepository.updateTemplate(id: templateID, name: templateName, notes: templateNotes)
                 try templateRepository.setExercises(templateID: templateID, drafts: drafts)
+                try templateRepository.setCardioBlocks(templateID: templateID, drafts: cardioDrafts)
             } else {
                 let created = try templateRepository.createTemplate(folderID: folderID, name: templateName, notes: templateNotes)
                 try templateRepository.setExercises(templateID: created.id, drafts: drafts)
+                try templateRepository.setCardioBlocks(templateID: created.id, drafts: cardioDrafts)
             }
             dismiss()
         } catch {
@@ -242,6 +361,11 @@ struct TemplateEditorView: View {
                     draft: TemplateExerciseDraft(model: $0, preferredLoadUnit: preferredLoadUnit)
                 )
             }
+            cardioDraftsByPhase = Dictionary(
+                uniqueKeysWithValues: try templateRepository.cardioBlocks(templateID: templateID).map { cardioBlock in
+                    (cardioBlock.phase, TemplateCardioBlockDraft(model: cardioBlock))
+                }
+            )
         } catch {
             errorMessage = String(describing: error)
             showingError = true
@@ -297,6 +421,69 @@ struct TemplateEditorView: View {
                 recommendation: recommendationByExerciseID[draftStore.id]
                     ?? templateRecommendation(for: draftStore, catalogByUUID: [:])
             )
+        }
+    }
+
+    private func cardioSectionSubtitle(for phase: WorkoutCardioPhase) -> String {
+        switch phase {
+        case .preWorkout:
+            return "Optional warmup cardio that runs before the lift roster starts."
+        case .postWorkout:
+            return "Optional cooldown cardio that starts after every exercise is done."
+        }
+    }
+
+    private func cardioEmptyStateMessage(for phase: WorkoutCardioPhase) -> String {
+        switch phase {
+        case .preWorkout:
+            return "Add a short low-effort warmup like bike, walk, or crosstrainer."
+        case .postWorkout:
+            return "Add a longer cooldown block like incline treadmill or an easy bike finish."
+        }
+    }
+
+    private func cardioFootnote(for phase: WorkoutCardioPhase) -> String {
+        switch phase {
+        case .preWorkout:
+            return "This section stays pinned before every exercise in the workout."
+        case .postWorkout:
+            return "This section stays pinned after every exercise in the workout."
+        }
+    }
+
+    private func cardioDescriptor(category: String, muscleSummary: String) -> String? {
+        let trimmedMuscleSummary = muscleSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedMuscleSummary.isEmpty {
+            return trimmedMuscleSummary
+        }
+
+        let trimmedCategory = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedCategory.isEmpty ? nil : trimmedCategory
+    }
+
+    private func makeCardioSettingsDraft(from draft: TemplateCardioBlockDraft) -> WorkoutCardioSettingsDraft {
+        WorkoutCardioSettingsDraft(
+            phase: draft.phase,
+            exerciseName: draft.exerciseNameSnapshot,
+            descriptor: cardioDescriptor(
+                category: draft.categorySnapshot,
+                muscleSummary: draft.muscleSummarySnapshot
+            ),
+            targetDurationSeconds: draft.targetDurationSeconds
+        )
+    }
+}
+
+private enum TemplateEditorPickerTarget: Identifiable {
+    case exercise
+    case cardio(WorkoutCardioPhase)
+
+    var id: String {
+        switch self {
+        case .exercise:
+            return "exercise"
+        case .cardio(let phase):
+            return "cardio-\(phase.rawValue)"
         }
     }
 }
@@ -530,9 +717,11 @@ private struct TemplateEditorExerciseRowData: Identifiable {
             UserProfile.self,
             TemplateFolder.self,
             WorkoutTemplate.self,
+            TemplateCardioBlock.self,
             TemplateExercise.self,
             TemplateExerciseSet.self,
             ActiveWorkoutDraftSession.self,
+            ActiveWorkoutDraftCardioBlock.self,
             ActiveWorkoutDraftExercise.self,
             ActiveWorkoutDraftSet.self,
         ], inMemory: true)

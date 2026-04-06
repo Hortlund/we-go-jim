@@ -310,6 +310,149 @@ enum WorkoutSessionStatus: String, Codable, CaseIterable, Equatable {
     case cancelled
 }
 
+enum WorkoutCardioPhase: String, Codable, CaseIterable, Equatable, Identifiable {
+    case preWorkout
+    case postWorkout
+
+    var id: String { rawValue }
+
+    var sortOrder: Int {
+        switch self {
+        case .preWorkout:
+            return 0
+        case .postWorkout:
+            return 1
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .preWorkout:
+            return "Pre-workout Cardio"
+        case .postWorkout:
+            return "Post-workout Cardio"
+        }
+    }
+
+    var shortTitle: String {
+        switch self {
+        case .preWorkout:
+            return "Pre Cardio"
+        case .postWorkout:
+            return "Post Cardio"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .preWorkout:
+            return "figure.walk"
+        case .postWorkout:
+            return "figure.run"
+        }
+    }
+
+    var defaultDurationSeconds: Int {
+        switch self {
+        case .preWorkout:
+            return 5 * 60
+        case .postWorkout:
+            return 20 * 60
+        }
+    }
+}
+
+struct TemplateCardioBlockDraft: Identifiable, Equatable {
+    let id: UUID
+    var phase: WorkoutCardioPhase
+    var catalogExerciseUUID: String
+    var exerciseNameSnapshot: String
+    var categorySnapshot: String
+    var muscleSummarySnapshot: String
+    var targetDurationSeconds: Int
+
+    init(
+        id: UUID = UUID(),
+        phase: WorkoutCardioPhase,
+        catalogExerciseUUID: String,
+        exerciseNameSnapshot: String,
+        categorySnapshot: String,
+        muscleSummarySnapshot: String,
+        targetDurationSeconds: Int
+    ) {
+        self.id = id
+        self.phase = phase
+        self.catalogExerciseUUID = catalogExerciseUUID
+        self.exerciseNameSnapshot = exerciseNameSnapshot
+        self.categorySnapshot = categorySnapshot
+        self.muscleSummarySnapshot = muscleSummarySnapshot
+        self.targetDurationSeconds = targetDurationSeconds
+    }
+
+    init(model: TemplateCardioBlock) {
+        self.id = model.id
+        self.phase = model.phase
+        self.catalogExerciseUUID = model.catalogExerciseUUID
+        self.exerciseNameSnapshot = model.exerciseNameSnapshot
+        self.categorySnapshot = model.categorySnapshot
+        self.muscleSummarySnapshot = model.muscleSummarySnapshot
+        self.targetDurationSeconds = model.targetDurationSeconds
+    }
+}
+
+struct WorkoutCardioBlockDraft: Identifiable, Equatable {
+    let id: UUID
+    var phase: WorkoutCardioPhase
+    var catalogExerciseUUID: String
+    var exerciseNameSnapshot: String
+    var categorySnapshot: String
+    var muscleSummarySnapshot: String
+    var targetDurationSeconds: Int
+    var isCompleted: Bool
+
+    init(
+        id: UUID = UUID(),
+        phase: WorkoutCardioPhase,
+        catalogExerciseUUID: String,
+        exerciseNameSnapshot: String,
+        categorySnapshot: String,
+        muscleSummarySnapshot: String,
+        targetDurationSeconds: Int,
+        isCompleted: Bool = false
+    ) {
+        self.id = id
+        self.phase = phase
+        self.catalogExerciseUUID = catalogExerciseUUID
+        self.exerciseNameSnapshot = exerciseNameSnapshot
+        self.categorySnapshot = categorySnapshot
+        self.muscleSummarySnapshot = muscleSummarySnapshot
+        self.targetDurationSeconds = targetDurationSeconds
+        self.isCompleted = isCompleted
+    }
+
+    init(model: ActiveWorkoutDraftCardioBlock) {
+        self.id = model.id
+        self.phase = model.phase
+        self.catalogExerciseUUID = model.catalogExerciseUUID
+        self.exerciseNameSnapshot = model.exerciseNameSnapshot
+        self.categorySnapshot = model.categorySnapshot
+        self.muscleSummarySnapshot = model.muscleSummarySnapshot
+        self.targetDurationSeconds = model.targetDurationSeconds
+        self.isCompleted = model.isCompleted
+    }
+
+    init(model: WorkoutSessionCardioBlock) {
+        self.id = model.id
+        self.phase = model.phase
+        self.catalogExerciseUUID = model.catalogExerciseUUID
+        self.exerciseNameSnapshot = model.exerciseNameSnapshot
+        self.categorySnapshot = model.categorySnapshot
+        self.muscleSummarySnapshot = model.muscleSummarySnapshot
+        self.targetDurationSeconds = model.targetDurationSeconds
+        self.isCompleted = model.isCompleted
+    }
+}
+
 enum ProfileWidgetKind: String, Codable, CaseIterable, Equatable, Hashable, Identifiable {
     case prs
     case weeklyGoals
@@ -626,6 +769,7 @@ final class WorkoutTemplate {
 
     @Relationship var folder: TemplateFolder?
     @Relationship(inverse: \TemplateExercise.template) var exercises: [TemplateExercise]?
+    @Relationship(inverse: \TemplateCardioBlock.template) var cardioBlocks: [TemplateCardioBlock]?
 
     init(
         id: UUID = UUID(),
@@ -646,6 +790,54 @@ final class WorkoutTemplate {
         self.updatedAt = updatedAt
         self.folder = folder
         self.exercises = []
+        self.cardioBlocks = []
+    }
+}
+
+@Model
+final class TemplateCardioBlock {
+    var id: UUID = UUID()
+    var templateID: UUID = UUID()
+    var phaseRaw: String = WorkoutCardioPhase.preWorkout.rawValue
+    var catalogExerciseUUID: String = ""
+    var exerciseNameSnapshot: String = ""
+    var categorySnapshot: String = ""
+    var muscleSummarySnapshot: String = ""
+    var targetDurationSeconds: Int = WorkoutCardioPhase.preWorkout.defaultDurationSeconds
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
+
+    @Relationship var template: WorkoutTemplate?
+
+    var phase: WorkoutCardioPhase {
+        get { WorkoutCardioPhase(rawValue: phaseRaw) ?? .preWorkout }
+        set { phaseRaw = newValue.rawValue }
+    }
+
+    init(
+        id: UUID = UUID(),
+        templateID: UUID,
+        phase: WorkoutCardioPhase,
+        catalogExerciseUUID: String,
+        exerciseNameSnapshot: String,
+        categorySnapshot: String,
+        muscleSummarySnapshot: String,
+        targetDurationSeconds: Int,
+        createdAt: Date = .now,
+        updatedAt: Date = .now,
+        template: WorkoutTemplate? = nil
+    ) {
+        self.id = id
+        self.templateID = templateID
+        self.phaseRaw = phase.rawValue
+        self.catalogExerciseUUID = catalogExerciseUUID
+        self.exerciseNameSnapshot = exerciseNameSnapshot
+        self.categorySnapshot = categorySnapshot
+        self.muscleSummarySnapshot = muscleSummarySnapshot
+        self.targetDurationSeconds = min(24 * 60 * 60, max(0, targetDurationSeconds))
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.template = template
     }
 }
 
@@ -775,6 +967,7 @@ final class ActiveWorkoutDraftSession {
     var updatedAt: Date = Date()
 
     @Relationship(deleteRule: .cascade, inverse: \ActiveWorkoutDraftExercise.session) var exercises: [ActiveWorkoutDraftExercise]?
+    @Relationship(deleteRule: .cascade, inverse: \ActiveWorkoutDraftCardioBlock.session) var cardioBlocks: [ActiveWorkoutDraftCardioBlock]?
 
     init(
         id: UUID = UUID(),
@@ -793,6 +986,57 @@ final class ActiveWorkoutDraftSession {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.exercises = []
+        self.cardioBlocks = []
+    }
+}
+
+@Model
+final class ActiveWorkoutDraftCardioBlock {
+    var id: UUID = UUID()
+    var sessionID: UUID = UUID()
+    var phaseRaw: String = WorkoutCardioPhase.preWorkout.rawValue
+    var catalogExerciseUUID: String = ""
+    var exerciseNameSnapshot: String = ""
+    var categorySnapshot: String = ""
+    var muscleSummarySnapshot: String = ""
+    var targetDurationSeconds: Int = WorkoutCardioPhase.preWorkout.defaultDurationSeconds
+    var isCompleted: Bool = false
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
+
+    @Relationship var session: ActiveWorkoutDraftSession?
+
+    var phase: WorkoutCardioPhase {
+        get { WorkoutCardioPhase(rawValue: phaseRaw) ?? .preWorkout }
+        set { phaseRaw = newValue.rawValue }
+    }
+
+    init(
+        id: UUID = UUID(),
+        sessionID: UUID,
+        phase: WorkoutCardioPhase,
+        catalogExerciseUUID: String,
+        exerciseNameSnapshot: String,
+        categorySnapshot: String,
+        muscleSummarySnapshot: String,
+        targetDurationSeconds: Int,
+        isCompleted: Bool = false,
+        createdAt: Date = .now,
+        updatedAt: Date = .now,
+        session: ActiveWorkoutDraftSession? = nil
+    ) {
+        self.id = id
+        self.sessionID = sessionID
+        self.phaseRaw = phase.rawValue
+        self.catalogExerciseUUID = catalogExerciseUUID
+        self.exerciseNameSnapshot = exerciseNameSnapshot
+        self.categorySnapshot = categorySnapshot
+        self.muscleSummarySnapshot = muscleSummarySnapshot
+        self.targetDurationSeconds = min(24 * 60 * 60, max(0, targetDurationSeconds))
+        self.isCompleted = isCompleted
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.session = session
     }
 }
 
@@ -931,6 +1175,7 @@ final class WorkoutSession {
     var updatedAt: Date = Date()
 
     @Relationship(deleteRule: .cascade, inverse: \WorkoutSessionExercise.session) var exercises: [WorkoutSessionExercise]?
+    @Relationship(deleteRule: .cascade, inverse: \WorkoutSessionCardioBlock.session) var cardioBlocks: [WorkoutSessionCardioBlock]?
 
     var status: WorkoutSessionStatus {
         get { WorkoutSessionStatus(rawValue: statusRaw) ?? .active }
@@ -968,6 +1213,57 @@ final class WorkoutSession {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.exercises = []
+        self.cardioBlocks = []
+    }
+}
+
+@Model
+final class WorkoutSessionCardioBlock {
+    var id: UUID = UUID()
+    var sessionID: UUID = UUID()
+    var phaseRaw: String = WorkoutCardioPhase.preWorkout.rawValue
+    var catalogExerciseUUID: String = ""
+    var exerciseNameSnapshot: String = ""
+    var categorySnapshot: String = ""
+    var muscleSummarySnapshot: String = ""
+    var targetDurationSeconds: Int = WorkoutCardioPhase.preWorkout.defaultDurationSeconds
+    var isCompleted: Bool = false
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
+
+    @Relationship var session: WorkoutSession?
+
+    var phase: WorkoutCardioPhase {
+        get { WorkoutCardioPhase(rawValue: phaseRaw) ?? .preWorkout }
+        set { phaseRaw = newValue.rawValue }
+    }
+
+    init(
+        id: UUID = UUID(),
+        sessionID: UUID,
+        phase: WorkoutCardioPhase,
+        catalogExerciseUUID: String,
+        exerciseNameSnapshot: String,
+        categorySnapshot: String,
+        muscleSummarySnapshot: String,
+        targetDurationSeconds: Int,
+        isCompleted: Bool = false,
+        createdAt: Date = .now,
+        updatedAt: Date = .now,
+        session: WorkoutSession? = nil
+    ) {
+        self.id = id
+        self.sessionID = sessionID
+        self.phaseRaw = phase.rawValue
+        self.catalogExerciseUUID = catalogExerciseUUID
+        self.exerciseNameSnapshot = exerciseNameSnapshot
+        self.categorySnapshot = categorySnapshot
+        self.muscleSummarySnapshot = muscleSummarySnapshot
+        self.targetDurationSeconds = min(24 * 60 * 60, max(0, targetDurationSeconds))
+        self.isCompleted = isCompleted
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.session = session
     }
 }
 

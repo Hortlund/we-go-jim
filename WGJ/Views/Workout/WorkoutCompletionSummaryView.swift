@@ -22,6 +22,7 @@ struct WorkoutCompletionSummaryView: View {
                         heroCard(snapshot)
                         statGrid(snapshot)
                         personalRecordsSection(snapshot)
+                        cardioRecapSection(snapshot)
                         exerciseRecapSection(snapshot)
                     } else {
                         loadingState
@@ -238,6 +239,30 @@ struct WorkoutCompletionSummaryView: View {
         }
     }
 
+    @ViewBuilder
+    private func cardioRecapSection(_ snapshot: WorkoutCompletionSnapshot) -> some View {
+        if !snapshot.cardioRecap.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                WGJActionHeader(
+                    "Cardio Phases",
+                    subtitle: "The timed warmup and cooldown blocks tracked in this session."
+                )
+
+                ForEach(snapshot.cardioRecap) { cardio in
+                    WorkoutCardioPhaseCard(
+                        phase: cardio.phase,
+                        exerciseName: cardio.exerciseName,
+                        descriptor: cardio.descriptor,
+                        targetDurationSeconds: cardio.targetDurationSeconds,
+                        statusText: cardio.isCompleted ? "Complete" : "Not finished",
+                        statusTint: cardio.isCompleted ? WGJTheme.success : WGJTheme.warning,
+                        footnote: cardio.isCompleted ? nil : "This workout was finished before this cardio phase was completed."
+                    )
+                }
+            }
+        }
+    }
+
     @MainActor
     private func loadSnapshotIfNeeded() async {
         guard snapshot == nil else { return }
@@ -295,6 +320,7 @@ struct WorkoutCompletionSnapshot: Equatable {
     let prHeadline: String
     let prSupportText: String
     let personalRecords: [WorkoutCompletionPersonalRecord]
+    let cardioRecap: [WorkoutCompletionCardioRecap]
     let exerciseRecap: [WorkoutCompletionExerciseRecap]
 }
 
@@ -313,6 +339,15 @@ struct WorkoutCompletionExerciseRecap: Identifiable, Equatable {
     let bestSetText: String
 }
 
+struct WorkoutCompletionCardioRecap: Identifiable, Equatable {
+    let id: String
+    let phase: WorkoutCardioPhase
+    let exerciseName: String
+    let descriptor: String?
+    let targetDurationSeconds: Int
+    let isCompleted: Bool
+}
+
 private struct WorkoutCompletionExerciseData {
     let completedSetCount: Int
     let recap: WorkoutCompletionExerciseRecap
@@ -327,6 +362,7 @@ enum WorkoutCompletionSnapshotBuilder {
         }
 
         let exercises = try repository.sessionExercises(sessionID: sessionID)
+        let cardioBlocks = try repository.sessionCardioBlocks(sessionID: sessionID)
         let exerciseData = exercises.map(makeExerciseData)
         let completedSetCount = exerciseData.reduce(0) { partialResult, data in
             partialResult + data.completedSetCount
@@ -364,6 +400,7 @@ enum WorkoutCompletionSnapshotBuilder {
             prHeadline: prHeadline,
             prSupportText: prSupportText,
             personalRecords: personalRecords,
+            cardioRecap: cardioBlocks.map(makeCardioRecap),
             exerciseRecap: exerciseData.map(\.recap)
         )
     }
@@ -390,6 +427,20 @@ enum WorkoutCompletionSnapshotBuilder {
             exerciseName: achievement.exerciseName,
             performanceText: performanceText(for: achievement),
             detailText: detailText(for: achievement)
+        )
+    }
+
+    private static func makeCardioRecap(_ cardioBlock: WorkoutSessionCardioBlock) -> WorkoutCompletionCardioRecap {
+        WorkoutCompletionCardioRecap(
+            id: cardioBlock.phase.rawValue,
+            phase: cardioBlock.phase,
+            exerciseName: cardioBlock.exerciseNameSnapshot,
+            descriptor: cardioDescriptor(
+                category: cardioBlock.categorySnapshot,
+                muscleSummary: cardioBlock.muscleSummarySnapshot
+            ),
+            targetDurationSeconds: cardioBlock.targetDurationSeconds,
+            isCompleted: cardioBlock.isCompleted
         )
     }
 
@@ -435,6 +486,16 @@ enum WorkoutCompletionSnapshotBuilder {
             return "0 kg"
         }
         return "\(WGJFormatters.integerString(volume)) kg"
+    }
+
+    private static func cardioDescriptor(category: String, muscleSummary: String) -> String? {
+        let trimmedMuscleSummary = muscleSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedMuscleSummary.isEmpty {
+            return trimmedMuscleSummary
+        }
+
+        let trimmedCategory = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedCategory.isEmpty ? nil : trimmedCategory
     }
 }
 

@@ -18,6 +18,27 @@ struct TemplateTransferServiceTests {
             name: "Push Prime",
             notes: "Heavy top sets and a backoff."
         )
+        try repository.setCardioBlocks(
+            templateID: template.id,
+            drafts: [
+                TemplateCardioBlockDraft(
+                    phase: .preWorkout,
+                    catalogExerciseUUID: "bike-1",
+                    exerciseNameSnapshot: "Bike",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Warmup",
+                    targetDurationSeconds: 300
+                ),
+                TemplateCardioBlockDraft(
+                    phase: .postWorkout,
+                    catalogExerciseUUID: "treadmill-1",
+                    exerciseNameSnapshot: "Incline Treadmill Walk",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Cooldown",
+                    targetDurationSeconds: 1200
+                ),
+            ]
+        )
 
         try repository.setExercises(
             templateID: template.id,
@@ -69,6 +90,7 @@ struct TemplateTransferServiceTests {
 
         let exportedData = try service.exportData(templateID: template.id)
         let importedTemplate = try service.importTemplate(from: exportedData)
+        let importedCardio = try repository.cardioBlocks(templateID: importedTemplate.id)
         let importedExercises = try repository.exercises(in: importedTemplate.id)
         let benchSets = try repository.setDrafts(for: try #require(importedExercises.first).id)
         let dipSets = try repository.setDrafts(for: try #require(importedExercises.last).id)
@@ -76,6 +98,9 @@ struct TemplateTransferServiceTests {
         #expect(importedTemplate.folderID == TemplateRepository.unfiledFolderID)
         #expect(importedTemplate.name == "Push Prime")
         #expect(importedTemplate.notes == "Heavy top sets and a backoff.")
+        #expect(importedCardio.map(\.phase) == [.preWorkout, .postWorkout])
+        #expect(importedCardio.map(\.exerciseNameSnapshot) == ["Bike", "Incline Treadmill Walk"])
+        #expect(importedCardio.map(\.targetDurationSeconds) == [300, 1200])
         #expect(importedExercises.map(\.exerciseNameSnapshot) == ["Bench Press", "Weighted Dip"])
         #expect(importedExercises.map(\.targetRepMin) == [4, 8])
         #expect(importedExercises.map(\.targetRepMax) == [6, 10])
@@ -257,6 +282,40 @@ struct TemplateTransferServiceTests {
     }
 
     @Test
+    func importSupportsLegacyFormatVersionOneWithoutCardio() throws {
+        let context = try makeInMemoryContext()
+        let service = TemplateTransferService(modelContext: context)
+        let repository = TemplateRepository(modelContext: context)
+        let legacyData = try encoded(
+            TemplateTransferEnvelope(
+                formatVersion: 1,
+                template: TemplateTransferTemplate(
+                    name: "Legacy Push",
+                    notes: "Old share file",
+                    exercises: [
+                        TemplateTransferExercise(
+                            catalogExerciseUUID: "legacy-bench",
+                            exerciseNameSnapshot: "Bench Press",
+                            categorySnapshot: "Chest",
+                            muscleSummarySnapshot: "Chest",
+                            targetRepMin: 5,
+                            targetRepMax: 8,
+                            restSeconds: 120,
+                            sets: []
+                        ),
+                    ]
+                )
+            )
+        )
+
+        let importedTemplate = try service.importTemplate(from: legacyData)
+
+        #expect(importedTemplate.name == "Legacy Push")
+        #expect(try repository.cardioBlocks(templateID: importedTemplate.id).isEmpty)
+        #expect(try repository.exercises(in: importedTemplate.id).map(\.exerciseNameSnapshot) == ["Bench Press"])
+    }
+
+    @Test
     func importFromFileURLRejectsMalformedFile() throws {
         let context = try makeInMemoryContext()
         let service = TemplateTransferService(modelContext: context)
@@ -294,12 +353,15 @@ struct TemplateTransferServiceTests {
             ProfileWidgetConfig.self,
             TemplateFolder.self,
             WorkoutTemplate.self,
+            TemplateCardioBlock.self,
             TemplateExercise.self,
             TemplateExerciseSet.self,
             ActiveWorkoutDraftSession.self,
+            ActiveWorkoutDraftCardioBlock.self,
             ActiveWorkoutDraftExercise.self,
             ActiveWorkoutDraftSet.self,
             WorkoutSession.self,
+            WorkoutSessionCardioBlock.self,
             WorkoutSessionExercise.self,
             WorkoutSessionSet.self,
             CompletedSetFact.self,

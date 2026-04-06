@@ -1233,6 +1233,30 @@ private struct StartWorkoutInlineActionLabel: View {
 
 @MainActor
 struct StartWorkoutTemplatePreview: Identifiable, Equatable {
+    struct CardioBlock: Identifiable, Equatable {
+        let id: UUID
+        let phase: WorkoutCardioPhase
+        let exerciseName: String
+        let descriptor: String?
+        let targetDurationSeconds: Int
+
+        init(templateCardioBlock: TemplateCardioBlock) {
+            id = templateCardioBlock.id
+            phase = templateCardioBlock.phase
+            exerciseName = templateCardioBlock.exerciseNameSnapshot
+            let trimmedMuscleSummary = templateCardioBlock.muscleSummarySnapshot
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedMuscleSummary.isEmpty {
+                descriptor = trimmedMuscleSummary
+            } else {
+                let trimmedCategory = templateCardioBlock.categorySnapshot
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                descriptor = trimmedCategory.isEmpty ? nil : trimmedCategory
+            }
+            targetDurationSeconds = templateCardioBlock.targetDurationSeconds
+        }
+    }
+
     struct Exercise: Identifiable, Equatable {
         let id: UUID
         let sortOrder: Int
@@ -1278,6 +1302,8 @@ struct StartWorkoutTemplatePreview: Identifiable, Equatable {
     let folderID: UUID
     let name: String
     let notes: String?
+    let preWorkoutCardio: CardioBlock?
+    let postWorkoutCardio: CardioBlock?
     let exercises: [Exercise]
     let totalPlannedSets: Int
     let focusAreaSummary: String?
@@ -1290,6 +1316,11 @@ struct StartWorkoutTemplatePreview: Identifiable, Equatable {
 
         let trimmedNotes = template.notes.trimmingCharacters(in: .whitespacesAndNewlines)
         notes = trimmedNotes.isEmpty ? nil : trimmedNotes
+        let cardioByPhase = Dictionary(
+            uniqueKeysWithValues: (template.cardioBlocks ?? []).map { ($0.phase, $0) }
+        )
+        preWorkoutCardio = cardioByPhase[.preWorkout].map(CardioBlock.init(templateCardioBlock:))
+        postWorkoutCardio = cardioByPhase[.postWorkout].map(CardioBlock.init(templateCardioBlock:))
         exercises = (template.exercises ?? [])
             .sorted { $0.sortOrder < $1.sortOrder }
             .map(Exercise.init(templateExercise:))
@@ -1328,10 +1359,18 @@ private struct TemplateStartPreviewSheet: View {
         preview.totalPlannedSets
     }
 
+    private var cardioCount: Int {
+        [preview.preWorkoutCardio, preview.postWorkoutCardio].compactMap { $0 }.count
+    }
+
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 16) {
                 summaryCard
+
+                if let preWorkoutCardio = preview.preWorkoutCardio {
+                    cardioSection(preWorkoutCardio)
+                }
 
                 if orderedExercises.isEmpty {
                     WGJEmptyStateCard(
@@ -1362,6 +1401,10 @@ private struct TemplateStartPreviewSheet: View {
                             .wgjCardContainer()
                         }
                     }
+                }
+
+                if let postWorkoutCardio = preview.postWorkoutCardio {
+                    cardioSection(postWorkoutCardio)
                 }
 
                 ViewThatFits(in: .horizontal) {
@@ -1479,6 +1522,14 @@ private struct TemplateStartPreviewSheet: View {
             tint: WGJTheme.accentCyan
         )
 
+        if cardioCount > 0 {
+            WGJMetricPill(
+                systemImage: "figure.run",
+                value: "\(cardioCount) cardio",
+                tint: WGJTheme.accentGold
+            )
+        }
+
         if let focusAreaSummary = preview.focusAreaSummary {
             WGJMetricPill(
                 systemImage: "bolt.fill",
@@ -1531,6 +1582,25 @@ private struct TemplateStartPreviewSheet: View {
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityIdentifier("template-preview-exercise-row-\(index)")
+    }
+
+    private func cardioSection(_ cardioBlock: StartWorkoutTemplatePreview.CardioBlock) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            WGJActionHeader(
+                cardioBlock.phase.title,
+                subtitle: cardioBlock.phase == .preWorkout
+                    ? "Warmup cardio before the lift roster starts."
+                    : "Cooldown cardio after the main exercises."
+            )
+
+            WorkoutCardioPhaseCard(
+                phase: cardioBlock.phase,
+                exerciseName: cardioBlock.exerciseName,
+                descriptor: cardioBlock.descriptor,
+                targetDurationSeconds: cardioBlock.targetDurationSeconds,
+                accessibilityIdentifier: "template-preview-\(cardioBlock.phase.rawValue)-card"
+            )
+        }
     }
 
     private func primaryPrescriptionText(for exercise: StartWorkoutTemplatePreview.Exercise) -> String {
@@ -1618,12 +1688,15 @@ private struct PendingTemplateFileTaskKey: Hashable {
         ProfileWidgetConfig.self,
         TemplateFolder.self,
         WorkoutTemplate.self,
+        TemplateCardioBlock.self,
         TemplateExercise.self,
         TemplateExerciseSet.self,
         ActiveWorkoutDraftSession.self,
+        ActiveWorkoutDraftCardioBlock.self,
         ActiveWorkoutDraftExercise.self,
         ActiveWorkoutDraftSet.self,
         WorkoutSession.self,
+        WorkoutSessionCardioBlock.self,
         WorkoutSessionExercise.self,
         WorkoutSessionSet.self,
     ], inMemory: true)

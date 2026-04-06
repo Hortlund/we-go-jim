@@ -21,12 +21,17 @@ struct WorkoutSessionExerciseGridEditor: View {
     var showsInlineExerciseControls: Bool
     var showsSetProgressChip: Bool
     var manualCompletionMode: Bool
+    var isSetEditingEnabled: Bool
     var enablesHeaderSwipeDelete: Bool
     var emphasizesExerciseCompletion: Bool
     var onSetDraftsChanged: (([WorkoutSessionSetDraft]) -> Void)?
     var onRestChanged: ((Int) -> Void)?
     var onSetCompletionChange: ((UUID, String, Int, Bool) -> Void)?
     var onExerciseSettings: (() -> Void)?
+    var canMoveExerciseUp: Bool
+    var canMoveExerciseDown: Bool
+    var onExerciseMoveUp: (() -> Void)?
+    var onExerciseMoveDown: (() -> Void)?
     var onExerciseDelete: (() -> Void)?
 
     private let externalIsExpanded: Binding<Bool>?
@@ -77,12 +82,17 @@ struct WorkoutSessionExerciseGridEditor: View {
         showsInlineExerciseControls: Bool = true,
         showsSetProgressChip: Bool = true,
         manualCompletionMode: Bool = false,
+        isSetEditingEnabled: Bool = true,
         enablesHeaderSwipeDelete: Bool = false,
         emphasizesExerciseCompletion: Bool = false,
         onSetDraftsChanged: (([WorkoutSessionSetDraft]) -> Void)? = nil,
         onRestChanged: ((Int) -> Void)? = nil,
         onSetCompletionChange: ((UUID, String, Int, Bool) -> Void)? = nil,
         onExerciseSettings: (() -> Void)? = nil,
+        canMoveExerciseUp: Bool = false,
+        canMoveExerciseDown: Bool = false,
+        onExerciseMoveUp: (() -> Void)? = nil,
+        onExerciseMoveDown: (() -> Void)? = nil,
         onExerciseDelete: (() -> Void)? = nil
     ) {
         self.exerciseName = exerciseName
@@ -103,12 +113,17 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.showsInlineExerciseControls = showsInlineExerciseControls
         self.showsSetProgressChip = showsSetProgressChip
         self.manualCompletionMode = manualCompletionMode
+        self.isSetEditingEnabled = isSetEditingEnabled
         self.enablesHeaderSwipeDelete = enablesHeaderSwipeDelete
         self.emphasizesExerciseCompletion = emphasizesExerciseCompletion
         self.onSetDraftsChanged = onSetDraftsChanged
         self.onRestChanged = onRestChanged
         self.onSetCompletionChange = onSetCompletionChange
         self.onExerciseSettings = onExerciseSettings
+        self.canMoveExerciseUp = canMoveExerciseUp
+        self.canMoveExerciseDown = canMoveExerciseDown
+        self.onExerciseMoveUp = onExerciseMoveUp
+        self.onExerciseMoveDown = onExerciseMoveDown
         self.onExerciseDelete = onExerciseDelete
         self._localIsExpanded = State(initialValue: isExpanded?.wrappedValue ?? initiallyExpanded)
         let initialRows = Self.makeDisplayRows(
@@ -247,7 +262,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             Spacer(minLength: 12)
 
             VStack(spacing: 8) {
-                if onExerciseSettings != nil || onExerciseDelete != nil {
+                if onExerciseSettings != nil || onExerciseMoveUp != nil || onExerciseMoveDown != nil || onExerciseDelete != nil {
                     WGJActionMenuButton("Exercise Actions") {
                         if let onExerciseSettings {
                             Button {
@@ -255,6 +270,24 @@ struct WorkoutSessionExerciseGridEditor: View {
                             } label: {
                                 Label("Exercise Settings", systemImage: "slider.horizontal.3")
                             }
+                        }
+
+                        if let onExerciseMoveUp {
+                            Button {
+                                onExerciseMoveUp()
+                            } label: {
+                                Label("Move up", systemImage: "arrow.up")
+                            }
+                            .disabled(!canMoveExerciseUp)
+                        }
+
+                        if let onExerciseMoveDown {
+                            Button {
+                                onExerciseMoveDown()
+                            } label: {
+                                Label("Move down", systemImage: "arrow.down")
+                            }
+                            .disabled(!canMoveExerciseDown)
                         }
 
                         if let onExerciseDelete {
@@ -417,7 +450,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                 SwipeDeleteRow(
                     offset: setSwipeOffsetBinding(for: row.id),
                     isRemoving: setRemovingBinding(for: row.id),
-                    isEnabled: !row.set.isLocked,
+                    isEnabled: isSetEditingEnabled && !row.set.isLocked,
                     gestureStrategy: .simultaneous
                 ) {
                     removeSet(withID: row.id)
@@ -444,6 +477,8 @@ struct WorkoutSessionExerciseGridEditor: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(WGJTheme.textPrimary)
+            .disabled(!isSetEditingEnabled)
+            .opacity(isSetEditingEnabled ? 1 : 0.5)
         }
     }
 
@@ -545,7 +580,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func inlineHintRow(_ presentation: WorkoutSetInlineHintPresentation, at index: Int) -> some View {
-        let canApplyPrevious = presentation.canApplyPrevious && !setDrafts[index].isLocked
+        let canApplyPrevious = isSetEditingEnabled && presentation.canApplyPrevious && !setDrafts[index].isLocked
 
         return ViewThatFits(in: .horizontal) {
             HStack(alignment: .top, spacing: 10) {
@@ -679,7 +714,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                 .monospacedDigit()
                 .focused($focusedInput, equals: inputFocus(for: index, metric: .reps))
                 .multilineTextAlignment(.center)
-                .disabled(setDrafts[index].isLocked)
+                .disabled(!isSetEditingEnabled || setDrafts[index].isLocked)
                 .accessibilityIdentifier("workout-set-\(index)-reps-field")
         }
         .metricInputShell(isFocused: isInputFocused(.reps, at: index))
@@ -703,7 +738,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                     .monospacedDigit()
                     .focused($focusedInput, equals: inputFocus(for: index, metric: .weight))
                     .multilineTextAlignment(.center)
-                    .disabled(isLocked)
+                    .disabled(!isSetEditingEnabled || isLocked)
                     .accessibilityIdentifier("workout-set-\(index)-weight-field")
             }
 
@@ -728,7 +763,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(WGJTheme.accentCyan)
             }
-            .disabled(isLocked)
+            .disabled(!isSetEditingEnabled || isLocked)
         }
         .metricInputShell(isFocused: isInputFocused(.weight, at: index))
     }
@@ -757,7 +792,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             .frame(width: 40, height: 40)
         }
         .buttonStyle(.plain)
-        .disabled(set.isLocked)
+        .disabled(!isSetEditingEnabled || set.isLocked)
     }
 
     private func setMenu(at index: Int) -> some View {
@@ -770,61 +805,62 @@ struct WorkoutSessionExerciseGridEditor: View {
             } label: {
                 Label("Insert below", systemImage: "plus")
             }
-            .disabled(isLocked)
+            .disabled(!isSetEditingEnabled || isLocked)
 
             Button {
                 toggleWarmup(at: index)
             } label: {
                 Label(setDrafts[index].isWarmup ? "Mark as working" : "Mark as warmup", systemImage: "flame")
             }
-            .disabled(isLocked)
+            .disabled(!isSetEditingEnabled || isLocked)
 
             Button {
                 moveSetUp(index)
             } label: {
                 Label("Move up", systemImage: "arrow.up")
             }
-            .disabled(isLocked || index == 0 || setDrafts[index - 1].isLocked)
+            .disabled(!isSetEditingEnabled || isLocked || index == 0 || setDrafts[index - 1].isLocked)
 
             Button {
                 moveSetDown(index)
             } label: {
                 Label("Move down", systemImage: "arrow.down")
             }
-            .disabled(isLocked || index == setDrafts.count - 1 || setDrafts[index + 1].isLocked)
+            .disabled(!isSetEditingEnabled || isLocked || index == setDrafts.count - 1 || setDrafts[index + 1].isLocked)
 
             ForEach(restPresets, id: \.self) { value in
                 Button("Set rest to \(Self.formattedRest(value))") {
                     updateSetRest(value, at: index)
                 }
-                .disabled(isLocked)
+                .disabled(!isSetEditingEnabled || isLocked)
             }
 
             Button("Use exercise default (\(Self.formattedRest(restSeconds)))") {
                 updateSetRest(restSeconds, at: index)
             }
-            .disabled(isLocked)
+            .disabled(!isSetEditingEnabled || isLocked)
 
             Button("Reduce rest by 15 sec") {
                 updateSetRest(currentRest - 15, at: index)
             }
-            .disabled(isLocked)
+            .disabled(!isSetEditingEnabled || isLocked)
 
             Button("Increase rest by 15 sec") {
                 updateSetRest(currentRest + 15, at: index)
             }
-            .disabled(isLocked)
+            .disabled(!isSetEditingEnabled || isLocked)
 
             Button("No rest") {
                 updateSetRest(0, at: index)
             }
-            .disabled(isLocked)
+            .disabled(!isSetEditingEnabled || isLocked)
 
             Button {
                 toggleLock(at: index)
             } label: {
                 Label(setDrafts[index].isLocked ? "Unlock set" : "Lock set", systemImage: setDrafts[index].isLocked ? "lock.open" : "lock")
             }
+            .disabled(!isSetEditingEnabled)
 
             if setDrafts[index].actualReps != nil || setDrafts[index].actualWeight != nil {
                 Button {
@@ -832,7 +868,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                 } label: {
                     Label("Clear logged values", systemImage: "eraser")
                 }
-                .disabled(isLocked)
+                .disabled(!isSetEditingEnabled || isLocked)
             }
 
             if setDrafts[index].restSeconds != restSeconds {
@@ -853,7 +889,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                         systemImage: setDrafts[index].isCompleted ? "arrow.uturn.backward.circle" : "checkmark.circle"
                     )
                 }
-                .disabled(isLocked)
+                .disabled(!isSetEditingEnabled || isLocked)
             }
 
             Button(role: .destructive) {
@@ -861,7 +897,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             } label: {
                 Label("Delete set", systemImage: "trash")
             }
-            .disabled(isLocked)
+            .disabled(!isSetEditingEnabled || isLocked)
         } label: {
             headerIcon(symbol: "ellipsis.circle")
         }
@@ -1159,7 +1195,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func focusMetric(_ metric: SetInputFocus.Metric, at index: Int) {
-        guard setDrafts.indices.contains(index), !setDrafts[index].isLocked else { return }
+        guard setDrafts.indices.contains(index), isSetEditingEnabled, !setDrafts[index].isLocked else { return }
         focusedInput = inputFocus(for: index, metric: metric)
     }
 
@@ -1547,7 +1583,7 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func applyPreviousPerformance(at index: Int) {
         guard setDrafts.indices.contains(index), let previous = previousBySetIndex[index] else { return }
-        guard !setDrafts[index].isLocked else { return }
+        guard isSetEditingEnabled, !setDrafts[index].isLocked else { return }
 
         setDrafts[index].actualWeight = previous.weight
         setDrafts[index].actualReps = previous.reps
@@ -1662,11 +1698,11 @@ struct WorkoutSessionExerciseGridEditor: View {
 
                     Spacer(minLength: 8)
 
-                    Button("Undo") {
-                        setCompletion(false, at: index)
-                    }
-                    .buttonStyle(WGJGhostButtonStyle())
-                    .disabled(set.isLocked)
+                Button("Undo") {
+                    setCompletion(false, at: index)
+                }
+                .buttonStyle(WGJGhostButtonStyle())
+                .disabled(!isSetEditingEnabled || set.isLocked)
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1687,7 +1723,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                         .wgjSingleLineText(scale: 0.82)
                 }
                 .buttonStyle(WGJCompactPrimaryButtonStyle())
-                .disabled(set.isLocked)
+                .disabled(!isSetEditingEnabled || set.isLocked)
             }
         }
     }

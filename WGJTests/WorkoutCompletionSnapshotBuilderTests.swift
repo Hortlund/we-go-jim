@@ -46,6 +46,70 @@ struct WorkoutCompletionSnapshotBuilderTests {
     }
 
     @Test
+    func snapshotIncludesCardioRecap() throws {
+        let context = try makeInMemoryContext()
+        let templateRepository = TemplateRepository(modelContext: context)
+        let repository = WorkoutSessionRepository(modelContext: context)
+
+        let bike = ExerciseCatalogItem(
+            remoteUUID: "summary-cardio-bike",
+            displayName: "Bike",
+            categoryName: "Cardio",
+            equipmentSummary: "Bike",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        let bench = ExerciseCatalogItem(
+            remoteUUID: "summary-cardio-bench",
+            displayName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(bike)
+        context.insert(bench)
+
+        let template = try templateRepository.createTemplate(name: "Push", notes: "")
+        try templateRepository.setCardioBlocks(
+            templateID: template.id,
+            drafts: [
+                TemplateCardioBlockDraft(
+                    phase: .preWorkout,
+                    catalogExerciseUUID: bike.remoteUUID,
+                    exerciseNameSnapshot: bike.displayName,
+                    categorySnapshot: bike.categoryName,
+                    muscleSummarySnapshot: "Warmup",
+                    targetDurationSeconds: 300
+                ),
+                TemplateCardioBlockDraft(
+                    phase: .postWorkout,
+                    catalogExerciseUUID: bike.remoteUUID,
+                    exerciseNameSnapshot: "Incline Treadmill Walk",
+                    categorySnapshot: bike.categoryName,
+                    muscleSummarySnapshot: "Cooldown",
+                    targetDurationSeconds: 1200
+                ),
+            ]
+        )
+        try templateRepository.addExercise(templateID: template.id, catalogItem: bench)
+
+        let session = try repository.createSessionFromTemplate(templateID: template.id)
+        let cardioBlocks = try repository.sessionCardioBlocks(sessionID: session.id)
+        cardioBlocks.first(where: { $0.phase == .preWorkout })?.isCompleted = true
+        try context.save()
+        try repository.finishSession(sessionID: session.id)
+
+        let snapshot = try #require(
+            try WorkoutCompletionSnapshotBuilder.build(sessionID: session.id, modelContext: context)
+        )
+
+        #expect(snapshot.cardioRecap.map(\.phase) == [.preWorkout, .postWorkout])
+        #expect(snapshot.cardioRecap.map(\.exerciseName) == ["Bike", "Incline Treadmill Walk"])
+        #expect(snapshot.cardioRecap.map(\.isCompleted) == [true, false])
+    }
+
+    @Test
     func snapshotBuildsPersonalRecordCardsFromCanonicalSetAchievements() throws {
         let context = try makeInMemoryContext()
         let repository = WorkoutSessionRepository(modelContext: context)
@@ -266,12 +330,15 @@ struct WorkoutCompletionSnapshotBuilderTests {
             ProfileWidgetConfig.self,
             TemplateFolder.self,
             WorkoutTemplate.self,
+            TemplateCardioBlock.self,
             TemplateExercise.self,
             TemplateExerciseSet.self,
             ActiveWorkoutDraftSession.self,
+            ActiveWorkoutDraftCardioBlock.self,
             ActiveWorkoutDraftExercise.self,
             ActiveWorkoutDraftSet.self,
             WorkoutSession.self,
+            WorkoutSessionCardioBlock.self,
             WorkoutSessionExercise.self,
             WorkoutSessionSet.self,
             CompletedSetFact.self,

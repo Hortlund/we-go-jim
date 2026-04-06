@@ -5,6 +5,57 @@ import Testing
 @MainActor
 struct TemplateRepositoryTests {
     @Test
+    func setCardioBlocksPersistsAndReplacesTemplatePhases() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+
+        let template = try repository.createTemplate(name: "Hybrid Day", notes: "")
+        try repository.setCardioBlocks(
+            templateID: template.id,
+            drafts: [
+                TemplateCardioBlockDraft(
+                    phase: .preWorkout,
+                    catalogExerciseUUID: "bike-1",
+                    exerciseNameSnapshot: "Bike",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Warmup",
+                    targetDurationSeconds: 300
+                ),
+                TemplateCardioBlockDraft(
+                    phase: .postWorkout,
+                    catalogExerciseUUID: "treadmill-1",
+                    exerciseNameSnapshot: "Incline Treadmill Walk",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Cooldown",
+                    targetDurationSeconds: 1200
+                ),
+            ]
+        )
+
+        #expect(try repository.cardioBlocks(templateID: template.id).map(\.phase) == [.preWorkout, .postWorkout])
+        #expect(try repository.cardioBlocks(templateID: template.id).map(\.targetDurationSeconds) == [300, 1200])
+
+        try repository.setCardioBlocks(
+            templateID: template.id,
+            drafts: [
+                TemplateCardioBlockDraft(
+                    phase: .postWorkout,
+                    catalogExerciseUUID: "bike-2",
+                    exerciseNameSnapshot: "Bike Finish",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Cooldown",
+                    targetDurationSeconds: 900
+                ),
+            ]
+        )
+
+        let refreshedBlocks = try repository.cardioBlocks(templateID: template.id)
+        #expect(refreshedBlocks.map(\.phase) == [.postWorkout])
+        #expect(refreshedBlocks.first?.exerciseNameSnapshot == "Bike Finish")
+        #expect(refreshedBlocks.first?.targetDurationSeconds == 900)
+    }
+
+    @Test
     func moveFolderReordersLibraryAndNormalizesSortOrder() throws {
         let context = try makeInMemoryContext()
         let repository = TemplateRepository(modelContext: context)
@@ -69,6 +120,59 @@ struct TemplateRepositoryTests {
         #expect(try metrics.exerciseOneRepMaxTrend(for: bench.remoteUUID, limit: 8).points.count == 1)
     }
 
+    @Test
+    func createTemplateFromCompletedSessionCopiesCardioBlocks() throws {
+        let context = try makeInMemoryContext()
+        let templateRepository = TemplateRepository(modelContext: context)
+        let sessionRepository = WorkoutSessionRepository(modelContext: context)
+
+        let bench = ExerciseCatalogItem(
+            remoteUUID: "template-copy-bench",
+            displayName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(bench)
+
+        let sourceTemplate = try templateRepository.createTemplate(name: "Source Hybrid", notes: "")
+        try templateRepository.setCardioBlocks(
+            templateID: sourceTemplate.id,
+            drafts: [
+                TemplateCardioBlockDraft(
+                    phase: .preWorkout,
+                    catalogExerciseUUID: "copy-bike-1",
+                    exerciseNameSnapshot: "Bike",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Warmup",
+                    targetDurationSeconds: 300
+                ),
+                TemplateCardioBlockDraft(
+                    phase: .postWorkout,
+                    catalogExerciseUUID: "copy-treadmill-1",
+                    exerciseNameSnapshot: "Incline Treadmill Walk",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Cooldown",
+                    targetDurationSeconds: 1200
+                ),
+            ]
+        )
+        try templateRepository.addExercise(templateID: sourceTemplate.id, catalogItem: bench)
+
+        let session = try sessionRepository.createSessionFromTemplate(templateID: sourceTemplate.id)
+        try sessionRepository.finishSession(sessionID: session.id)
+
+        let savedTemplate = try templateRepository.createTemplate(
+            fromSessionID: session.id,
+            name: "Saved Hybrid"
+        )
+
+        let cardioBlocks = try templateRepository.cardioBlocks(templateID: savedTemplate.id)
+        #expect(cardioBlocks.map(\.phase) == [.preWorkout, .postWorkout])
+        #expect(cardioBlocks.map(\.targetDurationSeconds) == [300, 1200])
+    }
+
     private func makeInMemoryContext() throws -> ModelContext {
         let schema = Schema([
             ExerciseCatalogItem.self,
@@ -81,12 +185,15 @@ struct TemplateRepositoryTests {
             ProfileWidgetConfig.self,
             TemplateFolder.self,
             WorkoutTemplate.self,
+            TemplateCardioBlock.self,
             TemplateExercise.self,
             TemplateExerciseSet.self,
             ActiveWorkoutDraftSession.self,
+            ActiveWorkoutDraftCardioBlock.self,
             ActiveWorkoutDraftExercise.self,
             ActiveWorkoutDraftSet.self,
             WorkoutSession.self,
+            WorkoutSessionCardioBlock.self,
             WorkoutSessionExercise.self,
             WorkoutSessionSet.self,
             CompletedSetFact.self,

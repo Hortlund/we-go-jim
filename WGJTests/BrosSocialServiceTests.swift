@@ -1553,6 +1553,7 @@ struct BrosSocialServiceTests {
         let schema = Schema([
             UserProfile.self,
             ActiveWorkoutDraftSession.self,
+            ActiveWorkoutDraftCardioBlock.self,
             ActiveWorkoutDraftExercise.self,
             ActiveWorkoutDraftSet.self,
             SocialOutboxItem.self,

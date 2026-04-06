@@ -15,6 +15,7 @@ struct TemplateDetailView: View {
         SortDescriptor(\TemplateFolder.name, order: .forward),
     ])
     private var folders: [TemplateFolder]
+    @Query private var templateCardioBlocks: [TemplateCardioBlock]
     @Query private var templateExercises: [TemplateExercise]
     @Query private var profiles: [UserProfile]
 
@@ -63,6 +64,12 @@ struct TemplateDetailView: View {
             },
             sort: [SortDescriptor(\TemplateExercise.sortOrder, order: .forward)]
         )
+
+        _templateCardioBlocks = Query(
+            filter: #Predicate<TemplateCardioBlock> { item in
+                item.templateID == templateID
+            }
+        )
     }
 
     var body: some View {
@@ -72,6 +79,7 @@ struct TemplateDetailView: View {
                     templateHeaderCard(template)
                 }
 
+                cardioSections
                 exercisesSection
             }
             .padding(WGJSpacing.page)
@@ -142,11 +150,21 @@ struct TemplateDetailView: View {
     private func templateHeaderCard(_ template: WorkoutTemplate) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             WGJActionHeader("Template", subtitle: "Reusable workout plan") {
-                WGJMetricPill(
-                    systemImage: "list.number",
-                    value: "\(templateExercises.count) exercises",
-                    tint: WGJTheme.accentCyan
-                )
+                HStack(spacing: 8) {
+                    WGJMetricPill(
+                        systemImage: "list.number",
+                        value: "\(templateExercises.count) exercises",
+                        tint: WGJTheme.accentCyan
+                    )
+
+                    if !orderedCardioBlocks.isEmpty {
+                        WGJMetricPill(
+                            systemImage: "figure.run",
+                            value: "\(orderedCardioBlocks.count) cardio",
+                            tint: WGJTheme.accentGold
+                        )
+                    }
+                }
             }
 
             Text(template.name)
@@ -163,6 +181,40 @@ struct TemplateDetailView: View {
         .padding(WGJSpacing.card)
         .frame(maxWidth: .infinity, alignment: .leading)
         .wgjCardContainer(strong: true)
+    }
+
+    @ViewBuilder
+    private var cardioSections: some View {
+        if !orderedCardioBlocks.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                WGJActionHeader(
+                    "Cardio Phases",
+                    subtitle: "Separate warmup and cooldown blocks pinned around the main exercises."
+                ) {
+                    Button {
+                        showingEditor = true
+                    } label: {
+                        Label("Edit", systemImage: "slider.horizontal.3")
+                    }
+                    .buttonStyle(WGJGhostButtonStyle())
+                }
+
+                ForEach(WorkoutCardioPhase.allCases, id: \.id) { phase in
+                    if let cardioBlock = cardioBlock(for: phase) {
+                        WorkoutCardioPhaseCard(
+                            phase: phase,
+                            exerciseName: cardioBlock.exerciseNameSnapshot,
+                            descriptor: cardioDescriptor(
+                                category: cardioBlock.categorySnapshot,
+                                muscleSummary: cardioBlock.muscleSummarySnapshot
+                            ),
+                            targetDurationSeconds: cardioBlock.targetDurationSeconds,
+                            footnote: cardioFootnote(for: phase)
+                        )
+                    }
+                }
+            }
+        }
     }
 
     private var exercisesSection: some View {
@@ -676,6 +728,33 @@ struct TemplateDetailView: View {
         WGJMotion.cardTransition(reduceMotion: reduceMotion)
     }
 
+    private var orderedCardioBlocks: [TemplateCardioBlock] {
+        templateCardioBlocks.sorted { $0.phase.sortOrder < $1.phase.sortOrder }
+    }
+
+    private func cardioBlock(for phase: WorkoutCardioPhase) -> TemplateCardioBlock? {
+        orderedCardioBlocks.first(where: { $0.phase == phase })
+    }
+
+    private func cardioDescriptor(category: String, muscleSummary: String) -> String? {
+        let trimmedMuscleSummary = muscleSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedMuscleSummary.isEmpty {
+            return trimmedMuscleSummary
+        }
+
+        let trimmedCategory = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedCategory.isEmpty ? nil : trimmedCategory
+    }
+
+    private func cardioFootnote(for phase: WorkoutCardioPhase) -> String {
+        switch phase {
+        case .preWorkout:
+            return "Runs before the first exercise in every session."
+        case .postWorkout:
+            return "Unlocks after the main exercise roster is done."
+        }
+    }
+
     private var templateExerciseIdentityStamp: TemplateExerciseIdentityStamp {
         TemplateExerciseIdentityStamp(
             ids: templateExercises.map(\.id),
@@ -799,10 +878,16 @@ private struct TemplateExerciseRowData: Identifiable {
         UserProfile.self,
         TemplateFolder.self,
         WorkoutTemplate.self,
+        TemplateCardioBlock.self,
         TemplateExercise.self,
         TemplateExerciseSet.self,
         ActiveWorkoutDraftSession.self,
+        ActiveWorkoutDraftCardioBlock.self,
         ActiveWorkoutDraftExercise.self,
         ActiveWorkoutDraftSet.self,
+        WorkoutSession.self,
+        WorkoutSessionCardioBlock.self,
+        WorkoutSessionExercise.self,
+        WorkoutSessionSet.self,
     ], inMemory: true)
 }

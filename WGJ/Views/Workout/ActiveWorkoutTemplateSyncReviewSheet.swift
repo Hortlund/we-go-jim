@@ -11,6 +11,51 @@ struct ActiveWorkoutTemplateSyncReviewSheet: View {
                 VStack(alignment: .leading, spacing: 16) {
                     summaryCard
 
+                    if !preview.addedCardioBlocks.isEmpty {
+                        section(
+                            title: "Added Cardio",
+                            subtitle: "\(preview.addedCardioBlocks.count) cardio section" + (preview.addedCardioBlocks.count == 1 ? "" : "s") + " added to the workout"
+                        ) {
+                            ForEach(preview.addedCardioBlocks) { addition in
+                                summaryRow(
+                                    title: addition.phase.title,
+                                    details: [addition.exerciseName, addition.summary],
+                                    tint: WGJTheme.success
+                                )
+                            }
+                        }
+                    }
+
+                    if !preview.removedCardioBlocks.isEmpty {
+                        section(
+                            title: "Removed Cardio",
+                            subtitle: "\(preview.removedCardioBlocks.count) cardio section" + (preview.removedCardioBlocks.count == 1 ? "" : "s") + " removed from the template"
+                        ) {
+                            ForEach(preview.removedCardioBlocks) { removal in
+                                summaryRow(
+                                    title: removal.phase.title,
+                                    details: [removal.exerciseName, removal.summary],
+                                    tint: WGJTheme.danger
+                                )
+                            }
+                        }
+                    }
+
+                    if !preview.editedCardioBlocks.isEmpty {
+                        section(
+                            title: "Edited Cardio",
+                            subtitle: "Cardio phase settings that changed during the workout."
+                        ) {
+                            ForEach(preview.editedCardioBlocks) { edited in
+                                summaryRow(
+                                    title: "\(edited.phase.title) · \(edited.exerciseName)",
+                                    details: edited.changes,
+                                    tint: WGJTheme.accentGold
+                                )
+                            }
+                        }
+                    }
+
                     if !preview.addedExercises.isEmpty {
                         section(
                             title: "Added Exercises",

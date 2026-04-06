@@ -10,6 +10,7 @@ struct HistoryDetailView: View {
     private let sessionID: UUID
 
     @Query private var sessions: [WorkoutSession]
+    @Query private var sessionCardioBlocks: [WorkoutSessionCardioBlock]
     @Query private var sessionExercises: [WorkoutSessionExercise]
 
     @State private var hasBootstrapped = false
@@ -41,6 +42,11 @@ struct HistoryDetailView: View {
         _sessions = Query(filter: #Predicate { item in
             item.id == sessionID
         })
+        _sessionCardioBlocks = Query(
+            filter: #Predicate { item in
+                item.sessionID == sessionID
+            }
+        )
         _sessionExercises = Query(
             filter: #Predicate { item in
                 item.sessionID == sessionID
@@ -56,6 +62,7 @@ struct HistoryDetailView: View {
             LazyVStack(alignment: .leading, spacing: WGJSpacing.section) {
                 if let session {
                     headerCard(session)
+                    cardioSection
                     exercisesSectionHeader
                 } else {
                     WGJEmptyStateCard(
@@ -137,6 +144,10 @@ struct HistoryDetailView: View {
 
     private var session: WorkoutSession? {
         sessions.first
+    }
+
+    private var orderedCardioBlocks: [WorkoutSessionCardioBlock] {
+        sessionCardioBlocks.sorted { $0.phase.sortOrder < $1.phase.sortOrder }
     }
 
     private var exercisesSectionHeader: some View {
@@ -222,6 +233,33 @@ struct HistoryDetailView: View {
         }
         .padding(WGJSpacing.card)
         .wgjCardContainer(strong: true)
+    }
+
+    @ViewBuilder
+    private var cardioSection: some View {
+        if !orderedCardioBlocks.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                WGJActionHeader(
+                    "Cardio Phases",
+                    subtitle: "Timed warmup and cooldown blocks saved with this workout."
+                )
+
+                ForEach(orderedCardioBlocks, id: \.id) { cardioBlock in
+                    WorkoutCardioPhaseCard(
+                        phase: cardioBlock.phase,
+                        exerciseName: cardioBlock.exerciseNameSnapshot,
+                        descriptor: cardioDescriptor(
+                            category: cardioBlock.categorySnapshot,
+                            muscleSummary: cardioBlock.muscleSummarySnapshot
+                        ),
+                        targetDurationSeconds: cardioBlock.targetDurationSeconds,
+                        statusText: cardioBlock.isCompleted ? "Complete" : "Not finished",
+                        statusTint: cardioBlock.isCompleted ? WGJTheme.success : WGJTheme.warning,
+                        footnote: cardioBlock.isCompleted ? nil : "This session was finished before this cardio phase was completed."
+                    )
+                }
+            }
+        }
     }
 
     @MainActor
@@ -517,6 +555,16 @@ struct HistoryDetailView: View {
     private func makeDrafts(from exercise: WorkoutSessionExercise) -> [WorkoutSessionSetDraft] {
         orderedSessionSets(for: exercise).map(WorkoutSessionSetDraft.init(model:))
     }
+
+    private func cardioDescriptor(category: String, muscleSummary: String) -> String? {
+        let trimmedMuscleSummary = muscleSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedMuscleSummary.isEmpty {
+            return trimmedMuscleSummary
+        }
+
+        let trimmedCategory = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedCategory.isEmpty ? nil : trimmedCategory
+    }
 }
 
 private struct HistoryExerciseHydrationResult {
@@ -591,12 +639,15 @@ private struct HistoryWorkoutPersonalRecordSummary {
         ProfileWidgetConfig.self,
         TemplateFolder.self,
         WorkoutTemplate.self,
+        TemplateCardioBlock.self,
         TemplateExercise.self,
         TemplateExerciseSet.self,
         ActiveWorkoutDraftSession.self,
+        ActiveWorkoutDraftCardioBlock.self,
         ActiveWorkoutDraftExercise.self,
         ActiveWorkoutDraftSet.self,
         WorkoutSession.self,
+        WorkoutSessionCardioBlock.self,
         WorkoutSessionExercise.self,
         WorkoutSessionSet.self,
     ], inMemory: true)

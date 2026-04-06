@@ -118,6 +118,25 @@ final class WorkoutSessionRepository {
         )
         modelContext.insert(session)
 
+        let orderedCardioBlocks = orderedTemplateCardioBlocks(template)
+        var createdCardioBlocks: [WorkoutSessionCardioBlock] = []
+        for templateCardioBlock in orderedCardioBlocks {
+            let cardioBlock = WorkoutSessionCardioBlock(
+                sessionID: session.id,
+                phase: templateCardioBlock.phase,
+                catalogExerciseUUID: templateCardioBlock.catalogExerciseUUID,
+                exerciseNameSnapshot: templateCardioBlock.exerciseNameSnapshot,
+                categorySnapshot: templateCardioBlock.categorySnapshot,
+                muscleSummarySnapshot: templateCardioBlock.muscleSummarySnapshot,
+                targetDurationSeconds: templateCardioBlock.targetDurationSeconds,
+                isCompleted: false,
+                session: session
+            )
+            modelContext.insert(cardioBlock)
+            createdCardioBlocks.append(cardioBlock)
+        }
+        session.cardioBlocks = createdCardioBlocks
+
         let orderedExercises = (template.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
         for (exerciseIndex, templateExercise) in orderedExercises.enumerated() {
             let exercise = WorkoutSessionExercise(
@@ -219,6 +238,16 @@ final class WorkoutSessionRepository {
             sortBy: [SortDescriptor(\.sortOrder, order: .forward)]
         )
         return try modelContext.fetch(descriptor)
+    }
+
+    func sessionCardioBlocks(sessionID: UUID) throws -> [WorkoutSessionCardioBlock] {
+        let descriptor = FetchDescriptor<WorkoutSessionCardioBlock>(
+            predicate: #Predicate { cardioBlock in
+                cardioBlock.sessionID == sessionID
+            }
+        )
+        return try modelContext.fetch(descriptor)
+            .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
     }
 
     func setDrafts(sessionExerciseID: UUID) throws -> [WorkoutSessionSetDraft] {
@@ -784,6 +813,11 @@ final class WorkoutSessionRepository {
 
     private func sanitizedRest(_ seconds: Int) -> Int {
         min(3600, max(0, seconds))
+    }
+
+    private func orderedTemplateCardioBlocks(_ template: WorkoutTemplate) -> [TemplateCardioBlock] {
+        (template.cardioBlocks ?? [])
+            .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
     }
 
     private func previousSnapshot(from set: WorkoutSessionSet) -> WorkoutPreviousSetSnapshot {

@@ -121,6 +121,48 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testTemplateEditorCardioAddAndRemoveSmoke() throws {
+        let app = launchApp()
+
+        tapTab("Start Workout", in: app)
+
+        app.buttons["start-workout-new-template-button"].tap()
+        let templateNameField = app.textFields["template-editor-name-field"]
+        XCTAssertTrue(templateNameField.waitForExistence(timeout: 5))
+        templateNameField.tap()
+        templateNameField.typeText("Cardio Template")
+
+        let preAddButton = app.buttons["template-editor-preWorkout-add-button"]
+        XCTAssertTrue(preAddButton.waitForExistence(timeout: 5))
+        preAddButton.tap()
+
+        let firstPickerSelectButton = identifiedElement("exercise-picker-select-button", in: app)
+        XCTAssertTrue(firstPickerSelectButton.waitForExistence(timeout: 15))
+        firstPickerSelectButton.tap()
+
+        XCTAssertTrue(identifiedElement("template-editor-preWorkout-card", in: app).waitForExistence(timeout: 5))
+
+        let postAddButton = app.buttons["template-editor-postWorkout-add-button"]
+        revealElement(postAddButton, in: app)
+        XCTAssertTrue(postAddButton.isHittable)
+        postAddButton.tap()
+
+        let secondPickerSelectButton = identifiedElement("exercise-picker-select-button", in: app)
+        XCTAssertTrue(secondPickerSelectButton.waitForExistence(timeout: 15))
+        secondPickerSelectButton.tap()
+
+        XCTAssertTrue(identifiedElement("template-editor-postWorkout-card", in: app).waitForExistence(timeout: 5))
+
+        let preActionsButton = app.buttons["template-editor-preWorkout-actions-button"]
+        revealElement(preActionsButton, in: app)
+        XCTAssertTrue(preActionsButton.isHittable)
+        preActionsButton.tap()
+        app.buttons["Remove"].tap()
+
+        XCTAssertTrue(app.buttons["template-editor-preWorkout-add-button"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testTemplateFileLaunchHookImportsAndShowsPreview() throws {
         let app = launchApp(launchEnvironment: [
             "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
@@ -212,6 +254,46 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(previewSheet.waitForExistence(timeout: 5))
         XCTAssertTrue(identifiedElement("template-preview-exercise-row-6", in: app).waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Triceps Pushdown"].exists)
+    }
+
+    @MainActor
+    func testTemplatePreviewShowsCardioSectionsFromLaunchPayload() throws {
+        let app = launchApp(launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Cardio Preview Template",
+                notes: "Warm up and cool down.",
+                preWorkoutCardio: templatePayloadCardio(
+                    catalogExerciseUUID: "preview-bike-1",
+                    exerciseNameSnapshot: "Bike",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Warmup",
+                    targetDurationSeconds: 300
+                ),
+                postWorkoutCardio: templatePayloadCardio(
+                    catalogExerciseUUID: "preview-treadmill-1",
+                    exerciseNameSnapshot: "Incline Treadmill Walk",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Cooldown",
+                    targetDurationSeconds: 1200
+                ),
+                exercises: [
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "preview-bench-1",
+                        exerciseNameSnapshot: "Bench Press",
+                        categorySnapshot: "Chest",
+                        muscleSummarySnapshot: "Chest",
+                        targetRepMin: 6,
+                        targetRepMax: 8,
+                        restSeconds: 120,
+                        sets: [templatePayloadSet(targetReps: 6, targetWeight: 100, loadUnit: "kg", restSeconds: 120, isWarmup: false)]
+                    ),
+                ]
+            ),
+        ])
+
+        XCTAssertTrue(identifiedElement("template-preview-sheet", in: app).waitForExistence(timeout: 5))
+        XCTAssertTrue(identifiedElement("template-preview-preWorkout-card", in: app).waitForExistence(timeout: 5))
+        XCTAssertTrue(identifiedElement("template-preview-postWorkout-card", in: app).waitForExistence(timeout: 5))
     }
 
     @MainActor
@@ -531,11 +613,91 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testActiveWorkoutCardioPhasesGateExerciseFlow() throws {
+        let app = launchApp(launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Gated Cardio Workout",
+                notes: "Cardio should gate the session phases.",
+                preWorkoutCardio: templatePayloadCardio(
+                    catalogExerciseUUID: "gated-bike-1",
+                    exerciseNameSnapshot: "Bike",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Warmup",
+                    targetDurationSeconds: 300
+                ),
+                postWorkoutCardio: templatePayloadCardio(
+                    catalogExerciseUUID: "gated-treadmill-1",
+                    exerciseNameSnapshot: "Incline Treadmill Walk",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Cooldown",
+                    targetDurationSeconds: 1200
+                ),
+                exercises: [
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "gated-bench-1",
+                        exerciseNameSnapshot: "Bench Press",
+                        categorySnapshot: "Chest",
+                        muscleSummarySnapshot: "Chest",
+                        targetRepMin: 6,
+                        targetRepMax: 8,
+                        restSeconds: 120,
+                        sets: [templatePayloadSet(targetReps: 6, targetWeight: 100, loadUnit: "kg", restSeconds: 120, isWarmup: false)]
+                    ),
+                ]
+            ),
+        ])
+
+        startPreviewedTemplateWorkout(in: app)
+
+        let preToggle = app.buttons["active-workout-preWorkout-toggle-button"]
+        let postToggle = app.buttons["active-workout-postWorkout-toggle-button"]
+        let completeSetButton = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
+        ).firstMatch
+        let weightField = identifiedElement("workout-set-0-weight-field", in: app)
+
+        XCTAssertTrue(preToggle.waitForExistence(timeout: 5))
+        XCTAssertTrue(postToggle.waitForExistence(timeout: 5))
+        XCTAssertTrue(weightField.waitForExistence(timeout: 5))
+        XCTAssertTrue(completeSetButton.waitForExistence(timeout: 5))
+
+        XCTAssertFalse(weightField.isEnabled)
+        XCTAssertFalse(completeSetButton.isEnabled)
+        XCTAssertFalse(postToggle.isEnabled)
+
+        preToggle.tap()
+
+        XCTAssertTrue(weightField.waitForExistence(timeout: 5))
+        XCTAssertTrue(weightField.isEnabled)
+        XCTAssertTrue(completeSetButton.isEnabled)
+        XCTAssertFalse(postToggle.isEnabled)
+
+        completeSetButton.tap()
+
+        XCTAssertTrue(postToggle.waitForExistence(timeout: 5))
+        XCTAssertTrue(postToggle.isEnabled)
+    }
+
+    @MainActor
     func testTemplateWorkoutFinishKeepTemplatePreservesOriginalStructure() throws {
         let app = launchApp(launchEnvironment: [
             "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
                 name: "Keep Template Workout",
                 notes: "UI test template",
+                preWorkoutCardio: templatePayloadCardio(
+                    catalogExerciseUUID: "template-keep-bike",
+                    exerciseNameSnapshot: "Bike",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Warmup",
+                    targetDurationSeconds: 300
+                ),
+                postWorkoutCardio: templatePayloadCardio(
+                    catalogExerciseUUID: "template-keep-treadmill",
+                    exerciseNameSnapshot: "Incline Treadmill Walk",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Cooldown",
+                    targetDurationSeconds: 1200
+                ),
                 exercises: [
                     templatePayloadExercise(
                         catalogExerciseUUID: "template-keep-bench",
@@ -560,6 +722,7 @@ final class WGJUITests: XCTestCase {
         ])
 
         startPreviewedTemplateWorkout(in: app)
+        app.buttons["active-workout-preWorkout-toggle-button"].tap()
         addSetToCurrentExercise(in: app)
         finishTemplateWorkout(in: app)
 
@@ -571,6 +734,8 @@ final class WGJUITests: XCTestCase {
         tapTab("Start Workout", in: app)
         restartImportedTemplateWorkout(in: app)
 
+        XCTAssertTrue(identifiedElement("active-workout-preWorkout-card", in: app).waitForExistence(timeout: 5))
+        XCTAssertTrue(identifiedElement("active-workout-postWorkout-card", in: app).waitForExistence(timeout: 5))
         XCTAssertTrue(identifiedElement("workout-set-0-weight-field", in: app).waitForExistence(timeout: 5))
         XCTAssertFalse(identifiedElement("workout-set-1-weight-field", in: app).waitForExistence(timeout: 1))
     }
@@ -581,6 +746,20 @@ final class WGJUITests: XCTestCase {
             "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
                 name: "Apply Template Workout",
                 notes: "UI test template",
+                preWorkoutCardio: templatePayloadCardio(
+                    catalogExerciseUUID: "template-apply-bike",
+                    exerciseNameSnapshot: "Bike",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Warmup",
+                    targetDurationSeconds: 300
+                ),
+                postWorkoutCardio: templatePayloadCardio(
+                    catalogExerciseUUID: "template-apply-treadmill",
+                    exerciseNameSnapshot: "Incline Treadmill Walk",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Cooldown",
+                    targetDurationSeconds: 1200
+                ),
                 exercises: [
                     templatePayloadExercise(
                         catalogExerciseUUID: "template-apply-bench",
@@ -605,6 +784,7 @@ final class WGJUITests: XCTestCase {
         ])
 
         startPreviewedTemplateWorkout(in: app)
+        app.buttons["active-workout-preWorkout-toggle-button"].tap()
         addSetToCurrentExercise(in: app)
         finishTemplateWorkout(in: app)
 
@@ -616,6 +796,8 @@ final class WGJUITests: XCTestCase {
         tapTab("Start Workout", in: app)
         restartImportedTemplateWorkout(in: app)
 
+        XCTAssertTrue(identifiedElement("active-workout-preWorkout-card", in: app).waitForExistence(timeout: 5))
+        XCTAssertTrue(identifiedElement("active-workout-postWorkout-card", in: app).waitForExistence(timeout: 5))
         XCTAssertTrue(identifiedElement("workout-set-1-weight-field", in: app).waitForExistence(timeout: 5))
     }
 
@@ -734,20 +916,48 @@ final class WGJUITests: XCTestCase {
     private func makeTemplateOpenPayloadBase64(
         name: String,
         notes: String,
+        preWorkoutCardio: [String: Any]? = nil,
+        postWorkoutCardio: [String: Any]? = nil,
         exercises: [[String: Any]] = []
     ) -> String {
+        var templatePayload: [String: Any] = [
+            "name": name,
+            "notes": notes,
+            "exercises": exercises,
+        ]
+
+        if let preWorkoutCardio {
+            templatePayload["preWorkoutCardio"] = preWorkoutCardio
+        }
+
+        if let postWorkoutCardio {
+            templatePayload["postWorkoutCardio"] = postWorkoutCardio
+        }
+
         let payload: [String: Any] = [
-            "formatVersion": 1,
+            "formatVersion": (preWorkoutCardio != nil || postWorkoutCardio != nil) ? 2 : 1,
             "exportedAt": ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: 0)),
-            "template": [
-                "name": name,
-                "notes": notes,
-                "exercises": exercises,
-            ],
+            "template": templatePayload,
         ]
 
         let data = try! JSONSerialization.data(withJSONObject: payload, options: [])
         return data.base64EncodedString()
+    }
+
+    private func templatePayloadCardio(
+        catalogExerciseUUID: String,
+        exerciseNameSnapshot: String,
+        categorySnapshot: String,
+        muscleSummarySnapshot: String,
+        targetDurationSeconds: Int
+    ) -> [String: Any] {
+        [
+            "catalogExerciseUUID": catalogExerciseUUID,
+            "exerciseNameSnapshot": exerciseNameSnapshot,
+            "categorySnapshot": categorySnapshot,
+            "muscleSummarySnapshot": muscleSummarySnapshot,
+            "targetDurationSeconds": targetDurationSeconds,
+        ]
     }
 
     private func templatePayloadExercise(

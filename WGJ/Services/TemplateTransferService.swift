@@ -8,7 +8,7 @@ enum TemplateTransferFileFormat {
 }
 
 struct TemplateTransferEnvelope: Codable, Equatable {
-    static let currentFormatVersion = 1
+    static let currentFormatVersion = 2
 
     let formatVersion: Int
     let exportedAt: Date
@@ -28,7 +28,31 @@ struct TemplateTransferEnvelope: Codable, Equatable {
 struct TemplateTransferTemplate: Codable, Equatable {
     let name: String
     let notes: String
+    let preWorkoutCardio: TemplateTransferCardioBlock?
+    let postWorkoutCardio: TemplateTransferCardioBlock?
     let exercises: [TemplateTransferExercise]
+
+    init(
+        name: String,
+        notes: String,
+        preWorkoutCardio: TemplateTransferCardioBlock? = nil,
+        postWorkoutCardio: TemplateTransferCardioBlock? = nil,
+        exercises: [TemplateTransferExercise]
+    ) {
+        self.name = name
+        self.notes = notes
+        self.preWorkoutCardio = preWorkoutCardio
+        self.postWorkoutCardio = postWorkoutCardio
+        self.exercises = exercises
+    }
+}
+
+struct TemplateTransferCardioBlock: Codable, Equatable {
+    let catalogExerciseUUID: String
+    let exerciseNameSnapshot: String
+    let categorySnapshot: String
+    let muscleSummarySnapshot: String
+    let targetDurationSeconds: Int
 }
 
 struct TemplateTransferExercise: Codable, Equatable {
@@ -147,6 +171,10 @@ final class TemplateTransferService {
                 templateID: template.id,
                 drafts: envelope.template.exercises.map(exerciseDraft(from:))
             )
+            try repository.setCardioBlocks(
+                templateID: template.id,
+                drafts: cardioDrafts(from: envelope.template)
+            )
             return template
         } catch {
             try? repository.deleteTemplate(id: template.id)
@@ -159,6 +187,8 @@ final class TemplateTransferService {
         guard let template = try repository.template(id: templateID) else {
             throw TemplateRepositoryError.templateNotFound
         }
+        let cardioBlocks = try repository.cardioBlocks(templateID: templateID)
+        let cardioByPhase = Dictionary(uniqueKeysWithValues: cardioBlocks.map { ($0.phase, $0) })
 
         let exercises = try repository.exercises(in: templateID).map { exercise in
             TemplateTransferExercise(
@@ -177,6 +207,8 @@ final class TemplateTransferService {
             template: TemplateTransferTemplate(
                 name: template.name,
                 notes: template.notes,
+                preWorkoutCardio: cardioByPhase[.preWorkout].map { transferCardio(from: TemplateCardioBlockDraft(model: $0)) },
+                postWorkoutCardio: cardioByPhase[.postWorkout].map { transferCardio(from: TemplateCardioBlockDraft(model: $0)) },
                 exercises: exercises
             )
         )
@@ -200,7 +232,7 @@ final class TemplateTransferService {
             throw TemplateTransferError.malformedFile
         }
 
-        guard envelope.formatVersion == TemplateTransferEnvelope.currentFormatVersion else {
+        guard [1, TemplateTransferEnvelope.currentFormatVersion].contains(envelope.formatVersion) else {
             throw TemplateTransferError.unsupportedVersion(envelope.formatVersion)
         }
 
@@ -215,6 +247,16 @@ final class TemplateTransferService {
             restSeconds: draft.restSeconds,
             isWarmup: draft.isWarmup,
             isLocked: draft.isLocked
+        )
+    }
+
+    private func transferCardio(from draft: TemplateCardioBlockDraft) -> TemplateTransferCardioBlock {
+        TemplateTransferCardioBlock(
+            catalogExerciseUUID: draft.catalogExerciseUUID,
+            exerciseNameSnapshot: draft.exerciseNameSnapshot,
+            categorySnapshot: draft.categorySnapshot,
+            muscleSummarySnapshot: draft.muscleSummarySnapshot,
+            targetDurationSeconds: draft.targetDurationSeconds
         )
     }
 
@@ -239,6 +281,38 @@ final class TemplateTransferService {
                 )
             }
         )
+    }
+
+    private func cardioDrafts(from template: TemplateTransferTemplate) -> [TemplateCardioBlockDraft] {
+        var drafts: [TemplateCardioBlockDraft] = []
+
+        if let preWorkoutCardio = template.preWorkoutCardio {
+            drafts.append(
+                TemplateCardioBlockDraft(
+                    phase: .preWorkout,
+                    catalogExerciseUUID: preWorkoutCardio.catalogExerciseUUID,
+                    exerciseNameSnapshot: preWorkoutCardio.exerciseNameSnapshot,
+                    categorySnapshot: preWorkoutCardio.categorySnapshot,
+                    muscleSummarySnapshot: preWorkoutCardio.muscleSummarySnapshot,
+                    targetDurationSeconds: preWorkoutCardio.targetDurationSeconds
+                )
+            )
+        }
+
+        if let postWorkoutCardio = template.postWorkoutCardio {
+            drafts.append(
+                TemplateCardioBlockDraft(
+                    phase: .postWorkout,
+                    catalogExerciseUUID: postWorkoutCardio.catalogExerciseUUID,
+                    exerciseNameSnapshot: postWorkoutCardio.exerciseNameSnapshot,
+                    categorySnapshot: postWorkoutCardio.categorySnapshot,
+                    muscleSummarySnapshot: postWorkoutCardio.muscleSummarySnapshot,
+                    targetDurationSeconds: postWorkoutCardio.targetDurationSeconds
+                )
+            )
+        }
+
+        return drafts
     }
 
     private func nextImportedTemplateName(

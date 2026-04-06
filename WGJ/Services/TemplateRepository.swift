@@ -353,7 +353,20 @@ final class TemplateRepository {
             )
         }
 
+        let cardioDrafts = try workoutSessionCardioBlocks(sessionID: sessionID).map { cardioBlock in
+            TemplateCardioBlockDraft(
+                id: cardioBlock.id,
+                phase: cardioBlock.phase,
+                catalogExerciseUUID: cardioBlock.catalogExerciseUUID,
+                exerciseNameSnapshot: cardioBlock.exerciseNameSnapshot,
+                categorySnapshot: cardioBlock.categorySnapshot,
+                muscleSummarySnapshot: cardioBlock.muscleSummarySnapshot,
+                targetDurationSeconds: cardioBlock.targetDurationSeconds
+            )
+        }
+
         try setExercises(templateID: template.id, drafts: drafts)
+        try setCardioBlocks(templateID: template.id, drafts: cardioDrafts)
         return template
     }
 
@@ -464,6 +477,10 @@ final class TemplateRepository {
             throw TemplateRepositoryError.templateNotFound
         }
 
+        for cardioBlock in template.cardioBlocks ?? [] {
+            modelContext.delete(cardioBlock)
+        }
+
         for exercise in template.exercises ?? [] {
             modelContext.delete(exercise)
         }
@@ -480,6 +497,91 @@ final class TemplateRepository {
             sortBy: [SortDescriptor(\.sortOrder, order: .forward)]
         )
         return try modelContext.fetch(descriptor)
+    }
+
+    func cardioBlocks(templateID: UUID) throws -> [TemplateCardioBlock] {
+        let descriptor = FetchDescriptor<TemplateCardioBlock>(
+            predicate: #Predicate { item in
+                item.templateID == templateID
+            }
+        )
+        return try modelContext.fetch(descriptor)
+            .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
+    }
+
+    func cardioBlock(templateID: UUID, phase: WorkoutCardioPhase) throws -> TemplateCardioBlock? {
+        let phaseRaw = phase.rawValue
+        let descriptor = FetchDescriptor<TemplateCardioBlock>(
+            predicate: #Predicate { item in
+                item.templateID == templateID && item.phaseRaw == phaseRaw
+            }
+        )
+        return try modelContext.fetch(descriptor).first
+    }
+
+    func upsertCardioBlock(templateID: UUID, draft: TemplateCardioBlockDraft) throws {
+        guard let template = try template(id: templateID) else {
+            throw TemplateRepositoryError.templateNotFound
+        }
+
+        let cardioBlock = try cardioBlock(templateID: templateID, phase: draft.phase)
+            ?? TemplateCardioBlock(
+                id: draft.id,
+                templateID: templateID,
+                phase: draft.phase,
+                catalogExerciseUUID: draft.catalogExerciseUUID,
+                exerciseNameSnapshot: draft.exerciseNameSnapshot,
+                categorySnapshot: draft.categorySnapshot,
+                muscleSummarySnapshot: draft.muscleSummarySnapshot,
+                targetDurationSeconds: draft.targetDurationSeconds,
+                template: template
+            )
+
+        if cardioBlock.modelContext == nil {
+            modelContext.insert(cardioBlock)
+        }
+
+        cardioBlock.templateID = templateID
+        cardioBlock.template = template
+        cardioBlock.phase = draft.phase
+        cardioBlock.catalogExerciseUUID = draft.catalogExerciseUUID
+        cardioBlock.exerciseNameSnapshot = draft.exerciseNameSnapshot
+        cardioBlock.categorySnapshot = draft.categorySnapshot
+        cardioBlock.muscleSummarySnapshot = draft.muscleSummarySnapshot
+        cardioBlock.targetDurationSeconds = sanitizedCardioDurationSeconds(draft.targetDurationSeconds)
+        cardioBlock.updatedAt = .now
+
+        syncTemplateCardioCollection(for: template)
+        template.updatedAt = .now
+        try modelContext.save()
+    }
+
+    func removeCardioBlock(templateID: UUID, phase: WorkoutCardioPhase) throws {
+        guard let template = try template(id: templateID) else {
+            throw TemplateRepositoryError.templateNotFound
+        }
+
+        guard let cardioBlock = try cardioBlock(templateID: templateID, phase: phase) else {
+            return
+        }
+
+        modelContext.delete(cardioBlock)
+        syncTemplateCardioCollection(for: template)
+        template.updatedAt = .now
+        try modelContext.save()
+    }
+
+    func setCardioBlocks(templateID: UUID, drafts: [TemplateCardioBlockDraft]) throws {
+        guard let template = try template(id: templateID) else {
+            throw TemplateRepositoryError.templateNotFound
+        }
+
+        syncCardioStructure(
+            for: template,
+            desiredDrafts: drafts
+        )
+        template.updatedAt = .now
+        try modelContext.save()
     }
 
     func setDrafts(for templateExerciseID: UUID) throws -> [TemplateExerciseSetDraft] {
@@ -653,7 +755,8 @@ final class TemplateRepository {
 
     func applyWorkoutTemplateSync(
         templateID: UUID,
-        exercises mutations: [WorkoutTemplateSyncExerciseMutation]
+        exercises mutations: [WorkoutTemplateSyncExerciseMutation],
+        cardioBlocks cardioMutations: [WorkoutTemplateSyncCardioMutation]
     ) throws {
         guard let template = try template(id: templateID) else {
             throw TemplateRepositoryError.templateNotFound
@@ -715,6 +818,19 @@ final class TemplateRepository {
         }
 
         template.exercises = updatedExercises
+        syncCardioStructure(
+            for: template,
+            desiredDrafts: cardioMutations.map { mutation in
+                TemplateCardioBlockDraft(
+                    phase: mutation.phase,
+                    catalogExerciseUUID: mutation.catalogExerciseUUID,
+                    exerciseNameSnapshot: mutation.exerciseNameSnapshot,
+                    categorySnapshot: mutation.categorySnapshot,
+                    muscleSummarySnapshot: mutation.muscleSummarySnapshot,
+                    targetDurationSeconds: mutation.targetDurationSeconds
+                )
+            }
+        )
         template.updatedAt = .now
         try modelContext.save()
     }
@@ -993,6 +1109,16 @@ final class TemplateRepository {
         return try modelContext.fetch(descriptor)
     }
 
+    private func workoutSessionCardioBlocks(sessionID: UUID) throws -> [WorkoutSessionCardioBlock] {
+        let descriptor = FetchDescriptor<WorkoutSessionCardioBlock>(
+            predicate: #Predicate { cardioBlock in
+                cardioBlock.sessionID == sessionID
+            }
+        )
+        return try modelContext.fetch(descriptor)
+            .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
+    }
+
     private func reorder(template: WorkoutTemplate) {
         let ordered = (template.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
         for (index, exercise) in ordered.enumerated() {
@@ -1014,6 +1140,66 @@ final class TemplateRepository {
     private func orderedSetDrafts(for exercise: TemplateExercise) -> [TemplateExerciseSetDraft] {
         let ordered = (exercise.prescribedSets ?? []).sorted { $0.sortOrder < $1.sortOrder }
         return ordered.map(TemplateExerciseSetDraft.init(model:))
+    }
+
+    private func syncCardioStructure(
+        for template: WorkoutTemplate,
+        desiredDrafts: [TemplateCardioBlockDraft]
+    ) {
+        let orderedExisting = orderedCardioBlocks(for: template)
+        let existingByPhase = Dictionary(
+            uniqueKeysWithValues: orderedExisting.map { ($0.phase, $0) }
+        )
+        let desiredPhases = Set(desiredDrafts.map(\.phase))
+
+        for cardioBlock in orderedExisting where !desiredPhases.contains(cardioBlock.phase) {
+            modelContext.delete(cardioBlock)
+        }
+
+        var updatedBlocks: [TemplateCardioBlock] = []
+        updatedBlocks.reserveCapacity(desiredDrafts.count)
+
+        for draft in desiredDrafts.sorted(by: { $0.phase.sortOrder < $1.phase.sortOrder }) {
+            let cardioBlock = existingByPhase[draft.phase]
+                ?? TemplateCardioBlock(
+                    id: draft.id,
+                    templateID: template.id,
+                    phase: draft.phase,
+                    catalogExerciseUUID: draft.catalogExerciseUUID,
+                    exerciseNameSnapshot: draft.exerciseNameSnapshot,
+                    categorySnapshot: draft.categorySnapshot,
+                    muscleSummarySnapshot: draft.muscleSummarySnapshot,
+                    targetDurationSeconds: draft.targetDurationSeconds,
+                    template: template
+                )
+
+            if cardioBlock.modelContext == nil {
+                modelContext.insert(cardioBlock)
+            }
+
+            cardioBlock.templateID = template.id
+            cardioBlock.template = template
+            cardioBlock.phase = draft.phase
+            cardioBlock.catalogExerciseUUID = draft.catalogExerciseUUID
+            cardioBlock.exerciseNameSnapshot = draft.exerciseNameSnapshot
+            cardioBlock.categorySnapshot = draft.categorySnapshot
+            cardioBlock.muscleSummarySnapshot = draft.muscleSummarySnapshot
+            cardioBlock.targetDurationSeconds = sanitizedCardioDurationSeconds(draft.targetDurationSeconds)
+            cardioBlock.updatedAt = .now
+            updatedBlocks.append(cardioBlock)
+        }
+
+        template.cardioBlocks = updatedBlocks
+    }
+
+    private func syncTemplateCardioCollection(for template: WorkoutTemplate) {
+        template.cardioBlocks = orderedCardioBlocks(for: template)
+    }
+
+    private func orderedCardioBlocks(for template: WorkoutTemplate) -> [TemplateCardioBlock] {
+        (template.cardioBlocks ?? [])
+            .filter { $0.modelContext != nil }
+            .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
     }
 
     private func syncSetStructure(
@@ -1087,6 +1273,10 @@ final class TemplateRepository {
 
     private func sanitizedRestSeconds(_ seconds: Int) -> Int {
         min(3600, max(0, seconds))
+    }
+
+    private func sanitizedCardioDurationSeconds(_ seconds: Int) -> Int {
+        min(24 * 60 * 60, max(0, seconds))
     }
 
     private func sanitizedRepRange(min minReps: Int?, max maxReps: Int?) -> (min: Int?, max: Int?) {

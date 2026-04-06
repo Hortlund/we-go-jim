@@ -77,6 +77,41 @@ struct WorkoutSessionRepositoryTests {
     }
 
     @Test
+    func createSessionFromTemplateCopiesCardioBlocks() throws {
+        let context = try makeInMemoryContext()
+        let templateRepository = TemplateRepository(modelContext: context)
+        let repository = WorkoutSessionRepository(modelContext: context)
+
+        let template = try templateRepository.createTemplate(name: "Hybrid", notes: "")
+        try templateRepository.setCardioBlocks(
+            templateID: template.id,
+            drafts: [
+                TemplateCardioBlockDraft(
+                    phase: .preWorkout,
+                    catalogExerciseUUID: "bike-1",
+                    exerciseNameSnapshot: "Bike",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Warmup",
+                    targetDurationSeconds: 300
+                ),
+                TemplateCardioBlockDraft(
+                    phase: .postWorkout,
+                    catalogExerciseUUID: "treadmill-1",
+                    exerciseNameSnapshot: "Incline Treadmill Walk",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Cooldown",
+                    targetDurationSeconds: 1200
+                ),
+            ]
+        )
+
+        let session = try repository.createSessionFromTemplate(templateID: template.id)
+
+        #expect(try repository.sessionCardioBlocks(sessionID: session.id).map(\.phase) == [.preWorkout, .postWorkout])
+        #expect(try repository.sessionCardioBlocks(sessionID: session.id).map(\.targetDurationSeconds) == [300, 1200])
+    }
+
+    @Test
     func previousSetLookupMatchesExerciseAndSetIndex() throws {
         let context = try makeInMemoryContext()
         let repository = WorkoutSessionRepository(modelContext: context)
@@ -451,12 +486,15 @@ struct WorkoutSessionRepositoryTests {
             ProfileWidgetConfig.self,
             TemplateFolder.self,
             WorkoutTemplate.self,
+            TemplateCardioBlock.self,
             TemplateExercise.self,
             TemplateExerciseSet.self,
             ActiveWorkoutDraftSession.self,
+            ActiveWorkoutDraftCardioBlock.self,
             ActiveWorkoutDraftExercise.self,
             ActiveWorkoutDraftSet.self,
             WorkoutSession.self,
+            WorkoutSessionCardioBlock.self,
             WorkoutSessionExercise.self,
             WorkoutSessionSet.self,
             CompletedSetFact.self,

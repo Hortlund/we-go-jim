@@ -13,6 +13,7 @@ struct ActiveWorkoutView: View {
 
     private let sessionID: UUID
     @Query private var sessions: [ActiveWorkoutDraftSession]
+    @Query private var sessionCardioBlocks: [ActiveWorkoutDraftCardioBlock]
     @Query private var sessionExercises: [ActiveWorkoutDraftExercise]
     @Query private var profiles: [UserProfile]
 
@@ -32,7 +33,7 @@ struct ActiveWorkoutView: View {
 
     @State private var sessionNameDraft = ""
     @State private var notesDraft = ""
-    @State private var showingExercisePicker = false
+    @State private var pickerTarget: ActiveWorkoutPickerTarget?
     @State private var showingFinishConfirmation = false
     @State private var isCancelArmed = false
     @State private var isEndingSession = false
@@ -41,6 +42,7 @@ struct ActiveWorkoutView: View {
     @State private var pendingCompletionAfterSaveTemplateSheet = false
     @State private var pendingCompletionTask: Task<Void, Never>?
     @State private var exerciseSettingsDraft: ActiveWorkoutExerciseSettingsDraft?
+    @State private var cardioSettingsDraft: WorkoutCardioSettingsDraft?
     @State private var pendingTemplateUpdatePreview: WorkoutTemplateSyncPreview?
     @State private var templateNameDraft = ""
     @State private var templateFolderID: UUID?
@@ -83,6 +85,11 @@ struct ActiveWorkoutView: View {
         _sessions = Query(filter: #Predicate { item in
             item.id == sessionID
         })
+        _sessionCardioBlocks = Query(
+            filter: #Predicate { item in
+                item.sessionID == sessionID
+            }
+        )
         _sessionExercises = Query(
             filter: #Predicate { item in
                 item.sessionID == sessionID
@@ -105,6 +112,7 @@ struct ActiveWorkoutView: View {
                             exerciseCount: sessionExercises.count,
                             onSubmit: persistSessionMeta
                         )
+                        cardioSection(for: .preWorkout, scrollProxy: scrollProxy)
                         exercisesSectionHeader
                     } else if isEndingSession || completedSessionID != nil {
                         WGJEmptyStateCard(
@@ -123,11 +131,13 @@ struct ActiveWorkoutView: View {
                     if session != nil && sessionExercises.isEmpty {
                         WGJEmptyStateCard(
                             title: "No exercises added",
-                            message: "Add exercises to start logging sets in this workout.",
+                            message: orderedCardioBlocks.isEmpty
+                                ? "Add exercises to start logging sets in this workout."
+                                : "Add exercises to keep building the main section of this workout.",
                             icon: "list.bullet.rectangle"
                         ) {
                             Button("Add Exercise") {
-                                showingExercisePicker = true
+                                pickerTarget = .exercise
                             }
                             .buttonStyle(WGJPrimaryButtonStyle())
                             .accessibilityIdentifier("active-workout-empty-add-exercise-button")
@@ -145,6 +155,10 @@ struct ActiveWorkoutView: View {
                     if session != nil && !sessionExercises.isEmpty {
                         addExerciseButton(title: "Add another exercise")
                             .disabled(session == nil)
+                    }
+
+                    if session != nil {
+                        cardioSection(for: .postWorkout, scrollProxy: scrollProxy)
                     }
 
                     if session != nil && !isEndingSession {
@@ -210,12 +224,12 @@ struct ActiveWorkoutView: View {
                 )
             }
             .wgjTrackKeyboardVisibility($isKeyboardVisible)
-            .sheet(isPresented: $showingExercisePicker, onDismiss: {
+            .sheet(item: $pickerTarget, onDismiss: {
                 dismissKeyboard()
                 isKeyboardVisible = false
-            }) {
+            }) { target in
                 ExercisePickerView(repository: catalogRepository) { exercise in
-                    addExercise(exercise)
+                    handlePickedExercise(exercise, target: target)
                 }
                 .wgjSheetSurface()
             }
@@ -224,6 +238,15 @@ struct ActiveWorkoutView: View {
                     draft: draft,
                     onSave: saveExerciseSettings
                 )
+                .wgjSheetSurface()
+            }
+            .sheet(item: $cardioSettingsDraft) { draft in
+                WorkoutCardioSettingsSheet(draft: draft) { updatedDurationSeconds in
+                    saveCardioDuration(
+                        phase: draft.phase,
+                        targetDurationSeconds: updatedDurationSeconds
+                    )
+                }
                 .wgjSheetSurface()
             }
             .sheet(isPresented: $showingSaveTemplateSheet, onDismiss: handleSaveTemplateSheetDismissed) {
@@ -284,6 +307,26 @@ struct ActiveWorkoutView: View {
         sessions.first
     }
 
+    @MainActor
+    private var orderedCardioBlocks: [ActiveWorkoutDraftCardioBlock] {
+        sessionCardioBlocks.sorted { $0.phase.sortOrder < $1.phase.sortOrder }
+    }
+
+    @MainActor
+    private var preWorkoutCardio: ActiveWorkoutDraftCardioBlock? {
+        orderedCardioBlocks.first(where: { $0.phase == .preWorkout })
+    }
+
+    @MainActor
+    private var postWorkoutCardio: ActiveWorkoutDraftCardioBlock? {
+        orderedCardioBlocks.first(where: { $0.phase == .postWorkout })
+    }
+
+    @MainActor
+    private var hasWorkoutContent: Bool {
+        !sessionExercises.isEmpty || !orderedCardioBlocks.isEmpty
+    }
+
     private var shouldShowBottomDock: Bool {
         guard !isKeyboardVisible, !isEndingSession, session != nil else {
             return false
@@ -309,15 +352,19 @@ struct ActiveWorkoutView: View {
             if sessionExercises.isEmpty {
                 WGJActionHeader(
                     "Exercises",
-                    subtitle: "Add exercises and log each set inline."
+                    subtitle: areMainExercisesUnlocked
+                        ? "Add exercises and log each set inline."
+                        : "Complete the pre-workout cardio block to unlock set logging."
                 )
             } else {
                 WGJActionHeader(
                     "Exercises",
-                    subtitle: "Swipe the exercise header to delete an exercise, or swipe a set row to delete a set."
+                    subtitle: areMainExercisesUnlocked
+                        ? "Swipe the exercise header to delete an exercise, or swipe a set row to delete a set."
+                        : "Main exercises stay visible, but set logging unlocks after the pre-workout cardio block."
                 ) {
                     Button {
-                        showingExercisePicker = true
+                        pickerTarget = .exercise
                     } label: {
                         Label("Add", systemImage: "plus")
                     }
@@ -334,7 +381,7 @@ struct ActiveWorkoutView: View {
         return Button("Finish") {
             presentFinishConfirmation()
         }
-        .disabled(isEndingSession || session == nil || sessionExercises.isEmpty)
+        .disabled(isEndingSession || session == nil || !hasWorkoutContent)
         .accessibilityIdentifier("active-workout-finish-button")
         .popover(isPresented: $showingFinishConfirmation, attachmentAnchor: .point(.bottom), arrowEdge: .top) {
             ActiveWorkoutFinishPopover(
@@ -348,13 +395,135 @@ struct ActiveWorkoutView: View {
 
     private func addExerciseButton(title: String) -> some View {
         Button {
-            showingExercisePicker = true
+            pickerTarget = .exercise
         } label: {
             Label(title, systemImage: "plus.circle.fill")
                 .frame(maxWidth: .infinity)
         }
         .buttonStyle(WGJGhostButtonStyle())
         .accessibilityIdentifier("active-workout-add-exercise-button")
+    }
+
+    @MainActor
+    @ViewBuilder
+    private func cardioSection(
+        for phase: WorkoutCardioPhase,
+        scrollProxy: ScrollViewProxy
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            WGJActionHeader(
+                phase.title,
+                subtitle: cardioSectionSubtitle(for: phase)
+            ) {
+                if cardioBlock(for: phase) == nil {
+                    Button {
+                        pickerTarget = .cardio(phase)
+                    } label: {
+                        Label("Add", systemImage: "plus")
+                    }
+                    .buttonStyle(WGJPrimaryButtonStyle())
+                    .disabled(session == nil)
+                }
+            }
+
+            if let cardioBlock = cardioBlock(for: phase) {
+                WorkoutCardioPhaseCard(
+                    phase: phase,
+                    exerciseName: cardioBlock.exerciseNameSnapshot,
+                    descriptor: cardioDescriptor(
+                        category: cardioBlock.categorySnapshot,
+                        muscleSummary: cardioBlock.muscleSummarySnapshot
+                    ),
+                    targetDurationSeconds: cardioBlock.targetDurationSeconds,
+                    statusText: cardioStatusText(for: cardioBlock),
+                    statusTint: cardioStatusTint(for: cardioBlock),
+                    footnote: cardioFootnote(for: cardioBlock)
+                ) {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 10) {
+                            cardioCompletionButton(
+                                for: cardioBlock,
+                                scrollProxy: scrollProxy
+                            )
+                            cardioActionsButton(for: cardioBlock)
+                        }
+
+                        VStack(alignment: .leading, spacing: 10) {
+                            cardioCompletionButton(
+                                for: cardioBlock,
+                                scrollProxy: scrollProxy
+                            )
+                            cardioActionsButton(for: cardioBlock)
+                        }
+                    }
+                }
+                .id(cardioScrollTarget(for: phase))
+                .accessibilityIdentifier("active-workout-\(phase.rawValue)-card")
+            } else {
+                WGJEmptyStateCard(
+                    title: "\(phase.shortTitle) not added",
+                    message: cardioEmptyStateMessage(for: phase),
+                    icon: phase.systemImage
+                ) {
+                    Button("Add \(phase.shortTitle)") {
+                        pickerTarget = .cardio(phase)
+                    }
+                    .buttonStyle(WGJPrimaryButtonStyle())
+                    .disabled(session == nil)
+                    .accessibilityIdentifier("active-workout-\(phase.rawValue)-add-button")
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func cardioCompletionButton(
+        for cardioBlock: ActiveWorkoutDraftCardioBlock,
+        scrollProxy: ScrollViewProxy
+    ) -> some View {
+        Group {
+            if cardioBlock.isCompleted {
+                Button {
+                    toggleCardioCompletion(for: cardioBlock, scrollProxy: scrollProxy)
+                } label: {
+                    Label("Mark Incomplete", systemImage: "arrow.uturn.backward.circle")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(WGJGhostButtonStyle())
+            } else {
+                Button {
+                    toggleCardioCompletion(for: cardioBlock, scrollProxy: scrollProxy)
+                } label: {
+                    Label("Complete \(cardioBlock.phase.shortTitle)", systemImage: "checkmark.circle.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(WGJPrimaryButtonStyle())
+            }
+        }
+        .disabled(!canToggleCompletion(for: cardioBlock))
+        .accessibilityIdentifier("active-workout-\(cardioBlock.phase.rawValue)-toggle-button")
+    }
+
+    @MainActor
+    private func cardioActionsButton(for cardioBlock: ActiveWorkoutDraftCardioBlock) -> some View {
+        WGJActionMenuButton("Cardio Actions") {
+            Button("Edit Duration") {
+                cardioSettingsDraft = makeCardioSettingsDraft(from: cardioBlock)
+            }
+
+            Button("Change Exercise") {
+                pickerTarget = .cardio(cardioBlock.phase)
+            }
+
+            Button("Remove", role: .destructive) {
+                removeCardioBlock(phase: cardioBlock.phase)
+            }
+        } label: {
+            Label("Actions", systemImage: "ellipsis.circle")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(WGJGhostButtonStyle())
+        .accessibilityIdentifier("active-workout-\(cardioBlock.phase.rawValue)-actions-button")
     }
 
     @MainActor
@@ -382,6 +551,9 @@ struct ActiveWorkoutView: View {
             restSeconds: resolvedRest(for: exercise),
             setDrafts: drafts,
             isExpanded: cardStateController.isExpanded(for: exerciseID),
+            isSetEditingEnabled: areMainExercisesUnlocked,
+            canMoveUp: index > 0,
+            canMoveDown: index < sessionExercises.count - 1,
             onSetDraftsBindingChanged: { updated in
                 updateDraftsValue(updated, for: exerciseID)
             },
@@ -413,6 +585,12 @@ struct ActiveWorkoutView: View {
             },
             onExerciseSettings: {
                 showExerciseSettings(for: exercise)
+            },
+            onExerciseMoveUp: {
+                moveExerciseUp(index)
+            },
+            onExerciseMoveDown: {
+                moveExerciseDown(index)
             },
             onExerciseDelete: {
                 removeExercise(exerciseID: exerciseID)
@@ -447,6 +625,32 @@ struct ActiveWorkoutView: View {
         let normalized = max(0, min(3600, updated))
         guard restByExerciseID[exerciseID] != normalized else { return }
         restByExerciseID[exerciseID] = normalized
+    }
+
+    @MainActor
+    private var areMainExercisesUnlocked: Bool {
+        preWorkoutCardio?.isCompleted ?? true
+    }
+
+    @MainActor
+    private var areAllMainExercisesCompleted: Bool {
+        guard !sessionExercises.isEmpty else {
+            return true
+        }
+
+        return sessionExercises.allSatisfy { exercise in
+            isExerciseCompleted(resolvedDrafts(for: exercise))
+        }
+    }
+
+    @MainActor
+    private var isPostWorkoutCardioUnlocked: Bool {
+        areMainExercisesUnlocked && areAllMainExercisesCompleted
+    }
+
+    @MainActor
+    private func cardioBlock(for phase: WorkoutCardioPhase) -> ActiveWorkoutDraftCardioBlock? {
+        orderedCardioBlocks.first(where: { $0.phase == phase })
     }
 
     @MainActor
@@ -520,23 +724,22 @@ struct ActiveWorkoutView: View {
         )
         loadedExerciseStateStamp = currentStamp
 
-        let focusExerciseID = firstIncompleteExerciseID(
-            from: sessionExercises,
+        let initialScrollTarget = preferredInitialScrollTarget(
             draftsByExerciseID: result.draftsByExerciseID
-        ) ?? sessionExercises.first?.id
+        )
 
         await Task.yield()
         guard !Task.isCancelled, currentStamp == exerciseHydrationStamp else { return }
-        if let focusExerciseID {
+        if let initialScrollTarget {
             withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
-                scrollProxy.scrollTo(focusExerciseID, anchor: .top)
+                scrollProxy.scrollTo(initialScrollTarget, anchor: .top)
             }
         }
 
         try? await Task.sleep(for: .milliseconds(120))
         guard !Task.isCancelled, currentStamp == exerciseHydrationStamp else { return }
-        if let focusExerciseID {
-            scrollProxy.scrollTo(focusExerciseID, anchor: .top)
+        if let initialScrollTarget {
+            scrollProxy.scrollTo(initialScrollTarget, anchor: .top)
         }
 
         let loadedPrevious = WGJPerformance.measure("active-workout.hydrate.history") {
@@ -760,12 +963,52 @@ struct ActiveWorkoutView: View {
         }
     }
 
+    private func handlePickedExercise(_ item: ExerciseCatalogItem, target: ActiveWorkoutPickerTarget) {
+        switch target {
+        case .exercise:
+            addExercise(item)
+        case .cardio(let phase):
+            upsertCardioBlock(phase: phase, catalogItem: item)
+        }
+    }
+
     private func addExercise(_ item: ExerciseCatalogItem) {
         var capturedError: Error?
 
         withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
             do {
                 try activeWorkoutRepository.addExercise(sessionID: sessionID, catalogItem: item)
+                loadedExerciseStateStamp = nil
+            } catch {
+                capturedError = error
+            }
+        }
+
+        if let capturedError {
+            showError(capturedError)
+        }
+    }
+
+    private func moveExerciseUp(_ index: Int) {
+        guard index > 0 else { return }
+        moveExercise(fromOffsets: IndexSet(integer: index), toOffset: index - 1)
+    }
+
+    private func moveExerciseDown(_ index: Int) {
+        guard index < sessionExercises.count - 1 else { return }
+        moveExercise(fromOffsets: IndexSet(integer: index), toOffset: index + 2)
+    }
+
+    private func moveExercise(fromOffsets: IndexSet, toOffset: Int) {
+        var capturedError: Error?
+
+        withAnimation(WGJMotion.quickAnimation(reduceMotion: reduceMotion)) {
+            do {
+                try activeWorkoutRepository.moveExercise(
+                    sessionID: sessionID,
+                    fromOffsets: fromOffsets,
+                    toOffset: toOffset
+                )
                 loadedExerciseStateStamp = nil
             } catch {
                 capturedError = error
@@ -795,6 +1038,88 @@ struct ActiveWorkoutView: View {
         }
     }
 
+    private func upsertCardioBlock(phase: WorkoutCardioPhase, catalogItem: ExerciseCatalogItem) {
+        do {
+            let existing = try activeWorkoutRepository.cardioBlock(sessionID: sessionID, phase: phase)
+            try activeWorkoutRepository.upsertCardioBlock(
+                sessionID: sessionID,
+                draft: WorkoutCardioBlockDraft(
+                    id: existing?.id ?? UUID(),
+                    phase: phase,
+                    catalogExerciseUUID: catalogItem.remoteUUID,
+                    exerciseNameSnapshot: catalogItem.displayName,
+                    categorySnapshot: catalogItem.categoryName,
+                    muscleSummarySnapshot: catalogItem.primaryMuscleNames,
+                    targetDurationSeconds: existing?.targetDurationSeconds ?? phase.defaultDurationSeconds,
+                    isCompleted: false
+                )
+            )
+        } catch {
+            showError(error)
+        }
+    }
+
+    private func removeCardioBlock(phase: WorkoutCardioPhase) {
+        do {
+            try activeWorkoutRepository.removeCardioBlock(sessionID: sessionID, phase: phase)
+        } catch {
+            showError(error)
+        }
+    }
+
+    private func saveCardioDuration(phase: WorkoutCardioPhase, targetDurationSeconds: Int) {
+        do {
+            guard let cardioBlock = try activeWorkoutRepository.cardioBlock(sessionID: sessionID, phase: phase) else {
+                return
+            }
+
+            try activeWorkoutRepository.upsertCardioBlock(
+                sessionID: sessionID,
+                draft: WorkoutCardioBlockDraft(
+                    id: cardioBlock.id,
+                    phase: cardioBlock.phase,
+                    catalogExerciseUUID: cardioBlock.catalogExerciseUUID,
+                    exerciseNameSnapshot: cardioBlock.exerciseNameSnapshot,
+                    categorySnapshot: cardioBlock.categorySnapshot,
+                    muscleSummarySnapshot: cardioBlock.muscleSummarySnapshot,
+                    targetDurationSeconds: targetDurationSeconds,
+                    isCompleted: cardioBlock.isCompleted
+                )
+            )
+        } catch {
+            showError(error)
+        }
+    }
+
+    @MainActor
+    private func toggleCardioCompletion(
+        for cardioBlock: ActiveWorkoutDraftCardioBlock,
+        scrollProxy: ScrollViewProxy
+    ) {
+        guard canToggleCompletion(for: cardioBlock) || cardioBlock.isCompleted else {
+            return
+        }
+
+        do {
+            let updatedCompletion = !cardioBlock.isCompleted
+            try activeWorkoutRepository.setCardioCompletion(
+                sessionID: sessionID,
+                phase: cardioBlock.phase,
+                isCompleted: updatedCompletion
+            )
+
+            if updatedCompletion {
+                WorkoutFeedbackCenter.shared.exerciseCompleted()
+                focusNextPhase(
+                    afterCompleting: cardioBlock.phase,
+                    scrollProxy: scrollProxy
+                )
+            }
+        } catch {
+            showError(error)
+        }
+    }
+
     @MainActor
     private func handleDraftsChanged(
         _ drafts: [WorkoutSessionSetDraft],
@@ -809,6 +1134,10 @@ struct ActiveWorkoutView: View {
                 updating: exercise.id,
                 with: drafts
             )
+            let shouldFocusPostWorkoutCardio =
+                isCompleted
+                && postWorkoutCardio != nil
+                && completedExerciseIDs.count == sessionExercises.count
             withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
                 let nextExerciseID = cardStateController.updateCompletion(
                     for: exercise.id,
@@ -816,7 +1145,9 @@ struct ActiveWorkoutView: View {
                     orderedExerciseIDs: sessionExercises.map(\.id),
                     completedExerciseIDs: completedExerciseIDs
                 )
-                if let nextExerciseID {
+                if shouldFocusPostWorkoutCardio {
+                    scrollProxy.scrollTo(cardioScrollTarget(for: .postWorkout), anchor: .top)
+                } else if let nextExerciseID {
                     scrollProxy.scrollTo(nextExerciseID, anchor: .top)
                 }
             }
@@ -898,6 +1229,53 @@ struct ActiveWorkoutView: View {
                 return exercise.id
             }
         }
+        return nil
+    }
+
+    @MainActor
+    private func allExercisesCompleted(
+        from exercises: [ActiveWorkoutDraftExercise],
+        draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
+    ) -> Bool {
+        exercises.allSatisfy { exercise in
+            let drafts = draftsByExerciseID[exercise.id] ?? makeDrafts(from: exercise)
+            return isExerciseCompleted(drafts)
+        }
+    }
+
+    @MainActor
+    private func preferredInitialScrollTarget(
+        draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
+    ) -> AnyHashable? {
+        if let preWorkoutCardio, !preWorkoutCardio.isCompleted {
+            return AnyHashable(cardioScrollTarget(for: .preWorkout))
+        }
+
+        if let firstIncompleteExerciseID = firstIncompleteExerciseID(
+            from: sessionExercises,
+            draftsByExerciseID: draftsByExerciseID
+        ) {
+            return AnyHashable(firstIncompleteExerciseID)
+        }
+
+        if let postWorkoutCardio,
+           !postWorkoutCardio.isCompleted,
+           allExercisesCompleted(from: sessionExercises, draftsByExerciseID: draftsByExerciseID) {
+            return AnyHashable(cardioScrollTarget(for: .postWorkout))
+        }
+
+        if let firstExerciseID = sessionExercises.first?.id {
+            return AnyHashable(firstExerciseID)
+        }
+
+        if preWorkoutCardio != nil {
+            return AnyHashable(cardioScrollTarget(for: .preWorkout))
+        }
+
+        if postWorkoutCardio != nil {
+            return AnyHashable(cardioScrollTarget(for: .postWorkout))
+        }
+
         return nil
     }
 
@@ -1151,7 +1529,8 @@ struct ActiveWorkoutView: View {
         ActiveWorkoutFinishConfirmationContent(
             exerciseDrafts: sessionExercises.map { exercise in
                 setDraftsByExerciseID[exercise.id] ?? makeDrafts(from: exercise)
-            }
+            },
+            cardioBlocks: orderedCardioBlocks.map(WorkoutCardioBlockDraft.init(model:))
         )
     }
 
@@ -1222,9 +1601,141 @@ struct ActiveWorkoutView: View {
             )
         }
     }
+
+    private func cardioScrollTarget(for phase: WorkoutCardioPhase) -> ActiveWorkoutScrollTarget {
+        switch phase {
+        case .preWorkout:
+            return .preWorkoutCardio
+        case .postWorkout:
+            return .postWorkoutCardio
+        }
+    }
+
+    @MainActor
+    private func focusNextPhase(
+        afterCompleting phase: WorkoutCardioPhase,
+        scrollProxy: ScrollViewProxy
+    ) {
+        switch phase {
+        case .preWorkout:
+            if let firstIncompleteExerciseID = firstIncompleteExerciseID(
+                from: sessionExercises,
+                draftsByExerciseID: setDraftsByExerciseID
+            ) {
+                withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
+                    scrollProxy.scrollTo(firstIncompleteExerciseID, anchor: .top)
+                }
+            } else if postWorkoutCardio != nil {
+                withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
+                    scrollProxy.scrollTo(cardioScrollTarget(for: .postWorkout), anchor: .top)
+                }
+            }
+        case .postWorkout:
+            break
+        }
+    }
+
+    @MainActor
+    private func canToggleCompletion(for cardioBlock: ActiveWorkoutDraftCardioBlock) -> Bool {
+        switch cardioBlock.phase {
+        case .preWorkout:
+            return true
+        case .postWorkout:
+            return isPostWorkoutCardioUnlocked
+        }
+    }
+
+    @MainActor
+    private func cardioStatusText(for cardioBlock: ActiveWorkoutDraftCardioBlock) -> String {
+        if cardioBlock.isCompleted {
+            return "Complete"
+        }
+
+        switch cardioBlock.phase {
+        case .preWorkout:
+            return "Ready"
+        case .postWorkout:
+            return isPostWorkoutCardioUnlocked ? "Ready" : "Locked"
+        }
+    }
+
+    @MainActor
+    private func cardioStatusTint(for cardioBlock: ActiveWorkoutDraftCardioBlock) -> Color {
+        if cardioBlock.isCompleted {
+            return WGJTheme.success
+        }
+
+        switch cardioBlock.phase {
+        case .preWorkout:
+            return WGJTheme.accentBlue
+        case .postWorkout:
+            return isPostWorkoutCardioUnlocked ? WGJTheme.accentGold : WGJTheme.textSecondary
+        }
+    }
+
+    private func cardioSectionSubtitle(for phase: WorkoutCardioPhase) -> String {
+        switch phase {
+        case .preWorkout:
+            return "Separate warmup cardio that gates the main exercise roster."
+        case .postWorkout:
+            return "Separate cooldown cardio that unlocks after the exercises are done."
+        }
+    }
+
+    private func cardioEmptyStateMessage(for phase: WorkoutCardioPhase) -> String {
+        switch phase {
+        case .preWorkout:
+            return "Add a short low-effort warmup like bike, walk, or crosstrainer."
+        case .postWorkout:
+            return "Add a longer cooldown like incline treadmill or an easy bike finish."
+        }
+    }
+
+    @MainActor
+    private func cardioFootnote(for cardioBlock: ActiveWorkoutDraftCardioBlock) -> String {
+        switch cardioBlock.phase {
+        case .preWorkout:
+            return cardioBlock.isCompleted
+                ? "Warmup complete. Main exercise logging is unlocked."
+                : "Finish this warmup block before logging or completing sets."
+        case .postWorkout:
+            if cardioBlock.isCompleted {
+                return "Cooldown complete. This workout is fully wrapped."
+            }
+
+            return isPostWorkoutCardioUnlocked
+                ? "Main exercises are complete. Finish this cooldown block when you're done."
+                : "This cooldown block unlocks after every main exercise is complete."
+        }
+    }
+
+    private func cardioDescriptor(category: String, muscleSummary: String) -> String? {
+        let trimmedMuscleSummary = muscleSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedMuscleSummary.isEmpty {
+            return trimmedMuscleSummary
+        }
+
+        let trimmedCategory = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedCategory.isEmpty ? nil : trimmedCategory
+    }
+
+    @MainActor
+    private func makeCardioSettingsDraft(from cardioBlock: ActiveWorkoutDraftCardioBlock) -> WorkoutCardioSettingsDraft {
+        WorkoutCardioSettingsDraft(
+            phase: cardioBlock.phase,
+            exerciseName: cardioBlock.exerciseNameSnapshot,
+            descriptor: cardioDescriptor(
+                category: cardioBlock.categorySnapshot,
+                muscleSummary: cardioBlock.muscleSummarySnapshot
+            ),
+            targetDurationSeconds: cardioBlock.targetDurationSeconds
+        )
+    }
 }
 
 private enum ActiveWorkoutScrollTarget: Hashable {
+    case preWorkoutCardio
+    case postWorkoutCardio
     case cancelSection
 }
 
@@ -1243,6 +1754,9 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
     let restSeconds: Int
     let setDrafts: [WorkoutSessionSetDraft]
     let isExpanded: Bool
+    let isSetEditingEnabled: Bool
+    let canMoveUp: Bool
+    let canMoveDown: Bool
 
     let onSetDraftsBindingChanged: ([WorkoutSessionSetDraft]) -> Void
     let onRestBindingChanged: (Int) -> Void
@@ -1251,6 +1765,8 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
     let onRestChanged: (Int) -> Void
     let onSetCompletionChange: (UUID, String, Int, Bool) -> Void
     let onExerciseSettings: () -> Void
+    let onExerciseMoveUp: () -> Void
+    let onExerciseMoveDown: () -> Void
     let onExerciseDelete: () -> Void
 
     @State private var localRestSeconds: Int
@@ -1275,6 +1791,9 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
         restSeconds: Int,
         setDrafts: [WorkoutSessionSetDraft],
         isExpanded: Bool,
+        isSetEditingEnabled: Bool,
+        canMoveUp: Bool,
+        canMoveDown: Bool,
         onSetDraftsBindingChanged: @escaping ([WorkoutSessionSetDraft]) -> Void,
         onRestBindingChanged: @escaping (Int) -> Void,
         onExpandedChanged: @escaping (Bool) -> Void,
@@ -1282,6 +1801,8 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
         onRestChanged: @escaping (Int) -> Void,
         onSetCompletionChange: @escaping (UUID, String, Int, Bool) -> Void,
         onExerciseSettings: @escaping () -> Void,
+        onExerciseMoveUp: @escaping () -> Void,
+        onExerciseMoveDown: @escaping () -> Void,
         onExerciseDelete: @escaping () -> Void
     ) {
         self.exerciseID = exerciseID
@@ -1298,6 +1819,9 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
         self.restSeconds = restSeconds
         self.setDrafts = setDrafts
         self.isExpanded = isExpanded
+        self.isSetEditingEnabled = isSetEditingEnabled
+        self.canMoveUp = canMoveUp
+        self.canMoveDown = canMoveDown
         self.onSetDraftsBindingChanged = onSetDraftsBindingChanged
         self.onRestBindingChanged = onRestBindingChanged
         self.onExpandedChanged = onExpandedChanged
@@ -1305,6 +1829,8 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
         self.onRestChanged = onRestChanged
         self.onSetCompletionChange = onSetCompletionChange
         self.onExerciseSettings = onExerciseSettings
+        self.onExerciseMoveUp = onExerciseMoveUp
+        self.onExerciseMoveDown = onExerciseMoveDown
         self.onExerciseDelete = onExerciseDelete
         self._localRestSeconds = State(initialValue: restSeconds)
         self._localSetDrafts = State(initialValue: setDrafts)
@@ -1325,6 +1851,9 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
             && lhs.restSeconds == rhs.restSeconds
             && lhs.setDrafts == rhs.setDrafts
             && lhs.isExpanded == rhs.isExpanded
+            && lhs.isSetEditingEnabled == rhs.isSetEditingEnabled
+            && lhs.canMoveUp == rhs.canMoveUp
+            && lhs.canMoveDown == rhs.canMoveDown
     }
 
     var body: some View {
@@ -1354,12 +1883,17 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
             showsInlineExerciseControls: false,
             showsSetProgressChip: false,
             manualCompletionMode: true,
+            isSetEditingEnabled: isSetEditingEnabled,
             enablesHeaderSwipeDelete: true,
             emphasizesExerciseCompletion: true,
             onSetDraftsChanged: onSetDraftsChanged,
             onRestChanged: onRestChanged,
             onSetCompletionChange: onSetCompletionChange,
             onExerciseSettings: onExerciseSettings,
+            canMoveExerciseUp: canMoveUp,
+            canMoveExerciseDown: canMoveDown,
+            onExerciseMoveUp: onExerciseMoveUp,
+            onExerciseMoveDown: onExerciseMoveDown,
             onExerciseDelete: onExerciseDelete
         )
         .onChange(of: restSeconds) { _, newValue in
@@ -1630,8 +2164,12 @@ private struct ActiveWorkoutFinishPopover: View {
 struct ActiveWorkoutFinishConfirmationContent: Equatable {
     let incompleteExerciseCount: Int
     let incompleteSetCount: Int
+    let incompleteCardioCount: Int
 
-    init(exerciseDrafts: [[WorkoutSessionSetDraft]]) {
+    init(
+        exerciseDrafts: [[WorkoutSessionSetDraft]],
+        cardioBlocks: [WorkoutCardioBlockDraft] = []
+    ) {
         var incompleteExerciseCount = 0
         var incompleteSetCount = 0
 
@@ -1645,10 +2183,11 @@ struct ActiveWorkoutFinishConfirmationContent: Equatable {
 
         self.incompleteExerciseCount = incompleteExerciseCount
         self.incompleteSetCount = incompleteSetCount
+        self.incompleteCardioCount = cardioBlocks.filter { !$0.isCompleted }.count
     }
 
     var hasIncompleteWork: Bool {
-        incompleteExerciseCount > 0 || incompleteSetCount > 0
+        incompleteExerciseCount > 0 || incompleteSetCount > 0 || incompleteCardioCount > 0
     }
 
     var title: String {
@@ -1660,11 +2199,23 @@ struct ActiveWorkoutFinishConfirmationContent: Equatable {
             return "This will close the active workout and add it to your history."
         }
 
+        if incompleteSetCount > 0 && incompleteCardioCount > 0 {
+            return "You still have \(countText(incompleteSetCount, singular: "unfinished set")) across \(countText(incompleteExerciseCount, singular: "exercise")), plus \(countText(incompleteCardioCount, singular: "unfinished cardio section")). Finish anyway or go back and finish them."
+        }
+
         if incompleteSetCount > 0 {
             return "You still have \(countText(incompleteSetCount, singular: "unfinished set")) across \(countText(incompleteExerciseCount, singular: "exercise")). Finish anyway or go back and finish them."
         }
 
-        return "You still have \(countText(incompleteExerciseCount, singular: "unfinished exercise")). Finish anyway or go back before closing this workout."
+        if incompleteExerciseCount > 0 && incompleteCardioCount > 0 {
+            return "You still have \(countText(incompleteExerciseCount, singular: "unfinished exercise")) and \(countText(incompleteCardioCount, singular: "unfinished cardio section")). Finish anyway or go back before closing this workout."
+        }
+
+        if incompleteExerciseCount > 0 {
+            return "You still have \(countText(incompleteExerciseCount, singular: "unfinished exercise")). Finish anyway or go back before closing this workout."
+        }
+
+        return "You still have \(countText(incompleteCardioCount, singular: "unfinished cardio section")). Finish anyway or go back before closing this workout."
     }
 
     var confirmButtonTitle: String {
@@ -1830,6 +2381,20 @@ private struct ActiveWorkoutSaveTemplateSheet: View {
         }
         .presentationDetents([.medium])
         .presentationDragIndicator(.hidden)
+    }
+}
+
+private enum ActiveWorkoutPickerTarget: Identifiable {
+    case exercise
+    case cardio(WorkoutCardioPhase)
+
+    var id: String {
+        switch self {
+        case .exercise:
+            return "exercise"
+        case .cardio(let phase):
+            return "cardio-\(phase.rawValue)"
+        }
     }
 }
 
@@ -2026,12 +2591,15 @@ private struct ActiveWorkoutExerciseSettingsSheet: View {
         ProfileWidgetConfig.self,
         TemplateFolder.self,
         WorkoutTemplate.self,
+        TemplateCardioBlock.self,
         TemplateExercise.self,
         TemplateExerciseSet.self,
         ActiveWorkoutDraftSession.self,
+        ActiveWorkoutDraftCardioBlock.self,
         ActiveWorkoutDraftExercise.self,
         ActiveWorkoutDraftSet.self,
         WorkoutSession.self,
+        WorkoutSessionCardioBlock.self,
         WorkoutSessionExercise.self,
         WorkoutSessionSet.self,
     ], inMemory: true)
