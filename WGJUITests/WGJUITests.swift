@@ -735,8 +735,8 @@ final class WGJUITests: XCTestCase {
 
         startPreviewedTemplateWorkout(in: app)
 
-        let preToggle = app.buttons["active-workout-preWorkout-toggle-button"]
-        let postToggle = app.buttons["active-workout-postWorkout-toggle-button"]
+        let preToggle = app.buttons["Complete Pre Cardio"]
+        let postToggle = app.buttons["Complete Post Cardio"]
         let completeSetButton = app.buttons.matching(
             NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
         ).firstMatch
@@ -762,6 +762,48 @@ final class WGJUITests: XCTestCase {
 
         XCTAssertTrue(postToggle.waitForExistence(timeout: 5))
         XCTAssertTrue(postToggle.isEnabled)
+    }
+
+    @MainActor
+    func testActiveWorkoutKeepsMissingCardioHiddenUntilAdded() throws {
+        let app = launchApp(launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Lift Only Workout",
+                notes: "No cardio in the template.",
+                exercises: [
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "lift-only-bench-1",
+                        exerciseNameSnapshot: "Bench Press",
+                        categorySnapshot: "Chest",
+                        muscleSummarySnapshot: "Chest",
+                        targetRepMin: 6,
+                        targetRepMax: 8,
+                        restSeconds: 120,
+                        sets: [templatePayloadSet(targetReps: 6, targetWeight: 100, loadUnit: "kg", restSeconds: 120, isWarmup: false)]
+                    ),
+                ]
+            ),
+        ])
+
+        startPreviewedTemplateWorkout(in: app)
+
+        XCTAssertFalse(identifiedElement("active-workout-preWorkout-card", in: app).waitForExistence(timeout: 1))
+        XCTAssertFalse(identifiedElement("active-workout-postWorkout-card", in: app).waitForExistence(timeout: 1))
+
+        let addCardioButton = identifiedElement("active-workout-add-cardio-button", in: app)
+        XCTAssertTrue(addCardioButton.waitForExistence(timeout: 5))
+        addCardioButton.tap()
+
+        let addPreWorkoutButton = app.buttons["Add Pre-workout Cardio"]
+        XCTAssertTrue(addPreWorkoutButton.waitForExistence(timeout: 5))
+        addPreWorkoutButton.tap()
+
+        let pickerSelectButton = identifiedElement("exercise-picker-select-button", in: app)
+        XCTAssertTrue(pickerSelectButton.waitForExistence(timeout: 15))
+        pickerSelectButton.tap()
+
+        XCTAssertTrue(identifiedElement("active-workout-preWorkout-card", in: app).waitForExistence(timeout: 5))
+        XCTAssertFalse(identifiedElement("active-workout-postWorkout-card", in: app).waitForExistence(timeout: 1))
     }
 
     @MainActor
@@ -808,7 +850,9 @@ final class WGJUITests: XCTestCase {
         ])
 
         startPreviewedTemplateWorkout(in: app)
-        app.buttons["active-workout-preWorkout-toggle-button"].tap()
+        let preToggle = app.buttons["Complete Pre Cardio"]
+        XCTAssertTrue(preToggle.waitForExistence(timeout: 5))
+        preToggle.tap()
         addSetToCurrentExercise(in: app)
         finishTemplateWorkout(in: app)
 
@@ -870,7 +914,9 @@ final class WGJUITests: XCTestCase {
         ])
 
         startPreviewedTemplateWorkout(in: app)
-        app.buttons["active-workout-preWorkout-toggle-button"].tap()
+        let preToggle = app.buttons["Complete Pre Cardio"]
+        XCTAssertTrue(preToggle.waitForExistence(timeout: 5))
+        preToggle.tap()
         addSetToCurrentExercise(in: app)
         finishTemplateWorkout(in: app)
 

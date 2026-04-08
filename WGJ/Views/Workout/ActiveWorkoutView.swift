@@ -116,9 +116,14 @@ struct ActiveWorkoutView: View {
                             notesDraft: $notesDraft,
                             session: session,
                             exerciseCount: sessionExercises.count,
-                            onSubmit: persistSessionMeta
+                            cardioCount: orderedCardioBlocks.count,
+                            missingCardioPhases: missingCardioPhases,
+                            onSubmit: persistSessionMeta,
+                            onAddCardio: showCardioPicker
                         )
-                        cardioSection(for: .preWorkout, scrollProxy: scrollProxy)
+                        if preWorkoutCardio != nil {
+                            cardioSection(for: .preWorkout, scrollProxy: scrollProxy)
+                        }
                         exercisesSectionHeader
                     } else if isEndingSession || completedSessionID != nil {
                         WGJEmptyStateCard(
@@ -163,7 +168,7 @@ struct ActiveWorkoutView: View {
                             .disabled(session == nil)
                     }
 
-                    if session != nil {
+                    if postWorkoutCardio != nil {
                         cardioSection(for: .postWorkout, scrollProxy: scrollProxy)
                     }
 
@@ -342,6 +347,11 @@ struct ActiveWorkoutView: View {
         !sessionExercises.isEmpty || !orderedCardioBlocks.isEmpty
     }
 
+    @MainActor
+    private var missingCardioPhases: [WorkoutCardioPhase] {
+        WorkoutCardioPhase.allCases.filter { cardioBlock(for: $0) == nil }
+    }
+
     private var shouldShowBottomDock: Bool {
         guard !isKeyboardVisible, !isEndingSession, session != nil else {
             return false
@@ -425,23 +435,13 @@ struct ActiveWorkoutView: View {
         for phase: WorkoutCardioPhase,
         scrollProxy: ScrollViewProxy
     ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            WGJActionHeader(
-                phase.title,
-                subtitle: cardioSectionSubtitle(for: phase)
-            ) {
-                if cardioBlock(for: phase) == nil {
-                    Button {
-                        pickerTarget = .cardio(phase)
-                    } label: {
-                        Label("Add", systemImage: "plus")
-                    }
-                    .buttonStyle(WGJPrimaryButtonStyle())
-                    .disabled(session == nil)
-                }
-            }
+        if let cardioBlock = cardioBlock(for: phase) {
+            VStack(alignment: .leading, spacing: 12) {
+                WGJActionHeader(
+                    phase.title,
+                    subtitle: cardioSectionSubtitle(for: phase)
+                )
 
-            if let cardioBlock = cardioBlock(for: phase) {
                 WorkoutCardioPhaseCard(
                     phase: phase,
                     exerciseName: cardioBlock.exerciseNameSnapshot,
@@ -474,19 +474,6 @@ struct ActiveWorkoutView: View {
                 }
                 .id(cardioScrollTarget(for: phase))
                 .accessibilityIdentifier("active-workout-\(phase.rawValue)-card")
-            } else {
-                WGJEmptyStateCard(
-                    title: "\(phase.shortTitle) not added",
-                    message: cardioEmptyStateMessage(for: phase),
-                    icon: phase.systemImage
-                ) {
-                    Button("Add \(phase.shortTitle)") {
-                        pickerTarget = .cardio(phase)
-                    }
-                    .buttonStyle(WGJPrimaryButtonStyle())
-                    .disabled(session == nil)
-                    .accessibilityIdentifier("active-workout-\(phase.rawValue)-add-button")
-                }
             }
         }
     }
@@ -505,6 +492,7 @@ struct ActiveWorkoutView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(WGJGhostButtonStyle())
+                .accessibilityIdentifier("active-workout-\(cardioBlock.phase.rawValue)-toggle-button")
             } else {
                 Button {
                     toggleCardioCompletion(for: cardioBlock, scrollProxy: scrollProxy)
@@ -513,10 +501,10 @@ struct ActiveWorkoutView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(WGJPrimaryButtonStyle())
+                .accessibilityIdentifier("active-workout-\(cardioBlock.phase.rawValue)-toggle-button")
             }
         }
         .disabled(!canToggleCompletion(for: cardioBlock))
-        .accessibilityIdentifier("active-workout-\(cardioBlock.phase.rawValue)-toggle-button")
     }
 
     @MainActor
@@ -527,7 +515,7 @@ struct ActiveWorkoutView: View {
             }
 
             Button("Change Exercise") {
-                pickerTarget = .cardio(cardioBlock.phase)
+                showCardioPicker(for: cardioBlock.phase)
             }
 
             Button("Remove", role: .destructive) {
@@ -1021,6 +1009,11 @@ struct ActiveWorkoutView: View {
         case .cardio(let phase):
             upsertCardioBlock(phase: phase, catalogItem: item)
         }
+    }
+
+    private func showCardioPicker(for phase: WorkoutCardioPhase) {
+        dismissKeyboard()
+        pickerTarget = .cardio(phase)
     }
 
     private func addExercise(_ item: ExerciseCatalogItem) {
@@ -2052,11 +2045,18 @@ private struct ActiveWorkoutHeaderCard: View {
 
     let session: ActiveWorkoutDraftSession
     let exerciseCount: Int
+    let cardioCount: Int
+    let missingCardioPhases: [WorkoutCardioPhase]
     let onSubmit: () -> Void
+    let onAddCardio: (WorkoutCardioPhase) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            WGJSectionHeader("Session")
+            WGJActionHeader("Session") {
+                if !missingCardioPhases.isEmpty {
+                    addCardioButton
+                }
+            }
 
             TextField("Workout name", text: $sessionNameDraft)
                 .textInputAutocapitalization(.words)
@@ -2070,10 +2070,16 @@ private struct ActiveWorkoutHeaderCard: View {
                 .wgjPillField()
                 .onSubmit(onSubmit)
 
-            HStack {
+            HStack(spacing: 10) {
                 Text("\(exerciseCount) exercises")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(WGJTheme.accentCyan)
+
+                if cardioCount > 0 {
+                    Text("\(cardioCount) cardio")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(WGJTheme.accentBlue)
+                }
 
                 Spacer()
             }
@@ -2084,6 +2090,31 @@ private struct ActiveWorkoutHeaderCard: View {
         }
         .padding(14)
         .wgjCardContainer(strong: true)
+    }
+
+    private var addCardioButton: some View {
+        WGJActionMenuButton("Add Cardio", titleVisibility: .hidden) {
+            ForEach(missingCardioPhases) { phase in
+                Button("Add \(phase.title)") {
+                    onAddCardio(phase)
+                }
+            }
+        } label: {
+            Label("Add Cardio", systemImage: "plus.circle.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(WGJTheme.accentBlue)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(WGJTheme.field)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(WGJTheme.accentBlue.opacity(0.24), lineWidth: 1)
+                        )
+                )
+        }
+        .accessibilityIdentifier("active-workout-add-cardio-button")
     }
 }
 
