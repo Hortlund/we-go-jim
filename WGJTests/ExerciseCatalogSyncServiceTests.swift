@@ -23,7 +23,13 @@ struct ExerciseCatalogSyncServiceTests {
         #expect(exerciseNames.contains("Hip Abduction Machine"))
         #expect(exerciseNames.contains("Barbell Wrist Curl"))
         #expect(exerciseNames.contains("Weighted Dip"))
+        #expect(exerciseNames.contains("Bike"))
+        #expect(exerciseNames.contains("Incline Treadmill Walk"))
+        #expect(exerciseNames.contains("Row Machine"))
+        #expect(exerciseNames.contains("Crosstrainer"))
+        #expect(exerciseNames.contains("Stair Climber"))
         #expect(payload.exercises.first(where: { $0.name == "Reverse Pec Deck" })?.aliases.contains("Machine Rear Delt Fly") == true)
+        #expect(payload.exercises.first(where: { $0.name == "Crosstrainer" })?.aliases.contains("Elliptical") == true)
     }
 
     @Test

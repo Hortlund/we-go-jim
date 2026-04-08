@@ -1,6 +1,6 @@
 {
-  "version": 3,
-  "generatedAt": "2026-03-31T00:00:00Z",
+  "version": 4,
+  "generatedAt": "2026-04-08T00:00:00Z",
   "muscles": [
     {
       "id": 1,
@@ -4861,6 +4861,182 @@
         13
       ],
       "secondary_muscles": [
+        10
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1221,
+      "uuid": "seed-bike",
+      "name": "Bike",
+      "aliases": [
+        "Exercise Bike",
+        "Stationary Bike",
+        "Indoor Bike"
+      ],
+      "category": "Cardio",
+      "equipment": "Bike",
+      "instructions": "Set an easy steady pace, stay tall through the torso, and keep the effort smooth enough to breathe through your nose if possible.",
+      "primary_muscles": [
+        5
+      ],
+      "secondary_muscles": [
+        7,
+        9
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1222,
+      "uuid": "seed-incline-treadmill-walk",
+      "name": "Incline Treadmill Walk",
+      "aliases": [
+        "Treadmill Walk",
+        "Incline Walk"
+      ],
+      "category": "Cardio",
+      "equipment": "Treadmill",
+      "instructions": "Keep a brisk but repeatable pace, lean slightly from the ankles instead of the hips, and let the incline raise the effort without jogging.",
+      "primary_muscles": [
+        9
+      ],
+      "secondary_muscles": [
+        5,
+        7
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1223,
+      "uuid": "seed-treadmill-run",
+      "name": "Treadmill Run",
+      "aliases": [
+        "Run",
+        "Jog"
+      ],
+      "category": "Cardio",
+      "equipment": "Treadmill",
+      "instructions": "Settle into a pace you can hold for the whole block, keep your stride compact, and avoid reaching out too far in front of you.",
+      "primary_muscles": [
+        9
+      ],
+      "secondary_muscles": [
+        5,
+        7
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1224,
+      "uuid": "seed-row-machine",
+      "name": "Row Machine",
+      "aliases": [
+        "Rower",
+        "Row Erg",
+        "Erg"
+      ],
+      "category": "Cardio",
+      "equipment": "Rower",
+      "instructions": "Drive with the legs first, finish with the arms second, and recover in reverse order without rushing back up the slide.",
+      "primary_muscles": [
+        4
+      ],
+      "secondary_muscles": [
+        5,
+        10
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1225,
+      "uuid": "seed-crosstrainer",
+      "name": "Crosstrainer",
+      "aliases": [
+        "Elliptical",
+        "Cross Trainer"
+      ],
+      "category": "Cardio",
+      "equipment": "Crosstrainer",
+      "instructions": "Keep the resistance moderate, drive evenly through the full stride, and let the handles move naturally instead of yanking them.",
+      "primary_muscles": [
+        5
+      ],
+      "secondary_muscles": [
+        7,
+        9
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1226,
+      "uuid": "seed-stair-climber",
+      "name": "Stair Climber",
+      "aliases": [
+        "StairMaster",
+        "Stepmill"
+      ],
+      "category": "Cardio",
+      "equipment": "Stair Climber",
+      "instructions": "Stand tall, keep full foot contact on each step, and keep the pace smooth instead of bouncing off the handrails.",
+      "primary_muscles": [
+        7
+      ],
+      "secondary_muscles": [
+        5,
+        9
+      ],
+      "image_url": "",
+      "source_url": "",
+      "license_name": "Bundled with WGJ",
+      "license_url": "",
+      "license_author": "WGJ",
+      "is_curated": true
+    },
+    {
+      "remote_id": 1227,
+      "uuid": "seed-skierg",
+      "name": "SkiErg",
+      "aliases": [
+        "Ski Erg"
+      ],
+      "category": "Cardio",
+      "equipment": "SkiErg",
+      "instructions": "Brace the trunk, hinge and crunch together with each pull, and keep the stroke rhythmic instead of ripping the handle down.",
+      "primary_muscles": [
+        4
+      ],
+      "secondary_muscles": [
+        2,
         10
       ],
       "image_url": "",
