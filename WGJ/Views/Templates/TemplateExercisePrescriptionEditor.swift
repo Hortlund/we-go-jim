@@ -1232,11 +1232,59 @@ private struct TemplateExerciseSetCardView: View, Equatable {
     }
 
     private var setMenu: some View {
-        WGJActionMenuButton("Set Actions") {
+        Menu {
             Button {
                 onInsertBelow()
             } label: {
                 Label("Insert below", systemImage: "plus")
+            }
+
+            Menu {
+                Button {
+                    onMoveUp()
+                } label: {
+                    Label("Move up", systemImage: "arrow.up")
+                }
+                .disabled(row.index == 0)
+
+                Button {
+                    onMoveDown()
+                } label: {
+                    Label("Move down", systemImage: "arrow.down")
+                }
+                .disabled(!canMoveDown)
+            } label: {
+                Label("Reorder", systemImage: "arrow.up.arrow.down")
+            }
+
+            Menu {
+                Button("Use exercise default (\(formattedRest(defaultRestSeconds)))") {
+                    onSetRestChanged(defaultRestSeconds)
+                }
+
+                Button("Reduce rest by 15 sec") {
+                    onSetRestChanged(set.restSeconds - 15)
+                }
+
+                Button("Increase rest by 15 sec") {
+                    onSetRestChanged(set.restSeconds + 15)
+                }
+
+                Button("No rest") {
+                    onSetRestChanged(0)
+                }
+
+                Divider()
+
+                Menu("Presets") {
+                    ForEach(restPresets, id: \.self) { value in
+                        Button(formattedRest(value)) {
+                            onSetRestChanged(value)
+                        }
+                    }
+                }
+            } label: {
+                Label("Rest", systemImage: "timer")
             }
 
             Button {
@@ -1246,53 +1294,9 @@ private struct TemplateExerciseSetCardView: View, Equatable {
             }
 
             Button {
-                onMoveUp()
-            } label: {
-                Label("Move up", systemImage: "arrow.up")
-            }
-            .disabled(row.index == 0)
-
-            Button {
-                onMoveDown()
-            } label: {
-                Label("Move down", systemImage: "arrow.down")
-            }
-            .disabled(!canMoveDown)
-
-            ForEach(restPresets, id: \.self) { value in
-                Button("Set rest to \(formattedRest(value))") {
-                    onSetRestChanged(value)
-                }
-            }
-
-            Button("Use exercise default (\(formattedRest(defaultRestSeconds)))") {
-                onSetRestChanged(defaultRestSeconds)
-            }
-
-            Button("Reduce rest by 15 sec") {
-                onSetRestChanged(set.restSeconds - 15)
-            }
-
-            Button("Increase rest by 15 sec") {
-                onSetRestChanged(set.restSeconds + 15)
-            }
-
-            Button("No rest") {
-                onSetRestChanged(0)
-            }
-
-            Button {
                 onToggleLock()
             } label: {
                 Label(set.isLocked ? "Unlock set" : "Lock set", systemImage: set.isLocked ? "lock.open" : "lock")
-            }
-
-            if set.restSeconds != defaultRestSeconds {
-                Button {
-                    onSetRestChanged(defaultRestSeconds)
-                } label: {
-                    Label("Reset rest", systemImage: "timer")
-                }
             }
 
             Button(role: .destructive) {
@@ -1310,6 +1314,8 @@ private struct TemplateExerciseSetCardView: View, Equatable {
                         .fill(WGJTheme.field)
                 )
         }
+        .menuIndicator(.hidden)
+        .accessibilityIdentifier("template-set-actions-button-\(row.index)")
     }
 
     private func metricField<Content: View>(

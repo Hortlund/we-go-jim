@@ -797,9 +797,8 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func setMenu(at index: Int) -> some View {
         let isLocked = setDrafts[index].isLocked
-        let currentRest = setDrafts[index].restSeconds
 
-        return WGJActionMenuButton("Set Actions") {
+        return Menu {
             Button {
                 insertSet(after: index)
             } label: {
@@ -807,51 +806,63 @@ struct WorkoutSessionExerciseGridEditor: View {
             }
             .disabled(!isSetEditingEnabled || isLocked)
 
+            Menu {
+                Button {
+                    moveSetUp(index)
+                } label: {
+                    Label("Move up", systemImage: "arrow.up")
+                }
+                .disabled(!isSetEditingEnabled || isLocked || index == 0 || setDrafts[index - 1].isLocked)
+
+                Button {
+                    moveSetDown(index)
+                } label: {
+                    Label("Move down", systemImage: "arrow.down")
+                }
+                .disabled(!isSetEditingEnabled || isLocked || index == setDrafts.count - 1 || setDrafts[index + 1].isLocked)
+            } label: {
+                Label("Reorder", systemImage: "arrow.up.arrow.down")
+            }
+
+            Menu {
+                Button("Use exercise default (\(Self.formattedRest(restSeconds)))") {
+                    updateSetRest(restSeconds, at: index)
+                }
+                .disabled(!isSetEditingEnabled || isLocked)
+
+                Button("Reduce rest by 15 sec") {
+                    updateSetRest(setDrafts[index].restSeconds - 15, at: index)
+                }
+                .disabled(!isSetEditingEnabled || isLocked)
+
+                Button("Increase rest by 15 sec") {
+                    updateSetRest(setDrafts[index].restSeconds + 15, at: index)
+                }
+                .disabled(!isSetEditingEnabled || isLocked)
+
+                Button("No rest") {
+                    updateSetRest(0, at: index)
+                }
+                .disabled(!isSetEditingEnabled || isLocked)
+
+                Divider()
+
+                Menu("Presets") {
+                    ForEach(restPresets, id: \.self) { value in
+                        Button(Self.formattedRest(value)) {
+                            updateSetRest(value, at: index)
+                        }
+                        .disabled(!isSetEditingEnabled || isLocked)
+                    }
+                }
+            } label: {
+                Label("Rest", systemImage: "timer")
+            }
+
             Button {
                 toggleWarmup(at: index)
             } label: {
                 Label(setDrafts[index].isWarmup ? "Mark as working" : "Mark as warmup", systemImage: "flame")
-            }
-            .disabled(!isSetEditingEnabled || isLocked)
-
-            Button {
-                moveSetUp(index)
-            } label: {
-                Label("Move up", systemImage: "arrow.up")
-            }
-            .disabled(!isSetEditingEnabled || isLocked || index == 0 || setDrafts[index - 1].isLocked)
-
-            Button {
-                moveSetDown(index)
-            } label: {
-                Label("Move down", systemImage: "arrow.down")
-            }
-            .disabled(!isSetEditingEnabled || isLocked || index == setDrafts.count - 1 || setDrafts[index + 1].isLocked)
-
-            ForEach(restPresets, id: \.self) { value in
-                Button("Set rest to \(Self.formattedRest(value))") {
-                    updateSetRest(value, at: index)
-                }
-                .disabled(!isSetEditingEnabled || isLocked)
-            }
-
-            Button("Use exercise default (\(Self.formattedRest(restSeconds)))") {
-                updateSetRest(restSeconds, at: index)
-            }
-            .disabled(!isSetEditingEnabled || isLocked)
-
-            Button("Reduce rest by 15 sec") {
-                updateSetRest(currentRest - 15, at: index)
-            }
-            .disabled(!isSetEditingEnabled || isLocked)
-
-            Button("Increase rest by 15 sec") {
-                updateSetRest(currentRest + 15, at: index)
-            }
-            .disabled(!isSetEditingEnabled || isLocked)
-
-            Button("No rest") {
-                updateSetRest(0, at: index)
             }
             .disabled(!isSetEditingEnabled || isLocked)
 
@@ -869,15 +880,6 @@ struct WorkoutSessionExerciseGridEditor: View {
                     Label("Clear logged values", systemImage: "eraser")
                 }
                 .disabled(!isSetEditingEnabled || isLocked)
-            }
-
-            if setDrafts[index].restSeconds != restSeconds {
-                Button {
-                    updateSetRest(restSeconds, at: index)
-                } label: {
-                    Label("Reset rest", systemImage: "timer")
-                }
-                .disabled(isLocked)
             }
 
             if manualCompletionMode {
@@ -901,6 +903,8 @@ struct WorkoutSessionExerciseGridEditor: View {
         } label: {
             headerIcon(symbol: "ellipsis.circle")
         }
+        .menuIndicator(.hidden)
+        .accessibilityIdentifier("workout-set-actions-button-\(index)")
     }
 
     private func infoChip(_ title: String, tint: Color) -> some View {
