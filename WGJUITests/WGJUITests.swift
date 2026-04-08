@@ -656,7 +656,7 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
-    func testBozarModeConfirmsEmptySetCompletionWithoutPreviousPerformance() throws {
+    func testBozarModeCompletesEmptySetWithoutPreviousPerformance() throws {
         let app = launchApp()
 
         tapTab("Profile", in: app)
@@ -694,10 +694,6 @@ final class WGJUITests: XCTestCase {
         ).firstMatch
         XCTAssertTrue(completeSetButton.waitForExistence(timeout: 5))
         completeSetButton.tap()
-
-        XCTAssertTrue(app.alerts.firstMatch.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["Complete Empty Set"].waitForExistence(timeout: 5))
-        app.buttons["Complete Empty Set"].tap()
 
         XCTAssertTrue(app.buttons["Undo"].waitForExistence(timeout: 5))
     }

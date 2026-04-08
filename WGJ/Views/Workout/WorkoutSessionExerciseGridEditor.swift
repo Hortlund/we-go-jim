@@ -49,7 +49,6 @@ struct WorkoutSessionExerciseGridEditor: View {
     @State private var weightInputTextBySetID: [UUID: String] = [:]
     @State private var pendingDraftChangeNotificationTask: Task<Void, Never>?
     @State private var pendingDisplayRefreshTask: Task<Void, Never>?
-    @State private var pendingEmptyCompletionConfirmation: PendingEmptyCompletionConfirmation?
     @FocusState private var focusedInput: SetInputFocus?
 
     private let restPresets = [10, 15, 20, 30, 45, 60, 75, 90, 105, 120, 150, 180, 210, 240]
@@ -64,13 +63,6 @@ struct WorkoutSessionExerciseGridEditor: View {
             case weight
             case reps
         }
-    }
-
-    private struct PendingEmptyCompletionConfirmation: Identifiable, Equatable {
-        let setID: UUID
-        let setTitle: String
-
-        var id: UUID { setID }
     }
 
     init(
@@ -220,16 +212,6 @@ struct WorkoutSessionExerciseGridEditor: View {
             if newFocus == nil {
                 flushPendingDisplayRefresh()
             }
-        }
-        .alert(item: $pendingEmptyCompletionConfirmation) { confirmation in
-            Alert(
-                title: Text("Complete with Empty Values?"),
-                message: Text("\(confirmation.setTitle) has no logged weight or reps, and there are no last values to fill."),
-                primaryButton: .default(Text("Complete Empty Set")) {
-                    confirmEmptyCompletion(confirmation)
-                },
-                secondaryButton: .cancel()
-            )
         }
     }
 
@@ -1794,7 +1776,6 @@ struct WorkoutSessionExerciseGridEditor: View {
         }
 
         guard isCompleted else {
-            pendingEmptyCompletionConfirmation = nil
             setCompletion(false, at: index)
             return
         }
@@ -1808,22 +1789,8 @@ struct WorkoutSessionExerciseGridEditor: View {
             draft: setDrafts[index],
             previous: previousBySetIndex[index]
         )
-        setDrafts[index] = resolution.draft
+        setDrafts[index] = resolution
 
-        guard !resolution.shouldConfirmEmptyCompletion else {
-            pendingEmptyCompletionConfirmation = PendingEmptyCompletionConfirmation(
-                setID: setDrafts[index].id,
-                setTitle: setTitle(for: index)
-            )
-            return
-        }
-
-        setCompletion(true, at: index)
-    }
-
-    private func confirmEmptyCompletion(_ confirmation: PendingEmptyCompletionConfirmation) {
-        pendingEmptyCompletionConfirmation = nil
-        guard let index = setDrafts.firstIndex(where: { $0.id == confirmation.setID }) else { return }
         setCompletion(true, at: index)
     }
 
@@ -2024,16 +1991,11 @@ struct WorkoutSetInlineHintPresentation: Equatable {
     }
 }
 
-struct WorkoutSetBozarCompletionResolution: Equatable {
-    let draft: WorkoutSessionSetDraft
-    let shouldConfirmEmptyCompletion: Bool
-}
-
 enum WorkoutSetBozarCompletionResolver {
     static func resolve(
         draft: WorkoutSessionSetDraft,
         previous: WorkoutPreviousSetSnapshot?
-    ) -> WorkoutSetBozarCompletionResolution {
+    ) -> WorkoutSessionSetDraft {
         var resolvedDraft = draft
 
         if resolvedDraft.actualWeight == nil, let previousWeight = previous?.weight {
@@ -2054,9 +2016,6 @@ enum WorkoutSetBozarCompletionResolver {
             resolvedDraft.actualLoadUnit = .bodyweight
         }
 
-        return WorkoutSetBozarCompletionResolution(
-            draft: resolvedDraft,
-            shouldConfirmEmptyCompletion: resolvedDraft.actualWeight == nil && resolvedDraft.actualReps == nil
-        )
+        return resolvedDraft
     }
 }

@@ -17,10 +17,9 @@ struct WorkoutSetBozarCompletionResolverTests {
             previous: previous
         )
 
-        #expect(resolution.draft.actualWeight == 100)
-        #expect(resolution.draft.actualReps == 8)
-        #expect(resolution.draft.actualLoadUnit == .kg)
-        #expect(resolution.shouldConfirmEmptyCompletion == false)
+        #expect(resolution.actualWeight == 100)
+        #expect(resolution.actualReps == 8)
+        #expect(resolution.actualLoadUnit == .kg)
     }
 
     @Test
@@ -37,14 +36,13 @@ struct WorkoutSetBozarCompletionResolverTests {
             previous: previous
         )
 
-        #expect(resolution.draft.actualReps == 10)
-        #expect(resolution.draft.actualWeight == 45)
-        #expect(resolution.draft.actualLoadUnit == .kg)
-        #expect(resolution.shouldConfirmEmptyCompletion == false)
+        #expect(resolution.actualReps == 10)
+        #expect(resolution.actualWeight == 45)
+        #expect(resolution.actualLoadUnit == .kg)
     }
 
     @Test
-    func flagsEmptyCompletionWhenNoPreviousValuesExist() {
+    func leavesDraftEmptyWhenNoPreviousValuesExist() {
         let draft = WorkoutSessionSetDraft(
             actualReps: nil,
             actualWeight: nil,
@@ -56,9 +54,9 @@ struct WorkoutSetBozarCompletionResolverTests {
             previous: nil
         )
 
-        #expect(resolution.draft.actualWeight == nil)
-        #expect(resolution.draft.actualReps == nil)
-        #expect(resolution.shouldConfirmEmptyCompletion)
+        #expect(resolution.actualWeight == nil)
+        #expect(resolution.actualReps == nil)
+        #expect(resolution.actualLoadUnit == .kg)
     }
 
     @Test
@@ -75,9 +73,8 @@ struct WorkoutSetBozarCompletionResolverTests {
             previous: previous
         )
 
-        #expect(resolution.draft.actualReps == 12)
-        #expect(resolution.draft.actualWeight == nil)
-        #expect(resolution.draft.actualLoadUnit == .bodyweight)
-        #expect(resolution.shouldConfirmEmptyCompletion == false)
+        #expect(resolution.actualReps == 12)
+        #expect(resolution.actualWeight == nil)
+        #expect(resolution.actualLoadUnit == .bodyweight)
     }
 }
