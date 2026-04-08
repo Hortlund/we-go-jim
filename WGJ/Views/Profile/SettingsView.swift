@@ -107,7 +107,7 @@ struct SettingsView: View {
                             Text("Bozar Mode")
                                 .foregroundStyle(WGJTheme.textPrimary)
 
-                            Text("what happens if i open all")
+                            Text("Lets you complete a set with empty fields and fills missing reps or weight from your last performance when available.")
                                 .font(.caption)
                                 .foregroundStyle(WGJTheme.textSecondary)
                         }
