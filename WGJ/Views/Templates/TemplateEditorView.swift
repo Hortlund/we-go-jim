@@ -242,6 +242,18 @@ struct TemplateEditorView: View {
                 },
                 onExerciseDelete: {
                     removeExercise(withID: row.id)
+                },
+                onAddComponent: {
+                    pickerTarget = .component(row.id)
+                },
+                onMoveComponentUp: { componentIndex in
+                    moveComponentUp(componentIndex, in: row.id)
+                },
+                onMoveComponentDown: { componentIndex in
+                    moveComponentDown(componentIndex, in: row.id)
+                },
+                onDeleteComponent: { componentID in
+                    removeComponent(componentID, from: row.id)
                 }
             )
             .id(row.id)
@@ -250,7 +262,7 @@ struct TemplateEditorView: View {
     }
 
     private func appendExercise(catalogItem: ExerciseCatalogItem) {
-        guard !exerciseDrafts.contains(where: { $0.catalogExerciseUUID == catalogItem.remoteUUID }) else {
+        guard !containsComponentCatalogUUID(catalogItem.remoteUUID) else {
             return
         }
 
@@ -270,9 +282,23 @@ struct TemplateEditorView: View {
         switch target {
         case .exercise:
             appendExercise(catalogItem: item)
+        case .component(let exerciseID):
+            appendComponent(catalogItem: item, to: exerciseID)
         case .cardio(let phase):
             upsertCardioBlock(phase: phase, catalogItem: item)
         }
+    }
+
+    private func appendComponent(catalogItem: ExerciseCatalogItem, to exerciseID: UUID) {
+        guard !containsComponentCatalogUUID(catalogItem.remoteUUID) else {
+            return
+        }
+        guard let draftStore = exerciseDrafts.first(where: { $0.id == exerciseID }) else {
+            return
+        }
+
+        draftStore.components.append(TemplateExerciseComponentDraft(catalogItem: catalogItem))
+        draftStore.isExpanded = true
     }
 
     private func upsertCardioBlock(phase: WorkoutCardioPhase, catalogItem: ExerciseCatalogItem) {
@@ -310,6 +336,28 @@ struct TemplateEditorView: View {
         removeExercise(at: index)
     }
 
+    private func moveComponentUp(_ componentIndex: Int, in exerciseID: UUID) {
+        guard let draftStore = exerciseDrafts.first(where: { $0.id == exerciseID }) else { return }
+        guard componentIndex > 0, componentIndex < draftStore.components.count else { return }
+        withAnimation(WGJMotion.quickAnimation(reduceMotion: reduceMotion)) {
+            draftStore.components.swapAt(componentIndex, componentIndex - 1)
+        }
+    }
+
+    private func moveComponentDown(_ componentIndex: Int, in exerciseID: UUID) {
+        guard let draftStore = exerciseDrafts.first(where: { $0.id == exerciseID }) else { return }
+        guard componentIndex >= 0, componentIndex < draftStore.components.count - 1 else { return }
+        withAnimation(WGJMotion.quickAnimation(reduceMotion: reduceMotion)) {
+            draftStore.components.swapAt(componentIndex, componentIndex + 1)
+        }
+    }
+
+    private func removeComponent(_ componentID: UUID, from exerciseID: UUID) {
+        guard let draftStore = exerciseDrafts.first(where: { $0.id == exerciseID }) else { return }
+        guard draftStore.components.count > 1 else { return }
+        draftStore.components.removeAll { $0.id == componentID }
+    }
+
     private func moveExerciseUp(_ index: Int) {
         guard index > 0 else { return }
         withAnimation(WGJMotion.quickAnimation(reduceMotion: reduceMotion)) {
@@ -321,6 +369,12 @@ struct TemplateEditorView: View {
         guard index < exerciseDrafts.count - 1 else { return }
         withAnimation(WGJMotion.quickAnimation(reduceMotion: reduceMotion)) {
             exerciseDrafts.swapAt(index, index + 1)
+        }
+    }
+
+    private func containsComponentCatalogUUID(_ catalogExerciseUUID: String) -> Bool {
+        exerciseDrafts.contains { draftStore in
+            draftStore.components.contains { $0.catalogExerciseUUID == catalogExerciseUUID }
         }
     }
 
@@ -476,12 +530,15 @@ struct TemplateEditorView: View {
 
 private enum TemplateEditorPickerTarget: Identifiable {
     case exercise
+    case component(UUID)
     case cardio(WorkoutCardioPhase)
 
     var id: String {
         switch self {
         case .exercise:
             return "exercise"
+        case .component(let exerciseID):
+            return "component-\(exerciseID.uuidString.lowercased())"
         case .cardio(let phase):
             return "cardio-\(phase.rawValue)"
         }
@@ -492,27 +549,37 @@ private enum TemplateEditorPickerTarget: Identifiable {
 @Observable
 private final class TemplateExerciseDraftStore: Identifiable {
     let id: UUID
-    let catalogExerciseUUID: String
-    let exerciseNameSnapshot: String
-    let categorySnapshot: String
-    let muscleSummarySnapshot: String
     var targetRepMin: Int?
     var targetRepMax: Int?
     var restSeconds: Int
     var setDrafts: [TemplateExerciseSetDraft]
+    var components: [TemplateExerciseComponentDraft]
     var isExpanded: Bool
 
     init(draft: TemplateExerciseDraft, isExpanded: Bool = false) {
         id = draft.id
-        catalogExerciseUUID = draft.catalogExerciseUUID
-        exerciseNameSnapshot = draft.exerciseNameSnapshot
-        categorySnapshot = draft.categorySnapshot
-        muscleSummarySnapshot = draft.muscleSummarySnapshot
         targetRepMin = draft.targetRepMin
         targetRepMax = draft.targetRepMax
         restSeconds = draft.restSeconds
         setDrafts = draft.setDrafts
+        components = draft.components
         self.isExpanded = isExpanded
+    }
+
+    var catalogExerciseUUID: String {
+        components.first?.catalogExerciseUUID ?? ""
+    }
+
+    var exerciseNameSnapshot: String {
+        components.first?.exerciseNameSnapshot ?? "Exercise"
+    }
+
+    var categorySnapshot: String {
+        components.first?.categorySnapshot ?? ""
+    }
+
+    var muscleSummarySnapshot: String {
+        components.first?.muscleSummarySnapshot ?? ""
     }
 
     var draft: TemplateExerciseDraft {
@@ -525,7 +592,8 @@ private final class TemplateExerciseDraftStore: Identifiable {
             targetRepMin: targetRepMin,
             targetRepMax: targetRepMax,
             restSeconds: restSeconds,
-            setDrafts: setDrafts
+            setDrafts: setDrafts,
+            components: components
         )
     }
 }
@@ -541,6 +609,10 @@ private struct TemplateEditorExerciseRow: View {
     let onMoveUp: () -> Void
     let onMoveDown: () -> Void
     let onExerciseDelete: () -> Void
+    let onAddComponent: () -> Void
+    let onMoveComponentUp: (Int) -> Void
+    let onMoveComponentDown: (Int) -> Void
+    let onDeleteComponent: (UUID) -> Void
 
     @State private var swipeOffset: CGFloat = 0
     @State private var swipeRemoving = false
@@ -584,7 +656,13 @@ private struct TemplateEditorExerciseRow: View {
                 onSetDraftsChanged: updateSetDrafts,
                 onMoveUp: onMoveUp,
                 onMoveDown: onMoveDown,
-                onExerciseDelete: onExerciseDelete
+                onExerciseDelete: onExerciseDelete,
+                components: draftStore.components,
+                componentAccessibilityIDPrefix: "template-editor-component-\(draftStore.id.uuidString.lowercased())",
+                onAddComponent: onAddComponent,
+                onMoveComponentUp: onMoveComponentUp,
+                onMoveComponentDown: onMoveComponentDown,
+                onDeleteComponent: onDeleteComponent
             )
             .equatable()
         }
@@ -643,6 +721,12 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
     let onMoveUp: () -> Void
     let onMoveDown: () -> Void
     let onExerciseDelete: () -> Void
+    let components: [TemplateExerciseComponentDraft]
+    let componentAccessibilityIDPrefix: String
+    let onAddComponent: () -> Void
+    let onMoveComponentUp: (Int) -> Void
+    let onMoveComponentDown: (Int) -> Void
+    let onDeleteComponent: (UUID) -> Void
 
     static func == (lhs: TemplateEditorExerciseCardView, rhs: TemplateEditorExerciseCardView) -> Bool {
         lhs.exerciseName == rhs.exerciseName
@@ -658,6 +742,7 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
             && lhs.restSeconds == rhs.restSeconds
             && lhs.setDrafts == rhs.setDrafts
             && lhs.isExpanded == rhs.isExpanded
+            && lhs.components == rhs.components
     }
 
     var body: some View {
@@ -666,6 +751,16 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
             muscleSummary: muscleSummary,
             category: category,
             recommendation: recommendation,
+            supplementaryContent: AnyView(
+                TemplateExerciseComponentsSection(
+                    components: components,
+                    accessibilityIDPrefix: componentAccessibilityIDPrefix,
+                    onAddComponent: onAddComponent,
+                    onMoveComponentUp: onMoveComponentUp,
+                    onMoveComponentDown: onMoveComponentDown,
+                    onDeleteComponent: onDeleteComponent
+                )
+            ),
             initiallyExpanded: false,
             isExpanded: Binding(
                 get: { currentIsExpanded() },
@@ -719,10 +814,12 @@ private struct TemplateEditorExerciseRowData: Identifiable {
             WorkoutTemplate.self,
             TemplateCardioBlock.self,
             TemplateExercise.self,
+            TemplateExerciseComponent.self,
             TemplateExerciseSet.self,
             ActiveWorkoutDraftSession.self,
             ActiveWorkoutDraftCardioBlock.self,
             ActiveWorkoutDraftExercise.self,
+            ActiveWorkoutDraftExerciseComponent.self,
             ActiveWorkoutDraftSet.self,
         ], inMemory: true)
 }

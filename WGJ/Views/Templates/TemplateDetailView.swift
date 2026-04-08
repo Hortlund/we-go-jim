@@ -282,6 +282,11 @@ struct TemplateDetailView: View {
                     TemplateExerciseDetailDestinationView(templateExercise: row.exercise)
                 ),
                 recommendation: row.recommendation,
+                supplementaryContent: AnyView(
+                    TemplateExerciseComponentsSection(
+                        components: componentDrafts(for: row.exercise)
+                    )
+                ),
                 initiallyExpanded: false,
                 isExpanded: isExpandedBinding(for: row.id),
                 exerciseIndexTitle: "Exercise \(row.index + 1)",
@@ -659,6 +664,29 @@ struct TemplateDetailView: View {
         )
     }
 
+    @MainActor
+    private func componentDrafts(for exercise: TemplateExercise) -> [TemplateExerciseComponentDraft] {
+        let orderedComponents = (exercise.components ?? [])
+            .sorted { $0.sortOrder < $1.sortOrder }
+            .map(TemplateExerciseComponentDraft.init(model:))
+        if !orderedComponents.isEmpty {
+            return orderedComponents
+        }
+
+        guard !exercise.catalogExerciseUUID.isEmpty else {
+            return []
+        }
+
+        return [
+            TemplateExerciseComponentDraft(
+                catalogExerciseUUID: exercise.catalogExerciseUUID,
+                exerciseNameSnapshot: exercise.exerciseNameSnapshot,
+                categorySnapshot: exercise.categorySnapshot,
+                muscleSummarySnapshot: exercise.muscleSummarySnapshot
+            ),
+        ]
+    }
+
     private func showError(_ error: Error) {
         errorMessage = String(describing: error)
         showingError = true
@@ -880,10 +908,12 @@ private struct TemplateExerciseRowData: Identifiable {
         WorkoutTemplate.self,
         TemplateCardioBlock.self,
         TemplateExercise.self,
+        TemplateExerciseComponent.self,
         TemplateExerciseSet.self,
         ActiveWorkoutDraftSession.self,
         ActiveWorkoutDraftCardioBlock.self,
         ActiveWorkoutDraftExercise.self,
+        ActiveWorkoutDraftExerciseComponent.self,
         ActiveWorkoutDraftSet.self,
         WorkoutSession.self,
         WorkoutSessionCardioBlock.self,

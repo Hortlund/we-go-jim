@@ -9,6 +9,10 @@ final class ActiveWorkoutDraftRepository {
         WorkoutSessionRepository(modelContext: modelContext)
     }
 
+    private var componentRotationResolver: TemplateExerciseComponentRotationResolver {
+        TemplateExerciseComponentRotationResolver(modelContext: modelContext)
+    }
+
     init(modelContext: ModelContext) {
         self.modelContext = modelContext
     }
@@ -58,12 +62,20 @@ final class ActiveWorkoutDraftRepository {
 
         let orderedExercises = (template.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
         for (exerciseIndex, templateExercise) in orderedExercises.enumerated() {
+            let componentResolution = try componentRotationResolver.resolution(
+                for: template,
+                exercise: templateExercise,
+                before: session.startedAt,
+                excludingSessionID: session.id
+            )
+            let selectedComponent = componentResolution?.selectedComponent
             let exercise = ActiveWorkoutDraftExercise(
                 sessionID: session.id,
-                catalogExerciseUUID: templateExercise.catalogExerciseUUID,
-                exerciseNameSnapshot: templateExercise.exerciseNameSnapshot,
-                categorySnapshot: templateExercise.categorySnapshot,
-                muscleSummarySnapshot: templateExercise.muscleSummarySnapshot,
+                templateExerciseID: templateExercise.id,
+                catalogExerciseUUID: selectedComponent?.catalogExerciseUUID ?? templateExercise.catalogExerciseUUID,
+                exerciseNameSnapshot: selectedComponent?.exerciseNameSnapshot ?? templateExercise.exerciseNameSnapshot,
+                categorySnapshot: selectedComponent?.categorySnapshot ?? templateExercise.categorySnapshot,
+                muscleSummarySnapshot: selectedComponent?.muscleSummarySnapshot ?? templateExercise.muscleSummarySnapshot,
                 targetRepMin: templateExercise.targetRepMin,
                 targetRepMax: templateExercise.targetRepMax,
                 restSeconds: templateExercise.restSeconds,
@@ -71,6 +83,22 @@ final class ActiveWorkoutDraftRepository {
                 session: session
             )
             modelContext.insert(exercise)
+
+            let createdComponents = componentResolution?.availableComponents.enumerated().map { index, component in
+                ActiveWorkoutDraftExerciseComponent(
+                    sessionExerciseID: exercise.id,
+                    catalogExerciseUUID: component.catalogExerciseUUID,
+                    exerciseNameSnapshot: component.exerciseNameSnapshot,
+                    categorySnapshot: component.categorySnapshot,
+                    muscleSummarySnapshot: component.muscleSummarySnapshot,
+                    sortOrder: index,
+                    sessionExercise: exercise
+                )
+            } ?? []
+            for component in createdComponents {
+                modelContext.insert(component)
+            }
+            exercise.components = createdComponents
 
             let orderedSets = (templateExercise.prescribedSets ?? []).sorted { $0.sortOrder < $1.sortOrder }
             var createdSets: [ActiveWorkoutDraftSet] = []
@@ -169,6 +197,14 @@ final class ActiveWorkoutDraftRepository {
         return orderedSessionSets(for: exercise).map(WorkoutSessionSetDraft.init(model:))
     }
 
+    func components(sessionExerciseID: UUID) throws -> [ActiveWorkoutDraftExerciseComponent] {
+        guard let exercise = try sessionExercise(id: sessionExerciseID) else {
+            throw WorkoutSessionRepositoryError.sessionExerciseNotFound
+        }
+
+        return orderedComponents(for: exercise)
+    }
+
     func updateSessionName(sessionID: UUID, name: String) throws {
         guard let session = try session(id: sessionID) else {
             throw WorkoutSessionRepositoryError.sessionNotFound
@@ -190,6 +226,30 @@ final class ActiveWorkoutDraftRepository {
         try modelContext.save()
     }
 
+    func overrideExerciseComponent(sessionExerciseID: UUID, componentID: UUID) throws {
+        guard let exercise = try sessionExercise(id: sessionExerciseID) else {
+            throw WorkoutSessionRepositoryError.sessionExerciseNotFound
+        }
+
+        guard let component = orderedComponents(for: exercise).first(where: { $0.id == componentID }) else {
+            return
+        }
+
+        guard exercise.catalogExerciseUUID != component.catalogExerciseUUID
+            || exercise.exerciseNameSnapshot != component.exerciseNameSnapshot
+            || exercise.categorySnapshot != component.categorySnapshot
+            || exercise.muscleSummarySnapshot != component.muscleSummarySnapshot else {
+            return
+        }
+
+        exercise.catalogExerciseUUID = component.catalogExerciseUUID
+        exercise.exerciseNameSnapshot = component.exerciseNameSnapshot
+        exercise.categorySnapshot = component.categorySnapshot
+        exercise.muscleSummarySnapshot = component.muscleSummarySnapshot
+        exercise.updatedAt = .now
+        try modelContext.save()
+    }
+
     func addExercise(sessionID: UUID, catalogItem: ExerciseCatalogItem, restSeconds: Int = 120) throws {
         guard let session = try session(id: sessionID) else {
             throw WorkoutSessionRepositoryError.sessionNotFound
@@ -203,6 +263,7 @@ final class ActiveWorkoutDraftRepository {
         let nextIndex = (existing.map(\.sortOrder).max() ?? -1) + 1
         let created = ActiveWorkoutDraftExercise(
             sessionID: sessionID,
+            templateExerciseID: nil,
             catalogExerciseUUID: catalogItem.remoteUUID,
             exerciseNameSnapshot: catalogItem.displayName,
             categorySnapshot: catalogItem.categoryName,
@@ -526,6 +587,7 @@ final class ActiveWorkoutDraftRepository {
             let draftExercise = ActiveWorkoutDraftExercise(
                 id: legacyExercise.id,
                 sessionID: draftSession.id,
+                templateExerciseID: legacyExercise.templateExerciseID,
                 catalogExerciseUUID: legacyExercise.catalogExerciseUUID,
                 exerciseNameSnapshot: legacyExercise.exerciseNameSnapshot,
                 categorySnapshot: legacyExercise.categorySnapshot,
@@ -539,6 +601,16 @@ final class ActiveWorkoutDraftRepository {
                 session: draftSession
             )
             modelContext.insert(draftExercise)
+
+            let draftComponents = try makeDraftComponents(
+                fromLegacyExercise: legacyExercise,
+                draftExercise: draftExercise,
+                templateID: legacySession.templateID
+            )
+            for component in draftComponents {
+                modelContext.insert(component)
+            }
+            draftExercise.components = draftComponents
 
             var draftSets: [ActiveWorkoutDraftSet] = []
             let orderedSets = (legacyExercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
@@ -623,6 +695,7 @@ final class ActiveWorkoutDraftRepository {
             let completedExercise = WorkoutSessionExercise(
                 id: draftExercise.id,
                 sessionID: completedSession.id,
+                templateExerciseID: draftExercise.templateExerciseID,
                 catalogExerciseUUID: draftExercise.catalogExerciseUUID,
                 exerciseNameSnapshot: draftExercise.exerciseNameSnapshot,
                 categorySnapshot: draftExercise.categorySnapshot,
@@ -682,6 +755,53 @@ final class ActiveWorkoutDraftRepository {
             exercise.id == id
         })
         return try modelContext.fetch(descriptor).first
+    }
+
+    private func makeDraftComponents(
+        fromLegacyExercise legacyExercise: WorkoutSessionExercise,
+        draftExercise: ActiveWorkoutDraftExercise,
+        templateID: UUID?
+    ) throws -> [ActiveWorkoutDraftExerciseComponent] {
+        if let templateID,
+           let templateExerciseID = legacyExercise.templateExerciseID,
+           let template = try template(id: templateID),
+           let templateExercise = (template.exercises ?? []).first(where: { $0.id == templateExerciseID }) {
+            let orderedTemplateComponents = (templateExercise.components ?? [])
+                .sorted { $0.sortOrder < $1.sortOrder }
+            if !orderedTemplateComponents.isEmpty {
+                return orderedTemplateComponents.enumerated().map { index, component in
+                    ActiveWorkoutDraftExerciseComponent(
+                        sessionExerciseID: draftExercise.id,
+                        catalogExerciseUUID: component.catalogExerciseUUID,
+                        exerciseNameSnapshot: component.exerciseNameSnapshot,
+                        categorySnapshot: component.categorySnapshot,
+                        muscleSummarySnapshot: component.muscleSummarySnapshot,
+                        sortOrder: index,
+                        createdAt: component.createdAt,
+                        updatedAt: component.updatedAt,
+                        sessionExercise: draftExercise
+                    )
+                }
+            }
+        }
+
+        guard !legacyExercise.catalogExerciseUUID.isEmpty else {
+            return []
+        }
+
+        return [
+            ActiveWorkoutDraftExerciseComponent(
+                sessionExerciseID: draftExercise.id,
+                catalogExerciseUUID: legacyExercise.catalogExerciseUUID,
+                exerciseNameSnapshot: legacyExercise.exerciseNameSnapshot,
+                categorySnapshot: legacyExercise.categorySnapshot,
+                muscleSummarySnapshot: legacyExercise.muscleSummarySnapshot,
+                sortOrder: 0,
+                createdAt: legacyExercise.createdAt,
+                updatedAt: legacyExercise.updatedAt,
+                sessionExercise: draftExercise
+            ),
+        ]
     }
 
     private func defaultSessionSets(
@@ -774,6 +894,12 @@ final class ActiveWorkoutDraftRepository {
 
     private func orderedSessionSets(for exercise: ActiveWorkoutDraftExercise) -> [ActiveWorkoutDraftSet] {
         (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    private func orderedComponents(for exercise: ActiveWorkoutDraftExercise) -> [ActiveWorkoutDraftExerciseComponent] {
+        (exercise.components ?? [])
+            .filter { $0.modelContext != nil }
+            .sorted { $0.sortOrder < $1.sortOrder }
     }
 
     private func apply(

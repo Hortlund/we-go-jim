@@ -112,6 +112,143 @@ struct WorkoutSessionRepositoryTests {
     }
 
     @Test
+    func createSessionFromTemplateRotatesMultiComponentExerciseAcrossCompletedSessions() throws {
+        let context = try makeInMemoryContext()
+        let templateRepository = TemplateRepository(modelContext: context)
+        let repository = WorkoutSessionRepository(modelContext: context)
+
+        let reverseCurl = ExerciseCatalogItem(
+            remoteUUID: "session-rotation-reverse-curl",
+            displayName: "Reverse Curl",
+            categoryName: "Arms",
+            equipmentSummary: "EZ bar",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        let wristCurl = ExerciseCatalogItem(
+            remoteUUID: "session-rotation-wrist-curl",
+            displayName: "Wrist Curl",
+            categoryName: "Arms",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(reverseCurl)
+        context.insert(wristCurl)
+
+        let template = try templateRepository.createTemplate(name: "Forearms", notes: "")
+        try templateRepository.setExercises(
+            templateID: template.id,
+            drafts: [
+                TemplateExerciseDraft(
+                    catalogExerciseUUID: reverseCurl.remoteUUID,
+                    exerciseNameSnapshot: reverseCurl.displayName,
+                    categorySnapshot: reverseCurl.categoryName,
+                    muscleSummarySnapshot: reverseCurl.primaryMuscleNames,
+                    targetRepMin: 10,
+                    targetRepMax: 12,
+                    restSeconds: 60,
+                    setDrafts: [
+                        TemplateExerciseSetDraft(targetReps: 12, targetWeight: 20, loadUnit: .kg, restSeconds: 60),
+                    ],
+                    components: [
+                        TemplateExerciseComponentDraft(catalogItem: reverseCurl),
+                        TemplateExerciseComponentDraft(catalogItem: wristCurl),
+                    ]
+                ),
+            ]
+        )
+
+        let firstSession = try repository.createSessionFromTemplate(templateID: template.id)
+        firstSession.startedAt = Date(timeIntervalSince1970: 1_000)
+        try context.save()
+        let firstExercise = try #require(try repository.sessionExercises(sessionID: firstSession.id).first)
+        #expect(firstExercise.catalogExerciseUUID == reverseCurl.remoteUUID)
+        #expect(firstExercise.templateExerciseID != nil)
+        var firstDrafts = try repository.setDrafts(sessionExerciseID: firstExercise.id)
+        firstDrafts[0].isCompleted = true
+        try repository.saveSetDrafts(sessionExerciseID: firstExercise.id, drafts: firstDrafts)
+        try repository.finishSession(sessionID: firstSession.id)
+
+        let secondSession = try repository.createSessionFromTemplate(templateID: template.id)
+        secondSession.startedAt = Date(timeIntervalSince1970: 2_000)
+        try context.save()
+        let secondExercise = try #require(try repository.sessionExercises(sessionID: secondSession.id).first)
+        #expect(secondExercise.catalogExerciseUUID == wristCurl.remoteUUID)
+        #expect(secondExercise.templateExerciseID == firstExercise.templateExerciseID)
+        var secondDrafts = try repository.setDrafts(sessionExerciseID: secondExercise.id)
+        secondDrafts[0].isCompleted = true
+        try repository.saveSetDrafts(sessionExerciseID: secondExercise.id, drafts: secondDrafts)
+        try repository.finishSession(sessionID: secondSession.id)
+
+        let thirdSession = try repository.createSessionFromTemplate(templateID: template.id)
+        let thirdExercise = try #require(try repository.sessionExercises(sessionID: thirdSession.id).first)
+        #expect(thirdExercise.catalogExerciseUUID == reverseCurl.remoteUUID)
+        #expect(thirdExercise.templateExerciseID == firstExercise.templateExerciseID)
+    }
+
+    @Test
+    func createSessionFromTemplateDoesNotAdvanceRotationWhenNoSetsWereCompleted() throws {
+        let context = try makeInMemoryContext()
+        let templateRepository = TemplateRepository(modelContext: context)
+        let repository = WorkoutSessionRepository(modelContext: context)
+
+        let seatedCalfRaise = ExerciseCatalogItem(
+            remoteUUID: "session-rotation-seated-calf-raise",
+            displayName: "Seated Calf Raise",
+            categoryName: "Legs",
+            equipmentSummary: "Machine",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        let standingCalfRaise = ExerciseCatalogItem(
+            remoteUUID: "session-rotation-standing-calf-raise",
+            displayName: "Standing Calf Raise",
+            categoryName: "Legs",
+            equipmentSummary: "Machine",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(seatedCalfRaise)
+        context.insert(standingCalfRaise)
+
+        let template = try templateRepository.createTemplate(name: "Calves", notes: "")
+        try templateRepository.setExercises(
+            templateID: template.id,
+            drafts: [
+                TemplateExerciseDraft(
+                    catalogExerciseUUID: seatedCalfRaise.remoteUUID,
+                    exerciseNameSnapshot: seatedCalfRaise.displayName,
+                    categorySnapshot: seatedCalfRaise.categoryName,
+                    muscleSummarySnapshot: seatedCalfRaise.primaryMuscleNames,
+                    targetRepMin: 12,
+                    targetRepMax: 15,
+                    restSeconds: 60,
+                    setDrafts: [
+                        TemplateExerciseSetDraft(targetReps: 15, targetWeight: 40, loadUnit: .kg, restSeconds: 60),
+                    ],
+                    components: [
+                        TemplateExerciseComponentDraft(catalogItem: seatedCalfRaise),
+                        TemplateExerciseComponentDraft(catalogItem: standingCalfRaise),
+                    ]
+                ),
+            ]
+        )
+
+        let firstSession = try repository.createSessionFromTemplate(templateID: template.id)
+        firstSession.startedAt = Date(timeIntervalSince1970: 1_000)
+        try context.save()
+        let firstExercise = try #require(try repository.sessionExercises(sessionID: firstSession.id).first)
+        #expect(firstExercise.catalogExerciseUUID == seatedCalfRaise.remoteUUID)
+        try repository.finishSession(sessionID: firstSession.id)
+
+        let secondSession = try repository.createSessionFromTemplate(templateID: template.id)
+        let secondExercise = try #require(try repository.sessionExercises(sessionID: secondSession.id).first)
+        #expect(secondExercise.catalogExerciseUUID == seatedCalfRaise.remoteUUID)
+        #expect(secondExercise.templateExerciseID == firstExercise.templateExerciseID)
+    }
+
+    @Test
     func previousSetLookupMatchesExerciseAndSetIndex() throws {
         let context = try makeInMemoryContext()
         let repository = WorkoutSessionRepository(modelContext: context)
@@ -224,10 +361,13 @@ struct WorkoutSessionRepositoryTests {
         let template = try templateRepository.createTemplate(fromSessionID: session.id, name: "Deadlift Template")
         let templateExercise = try templateRepository.exercises(in: template.id).first
         let setDrafts = try templateExercise.map { try templateRepository.setDrafts(for: $0.id) } ?? []
+        let components = try templateExercise.map { try templateRepository.components(for: $0.id) } ?? []
 
         #expect(templateExercise?.exerciseNameSnapshot == "Deadlift")
         #expect(setDrafts.first?.targetWeight == 180)
         #expect(setDrafts.first?.targetReps == 3)
+        #expect(components.count == 1)
+        #expect(components.first?.catalogExerciseUUID == item.remoteUUID)
     }
 
     @Test
@@ -488,10 +628,12 @@ struct WorkoutSessionRepositoryTests {
             WorkoutTemplate.self,
             TemplateCardioBlock.self,
             TemplateExercise.self,
+            TemplateExerciseComponent.self,
             TemplateExerciseSet.self,
             ActiveWorkoutDraftSession.self,
             ActiveWorkoutDraftCardioBlock.self,
             ActiveWorkoutDraftExercise.self,
+            ActiveWorkoutDraftExerciseComponent.self,
             ActiveWorkoutDraftSet.self,
             WorkoutSession.self,
             WorkoutSessionCardioBlock.self,

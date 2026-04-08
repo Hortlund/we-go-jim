@@ -1261,6 +1261,7 @@ struct StartWorkoutTemplatePreview: Identifiable, Equatable {
         let id: UUID
         let sortOrder: Int
         let exerciseName: String
+        let componentNames: [String]
         let focusArea: String?
         let descriptor: String?
         let targetRepMin: Int?
@@ -1272,6 +1273,14 @@ struct StartWorkoutTemplatePreview: Identifiable, Equatable {
             id = templateExercise.id
             sortOrder = templateExercise.sortOrder
             exerciseName = templateExercise.exerciseNameSnapshot
+            let orderedComponentNames = (templateExercise.components ?? [])
+                .sorted { $0.sortOrder < $1.sortOrder }
+                .map(\.exerciseNameSnapshot)
+            if orderedComponentNames.isEmpty {
+                componentNames = [templateExercise.exerciseNameSnapshot]
+            } else {
+                componentNames = orderedComponentNames
+            }
             let resolvedDescriptor = Self.makeDescriptor(
                 muscleSummary: templateExercise.muscleSummarySnapshot,
                 category: templateExercise.categorySnapshot
@@ -1563,6 +1572,14 @@ private struct TemplateStartPreviewSheet: View {
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+
+                if exercise.componentNames.count > 1 {
+                    Text("Options: \(exercise.componentNames.joined(separator: ", "))")
+                        .font(.caption)
+                        .foregroundStyle(WGJTheme.textSecondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -1690,10 +1707,12 @@ private struct PendingTemplateFileTaskKey: Hashable {
         WorkoutTemplate.self,
         TemplateCardioBlock.self,
         TemplateExercise.self,
+        TemplateExerciseComponent.self,
         TemplateExerciseSet.self,
         ActiveWorkoutDraftSession.self,
         ActiveWorkoutDraftCardioBlock.self,
         ActiveWorkoutDraftExercise.self,
+        ActiveWorkoutDraftExerciseComponent.self,
         ActiveWorkoutDraftSet.self,
         WorkoutSession.self,
         WorkoutSessionCardioBlock.self,

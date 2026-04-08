@@ -176,6 +176,76 @@ struct WorkoutTemplateSyncServiceTests {
     }
 
     @Test
+    func previewIgnoresSessionOnlyExerciseComponentOverride() throws {
+        let context = try makeInMemoryContext()
+        let templateRepository = TemplateRepository(modelContext: context)
+        let sessionRepository = WorkoutSessionRepository(modelContext: context)
+        let syncService = WorkoutTemplateSyncService(modelContext: context)
+
+        let reverseCurl = catalogItem(
+            remoteUUID: "sync-component-reverse-curl",
+            displayName: "Reverse Curl",
+            categoryName: "Arms",
+            equipmentSummary: "EZ bar"
+        )
+        let wristCurl = catalogItem(
+            remoteUUID: "sync-component-wrist-curl",
+            displayName: "Wrist Curl",
+            categoryName: "Arms",
+            equipmentSummary: "Barbell"
+        )
+        context.insert(reverseCurl)
+        context.insert(wristCurl)
+
+        let template = try makeTemplate(
+            name: "Forearms",
+            exercises: [
+                TemplateExerciseDraft(
+                    catalogExerciseUUID: reverseCurl.remoteUUID,
+                    exerciseNameSnapshot: reverseCurl.displayName,
+                    categorySnapshot: reverseCurl.categoryName,
+                    muscleSummarySnapshot: reverseCurl.primaryMuscleNames,
+                    targetRepMin: 10,
+                    targetRepMax: 12,
+                    restSeconds: 60,
+                    setDrafts: [
+                        TemplateExerciseSetDraft(targetReps: 12, targetWeight: 20, loadUnit: .kg, restSeconds: 60),
+                    ],
+                    components: [
+                        TemplateExerciseComponentDraft(catalogItem: reverseCurl),
+                        TemplateExerciseComponentDraft(catalogItem: wristCurl),
+                    ]
+                ),
+            ],
+            repository: templateRepository
+        )
+
+        let session = try sessionRepository.createSessionFromTemplate(templateID: template.id)
+        session.startedAt = Date(timeIntervalSince1970: 1_000)
+        let exercise = try #require(try sessionRepository.sessionExercises(sessionID: session.id).first)
+        exercise.catalogExerciseUUID = wristCurl.remoteUUID
+        exercise.exerciseNameSnapshot = wristCurl.displayName
+        exercise.categorySnapshot = wristCurl.categoryName
+        exercise.muscleSummarySnapshot = wristCurl.primaryMuscleNames
+        try context.save()
+
+        var drafts = try sessionRepository.setDrafts(sessionExerciseID: exercise.id)
+        drafts[0].actualWeight = 22.5
+        drafts[0].actualReps = 12
+        drafts[0].isCompleted = true
+        try sessionRepository.saveSetDrafts(sessionExerciseID: exercise.id, drafts: drafts)
+        try sessionRepository.finishSession(sessionID: session.id)
+
+        #expect(try syncService.previewTemplateUpdate(forSessionID: session.id) == nil)
+
+        let templateExercise = try #require(try templateRepository.exercises(in: template.id).first)
+        #expect(try templateRepository.components(for: templateExercise.id).map(\.catalogExerciseUUID) == [
+            reverseCurl.remoteUUID,
+            wristCurl.remoteUUID,
+        ])
+    }
+
+    @Test
     func previewAndApplyTemplateUpdateHandleCardioPhaseChanges() throws {
         let context = try makeInMemoryContext()
         let templateRepository = TemplateRepository(modelContext: context)
@@ -498,10 +568,12 @@ struct WorkoutTemplateSyncServiceTests {
             WorkoutTemplate.self,
             TemplateCardioBlock.self,
             TemplateExercise.self,
+            TemplateExerciseComponent.self,
             TemplateExerciseSet.self,
             ActiveWorkoutDraftSession.self,
             ActiveWorkoutDraftCardioBlock.self,
             ActiveWorkoutDraftExercise.self,
+            ActiveWorkoutDraftExerciseComponent.self,
             ActiveWorkoutDraftSet.self,
             WorkoutSession.self,
             WorkoutSessionCardioBlock.self,

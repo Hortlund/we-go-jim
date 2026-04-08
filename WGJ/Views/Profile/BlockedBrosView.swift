@@ -84,6 +84,7 @@ struct BlockedBrosView: View {
         BlockedBro.self,
         ActiveWorkoutDraftSession.self,
         ActiveWorkoutDraftExercise.self,
+        ActiveWorkoutDraftExerciseComponent.self,
         ActiveWorkoutDraftSet.self,
     ], inMemory: true)
 }

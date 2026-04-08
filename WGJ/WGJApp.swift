@@ -113,10 +113,12 @@ struct WGJApp: App {
             WorkoutTemplate.self,
             TemplateCardioBlock.self,
             TemplateExercise.self,
+            TemplateExerciseComponent.self,
             TemplateExerciseSet.self,
             ActiveWorkoutDraftSession.self,
             ActiveWorkoutDraftCardioBlock.self,
             ActiveWorkoutDraftExercise.self,
+            ActiveWorkoutDraftExerciseComponent.self,
             ActiveWorkoutDraftSet.self,
             WorkoutSession.self,
             WorkoutSessionCardioBlock.self,
@@ -147,6 +149,7 @@ struct WGJApp: App {
             WorkoutTemplate.self,
             TemplateCardioBlock.self,
             TemplateExercise.self,
+            TemplateExerciseComponent.self,
             TemplateExerciseSet.self,
             WorkoutSession.self,
             WorkoutSessionCardioBlock.self,
@@ -158,6 +161,7 @@ struct WGJApp: App {
             ActiveWorkoutDraftSession.self,
             ActiveWorkoutDraftCardioBlock.self,
             ActiveWorkoutDraftExercise.self,
+            ActiveWorkoutDraftExerciseComponent.self,
             ActiveWorkoutDraftSet.self,
         ])
 

@@ -22,6 +22,7 @@ struct TemplateExercisePrescriptionEditor: View {
     let canMoveDown: Bool
     let recommendation: TemplateExerciseRecommendation?
     let preferredLoadUnit: TemplateLoadUnit
+    let supplementaryContent: AnyView?
 
     @Binding var targetRepMin: Int?
     @Binding var targetRepMax: Int?
@@ -53,6 +54,7 @@ struct TemplateExercisePrescriptionEditor: View {
         category: String,
         infoDestination: AnyView? = nil,
         recommendation: TemplateExerciseRecommendation? = nil,
+        supplementaryContent: AnyView? = nil,
         initiallyExpanded: Bool = false,
         isExpanded: Binding<Bool>? = nil,
         exerciseIndexTitle: String? = nil,
@@ -75,6 +77,7 @@ struct TemplateExercisePrescriptionEditor: View {
         self.category = category
         self.infoDestination = infoDestination
         self.recommendation = recommendation
+        self.supplementaryContent = supplementaryContent
         self.exerciseIndexTitle = exerciseIndexTitle
         self.canMoveUp = canMoveUp
         self.canMoveDown = canMoveDown
@@ -109,6 +112,10 @@ struct TemplateExercisePrescriptionEditor: View {
                 }
 
                 controlsSection
+
+                if let supplementaryContent {
+                    supplementaryContent
+                }
 
                 if let recommendation {
                     setupTipsSection(recommendation: recommendation)

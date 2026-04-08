@@ -173,6 +173,93 @@ struct TemplateRepositoryTests {
         #expect(cardioBlocks.map(\.targetDurationSeconds) == [300, 1200])
     }
 
+    @Test
+    func setExercisesPersistsOrderedExerciseComponents() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+
+        let reverseCurl = ExerciseCatalogItem(
+            remoteUUID: "template-component-reverse-curl",
+            displayName: "Reverse Curl",
+            categoryName: "Arms",
+            equipmentSummary: "EZ bar",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        let wristCurl = ExerciseCatalogItem(
+            remoteUUID: "template-component-wrist-curl",
+            displayName: "Wrist Curl",
+            categoryName: "Arms",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(reverseCurl)
+        context.insert(wristCurl)
+
+        let template = try repository.createTemplate(name: "Forearms", notes: "")
+        try repository.setExercises(
+            templateID: template.id,
+            drafts: [
+                TemplateExerciseDraft(
+                    catalogExerciseUUID: reverseCurl.remoteUUID,
+                    exerciseNameSnapshot: reverseCurl.displayName,
+                    categorySnapshot: reverseCurl.categoryName,
+                    muscleSummarySnapshot: reverseCurl.primaryMuscleNames,
+                    targetRepMin: 12,
+                    targetRepMax: 15,
+                    restSeconds: 60,
+                    setDrafts: [
+                        TemplateExerciseSetDraft(targetReps: 15, targetWeight: 20, loadUnit: .kg, restSeconds: 60),
+                    ],
+                    components: [
+                        TemplateExerciseComponentDraft(catalogItem: reverseCurl),
+                        TemplateExerciseComponentDraft(catalogItem: wristCurl),
+                    ]
+                ),
+            ]
+        )
+
+        let storedExercise = try #require(try repository.exercises(in: template.id).first)
+        let storedComponents = try repository.components(for: storedExercise.id)
+
+        #expect(storedExercise.exerciseNameSnapshot == "Reverse Curl")
+        #expect(storedExercise.catalogExerciseUUID == reverseCurl.remoteUUID)
+        #expect(storedComponents.map(\.catalogExerciseUUID) == [reverseCurl.remoteUUID, wristCurl.remoteUUID])
+        #expect(storedComponents.map(\.exerciseNameSnapshot) == ["Reverse Curl", "Wrist Curl"])
+    }
+
+    @Test
+    func exercisesLazyNormalizeLegacySingleExerciseIntoOneComponentSlot() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+
+        let template = try repository.createTemplate(name: "Legacy Template", notes: "")
+        let legacyExercise = TemplateExercise(
+            templateID: template.id,
+            catalogExerciseUUID: "legacy-standing-calf-raise",
+            exerciseNameSnapshot: "Standing Calf Raise",
+            categorySnapshot: "Legs",
+            muscleSummarySnapshot: "Calves",
+            targetRepMin: 12,
+            targetRepMax: 15,
+            restSeconds: 75,
+            sortOrder: 0,
+            template: template
+        )
+        legacyExercise.components = nil
+        context.insert(legacyExercise)
+        try context.save()
+
+        let storedExercise = try #require(try repository.exercises(in: template.id).first)
+        let normalizedComponents = try repository.components(for: storedExercise.id)
+
+        #expect(normalizedComponents.count == 1)
+        #expect(normalizedComponents.first?.catalogExerciseUUID == "legacy-standing-calf-raise")
+        #expect(normalizedComponents.first?.exerciseNameSnapshot == "Standing Calf Raise")
+        #expect(storedExercise.exerciseNameSnapshot == "Standing Calf Raise")
+    }
+
     private func makeInMemoryContext() throws -> ModelContext {
         let schema = Schema([
             ExerciseCatalogItem.self,
@@ -187,10 +274,12 @@ struct TemplateRepositoryTests {
             WorkoutTemplate.self,
             TemplateCardioBlock.self,
             TemplateExercise.self,
+            TemplateExerciseComponent.self,
             TemplateExerciseSet.self,
             ActiveWorkoutDraftSession.self,
             ActiveWorkoutDraftCardioBlock.self,
             ActiveWorkoutDraftExercise.self,
+            ActiveWorkoutDraftExerciseComponent.self,
             ActiveWorkoutDraftSet.self,
             WorkoutSession.self,
             WorkoutSessionCardioBlock.self,

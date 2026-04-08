@@ -136,6 +136,7 @@ struct WorkoutTemplateSyncCardioMutation: Equatable {
 }
 
 struct WorkoutTemplateSyncExerciseMutation: Equatable {
+    let templateExerciseID: UUID?
     let catalogExerciseUUID: String
     let exerciseNameSnapshot: String
     let categorySnapshot: String
@@ -144,6 +145,31 @@ struct WorkoutTemplateSyncExerciseMutation: Equatable {
     let targetRepMax: Int?
     let restSeconds: Int
     let setDrafts: [TemplateExerciseSetDraft]
+    let components: [TemplateExerciseComponentDraft]
+
+    init(
+        templateExerciseID: UUID? = nil,
+        catalogExerciseUUID: String,
+        exerciseNameSnapshot: String,
+        categorySnapshot: String,
+        muscleSummarySnapshot: String,
+        targetRepMin: Int?,
+        targetRepMax: Int?,
+        restSeconds: Int,
+        setDrafts: [TemplateExerciseSetDraft],
+        components: [TemplateExerciseComponentDraft] = []
+    ) {
+        self.templateExerciseID = templateExerciseID
+        self.catalogExerciseUUID = catalogExerciseUUID
+        self.exerciseNameSnapshot = exerciseNameSnapshot
+        self.categorySnapshot = categorySnapshot
+        self.muscleSummarySnapshot = muscleSummarySnapshot
+        self.targetRepMin = targetRepMin
+        self.targetRepMax = targetRepMax
+        self.restSeconds = restSeconds
+        self.setDrafts = setDrafts
+        self.components = components
+    }
 }
 
 @MainActor
@@ -177,8 +203,22 @@ final class WorkoutTemplateSyncService {
         let templateExercisesByUUID = Dictionary(
             uniqueKeysWithValues: orderedTemplateExercises.map { ($0.catalogExerciseUUID, $0) }
         )
-        let sessionExercisesByUUID = Dictionary(
-            uniqueKeysWithValues: orderedSessionExercises.map { ($0.catalogExerciseUUID, $0) }
+        let templateExercisesByID = Dictionary(
+            uniqueKeysWithValues: orderedTemplateExercises.map { ($0.id, $0) }
+        )
+        let matchedTemplateIDs = Set<UUID>(
+            orderedSessionExercises.compactMap { exercise in
+                guard let templateExerciseID = exercise.templateExerciseID,
+                      templateExercisesByID[templateExerciseID] != nil else {
+                    return nil
+                }
+                return templateExerciseID
+            }
+        )
+        let sessionExercisesByLegacyCatalogUUID = Dictionary(
+            uniqueKeysWithValues: orderedSessionExercises
+                .filter { $0.templateExerciseID == nil }
+                .map { ($0.catalogExerciseUUID, $0) }
         )
 
         let addedCardioBlocks = orderedSessionCardioBlocks.compactMap { cardioBlock -> WorkoutTemplateSyncAddedCardioBlock? in
@@ -226,6 +266,10 @@ final class WorkoutTemplateSyncService {
         }
 
         let addedExercises = orderedSessionExercises.compactMap { sessionExercise -> WorkoutTemplateSyncAddedExercise? in
+            if let templateExerciseID = sessionExercise.templateExerciseID,
+               templateExercisesByID[templateExerciseID] != nil {
+                return nil
+            }
             guard templateExercisesByUUID[sessionExercise.catalogExerciseUUID] == nil else {
                 return nil
             }
@@ -243,7 +287,10 @@ final class WorkoutTemplateSyncService {
         }
 
         let removedExercises = orderedTemplateExercises.compactMap { templateExercise -> WorkoutTemplateSyncRemovedExercise? in
-            guard sessionExercisesByUUID[templateExercise.catalogExerciseUUID] == nil else {
+            if matchedTemplateIDs.contains(templateExercise.id) {
+                return nil
+            }
+            guard sessionExercisesByLegacyCatalogUUID[templateExercise.catalogExerciseUUID] == nil else {
                 return nil
             }
 
@@ -266,7 +313,12 @@ final class WorkoutTemplateSyncService {
 
         var editedExercises: [WorkoutTemplateSyncEditedExercise] = []
         for sessionExercise in orderedSessionExercises {
-            guard let templateExercise = templateExercisesByUUID[sessionExercise.catalogExerciseUUID] else {
+            let templateExercise = matchedTemplateExercise(
+                for: sessionExercise,
+                templateExercisesByID: templateExercisesByID,
+                templateExercisesByUUID: templateExercisesByUUID
+            )
+            guard let templateExercise else {
                 continue
             }
 
@@ -312,7 +364,16 @@ final class WorkoutTemplateSyncService {
             editedExercises: editedExercises,
             mutation: WorkoutTemplateSyncMutation(
                 cardioBlocks: orderedSessionCardioBlocks.map(makeMutation(from:)),
-                exercises: orderedSessionExercises.map(makeMutation(from:))
+                exercises: orderedSessionExercises.map { sessionExercise in
+                    makeMutation(
+                        from: sessionExercise,
+                        templateExercise: matchedTemplateExercise(
+                            for: sessionExercise,
+                            templateExercisesByID: templateExercisesByID,
+                            templateExercisesByUUID: templateExercisesByUUID
+                        )
+                    )
+                }
             )
         )
     }
@@ -340,16 +401,30 @@ final class WorkoutTemplateSyncService {
         return try modelContext.fetch(descriptor).first
     }
 
-    private func makeMutation(from sessionExercise: WorkoutSessionExercise) -> WorkoutTemplateSyncExerciseMutation {
-        WorkoutTemplateSyncExerciseMutation(
-            catalogExerciseUUID: sessionExercise.catalogExerciseUUID,
-            exerciseNameSnapshot: sessionExercise.exerciseNameSnapshot,
-            categorySnapshot: sessionExercise.categorySnapshot,
-            muscleSummarySnapshot: sessionExercise.muscleSummarySnapshot,
+    private func makeMutation(
+        from sessionExercise: WorkoutSessionExercise,
+        templateExercise: TemplateExercise?
+    ) -> WorkoutTemplateSyncExerciseMutation {
+        let componentDrafts = templateExercise.map(templateComponentDrafts(for:)) ?? [
+            TemplateExerciseComponentDraft(
+                catalogExerciseUUID: sessionExercise.catalogExerciseUUID,
+                exerciseNameSnapshot: sessionExercise.exerciseNameSnapshot,
+                categorySnapshot: sessionExercise.categorySnapshot,
+                muscleSummarySnapshot: sessionExercise.muscleSummarySnapshot
+            ),
+        ]
+        let primaryComponent = componentDrafts.first
+        return WorkoutTemplateSyncExerciseMutation(
+            templateExerciseID: sessionExercise.templateExerciseID,
+            catalogExerciseUUID: primaryComponent?.catalogExerciseUUID ?? sessionExercise.catalogExerciseUUID,
+            exerciseNameSnapshot: primaryComponent?.exerciseNameSnapshot ?? sessionExercise.exerciseNameSnapshot,
+            categorySnapshot: primaryComponent?.categorySnapshot ?? sessionExercise.categorySnapshot,
+            muscleSummarySnapshot: primaryComponent?.muscleSummarySnapshot ?? sessionExercise.muscleSummarySnapshot,
             targetRepMin: sessionExercise.targetRepMin,
             targetRepMax: sessionExercise.targetRepMax,
             restSeconds: normalizedRest(sessionExercise.restSeconds),
-            setDrafts: mappedSetDrafts(from: sessionExercise)
+            setDrafts: mappedSetDrafts(from: sessionExercise),
+            components: componentDrafts
         )
     }
 
@@ -375,6 +450,58 @@ final class WorkoutTemplateSyncService {
                 isLocked: sessionSet.isLocked
             )
         }
+    }
+
+    private func templateComponentDrafts(for templateExercise: TemplateExercise) -> [TemplateExerciseComponentDraft] {
+        let orderedComponents = (templateExercise.components ?? [])
+            .sorted { $0.sortOrder < $1.sortOrder }
+            .map(TemplateExerciseComponentDraft.init(model:))
+        if !orderedComponents.isEmpty {
+            return orderedComponents
+        }
+
+        guard !templateExercise.catalogExerciseUUID.isEmpty else {
+            return []
+        }
+
+        return [
+            TemplateExerciseComponentDraft(
+                catalogExerciseUUID: templateExercise.catalogExerciseUUID,
+                exerciseNameSnapshot: templateExercise.exerciseNameSnapshot,
+                categorySnapshot: templateExercise.categorySnapshot,
+                muscleSummarySnapshot: templateExercise.muscleSummarySnapshot
+            ),
+        ]
+    }
+
+    private func matchedTemplateExercise(
+        for sessionExercise: WorkoutSessionExercise,
+        templateExercisesByID: [UUID: TemplateExercise],
+        templateExercisesByUUID: [String: TemplateExercise]
+    ) -> TemplateExercise? {
+        if let templateExerciseID = sessionExercise.templateExerciseID,
+           let matchedByID = templateExercisesByID[templateExerciseID] {
+            return matchedByID
+        }
+
+        return templateExercisesByUUID[sessionExercise.catalogExerciseUUID]
+    }
+
+    private func syncIdentityKey(
+        templateExerciseID: UUID?,
+        catalogExerciseUUID: String
+    ) -> String {
+        if let templateExerciseID {
+            return "slot:\(templateExerciseID.uuidString.lowercased())"
+        }
+        return "exercise:\(catalogExerciseUUID.lowercased())"
+    }
+
+    private func syncIdentityKey(for sessionExercise: WorkoutSessionExercise) -> String {
+        syncIdentityKey(
+            templateExerciseID: sessionExercise.templateExerciseID,
+            catalogExerciseUUID: sessionExercise.catalogExerciseUUID
+        )
     }
 
     private func editedChangeSummaries(
@@ -445,30 +572,36 @@ final class WorkoutTemplateSyncService {
         templateExercises: [TemplateExercise],
         sessionExercises: [WorkoutSessionExercise]
     ) -> [WorkoutTemplateSyncReorderedExercise] {
-        let sessionCatalogUUIDs = Set(sessionExercises.map(\.catalogExerciseUUID))
-        let templateCatalogUUIDs = Set(templateExercises.map(\.catalogExerciseUUID))
         let sharedTemplateOrder = templateExercises
-            .map(\.catalogExerciseUUID)
-            .filter { sessionCatalogUUIDs.contains($0) }
+            .map { syncIdentityKey(templateExerciseID: $0.id, catalogExerciseUUID: $0.catalogExerciseUUID) }
+            .filter { templateKey in
+                sessionExercises.contains { syncIdentityKey(for: $0) == templateKey }
+            }
         let sharedSessionOrder = sessionExercises
-            .map(\.catalogExerciseUUID)
-            .filter { templateCatalogUUIDs.contains($0) }
+            .map(syncIdentityKey(for:))
+            .filter { sessionKey in
+                templateExercises.contains {
+                    syncIdentityKey(templateExerciseID: $0.id, catalogExerciseUUID: $0.catalogExerciseUUID) == sessionKey
+                }
+            }
 
         guard sharedTemplateOrder != sharedSessionOrder else {
             return []
         }
 
-        let sessionIndexByUUID = Dictionary(uniqueKeysWithValues: sharedSessionOrder.enumerated().map { ($1, $0) })
-        let sessionExercisesByUUID = Dictionary(uniqueKeysWithValues: sessionExercises.map { ($0.catalogExerciseUUID, $0) })
+        let sessionIndexByKey = Dictionary(uniqueKeysWithValues: sharedSessionOrder.enumerated().map { ($1, $0) })
 
-        return sharedTemplateOrder.enumerated().compactMap { index, catalogExerciseUUID in
-            guard let destinationIndex = sessionIndexByUUID[catalogExerciseUUID], destinationIndex != index else {
+        return sharedTemplateOrder.enumerated().compactMap { index, identityKey in
+            guard let destinationIndex = sessionIndexByKey[identityKey], destinationIndex != index else {
                 return nil
             }
 
-            let exerciseName = sessionExercisesByUUID[catalogExerciseUUID]?.exerciseNameSnapshot ?? catalogExerciseUUID
+            let matchedTemplateExercise = templateExercises.first {
+                syncIdentityKey(templateExerciseID: $0.id, catalogExerciseUUID: $0.catalogExerciseUUID) == identityKey
+            }
+            let exerciseName = matchedTemplateExercise?.exerciseNameSnapshot ?? identityKey
             return WorkoutTemplateSyncReorderedExercise(
-                catalogExerciseUUID: catalogExerciseUUID,
+                catalogExerciseUUID: matchedTemplateExercise?.catalogExerciseUUID ?? identityKey,
                 exerciseName: exerciseName,
                 fromPosition: index + 1,
                 toPosition: destinationIndex + 1

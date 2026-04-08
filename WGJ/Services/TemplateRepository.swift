@@ -1,6 +1,44 @@
 import Foundation
 import SwiftData
 
+struct TemplateExerciseComponentDraft: Identifiable, Equatable {
+    let id: UUID
+    var catalogExerciseUUID: String
+    var exerciseNameSnapshot: String
+    var categorySnapshot: String
+    var muscleSummarySnapshot: String
+
+    init(
+        id: UUID = UUID(),
+        catalogExerciseUUID: String,
+        exerciseNameSnapshot: String,
+        categorySnapshot: String,
+        muscleSummarySnapshot: String
+    ) {
+        self.id = id
+        self.catalogExerciseUUID = catalogExerciseUUID
+        self.exerciseNameSnapshot = exerciseNameSnapshot
+        self.categorySnapshot = categorySnapshot
+        self.muscleSummarySnapshot = muscleSummarySnapshot
+    }
+
+    init(model: TemplateExerciseComponent) {
+        self.id = model.id
+        self.catalogExerciseUUID = model.catalogExerciseUUID
+        self.exerciseNameSnapshot = model.exerciseNameSnapshot
+        self.categorySnapshot = model.categorySnapshot
+        self.muscleSummarySnapshot = model.muscleSummarySnapshot
+    }
+
+    init(catalogItem: ExerciseCatalogItem) {
+        self.id = UUID()
+        self.catalogExerciseUUID = catalogItem.remoteUUID
+        self.exerciseNameSnapshot = catalogItem.displayName
+        self.categorySnapshot = catalogItem.categoryName
+        self.muscleSummarySnapshot = catalogItem.primaryMuscleNames
+    }
+}
+
 struct TemplateExerciseSetDraft: Identifiable, Equatable {
     let id: UUID
     var targetReps: Int?
@@ -61,6 +99,7 @@ struct TemplateExerciseDraft: Identifiable, Equatable {
     var targetRepMax: Int?
     var restSeconds: Int
     var setDrafts: [TemplateExerciseSetDraft]
+    var components: [TemplateExerciseComponentDraft]
 
     init(
         id: UUID = UUID(),
@@ -71,28 +110,50 @@ struct TemplateExerciseDraft: Identifiable, Equatable {
         targetRepMin: Int? = nil,
         targetRepMax: Int? = nil,
         restSeconds: Int = 120,
-        setDrafts: [TemplateExerciseSetDraft] = []
+        setDrafts: [TemplateExerciseSetDraft] = [],
+        components: [TemplateExerciseComponentDraft] = []
     ) {
+        let normalizedComponents = Self.normalizedComponents(
+            from: components,
+            fallbackCatalogExerciseUUID: catalogExerciseUUID,
+            fallbackExerciseNameSnapshot: exerciseNameSnapshot,
+            fallbackCategorySnapshot: categorySnapshot,
+            fallbackMuscleSummarySnapshot: muscleSummarySnapshot
+        )
+        let primaryComponent = normalizedComponents.first
         self.id = id
-        self.catalogExerciseUUID = catalogExerciseUUID
-        self.exerciseNameSnapshot = exerciseNameSnapshot
-        self.categorySnapshot = categorySnapshot
-        self.muscleSummarySnapshot = muscleSummarySnapshot
+        self.catalogExerciseUUID = primaryComponent?.catalogExerciseUUID ?? catalogExerciseUUID
+        self.exerciseNameSnapshot = primaryComponent?.exerciseNameSnapshot ?? exerciseNameSnapshot
+        self.categorySnapshot = primaryComponent?.categorySnapshot ?? categorySnapshot
+        self.muscleSummarySnapshot = primaryComponent?.muscleSummarySnapshot ?? muscleSummarySnapshot
         self.targetRepMin = targetRepMin
         self.targetRepMax = targetRepMax
         self.restSeconds = restSeconds
         self.setDrafts = setDrafts
+        self.components = normalizedComponents
     }
 
+    @MainActor
     init(model: TemplateExercise, preferredLoadUnit: TemplateLoadUnit = .kg) {
+        let normalizedComponents = Self.normalizedComponents(
+            from: (model.components ?? [])
+                .sorted { $0.sortOrder < $1.sortOrder }
+                .map(TemplateExerciseComponentDraft.init(model:)),
+            fallbackCatalogExerciseUUID: model.catalogExerciseUUID,
+            fallbackExerciseNameSnapshot: model.exerciseNameSnapshot,
+            fallbackCategorySnapshot: model.categorySnapshot,
+            fallbackMuscleSummarySnapshot: model.muscleSummarySnapshot
+        )
+        let primaryComponent = normalizedComponents.first
         self.id = model.id
-        self.catalogExerciseUUID = model.catalogExerciseUUID
-        self.exerciseNameSnapshot = model.exerciseNameSnapshot
-        self.categorySnapshot = model.categorySnapshot
-        self.muscleSummarySnapshot = model.muscleSummarySnapshot
+        self.catalogExerciseUUID = primaryComponent?.catalogExerciseUUID ?? model.catalogExerciseUUID
+        self.exerciseNameSnapshot = primaryComponent?.exerciseNameSnapshot ?? model.exerciseNameSnapshot
+        self.categorySnapshot = primaryComponent?.categorySnapshot ?? model.categorySnapshot
+        self.muscleSummarySnapshot = primaryComponent?.muscleSummarySnapshot ?? model.muscleSummarySnapshot
         self.targetRepMin = model.targetRepMin
         self.targetRepMax = model.targetRepMax
         self.restSeconds = model.restSeconds
+        self.components = normalizedComponents
         let orderedSets = (model.prescribedSets ?? []).sorted { $0.sortOrder < $1.sortOrder }
         if orderedSets.isEmpty {
             self.setDrafts = Self.defaultSetDrafts(loadUnit: preferredLoadUnit)
@@ -128,10 +189,36 @@ struct TemplateExerciseDraft: Identifiable, Equatable {
         self.targetRepMin = nil
         self.targetRepMax = nil
         self.restSeconds = 120
+        self.components = [TemplateExerciseComponentDraft(catalogItem: catalogItem)]
         self.setDrafts = Self.defaultSetDrafts(
             loadUnit: TemplateLoadUnit.inferredDefault(fromEquipmentSummary: catalogItem.equipmentSummary)
                 ?? preferredLoadUnit
         )
+    }
+
+    static func normalizedComponents(
+        from components: [TemplateExerciseComponentDraft],
+        fallbackCatalogExerciseUUID: String,
+        fallbackExerciseNameSnapshot: String,
+        fallbackCategorySnapshot: String,
+        fallbackMuscleSummarySnapshot: String
+    ) -> [TemplateExerciseComponentDraft] {
+        if !components.isEmpty {
+            return components
+        }
+
+        guard !fallbackCatalogExerciseUUID.isEmpty else {
+            return []
+        }
+
+        return [
+            TemplateExerciseComponentDraft(
+                catalogExerciseUUID: fallbackCatalogExerciseUUID,
+                exerciseNameSnapshot: fallbackExerciseNameSnapshot,
+                categorySnapshot: fallbackCategorySnapshot,
+                muscleSummarySnapshot: fallbackMuscleSummarySnapshot
+            ),
+        ]
     }
 
     static func defaultSetDrafts(count: Int = 3, loadUnit: TemplateLoadUnit = .kg) -> [TemplateExerciseSetDraft] {
@@ -154,6 +241,7 @@ enum TemplateRepositoryError: Error {
     case templateExerciseNotFound
     case templateExerciseSetNotFound
     case workoutSessionNotFound
+    case duplicateExerciseComponent
 }
 
 @MainActor
@@ -349,7 +437,15 @@ final class TemplateRepository {
                 targetRepMin: nil,
                 targetRepMax: nil,
                 restSeconds: exercise.restSeconds,
-                setDrafts: setDrafts.isEmpty ? TemplateExerciseDraft.defaultSetDrafts(loadUnit: preferredLoadUnit()) : setDrafts
+                setDrafts: setDrafts.isEmpty ? TemplateExerciseDraft.defaultSetDrafts(loadUnit: preferredLoadUnit()) : setDrafts,
+                components: [
+                    TemplateExerciseComponentDraft(
+                        catalogExerciseUUID: exercise.catalogExerciseUUID,
+                        exerciseNameSnapshot: exercise.exerciseNameSnapshot,
+                        categorySnapshot: exercise.categorySnapshot,
+                        muscleSummarySnapshot: exercise.muscleSummarySnapshot
+                    ),
+                ]
             )
         }
 
@@ -496,7 +592,15 @@ final class TemplateRepository {
             },
             sortBy: [SortDescriptor(\.sortOrder, order: .forward)]
         )
-        return try modelContext.fetch(descriptor)
+        let exercises = try modelContext.fetch(descriptor)
+        var didNormalize = false
+        for exercise in exercises {
+            didNormalize = ensureTemplateComponentStructure(for: exercise) || didNormalize
+        }
+        if didNormalize {
+            try modelContext.save()
+        }
+        return exercises
     }
 
     func cardioBlocks(templateID: UUID) throws -> [TemplateCardioBlock] {
@@ -589,6 +693,114 @@ final class TemplateRepository {
             throw TemplateRepositoryError.templateExerciseNotFound
         }
         return orderedSetDrafts(for: exercise)
+    }
+
+    func components(for templateExerciseID: UUID) throws -> [TemplateExerciseComponent] {
+        guard let exercise = try templateExercise(id: templateExerciseID) else {
+            throw TemplateRepositoryError.templateExerciseNotFound
+        }
+
+        let didNormalize = ensureTemplateComponentStructure(for: exercise)
+        if didNormalize {
+            try modelContext.save()
+        }
+
+        return orderedComponents(for: exercise)
+    }
+
+    func addComponent(templateExerciseID: UUID, catalogItem: ExerciseCatalogItem) throws {
+        guard let exercise = try templateExercise(id: templateExerciseID) else {
+            throw TemplateRepositoryError.templateExerciseNotFound
+        }
+        guard let template = exercise.template else {
+            throw TemplateRepositoryError.templateNotFound
+        }
+        if containsComponentCatalogUUID(
+            catalogItem.remoteUUID,
+            in: template,
+            excludingTemplateExerciseID: exercise.id
+        ) {
+            throw TemplateRepositoryError.duplicateExerciseComponent
+        }
+
+        var updatedComponents = orderedComponents(for: exercise)
+        let created = TemplateExerciseComponent(
+            templateExerciseID: exercise.id,
+            catalogExerciseUUID: catalogItem.remoteUUID,
+            exerciseNameSnapshot: catalogItem.displayName,
+            categorySnapshot: catalogItem.categoryName,
+            muscleSummarySnapshot: catalogItem.primaryMuscleNames,
+            sortOrder: updatedComponents.count,
+            templateExercise: exercise
+        )
+        modelContext.insert(created)
+        updatedComponents.append(created)
+        exercise.components = updatedComponents
+        _ = syncPrimaryComponentSnapshot(for: exercise)
+        exercise.updatedAt = .now
+        template.updatedAt = .now
+        try modelContext.save()
+    }
+
+    func removeComponent(templateExerciseID: UUID, componentID: UUID) throws {
+        guard let exercise = try templateExercise(id: templateExerciseID) else {
+            throw TemplateRepositoryError.templateExerciseNotFound
+        }
+        guard let template = exercise.template else {
+            throw TemplateRepositoryError.templateNotFound
+        }
+
+        let components = orderedComponents(for: exercise)
+        guard components.count > 1 else {
+            return
+        }
+        guard let component = components.first(where: { $0.id == componentID }) else {
+            return
+        }
+
+        modelContext.delete(component)
+        let remaining = orderedComponents(for: exercise)
+        for (index, row) in remaining.enumerated() {
+            row.sortOrder = index
+            row.updatedAt = .now
+        }
+        exercise.components = remaining
+        _ = syncPrimaryComponentSnapshot(for: exercise)
+        exercise.updatedAt = .now
+        template.updatedAt = .now
+        try modelContext.save()
+    }
+
+    func moveComponent(templateExerciseID: UUID, fromOffsets: IndexSet, toOffset: Int) throws {
+        guard let exercise = try templateExercise(id: templateExerciseID) else {
+            throw TemplateRepositoryError.templateExerciseNotFound
+        }
+        guard let template = exercise.template else {
+            throw TemplateRepositoryError.templateNotFound
+        }
+
+        var ordered = orderedComponents(for: exercise)
+        let movingItems = fromOffsets.sorted().map { ordered[$0] }
+        for index in fromOffsets.sorted(by: >) {
+            ordered.remove(at: index)
+        }
+
+        var destination = toOffset
+        let removedBeforeDestination = fromOffsets.filter { $0 < toOffset }.count
+        destination -= removedBeforeDestination
+        destination = max(0, min(destination, ordered.count))
+        ordered.insert(contentsOf: movingItems, at: destination)
+
+        for (index, component) in ordered.enumerated() {
+            component.sortOrder = index
+            component.updatedAt = .now
+        }
+
+        exercise.components = ordered
+        _ = syncPrimaryComponentSnapshot(for: exercise)
+        exercise.updatedAt = .now
+        template.updatedAt = .now
+        try modelContext.save()
     }
 
     func upsertSet(
@@ -762,15 +974,30 @@ final class TemplateRepository {
             throw TemplateRepositoryError.templateNotFound
         }
 
+        try validateUniqueComponentCatalogUUIDs(
+            in: mutations.map { mutation in
+                TemplateExerciseDraft(
+                    id: mutation.templateExerciseID ?? UUID(),
+                    catalogExerciseUUID: mutation.catalogExerciseUUID,
+                    exerciseNameSnapshot: mutation.exerciseNameSnapshot,
+                    categorySnapshot: mutation.categorySnapshot,
+                    muscleSummarySnapshot: mutation.muscleSummarySnapshot,
+                    targetRepMin: mutation.targetRepMin,
+                    targetRepMax: mutation.targetRepMax,
+                    restSeconds: mutation.restSeconds,
+                    setDrafts: mutation.setDrafts,
+                    components: mutation.components
+                )
+            }
+        )
+
         let orderedExistingExercises = (template.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
+        let existingByID = Dictionary(
+            uniqueKeysWithValues: orderedExistingExercises.map { ($0.id, $0) }
+        )
         let existingByCatalogUUID = Dictionary(
             uniqueKeysWithValues: orderedExistingExercises.map { ($0.catalogExerciseUUID, $0) }
         )
-        let desiredCatalogUUIDs = Set(mutations.map(\.catalogExerciseUUID))
-
-        for exercise in orderedExistingExercises where !desiredCatalogUUIDs.contains(exercise.catalogExerciseUUID) {
-            modelContext.delete(exercise)
-        }
 
         var updatedExercises: [TemplateExercise] = []
         updatedExercises.reserveCapacity(mutations.count)
@@ -778,12 +1005,22 @@ final class TemplateRepository {
         for (index, mutation) in mutations.enumerated() {
             let normalizedRange = sanitizedRepRange(min: mutation.targetRepMin, max: mutation.targetRepMax)
             let normalizedRest = sanitizedRestSeconds(mutation.restSeconds)
-            let exercise = existingByCatalogUUID[mutation.catalogExerciseUUID] ?? TemplateExercise(
+            let normalizedComponents = TemplateExerciseDraft.normalizedComponents(
+                from: mutation.components,
+                fallbackCatalogExerciseUUID: mutation.catalogExerciseUUID,
+                fallbackExerciseNameSnapshot: mutation.exerciseNameSnapshot,
+                fallbackCategorySnapshot: mutation.categorySnapshot,
+                fallbackMuscleSummarySnapshot: mutation.muscleSummarySnapshot
+            )
+            let primaryComponent = normalizedComponents.first
+            let exercise = mutation.templateExerciseID.flatMap { existingByID[$0] }
+                ?? existingByCatalogUUID[mutation.catalogExerciseUUID]
+                ?? TemplateExercise(
                 templateID: templateID,
-                catalogExerciseUUID: mutation.catalogExerciseUUID,
-                exerciseNameSnapshot: mutation.exerciseNameSnapshot,
-                categorySnapshot: mutation.categorySnapshot,
-                muscleSummarySnapshot: mutation.muscleSummarySnapshot,
+                catalogExerciseUUID: primaryComponent?.catalogExerciseUUID ?? mutation.catalogExerciseUUID,
+                exerciseNameSnapshot: primaryComponent?.exerciseNameSnapshot ?? mutation.exerciseNameSnapshot,
+                categorySnapshot: primaryComponent?.categorySnapshot ?? mutation.categorySnapshot,
+                muscleSummarySnapshot: primaryComponent?.muscleSummarySnapshot ?? mutation.muscleSummarySnapshot,
                 targetRepMin: normalizedRange.min,
                 targetRepMax: normalizedRange.max,
                 restSeconds: normalizedRest,
@@ -797,15 +1034,15 @@ final class TemplateRepository {
 
             exercise.templateID = templateID
             exercise.template = template
-            exercise.catalogExerciseUUID = mutation.catalogExerciseUUID
-            exercise.exerciseNameSnapshot = mutation.exerciseNameSnapshot
-            exercise.categorySnapshot = mutation.categorySnapshot
-            exercise.muscleSummarySnapshot = mutation.muscleSummarySnapshot
             exercise.targetRepMin = normalizedRange.min
             exercise.targetRepMax = normalizedRange.max
             exercise.restSeconds = normalizedRest
             exercise.sortOrder = index
 
+            syncComponentStructure(
+                for: exercise,
+                desiredDrafts: normalizedComponents
+            )
             syncSetStructure(
                 for: exercise,
                 desiredDrafts: mutation.setDrafts,
@@ -815,6 +1052,11 @@ final class TemplateRepository {
             normalizeWarmupSet(for: exercise)
             exercise.updatedAt = .now
             updatedExercises.append(exercise)
+        }
+
+        let updatedIDs = Set(updatedExercises.map(\.id))
+        for exercise in orderedExistingExercises where !updatedIDs.contains(exercise.id) {
+            modelContext.delete(exercise)
         }
 
         template.exercises = updatedExercises
@@ -962,6 +1204,8 @@ final class TemplateRepository {
             throw TemplateRepositoryError.templateNotFound
         }
 
+        try validateUniqueComponentCatalogUUIDs(in: drafts)
+
         for existing in template.exercises ?? [] {
             modelContext.delete(existing)
         }
@@ -971,12 +1215,14 @@ final class TemplateRepository {
         for (index, draft) in drafts.enumerated() {
             let normalizedRange = sanitizedRepRange(min: draft.targetRepMin, max: draft.targetRepMax)
             let normalizedRest = sanitizedRestSeconds(draft.restSeconds)
+            let componentDrafts = normalizedComponentDrafts(from: draft)
+            let primaryComponent = componentDrafts.first
             let exercise = TemplateExercise(
                 templateID: templateID,
-                catalogExerciseUUID: draft.catalogExerciseUUID,
-                exerciseNameSnapshot: draft.exerciseNameSnapshot,
-                categorySnapshot: draft.categorySnapshot,
-                muscleSummarySnapshot: draft.muscleSummarySnapshot,
+                catalogExerciseUUID: primaryComponent?.catalogExerciseUUID ?? draft.catalogExerciseUUID,
+                exerciseNameSnapshot: primaryComponent?.exerciseNameSnapshot ?? draft.exerciseNameSnapshot,
+                categorySnapshot: primaryComponent?.categorySnapshot ?? draft.categorySnapshot,
+                muscleSummarySnapshot: primaryComponent?.muscleSummarySnapshot ?? draft.muscleSummarySnapshot,
                 targetRepMin: normalizedRange.min,
                 targetRepMax: normalizedRange.max,
                 restSeconds: normalizedRest,
@@ -985,30 +1231,18 @@ final class TemplateRepository {
             )
             modelContext.insert(exercise)
 
+            syncComponentStructure(
+                for: exercise,
+                desiredDrafts: componentDrafts
+            )
             let sets = draft.setDrafts.isEmpty && appliesDefaultSetPlansWhenEmpty
                 ? TemplateExerciseDraft.defaultSetDrafts(loadUnit: preferredLoadUnit())
                 : draft.setDrafts
-            var createdSets: [TemplateExerciseSet] = []
-            for (setIndex, setDraft) in sets.enumerated() {
-                let createdSet = TemplateExerciseSet(
-                    id: setDraft.id,
-                    templateExerciseID: exercise.id,
-                    sortOrder: setIndex,
-                    targetReps: sanitizedReps(setDraft.targetReps),
-                    targetWeight: sanitizedWeight(setDraft.targetWeight),
-                    loadUnit: setDraft.loadUnit,
-                    restSeconds: sanitizedRestSeconds(setDraft.restSeconds),
-                    isWarmup: setDraft.isWarmup,
-                    isLocked: setDraft.isLocked,
-                    previousTargetReps: sanitizedReps(setDraft.previousTargetReps),
-                    previousTargetWeight: sanitizedWeight(setDraft.previousTargetWeight),
-                    previousLoadUnit: setDraft.previousLoadUnit,
-                    templateExercise: exercise
-                )
-                modelContext.insert(createdSet)
-                createdSets.append(createdSet)
-            }
-            exercise.prescribedSets = createdSets
+            syncSetStructure(
+                for: exercise,
+                desiredDrafts: sets,
+                defaultRestSeconds: normalizedRest
+            )
             normalizeWarmupSet(for: exercise)
             createdExercises.append(exercise)
         }
@@ -1023,20 +1257,27 @@ final class TemplateRepository {
             throw TemplateRepositoryError.templateNotFound
         }
 
-        let existingExercises = template.exercises ?? []
-        if existingExercises.contains(where: { $0.catalogExerciseUUID == draft.catalogExerciseUUID }) {
-            return
+        let componentDrafts = normalizedComponentDrafts(from: draft)
+        for component in componentDrafts {
+            if containsComponentCatalogUUID(
+                component.catalogExerciseUUID,
+                in: template
+            ) {
+                throw TemplateRepositoryError.duplicateExerciseComponent
+            }
         }
 
+        let existingExercises = template.exercises ?? []
         let nextIndex = existingExercises.map(\.sortOrder).max() ?? -1
         let normalizedRange = sanitizedRepRange(min: draft.targetRepMin, max: draft.targetRepMax)
         let normalizedRest = sanitizedRestSeconds(draft.restSeconds)
+        let primaryComponent = componentDrafts.first
         let created = TemplateExercise(
             templateID: templateID,
-            catalogExerciseUUID: draft.catalogExerciseUUID,
-            exerciseNameSnapshot: draft.exerciseNameSnapshot,
-            categorySnapshot: draft.categorySnapshot,
-            muscleSummarySnapshot: draft.muscleSummarySnapshot,
+            catalogExerciseUUID: primaryComponent?.catalogExerciseUUID ?? draft.catalogExerciseUUID,
+            exerciseNameSnapshot: primaryComponent?.exerciseNameSnapshot ?? draft.exerciseNameSnapshot,
+            categorySnapshot: primaryComponent?.categorySnapshot ?? draft.categorySnapshot,
+            muscleSummarySnapshot: primaryComponent?.muscleSummarySnapshot ?? draft.muscleSummarySnapshot,
             targetRepMin: normalizedRange.min,
             targetRepMax: normalizedRange.max,
             restSeconds: normalizedRest,
@@ -1045,30 +1286,15 @@ final class TemplateRepository {
         )
 
         modelContext.insert(created)
+        syncComponentStructure(for: created, desiredDrafts: componentDrafts)
         let setDrafts = draft.setDrafts.isEmpty
             ? TemplateExerciseDraft.defaultSetDrafts(loadUnit: preferredLoadUnit())
             : draft.setDrafts
-        var createdSets: [TemplateExerciseSet] = []
-        for (index, setDraft) in setDrafts.enumerated() {
-            let createdSet = TemplateExerciseSet(
-                id: setDraft.id,
-                templateExerciseID: created.id,
-                sortOrder: index,
-                targetReps: sanitizedReps(setDraft.targetReps),
-                targetWeight: sanitizedWeight(setDraft.targetWeight),
-                loadUnit: setDraft.loadUnit,
-                restSeconds: sanitizedRestSeconds(setDraft.restSeconds),
-                isWarmup: setDraft.isWarmup,
-                isLocked: setDraft.isLocked,
-                previousTargetReps: sanitizedReps(setDraft.previousTargetReps),
-                previousTargetWeight: sanitizedWeight(setDraft.previousTargetWeight),
-                previousLoadUnit: setDraft.previousLoadUnit,
-                templateExercise: created
-            )
-            modelContext.insert(createdSet)
-            createdSets.append(createdSet)
-        }
-        created.prescribedSets = createdSets
+        syncSetStructure(
+            for: created,
+            desiredDrafts: setDrafts,
+            defaultRestSeconds: normalizedRest
+        )
         normalizeWarmupSet(for: created)
 
         var updatedExercises = existingExercises
@@ -1140,6 +1366,183 @@ final class TemplateRepository {
     private func orderedSetDrafts(for exercise: TemplateExercise) -> [TemplateExerciseSetDraft] {
         let ordered = (exercise.prescribedSets ?? []).sorted { $0.sortOrder < $1.sortOrder }
         return ordered.map(TemplateExerciseSetDraft.init(model:))
+    }
+
+    private func orderedComponents(for exercise: TemplateExercise) -> [TemplateExerciseComponent] {
+        (exercise.components ?? [])
+            .filter { $0.modelContext != nil }
+            .sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    private func normalizedComponentDrafts(from draft: TemplateExerciseDraft) -> [TemplateExerciseComponentDraft] {
+        TemplateExerciseDraft.normalizedComponents(
+            from: draft.components,
+            fallbackCatalogExerciseUUID: draft.catalogExerciseUUID,
+            fallbackExerciseNameSnapshot: draft.exerciseNameSnapshot,
+            fallbackCategorySnapshot: draft.categorySnapshot,
+            fallbackMuscleSummarySnapshot: draft.muscleSummarySnapshot
+        )
+    }
+
+    private func ensureTemplateComponentStructure(for exercise: TemplateExercise) -> Bool {
+        var didChange = false
+        var components = orderedComponents(for: exercise)
+
+        if components.isEmpty, !exercise.catalogExerciseUUID.isEmpty {
+            let created = TemplateExerciseComponent(
+                templateExerciseID: exercise.id,
+                catalogExerciseUUID: exercise.catalogExerciseUUID,
+                exerciseNameSnapshot: exercise.exerciseNameSnapshot,
+                categorySnapshot: exercise.categorySnapshot,
+                muscleSummarySnapshot: exercise.muscleSummarySnapshot,
+                sortOrder: 0,
+                createdAt: exercise.createdAt,
+                updatedAt: exercise.updatedAt,
+                templateExercise: exercise
+            )
+            modelContext.insert(created)
+            components = [created]
+            didChange = true
+        }
+
+        for (index, component) in components.enumerated() {
+            if component.templateExerciseID != exercise.id {
+                component.templateExerciseID = exercise.id
+                didChange = true
+            }
+            if component.sortOrder != index {
+                component.sortOrder = index
+                didChange = true
+            }
+        }
+
+        if exercise.components?.map(\.id) != components.map(\.id) {
+            exercise.components = components
+            didChange = true
+        }
+
+        if syncPrimaryComponentSnapshot(for: exercise) {
+            didChange = true
+        }
+
+        return didChange
+    }
+
+    private func syncComponentStructure(
+        for exercise: TemplateExercise,
+        desiredDrafts: [TemplateExerciseComponentDraft]
+    ) {
+        let normalizedDrafts = TemplateExerciseDraft.normalizedComponents(
+            from: desiredDrafts,
+            fallbackCatalogExerciseUUID: exercise.catalogExerciseUUID,
+            fallbackExerciseNameSnapshot: exercise.exerciseNameSnapshot,
+            fallbackCategorySnapshot: exercise.categorySnapshot,
+            fallbackMuscleSummarySnapshot: exercise.muscleSummarySnapshot
+        )
+        let existingByID = Dictionary(uniqueKeysWithValues: orderedComponents(for: exercise).map { ($0.id, $0) })
+        let incomingIDs = Set(normalizedDrafts.map(\.id))
+
+        for component in orderedComponents(for: exercise) where !incomingIDs.contains(component.id) {
+            modelContext.delete(component)
+        }
+
+        var updatedComponents: [TemplateExerciseComponent] = []
+        updatedComponents.reserveCapacity(normalizedDrafts.count)
+        for (index, draft) in normalizedDrafts.enumerated() {
+            let component = existingByID[draft.id] ?? TemplateExerciseComponent(
+                id: draft.id,
+                templateExerciseID: exercise.id,
+                catalogExerciseUUID: draft.catalogExerciseUUID,
+                exerciseNameSnapshot: draft.exerciseNameSnapshot,
+                categorySnapshot: draft.categorySnapshot,
+                muscleSummarySnapshot: draft.muscleSummarySnapshot,
+                sortOrder: index,
+                templateExercise: exercise
+            )
+
+            if component.modelContext == nil {
+                modelContext.insert(component)
+            }
+
+            component.templateExerciseID = exercise.id
+            component.templateExercise = exercise
+            component.catalogExerciseUUID = draft.catalogExerciseUUID
+            component.exerciseNameSnapshot = draft.exerciseNameSnapshot
+            component.categorySnapshot = draft.categorySnapshot
+            component.muscleSummarySnapshot = draft.muscleSummarySnapshot
+            component.sortOrder = index
+            component.updatedAt = .now
+            updatedComponents.append(component)
+        }
+
+        exercise.components = updatedComponents
+        _ = syncPrimaryComponentSnapshot(for: exercise)
+    }
+
+    @discardableResult
+    private func syncPrimaryComponentSnapshot(for exercise: TemplateExercise) -> Bool {
+        guard let primaryComponent = orderedComponents(for: exercise).first else {
+            return false
+        }
+
+        var didChange = false
+        if exercise.catalogExerciseUUID != primaryComponent.catalogExerciseUUID {
+            exercise.catalogExerciseUUID = primaryComponent.catalogExerciseUUID
+            didChange = true
+        }
+        if exercise.exerciseNameSnapshot != primaryComponent.exerciseNameSnapshot {
+            exercise.exerciseNameSnapshot = primaryComponent.exerciseNameSnapshot
+            didChange = true
+        }
+        if exercise.categorySnapshot != primaryComponent.categorySnapshot {
+            exercise.categorySnapshot = primaryComponent.categorySnapshot
+            didChange = true
+        }
+        if exercise.muscleSummarySnapshot != primaryComponent.muscleSummarySnapshot {
+            exercise.muscleSummarySnapshot = primaryComponent.muscleSummarySnapshot
+            didChange = true
+        }
+        return didChange
+    }
+
+    private func containsComponentCatalogUUID(
+        _ catalogExerciseUUID: String,
+        in template: WorkoutTemplate,
+        excludingTemplateExerciseID excludedTemplateExerciseID: UUID? = nil
+    ) -> Bool {
+        let trimmed = catalogExerciseUUID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return false
+        }
+
+        return (template.exercises ?? []).contains { exercise in
+            if let excludedTemplateExerciseID, exercise.id == excludedTemplateExerciseID {
+                return false
+            }
+            let components = TemplateExerciseDraft.normalizedComponents(
+                from: orderedComponents(for: exercise).map(TemplateExerciseComponentDraft.init(model:)),
+                fallbackCatalogExerciseUUID: exercise.catalogExerciseUUID,
+                fallbackExerciseNameSnapshot: exercise.exerciseNameSnapshot,
+                fallbackCategorySnapshot: exercise.categorySnapshot,
+                fallbackMuscleSummarySnapshot: exercise.muscleSummarySnapshot
+            )
+            return components.contains { $0.catalogExerciseUUID == trimmed }
+        }
+    }
+
+    private func validateUniqueComponentCatalogUUIDs(in drafts: [TemplateExerciseDraft]) throws {
+        var seen: Set<String> = []
+        for draft in drafts {
+            for component in normalizedComponentDrafts(from: draft) {
+                let normalizedUUID = component.catalogExerciseUUID.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !normalizedUUID.isEmpty else {
+                    continue
+                }
+                if seen.insert(normalizedUUID).inserted == false {
+                    throw TemplateRepositoryError.duplicateExerciseComponent
+                }
+            }
+        }
     }
 
     private func syncCardioStructure(

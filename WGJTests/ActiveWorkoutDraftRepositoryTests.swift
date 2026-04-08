@@ -87,6 +87,89 @@ struct ActiveWorkoutDraftRepositoryTests {
     }
 
     @Test
+    func overrideExerciseComponentUsesLoggedChoiceForNextDraftRotation() throws {
+        let context = try makeInMemoryContext()
+        let templateRepository = TemplateRepository(modelContext: context)
+        let repository = ActiveWorkoutDraftRepository(modelContext: context)
+        let completedRepository = WorkoutSessionRepository(modelContext: context)
+
+        let reverseCurl = makeCatalogItem(
+            remoteUUID: "draft-override-reverse-curl",
+            displayName: "Reverse Curl",
+            equipmentSummary: "EZ bar",
+            context: context
+        )
+        let wristCurl = makeCatalogItem(
+            remoteUUID: "draft-override-wrist-curl",
+            displayName: "Wrist Curl",
+            equipmentSummary: "Barbell",
+            context: context
+        )
+
+        let template = try templateRepository.createTemplate(name: "Forearms", notes: "")
+        try templateRepository.setExercises(
+            templateID: template.id,
+            drafts: [
+                TemplateExerciseDraft(
+                    catalogExerciseUUID: reverseCurl.remoteUUID,
+                    exerciseNameSnapshot: reverseCurl.displayName,
+                    categorySnapshot: reverseCurl.categoryName,
+                    muscleSummarySnapshot: reverseCurl.primaryMuscleNames,
+                    targetRepMin: 10,
+                    targetRepMax: 12,
+                    restSeconds: 60,
+                    setDrafts: [
+                        TemplateExerciseSetDraft(targetReps: 12, targetWeight: 20, loadUnit: .kg, restSeconds: 60),
+                    ],
+                    components: [
+                        TemplateExerciseComponentDraft(catalogItem: reverseCurl),
+                        TemplateExerciseComponentDraft(catalogItem: wristCurl),
+                    ]
+                ),
+            ]
+        )
+
+        let firstDraftSession = try repository.createSessionFromTemplate(templateID: template.id)
+        firstDraftSession.startedAt = Date(timeIntervalSince1970: 1_000)
+        try context.save()
+
+        let firstExercise = try #require(try repository.sessionExercises(sessionID: firstDraftSession.id).first)
+        let firstComponents = try repository.components(sessionExerciseID: firstExercise.id)
+        #expect(firstExercise.catalogExerciseUUID == reverseCurl.remoteUUID)
+        #expect(firstExercise.templateExerciseID != nil)
+        #expect(firstComponents.map(\.catalogExerciseUUID) == [reverseCurl.remoteUUID, wristCurl.remoteUUID])
+
+        let overrideComponent = try #require(
+            firstComponents.first(where: { $0.catalogExerciseUUID == wristCurl.remoteUUID })
+        )
+        try repository.overrideExerciseComponent(
+            sessionExerciseID: firstExercise.id,
+            componentID: overrideComponent.id
+        )
+
+        let overriddenExercise = try #require(try repository.sessionExercises(sessionID: firstDraftSession.id).first)
+        #expect(overriddenExercise.catalogExerciseUUID == wristCurl.remoteUUID)
+        #expect(overriddenExercise.exerciseNameSnapshot == wristCurl.displayName)
+
+        var drafts = try repository.setDrafts(sessionExerciseID: overriddenExercise.id)
+        drafts[0].isCompleted = true
+        try repository.saveSetDrafts(sessionExerciseID: overriddenExercise.id, drafts: drafts)
+
+        let completedSessionID = try repository.finishSession(sessionID: firstDraftSession.id)
+        let completedExercise = try #require(
+            try completedRepository.sessionExercises(sessionID: completedSessionID).first
+        )
+        #expect(completedExercise.catalogExerciseUUID == wristCurl.remoteUUID)
+        #expect(completedExercise.exerciseNameSnapshot == wristCurl.displayName)
+        #expect(completedExercise.templateExerciseID == firstExercise.templateExerciseID)
+
+        let secondDraftSession = try repository.createSessionFromTemplate(templateID: template.id)
+        let secondExercise = try #require(try repository.sessionExercises(sessionID: secondDraftSession.id).first)
+        #expect(secondExercise.catalogExerciseUUID == reverseCurl.remoteUUID)
+        #expect(secondExercise.templateExerciseID == firstExercise.templateExerciseID)
+    }
+
+    @Test
     func draftEditsPersistWithoutCreatingCompletedWorkout() throws {
         let context = try makeInMemoryContext()
         let repository = ActiveWorkoutDraftRepository(modelContext: context)
@@ -316,10 +399,12 @@ struct ActiveWorkoutDraftRepositoryTests {
             WorkoutTemplate.self,
             TemplateCardioBlock.self,
             TemplateExercise.self,
+            TemplateExerciseComponent.self,
             TemplateExerciseSet.self,
             ActiveWorkoutDraftSession.self,
             ActiveWorkoutDraftCardioBlock.self,
             ActiveWorkoutDraftExercise.self,
+            ActiveWorkoutDraftExerciseComponent.self,
             ActiveWorkoutDraftSet.self,
             WorkoutSession.self,
             WorkoutSessionCardioBlock.self,
@@ -353,6 +438,7 @@ struct ActiveWorkoutDraftRepositoryTests {
                     WorkoutTemplate.self,
                     TemplateCardioBlock.self,
                     TemplateExercise.self,
+                    TemplateExerciseComponent.self,
                     TemplateExerciseSet.self,
                     WorkoutSession.self,
                     WorkoutSessionCardioBlock.self,
@@ -368,6 +454,7 @@ struct ActiveWorkoutDraftRepositoryTests {
                     ActiveWorkoutDraftSession.self,
                     ActiveWorkoutDraftCardioBlock.self,
                     ActiveWorkoutDraftExercise.self,
+                    ActiveWorkoutDraftExerciseComponent.self,
                     ActiveWorkoutDraftSet.self,
                 ]),
                 isStoredInMemoryOnly: true,

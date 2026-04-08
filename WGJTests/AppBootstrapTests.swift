@@ -12,12 +12,14 @@ struct AppBootstrapTests {
         #expect(AppStoreLayout.configurationNames == [
             "LocalCatalog",
             "UserData",
+            "ActiveWorkoutDraft",
             "SocialOutbox",
             "HistoryProjection",
         ])
         #expect(AppStoreLayout.storeFilePrefixes == [
             "LocalCatalog.store",
             "UserData.store",
+            "ActiveWorkoutDraft.store",
             "SocialOutbox.store",
             "HistoryProjection.store",
         ])

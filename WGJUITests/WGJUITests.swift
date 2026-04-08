@@ -297,6 +297,47 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testTemplatePreviewShowsExerciseOptionsForMultiComponentSlot() throws {
+        let app = launchApp(launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Multi Curl Template",
+                notes: "Rotate the curl variation.",
+                exercises: [
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "ui-preview-reverse-curl",
+                        exerciseNameSnapshot: "Reverse Curl",
+                        categorySnapshot: "Arms",
+                        muscleSummarySnapshot: "Forearms",
+                        targetRepMin: 10,
+                        targetRepMax: 12,
+                        restSeconds: 60,
+                        sets: [templatePayloadSet(targetReps: 12, targetWeight: 20, loadUnit: "kg", restSeconds: 60, isWarmup: false)],
+                        components: [
+                            templatePayloadExerciseComponent(
+                                catalogExerciseUUID: "ui-preview-reverse-curl",
+                                exerciseNameSnapshot: "Reverse Curl",
+                                categorySnapshot: "Arms",
+                                muscleSummarySnapshot: "Forearms"
+                            ),
+                            templatePayloadExerciseComponent(
+                                catalogExerciseUUID: "ui-preview-wrist-curl",
+                                exerciseNameSnapshot: "Wrist Curl",
+                                categorySnapshot: "Arms",
+                                muscleSummarySnapshot: "Forearms"
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+        ])
+
+        let previewSheet = identifiedElement("template-preview-sheet", in: app)
+        XCTAssertTrue(previewSheet.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Reverse Curl"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Options: Reverse Curl, Wrist Curl"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testSettingsLegalSupportNavigation() throws {
         let app = launchApp()
 
@@ -801,6 +842,142 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(identifiedElement("workout-set-1-weight-field", in: app).waitForExistence(timeout: 5))
     }
 
+    @MainActor
+    func testImportedTemplateWorkoutRotatesToNextComponentAfterCompletedSession() throws {
+        let app = launchApp(launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Rotate Curls",
+                notes: "Advance to the next component each workout.",
+                exercises: [
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "ui-rotation-reverse-curl",
+                        exerciseNameSnapshot: "Reverse Curl",
+                        categorySnapshot: "Arms",
+                        muscleSummarySnapshot: "Forearms",
+                        targetRepMin: 10,
+                        targetRepMax: 12,
+                        restSeconds: 60,
+                        sets: [templatePayloadSet(targetReps: 12, targetWeight: 20, loadUnit: "kg", restSeconds: 60, isWarmup: false)],
+                        components: [
+                            templatePayloadExerciseComponent(
+                                catalogExerciseUUID: "ui-rotation-reverse-curl",
+                                exerciseNameSnapshot: "Reverse Curl",
+                                categorySnapshot: "Arms",
+                                muscleSummarySnapshot: "Forearms"
+                            ),
+                            templatePayloadExerciseComponent(
+                                catalogExerciseUUID: "ui-rotation-wrist-curl",
+                                exerciseNameSnapshot: "Wrist Curl",
+                                categorySnapshot: "Arms",
+                                muscleSummarySnapshot: "Forearms"
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+        ])
+
+        startPreviewedTemplateWorkout(in: app)
+
+        XCTAssertTrue(
+            identifiedElement("active-workout-exercise-ui-rotation-reverse-curl", in: app)
+                .waitForExistence(timeout: 5)
+        )
+
+        let completeSetButton = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
+        ).firstMatch
+        XCTAssertTrue(completeSetButton.waitForExistence(timeout: 5))
+        completeSetButton.tap()
+
+        finishTemplateWorkout(in: app)
+        confirmWorkoutCompletion(in: app)
+        tapTab("Start Workout", in: app)
+        restartImportedTemplateWorkout(in: app)
+
+        XCTAssertTrue(
+            identifiedElement("active-workout-exercise-ui-rotation-wrist-curl", in: app)
+                .waitForExistence(timeout: 5)
+        )
+    }
+
+    @MainActor
+    func testActiveWorkoutComponentOverrideControlsNextSessionRotation() throws {
+        let app = launchApp(launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Override Curls",
+                notes: "Override the suggested option for this session.",
+                exercises: [
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "ui-override-reverse-curl",
+                        exerciseNameSnapshot: "Reverse Curl",
+                        categorySnapshot: "Arms",
+                        muscleSummarySnapshot: "Forearms",
+                        targetRepMin: 10,
+                        targetRepMax: 12,
+                        restSeconds: 60,
+                        sets: [templatePayloadSet(targetReps: 12, targetWeight: 20, loadUnit: "kg", restSeconds: 60, isWarmup: false)],
+                        components: [
+                            templatePayloadExerciseComponent(
+                                catalogExerciseUUID: "ui-override-reverse-curl",
+                                exerciseNameSnapshot: "Reverse Curl",
+                                categorySnapshot: "Arms",
+                                muscleSummarySnapshot: "Forearms"
+                            ),
+                            templatePayloadExerciseComponent(
+                                catalogExerciseUUID: "ui-override-wrist-curl",
+                                exerciseNameSnapshot: "Wrist Curl",
+                                categorySnapshot: "Arms",
+                                muscleSummarySnapshot: "Forearms"
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+        ])
+
+        startPreviewedTemplateWorkout(in: app)
+
+        let actionsButton = identifiedElement(
+            "active-workout-exercise-ui-override-reverse-curl-actions-button",
+            in: app
+        )
+        XCTAssertTrue(actionsButton.waitForExistence(timeout: 5))
+        actionsButton.tap()
+
+        let chooseExerciseButton = identifiedElement("workout-exercise-choose-component-button", in: app)
+        XCTAssertTrue(chooseExerciseButton.waitForExistence(timeout: 5))
+        chooseExerciseButton.tap()
+
+        let pickerSheet = identifiedElement("active-workout-component-picker-sheet", in: app)
+        XCTAssertTrue(pickerSheet.waitForExistence(timeout: 5))
+
+        let wristCurlOption = identifiedElement("active-workout-component-option-ui-override-wrist-curl", in: app)
+        XCTAssertTrue(wristCurlOption.waitForExistence(timeout: 5))
+        wristCurlOption.tap()
+
+        XCTAssertTrue(
+            identifiedElement("active-workout-exercise-ui-override-wrist-curl", in: app)
+                .waitForExistence(timeout: 5)
+        )
+
+        let completeSetButton = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
+        ).firstMatch
+        XCTAssertTrue(completeSetButton.waitForExistence(timeout: 5))
+        completeSetButton.tap()
+
+        finishTemplateWorkout(in: app)
+        confirmWorkoutCompletion(in: app)
+        tapTab("Start Workout", in: app)
+        restartImportedTemplateWorkout(in: app)
+
+        XCTAssertTrue(
+            identifiedElement("active-workout-exercise-ui-override-reverse-curl", in: app)
+                .waitForExistence(timeout: 5)
+        )
+    }
+
     private func launchApp(
         launchArguments extraLaunchArguments: [String] = [],
         launchEnvironment extraLaunchEnvironment: [String: String] = [:]
@@ -934,8 +1111,18 @@ final class WGJUITests: XCTestCase {
             templatePayload["postWorkoutCardio"] = postWorkoutCardio
         }
 
+        let hasExerciseComponents = exercises.contains { $0["components"] != nil }
+        let formatVersion: Int
+        if hasExerciseComponents {
+            formatVersion = 3
+        } else if preWorkoutCardio != nil || postWorkoutCardio != nil {
+            formatVersion = 2
+        } else {
+            formatVersion = 1
+        }
+
         let payload: [String: Any] = [
-            "formatVersion": (preWorkoutCardio != nil || postWorkoutCardio != nil) ? 2 : 1,
+            "formatVersion": formatVersion,
             "exportedAt": ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: 0)),
             "template": templatePayload,
         ]
@@ -968,7 +1155,8 @@ final class WGJUITests: XCTestCase {
         targetRepMin: Int?,
         targetRepMax: Int?,
         restSeconds: Int,
-        sets: [[String: Any]]
+        sets: [[String: Any]],
+        components: [[String: Any]] = []
     ) -> [String: Any] {
         var payload: [String: Any] = [
             "catalogExerciseUUID": catalogExerciseUUID,
@@ -981,7 +1169,24 @@ final class WGJUITests: XCTestCase {
 
         payload["targetRepMin"] = targetRepMin
         payload["targetRepMax"] = targetRepMax
+        if !components.isEmpty {
+            payload["components"] = components
+        }
         return payload
+    }
+
+    private func templatePayloadExerciseComponent(
+        catalogExerciseUUID: String,
+        exerciseNameSnapshot: String,
+        categorySnapshot: String,
+        muscleSummarySnapshot: String
+    ) -> [String: Any] {
+        [
+            "catalogExerciseUUID": catalogExerciseUUID,
+            "exerciseNameSnapshot": exerciseNameSnapshot,
+            "categorySnapshot": categorySnapshot,
+            "muscleSummarySnapshot": muscleSummarySnapshot,
+        ]
     }
 
     private func templatePayloadSet(

@@ -14,6 +14,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     let personalRecordKindsBySetID: [UUID: [WorkoutPersonalRecordKind]]
     let guidance: ActiveWorkoutExerciseGuidancePresentation?
     let preferredLoadUnit: TemplateLoadUnit
+    let supplementaryContent: AnyView?
 
     @Binding var restSeconds: Int
     @Binding var setDrafts: [WorkoutSessionSetDraft]
@@ -28,6 +29,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     var onRestChanged: ((Int) -> Void)?
     var onSetCompletionChange: ((UUID, String?, Int, Bool) -> Void)?
     var onExerciseSettings: (() -> Void)?
+    var onExerciseComponentPicker: (() -> Void)?
     var canMoveExerciseUp: Bool
     var canMoveExerciseDown: Bool
     var onExerciseMoveUp: (() -> Void)?
@@ -75,6 +77,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         personalRecordKindsBySetID: [UUID: [WorkoutPersonalRecordKind]] = [:],
         guidance: ActiveWorkoutExerciseGuidancePresentation? = nil,
         preferredLoadUnit: TemplateLoadUnit = .kg,
+        supplementaryContent: AnyView? = nil,
         restSeconds: Binding<Int>,
         setDrafts: Binding<[WorkoutSessionSetDraft]>,
         initiallyExpanded: Bool = false,
@@ -89,6 +92,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         onRestChanged: ((Int) -> Void)? = nil,
         onSetCompletionChange: ((UUID, String?, Int, Bool) -> Void)? = nil,
         onExerciseSettings: (() -> Void)? = nil,
+        onExerciseComponentPicker: (() -> Void)? = nil,
         canMoveExerciseUp: Bool = false,
         canMoveExerciseDown: Bool = false,
         onExerciseMoveUp: (() -> Void)? = nil,
@@ -107,6 +111,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.personalRecordKindsBySetID = personalRecordKindsBySetID
         self.guidance = guidance
         self.preferredLoadUnit = preferredLoadUnit
+        self.supplementaryContent = supplementaryContent
         self._restSeconds = restSeconds
         self._setDrafts = setDrafts
         self.externalIsExpanded = isExpanded
@@ -120,6 +125,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.onRestChanged = onRestChanged
         self.onSetCompletionChange = onSetCompletionChange
         self.onExerciseSettings = onExerciseSettings
+        self.onExerciseComponentPicker = onExerciseComponentPicker
         self.canMoveExerciseUp = canMoveExerciseUp
         self.canMoveExerciseDown = canMoveExerciseDown
         self.onExerciseMoveUp = onExerciseMoveUp
@@ -239,6 +245,10 @@ struct WorkoutSessionExerciseGridEditor: View {
                     .foregroundStyle(WGJTheme.textSecondary)
                     .lineLimit(2)
 
+                if let supplementaryContent {
+                    supplementaryContent
+                }
+
                 if shouldEmphasizeCompletedExercise {
                     completedExerciseBadge
                 }
@@ -262,8 +272,21 @@ struct WorkoutSessionExerciseGridEditor: View {
             Spacer(minLength: 12)
 
             VStack(spacing: 8) {
-                if onExerciseSettings != nil || onExerciseMoveUp != nil || onExerciseMoveDown != nil || onExerciseDelete != nil {
+                if onExerciseSettings != nil
+                    || onExerciseComponentPicker != nil
+                    || onExerciseMoveUp != nil
+                    || onExerciseMoveDown != nil
+                    || onExerciseDelete != nil {
                     WGJActionMenuButton("Exercise Actions") {
+                        if let onExerciseComponentPicker {
+                            Button {
+                                onExerciseComponentPicker()
+                            } label: {
+                                Label("Choose exercise", systemImage: "arrow.triangle.2.circlepath")
+                            }
+                            .accessibilityIdentifier("workout-exercise-choose-component-button")
+                        }
+
                         if let onExerciseSettings {
                             Button {
                                 onExerciseSettings()
@@ -300,6 +323,10 @@ struct WorkoutSessionExerciseGridEditor: View {
                     } label: {
                         headerIcon(symbol: "ellipsis.circle")
                     }
+                    .accessibilityIdentifier(
+                        exerciseAccessibilityIdentifier.map { "\($0)-actions-button" }
+                            ?? "workout-exercise-actions-button"
+                    )
                 }
 
                 Button {

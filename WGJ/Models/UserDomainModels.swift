@@ -858,6 +858,7 @@ final class TemplateExercise {
 
     @Relationship var template: WorkoutTemplate?
     @Relationship(deleteRule: .cascade, inverse: \TemplateExerciseSet.templateExercise) var prescribedSets: [TemplateExerciseSet]?
+    @Relationship(deleteRule: .cascade, inverse: \TemplateExerciseComponent.templateExercise) var components: [TemplateExerciseComponent]?
 
     init(
         id: UUID = UUID(),
@@ -888,6 +889,46 @@ final class TemplateExercise {
         self.updatedAt = updatedAt
         self.template = template
         self.prescribedSets = []
+        self.components = []
+    }
+}
+
+@Model
+final class TemplateExerciseComponent {
+    var id: UUID = UUID()
+    var templateExerciseID: UUID = UUID()
+    var catalogExerciseUUID: String = ""
+    var exerciseNameSnapshot: String = ""
+    var categorySnapshot: String = ""
+    var muscleSummarySnapshot: String = ""
+    var sortOrder: Int = 0
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
+
+    @Relationship var templateExercise: TemplateExercise?
+
+    init(
+        id: UUID = UUID(),
+        templateExerciseID: UUID,
+        catalogExerciseUUID: String,
+        exerciseNameSnapshot: String,
+        categorySnapshot: String,
+        muscleSummarySnapshot: String,
+        sortOrder: Int = 0,
+        createdAt: Date = .now,
+        updatedAt: Date = .now,
+        templateExercise: TemplateExercise? = nil
+    ) {
+        self.id = id
+        self.templateExerciseID = templateExerciseID
+        self.catalogExerciseUUID = catalogExerciseUUID
+        self.exerciseNameSnapshot = exerciseNameSnapshot
+        self.categorySnapshot = categorySnapshot
+        self.muscleSummarySnapshot = muscleSummarySnapshot
+        self.sortOrder = sortOrder
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.templateExercise = templateExercise
     }
 }
 
@@ -1044,6 +1085,7 @@ final class ActiveWorkoutDraftCardioBlock {
 final class ActiveWorkoutDraftExercise {
     var id: UUID = UUID()
     var sessionID: UUID = UUID()
+    var templateExerciseID: UUID?
     var catalogExerciseUUID: String = ""
     var exerciseNameSnapshot: String = ""
     var categorySnapshot: String = ""
@@ -1057,10 +1099,12 @@ final class ActiveWorkoutDraftExercise {
 
     @Relationship var session: ActiveWorkoutDraftSession?
     @Relationship(deleteRule: .cascade, inverse: \ActiveWorkoutDraftSet.sessionExercise) var sets: [ActiveWorkoutDraftSet]?
+    @Relationship(deleteRule: .cascade, inverse: \ActiveWorkoutDraftExerciseComponent.sessionExercise) var components: [ActiveWorkoutDraftExerciseComponent]?
 
     init(
         id: UUID = UUID(),
         sessionID: UUID,
+        templateExerciseID: UUID? = nil,
         catalogExerciseUUID: String,
         exerciseNameSnapshot: String,
         categorySnapshot: String,
@@ -1075,6 +1119,7 @@ final class ActiveWorkoutDraftExercise {
     ) {
         self.id = id
         self.sessionID = sessionID
+        self.templateExerciseID = templateExerciseID
         self.catalogExerciseUUID = catalogExerciseUUID
         self.exerciseNameSnapshot = exerciseNameSnapshot
         self.categorySnapshot = categorySnapshot
@@ -1087,6 +1132,46 @@ final class ActiveWorkoutDraftExercise {
         self.updatedAt = updatedAt
         self.session = session
         self.sets = []
+        self.components = []
+    }
+}
+
+@Model
+final class ActiveWorkoutDraftExerciseComponent {
+    var id: UUID = UUID()
+    var sessionExerciseID: UUID = UUID()
+    var catalogExerciseUUID: String = ""
+    var exerciseNameSnapshot: String = ""
+    var categorySnapshot: String = ""
+    var muscleSummarySnapshot: String = ""
+    var sortOrder: Int = 0
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
+
+    @Relationship var sessionExercise: ActiveWorkoutDraftExercise?
+
+    init(
+        id: UUID = UUID(),
+        sessionExerciseID: UUID,
+        catalogExerciseUUID: String,
+        exerciseNameSnapshot: String,
+        categorySnapshot: String,
+        muscleSummarySnapshot: String,
+        sortOrder: Int = 0,
+        createdAt: Date = .now,
+        updatedAt: Date = .now,
+        sessionExercise: ActiveWorkoutDraftExercise? = nil
+    ) {
+        self.id = id
+        self.sessionExerciseID = sessionExerciseID
+        self.catalogExerciseUUID = catalogExerciseUUID
+        self.exerciseNameSnapshot = exerciseNameSnapshot
+        self.categorySnapshot = categorySnapshot
+        self.muscleSummarySnapshot = muscleSummarySnapshot
+        self.sortOrder = sortOrder
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.sessionExercise = sessionExercise
     }
 }
 
@@ -1271,6 +1356,7 @@ final class WorkoutSessionCardioBlock {
 final class WorkoutSessionExercise {
     var id: UUID = UUID()
     var sessionID: UUID = UUID()
+    var templateExerciseID: UUID?
     var catalogExerciseUUID: String = ""
     var exerciseNameSnapshot: String = ""
     var categorySnapshot: String = ""
@@ -1288,6 +1374,7 @@ final class WorkoutSessionExercise {
     init(
         id: UUID = UUID(),
         sessionID: UUID,
+        templateExerciseID: UUID? = nil,
         catalogExerciseUUID: String,
         exerciseNameSnapshot: String,
         categorySnapshot: String,
@@ -1302,6 +1389,7 @@ final class WorkoutSessionExercise {
     ) {
         self.id = id
         self.sessionID = sessionID
+        self.templateExerciseID = templateExerciseID
         self.catalogExerciseUUID = catalogExerciseUUID
         self.exerciseNameSnapshot = exerciseNameSnapshot
         self.categorySnapshot = categorySnapshot

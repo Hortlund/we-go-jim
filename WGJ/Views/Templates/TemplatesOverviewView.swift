@@ -569,9 +569,11 @@ struct TemplateFolderEditorSheet: View {
         TemplateFolder.self,
         WorkoutTemplate.self,
         TemplateExercise.self,
+        TemplateExerciseComponent.self,
         TemplateExerciseSet.self,
         ActiveWorkoutDraftSession.self,
         ActiveWorkoutDraftExercise.self,
+        ActiveWorkoutDraftExerciseComponent.self,
         ActiveWorkoutDraftSet.self,
     ], inMemory: true)
 }

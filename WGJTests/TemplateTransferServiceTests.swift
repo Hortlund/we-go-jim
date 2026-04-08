@@ -174,6 +174,69 @@ struct TemplateTransferServiceTests {
     }
 
     @Test
+    func exportImportRoundTripPreservesMultiComponentExerciseOptionsAndUsesFormatVersionThree() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+        let service = TemplateTransferService(modelContext: context)
+
+        let reverseCurl = ExerciseCatalogItem(
+            remoteUUID: "transfer-reverse-curl",
+            displayName: "Reverse Curl",
+            categoryName: "Arms",
+            equipmentSummary: "EZ bar",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        let wristCurl = ExerciseCatalogItem(
+            remoteUUID: "transfer-wrist-curl",
+            displayName: "Wrist Curl",
+            categoryName: "Arms",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(reverseCurl)
+        context.insert(wristCurl)
+
+        let template = try repository.createTemplate(name: "Forearms", notes: "Rotate the curl variation.")
+        try repository.setExercises(
+            templateID: template.id,
+            drafts: [
+                TemplateExerciseDraft(
+                    catalogExerciseUUID: reverseCurl.remoteUUID,
+                    exerciseNameSnapshot: reverseCurl.displayName,
+                    categorySnapshot: reverseCurl.categoryName,
+                    muscleSummarySnapshot: reverseCurl.primaryMuscleNames,
+                    targetRepMin: 10,
+                    targetRepMax: 12,
+                    restSeconds: 60,
+                    setDrafts: [
+                        TemplateExerciseSetDraft(targetReps: 12, targetWeight: 20, loadUnit: .kg, restSeconds: 60),
+                    ],
+                    components: [
+                        TemplateExerciseComponentDraft(catalogItem: reverseCurl),
+                        TemplateExerciseComponentDraft(catalogItem: wristCurl),
+                    ]
+                ),
+            ]
+        )
+
+        let exportedData = try service.exportData(templateID: template.id)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let envelope = try decoder.decode(TemplateTransferEnvelope.self, from: exportedData)
+        #expect(envelope.formatVersion == 3)
+        #expect(envelope.template.exercises.first?.components?.map(\.exerciseNameSnapshot) == ["Reverse Curl", "Wrist Curl"])
+
+        let importedTemplate = try service.importTemplate(from: exportedData)
+        let importedExercise = try #require(try repository.exercises(in: importedTemplate.id).first)
+        let importedComponents = try repository.components(for: importedExercise.id)
+
+        #expect(importedExercise.exerciseNameSnapshot == "Reverse Curl")
+        #expect(importedComponents.map(\.catalogExerciseUUID) == [reverseCurl.remoteUUID, wristCurl.remoteUUID])
+    }
+
+    @Test
     func importedTemplateCanStartWorkoutWithoutCatalogMatch() throws {
         let context = try makeInMemoryContext()
         let service = TemplateTransferService(modelContext: context)
@@ -316,6 +379,50 @@ struct TemplateTransferServiceTests {
     }
 
     @Test
+    func importSupportsLegacyFormatVersionTwoWithoutExerciseComponents() throws {
+        let context = try makeInMemoryContext()
+        let service = TemplateTransferService(modelContext: context)
+        let repository = TemplateRepository(modelContext: context)
+        let legacyData = try encoded(
+            TemplateTransferEnvelope(
+                formatVersion: 2,
+                template: TemplateTransferTemplate(
+                    name: "Legacy Hybrid",
+                    notes: "Older cardio-capable share file",
+                    preWorkoutCardio: TemplateTransferCardioBlock(
+                        catalogExerciseUUID: "legacy-bike",
+                        exerciseNameSnapshot: "Bike",
+                        categorySnapshot: "Cardio",
+                        muscleSummarySnapshot: "Warmup",
+                        targetDurationSeconds: 300
+                    ),
+                    exercises: [
+                        TemplateTransferExercise(
+                            catalogExerciseUUID: "legacy-seated-calf-raise",
+                            exerciseNameSnapshot: "Seated Calf Raise",
+                            categorySnapshot: "Legs",
+                            muscleSummarySnapshot: "Calves",
+                            targetRepMin: 12,
+                            targetRepMax: 15,
+                            restSeconds: 60,
+                            sets: []
+                        ),
+                    ]
+                )
+            )
+        )
+
+        let importedTemplate = try service.importTemplate(from: legacyData)
+        let importedExercise = try #require(try repository.exercises(in: importedTemplate.id).first)
+        let importedComponents = try repository.components(for: importedExercise.id)
+
+        #expect(importedTemplate.name == "Legacy Hybrid")
+        #expect(try repository.cardioBlocks(templateID: importedTemplate.id).map(\.phase) == [.preWorkout])
+        #expect(importedComponents.count == 1)
+        #expect(importedComponents.first?.exerciseNameSnapshot == "Seated Calf Raise")
+    }
+
+    @Test
     func importFromFileURLRejectsMalformedFile() throws {
         let context = try makeInMemoryContext()
         let service = TemplateTransferService(modelContext: context)
@@ -355,10 +462,12 @@ struct TemplateTransferServiceTests {
             WorkoutTemplate.self,
             TemplateCardioBlock.self,
             TemplateExercise.self,
+            TemplateExerciseComponent.self,
             TemplateExerciseSet.self,
             ActiveWorkoutDraftSession.self,
             ActiveWorkoutDraftCardioBlock.self,
             ActiveWorkoutDraftExercise.self,
+            ActiveWorkoutDraftExerciseComponent.self,
             ActiveWorkoutDraftSet.self,
             WorkoutSession.self,
             WorkoutSessionCardioBlock.self,

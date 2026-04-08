@@ -8,7 +8,7 @@ enum TemplateTransferFileFormat {
 }
 
 struct TemplateTransferEnvelope: Codable, Equatable {
-    static let currentFormatVersion = 2
+    static let currentFormatVersion = 3
 
     let formatVersion: Int
     let exportedAt: Date
@@ -64,6 +64,36 @@ struct TemplateTransferExercise: Codable, Equatable {
     let targetRepMax: Int?
     let restSeconds: Int
     let sets: [TemplateTransferSet]
+    let components: [TemplateTransferExerciseComponent]?
+
+    init(
+        catalogExerciseUUID: String,
+        exerciseNameSnapshot: String,
+        categorySnapshot: String,
+        muscleSummarySnapshot: String,
+        targetRepMin: Int?,
+        targetRepMax: Int?,
+        restSeconds: Int,
+        sets: [TemplateTransferSet],
+        components: [TemplateTransferExerciseComponent]? = nil
+    ) {
+        self.catalogExerciseUUID = catalogExerciseUUID
+        self.exerciseNameSnapshot = exerciseNameSnapshot
+        self.categorySnapshot = categorySnapshot
+        self.muscleSummarySnapshot = muscleSummarySnapshot
+        self.targetRepMin = targetRepMin
+        self.targetRepMax = targetRepMax
+        self.restSeconds = restSeconds
+        self.sets = sets
+        self.components = components
+    }
+}
+
+struct TemplateTransferExerciseComponent: Codable, Equatable {
+    let catalogExerciseUUID: String
+    let exerciseNameSnapshot: String
+    let categorySnapshot: String
+    let muscleSummarySnapshot: String
 }
 
 struct TemplateTransferSet: Codable, Equatable {
@@ -191,7 +221,15 @@ final class TemplateTransferService {
         let cardioByPhase = Dictionary(uniqueKeysWithValues: cardioBlocks.map { ($0.phase, $0) })
 
         let exercises = try repository.exercises(in: templateID).map { exercise in
-            TemplateTransferExercise(
+            let components = try repository.components(for: exercise.id).map { component in
+                TemplateTransferExerciseComponent(
+                    catalogExerciseUUID: component.catalogExerciseUUID,
+                    exerciseNameSnapshot: component.exerciseNameSnapshot,
+                    categorySnapshot: component.categorySnapshot,
+                    muscleSummarySnapshot: component.muscleSummarySnapshot
+                )
+            }
+            return TemplateTransferExercise(
                 catalogExerciseUUID: exercise.catalogExerciseUUID,
                 exerciseNameSnapshot: exercise.exerciseNameSnapshot,
                 categorySnapshot: exercise.categorySnapshot,
@@ -199,7 +237,8 @@ final class TemplateTransferService {
                 targetRepMin: exercise.targetRepMin,
                 targetRepMax: exercise.targetRepMax,
                 restSeconds: exercise.restSeconds,
-                sets: try repository.setDrafts(for: exercise.id).map(transferSet(from:))
+                sets: try repository.setDrafts(for: exercise.id).map(transferSet(from:)),
+                components: components
             )
         }
 
@@ -232,7 +271,7 @@ final class TemplateTransferService {
             throw TemplateTransferError.malformedFile
         }
 
-        guard [1, TemplateTransferEnvelope.currentFormatVersion].contains(envelope.formatVersion) else {
+        guard [1, 2, TemplateTransferEnvelope.currentFormatVersion].contains(envelope.formatVersion) else {
             throw TemplateTransferError.unsupportedVersion(envelope.formatVersion)
         }
 
@@ -279,7 +318,15 @@ final class TemplateTransferService {
                     isLocked: set.isLocked,
                     previousLoadUnit: set.loadUnit
                 )
-            }
+            },
+            components: exercise.components?.map { component in
+                TemplateExerciseComponentDraft(
+                    catalogExerciseUUID: component.catalogExerciseUUID,
+                    exerciseNameSnapshot: component.exerciseNameSnapshot,
+                    categorySnapshot: component.categorySnapshot,
+                    muscleSummarySnapshot: component.muscleSummarySnapshot
+                )
+            } ?? []
         )
     }
 

@@ -260,6 +260,19 @@ final class ExerciseCatalogRepository: ExerciseCatalogRepositoryProtocol {
 
     private func refreshTemplateSnapshots(for exercise: ExerciseCatalogItem) throws {
         let catalogExerciseUUID = exercise.remoteUUID
+        let componentDescriptor = FetchDescriptor<TemplateExerciseComponent>(
+            predicate: #Predicate { component in
+                component.catalogExerciseUUID == catalogExerciseUUID
+            }
+        )
+        let matchedComponents = try modelContext.fetch(componentDescriptor)
+        for component in matchedComponents {
+            component.exerciseNameSnapshot = exercise.displayName
+            component.categorySnapshot = exercise.categoryName
+            component.muscleSummarySnapshot = exercise.primaryMuscleNames
+            component.updatedAt = .now
+        }
+
         let descriptor = FetchDescriptor<TemplateExercise>(
             predicate: #Predicate { templateExercise in
                 templateExercise.catalogExerciseUUID == catalogExerciseUUID
@@ -271,6 +284,13 @@ final class ExerciseCatalogRepository: ExerciseCatalogRepositoryProtocol {
             templateExercise.categorySnapshot = exercise.categoryName
             templateExercise.muscleSummarySnapshot = exercise.primaryMuscleNames
             templateExercise.updatedAt = .now
+        }
+
+        for component in matchedComponents where component.sortOrder == 0 {
+            component.templateExercise?.exerciseNameSnapshot = component.exerciseNameSnapshot
+            component.templateExercise?.categorySnapshot = component.categorySnapshot
+            component.templateExercise?.muscleSummarySnapshot = component.muscleSummarySnapshot
+            component.templateExercise?.updatedAt = .now
         }
     }
 }

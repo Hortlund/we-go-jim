@@ -27,6 +27,7 @@ struct ActiveWorkoutView: View {
     @State private var pendingRestTasks: [UUID: Task<Void, Never>] = [:]
 
     @State private var previousByExerciseID: [UUID: [Int: WorkoutPreviousSetSnapshot]] = [:]
+    @State private var componentResolutionByExerciseID: [UUID: ExerciseComponentRotationResolution] = [:]
     @State private var catalogMatchesByUUID: [String: ExerciseCatalogItem] = [:]
     @State private var loadedExerciseStateStamp: ActiveWorkoutExerciseStateStamp?
     @State private var cardStateController = ActiveWorkoutExerciseCardStateController()
@@ -42,6 +43,7 @@ struct ActiveWorkoutView: View {
     @State private var pendingCompletionAfterSaveTemplateSheet = false
     @State private var pendingCompletionTask: Task<Void, Never>?
     @State private var exerciseSettingsDraft: ActiveWorkoutExerciseSettingsDraft?
+    @State private var exerciseComponentPickerDraft: ActiveWorkoutExerciseComponentPickerDraft?
     @State private var cardioSettingsDraft: WorkoutCardioSettingsDraft?
     @State private var pendingTemplateUpdatePreview: WorkoutTemplateSyncPreview?
     @State private var templateNameDraft = ""
@@ -77,6 +79,10 @@ struct ActiveWorkoutView: View {
 
     private var catalogRepository: ExerciseCatalogRepository {
         ExerciseCatalogRepository(modelContext: modelContext)
+    }
+
+    private var componentRotationResolver: TemplateExerciseComponentRotationResolver {
+        TemplateExerciseComponentRotationResolver(modelContext: modelContext)
     }
 
     init(sessionID: UUID) {
@@ -238,6 +244,15 @@ struct ActiveWorkoutView: View {
                     draft: draft,
                     onSave: saveExerciseSettings
                 )
+                .wgjSheetSurface()
+            }
+            .sheet(item: $exerciseComponentPickerDraft) { draft in
+                ActiveWorkoutExerciseComponentPickerSheet(draft: draft) { componentID in
+                    saveExerciseComponentSelection(
+                        exerciseID: draft.exerciseID,
+                        componentID: componentID
+                    )
+                }
                 .wgjSheetSurface()
             }
             .sheet(item: $cardioSettingsDraft) { draft in
@@ -546,6 +561,7 @@ struct ActiveWorkoutView: View {
             targetRepMin: exercise.targetRepMin,
             targetRepMax: exercise.targetRepMax,
             previousBySetIndex: previousByExerciseID[exerciseID] ?? [:],
+            componentResolution: componentResolutionByExerciseID[exerciseID],
             guidance: guidancePresentation(for: exercise, drafts: drafts),
             preferredLoadUnit: preferredLoadUnit,
             restSeconds: resolvedRest(for: exercise),
@@ -585,6 +601,9 @@ struct ActiveWorkoutView: View {
             },
             onExerciseSettings: {
                 showExerciseSettings(for: exercise)
+            },
+            onExerciseComponentPicker: {
+                showExerciseComponentPicker(for: exercise)
             },
             onExerciseMoveUp: {
                 moveExerciseUp(index)
@@ -747,6 +766,12 @@ struct ActiveWorkoutView: View {
         }
         guard !Task.isCancelled, currentStamp == exerciseHydrationStamp else { return }
         previousByExerciseID = loadedPrevious
+
+        let loadedComponentResolutions = WGJPerformance.measure("active-workout.hydrate.components") {
+            loadComponentResolutionByExerciseID()
+        }
+        guard !Task.isCancelled, currentStamp == exerciseHydrationStamp else { return }
+        componentResolutionByExerciseID = loadedComponentResolutions
     }
 
     @MainActor
@@ -845,6 +870,31 @@ struct ActiveWorkoutView: View {
         }
 
         return loadedPrevious
+    }
+
+    @MainActor
+    private func loadComponentResolutionByExerciseID() -> [UUID: ExerciseComponentRotationResolution] {
+        guard let session else {
+            return [:]
+        }
+
+        var loaded: [UUID: ExerciseComponentRotationResolution] = [:]
+        loaded.reserveCapacity(sessionExercises.count)
+
+        for exercise in sessionExercises {
+            guard let resolution = try? componentRotationResolver.resolution(
+                for: exercise,
+                templateID: session.templateID,
+                before: session.startedAt,
+                excludingSessionID: sessionID
+            ) else {
+                continue
+            }
+
+            loaded[exercise.id] = resolution
+        }
+
+        return loaded
     }
 
     @MainActor
@@ -1294,6 +1344,19 @@ struct ActiveWorkoutView: View {
         )
     }
 
+    private func showExerciseComponentPicker(for exercise: ActiveWorkoutDraftExercise) {
+        dismissKeyboard()
+        guard let resolution = componentResolutionByExerciseID[exercise.id],
+              resolution.availableComponents.count > 1 else {
+            return
+        }
+
+        exerciseComponentPickerDraft = ActiveWorkoutExerciseComponentPickerDraft(
+            exerciseID: exercise.id,
+            resolution: resolution
+        )
+    }
+
     private func saveExerciseSettings(_ draft: ActiveWorkoutExerciseSettingsDraft) {
         do {
             pendingRestTasks[draft.exerciseID]?.cancel()
@@ -1318,6 +1381,19 @@ struct ActiveWorkoutView: View {
                 updatedRest: draft.restSeconds
             )
             exerciseSettingsDraft = nil
+        } catch {
+            showError(error)
+        }
+    }
+
+    private func saveExerciseComponentSelection(exerciseID: UUID, componentID: UUID) {
+        do {
+            try activeWorkoutRepository.overrideExerciseComponent(
+                sessionExerciseID: exerciseID,
+                componentID: componentID
+            )
+            exerciseComponentPickerDraft = nil
+            loadedExerciseStateStamp = nil
         } catch {
             showError(error)
         }
@@ -1391,6 +1467,7 @@ struct ActiveWorkoutView: View {
         showingSaveTemplateSheet = false
         pendingCompletionAfterSaveTemplateSheet = false
         exerciseSettingsDraft = nil
+        exerciseComponentPickerDraft = nil
         pendingTemplateUpdatePreview = nil
         workoutCompletionPresentationState.queueAfterActiveWorkoutDismiss(sessionID: completedSessionID ?? sessionID)
         activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
@@ -1471,6 +1548,7 @@ struct ActiveWorkoutView: View {
             .union(restByExerciseID.keys)
             .union(lastPersistedRestByExerciseID.keys)
             .union(previousByExerciseID.keys)
+            .union(componentResolutionByExerciseID.keys)
             .union(pendingSaveTasks.keys)
             .union(pendingRestTasks.keys)
 
@@ -1490,6 +1568,7 @@ struct ActiveWorkoutView: View {
         restByExerciseID[exerciseID] = nil
         lastPersistedRestByExerciseID[exerciseID] = nil
         previousByExerciseID[exerciseID] = nil
+        componentResolutionByExerciseID[exerciseID] = nil
 
         if let restTimerSourceSetID = restTimerState.restTimerSourceSetID,
            removedSetIDs.contains(restTimerSourceSetID) {
@@ -1749,6 +1828,7 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
     let targetRepMin: Int?
     let targetRepMax: Int?
     let previousBySetIndex: [Int: WorkoutPreviousSetSnapshot]
+    let componentResolution: ExerciseComponentRotationResolution?
     let guidance: ActiveWorkoutExerciseGuidancePresentation?
     let preferredLoadUnit: TemplateLoadUnit
     let restSeconds: Int
@@ -1765,6 +1845,7 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
     let onRestChanged: (Int) -> Void
     let onSetCompletionChange: (UUID, String?, Int, Bool) -> Void
     let onExerciseSettings: () -> Void
+    let onExerciseComponentPicker: () -> Void
     let onExerciseMoveUp: () -> Void
     let onExerciseMoveDown: () -> Void
     let onExerciseDelete: () -> Void
@@ -1786,6 +1867,7 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
         targetRepMin: Int?,
         targetRepMax: Int?,
         previousBySetIndex: [Int: WorkoutPreviousSetSnapshot],
+        componentResolution: ExerciseComponentRotationResolution?,
         guidance: ActiveWorkoutExerciseGuidancePresentation?,
         preferredLoadUnit: TemplateLoadUnit,
         restSeconds: Int,
@@ -1801,6 +1883,7 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
         onRestChanged: @escaping (Int) -> Void,
         onSetCompletionChange: @escaping (UUID, String?, Int, Bool) -> Void,
         onExerciseSettings: @escaping () -> Void,
+        onExerciseComponentPicker: @escaping () -> Void,
         onExerciseMoveUp: @escaping () -> Void,
         onExerciseMoveDown: @escaping () -> Void,
         onExerciseDelete: @escaping () -> Void
@@ -1814,6 +1897,7 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
         self.targetRepMin = targetRepMin
         self.targetRepMax = targetRepMax
         self.previousBySetIndex = previousBySetIndex
+        self.componentResolution = componentResolution
         self.guidance = guidance
         self.preferredLoadUnit = preferredLoadUnit
         self.restSeconds = restSeconds
@@ -1829,6 +1913,7 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
         self.onRestChanged = onRestChanged
         self.onSetCompletionChange = onSetCompletionChange
         self.onExerciseSettings = onExerciseSettings
+        self.onExerciseComponentPicker = onExerciseComponentPicker
         self.onExerciseMoveUp = onExerciseMoveUp
         self.onExerciseMoveDown = onExerciseMoveDown
         self.onExerciseDelete = onExerciseDelete
@@ -1846,6 +1931,7 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
             && lhs.targetRepMin == rhs.targetRepMin
             && lhs.targetRepMax == rhs.targetRepMax
             && lhs.previousBySetIndex == rhs.previousBySetIndex
+            && lhs.componentResolution == rhs.componentResolution
             && lhs.guidance == rhs.guidance
             && lhs.preferredLoadUnit == rhs.preferredLoadUnit
             && lhs.restSeconds == rhs.restSeconds
@@ -1868,6 +1954,9 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
             previousBySetIndex: previousBySetIndex,
             guidance: guidance,
             preferredLoadUnit: preferredLoadUnit,
+            supplementaryContent: componentResolution.map { resolution in
+                AnyView(ActiveWorkoutExerciseComponentSummaryView(resolution: resolution))
+            },
             restSeconds: Binding(
                 get: { localRestSeconds },
                 set: { localRestSeconds = $0 }
@@ -1890,6 +1979,9 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
             onRestChanged: onRestChanged,
             onSetCompletionChange: onSetCompletionChange,
             onExerciseSettings: onExerciseSettings,
+            onExerciseComponentPicker: componentResolution?.availableComponents.count ?? 0 > 1
+                ? onExerciseComponentPicker
+                : nil,
             canMoveExerciseUp: canMoveUp,
             canMoveExerciseDown: canMoveDown,
             onExerciseMoveUp: onExerciseMoveUp,
@@ -2426,11 +2518,17 @@ private struct ActiveWorkoutExerciseStateStamp: Hashable {
 
     private struct Entry: Hashable {
         let id: UUID
+        let catalogExerciseUUID: String
+        let orderedComponentIDs: [UUID]
         let orderedSetIDs: [UUID]
 
         @MainActor
         init(exercise: ActiveWorkoutDraftExercise) {
             id = exercise.id
+            catalogExerciseUUID = exercise.catalogExerciseUUID
+            orderedComponentIDs = (exercise.components ?? [])
+                .sorted { $0.sortOrder < $1.sortOrder }
+                .map(\.id)
             orderedSetIDs = (exercise.sets ?? [])
                 .sorted { $0.sortOrder < $1.sortOrder }
                 .map(\.id)
@@ -2593,10 +2691,12 @@ private struct ActiveWorkoutExerciseSettingsSheet: View {
         WorkoutTemplate.self,
         TemplateCardioBlock.self,
         TemplateExercise.self,
+        TemplateExerciseComponent.self,
         TemplateExerciseSet.self,
         ActiveWorkoutDraftSession.self,
         ActiveWorkoutDraftCardioBlock.self,
         ActiveWorkoutDraftExercise.self,
+        ActiveWorkoutDraftExerciseComponent.self,
         ActiveWorkoutDraftSet.self,
         WorkoutSession.self,
         WorkoutSessionCardioBlock.self,

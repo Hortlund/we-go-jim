@@ -135,6 +135,10 @@ final class WorkoutSessionRepository {
         return (try? profileRepository.currentProfile()?.preferredLoadUnit) ?? .kg
     }
 
+    private var componentRotationResolver: TemplateExerciseComponentRotationResolver {
+        TemplateExerciseComponentRotationResolver(modelContext: modelContext)
+    }
+
     func createEmptySession(name: String = "Empty Workout") throws -> WorkoutSession {
         let cleanedName = ReviewModerationService.sanitizedForSharing(name, kind: .workoutName)
         let created = WorkoutSession(name: cleanedName)
@@ -175,12 +179,21 @@ final class WorkoutSessionRepository {
 
         let orderedExercises = (template.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
         for (exerciseIndex, templateExercise) in orderedExercises.enumerated() {
+            let selectedComponent = try componentRotationResolver
+                .resolution(
+                    for: template,
+                    exercise: templateExercise,
+                    before: session.startedAt,
+                    excludingSessionID: session.id
+                )?
+                .selectedComponent
             let exercise = WorkoutSessionExercise(
                 sessionID: session.id,
-                catalogExerciseUUID: templateExercise.catalogExerciseUUID,
-                exerciseNameSnapshot: templateExercise.exerciseNameSnapshot,
-                categorySnapshot: templateExercise.categorySnapshot,
-                muscleSummarySnapshot: templateExercise.muscleSummarySnapshot,
+                templateExerciseID: templateExercise.id,
+                catalogExerciseUUID: selectedComponent?.catalogExerciseUUID ?? templateExercise.catalogExerciseUUID,
+                exerciseNameSnapshot: selectedComponent?.exerciseNameSnapshot ?? templateExercise.exerciseNameSnapshot,
+                categorySnapshot: selectedComponent?.categorySnapshot ?? templateExercise.categorySnapshot,
+                muscleSummarySnapshot: selectedComponent?.muscleSummarySnapshot ?? templateExercise.muscleSummarySnapshot,
                 targetRepMin: templateExercise.targetRepMin,
                 targetRepMax: templateExercise.targetRepMax,
                 restSeconds: templateExercise.restSeconds,
@@ -329,6 +342,7 @@ final class WorkoutSessionRepository {
         let nextIndex = (existing.map(\.sortOrder).max() ?? -1) + 1
         let created = WorkoutSessionExercise(
             sessionID: sessionID,
+            templateExerciseID: nil,
             catalogExerciseUUID: catalogItem.remoteUUID,
             exerciseNameSnapshot: catalogItem.displayName,
             categorySnapshot: catalogItem.categoryName,

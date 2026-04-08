@@ -1555,6 +1555,7 @@ struct BrosSocialServiceTests {
             ActiveWorkoutDraftSession.self,
             ActiveWorkoutDraftCardioBlock.self,
             ActiveWorkoutDraftExercise.self,
+            ActiveWorkoutDraftExerciseComponent.self,
             ActiveWorkoutDraftSet.self,
             SocialOutboxItem.self,
         ])
