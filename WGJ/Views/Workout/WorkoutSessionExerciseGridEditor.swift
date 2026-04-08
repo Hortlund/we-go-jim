@@ -22,6 +22,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     var showsInlineExerciseControls: Bool
     var showsSetProgressChip: Bool
     var manualCompletionMode: Bool
+    var isBozarModeEnabled: Bool
     var isSetEditingEnabled: Bool
     var enablesHeaderSwipeDelete: Bool
     var emphasizesExerciseCompletion: Bool
@@ -48,6 +49,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     @State private var weightInputTextBySetID: [UUID: String] = [:]
     @State private var pendingDraftChangeNotificationTask: Task<Void, Never>?
     @State private var pendingDisplayRefreshTask: Task<Void, Never>?
+    @State private var pendingEmptyCompletionConfirmation: PendingEmptyCompletionConfirmation?
     @FocusState private var focusedInput: SetInputFocus?
 
     private let restPresets = [10, 15, 20, 30, 45, 60, 75, 90, 105, 120, 150, 180, 210, 240]
@@ -62,6 +64,13 @@ struct WorkoutSessionExerciseGridEditor: View {
             case weight
             case reps
         }
+    }
+
+    private struct PendingEmptyCompletionConfirmation: Identifiable, Equatable {
+        let setID: UUID
+        let setTitle: String
+
+        var id: UUID { setID }
     }
 
     init(
@@ -85,6 +94,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         showsInlineExerciseControls: Bool = true,
         showsSetProgressChip: Bool = true,
         manualCompletionMode: Bool = false,
+        isBozarModeEnabled: Bool = false,
         isSetEditingEnabled: Bool = true,
         enablesHeaderSwipeDelete: Bool = false,
         emphasizesExerciseCompletion: Bool = false,
@@ -118,6 +128,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.showsInlineExerciseControls = showsInlineExerciseControls
         self.showsSetProgressChip = showsSetProgressChip
         self.manualCompletionMode = manualCompletionMode
+        self.isBozarModeEnabled = isBozarModeEnabled
         self.isSetEditingEnabled = isSetEditingEnabled
         self.enablesHeaderSwipeDelete = enablesHeaderSwipeDelete
         self.emphasizesExerciseCompletion = emphasizesExerciseCompletion
@@ -209,6 +220,16 @@ struct WorkoutSessionExerciseGridEditor: View {
             if newFocus == nil {
                 flushPendingDisplayRefresh()
             }
+        }
+        .alert(item: $pendingEmptyCompletionConfirmation) { confirmation in
+            Alert(
+                title: Text("Complete with Empty Values?"),
+                message: Text("\(confirmation.setTitle) has no logged weight or reps, and there are no last values to fill."),
+                primaryButton: .default(Text("Complete Empty Set")) {
+                    confirmEmptyCompletion(confirmation)
+                },
+                secondaryButton: .cancel()
+            )
         }
     }
 
@@ -1730,7 +1751,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                     Spacer(minLength: 8)
 
                 Button("Undo") {
-                    setCompletion(false, at: index)
+                    requestCompletionChange(at: index, isCompleted: false)
                 }
                 .buttonStyle(WGJGhostButtonStyle())
                 .disabled(!isSetEditingEnabled || set.isLocked)
@@ -1747,7 +1768,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                 )
             } else {
                 Button {
-                    setCompletion(true, at: index)
+                    requestCompletionChange(at: index, isCompleted: true)
                 } label: {
                     Label(row.completionButtonTitle, systemImage: "checkmark.circle.fill")
                         .frame(maxWidth: .infinity)
@@ -1761,7 +1782,49 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func toggleCompletion(at index: Int) {
         guard setDrafts.indices.contains(index) else { return }
-        setCompletion(!setDrafts[index].isCompleted, at: index)
+        requestCompletionChange(at: index, isCompleted: !setDrafts[index].isCompleted)
+    }
+
+    private func requestCompletionChange(at index: Int, isCompleted: Bool) {
+        guard setDrafts.indices.contains(index) else { return }
+        guard !setDrafts[index].isLocked else { return }
+
+        if focusedInput?.setID == setDrafts[index].id {
+            dismissInputFocus()
+        }
+
+        guard isCompleted else {
+            pendingEmptyCompletionConfirmation = nil
+            setCompletion(false, at: index)
+            return
+        }
+
+        guard manualCompletionMode, isBozarModeEnabled else {
+            setCompletion(true, at: index)
+            return
+        }
+
+        let resolution = WorkoutSetBozarCompletionResolver.resolve(
+            draft: setDrafts[index],
+            previous: previousBySetIndex[index]
+        )
+        setDrafts[index] = resolution.draft
+
+        guard !resolution.shouldConfirmEmptyCompletion else {
+            pendingEmptyCompletionConfirmation = PendingEmptyCompletionConfirmation(
+                setID: setDrafts[index].id,
+                setTitle: setTitle(for: index)
+            )
+            return
+        }
+
+        setCompletion(true, at: index)
+    }
+
+    private func confirmEmptyCompletion(_ confirmation: PendingEmptyCompletionConfirmation) {
+        pendingEmptyCompletionConfirmation = nil
+        guard let index = setDrafts.firstIndex(where: { $0.id == confirmation.setID }) else { return }
+        setCompletion(true, at: index)
     }
 
     private func setCompletion(_ isCompleted: Bool, at index: Int) {
@@ -1958,5 +2021,42 @@ struct WorkoutSetInlineHintPresentation: Equatable {
 
     private static func repsGhostText(from previous: WorkoutPreviousSetSnapshot?) -> String? {
         previous?.reps.map(String.init)
+    }
+}
+
+struct WorkoutSetBozarCompletionResolution: Equatable {
+    let draft: WorkoutSessionSetDraft
+    let shouldConfirmEmptyCompletion: Bool
+}
+
+enum WorkoutSetBozarCompletionResolver {
+    static func resolve(
+        draft: WorkoutSessionSetDraft,
+        previous: WorkoutPreviousSetSnapshot?
+    ) -> WorkoutSetBozarCompletionResolution {
+        var resolvedDraft = draft
+
+        if resolvedDraft.actualWeight == nil, let previousWeight = previous?.weight {
+            resolvedDraft.actualWeight = previousWeight
+            resolvedDraft.actualLoadUnit = previous?.unit ?? resolvedDraft.actualLoadUnit
+        }
+
+        if resolvedDraft.actualReps == nil, let previousReps = previous?.reps {
+            resolvedDraft.actualReps = previousReps
+        }
+
+        let shouldApplyBodyweightUnit =
+            previous?.unit == .bodyweight
+            && resolvedDraft.actualWeight == nil
+            && ((previous?.reps) != nil || resolvedDraft.actualReps != nil)
+
+        if shouldApplyBodyweightUnit {
+            resolvedDraft.actualLoadUnit = .bodyweight
+        }
+
+        return WorkoutSetBozarCompletionResolution(
+            draft: resolvedDraft,
+            shouldConfirmEmptyCompletion: resolvedDraft.actualWeight == nil && resolvedDraft.actualReps == nil
+        )
     }
 }

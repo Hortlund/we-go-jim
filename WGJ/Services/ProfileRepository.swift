@@ -122,6 +122,13 @@ final class ProfileRepository {
         try modelContext.save()
     }
 
+    func updateBozarModeEnabled(_ isEnabled: Bool) throws {
+        let profile = try loadOrCreateProfile()
+        profile.isBozarModeEnabled = isEnabled
+        profile.updatedAt = .now
+        try modelContext.save()
+    }
+
     func updatePreferredWeightUnit(_ unit: PreferredWeightUnit) throws {
         let profile = try loadOrCreateProfile()
         profile.preferredWeightUnit = unit

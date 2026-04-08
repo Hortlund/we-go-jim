@@ -16,6 +16,7 @@ struct SettingsView: View {
     @State private var weeklyGoal = 4
     @State private var isTrainingGuidanceEnabled = true
     @State private var keepsScreenAwake = false
+    @State private var isBozarModeEnabled = false
     @State private var preferredWeightUnit: PreferredWeightUnit = .kg
     @State private var workoutNotificationStyle: WorkoutNotificationStyle = .timeSensitive
     @State private var hasLoadedProfile = false
@@ -100,6 +101,19 @@ struct SettingsView: View {
                         }
                     }
                     .tint(WGJTheme.accentBlue)
+
+                    Toggle(isOn: $isBozarModeEnabled) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Bozar Mode")
+                                .foregroundStyle(WGJTheme.textPrimary)
+
+                            Text("what happens if i open all")
+                                .font(.caption)
+                                .foregroundStyle(WGJTheme.textSecondary)
+                        }
+                    }
+                    .tint(WGJTheme.accentBlue)
+                    .accessibilityIdentifier("settings-bozar-mode-toggle")
 
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Default weight unit")
@@ -373,6 +387,10 @@ struct SettingsView: View {
             guard hasLoadedProfile else { return }
             saveKeepsScreenAwakePreference(newValue)
         }
+        .onChange(of: isBozarModeEnabled) { _, newValue in
+            guard hasLoadedProfile else { return }
+            saveBozarModePreference(newValue)
+        }
         .onChange(of: preferredWeightUnit) { _, newValue in
             guard hasLoadedProfile else { return }
             savePreferredWeightUnitPreference(newValue)
@@ -418,6 +436,7 @@ struct SettingsView: View {
             weeklyGoal = profile.weeklyWorkoutGoal
             isTrainingGuidanceEnabled = profile.isTrainingGuidanceEnabled
             keepsScreenAwake = profile.keepsScreenAwake
+            isBozarModeEnabled = profile.isBozarModeEnabled
             preferredWeightUnit = profile.preferredWeightUnit
             workoutNotificationStyle = profile.workoutNotificationStyle
         } catch {
@@ -545,6 +564,14 @@ struct SettingsView: View {
     private func saveKeepsScreenAwakePreference(_ isEnabled: Bool) {
         do {
             try profileRepository.updateKeepsScreenAwake(isEnabled)
+        } catch {
+            showError(error)
+        }
+    }
+
+    private func saveBozarModePreference(_ isEnabled: Bool) {
+        do {
+            try profileRepository.updateBozarModeEnabled(isEnabled)
         } catch {
             showError(error)
         }

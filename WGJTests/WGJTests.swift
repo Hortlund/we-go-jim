@@ -546,6 +546,7 @@ struct WGJTests {
         #expect(created.preferredWeightUnit == .kg)
         #expect(created.isTrainingGuidanceEnabled)
         #expect(created.keepsScreenAwake == false)
+        #expect(created.isBozarModeEnabled == false)
 
         let avatarData = Data([0x01, 0x02, 0x03, 0x04])
         try repository.saveProfile(
@@ -644,6 +645,18 @@ struct WGJTests {
 
         let updated = try repository.currentProfile()
         #expect(updated?.keepsScreenAwake == true)
+    }
+
+    @Test
+    func profileRepositoryPersistsBozarModePreference() throws {
+        let context = try makeInMemoryContext()
+        let repository = ProfileRepository(modelContext: context)
+
+        _ = try repository.loadOrCreateProfile()
+        try repository.updateBozarModeEnabled(true)
+
+        let updated = try repository.currentProfile()
+        #expect(updated?.isBozarModeEnabled == true)
     }
 
     @Test

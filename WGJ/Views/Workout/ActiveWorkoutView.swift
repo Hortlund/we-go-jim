@@ -566,6 +566,7 @@ struct ActiveWorkoutView: View {
             preferredLoadUnit: preferredLoadUnit,
             restSeconds: resolvedRest(for: exercise),
             setDrafts: drafts,
+            isBozarModeEnabled: profiles.first?.isBozarModeEnabled ?? false,
             isExpanded: cardStateController.isExpanded(for: exerciseID),
             isSetEditingEnabled: areMainExercisesUnlocked,
             canMoveUp: index > 0,
@@ -1833,6 +1834,7 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
     let preferredLoadUnit: TemplateLoadUnit
     let restSeconds: Int
     let setDrafts: [WorkoutSessionSetDraft]
+    let isBozarModeEnabled: Bool
     let isExpanded: Bool
     let isSetEditingEnabled: Bool
     let canMoveUp: Bool
@@ -1872,6 +1874,7 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
         preferredLoadUnit: TemplateLoadUnit,
         restSeconds: Int,
         setDrafts: [WorkoutSessionSetDraft],
+        isBozarModeEnabled: Bool,
         isExpanded: Bool,
         isSetEditingEnabled: Bool,
         canMoveUp: Bool,
@@ -1902,6 +1905,7 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
         self.preferredLoadUnit = preferredLoadUnit
         self.restSeconds = restSeconds
         self.setDrafts = setDrafts
+        self.isBozarModeEnabled = isBozarModeEnabled
         self.isExpanded = isExpanded
         self.isSetEditingEnabled = isSetEditingEnabled
         self.canMoveUp = canMoveUp
@@ -1936,6 +1940,7 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
             && lhs.preferredLoadUnit == rhs.preferredLoadUnit
             && lhs.restSeconds == rhs.restSeconds
             && lhs.setDrafts == rhs.setDrafts
+            && lhs.isBozarModeEnabled == rhs.isBozarModeEnabled
             && lhs.isExpanded == rhs.isExpanded
             && lhs.isSetEditingEnabled == rhs.isSetEditingEnabled
             && lhs.canMoveUp == rhs.canMoveUp
@@ -1972,6 +1977,7 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
             showsInlineExerciseControls: false,
             showsSetProgressChip: false,
             manualCompletionMode: true,
+            isBozarModeEnabled: isBozarModeEnabled,
             isSetEditingEnabled: isSetEditingEnabled,
             enablesHeaderSwipeDelete: true,
             emphasizesExerciseCompletion: true,

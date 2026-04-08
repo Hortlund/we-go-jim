@@ -516,6 +516,7 @@ final class UserProfile {
     var weeklyWorkoutGoal: Int = 4
     var isTrainingGuidanceEnabled: Bool = true
     var keepsScreenAwake: Bool = false
+    var isBozarModeEnabled: Bool = false
     var brosCircleID: String?
     var brosMembershipID: String?
     var brosUserRecordName: String?
@@ -568,6 +569,7 @@ final class UserProfile {
         weeklyWorkoutGoal: Int = 4,
         isTrainingGuidanceEnabled: Bool = true,
         keepsScreenAwake: Bool = false,
+        isBozarModeEnabled: Bool = false,
         brosCircleID: String? = nil,
         brosMembershipID: String? = nil,
         brosUserRecordName: String? = nil,
@@ -585,6 +587,7 @@ final class UserProfile {
         self.weeklyWorkoutGoal = max(1, min(14, weeklyWorkoutGoal))
         self.isTrainingGuidanceEnabled = isTrainingGuidanceEnabled
         self.keepsScreenAwake = keepsScreenAwake
+        self.isBozarModeEnabled = isBozarModeEnabled
         self.brosCircleID = brosCircleID
         self.brosMembershipID = brosMembershipID
         self.brosUserRecordName = brosUserRecordName
