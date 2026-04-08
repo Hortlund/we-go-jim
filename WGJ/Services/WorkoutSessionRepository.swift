@@ -75,6 +75,42 @@ struct WorkoutSessionSetDraft: Identifiable, Equatable {
     }
 }
 
+enum WorkoutRestTimerContextBuilder {
+    static func nextSetLabel(
+        afterCompletingSetAt completedIndex: Int,
+        in setDrafts: [WorkoutSessionSetDraft]
+    ) -> String? {
+        guard setDrafts.indices.contains(completedIndex) else {
+            return nil
+        }
+
+        guard let nextIndex = setDrafts.indices.first(where: { index in
+            index > completedIndex && !setDrafts[index].isCompleted
+        }) else {
+            return nil
+        }
+
+        return setLabel(for: nextIndex, in: setDrafts)
+    }
+
+    static func setLabel(for index: Int, in setDrafts: [WorkoutSessionSetDraft]) -> String? {
+        guard setDrafts.indices.contains(index) else {
+            return nil
+        }
+
+        if setDrafts[index].isWarmup {
+            return "Warmup Set"
+        }
+
+        let workingSetNumber = setDrafts.prefix(index + 1).reduce(into: 0) { count, draft in
+            if !draft.isWarmup {
+                count += 1
+            }
+        }
+        return "Working Set \(workingSetNumber)"
+    }
+}
+
 enum WorkoutSessionRepositoryError: Error {
     case sessionNotFound
     case sessionExerciseNotFound

@@ -397,7 +397,7 @@ final class RestTimerState {
 
     @ObservationIgnored private var restTimerPopupDismissTask: Task<Void, Never>?
 
-    func startRestTimer(seconds: Int, exerciseName: String, setLabel: String, sourceSetID: UUID) {
+    func startRestTimer(seconds: Int, exerciseName: String, setLabel: String?, sourceSetID: UUID) {
         let normalized = max(0, min(3600, seconds))
         guard normalized > 0 else {
             clearRestTimer()
@@ -411,8 +411,6 @@ final class RestTimerState {
         restTimerSourceSetID = sourceSetID
         RestTimerNotificationManager.shared.scheduleRestTimer(
             seconds: normalized,
-            exerciseName: exerciseName,
-            setLabel: setLabel,
             style: AppRuntimeState.shared.workoutNotificationStyle
         )
     }
@@ -665,8 +663,6 @@ final class RestTimerNotificationManager {
 
     func scheduleRestTimer(
         seconds: Int,
-        exerciseName: String,
-        setLabel: String,
         style: WorkoutNotificationStyle
     ) {
         schedulingGeneration += 1
@@ -690,11 +686,7 @@ final class RestTimerNotificationManager {
             }
             guard !Task.isCancelled, generation == self.schedulingGeneration else { return }
 
-            let descriptor = Self.notificationDescriptor(
-                exerciseName: exerciseName,
-                setLabel: setLabel,
-                style: style
-            )
+            let descriptor = Self.notificationDescriptor(style: style)
             let content = Self.makeNotificationContent(from: descriptor)
 
             let trigger = UNTimeIntervalNotificationTrigger(
@@ -728,14 +720,12 @@ final class RestTimerNotificationManager {
     }
 
     static func notificationDescriptor(
-        exerciseName: String,
-        setLabel: String,
         style: WorkoutNotificationStyle
     ) -> RestTimerNotificationDescriptor {
         RestTimerNotificationDescriptor(
             title: "Rest complete",
-            subtitle: exerciseName,
-            body: "Back for \(setLabel)",
+            subtitle: "",
+            body: "Time for your next set.",
             usesDefaultSound: true,
             interruptionLevel: style.notificationInterruptionLevel
         )

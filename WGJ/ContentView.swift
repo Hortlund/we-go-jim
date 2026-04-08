@@ -47,12 +47,14 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .task {
             installUITestPendingTemplateIfNeeded()
+            restTimerState.clearExpiredRestTimerIfNeeded()
             requestAppMaintenance()
             syncWorkoutNotificationPreferences()
             updateIdleTimerState()
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
+                restTimerState.clearExpiredRestTimerIfNeeded()
                 requestAppMaintenance()
             }
             updateIdleTimerState()

@@ -7,14 +7,12 @@ struct WorkoutNotificationBehaviorTests {
     @Test
     func restTimerNotificationsUseDefaultSystemSound() {
         let descriptor = RestTimerNotificationManager.notificationDescriptor(
-            exerciseName: "Bench Press",
-            setLabel: "Set 3",
             style: .standard
         )
 
         #expect(descriptor.title == "Rest complete")
-        #expect(descriptor.subtitle == "Bench Press")
-        #expect(descriptor.body == "Back for Set 3")
+        #expect(descriptor.subtitle.isEmpty)
+        #expect(descriptor.body == "Time for your next set.")
         #expect(descriptor.usesDefaultSound)
         #expect(descriptor.interruptionLevel == .active)
     }
@@ -22,13 +20,44 @@ struct WorkoutNotificationBehaviorTests {
     @Test
     func timeSensitiveRestTimerNotificationsKeepTimeSensitiveInterruptionLevel() {
         let descriptor = RestTimerNotificationManager.notificationDescriptor(
-            exerciseName: "Incline Press",
-            setLabel: "Set 4",
             style: .timeSensitive
         )
 
         #expect(descriptor.usesDefaultSound)
         #expect(descriptor.interruptionLevel == .timeSensitive)
+    }
+
+    @Test
+    func nextRestTimerContextUsesUpcomingWorkingSetLabel() {
+        var drafts = [
+            WorkoutSessionSetDraft(isWarmup: false),
+            WorkoutSessionSetDraft(isWarmup: false),
+            WorkoutSessionSetDraft(isWarmup: false)
+        ]
+        drafts[1].isCompleted = true
+
+        #expect(
+            WorkoutRestTimerContextBuilder.nextSetLabel(
+                afterCompletingSetAt: 1,
+                in: drafts
+            ) == "Working Set 3"
+        )
+    }
+
+    @Test
+    func nextRestTimerContextFallsBackWhenNoUpcomingSetExists() {
+        var drafts = [
+            WorkoutSessionSetDraft(isWarmup: true),
+            WorkoutSessionSetDraft(isWarmup: false)
+        ]
+        drafts[1].isCompleted = true
+
+        #expect(
+            WorkoutRestTimerContextBuilder.nextSetLabel(
+                afterCompletingSetAt: 1,
+                in: drafts
+            ) == nil
+        )
     }
 
     @Test

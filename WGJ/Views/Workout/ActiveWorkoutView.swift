@@ -1763,7 +1763,7 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
     let onExpandedChanged: (Bool) -> Void
     let onSetDraftsChanged: ([WorkoutSessionSetDraft]) -> Void
     let onRestChanged: (Int) -> Void
-    let onSetCompletionChange: (UUID, String, Int, Bool) -> Void
+    let onSetCompletionChange: (UUID, String?, Int, Bool) -> Void
     let onExerciseSettings: () -> Void
     let onExerciseMoveUp: () -> Void
     let onExerciseMoveDown: () -> Void
@@ -1799,7 +1799,7 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
         onExpandedChanged: @escaping (Bool) -> Void,
         onSetDraftsChanged: @escaping ([WorkoutSessionSetDraft]) -> Void,
         onRestChanged: @escaping (Int) -> Void,
-        onSetCompletionChange: @escaping (UUID, String, Int, Bool) -> Void,
+        onSetCompletionChange: @escaping (UUID, String?, Int, Bool) -> Void,
         onExerciseSettings: @escaping () -> Void,
         onExerciseMoveUp: @escaping () -> Void,
         onExerciseMoveDown: @escaping () -> Void,

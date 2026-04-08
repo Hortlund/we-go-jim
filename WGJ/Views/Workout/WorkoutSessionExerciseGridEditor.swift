@@ -26,7 +26,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     var emphasizesExerciseCompletion: Bool
     var onSetDraftsChanged: (([WorkoutSessionSetDraft]) -> Void)?
     var onRestChanged: ((Int) -> Void)?
-    var onSetCompletionChange: ((UUID, String, Int, Bool) -> Void)?
+    var onSetCompletionChange: ((UUID, String?, Int, Bool) -> Void)?
     var onExerciseSettings: (() -> Void)?
     var canMoveExerciseUp: Bool
     var canMoveExerciseDown: Bool
@@ -87,7 +87,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         emphasizesExerciseCompletion: Bool = false,
         onSetDraftsChanged: (([WorkoutSessionSetDraft]) -> Void)? = nil,
         onRestChanged: ((Int) -> Void)? = nil,
-        onSetCompletionChange: ((UUID, String, Int, Bool) -> Void)? = nil,
+        onSetCompletionChange: ((UUID, String?, Int, Bool) -> Void)? = nil,
         onExerciseSettings: (() -> Void)? = nil,
         canMoveExerciseUp: Bool = false,
         canMoveExerciseDown: Bool = false,
@@ -1742,11 +1742,19 @@ struct WorkoutSessionExerciseGridEditor: View {
 
         guard setDrafts[index].isCompleted != isCompleted else { return }
         let setID = setDrafts[index].id
-        let setTitle = setTitle(for: index)
         let setRestSeconds = setDrafts[index].restSeconds
         setDrafts[index].isCompleted = isCompleted
+        let restTimerSetLabel: String?
+        if isCompleted {
+            restTimerSetLabel = WorkoutRestTimerContextBuilder.nextSetLabel(
+                afterCompletingSetAt: index,
+                in: setDrafts
+            )
+        } else {
+            restTimerSetLabel = setTitle(for: index)
+        }
         notifyChanged()
-        onSetCompletionChange?(setID, setTitle, setRestSeconds, isCompleted)
+        onSetCompletionChange?(setID, restTimerSetLabel, setRestSeconds, isCompleted)
     }
 
     private func notifyChanged() {
