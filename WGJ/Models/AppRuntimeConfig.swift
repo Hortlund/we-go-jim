@@ -11,13 +11,62 @@ struct AppReviewPolicy {
     let syncBrosAvatars: Bool
 }
 
+enum CloudSyncEventType: Equatable {
+    case setup
+    case `import`
+    case export
+    case unknown
+
+    var label: String {
+        switch self {
+        case .setup:
+            return "Setup"
+        case .import:
+            return "Import"
+        case .export:
+            return "Export"
+        case .unknown:
+            return "Unknown"
+        }
+    }
+}
+
+enum CloudSyncEventStatus: Equatable {
+    case running
+    case succeeded
+    case failed
+
+    var label: String {
+        switch self {
+        case .running:
+            return "Running"
+        case .succeeded:
+            return "Succeeded"
+        case .failed:
+            return "Failed"
+        }
+    }
+}
+
+struct CloudSyncErrorSnapshot: Equatable {
+    let domain: String
+    let code: Int
+    let underlyingDomain: String?
+    let underlyingCode: Int?
+    let description: String
+}
+
 struct CloudSyncEventSummary: Equatable {
-    let typeLabel: String
-    let statusLabel: String
+    let type: CloudSyncEventType
+    let status: CloudSyncEventStatus
     let storeIdentifier: String
     let startedAt: Date
     let endedAt: Date?
-    let errorDescription: String?
+    let error: CloudSyncErrorSnapshot?
+
+    var typeLabel: String { type.label }
+    var statusLabel: String { status.label }
+    var errorDescription: String? { error?.description }
 }
 
 enum CloudKitContainerAvailabilityError: Error {
@@ -135,6 +184,10 @@ final class AppRuntimeState {
         cloudSyncErrorDescription = errorDescription
     }
 
+    func updateCloudRuntimeError(_ errorDescription: String?) {
+        cloudSyncErrorDescription = errorDescription
+    }
+
     func updateLatestCloudSyncEvent(_ summary: CloudSyncEventSummary?) {
         latestCloudSyncEvent = summary
     }
@@ -143,11 +196,15 @@ final class AppRuntimeState {
         workoutNotificationStyle = style
     }
 
-    var isBrosCloudAvailable: Bool {
+    func isBrosCloudAvailable(cloudContainerAvailable: Bool) -> Bool {
         AppRuntimeConfig.reviewPolicy.brosEnabled
             && cloudSyncEnabled
             && cloudSyncErrorDescription == nil
-            && AppRuntimeConfig.canUseConfiguredCloudKitContainer
+            && cloudContainerAvailable
+    }
+
+    var isBrosCloudAvailable: Bool {
+        isBrosCloudAvailable(cloudContainerAvailable: AppRuntimeConfig.canUseConfiguredCloudKitContainer)
     }
 }
 

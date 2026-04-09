@@ -4,6 +4,7 @@ import SwiftData
 struct LoginGateView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
+    @Environment(\.cloudSyncErrorDescription) private var cloudSyncErrorDescription
 
     private let accountService: any AccountStatusProviding
     private let onAuthenticated: @MainActor () async -> Void
@@ -153,7 +154,8 @@ struct LoginGateView: View {
     private var cloudDisabledActions: some View {
         WGJEmptyStateCard(
             title: "Local Mode",
-            message: "CloudKit could not initialize for this build or device environment. Data will be stored locally.",
+            message: cloudSyncErrorDescription
+                ?? "CloudKit could not initialize for this build or device environment. Data will be stored locally.",
             icon: "internaldrive"
         ) {
             Button {
@@ -170,7 +172,7 @@ struct LoginGateView: View {
 
     private var statusDescription: String {
         if !cloudSyncEnabled {
-            return "Cloud sync could not be initialized. You can continue locally."
+            return cloudSyncErrorDescription ?? "Cloud sync could not be initialized. You can continue locally."
         }
 
         switch accountStatus {

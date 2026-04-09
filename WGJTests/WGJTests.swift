@@ -729,6 +729,138 @@ struct WGJTests {
         #expect(failed == .unavailable(.unknown))
     }
 
+    @Test
+    func cloudStartupPreflightChoosesCloudBackedBootstrapWhenAccountIsAvailable() {
+        let decision = CloudStartupPreflight.makeDecision(
+            statusProvider: MockCloudStartupAccountStatusProvider(status: .available)
+        )
+
+        #expect(decision.storeMode == .cloudBacked)
+        #expect(decision.cloudSyncEnabled)
+        #expect(decision.cloudSyncErrorDescription == nil)
+    }
+
+    @Test
+    func cloudStartupPreflightChoosesLocalFallbackWithoutICloudAccount() {
+        let decision = CloudStartupPreflight.makeDecision(
+            statusProvider: MockCloudStartupAccountStatusProvider(status: .noAccount)
+        )
+
+        #expect(decision.storeMode == .localFallback)
+        #expect(!decision.cloudSyncEnabled)
+        #expect(decision.cloudSyncErrorDescription?.contains("No iCloud account") == true)
+    }
+
+    @Test
+    func cloudStartupPreflightChoosesLocalFallbackWhenICloudIsRestricted() {
+        let decision = CloudStartupPreflight.makeDecision(
+            statusProvider: MockCloudStartupAccountStatusProvider(status: .restricted)
+        )
+
+        #expect(decision.storeMode == .localFallback)
+        #expect(!decision.cloudSyncEnabled)
+        #expect(decision.cloudSyncErrorDescription?.contains("restricted") == true)
+    }
+
+    @Test
+    func cloudStartupPreflightKeepsCloudAttemptForTransientStatuses() {
+        let statuses: [CloudStartupAccountStatus] = [
+            .temporarilyUnavailable,
+            .couldNotDetermine,
+            .timedOut,
+            .error,
+        ]
+
+        for status in statuses {
+            let decision = CloudStartupPreflight.makeDecision(
+                statusProvider: MockCloudStartupAccountStatusProvider(status: status)
+            )
+
+            #expect(decision.storeMode == .cloudBacked)
+            #expect(decision.cloudSyncEnabled)
+            #expect(decision.cloudSyncErrorDescription == nil)
+        }
+    }
+
+    @Test
+    func cloudSyncClassifierTreatsNoAccountSetupFailureAsRuntimeError() {
+        let summary = makeCloudSyncSummary(
+            type: .setup,
+            status: .failed,
+            error: CloudSyncErrorSnapshot(
+                domain: NSCocoaErrorDomain,
+                code: 134400,
+                underlyingDomain: nil,
+                underlyingCode: nil,
+                description: "Unable to initialize without an iCloud account."
+            )
+        )
+
+        let resolution = CloudSyncEventHealthClassifier.resolution(for: summary)
+        switch resolution {
+        case .setRuntimeError(let description):
+            #expect(description.contains("No iCloud account"))
+        default:
+            Issue.record("Expected a runtime CloudKit error for the no-account setup failure.")
+        }
+    }
+
+    @Test
+    func cloudSyncClassifierClearsRuntimeErrorAfterSuccessfulCloudEvent() {
+        resetAppRuntimeState()
+        defer { resetAppRuntimeState() }
+
+        AppRuntimeState.shared.updateCloudState(
+            isEnabled: true,
+            errorDescription: "CloudKit setup failed."
+        )
+
+        let summary = makeCloudSyncSummary(type: .export, status: .succeeded)
+        let resolution = CloudSyncEventHealthClassifier.resolution(for: summary)
+        applyCloudSyncResolution(resolution)
+
+        #expect(AppRuntimeState.shared.cloudSyncErrorDescription == nil)
+    }
+
+    @Test
+    func cloudSyncClassifierIgnoresBackgroundTaskSchedulerNoise() {
+        resetAppRuntimeState()
+        defer { resetAppRuntimeState() }
+
+        AppRuntimeState.shared.updateCloudState(isEnabled: true, errorDescription: nil)
+
+        let summary = makeCloudSyncSummary(
+            type: .export,
+            status: .failed,
+            error: CloudSyncErrorSnapshot(
+                domain: "BGSystemTaskSchedulerErrorDomain",
+                code: 3,
+                underlyingDomain: nil,
+                underlyingCode: nil,
+                description: "Error updating background task request."
+            )
+        )
+
+        let resolution = CloudSyncEventHealthClassifier.resolution(for: summary)
+        applyCloudSyncResolution(resolution)
+
+        #expect(AppRuntimeState.shared.cloudSyncErrorDescription == nil)
+        #expect(AppRuntimeState.shared.isBrosCloudAvailable(cloudContainerAvailable: true))
+    }
+
+    @Test
+    func brosCloudAvailabilityTurnsOffWhenRuntimeErrorIsSet() {
+        resetAppRuntimeState()
+        defer { resetAppRuntimeState() }
+
+        AppRuntimeState.shared.updateCloudState(isEnabled: true, errorDescription: nil)
+        #expect(AppRuntimeState.shared.isBrosCloudAvailable(cloudContainerAvailable: true))
+
+        AppRuntimeState.shared.updateCloudRuntimeError("CloudKit setup failed.")
+
+        #expect(!AppRuntimeState.shared.isBrosCloudAvailable(cloudContainerAvailable: true))
+    }
+
 #if DEBUG
     @Test
     func demoSeedServiceSeedsProfileAndTemplatesIdempotently() throws {
@@ -757,6 +889,37 @@ struct WGJTests {
         #expect(templatesSecondPass.count == templatesFirstPass.count)
     }
 #endif
+
+    private func makeCloudSyncSummary(
+        type: CloudSyncEventType,
+        status: CloudSyncEventStatus,
+        error: CloudSyncErrorSnapshot? = nil
+    ) -> CloudSyncEventSummary {
+        CloudSyncEventSummary(
+            type: type,
+            status: status,
+            storeIdentifier: "UserData",
+            startedAt: .now,
+            endedAt: status == .running ? nil : .now,
+            error: error
+        )
+    }
+
+    private func applyCloudSyncResolution(_ resolution: CloudSyncEventHealthResolution) {
+        switch resolution {
+        case .noChange:
+            break
+        case .clearRuntimeError:
+            AppRuntimeState.shared.updateCloudRuntimeError(nil)
+        case .setRuntimeError(let description):
+            AppRuntimeState.shared.updateCloudRuntimeError(description)
+        }
+    }
+
+    private func resetAppRuntimeState() {
+        AppRuntimeState.shared.updateCloudState(isEnabled: false, errorDescription: nil)
+        AppRuntimeState.shared.updateLatestCloudSyncEvent(nil)
+    }
 
     private func makeInMemoryContext() throws -> ModelContext {
         let schema = Schema([
@@ -813,6 +976,15 @@ private struct MockCloudAccountStatusClient: CloudAccountStatusClient {
         if let error {
             throw error
         }
+        return status
+    }
+}
+
+private struct MockCloudStartupAccountStatusProvider: CloudStartupAccountStatusProviding {
+    let status: CloudStartupAccountStatus
+
+    func currentStatus(timeout: TimeInterval) -> CloudStartupAccountStatus {
+        _ = timeout
         return status
     }
 }

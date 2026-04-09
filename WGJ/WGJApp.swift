@@ -40,32 +40,46 @@ struct WGJApp: App {
             }
         }
 
-        do {
-            let container = try makeCloudBackedContainer()
-            return ModelContainerBootstrap(
-                container: container,
-                cloudSyncEnabled: true,
-                cloudSyncErrorDescription: nil
-            )
-        } catch {
-            let cloudError = describe(error)
-            let fallbackContainer: ModelContainer
-
+        let startupDecision = CloudStartupPreflight.makeDecision()
+        switch startupDecision.storeMode {
+        case .localFallback:
             do {
-                fallbackContainer = try makeLocalFallbackContainer()
+                return ModelContainerBootstrap(
+                    container: try makeLocalFallbackContainer(),
+                    cloudSyncEnabled: startupDecision.cloudSyncEnabled,
+                    cloudSyncErrorDescription: startupDecision.cloudSyncErrorDescription
+                )
             } catch {
                 fatalError("Could not create fallback ModelContainer without CloudKit sync: \(describe(error))")
             }
+        case .cloudBacked:
+            do {
+                let container = try makeCloudBackedContainer()
+                return ModelContainerBootstrap(
+                    container: container,
+                    cloudSyncEnabled: startupDecision.cloudSyncEnabled,
+                    cloudSyncErrorDescription: startupDecision.cloudSyncErrorDescription
+                )
+            } catch {
+                let cloudError = describe(error)
+                let fallbackContainer: ModelContainer
 
-            #if DEBUG
-            print("Cloud-backed ModelContainer unavailable. Falling back to local-only mode. Error: \(cloudError)")
-            #endif
+                do {
+                    fallbackContainer = try makeLocalFallbackContainer()
+                } catch {
+                    fatalError("Could not create fallback ModelContainer without CloudKit sync: \(describe(error))")
+                }
 
-            return ModelContainerBootstrap(
-                container: fallbackContainer,
-                cloudSyncEnabled: false,
-                cloudSyncErrorDescription: cloudError
-            )
+                #if DEBUG
+                print("Cloud-backed ModelContainer unavailable. Falling back to local-only mode. Error: \(cloudError)")
+                #endif
+
+                return ModelContainerBootstrap(
+                    container: fallbackContainer,
+                    cloudSyncEnabled: false,
+                    cloudSyncErrorDescription: cloudError
+                )
+            }
         }
     }
 

@@ -1,5 +1,84 @@
+import CloudKit
 import CoreData
 import Foundation
+
+enum CloudSyncEventHealthResolution: Equatable {
+    case noChange
+    case clearRuntimeError
+    case setRuntimeError(String)
+}
+
+enum CloudSyncEventHealthClassifier {
+    private static let backgroundTaskSchedulerErrorDomain = "BGSystemTaskSchedulerErrorDomain"
+    private static let ignoredBackgroundTaskSchedulerCodes: Set<Int> = [3, 8]
+
+    static func resolution(for summary: CloudSyncEventSummary) -> CloudSyncEventHealthResolution {
+        switch summary.status {
+        case .running:
+            return .noChange
+        case .succeeded:
+            switch summary.type {
+            case .setup, .import, .export:
+                return .clearRuntimeError
+            case .unknown:
+                return .noChange
+            }
+        case .failed:
+            guard let description = runtimeErrorDescription(for: summary) else {
+                return .noChange
+            }
+
+            return .setRuntimeError(description)
+        }
+    }
+
+    static func runtimeErrorDescription(for summary: CloudSyncEventSummary) -> String? {
+        if let error = summary.error {
+            if matches(error, domain: backgroundTaskSchedulerErrorDomain, codes: ignoredBackgroundTaskSchedulerCodes) {
+                return nil
+            }
+
+            if matches(error, domain: NSCocoaErrorDomain, codes: [134400]) {
+                return "No iCloud account is signed in on this device. Cloud features are unavailable for this session."
+            }
+
+            if matches(error, domain: CKError.errorDomain, codes: [CKError.Code.notAuthenticated.rawValue]) {
+                return "You are not signed into iCloud. Cloud features are unavailable until iCloud is available again."
+            }
+
+            if matches(error, domain: CKError.errorDomain, codes: [CKError.Code.permissionFailure.rawValue]) {
+                return "CloudKit permission failed for this account. Cloud features are currently unavailable."
+            }
+        }
+
+        switch summary.type {
+        case .setup:
+            return "CloudKit setup failed. Cloud features are currently unavailable."
+        case .import, .export:
+            return "CloudKit sync encountered an error. Cloud features are temporarily unavailable."
+        case .unknown:
+            return nil
+        }
+    }
+
+    private static func matches(
+        _ error: CloudSyncErrorSnapshot,
+        domain: String,
+        codes: Set<Int>
+    ) -> Bool {
+        if error.domain == domain && codes.contains(error.code) {
+            return true
+        }
+
+        guard let underlyingDomain = error.underlyingDomain,
+              let underlyingCode = error.underlyingCode
+        else {
+            return false
+        }
+
+        return underlyingDomain == domain && codes.contains(underlyingCode)
+    }
+}
 
 @MainActor
 final class CloudSyncEventMonitor {
@@ -25,42 +104,64 @@ final class CloudSyncEventMonitor {
             }
 
             let summary = Self.summary(from: event)
+            let resolution = CloudSyncEventHealthClassifier.resolution(for: summary)
             Task { @MainActor in
                 AppRuntimeState.shared.updateLatestCloudSyncEvent(summary)
+                switch resolution {
+                case .noChange:
+                    break
+                case .clearRuntimeError:
+                    AppRuntimeState.shared.updateCloudRuntimeError(nil)
+                case .setRuntimeError(let description):
+                    AppRuntimeState.shared.updateCloudRuntimeError(description)
+                }
             }
         }
     }
 
     nonisolated private static func summary(from event: NSPersistentCloudKitContainer.Event) -> CloudSyncEventSummary {
         CloudSyncEventSummary(
-            typeLabel: typeLabel(for: event),
-            statusLabel: statusLabel(for: event),
+            type: type(for: event),
+            status: status(for: event),
             storeIdentifier: event.storeIdentifier,
             startedAt: event.startDate,
             endedAt: event.endDate,
-            errorDescription: event.error.map(Self.describe)
+            error: event.error.map(Self.snapshot)
         )
     }
 
-    nonisolated private static func typeLabel(for event: NSPersistentCloudKitContainer.Event) -> String {
+    nonisolated private static func type(for event: NSPersistentCloudKitContainer.Event) -> CloudSyncEventType {
         switch event.type {
         case .setup:
-            return "Setup"
+            return .setup
         case .import:
-            return "Import"
+            return .import
         case .export:
-            return "Export"
+            return .export
         @unknown default:
-            return "Unknown"
+            return .unknown
         }
     }
 
-    nonisolated private static func statusLabel(for event: NSPersistentCloudKitContainer.Event) -> String {
+    nonisolated private static func status(for event: NSPersistentCloudKitContainer.Event) -> CloudSyncEventStatus {
         if event.endDate == nil {
-            return "Running"
+            return .running
         }
 
-        return event.succeeded ? "Succeeded" : "Failed"
+        return event.succeeded ? .succeeded : .failed
+    }
+
+    nonisolated private static func snapshot(_ error: Error) -> CloudSyncErrorSnapshot {
+        let nsError = error as NSError
+        let underlyingError = nsError.userInfo[NSUnderlyingErrorKey] as? NSError
+
+        return CloudSyncErrorSnapshot(
+            domain: nsError.domain,
+            code: nsError.code,
+            underlyingDomain: underlyingError?.domain,
+            underlyingCode: underlyingError?.code,
+            description: describe(error)
+        )
     }
 
     nonisolated private static func describe(_ error: Error) -> String {

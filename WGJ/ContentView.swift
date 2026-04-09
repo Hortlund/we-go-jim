@@ -5,11 +5,11 @@ import UIKit
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
 
     @Query(sort: [SortDescriptor(\UserProfile.updatedAt, order: .reverse)])
     private var storedProfiles: [UserProfile]
 
+    @State private var appRuntimeState = AppRuntimeState.shared
     @State private var appPhase: AppPhase = .splash
     @State private var appTabState = AppTabState()
     @State private var templateFileOpenState = TemplateFileOpenState()
@@ -37,6 +37,8 @@ struct ContentView: View {
                 MainTabView()
             }
         }
+        .environment(\.cloudSyncEnabled, appRuntimeState.cloudSyncEnabled)
+        .environment(\.cloudSyncErrorDescription, appRuntimeState.cloudSyncErrorDescription)
         .environment(appTabState)
         .environment(templateFileOpenState)
         .environment(workoutCompletionPresentationState)
@@ -238,7 +240,9 @@ struct ContentView: View {
         let repository = ProfileRepository(modelContext: modelContext)
 
         do {
-            let profile = try await repository.bootstrapProfileIdentity(cloudSyncEnabled: cloudSyncEnabled)
+            let profile = try await repository.bootstrapProfileIdentity(
+                cloudSyncEnabled: appRuntimeState.cloudSyncEnabled
+            )
             AppRuntimeState.shared.updateWorkoutNotificationStyle(profile.workoutNotificationStyle)
         } catch {
             if let profile = try? repository.loadOrCreateProfile() {
