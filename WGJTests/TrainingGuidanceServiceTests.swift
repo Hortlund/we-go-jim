@@ -131,7 +131,7 @@ struct TrainingGuidanceServiceTests {
         #expect(cue?.suggestedLoadUnit == .kg)
         #expect(cue?.suggestedRepRange == 6...8)
         let increaseWeightText = "\(WGJFormatters.decimalString(102.5)) kg"
-        #expect(cue?.summary == "Last working sets cleared the range. Next time try \(increaseWeightText) and build back to 6-8 reps.")
+        #expect(cue?.summary == "You cleared the whole range. Go to \(increaseWeightText) next time and own 6-8 clean reps.")
     }
 
     @Test
@@ -156,7 +156,7 @@ struct TrainingGuidanceServiceTests {
         #expect(cue?.suggestedLoadUnit == .kg)
         #expect(cue?.suggestedRepRange == 5...8)
         let decreaseWeightText = "\(WGJFormatters.decimalString(137.5)) kg"
-        #expect(cue?.summary == "Last working sets missed the range. Drop to \(decreaseWeightText) and rebuild to 5-8 reps.")
+        #expect(cue?.summary == "You missed the floor of the range. Drop to \(decreaseWeightText), take your rest, and rebuild 5-8 clean reps.")
     }
 
     @Test
@@ -259,9 +259,9 @@ struct TrainingGuidanceServiceTests {
 
         let presentation = ActiveWorkoutExerciseGuidancePresentation.make(cue: cue)
 
-        #expect(presentation?.title == "Increase load next time")
+        #expect(presentation?.title == "You earned a load jump")
         let nextWeightText = "\(WGJFormatters.decimalString(102.5)) kg"
-        #expect(presentation?.summary == "Last working sets cleared the range. Next time try \(nextWeightText) and build back to 6-8 reps.")
+        #expect(presentation?.summary == "You cleared the whole range. Go to \(nextWeightText) next time and own 6-8 clean reps.")
         #expect(presentation?.tone == .success)
     }
 
@@ -292,9 +292,71 @@ struct TrainingGuidanceServiceTests {
 
         let presentation = ActiveWorkoutExerciseGuidancePresentation.make(cue: cue)
 
-        #expect(presentation?.title == "Stay here until you own the range")
-        #expect(presentation?.summary == "Keep 100 kg until every working set lands in 6-8 reps.")
+        #expect(presentation?.title == "Stay here and sharpen it")
+        #expect(presentation?.summary == "100 kg is right for now. Keep every work set inside 6-8 before you move it.")
         #expect(presentation?.tone == .accent)
+    }
+
+    @Test
+    func activeWorkoutGuidanceShowsSetupCueBeforeWorkingSets() {
+        let presentation = service.activeWorkoutGuidance(
+            for: TrainingGuidanceCatalogSnapshot(
+                exerciseName: "Bench Press",
+                categoryName: "Chest",
+                equipmentSummary: "Barbell",
+                primaryMuscleNames: "Chest, Triceps"
+            ),
+            targetRepMin: 6,
+            targetRepMax: 8,
+            setDrafts: []
+        )
+
+        #expect(presentation.title == "Coach cue: set the shoulders")
+        #expect(presentation.summary == "Take 1-2 ramp-up sets before the work sets. Pack the shoulders, keep the path repeatable, and hunt 6-8 reps.")
+        #expect(presentation.tone == .accent)
+    }
+
+    @Test
+    func activeWorkoutGuidanceUsesNextSetCueBeforeExerciseIsFinished() {
+        let presentation = service.activeWorkoutGuidance(
+            for: TrainingGuidanceCatalogSnapshot(
+                exerciseName: "Bench Press",
+                categoryName: "Chest",
+                equipmentSummary: "Barbell",
+                primaryMuscleNames: "Chest, Triceps"
+            ),
+            targetRepMin: 6,
+            targetRepMax: 8,
+            setDrafts: [
+                makeWorkoutSet(reps: 7, weight: 100, completed: true),
+                makeWorkoutSet(reps: nil, weight: nil, completed: false),
+            ]
+        )
+
+        #expect(presentation.title == "Repeat that standard")
+        #expect(presentation.summary == "100 kg is landing right where it should. Match the setup and keep the next set in 6-8 clean reps.")
+        #expect(presentation.tone == .accent)
+    }
+
+    @Test
+    func activeWorkoutGuidanceSupportsBodyweightExercises() {
+        let presentation = service.activeWorkoutGuidance(
+            for: TrainingGuidanceCatalogSnapshot(
+                exerciseName: "Pull Up",
+                categoryName: "Back",
+                equipmentSummary: "Pull-up Bar",
+                primaryMuscleNames: "Lats"
+            ),
+            targetRepMin: 6,
+            targetRepMax: 8,
+            setDrafts: [
+                makeWorkoutSet(reps: 10, weight: 0, unit: .bodyweight, completed: true),
+            ]
+        )
+
+        #expect(presentation.title == "Make bodyweight harder, not sloppier")
+        #expect(presentation.summary == "That last set hit 10 reps. Slow the lowering, add a pause, or progress the variation so the next one still earns 6-8 clean reps.")
+        #expect(presentation.tone == .accent)
     }
 
     @Test

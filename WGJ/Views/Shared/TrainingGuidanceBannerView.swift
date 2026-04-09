@@ -17,16 +17,19 @@ struct TrainingGuidanceBannerView: View {
                 Text(title)
                     .font((compact ? Font.caption : .subheadline).weight(.semibold))
                     .foregroundStyle(WGJTheme.textPrimary)
-                    .lineLimit(compact ? 1 : 2)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 Text(message)
                     .font(compact ? .caption2 : .caption)
                     .foregroundStyle(WGJTheme.textSecondary)
-                    .lineLimit(compact ? 2 : 4)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(compact ? 10 : 12)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)

@@ -1217,30 +1217,27 @@ struct ActiveWorkoutView: View {
     ) -> ActiveWorkoutExerciseGuidancePresentation? {
         guard isTrainingGuidanceEnabled else { return nil }
 
-        let cue: ProgressiveOverloadCue?
         if let catalogExercise = catalogMatchesByUUID[exercise.catalogExerciseUUID] {
-            cue = guidanceService.progressiveOverloadCue(
+            return guidanceService.activeWorkoutGuidance(
                 for: catalogExercise,
-                targetRepMin: exercise.targetRepMin,
-                targetRepMax: exercise.targetRepMax,
-                setDrafts: drafts
-            )
-        } else {
-            let snapshot = TrainingGuidanceCatalogSnapshot(
-                exerciseName: exercise.exerciseNameSnapshot,
-                categoryName: exercise.categorySnapshot,
-                equipmentSummary: "",
-                primaryMuscleNames: exercise.muscleSummarySnapshot
-            )
-            cue = guidanceService.progressiveOverloadCue(
-                for: snapshot,
                 targetRepMin: exercise.targetRepMin,
                 targetRepMax: exercise.targetRepMax,
                 setDrafts: drafts
             )
         }
 
-        return ActiveWorkoutExerciseGuidancePresentation.make(cue: cue)
+        let snapshot = TrainingGuidanceCatalogSnapshot(
+            exerciseName: exercise.exerciseNameSnapshot,
+            categoryName: exercise.categorySnapshot,
+            equipmentSummary: "",
+            primaryMuscleNames: exercise.muscleSummarySnapshot
+        )
+        return guidanceService.activeWorkoutGuidance(
+            for: snapshot,
+            targetRepMin: exercise.targetRepMin,
+            targetRepMax: exercise.targetRepMax,
+            setDrafts: drafts
+        )
     }
 
     @MainActor

@@ -337,7 +337,7 @@ struct TrainingGuidanceService {
             return ProgressiveOverloadCue(
                 classification: classification,
                 tone: .success,
-                title: "Increase load next time",
+                title: "You earned a load jump",
                 summary: summary,
                 direction: .increaseLoad,
                 suggestedNextLoad: adjustedLoad(for: referenceSet, direction: .increaseLoad),
@@ -352,7 +352,7 @@ struct TrainingGuidanceService {
             return ProgressiveOverloadCue(
                 classification: classification,
                 tone: .caution,
-                title: "Reduce load next time",
+                title: "Pull it back and rebuild",
                 summary: summary,
                 direction: .decreaseLoad,
                 suggestedNextLoad: adjustedLoad(for: referenceSet, direction: .decreaseLoad),
@@ -364,12 +364,122 @@ struct TrainingGuidanceService {
         return ProgressiveOverloadCue(
             classification: classification,
             tone: .accent,
-            title: "Stay here until you own the range",
+            title: "Stay here and sharpen it",
             summary: stayCourseSummary(referenceSet: referenceSet, repRange: repRange),
             direction: .stayCourse,
             suggestedNextLoad: referenceSet?.actualWeight,
             suggestedLoadUnit: referenceSet?.actualLoadUnit,
             suggestedRepRange: repRange
+        )
+    }
+
+    func activeWorkoutGuidance(
+        for exercise: ExerciseCatalogItem?,
+        targetRepMin: Int?,
+        targetRepMax: Int?,
+        setDrafts: [WorkoutSessionSetDraft]
+    ) -> ActiveWorkoutExerciseGuidancePresentation {
+        let snapshot: TrainingGuidanceCatalogSnapshot
+        if let exercise {
+            snapshot = TrainingGuidanceCatalogSnapshot(exercise: exercise)
+        } else {
+            snapshot = TrainingGuidanceCatalogSnapshot(
+                exerciseName: "",
+                categoryName: "",
+                equipmentSummary: "",
+                primaryMuscleNames: ""
+            )
+        }
+
+        return activeWorkoutGuidance(
+            for: snapshot,
+            targetRepMin: targetRepMin,
+            targetRepMax: targetRepMax,
+            setDrafts: setDrafts
+        )
+    }
+
+    func activeWorkoutGuidance(
+        for exercise: TrainingGuidanceCatalogSnapshot,
+        targetRepMin: Int?,
+        targetRepMax: Int?,
+        setDrafts: [WorkoutSessionSetDraft]
+    ) -> ActiveWorkoutExerciseGuidancePresentation {
+        let completedWorkingSets = setDrafts.filter { $0.isCompleted && !$0.isWarmup }
+        let hasWorkingSets = setDrafts.contains { !$0.isWarmup }
+        let isExerciseComplete = hasWorkingSets && setDrafts.allSatisfy(\.isCompleted)
+
+        if isExerciseComplete,
+           let cue = progressiveOverloadCue(
+                for: exercise,
+                targetRepMin: targetRepMin,
+                targetRepMax: targetRepMax,
+                setDrafts: setDrafts
+           ),
+           let presentation = ActiveWorkoutExerciseGuidancePresentation.make(cue: cue)
+        {
+            return presentation
+        }
+
+        let recommendation = templateRecommendation(for: exercise)
+        let classification = classification(for: exercise)
+        let repRange = resolvedRepRange(
+            targetRepMin: targetRepMin,
+            targetRepMax: targetRepMax,
+            recommendation: recommendation
+        )
+        let completedWarmupCount = setDrafts.filter { $0.isCompleted && $0.isWarmup }.count
+
+        guard let lastCompletedWorkingSet = completedWorkingSets.last else {
+            return initialActiveWorkoutGuidance(
+                classification: classification,
+                recommendation: recommendation,
+                repRange: repRange,
+                completedWarmupCount: completedWarmupCount
+            )
+        }
+
+        guard let lastReps = lastCompletedWorkingSet.actualReps else {
+            return inProgressGenericGuidance(
+                classification: classification,
+                repRange: repRange
+            )
+        }
+
+        if lastCompletedWorkingSet.actualLoadUnit == .bodyweight || lastCompletedWorkingSet.actualWeight == nil {
+            return bodyweightGuidance(
+                repRange: repRange,
+                lastReps: lastReps
+            )
+        }
+
+        if lastReps < repRange.lowerBound {
+            return ActiveWorkoutExerciseGuidancePresentation(
+                title: "Buy the next set back",
+                summary: "That last set fell to \(lastReps) reps. Add a little rest or trim the load so the next one lands in \(repRangeText(repRange)) clean reps.",
+                tone: .caution
+            )
+        }
+
+        if lastReps > repRange.upperBound {
+            return ActiveWorkoutExerciseGuidancePresentation(
+                title: "You have room here",
+                summary: "That last set hit \(lastReps) reps. Keep the form tight today; if the rest keep clearing \(repRangeText(repRange)), plan a load bump next time.",
+                tone: .success
+            )
+        }
+
+        if let loadText = loggedLoadText(for: lastCompletedWorkingSet) {
+            return ActiveWorkoutExerciseGuidancePresentation(
+                title: "Repeat that standard",
+                summary: "\(loadText) is landing right where it should. Match the setup and keep the next set in \(repRangeText(repRange)) clean reps.",
+                tone: .accent
+            )
+        }
+
+        return inProgressGenericGuidance(
+            classification: classification,
+            repRange: repRange
         )
     }
 
@@ -446,10 +556,10 @@ struct TrainingGuidanceService {
         repRange: ClosedRange<Int>
     ) -> String {
         guard let loadText = adjustedLoadText(for: referenceSet, direction: .increaseLoad) else {
-            return "Last working sets cleared the range. Add load next time and build back to \(repRangeText(repRange))."
+            return "You cleared the whole range. Add a little load next time and own \(repRangeText(repRange)) clean reps."
         }
 
-        return "Last working sets cleared the range. Next time try \(loadText) and build back to \(repRangeText(repRange))."
+        return "You cleared the whole range. Go to \(loadText) next time and own \(repRangeText(repRange)) clean reps."
     }
 
     private func decreaseLoadSummary(
@@ -457,10 +567,10 @@ struct TrainingGuidanceService {
         repRange: ClosedRange<Int>
     ) -> String {
         guard let loadText = adjustedLoadText(for: referenceSet, direction: .decreaseLoad) else {
-            return "Last working sets missed the range. Drop the load a touch and rebuild to \(repRangeText(repRange))."
+            return "You missed the floor of the range. Pull the load back a touch and rebuild \(repRangeText(repRange)) clean reps."
         }
 
-        return "Last working sets missed the range. Drop to \(loadText) and rebuild to \(repRangeText(repRange))."
+        return "You missed the floor of the range. Drop to \(loadText), take your rest, and rebuild \(repRangeText(repRange)) clean reps."
     }
 
     private func stayCourseSummary(
@@ -471,11 +581,11 @@ struct TrainingGuidanceService {
             let referenceSet,
             let weight = referenceSet.actualWeight
         else {
-            return "Keep the load steady until your working sets consistently land inside \(repRangeText(repRange))."
+            return "Stay here until every work set lands inside \(repRangeText(repRange)) with the same clean standard."
         }
 
         let loadText = "\(WGJFormatters.decimalString(weight)) \(referenceSet.actualLoadUnit.shortLabel)"
-        return "Keep \(loadText) until every working set lands in \(repRangeText(repRange))."
+        return "\(loadText) is right for now. Keep every work set inside \(repRangeText(repRange)) before you move it."
     }
 
     private func adjustedLoadText(
@@ -493,6 +603,164 @@ struct TrainingGuidanceService {
     }
 
     private func repRangeText(_ repRange: ClosedRange<Int>) -> String {
-        "\(repRange.lowerBound)-\(repRange.upperBound) reps"
+        "\(repRange.lowerBound)-\(repRange.upperBound)"
+    }
+
+    private func resolvedRepRange(
+        targetRepMin: Int?,
+        targetRepMax: Int?,
+        recommendation: TemplateExerciseRecommendation
+    ) -> ClosedRange<Int> {
+        guard
+            let targetRepMin,
+            let targetRepMax,
+            targetRepMin <= targetRepMax
+        else {
+            return recommendation.suggestedRepRange
+        }
+
+        return targetRepMin...targetRepMax
+    }
+
+    private func initialActiveWorkoutGuidance(
+        classification: TrainingExerciseClassification,
+        recommendation: TemplateExerciseRecommendation,
+        repRange: ClosedRange<Int>,
+        completedWarmupCount: Int
+    ) -> ActiveWorkoutExerciseGuidancePresentation {
+        let warmupInstruction = warmupInstruction(
+            completedWarmupCount: completedWarmupCount,
+            suggestedWarmupSets: recommendation.suggestedWarmupSets
+        )
+
+        switch classification {
+        case .lowerBodyCompound:
+            return ActiveWorkoutExerciseGuidancePresentation(
+                title: "Coach cue: brace and drive",
+                summary: "\(warmupInstruction) Big lower-body lifts win when your torso stays locked and the first work set lands in \(repRangeText(repRange)) reps.",
+                tone: .accent
+            )
+        case .upperBodyCompound:
+            return ActiveWorkoutExerciseGuidancePresentation(
+                title: "Coach cue: set the shoulders",
+                summary: "\(warmupInstruction) Pack the shoulders, keep the path repeatable, and hunt \(repRangeText(repRange)) reps.",
+                tone: .accent
+            )
+        case .isolation:
+            return ActiveWorkoutExerciseGuidancePresentation(
+                title: "Coach cue: tension beats ego",
+                summary: "\(warmupInstruction) Slow the squeeze, own the stretch, and make \(repRangeText(repRange)) reps feel deliberate.",
+                tone: .accent
+            )
+        case .core:
+            return ActiveWorkoutExerciseGuidancePresentation(
+                title: "Coach cue: brace first",
+                summary: "\(warmupInstruction) Keep ribs down, move slow, and make every rep in \(repRangeText(repRange)) look clean.",
+                tone: .accent
+            )
+        case .conditioning:
+            return ActiveWorkoutExerciseGuidancePresentation(
+                title: "Coach cue: pace the effort",
+                summary: "\(warmupInstruction) Start smooth so the later rounds still hit \(repRangeText(repRange)) reps with control.",
+                tone: .accent
+            )
+        case .unknown:
+            return ActiveWorkoutExerciseGuidancePresentation(
+                title: "Coach cue: find the groove",
+                summary: "\(warmupInstruction) Use the early sets to lock the pattern in and aim for \(repRangeText(repRange)) clean reps.",
+                tone: .accent
+            )
+        }
+    }
+
+    private func inProgressGenericGuidance(
+        classification: TrainingExerciseClassification,
+        repRange: ClosedRange<Int>
+    ) -> ActiveWorkoutExerciseGuidancePresentation {
+        let summary: String
+
+        switch classification {
+        case .lowerBodyCompound:
+            summary = "Your work sets are underway. Keep the brace honest and make the next one land in \(repRangeText(repRange)) clean reps."
+        case .upperBodyCompound:
+            summary = "Your work sets are underway. Set the shoulders, repeat the path, and keep the next one in \(repRangeText(repRange)) clean reps."
+        case .isolation:
+            summary = "Your work sets are underway. Chase tension, not momentum, and keep the next one in \(repRangeText(repRange)) clean reps."
+        case .core:
+            summary = "Your work sets are underway. Keep ribs down, brace first, and make the next one land in \(repRangeText(repRange)) clean reps."
+        case .conditioning:
+            summary = "Your work sets are underway. Keep the early pace under control so the next effort still hits \(repRangeText(repRange)) reps."
+        case .unknown:
+            summary = "Your work sets are underway. Repeat the same setup and keep the next one around \(repRangeText(repRange)) clean reps."
+        }
+
+        return ActiveWorkoutExerciseGuidancePresentation(
+            title: "Next set cue",
+            summary: summary,
+            tone: .accent
+        )
+    }
+
+    private func bodyweightGuidance(
+        repRange: ClosedRange<Int>,
+        lastReps: Int
+    ) -> ActiveWorkoutExerciseGuidancePresentation {
+        if lastReps < repRange.lowerBound {
+            return ActiveWorkoutExerciseGuidancePresentation(
+                title: "Keep bodyweight reps clean",
+                summary: "That last set dropped to \(lastReps) reps. Take a little more rest or use assistance so the next one gets back to \(repRangeText(repRange)) clean reps.",
+                tone: .caution
+            )
+        }
+
+        if lastReps > repRange.upperBound {
+            return ActiveWorkoutExerciseGuidancePresentation(
+                title: "Make bodyweight harder, not sloppier",
+                summary: "That last set hit \(lastReps) reps. Slow the lowering, add a pause, or progress the variation so the next one still earns \(repRangeText(repRange)) clean reps.",
+                tone: .accent
+            )
+        }
+
+        return ActiveWorkoutExerciseGuidancePresentation(
+            title: "Own those bodyweight reps",
+            summary: "That set was right on target. Keep the same tempo and make the next one match in \(repRangeText(repRange)) clean reps.",
+            tone: .accent
+        )
+    }
+
+    private func warmupInstruction(
+        completedWarmupCount: Int,
+        suggestedWarmupSets: ClosedRange<Int>
+    ) -> String {
+        if completedWarmupCount == 0 {
+            if suggestedWarmupSets.upperBound == 0 {
+                return "You can go straight into the work sets if the groove already feels ready."
+            }
+
+            if suggestedWarmupSets.lowerBound == suggestedWarmupSets.upperBound {
+                let count = suggestedWarmupSets.lowerBound
+                return "Take \(count) ramp-up \(count == 1 ? "set" : "sets") before the work sets."
+            }
+
+            return "Take \(suggestedWarmupSets.lowerBound)-\(suggestedWarmupSets.upperBound) ramp-up sets before the work sets."
+        }
+
+        if completedWarmupCount < suggestedWarmupSets.lowerBound {
+            return "One more ramp-up set is worth it if the pattern still feels cold."
+        }
+
+        return "Warmups look covered, so make the first work set count."
+    }
+
+    private func loggedLoadText(for set: WorkoutSessionSetDraft?) -> String? {
+        guard
+            let set,
+            let actualWeight = set.actualWeight,
+            set.actualLoadUnit != .bodyweight
+        else {
+            return nil
+        }
+
+        return "\(WGJFormatters.decimalString(actualWeight)) \(set.actualLoadUnit.shortLabel)"
     }
 }
