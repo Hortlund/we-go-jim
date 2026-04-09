@@ -26,7 +26,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     var isSetEditingEnabled: Bool
     var enablesHeaderSwipeDelete: Bool
     var emphasizesExerciseCompletion: Bool
-    var onCommitRequest: (() -> Void)?
+    var onCommitRequest: (([WorkoutSessionSetDraft], Int) -> Void)?
     var onSetCompletionChange: ((UUID, String?, Int, Bool) -> Void)?
     var onExerciseSettings: (() -> Void)?
     var onExerciseComponentPicker: (() -> Void)?
@@ -88,7 +88,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         isSetEditingEnabled: Bool = true,
         enablesHeaderSwipeDelete: Bool = false,
         emphasizesExerciseCompletion: Bool = false,
-        onCommitRequest: (() -> Void)? = nil,
+        onCommitRequest: (([WorkoutSessionSetDraft], Int) -> Void)? = nil,
         onSetCompletionChange: ((UUID, String?, Int, Bool) -> Void)? = nil,
         onExerciseSettings: (() -> Void)? = nil,
         onExerciseComponentPicker: (() -> Void)? = nil,
@@ -161,22 +161,9 @@ struct WorkoutSessionExerciseGridEditor: View {
             }
         }
         .padding(16)
-        .background {
-            if shouldEmphasizeCompletedExercise {
-                RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
-                    .fill(completedExerciseCardFill)
-            }
-        }
+        .background { cardBackgroundLayer }
         .wgjCardContainer(strong: true)
-        .overlay {
-            if isExerciseCompleted {
-                RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
-                    .stroke(
-                        WGJTheme.success.opacity(shouldEmphasizeCompletedExercise ? 0.60 : 0.34),
-                        lineWidth: shouldEmphasizeCompletedExercise ? 2 : 1.2
-                    )
-            }
-        }
+        .overlay { cardOverlayLayer }
         .shadow(
             color: shouldEmphasizeCompletedExercise ? WGJTheme.success.opacity(0.12) : .clear,
             radius: 16,
@@ -186,11 +173,10 @@ struct WorkoutSessionExerciseGridEditor: View {
         .onAppear(perform: refreshDisplayRows)
         .onDisappear {
             flushPendingEditorState()
-            onCommitRequest?()
+            requestCommitForCurrentState()
         }
-        .onChange(of: _setDrafts.wrappedValue) { _, _ in
-            scheduleDisplayRefresh()
-            pruneInputDrafts()
+        .onChange(of: setDrafts) { _, _ in
+            handleSetDraftsChange()
         }
         .onChange(of: previousBySetIndex) { _, _ in
             refreshDisplayRows()
@@ -205,14 +191,26 @@ struct WorkoutSessionExerciseGridEditor: View {
             refreshDisplayRows()
         }
         .onChange(of: focusedInput) { previousFocus, newFocus in
-            guard previousFocus != newFocus else { return }
-            if let previousFocus {
-                clearInputDraft(for: previousFocus)
-                onCommitRequest?()
-            }
-            if newFocus == nil {
-                flushPendingDisplayRefresh()
-            }
+            handleFocusedInputChange(previousFocus, newFocus)
+        }
+    }
+
+    @ViewBuilder
+    private var cardBackgroundLayer: some View {
+        if shouldEmphasizeCompletedExercise {
+            RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
+                .fill(completedExerciseCardFill)
+        }
+    }
+
+    @ViewBuilder
+    private var cardOverlayLayer: some View {
+        if isExerciseCompleted {
+            RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
+                .stroke(
+                    WGJTheme.success.opacity(shouldEmphasizeCompletedExercise ? 0.60 : 0.34),
+                    lineWidth: shouldEmphasizeCompletedExercise ? 2 : 1.2
+                )
         }
     }
 
@@ -1449,13 +1447,22 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func refreshDisplayRows() {
+        rebuildDisplayRows()
+    }
+
+    private func rebuildDisplayRows(
+        using drafts: [WorkoutSessionSetDraft]? = nil,
+        restSeconds overrideRestSeconds: Int? = nil
+    ) {
+        let currentDrafts = drafts ?? _setDrafts.wrappedValue
+        let currentRestSeconds = overrideRestSeconds ?? restSeconds
         let snapshot = WGJPerformance.measure("workout-grid.row-refresh") {
             Self.makeDisplayRows(
-                setDrafts: _setDrafts.wrappedValue,
+                setDrafts: currentDrafts,
                 previousBySetIndex: previousBySetIndex,
                 targetRepMin: targetRepMin,
                 targetRepMax: targetRepMax,
-                restSeconds: restSeconds,
+                restSeconds: currentRestSeconds,
                 formatWeight: formatWeight
             )
         }
@@ -1627,12 +1634,14 @@ struct WorkoutSessionExerciseGridEditor: View {
         notifyChanged()
     }
 
-    private func setTitle(for index: Int) -> String {
-        setDrafts[index].isWarmup ? "Warmup Set" : "Working Set \(workingSetNumber(at: index))"
+    private func setTitle(for index: Int, in drafts: [WorkoutSessionSetDraft]? = nil) -> String {
+        let drafts = drafts ?? setDrafts
+        return drafts[index].isWarmup ? "Warmup Set" : "Working Set \(workingSetNumber(at: index, in: drafts))"
     }
 
-    private func workingSetNumber(at index: Int) -> Int {
-        let priorWorking = setDrafts.prefix(index).filter { !$0.isWarmup }
+    private func workingSetNumber(at index: Int, in drafts: [WorkoutSessionSetDraft]? = nil) -> Int {
+        let drafts = drafts ?? setDrafts
+        let priorWorking = drafts.prefix(index).filter { !$0.isWarmup }
         return priorWorking.count + 1
     }
 
@@ -1781,44 +1790,78 @@ struct WorkoutSessionExerciseGridEditor: View {
             return
         }
 
+        var updatedDrafts = setDrafts
         let resolution = WorkoutSetBozarCompletionResolver.resolve(
-            draft: setDrafts[index],
+            draft: updatedDrafts[index],
             previous: previousBySetIndex[index]
         )
-        setDrafts[index] = resolution
+        updatedDrafts[index] = resolution
+        setDrafts = updatedDrafts
 
-        setCompletion(true, at: index)
+        setCompletion(true, at: index, draftOverride: updatedDrafts)
     }
 
-    private func setCompletion(_ isCompleted: Bool, at index: Int) {
-        guard setDrafts.indices.contains(index) else { return }
-        guard !setDrafts[index].isLocked else { return }
-        if focusedInput?.setID == setDrafts[index].id {
+    private func setCompletion(
+        _ isCompleted: Bool,
+        at index: Int,
+        draftOverride: [WorkoutSessionSetDraft]? = nil
+    ) {
+        var updatedDrafts = draftOverride ?? setDrafts
+        guard updatedDrafts.indices.contains(index) else { return }
+        guard !updatedDrafts[index].isLocked else { return }
+        if focusedInput?.setID == updatedDrafts[index].id {
             dismissInputFocus()
         }
 
-        guard setDrafts[index].isCompleted != isCompleted else { return }
-        let setID = setDrafts[index].id
-        let setRestSeconds = setDrafts[index].restSeconds
-        setDrafts[index].isCompleted = isCompleted
+        guard updatedDrafts[index].isCompleted != isCompleted else { return }
+        let setID = updatedDrafts[index].id
+        let setRestSeconds = updatedDrafts[index].restSeconds
+        updatedDrafts[index].isCompleted = isCompleted
+        setDrafts = updatedDrafts
         let restTimerSetLabel: String?
         if isCompleted {
             restTimerSetLabel = WorkoutRestTimerContextBuilder.nextSetLabel(
                 afterCompletingSetAt: index,
-                in: setDrafts
+                in: updatedDrafts
             )
         } else {
-            restTimerSetLabel = setTitle(for: index)
+            restTimerSetLabel = setTitle(for: index, in: updatedDrafts)
         }
-        notifyChanged()
+        notifyChanged(drafts: updatedDrafts)
         onSetCompletionChange?(setID, restTimerSetLabel, setRestSeconds, isCompleted)
     }
 
-    private func notifyChanged() {
+    private func notifyChanged(drafts: [WorkoutSessionSetDraft]? = nil) {
         pendingDisplayRefreshTask?.cancel()
         pendingDisplayRefreshTask = nil
-        refreshDisplayRows()
-        onCommitRequest?()
+        let currentDrafts = drafts ?? setDrafts
+        rebuildDisplayRows(using: currentDrafts, restSeconds: restSeconds)
+        requestCommitForCurrentState(drafts: currentDrafts)
+    }
+
+    private func handleFocusedInputChange(_ previousFocus: SetInputFocus?, _ newFocus: SetInputFocus?) {
+        guard previousFocus != newFocus else { return }
+        if let previousFocus {
+            clearInputDraft(for: previousFocus)
+            requestCommitForCurrentState()
+        }
+        if newFocus == nil {
+            flushPendingDisplayRefresh()
+        }
+    }
+
+    private func handleSetDraftsChange() {
+        scheduleDisplayRefresh()
+        pruneInputDrafts()
+    }
+
+    private func requestCommitForCurrentState(
+        drafts: [WorkoutSessionSetDraft]? = nil,
+        restSeconds overrideRestSeconds: Int? = nil
+    ) {
+        let currentDrafts = drafts ?? setDrafts
+        let currentRestSeconds = overrideRestSeconds ?? restSeconds
+        onCommitRequest?(currentDrafts, currentRestSeconds)
     }
 
     private func formatWeight(_ value: Double) -> String {

@@ -792,12 +792,20 @@ final class WGJUITests: XCTestCase {
 
         let weightField = identifiedElement("workout-set-0-weight-field", in: app)
         XCTAssertTrue(weightField.waitForExistence(timeout: 5))
+        revealElement(weightField, in: app)
         weightField.tap()
+        if !app.keyboards.element.waitForExistence(timeout: 1) {
+            weightField.tap()
+        }
         weightField.typeText("100")
 
         let repsField = identifiedElement("workout-set-0-reps-field", in: app)
         XCTAssertTrue(repsField.waitForExistence(timeout: 5))
+        revealElement(repsField, in: app)
         repsField.tap()
+        if !app.keyboards.element.waitForExistence(timeout: 1) {
+            repsField.tap()
+        }
         repsField.typeText("8")
 
         let hideKeyboardButton = app.buttons["Hide"]
@@ -903,6 +911,104 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(completeSetButton.waitForExistence(timeout: 5))
         completeSetButton.tap()
 
+        XCTAssertTrue(app.buttons["Undo"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testBozarModeFillsPreviousPerformanceWhenCompletingSet() throws {
+        let app = launchApp(launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Bozar Bench Template",
+                notes: "Seed previous bench performance for Bozar mode.",
+                exercises: [
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "seed-bench-press",
+                        exerciseNameSnapshot: "Barbell Bench Press",
+                        categorySnapshot: "Chest",
+                        muscleSummarySnapshot: "Chest",
+                        targetRepMin: 8,
+                        targetRepMax: 8,
+                        restSeconds: 120,
+                        sets: [templatePayloadSet(targetReps: 8, targetWeight: 100, loadUnit: "kg", restSeconds: 120, isWarmup: false)]
+                    ),
+                ]
+            ),
+        ])
+
+        startPreviewedTemplateWorkout(in: app)
+
+        let firstCompleteSetButton = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
+        ).firstMatch
+        XCTAssertTrue(firstCompleteSetButton.waitForExistence(timeout: 5))
+        firstCompleteSetButton.tap()
+
+        let finishButton = app.buttons["active-workout-finish-button"]
+        XCTAssertTrue(finishButton.waitForExistence(timeout: 5))
+        finishButton.tap()
+
+        let finishConfirmationButton = app.buttons["Finish Anyway"].waitForExistence(timeout: 2)
+            ? app.buttons["Finish Anyway"]
+            : app.buttons["Finish and Save"]
+        XCTAssertTrue(finishConfirmationButton.waitForExistence(timeout: 5))
+        finishConfirmationButton.tap()
+
+        let skipButton = app.buttons["Skip"]
+        if skipButton.waitForExistence(timeout: 10) {
+            skipButton.tap()
+        }
+
+        let summary = identifiedElement("workout-completion-summary", in: app)
+        XCTAssertTrue(summary.waitForExistence(timeout: 10))
+
+        let confirmButton = identifiedElement("workout-completion-confirm-button", in: app)
+        XCTAssertTrue(confirmButton.waitForExistence(timeout: 5))
+        confirmButton.tap()
+
+        tapTab("Profile", in: app)
+        let settingsTile = identifiedElement("profile-settings-tile", in: app)
+        XCTAssertTrue(settingsTile.waitForExistence(timeout: 5))
+        settingsTile.tap()
+
+        let bozarToggle = identifiedElement("settings-bozar-mode-toggle", in: app)
+        XCTAssertTrue(bozarToggle.waitForExistence(timeout: 5))
+        if let currentValue = bozarToggle.value as? String, currentValue == "0" {
+            bozarToggle.tap()
+        }
+
+        tapTab("Start Workout", in: app)
+        let startButton = app.buttons["start-workout-empty-button"]
+        XCTAssertTrue(startButton.waitForExistence(timeout: 5))
+        startButton.tap()
+
+        let addExerciseButton = app.buttons["active-workout-empty-add-exercise-button"]
+        XCTAssertTrue(addExerciseButton.waitForExistence(timeout: 5))
+        addExerciseButton.tap()
+
+        let searchField = app.textFields["exercises-search-field"]
+        XCTAssertTrue(searchField.waitForExistence(timeout: 5))
+        searchField.tap()
+        searchField.typeText("bench")
+
+        let selectExerciseButton = identifiedElement("exercise-picker-select-button", in: app)
+        XCTAssertTrue(selectExerciseButton.waitForExistence(timeout: 15))
+        selectExerciseButton.tap()
+
+        let weightGhost = identifiedElement("workout-set-0-weight-ghost", in: app)
+        let repsGhost = identifiedElement("workout-set-0-reps-ghost", in: app)
+        XCTAssertTrue(weightGhost.waitForExistence(timeout: 5))
+        XCTAssertTrue(repsGhost.waitForExistence(timeout: 5))
+
+        let secondCompleteSetButton = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
+        ).firstMatch
+        XCTAssertTrue(secondCompleteSetButton.waitForExistence(timeout: 5))
+        secondCompleteSetButton.tap()
+
+        let completedWeightField = identifiedElement("workout-set-0-weight-field", in: app)
+        let completedRepsField = identifiedElement("workout-set-0-reps-field", in: app)
+        XCTAssertEqual(completedWeightField.value as? String, "100")
+        XCTAssertEqual(completedRepsField.value as? String, "8")
         XCTAssertTrue(app.buttons["Undo"].waitForExistence(timeout: 5))
     }
 

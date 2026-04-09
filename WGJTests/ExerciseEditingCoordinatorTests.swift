@@ -76,6 +76,35 @@ struct ExerciseEditingCoordinatorTests {
     }
 
     @Test
+    func workoutCoordinatorFlushesLatestScheduledDraftsWhenImmediateCommitUsesStaleInputs() {
+        let initialDraft = WorkoutSessionSetDraft(targetReps: 8, targetWeight: 100, targetLoadUnit: .kg)
+        let bozarResolvedDraft = WorkoutSessionSetDraft(
+            id: initialDraft.id,
+            targetReps: 8,
+            targetWeight: 100,
+            targetLoadUnit: .kg,
+            actualReps: 8,
+            actualWeight: 100,
+            actualLoadUnit: .kg,
+            isCompleted: true
+        )
+
+        var committedDrafts: [[WorkoutSessionSetDraft]] = []
+        let coordinator = WorkoutExerciseEditingCoordinator(
+            setDrafts: [initialDraft],
+            restSeconds: 120,
+            onDraftsCommitted: { committedDrafts.append($0) },
+            onRestCommitted: { _ in },
+            onCompletionChanged: { _, _, _, _ in }
+        )
+
+        coordinator.scheduleDraftCommit([bozarResolvedDraft])
+        coordinator.requestImmediateCommit(setDrafts: [initialDraft], restSeconds: 120)
+
+        #expect(committedDrafts == [[bozarResolvedDraft]])
+    }
+
+    @Test
     func workoutCoordinatorRelaysCompletionImmediately() {
         let setID = UUID()
         var receivedEvent: (UUID, String?, Int, Bool)?

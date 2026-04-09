@@ -7,6 +7,8 @@ final class WorkoutExerciseEditingCoordinator {
     private let onRestCommitted: (Int) -> Void
     private let onCompletionChanged: (UUID, String?, Int, Bool) -> Void
 
+    private var currentDrafts: [WorkoutSessionSetDraft]
+    private var currentRestSeconds: Int
     private var lastCommittedDrafts: [WorkoutSessionSetDraft]
     private var lastCommittedRestSeconds: Int
     private var pendingDraftCommitTask: Task<Void, Never>?
@@ -24,8 +26,10 @@ final class WorkoutExerciseEditingCoordinator {
         self.onDraftsCommitted = onDraftsCommitted
         self.onRestCommitted = onRestCommitted
         self.onCompletionChanged = onCompletionChanged
+        currentDrafts = setDrafts
+        currentRestSeconds = max(0, min(3600, restSeconds))
         lastCommittedDrafts = setDrafts
-        lastCommittedRestSeconds = restSeconds
+        lastCommittedRestSeconds = max(0, min(3600, restSeconds))
     }
 
     deinit {
@@ -38,26 +42,34 @@ final class WorkoutExerciseEditingCoordinator {
         restSeconds: Int
     ) {
         lastCommittedDrafts = setDrafts
-        lastCommittedRestSeconds = restSeconds
+        lastCommittedRestSeconds = max(0, min(3600, restSeconds))
+        if pendingDraftCommitTask == nil {
+            currentDrafts = setDrafts
+        }
+        if pendingRestCommitTask == nil {
+            currentRestSeconds = max(0, min(3600, restSeconds))
+        }
     }
 
     func scheduleDraftCommit(_ drafts: [WorkoutSessionSetDraft]) {
+        currentDrafts = drafts
         pendingDraftCommitTask?.cancel()
         pendingDraftCommitTask = Task { @MainActor in
             try? await Task.sleep(for: commitDebounce)
             guard !Task.isCancelled else { return }
             pendingDraftCommitTask = nil
-            commitDraftsIfNeeded(drafts)
+            commitDraftsIfNeeded(currentDrafts)
         }
     }
 
     func scheduleRestCommit(_ restSeconds: Int) {
+        currentRestSeconds = max(0, min(3600, restSeconds))
         pendingRestCommitTask?.cancel()
         pendingRestCommitTask = Task { @MainActor in
             try? await Task.sleep(for: commitDebounce)
             guard !Task.isCancelled else { return }
             pendingRestCommitTask = nil
-            commitRestIfNeeded(restSeconds)
+            commitRestIfNeeded(currentRestSeconds)
         }
     }
 
@@ -65,20 +77,24 @@ final class WorkoutExerciseEditingCoordinator {
         setDrafts: [WorkoutSessionSetDraft],
         restSeconds: Int
     ) {
-        flushCommits(setDrafts: setDrafts, restSeconds: restSeconds)
+        if lastCommittedDrafts != setDrafts {
+            currentDrafts = setDrafts
+        }
+        let normalizedRestSeconds = max(0, min(3600, restSeconds))
+        if lastCommittedRestSeconds != normalizedRestSeconds {
+            currentRestSeconds = normalizedRestSeconds
+        }
+        flushCommits()
     }
 
-    func flushCommits(
-        setDrafts: [WorkoutSessionSetDraft],
-        restSeconds: Int
-    ) {
+    func flushCommits() {
         pendingDraftCommitTask?.cancel()
         pendingDraftCommitTask = nil
         pendingRestCommitTask?.cancel()
         pendingRestCommitTask = nil
 
-        commitDraftsIfNeeded(setDrafts)
-        commitRestIfNeeded(restSeconds)
+        commitDraftsIfNeeded(currentDrafts)
+        commitRestIfNeeded(currentRestSeconds)
     }
 
     func relayCompletionChange(

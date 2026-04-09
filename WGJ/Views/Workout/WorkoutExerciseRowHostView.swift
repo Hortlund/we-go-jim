@@ -201,10 +201,10 @@ struct WorkoutExerciseRowHostView: View, Equatable {
             isSetEditingEnabled: isSetEditingEnabled,
             enablesHeaderSwipeDelete: enablesHeaderSwipeDelete,
             emphasizesExerciseCompletion: emphasizesExerciseCompletion,
-            onCommitRequest: {
+            onCommitRequest: { drafts, restSeconds in
                 editingCoordinator.requestImmediateCommit(
-                    setDrafts: localSetDrafts,
-                    restSeconds: localRestSeconds
+                    setDrafts: drafts,
+                    restSeconds: restSeconds
                 )
             },
             onSetCompletionChange: { setID, setLabel, restSeconds, isCompleted in
@@ -235,10 +235,7 @@ struct WorkoutExerciseRowHostView: View, Equatable {
             localSetDrafts = newValue
         }
         .onDisappear {
-            editingCoordinator.flushCommits(
-                setDrafts: localSetDrafts,
-                restSeconds: localRestSeconds
-            )
+            editingCoordinator.flushCommits()
         }
     }
 }
