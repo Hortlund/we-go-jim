@@ -570,6 +570,62 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testCompletedWorkoutDetailEditAndSaveSmoke() throws {
+        let app = launchApp()
+
+        tapTab("Start Workout", in: app)
+
+        let startButton = app.buttons["start-workout-empty-button"]
+        XCTAssertTrue(startButton.waitForExistence(timeout: 5))
+        startButton.tap()
+
+        let emptyAddExerciseButton = identifiedElement("active-workout-empty-add-exercise-button", in: app)
+        XCTAssertTrue(emptyAddExerciseButton.waitForExistence(timeout: 5))
+        emptyAddExerciseButton.tap()
+        pickExercise(named: "bench", in: app)
+
+        let addAnotherExerciseButton = app.buttons["Add another exercise"]
+        XCTAssertTrue(addAnotherExerciseButton.waitForExistence(timeout: 5))
+        addAnotherExerciseButton.tap()
+        pickExercise(named: "row", in: app)
+
+        finishTemplateWorkout(in: app)
+        let skipButton = app.buttons["Skip"]
+        if skipButton.waitForExistence(timeout: 10) {
+            skipButton.tap()
+        }
+        confirmWorkoutCompletion(in: app)
+
+        let workoutCard = identifiedElement("history-session-card", in: app)
+        XCTAssertTrue(workoutCard.waitForExistence(timeout: 10))
+        workoutCard.tap()
+
+        let weightField = identifiedElement("workout-set-0-weight-field", in: app)
+        XCTAssertTrue(weightField.waitForExistence(timeout: 5))
+        weightField.tap()
+        weightField.typeText("120")
+
+        let repsField = identifiedElement("workout-set-0-reps-field", in: app)
+        XCTAssertTrue(repsField.waitForExistence(timeout: 5))
+        repsField.tap()
+        repsField.typeText("6")
+
+        let hideKeyboardButton = app.buttons["Hide"]
+        if hideKeyboardButton.waitForExistence(timeout: 1) {
+            hideKeyboardButton.tap()
+        }
+
+        app.swipeUp()
+
+        let saveChangesButton = app.buttons["Save Changes"]
+        revealElement(saveChangesButton, in: app)
+        XCTAssertTrue(saveChangesButton.waitForExistence(timeout: 5))
+        saveChangesButton.tap()
+
+        XCTAssertTrue(app.buttons["history-calendar-button"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testActiveWorkoutRestTimerStartsOnSetCompletion() throws {
         let app = launchApp()
 
@@ -1341,6 +1397,17 @@ final class WGJUITests: XCTestCase {
         let confirmButton = identifiedElement("workout-completion-confirm-button", in: app)
         XCTAssertTrue(confirmButton.waitForExistence(timeout: 5))
         confirmButton.tap()
+    }
+
+    private func pickExercise(named query: String, in app: XCUIApplication) {
+        let searchField = app.textFields["exercises-search-field"]
+        XCTAssertTrue(searchField.waitForExistence(timeout: 5))
+        searchField.tap()
+        searchField.typeText(query)
+
+        let selectExerciseButton = identifiedElement("exercise-picker-select-button", in: app)
+        XCTAssertTrue(selectExerciseButton.waitForExistence(timeout: 15))
+        selectExerciseButton.tap()
     }
 
     private func makeTemplateOpenPayloadBase64(

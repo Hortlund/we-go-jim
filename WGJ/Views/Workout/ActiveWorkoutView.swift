@@ -549,10 +549,13 @@ struct ActiveWorkoutView: View {
         let exerciseID = exercise.id
         let exerciseName = exercise.exerciseNameSnapshot
         let drafts = resolvedDrafts(for: exercise)
+        let guidance = WGJPerformance.measure("active-workout.guidance") {
+            guidancePresentation(for: exercise, drafts: drafts)
+        }
 
-        return ActiveWorkoutExerciseRowView(
+        return WorkoutExerciseRowHostView(
             exerciseID: exerciseID,
-            catalogExerciseUUID: exercise.catalogExerciseUUID,
+            exerciseAccessibilityIdentifier: "active-workout-exercise-\(exercise.catalogExerciseUUID)",
             exerciseName: exerciseName,
             muscleSummary: exercise.muscleSummarySnapshot,
             category: exercise.categorySnapshot,
@@ -560,31 +563,31 @@ struct ActiveWorkoutView: View {
             targetRepMin: exercise.targetRepMin,
             targetRepMax: exercise.targetRepMax,
             previousBySetIndex: previousByExerciseID[exerciseID] ?? [:],
-            componentResolution: componentResolutionByExerciseID[exerciseID],
-            guidance: guidancePresentation(for: exercise, drafts: drafts),
+            guidance: guidance,
             preferredLoadUnit: preferredLoadUnit,
+            supplementaryContent: componentResolutionByExerciseID[exerciseID].map { resolution in
+                AnyView(ActiveWorkoutExerciseComponentSummaryView(resolution: resolution))
+            },
+            supplementaryContentKey: componentResolutionByExerciseID[exerciseID].map { resolution in
+                "\(resolution.selectedComponent.catalogExerciseUUID)-\(resolution.availableComponents.count)"
+            },
             restSeconds: resolvedRest(for: exercise),
             setDrafts: drafts,
-            isBozarModeEnabled: profiles.first?.isBozarModeEnabled ?? false,
             isExpanded: cardStateController.isExpanded(for: exerciseID),
+            manualCompletionMode: true,
+            isBozarModeEnabled: profiles.first?.isBozarModeEnabled ?? false,
             isSetEditingEnabled: areMainExercisesUnlocked,
-            canMoveUp: index > 0,
-            canMoveDown: index < sessionExercises.count - 1,
-            onSetDraftsBindingChanged: { updated in
-                updateDraftsValue(updated, for: exerciseID)
+            canMoveExerciseUp: index > 0,
+            canMoveExerciseDown: index < sessionExercises.count - 1,
+            onSetDraftsCommitted: { drafts in
+                handleDraftsChanged(drafts, for: exercise, scrollProxy: scrollProxy)
             },
-            onRestBindingChanged: { updated in
-                updateRestValue(updated, for: exerciseID)
+            onRestCommitted: { rest in
+                updateRestValue(rest, for: exerciseID)
+                persistRest(sessionExerciseID: exerciseID, restSeconds: rest)
             },
             onExpandedChanged: { isExpanded in
                 cardStateController.setExpanded(isExpanded, for: exerciseID)
-            },
-            onSetDraftsChanged: { drafts in
-                handleDraftsChanged(drafts, for: exercise, scrollProxy: scrollProxy)
-            },
-            onRestChanged: { rest in
-                updateRestValue(rest, for: exerciseID)
-                persistRest(sessionExerciseID: exerciseID, restSeconds: rest)
             },
             onSetCompletionChange: { setID, setLabel, restSeconds, isCompleted in
                 if isCompleted {
@@ -602,9 +605,9 @@ struct ActiveWorkoutView: View {
             onExerciseSettings: {
                 showExerciseSettings(for: exercise)
             },
-            onExerciseComponentPicker: {
-                showExerciseComponentPicker(for: exercise)
-            },
+            onExerciseComponentPicker: componentResolutionByExerciseID[exerciseID]?.availableComponents.count ?? 0 > 1
+                ? { showExerciseComponentPicker(for: exercise) }
+                : nil,
             onExerciseMoveUp: {
                 moveExerciseUp(index)
             },
@@ -918,7 +921,9 @@ struct ActiveWorkoutView: View {
             }
 
             do {
-                try activeWorkoutRepository.saveSetDrafts(sessionExerciseID: sessionExerciseID, drafts: latest)
+                try WGJPerformance.measure("active-workout.persist.drafts") {
+                    try activeWorkoutRepository.saveSetDrafts(sessionExerciseID: sessionExerciseID, drafts: latest)
+                }
                 lastPersistedDraftsByExerciseID[sessionExerciseID] = latest
                 pendingSaveTasks[sessionExerciseID] = nil
             } catch {
@@ -947,7 +952,9 @@ struct ActiveWorkoutView: View {
 
             do {
                 let previousDefaultRest = lastPersistedRestByExerciseID[sessionExerciseID] ?? normalized
-                try activeWorkoutRepository.updateExerciseRest(sessionExerciseID: sessionExerciseID, restSeconds: latest)
+                try WGJPerformance.measure("active-workout.persist.rest") {
+                    try activeWorkoutRepository.updateExerciseRest(sessionExerciseID: sessionExerciseID, restSeconds: latest)
+                }
                 lastPersistedRestByExerciseID[sessionExerciseID] = latest
                 applyPersistedRestChange(
                     sessionExerciseID: sessionExerciseID,
@@ -1842,237 +1849,6 @@ private enum ActiveWorkoutScrollTarget: Hashable {
     case preWorkoutCardio
     case postWorkoutCardio
     case cancelSection
-}
-
-private struct ActiveWorkoutExerciseRowView: View, Equatable {
-    let exerciseID: UUID
-    let catalogExerciseUUID: String
-    let exerciseName: String
-    let muscleSummary: String
-    let category: String
-    let exerciseIndexTitle: String
-    let targetRepMin: Int?
-    let targetRepMax: Int?
-    let previousBySetIndex: [Int: WorkoutPreviousSetSnapshot]
-    let componentResolution: ExerciseComponentRotationResolution?
-    let guidance: ActiveWorkoutExerciseGuidancePresentation?
-    let preferredLoadUnit: TemplateLoadUnit
-    let restSeconds: Int
-    let setDrafts: [WorkoutSessionSetDraft]
-    let isBozarModeEnabled: Bool
-    let isExpanded: Bool
-    let isSetEditingEnabled: Bool
-    let canMoveUp: Bool
-    let canMoveDown: Bool
-
-    let onSetDraftsBindingChanged: ([WorkoutSessionSetDraft]) -> Void
-    let onRestBindingChanged: (Int) -> Void
-    let onExpandedChanged: (Bool) -> Void
-    let onSetDraftsChanged: ([WorkoutSessionSetDraft]) -> Void
-    let onRestChanged: (Int) -> Void
-    let onSetCompletionChange: (UUID, String?, Int, Bool) -> Void
-    let onExerciseSettings: () -> Void
-    let onExerciseComponentPicker: () -> Void
-    let onExerciseMoveUp: () -> Void
-    let onExerciseMoveDown: () -> Void
-    let onExerciseMoveToPosition: (() -> Void)?
-    let onExerciseDelete: () -> Void
-
-    @State private var localRestSeconds: Int
-    @State private var localSetDrafts: [WorkoutSessionSetDraft]
-    @State private var pendingRestSyncTask: Task<Void, Never>?
-    @State private var pendingDraftSyncTask: Task<Void, Never>?
-
-    private let bindingSyncDebounce = Duration.milliseconds(120)
-
-    init(
-        exerciseID: UUID,
-        catalogExerciseUUID: String,
-        exerciseName: String,
-        muscleSummary: String,
-        category: String,
-        exerciseIndexTitle: String,
-        targetRepMin: Int?,
-        targetRepMax: Int?,
-        previousBySetIndex: [Int: WorkoutPreviousSetSnapshot],
-        componentResolution: ExerciseComponentRotationResolution?,
-        guidance: ActiveWorkoutExerciseGuidancePresentation?,
-        preferredLoadUnit: TemplateLoadUnit,
-        restSeconds: Int,
-        setDrafts: [WorkoutSessionSetDraft],
-        isBozarModeEnabled: Bool,
-        isExpanded: Bool,
-        isSetEditingEnabled: Bool,
-        canMoveUp: Bool,
-        canMoveDown: Bool,
-        onSetDraftsBindingChanged: @escaping ([WorkoutSessionSetDraft]) -> Void,
-        onRestBindingChanged: @escaping (Int) -> Void,
-        onExpandedChanged: @escaping (Bool) -> Void,
-        onSetDraftsChanged: @escaping ([WorkoutSessionSetDraft]) -> Void,
-        onRestChanged: @escaping (Int) -> Void,
-        onSetCompletionChange: @escaping (UUID, String?, Int, Bool) -> Void,
-        onExerciseSettings: @escaping () -> Void,
-        onExerciseComponentPicker: @escaping () -> Void,
-        onExerciseMoveUp: @escaping () -> Void,
-        onExerciseMoveDown: @escaping () -> Void,
-        onExerciseMoveToPosition: (() -> Void)? = nil,
-        onExerciseDelete: @escaping () -> Void
-    ) {
-        self.exerciseID = exerciseID
-        self.catalogExerciseUUID = catalogExerciseUUID
-        self.exerciseName = exerciseName
-        self.muscleSummary = muscleSummary
-        self.category = category
-        self.exerciseIndexTitle = exerciseIndexTitle
-        self.targetRepMin = targetRepMin
-        self.targetRepMax = targetRepMax
-        self.previousBySetIndex = previousBySetIndex
-        self.componentResolution = componentResolution
-        self.guidance = guidance
-        self.preferredLoadUnit = preferredLoadUnit
-        self.restSeconds = restSeconds
-        self.setDrafts = setDrafts
-        self.isBozarModeEnabled = isBozarModeEnabled
-        self.isExpanded = isExpanded
-        self.isSetEditingEnabled = isSetEditingEnabled
-        self.canMoveUp = canMoveUp
-        self.canMoveDown = canMoveDown
-        self.onSetDraftsBindingChanged = onSetDraftsBindingChanged
-        self.onRestBindingChanged = onRestBindingChanged
-        self.onExpandedChanged = onExpandedChanged
-        self.onSetDraftsChanged = onSetDraftsChanged
-        self.onRestChanged = onRestChanged
-        self.onSetCompletionChange = onSetCompletionChange
-        self.onExerciseSettings = onExerciseSettings
-        self.onExerciseComponentPicker = onExerciseComponentPicker
-        self.onExerciseMoveUp = onExerciseMoveUp
-        self.onExerciseMoveDown = onExerciseMoveDown
-        self.onExerciseMoveToPosition = onExerciseMoveToPosition
-        self.onExerciseDelete = onExerciseDelete
-        self._localRestSeconds = State(initialValue: restSeconds)
-        self._localSetDrafts = State(initialValue: setDrafts)
-    }
-
-    static func == (lhs: ActiveWorkoutExerciseRowView, rhs: ActiveWorkoutExerciseRowView) -> Bool {
-        lhs.exerciseID == rhs.exerciseID
-            && lhs.catalogExerciseUUID == rhs.catalogExerciseUUID
-            && lhs.exerciseName == rhs.exerciseName
-            && lhs.muscleSummary == rhs.muscleSummary
-            && lhs.category == rhs.category
-            && lhs.exerciseIndexTitle == rhs.exerciseIndexTitle
-            && lhs.targetRepMin == rhs.targetRepMin
-            && lhs.targetRepMax == rhs.targetRepMax
-            && lhs.previousBySetIndex == rhs.previousBySetIndex
-            && lhs.componentResolution == rhs.componentResolution
-            && lhs.guidance == rhs.guidance
-            && lhs.preferredLoadUnit == rhs.preferredLoadUnit
-            && lhs.restSeconds == rhs.restSeconds
-            && lhs.setDrafts == rhs.setDrafts
-            && lhs.isBozarModeEnabled == rhs.isBozarModeEnabled
-            && lhs.isExpanded == rhs.isExpanded
-            && lhs.isSetEditingEnabled == rhs.isSetEditingEnabled
-            && lhs.canMoveUp == rhs.canMoveUp
-            && lhs.canMoveDown == rhs.canMoveDown
-    }
-
-    var body: some View {
-        WorkoutSessionExerciseGridEditor(
-            exerciseName: exerciseName,
-            muscleSummary: muscleSummary,
-            category: category,
-            exerciseIndexTitle: exerciseIndexTitle,
-            exerciseAccessibilityIdentifier: "active-workout-exercise-\(catalogExerciseUUID)",
-            targetRepMin: targetRepMin,
-            targetRepMax: targetRepMax,
-            previousBySetIndex: previousBySetIndex,
-            guidance: guidance,
-            preferredLoadUnit: preferredLoadUnit,
-            supplementaryContent: componentResolution.map { resolution in
-                AnyView(ActiveWorkoutExerciseComponentSummaryView(resolution: resolution))
-            },
-            restSeconds: Binding(
-                get: { localRestSeconds },
-                set: { localRestSeconds = $0 }
-            ),
-            setDrafts: Binding(
-                get: { localSetDrafts },
-                set: { localSetDrafts = $0 }
-            ),
-            isExpanded: Binding(
-                get: { isExpanded },
-                set: { onExpandedChanged($0) }
-            ),
-            showsInlineExerciseControls: false,
-            showsSetProgressChip: false,
-            manualCompletionMode: true,
-            isBozarModeEnabled: isBozarModeEnabled,
-            isSetEditingEnabled: isSetEditingEnabled,
-            enablesHeaderSwipeDelete: true,
-            emphasizesExerciseCompletion: true,
-            onSetDraftsChanged: onSetDraftsChanged,
-            onRestChanged: onRestChanged,
-            onSetCompletionChange: onSetCompletionChange,
-            onExerciseSettings: onExerciseSettings,
-            onExerciseComponentPicker: componentResolution?.availableComponents.count ?? 0 > 1
-                ? onExerciseComponentPicker
-                : nil,
-            canMoveExerciseUp: canMoveUp,
-            canMoveExerciseDown: canMoveDown,
-            onExerciseMoveUp: onExerciseMoveUp,
-            onExerciseMoveDown: onExerciseMoveDown,
-            onExerciseMoveToPosition: onExerciseMoveToPosition,
-            onExerciseDelete: onExerciseDelete
-        )
-        .onChange(of: restSeconds) { _, newValue in
-            guard localRestSeconds != newValue else { return }
-            localRestSeconds = newValue
-        }
-        .onChange(of: setDrafts) { _, newValue in
-            guard localSetDrafts != newValue else { return }
-            localSetDrafts = newValue
-        }
-        .onChange(of: localRestSeconds) { _, newValue in
-            scheduleRestBindingSync(newValue)
-        }
-        .onChange(of: localSetDrafts) { _, newValue in
-            scheduleDraftBindingSync(newValue)
-        }
-        .onDisappear(perform: flushBindingSyncs)
-    }
-
-    private func scheduleRestBindingSync(_ restSeconds: Int) {
-        pendingRestSyncTask?.cancel()
-        pendingRestSyncTask = Task { @MainActor in
-            try? await Task.sleep(for: bindingSyncDebounce)
-            guard !Task.isCancelled else { return }
-            pendingRestSyncTask = nil
-            onRestBindingChanged(restSeconds)
-        }
-    }
-
-    private func scheduleDraftBindingSync(_ drafts: [WorkoutSessionSetDraft]) {
-        pendingDraftSyncTask?.cancel()
-        pendingDraftSyncTask = Task { @MainActor in
-            try? await Task.sleep(for: bindingSyncDebounce)
-            guard !Task.isCancelled else { return }
-            pendingDraftSyncTask = nil
-            onSetDraftsBindingChanged(drafts)
-        }
-    }
-
-    private func flushBindingSyncs() {
-        if pendingRestSyncTask != nil {
-            pendingRestSyncTask?.cancel()
-            pendingRestSyncTask = nil
-            onRestBindingChanged(localRestSeconds)
-        }
-
-        if pendingDraftSyncTask != nil {
-            pendingDraftSyncTask?.cancel()
-            pendingDraftSyncTask = nil
-            onSetDraftsBindingChanged(localSetDrafts)
-        }
-    }
 }
 
 private struct ActiveWorkoutHeaderCard: View {

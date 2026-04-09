@@ -26,8 +26,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     var isSetEditingEnabled: Bool
     var enablesHeaderSwipeDelete: Bool
     var emphasizesExerciseCompletion: Bool
-    var onSetDraftsChanged: (([WorkoutSessionSetDraft]) -> Void)?
-    var onRestChanged: ((Int) -> Void)?
+    var onCommitRequest: (() -> Void)?
     var onSetCompletionChange: ((UUID, String?, Int, Bool) -> Void)?
     var onExerciseSettings: (() -> Void)?
     var onExerciseComponentPicker: (() -> Void)?
@@ -48,12 +47,10 @@ struct WorkoutSessionExerciseGridEditor: View {
     @State private var setSwipeRemoving: [UUID: Bool] = [:]
     @State private var repsInputTextBySetID: [UUID: String] = [:]
     @State private var weightInputTextBySetID: [UUID: String] = [:]
-    @State private var pendingDraftChangeNotificationTask: Task<Void, Never>?
     @State private var pendingDisplayRefreshTask: Task<Void, Never>?
     @FocusState private var focusedInput: SetInputFocus?
 
     private let restPresets = [10, 15, 20, 30, 45, 60, 75, 90, 105, 120, 150, 180, 210, 240]
-    private let inputChangeNotificationDebounce = Duration.milliseconds(180)
     private let displayRefreshDebounce = Duration.milliseconds(90)
 
     private struct SetInputFocus: Hashable {
@@ -91,8 +88,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         isSetEditingEnabled: Bool = true,
         enablesHeaderSwipeDelete: Bool = false,
         emphasizesExerciseCompletion: Bool = false,
-        onSetDraftsChanged: (([WorkoutSessionSetDraft]) -> Void)? = nil,
-        onRestChanged: ((Int) -> Void)? = nil,
+        onCommitRequest: (() -> Void)? = nil,
         onSetCompletionChange: ((UUID, String?, Int, Bool) -> Void)? = nil,
         onExerciseSettings: (() -> Void)? = nil,
         onExerciseComponentPicker: (() -> Void)? = nil,
@@ -126,8 +122,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.isSetEditingEnabled = isSetEditingEnabled
         self.enablesHeaderSwipeDelete = enablesHeaderSwipeDelete
         self.emphasizesExerciseCompletion = emphasizesExerciseCompletion
-        self.onSetDraftsChanged = onSetDraftsChanged
-        self.onRestChanged = onRestChanged
+        self.onCommitRequest = onCommitRequest
         self.onSetCompletionChange = onSetCompletionChange
         self.onExerciseSettings = onExerciseSettings
         self.onExerciseComponentPicker = onExerciseComponentPicker
@@ -189,7 +184,10 @@ struct WorkoutSessionExerciseGridEditor: View {
             y: 8
         )
         .onAppear(perform: refreshDisplayRows)
-        .onDisappear(perform: flushPendingEditorState)
+        .onDisappear {
+            flushPendingEditorState()
+            onCommitRequest?()
+        }
         .onChange(of: _setDrafts.wrappedValue) { _, _ in
             scheduleDisplayRefresh()
             pruneInputDrafts()
@@ -209,8 +207,8 @@ struct WorkoutSessionExerciseGridEditor: View {
         .onChange(of: focusedInput) { previousFocus, newFocus in
             guard previousFocus != newFocus else { return }
             if let previousFocus {
-                flushPendingDraftChangeNotification()
                 clearInputDraft(for: previousFocus)
+                onCommitRequest?()
             }
             if newFocus == nil {
                 flushPendingDisplayRefresh()
@@ -1272,23 +1270,16 @@ struct WorkoutSessionExerciseGridEditor: View {
                 repsInputTextBySetID[setID] = newValue
                 let cleaned = newValue.filter(\.isNumber)
                 let updatedReps = cleaned.isEmpty ? nil : Int(cleaned)
-                var didChange = false
 
                 if setDrafts[index].actualReps != updatedReps {
                     setDrafts[index].actualReps = updatedReps
-                    didChange = true
                 }
 
                 if !manualCompletionMode {
                     let isCompleted = (setDrafts[index].actualReps != nil || setDrafts[index].actualWeight != nil)
                     if setDrafts[index].isCompleted != isCompleted {
                         setDrafts[index].isCompleted = isCompleted
-                        didChange = true
                     }
-                }
-
-                if didChange {
-                    scheduleDraftChangeNotification()
                 }
             }
         )
@@ -1315,7 +1306,6 @@ struct WorkoutSessionExerciseGridEditor: View {
                 weightInputTextBySetID[setID] = newValue
                 let normalized = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
                 let updatedWeight: Double?
-                var didChange = false
 
                 if normalized.isEmpty {
                     updatedWeight = nil
@@ -1327,33 +1317,25 @@ struct WorkoutSessionExerciseGridEditor: View {
 
                 if setDrafts[index].actualWeight != updatedWeight {
                     setDrafts[index].actualWeight = updatedWeight
-                    didChange = true
                 }
 
                 let fallbackWeightedUnit = resolvedWeightedLoadUnit(for: setDrafts[index])
                 if let updatedWeight, updatedWeight > 0 {
                     if setDrafts[index].actualLoadUnit == .bodyweight {
                         setDrafts[index].actualLoadUnit = fallbackWeightedUnit
-                        didChange = true
                     }
                 } else if updatedWeight == nil,
                           setDrafts[index].targetLoadUnit == .bodyweight,
                           setDrafts[index].actualLoadUnit != .bodyweight
                 {
                     setDrafts[index].actualLoadUnit = .bodyweight
-                    didChange = true
                 }
 
                 if !manualCompletionMode {
                     let isCompleted = (setDrafts[index].actualReps != nil || setDrafts[index].actualWeight != nil)
                     if setDrafts[index].isCompleted != isCompleted {
                         setDrafts[index].isCompleted = isCompleted
-                        didChange = true
                     }
-                }
-
-                if didChange {
-                    scheduleDraftChangeNotification()
                 }
             }
         )
@@ -1467,14 +1449,16 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func refreshDisplayRows() {
-        let snapshot = Self.makeDisplayRows(
-            setDrafts: _setDrafts.wrappedValue,
-            previousBySetIndex: previousBySetIndex,
-            targetRepMin: targetRepMin,
-            targetRepMax: targetRepMax,
-            restSeconds: restSeconds,
-            formatWeight: formatWeight
-        )
+        let snapshot = WGJPerformance.measure("workout-grid.row-refresh") {
+            Self.makeDisplayRows(
+                setDrafts: _setDrafts.wrappedValue,
+                previousBySetIndex: previousBySetIndex,
+                targetRepMin: targetRepMin,
+                targetRepMax: targetRepMax,
+                restSeconds: restSeconds,
+                formatWeight: formatWeight
+            )
+        }
         rowSnapshots = snapshot
         cachedCompletedSetCount = snapshot.reduce(0) { partialResult, row in
             partialResult + (row.set.isCompleted ? 1 : 0)
@@ -1507,7 +1491,6 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func flushPendingEditorState() {
         flushPendingDisplayRefresh()
-        flushPendingDraftChangeNotification()
     }
 
     private static func makeDisplayRows(
@@ -1724,7 +1707,6 @@ struct WorkoutSessionExerciseGridEditor: View {
             setDrafts[index].restSeconds = normalized
         }
 
-        onRestChanged?(normalized)
         notifyChanged()
     }
 
@@ -1833,26 +1815,10 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func notifyChanged() {
-        pendingDraftChangeNotificationTask?.cancel()
-        pendingDraftChangeNotificationTask = nil
-        onSetDraftsChanged?(setDrafts)
-    }
-
-    private func scheduleDraftChangeNotification() {
-        pendingDraftChangeNotificationTask?.cancel()
-        pendingDraftChangeNotificationTask = Task { @MainActor in
-            try? await Task.sleep(for: inputChangeNotificationDebounce)
-            guard !Task.isCancelled else { return }
-            pendingDraftChangeNotificationTask = nil
-            onSetDraftsChanged?(setDrafts)
-        }
-    }
-
-    private func flushPendingDraftChangeNotification() {
-        guard pendingDraftChangeNotificationTask != nil else { return }
-        pendingDraftChangeNotificationTask?.cancel()
-        pendingDraftChangeNotificationTask = nil
-        onSetDraftsChanged?(setDrafts)
+        pendingDisplayRefreshTask?.cancel()
+        pendingDisplayRefreshTask = nil
+        refreshDisplayRows()
+        onCommitRequest?()
     }
 
     private func formatWeight(_ value: Double) -> String {

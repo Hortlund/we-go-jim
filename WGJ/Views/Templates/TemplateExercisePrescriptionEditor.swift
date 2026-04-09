@@ -30,9 +30,7 @@ struct TemplateExercisePrescriptionEditor: View {
     @Binding var restSeconds: Int
     @Binding var setDrafts: [TemplateExerciseSetDraft]
 
-    var onSetDraftsChanged: (([TemplateExerciseSetDraft]) -> Void)?
-    var onRepRangeChanged: ((Int?, Int?) -> Void)?
-    var onRestChanged: ((Int) -> Void)?
+    var onCommitRequest: (() -> Void)?
     var onMoveUp: (() -> Void)?
     var onMoveDown: (() -> Void)?
     var onMoveToPosition: (() -> Void)?
@@ -46,9 +44,12 @@ struct TemplateExercisePrescriptionEditor: View {
     @State private var repMaxInputText: String?
     @State private var repsInputTextBySetID: [UUID: String] = [:]
     @State private var weightInputTextBySetID: [UUID: String] = [:]
+    @State private var cachedSetPresentation: SetPresentation
+    @State private var pendingPresentationRefreshTask: Task<Void, Never>?
     @FocusState private var focusedInput: TemplateEditorInputFocus?
 
     private let restPresets = [10, 15, 20, 30, 45, 60, 75, 90, 105, 120, 150, 180, 210, 240]
+    private let presentationRefreshDebounce = Duration.milliseconds(90)
 
     init(
         exerciseName: String,
@@ -68,9 +69,7 @@ struct TemplateExercisePrescriptionEditor: View {
         targetRepMax: Binding<Int?>,
         restSeconds: Binding<Int>,
         setDrafts: Binding<[TemplateExerciseSetDraft]>,
-        onSetDraftsChanged: (([TemplateExerciseSetDraft]) -> Void)? = nil,
-        onRepRangeChanged: ((Int?, Int?) -> Void)? = nil,
-        onRestChanged: ((Int) -> Void)? = nil,
+        onCommitRequest: (() -> Void)? = nil,
         onMoveUp: (() -> Void)? = nil,
         onMoveDown: (() -> Void)? = nil,
         onMoveToPosition: (() -> Void)? = nil,
@@ -92,18 +91,23 @@ struct TemplateExercisePrescriptionEditor: View {
         self._restSeconds = restSeconds
         self._setDrafts = setDrafts
         self.externalIsExpanded = isExpanded
-        self.onSetDraftsChanged = onSetDraftsChanged
-        self.onRepRangeChanged = onRepRangeChanged
-        self.onRestChanged = onRestChanged
+        self.onCommitRequest = onCommitRequest
         self.onMoveUp = onMoveUp
         self.onMoveDown = onMoveDown
         self.onMoveToPosition = onMoveToPosition
         self.onExerciseDelete = onExerciseDelete
         self._localIsExpanded = State(initialValue: isExpanded?.wrappedValue ?? initiallyExpanded)
+        self._cachedSetPresentation = State(
+            initialValue: Self.makeSetPresentation(
+                setDrafts: setDrafts.wrappedValue,
+                restSeconds: restSeconds.wrappedValue,
+                formatWeight: { WGJFormatters.decimalString($0) }
+            )
+        )
     }
 
     var body: some View {
-        let presentation = setPresentation
+        let presentation = cachedSetPresentation
 
         return VStack(alignment: .leading, spacing: 14) {
             header(presentation: presentation)
@@ -132,13 +136,26 @@ struct TemplateExercisePrescriptionEditor: View {
         }
         .padding(16)
         .wgjCardContainer(strong: true)
+        .onAppear(perform: refreshSetPresentation)
+        .onDisappear {
+            flushPendingPresentationRefresh()
+            onCommitRequest?()
+        }
         .onChange(of: _setDrafts.wrappedValue) { _, _ in
+            scheduleSetPresentationRefresh()
             pruneInputDrafts()
+        }
+        .onChange(of: restSeconds) { _, _ in
+            scheduleSetPresentationRefresh()
         }
         .onChange(of: focusedInput) { previousFocus, newFocus in
             guard previousFocus != newFocus else { return }
             if let previousFocus {
                 clearInputDraft(for: previousFocus)
+                onCommitRequest?()
+            }
+            if newFocus == nil {
+                flushPendingPresentationRefresh()
             }
         }
     }
@@ -764,7 +781,6 @@ struct TemplateExercisePrescriptionEditor: View {
                 let updatedValue = cleaned.isEmpty ? nil : Int(cleaned)
                 guard targetRepMin != updatedValue else { return }
                 targetRepMin = updatedValue
-                onRepRangeChanged?(targetRepMin, targetRepMax)
             }
         )
     }
@@ -784,7 +800,6 @@ struct TemplateExercisePrescriptionEditor: View {
                 let updatedValue = cleaned.isEmpty ? nil : Int(cleaned)
                 guard targetRepMax != updatedValue else { return }
                 targetRepMax = updatedValue
-                onRepRangeChanged?(targetRepMin, targetRepMax)
             }
         )
     }
@@ -797,7 +812,6 @@ struct TemplateExercisePrescriptionEditor: View {
         let updatedValue = cleaned.isEmpty ? nil : Int(cleaned)
         guard setDrafts[index].targetReps != updatedValue else { return }
         setDrafts[index].targetReps = updatedValue
-        notifySetChanged()
     }
 
     private func updateWeightText(_ newValue: String, at index: Int) {
@@ -817,21 +831,20 @@ struct TemplateExercisePrescriptionEditor: View {
 
         guard setDrafts[index].targetWeight != updatedValue else { return }
         setDrafts[index].targetWeight = updatedValue
-        notifySetChanged()
     }
 
     private func updateLoadUnit(_ loadUnit: TemplateLoadUnit, at index: Int) {
         guard setDrafts.indices.contains(index) else { return }
         guard setDrafts[index].loadUnit != loadUnit else { return }
         setDrafts[index].loadUnit = loadUnit
-        notifySetChanged()
+        requestImmediateCommit()
     }
 
     private func addSet() {
         withAnimation(.snappy(duration: 0.24, extraBounce: 0.04)) {
             setDrafts.append(makeSetDraft(copying: setDrafts.last))
         }
-        notifySetChanged()
+        requestImmediateCommit()
     }
 
     private func insertSet(after index: Int) {
@@ -840,7 +853,7 @@ struct TemplateExercisePrescriptionEditor: View {
         withAnimation(.snappy(duration: 0.22, extraBounce: 0.04)) {
             setDrafts.insert(makeSetDraft(copying: setDrafts[index]), at: index + 1)
         }
-        notifySetChanged()
+        requestImmediateCommit()
     }
 
     private func removeSet(at index: Int) {
@@ -853,7 +866,7 @@ struct TemplateExercisePrescriptionEditor: View {
 
         setSwipeOffsets[removedID] = nil
         setSwipeRemoving[removedID] = nil
-        notifySetChanged()
+        requestImmediateCommit()
     }
 
     private func removeSet(withID setID: UUID) {
@@ -864,13 +877,13 @@ struct TemplateExercisePrescriptionEditor: View {
     private func toggleWarmup(at index: Int) {
         guard setDrafts.indices.contains(index) else { return }
         setDrafts[index].isWarmup.toggle()
-        notifySetChanged()
+        requestImmediateCommit()
     }
 
     private func toggleLock(at index: Int) {
         guard setDrafts.indices.contains(index) else { return }
         setDrafts[index].isLocked.toggle()
-        notifySetChanged()
+        requestImmediateCommit()
     }
 
     private func moveSetUp(_ index: Int) {
@@ -879,7 +892,7 @@ struct TemplateExercisePrescriptionEditor: View {
         withAnimation(.snappy(duration: 0.2, extraBounce: 0.02)) {
             setDrafts.swapAt(index, index - 1)
         }
-        notifySetChanged()
+        requestImmediateCommit()
     }
 
     private func moveSetDown(_ index: Int) {
@@ -888,39 +901,7 @@ struct TemplateExercisePrescriptionEditor: View {
         withAnimation(.snappy(duration: 0.2, extraBounce: 0.02)) {
             setDrafts.swapAt(index, index + 1)
         }
-        notifySetChanged()
-    }
-
-    private func previousText(for set: TemplateExerciseSetDraft) -> String {
-        if let weight = set.previousTargetWeight, let reps = set.previousTargetReps {
-            return "\(formatWeight(weight)) \(set.previousLoadUnit.shortLabel) x \(reps)"
-        }
-
-        if let reps = set.previousTargetReps {
-            return "\(reps) reps"
-        }
-
-        return "-"
-    }
-
-    private func previousSummary(for set: TemplateExerciseSetDraft) -> String {
-        let previous = previousText(for: set)
-        return previous == "-" ? "No previous target saved." : "Last target \(previous)"
-    }
-
-    private func setMetadataLine(for set: TemplateExerciseSetDraft) -> String? {
-        var parts: [String] = []
-
-        if set.isLocked {
-            parts.append("Locked")
-        }
-
-        if set.restSeconds != restSeconds {
-            parts.append("Rest \(restLabel(for: set.restSeconds))")
-        }
-
-        guard !parts.isEmpty else { return nil }
-        return parts.joined(separator: " • ")
+        requestImmediateCommit()
     }
 
     private func makeSetDraft(copying source: TemplateExerciseSetDraft?) -> TemplateExerciseSetDraft {
@@ -958,12 +939,8 @@ struct TemplateExercisePrescriptionEditor: View {
             for index in setDrafts.indices where setDrafts[index].restSeconds != normalized {
                 setDrafts[index].restSeconds = normalized
             }
-            notifySetChanged()
         }
-
-        if didChangeDefaultRest {
-            onRestChanged?(normalized)
-        }
+        requestImmediateCommit()
     }
 
     private func updateSetRest(_ seconds: Int, at index: Int) {
@@ -971,15 +948,18 @@ struct TemplateExercisePrescriptionEditor: View {
         let normalized = max(0, min(3600, seconds))
         guard setDrafts[index].restSeconds != normalized else { return }
         setDrafts[index].restSeconds = normalized
-        notifySetChanged()
+        requestImmediateCommit()
     }
 
     private func restLabel(for seconds: Int) -> String {
         seconds <= 0 ? "No rest" : formattedRest(seconds)
     }
 
-    private func notifySetChanged() {
-        onSetDraftsChanged?(setDrafts)
+    private func requestImmediateCommit() {
+        pendingPresentationRefreshTask?.cancel()
+        pendingPresentationRefreshTask = nil
+        refreshSetPresentation()
+        onCommitRequest?()
     }
 
     private func formatWeight(_ value: Double) -> String {
@@ -1032,7 +1012,45 @@ struct TemplateExercisePrescriptionEditor: View {
 }
 
 private extension TemplateExercisePrescriptionEditor {
-    var setPresentation: SetPresentation {
+    func refreshSetPresentation() {
+        cachedSetPresentation = WGJPerformance.measure("template-editor.set-presentation") {
+            Self.makeSetPresentation(
+                setDrafts: setDrafts,
+                restSeconds: restSeconds,
+                formatWeight: formatWeight
+            )
+        }
+    }
+
+    func scheduleSetPresentationRefresh() {
+        guard focusedInput != nil else {
+            pendingPresentationRefreshTask?.cancel()
+            pendingPresentationRefreshTask = nil
+            refreshSetPresentation()
+            return
+        }
+
+        pendingPresentationRefreshTask?.cancel()
+        pendingPresentationRefreshTask = Task { @MainActor in
+            try? await Task.sleep(for: presentationRefreshDebounce)
+            guard !Task.isCancelled else { return }
+            pendingPresentationRefreshTask = nil
+            refreshSetPresentation()
+        }
+    }
+
+    func flushPendingPresentationRefresh() {
+        guard pendingPresentationRefreshTask != nil else { return }
+        pendingPresentationRefreshTask?.cancel()
+        pendingPresentationRefreshTask = nil
+        refreshSetPresentation()
+    }
+
+    static func makeSetPresentation(
+        setDrafts: [TemplateExerciseSetDraft],
+        restSeconds: Int,
+        formatWeight: (Double) -> String
+    ) -> SetPresentation {
         var rows: [SetRowData] = []
         rows.reserveCapacity(setDrafts.count)
 
@@ -1052,8 +1070,8 @@ private extension TemplateExercisePrescriptionEditor {
                     index: index,
                     title: set.isWarmup ? "Warmup Set" : "Working Set \(workingSetNumber)",
                     badgeTitle: set.isWarmup ? "W" : "\(workingSetNumber)",
-                    previousSummary: previousSummary(for: set),
-                    metadataLine: setMetadataLine(for: set),
+                    previousSummary: previousSummary(for: set, formatWeight: formatWeight),
+                    metadataLine: setMetadataLine(for: set, restSeconds: restSeconds),
                     isLocked: set.isLocked
                 )
             )
@@ -1065,6 +1083,50 @@ private extension TemplateExercisePrescriptionEditor {
             : "\(workingSets) working sets"
 
         return SetPresentation(rows: rows, summary: summary)
+    }
+
+    static func previousSummary(
+        for set: TemplateExerciseSetDraft,
+        formatWeight: (Double) -> String
+    ) -> String {
+        let previous = previousText(for: set, formatWeight: formatWeight)
+        return previous == "-" ? "No previous target saved." : "Last target \(previous)"
+    }
+
+    static func previousText(
+        for set: TemplateExerciseSetDraft,
+        formatWeight: (Double) -> String
+    ) -> String {
+        if let weight = set.previousTargetWeight, let reps = set.previousTargetReps {
+            return "\(formatWeight(weight)) \(set.previousLoadUnit.shortLabel) x \(reps)"
+        }
+
+        if let reps = set.previousTargetReps {
+            return "\(reps) reps"
+        }
+
+        return "-"
+    }
+
+    static func setMetadataLine(
+        for set: TemplateExerciseSetDraft,
+        restSeconds: Int
+    ) -> String? {
+        var parts: [String] = []
+
+        if set.isLocked {
+            parts.append("Locked")
+        }
+
+        if set.restSeconds != restSeconds {
+            let mins = max(0, set.restSeconds) / 60
+            let secs = max(0, set.restSeconds) % 60
+            let restLabel = set.restSeconds <= 0 ? "No rest" : String(format: "%d:%02d", mins, secs)
+            parts.append("Rest \(restLabel)")
+        }
+
+        guard !parts.isEmpty else { return nil }
+        return parts.joined(separator: " • ")
     }
 }
 

@@ -29,8 +29,6 @@ struct HistoryDetailView: View {
     @State private var showingArchiveConfirmation = false
     @State private var errorMessage = ""
     @State private var showingError = false
-    @State private var exerciseSwipeOffsets: [UUID: CGFloat] = [:]
-    @State private var exerciseSwipeRemoving: [UUID: Bool] = [:]
 
     private var sessionRepository: WorkoutSessionRepository {
         WorkoutSessionRepository(modelContext: modelContext)
@@ -263,27 +261,6 @@ struct HistoryDetailView: View {
     }
 
     @MainActor
-    private func setDraftsBinding(for exercise: WorkoutSessionExercise) -> Binding<[WorkoutSessionSetDraft]> {
-        Binding {
-            if let cached = setDraftsByExerciseID[exercise.id] {
-                return cached
-            }
-            return makeDrafts(from: exercise)
-        } set: { updated in
-            setDraftsByExerciseID[exercise.id] = updated
-        }
-    }
-
-    @MainActor
-    private func restBinding(for exercise: WorkoutSessionExercise) -> Binding<Int> {
-        Binding {
-            restByExerciseID[exercise.id] ?? exercise.restSeconds
-        } set: { updated in
-            restByExerciseID[exercise.id] = max(0, min(3600, updated))
-        }
-    }
-
-    @MainActor
     private func bootstrapIfNeeded() async {
         guard !hasBootstrapped else { return }
         hasBootstrapped = true
@@ -365,40 +342,36 @@ struct HistoryDetailView: View {
     private func exerciseSection(_ exercise: WorkoutSessionExercise, index: Int) -> some View {
         let personalRecordPresentation = personalRecordPresentationByExerciseID[exercise.id]
         let previousSets = previousByExerciseID[exercise.id] ?? [:]
+        let drafts = setDraftsByExerciseID[exercise.id] ?? makeDrafts(from: exercise)
+        let restSeconds = restByExerciseID[exercise.id] ?? exercise.restSeconds
 
-        return SwipeDeleteRow(
-            offset: exerciseSwipeOffsetBinding(for: exercise.id),
-            isRemoving: exerciseRemovingBinding(for: exercise.id),
-            activeRegionMaxY: 116,
-            gestureStrategy: .simultaneous
-        ) {
-            removeExercise(exerciseID: exercise.id)
-        } content: {
-            WorkoutSessionExerciseGridEditor(
-                exerciseName: exercise.exerciseNameSnapshot,
-                muscleSummary: exercise.muscleSummarySnapshot,
-                category: exercise.categorySnapshot,
-                exerciseIndexTitle: "Exercise \(index + 1)",
-                targetRepMin: exercise.targetRepMin,
-                targetRepMax: exercise.targetRepMax,
-                previousBySetIndex: previousSets,
-                personalRecordSummaryKinds: personalRecordPresentation?.summaryKinds ?? [],
-                personalRecordKindsBySetID: personalRecordPresentation?.setKindsBySetID ?? [:],
-                preferredLoadUnit: preferredLoadUnit,
-                restSeconds: restBinding(for: exercise),
-                setDrafts: setDraftsBinding(for: exercise),
-                isExpanded: expansionBinding(for: exercise.id),
-                onSetDraftsChanged: { drafts in
-                    setDraftsByExerciseID[exercise.id] = drafts
-                },
-                onRestChanged: { rest in
-                    restByExerciseID[exercise.id] = rest
-                },
-                onExerciseDelete: {
-                    removeExercise(exerciseID: exercise.id)
-                }
-            )
-        }
+        return WorkoutExerciseRowHostView(
+            exerciseID: exercise.id,
+            exerciseAccessibilityIdentifier: "history-exercise-\(exercise.catalogExerciseUUID)",
+            exerciseName: exercise.exerciseNameSnapshot,
+            muscleSummary: exercise.muscleSummarySnapshot,
+            category: exercise.categorySnapshot,
+            exerciseIndexTitle: "Exercise \(index + 1)",
+            targetRepMin: exercise.targetRepMin,
+            targetRepMax: exercise.targetRepMax,
+            previousBySetIndex: previousSets,
+            personalRecordSummaryKinds: personalRecordPresentation?.summaryKinds ?? [],
+            personalRecordKindsBySetID: personalRecordPresentation?.setKindsBySetID ?? [:],
+            preferredLoadUnit: preferredLoadUnit,
+            restSeconds: restSeconds,
+            setDrafts: drafts,
+            isExpanded: expandedExerciseIDs[exercise.id] ?? false,
+            onSetDraftsCommitted: { drafts in
+                setDraftsByExerciseID[exercise.id] = drafts
+            },
+            onRestCommitted: { rest in
+                restByExerciseID[exercise.id] = rest
+            },
+            onExpandedChanged: { expandedExerciseIDs[exercise.id] = $0 },
+            onExerciseDelete: {
+                removeExercise(exerciseID: exercise.id)
+            }
+        )
     }
 
     private func saveChanges() {
@@ -456,7 +429,6 @@ struct HistoryDetailView: View {
                 setDraftsByExerciseID.removeValue(forKey: exerciseID)
                 restByExerciseID.removeValue(forKey: exerciseID)
                 previousByExerciseID.removeValue(forKey: exerciseID)
-                clearExerciseSwipeState(for: exerciseID)
                 loadedExerciseStateStamp = nil
             } catch {
                 capturedError = error
@@ -477,11 +449,6 @@ struct HistoryDetailView: View {
         }
     }
 
-    private func clearExerciseSwipeState(for exerciseID: UUID) {
-        exerciseSwipeOffsets[exerciseID] = nil
-        exerciseSwipeRemoving[exerciseID] = nil
-    }
-
     private func syncExpandedExerciseState() {
         let validIDs = Set(sessionExercises.map(\.id))
         expandedExerciseIDs = expandedExerciseIDs.filter { validIDs.contains($0.key) }
@@ -489,27 +456,6 @@ struct HistoryDetailView: View {
         for (index, exercise) in sessionExercises.enumerated() where expandedExerciseIDs[exercise.id] == nil {
             expandedExerciseIDs[exercise.id] = index == 0
         }
-    }
-
-    private func expansionBinding(for exerciseID: UUID) -> Binding<Bool> {
-        Binding(
-            get: { expandedExerciseIDs[exerciseID] ?? false },
-            set: { expandedExerciseIDs[exerciseID] = $0 }
-        )
-    }
-
-    private func exerciseSwipeOffsetBinding(for exerciseID: UUID) -> Binding<CGFloat> {
-        Binding(
-            get: { exerciseSwipeOffsets[exerciseID] ?? 0 },
-            set: { exerciseSwipeOffsets[exerciseID] = $0 }
-        )
-    }
-
-    private func exerciseRemovingBinding(for exerciseID: UUID) -> Binding<Bool> {
-        Binding(
-            get: { exerciseSwipeRemoving[exerciseID] ?? false },
-            set: { exerciseSwipeRemoving[exerciseID] = $0 }
-        )
     }
 
     private var exerciseCardTransition: AnyTransition {

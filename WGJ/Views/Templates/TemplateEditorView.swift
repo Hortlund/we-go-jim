@@ -636,7 +636,7 @@ private final class TemplateExerciseDraftStore: Identifiable {
 }
 
 private struct TemplateEditorExerciseRow: View {
-    @Bindable var draftStore: TemplateExerciseDraftStore
+    let draftStore: TemplateExerciseDraftStore
 
     let recommendation: TemplateExerciseRecommendation?
     let exerciseIndexTitle: String
@@ -654,6 +654,72 @@ private struct TemplateEditorExerciseRow: View {
 
     @State private var swipeOffset: CGFloat = 0
     @State private var swipeRemoving = false
+    @State private var localTargetRepMin: Int?
+    @State private var localTargetRepMax: Int?
+    @State private var localRestSeconds: Int
+    @State private var localSetDrafts: [TemplateExerciseSetDraft]
+    @State private var editingCoordinator: TemplateExerciseEditingCoordinator
+
+    init(
+        draftStore: TemplateExerciseDraftStore,
+        recommendation: TemplateExerciseRecommendation?,
+        exerciseIndexTitle: String,
+        canMoveUp: Bool,
+        canMoveDown: Bool,
+        onMoveToPosition: (() -> Void)?,
+        preferredLoadUnit: TemplateLoadUnit,
+        onMoveUp: @escaping () -> Void,
+        onMoveDown: @escaping () -> Void,
+        onExerciseDelete: @escaping () -> Void,
+        onAddComponent: @escaping () -> Void,
+        onMoveComponentUp: @escaping (Int) -> Void,
+        onMoveComponentDown: @escaping (Int) -> Void,
+        onDeleteComponent: @escaping (UUID) -> Void
+    ) {
+        self.draftStore = draftStore
+        self.recommendation = recommendation
+        self.exerciseIndexTitle = exerciseIndexTitle
+        self.canMoveUp = canMoveUp
+        self.canMoveDown = canMoveDown
+        self.onMoveToPosition = onMoveToPosition
+        self.preferredLoadUnit = preferredLoadUnit
+        self.onMoveUp = onMoveUp
+        self.onMoveDown = onMoveDown
+        self.onExerciseDelete = onExerciseDelete
+        self.onAddComponent = onAddComponent
+        self.onMoveComponentUp = onMoveComponentUp
+        self.onMoveComponentDown = onMoveComponentDown
+        self.onDeleteComponent = onDeleteComponent
+        self._localTargetRepMin = State(initialValue: draftStore.targetRepMin)
+        self._localTargetRepMax = State(initialValue: draftStore.targetRepMax)
+        self._localRestSeconds = State(initialValue: draftStore.restSeconds)
+        self._localSetDrafts = State(initialValue: draftStore.setDrafts)
+        self._editingCoordinator = State(
+            initialValue: TemplateExerciseEditingCoordinator(
+                targetRepMin: draftStore.targetRepMin,
+                targetRepMax: draftStore.targetRepMax,
+                restSeconds: draftStore.restSeconds,
+                setDrafts: draftStore.setDrafts,
+                onRepRangeCommitted: { minReps, maxReps in
+                    if draftStore.targetRepMin != minReps {
+                        draftStore.targetRepMin = minReps
+                    }
+                    if draftStore.targetRepMax != maxReps {
+                        draftStore.targetRepMax = maxReps
+                    }
+                },
+                onRestCommitted: { restSeconds in
+                    let normalized = max(0, min(3600, restSeconds))
+                    guard draftStore.restSeconds != normalized else { return }
+                    draftStore.restSeconds = normalized
+                },
+                onSetDraftsCommitted: { setDrafts in
+                    guard draftStore.setDrafts != setDrafts else { return }
+                    draftStore.setDrafts = setDrafts
+                }
+            )
+        )
+    }
 
     var body: some View {
         SwipeDeleteRow(
@@ -674,25 +740,42 @@ private struct TemplateEditorExerciseRow: View {
                 canMoveUp: canMoveUp,
                 canMoveDown: canMoveDown,
                 preferredLoadUnit: preferredLoadUnit,
-                targetRepMin: draftStore.targetRepMin,
-                targetRepMax: draftStore.targetRepMax,
-                restSeconds: draftStore.restSeconds,
-                setDrafts: draftStore.setDrafts,
+                targetRepMin: localTargetRepMin,
+                targetRepMax: localTargetRepMax,
+                restSeconds: localRestSeconds,
+                setDrafts: localSetDrafts,
                 isExpanded: draftStore.isExpanded,
-                currentRestSeconds: {
-                    draftStore.restSeconds
-                },
-                currentSetDrafts: {
-                    draftStore.setDrafts
-                },
-                currentIsExpanded: {
-                    draftStore.isExpanded
+                onCommitRequest: {
+                    editingCoordinator.requestImmediateCommit(
+                        targetRepMin: localTargetRepMin,
+                        targetRepMax: localTargetRepMax,
+                        restSeconds: localRestSeconds,
+                        setDrafts: localSetDrafts
+                    )
                 },
                 onExpandedChanged: updateExpanded,
-                onTargetRepMinChanged: updateTargetRepMin,
-                onTargetRepMaxChanged: updateTargetRepMax,
-                onRestChanged: updateRestSeconds,
-                onSetDraftsChanged: updateSetDrafts,
+                onTargetRepMinChanged: { value in
+                    localTargetRepMin = value
+                    editingCoordinator.scheduleRepRangeCommit(
+                        targetRepMin: value,
+                        targetRepMax: localTargetRepMax
+                    )
+                },
+                onTargetRepMaxChanged: { value in
+                    localTargetRepMax = value
+                    editingCoordinator.scheduleRepRangeCommit(
+                        targetRepMin: localTargetRepMin,
+                        targetRepMax: value
+                    )
+                },
+                onRestChanged: { value in
+                    localRestSeconds = value
+                    editingCoordinator.scheduleRestCommit(value)
+                },
+                onSetDraftsChanged: { value in
+                    localSetDrafts = value
+                    editingCoordinator.scheduleSetDraftCommit(value)
+                },
                 onMoveUp: onMoveUp,
                 onMoveDown: onMoveDown,
                 onMoveToPosition: onMoveToPosition,
@@ -706,32 +789,51 @@ private struct TemplateEditorExerciseRow: View {
             )
             .equatable()
         }
+        .onChange(of: draftStore.targetRepMin) { _, newValue in
+            editingCoordinator.syncCommittedState(
+                targetRepMin: newValue,
+                targetRepMax: draftStore.targetRepMax,
+                restSeconds: draftStore.restSeconds,
+                setDrafts: draftStore.setDrafts
+            )
+            guard localTargetRepMin != newValue else { return }
+            localTargetRepMin = newValue
+        }
+        .onChange(of: draftStore.targetRepMax) { _, newValue in
+            editingCoordinator.syncCommittedState(
+                targetRepMin: draftStore.targetRepMin,
+                targetRepMax: newValue,
+                restSeconds: draftStore.restSeconds,
+                setDrafts: draftStore.setDrafts
+            )
+            guard localTargetRepMax != newValue else { return }
+            localTargetRepMax = newValue
+        }
+        .onChange(of: draftStore.restSeconds) { _, newValue in
+            editingCoordinator.syncCommittedState(
+                targetRepMin: draftStore.targetRepMin,
+                targetRepMax: draftStore.targetRepMax,
+                restSeconds: newValue,
+                setDrafts: draftStore.setDrafts
+            )
+            guard localRestSeconds != newValue else { return }
+            localRestSeconds = newValue
+        }
+        .onChange(of: draftStore.setDrafts) { _, newValue in
+            editingCoordinator.syncCommittedState(
+                targetRepMin: draftStore.targetRepMin,
+                targetRepMax: draftStore.targetRepMax,
+                restSeconds: draftStore.restSeconds,
+                setDrafts: newValue
+            )
+            guard localSetDrafts != newValue else { return }
+            localSetDrafts = newValue
+        }
     }
 
     private func updateExpanded(_ isExpanded: Bool) {
         guard draftStore.isExpanded != isExpanded else { return }
         draftStore.isExpanded = isExpanded
-    }
-
-    private func updateTargetRepMin(_ value: Int?) {
-        guard draftStore.targetRepMin != value else { return }
-        draftStore.targetRepMin = value
-    }
-
-    private func updateTargetRepMax(_ value: Int?) {
-        guard draftStore.targetRepMax != value else { return }
-        draftStore.targetRepMax = value
-    }
-
-    private func updateRestSeconds(_ value: Int) {
-        let normalized = max(0, min(3600, value))
-        guard draftStore.restSeconds != normalized else { return }
-        draftStore.restSeconds = normalized
-    }
-
-    private func updateSetDrafts(_ value: [TemplateExerciseSetDraft]) {
-        guard draftStore.setDrafts != value else { return }
-        draftStore.setDrafts = value
     }
 }
 
@@ -751,9 +853,7 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
     let setDrafts: [TemplateExerciseSetDraft]
     let isExpanded: Bool
 
-    let currentRestSeconds: () -> Int
-    let currentSetDrafts: () -> [TemplateExerciseSetDraft]
-    let currentIsExpanded: () -> Bool
+    let onCommitRequest: () -> Void
     let onExpandedChanged: (Bool) -> Void
     let onTargetRepMinChanged: (Int?) -> Void
     let onTargetRepMaxChanged: (Int?) -> Void
@@ -807,7 +907,7 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
             ),
             initiallyExpanded: false,
             isExpanded: Binding(
-                get: { currentIsExpanded() },
+                get: { isExpanded },
                 set: { onExpandedChanged($0) }
             ),
             exerciseIndexTitle: exerciseIndexTitle,
@@ -823,13 +923,14 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
                 set: { onTargetRepMaxChanged($0) }
             ),
             restSeconds: Binding(
-                get: { currentRestSeconds() },
+                get: { restSeconds },
                 set: { onRestChanged($0) }
             ),
             setDrafts: Binding(
-                get: { currentSetDrafts() },
+                get: { setDrafts },
                 set: { onSetDraftsChanged($0) }
             ),
+            onCommitRequest: onCommitRequest,
             onMoveUp: onMoveUp,
             onMoveDown: onMoveDown,
             onMoveToPosition: onMoveToPosition,

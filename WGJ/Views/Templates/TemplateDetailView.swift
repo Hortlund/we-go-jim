@@ -295,14 +295,24 @@ struct TemplateDetailView: View {
                 targetRepMax: targetRepMaxBinding(for: row.exercise),
                 restSeconds: restSecondsBinding(for: row.exercise),
                 setDrafts: setDraftsBinding(for: row.exercise),
-                onSetDraftsChanged: { drafts in
-                    persistSetDrafts(templateExerciseID: row.id, drafts: drafts)
-                },
-                onRepRangeChanged: { min, max in
-                    persistRepRange(templateExerciseID: row.id, minReps: min, maxReps: max)
-                },
-                onRestChanged: { value in
-                    persistRestSeconds(templateExerciseID: row.id, restSeconds: value)
+                onCommitRequest: {
+                    let repRange = repRangeByExerciseID[row.id] ?? RepRangeDraft(
+                        min: row.exercise.targetRepMin,
+                        max: row.exercise.targetRepMax
+                    )
+                    persistSetDrafts(
+                        templateExerciseID: row.id,
+                        drafts: setDraftsByExerciseID[row.id] ?? setDraftsBinding(for: row.exercise).wrappedValue
+                    )
+                    persistRepRange(
+                        templateExerciseID: row.id,
+                        minReps: repRange.min,
+                        maxReps: repRange.max
+                    )
+                    persistRestSeconds(
+                        templateExerciseID: row.id,
+                        restSeconds: restSecondsByExerciseID[row.id] ?? row.exercise.restSeconds
+                    )
                 },
                 onExerciseDelete: {
                     removeExercise(templateExerciseID: row.id)

@@ -422,6 +422,7 @@ private struct HistorySessionCardView: View, Equatable {
             .wgjCardContainer(strong: true)
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("history-session-card")
     }
 
     private var summaryRows: [HistorySessionSummaryRow] {
