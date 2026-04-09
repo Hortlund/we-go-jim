@@ -458,6 +458,7 @@ final class ActiveWorkoutDraftRepository {
         let incomingOrderedIDs = drafts.map(\.id)
         let now = Date()
         var didMutateExerciseStructure = existingOrderedIDs != incomingOrderedIDs
+        var didMutateAnySet = false
 
         for set in existing where !incomingIDs.contains(set.id) {
             modelContext.delete(set)
@@ -483,8 +484,13 @@ final class ActiveWorkoutDraftRepository {
             let didMutateSet = apply(draft: draft, to: set, sortOrder: index)
             if didMutateSet {
                 set.updatedAt = now
+                didMutateAnySet = true
             }
             updatedSets.append(set)
+        }
+
+        guard didMutateExerciseStructure || didMutateAnySet else {
+            return
         }
 
         if didMutateExerciseStructure {

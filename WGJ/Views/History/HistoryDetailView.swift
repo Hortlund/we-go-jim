@@ -363,16 +363,17 @@ struct HistoryDetailView: View {
             setDrafts: drafts,
             isExpanded: expandedExerciseIDs[exercise.id] ?? false,
             onSetDraftsCommitted: { drafts in
-                setDraftsByExerciseID[exercise.id] = drafts
+                updateDraftsValue(drafts, for: exercise.id)
             },
             onRestCommitted: { rest in
-                restByExerciseID[exercise.id] = rest
+                updateRestValue(rest, for: exercise.id)
             },
             onExpandedChanged: { expandedExerciseIDs[exercise.id] = $0 },
             onExerciseDelete: {
                 removeExercise(exerciseID: exercise.id)
             }
         )
+        .equatable()
     }
 
     private func saveChanges() {
@@ -501,6 +502,19 @@ struct HistoryDetailView: View {
     @MainActor
     private func makeDrafts(from exercise: WorkoutSessionExercise) -> [WorkoutSessionSetDraft] {
         orderedSessionSets(for: exercise).map(WorkoutSessionSetDraft.init(model:))
+    }
+
+    @MainActor
+    private func updateDraftsValue(_ updated: [WorkoutSessionSetDraft], for exerciseID: UUID) {
+        guard setDraftsByExerciseID[exerciseID] != updated else { return }
+        setDraftsByExerciseID[exerciseID] = updated
+    }
+
+    @MainActor
+    private func updateRestValue(_ updated: Int, for exerciseID: UUID) {
+        let normalized = max(0, min(3600, updated))
+        guard restByExerciseID[exerciseID] != normalized else { return }
+        restByExerciseID[exerciseID] = normalized
     }
 
     private func cardioDescriptor(category: String, muscleSummary: String) -> String? {

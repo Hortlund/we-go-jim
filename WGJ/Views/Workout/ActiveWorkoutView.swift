@@ -56,7 +56,7 @@ struct ActiveWorkoutView: View {
     @State private var errorMessage = ""
     @State private var showingError = false
 
-    private let interactivePersistenceDebounce = Duration.milliseconds(550)
+    private let interactivePersistenceDebounce = Duration.seconds(1)
     private let cancelSectionFocusSpacerHeight: CGFloat = 160
     private let cancelSectionDockClearanceHeight: CGFloat = 96
     private let cancelSectionScrollTarget = ActiveWorkoutScrollTarget.cancelSection
@@ -566,7 +566,12 @@ struct ActiveWorkoutView: View {
             guidance: guidance,
             preferredLoadUnit: preferredLoadUnit,
             supplementaryContent: componentResolutionByExerciseID[exerciseID].map { resolution in
-                AnyView(ActiveWorkoutExerciseComponentSummaryView(resolution: resolution))
+                AnyView(
+                    ActiveWorkoutExerciseComponentSummaryView(
+                        resolution: resolution,
+                        showsSuggestedComponent: false
+                    )
+                )
             },
             supplementaryContentKey: componentResolutionByExerciseID[exerciseID].map { resolution in
                 "\(resolution.selectedComponent.catalogExerciseUUID)-\(resolution.availableComponents.count)"

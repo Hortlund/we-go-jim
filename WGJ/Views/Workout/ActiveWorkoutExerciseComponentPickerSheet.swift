@@ -9,6 +9,7 @@ struct ActiveWorkoutExerciseComponentPickerDraft: Identifiable, Equatable {
 
 struct ActiveWorkoutExerciseComponentSummaryView: View {
     let resolution: ExerciseComponentRotationResolution
+    var showsSuggestedComponent: Bool = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -20,11 +21,13 @@ struct ActiveWorkoutExerciseComponentSummaryView: View {
                 )
             }
 
-            summaryChip(
-                title: "Next",
-                value: resolution.suggestedComponent.exerciseNameSnapshot,
-                tint: WGJTheme.accentBlue
-            )
+            if showsSuggestedComponent {
+                summaryChip(
+                    title: "Next",
+                    value: resolution.suggestedComponent.exerciseNameSnapshot,
+                    tint: WGJTheme.accentBlue
+                )
+            }
 
             if resolution.hasOverride {
                 Text("Override active")
