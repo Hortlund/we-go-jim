@@ -71,7 +71,7 @@ struct MainTabView: View {
             .onPreferenceChange(ActiveWorkoutStripHeightPreferenceKey.self) { newValue in
                 activeWorkoutStripHeight = max(newValue, Self.activeWorkoutStripFallbackHeight)
             }
-            .sheet(isPresented: Binding(
+            .fullScreenCover(isPresented: Binding(
                 get: {
                     activeWorkoutPresentationState.isActiveWorkoutPresented && activeWorkoutPresentationState.activeSessionID != nil
                 },
