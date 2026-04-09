@@ -35,6 +35,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     var canMoveExerciseDown: Bool
     var onExerciseMoveUp: (() -> Void)?
     var onExerciseMoveDown: (() -> Void)?
+    var onExerciseMoveToPosition: (() -> Void)?
     var onExerciseDelete: (() -> Void)?
 
     private let externalIsExpanded: Binding<Bool>?
@@ -99,6 +100,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         canMoveExerciseDown: Bool = false,
         onExerciseMoveUp: (() -> Void)? = nil,
         onExerciseMoveDown: (() -> Void)? = nil,
+        onExerciseMoveToPosition: (() -> Void)? = nil,
         onExerciseDelete: (() -> Void)? = nil
     ) {
         self.exerciseName = exerciseName
@@ -133,6 +135,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.canMoveExerciseDown = canMoveExerciseDown
         self.onExerciseMoveUp = onExerciseMoveUp
         self.onExerciseMoveDown = onExerciseMoveDown
+        self.onExerciseMoveToPosition = onExerciseMoveToPosition
         self.onExerciseDelete = onExerciseDelete
         self._localIsExpanded = State(initialValue: isExpanded?.wrappedValue ?? initiallyExpanded)
         let initialRows = Self.makeDisplayRows(
@@ -281,6 +284,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                     || onExerciseComponentPicker != nil
                     || onExerciseMoveUp != nil
                     || onExerciseMoveDown != nil
+                    || onExerciseMoveToPosition != nil
                     || onExerciseDelete != nil {
                     WGJActionMenuButton("Exercise Actions") {
                         if let onExerciseComponentPicker {
@@ -316,6 +320,14 @@ struct WorkoutSessionExerciseGridEditor: View {
                                 Label("Move down", systemImage: "arrow.down")
                             }
                             .disabled(!canMoveExerciseDown)
+                        }
+
+                        if let onExerciseMoveToPosition {
+                            Button {
+                                onExerciseMoveToPosition()
+                            } label: {
+                                Label("Move to position", systemImage: "list.number")
+                            }
                         }
 
                         if let onExerciseDelete {

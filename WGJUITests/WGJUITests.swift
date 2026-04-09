@@ -163,6 +163,88 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testTemplateEditorMoveExerciseToPositionPersistsOrder() throws {
+        let app = launchApp(launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Template Reorder",
+                notes: "Move the first exercise to the bottom.",
+                exercises: [
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "template-order-bench",
+                        exerciseNameSnapshot: "Bench Press",
+                        categorySnapshot: "Chest",
+                        muscleSummarySnapshot: "Chest",
+                        targetRepMin: 6,
+                        targetRepMax: 8,
+                        restSeconds: 120,
+                        sets: [templatePayloadSet(targetReps: 6, targetWeight: 100, loadUnit: "kg", restSeconds: 120, isWarmup: false)]
+                    ),
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "template-order-row",
+                        exerciseNameSnapshot: "Barbell Row",
+                        categorySnapshot: "Back",
+                        muscleSummarySnapshot: "Lats",
+                        targetRepMin: 8,
+                        targetRepMax: 10,
+                        restSeconds: 120,
+                        sets: [templatePayloadSet(targetReps: 8, targetWeight: 80, loadUnit: "kg", restSeconds: 120, isWarmup: false)]
+                    ),
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "template-order-squat",
+                        exerciseNameSnapshot: "Back Squat",
+                        categorySnapshot: "Legs",
+                        muscleSummarySnapshot: "Quads",
+                        targetRepMin: 5,
+                        targetRepMax: 8,
+                        restSeconds: 180,
+                        sets: [templatePayloadSet(targetReps: 5, targetWeight: 140, loadUnit: "kg", restSeconds: 180, isWarmup: false)]
+                    ),
+                ]
+            ),
+        ])
+
+        let previewSheet = identifiedElement("template-preview-sheet", in: app)
+        XCTAssertTrue(previewSheet.waitForExistence(timeout: 5))
+        app.buttons["Cancel"].tap()
+
+        tapTab("Start Workout", in: app)
+
+        let actionsButton = identifiedElement("start-workout-template-actions-button", in: app)
+        XCTAssertTrue(actionsButton.waitForExistence(timeout: 5))
+        actionsButton.tap()
+
+        let editButton = identifiedElement("start-workout-template-edit-menu-button", in: app)
+        XCTAssertTrue(editButton.waitForExistence(timeout: 5))
+        editButton.tap()
+
+        let benchActionsButton = app.buttons["template-editor-exercise-template-order-bench-actions-button"]
+        XCTAssertTrue(benchActionsButton.waitForExistence(timeout: 5))
+        benchActionsButton.tap()
+
+        XCTAssertTrue(app.buttons["Move to position"].waitForExistence(timeout: 5))
+        app.buttons["Move to position"].tap()
+
+        let reorderSheet = identifiedElement("template-editor-reorder-sheet", in: app)
+        XCTAssertTrue(reorderSheet.waitForExistence(timeout: 5))
+        app.buttons["template-editor-reorder-position-3"].tap()
+
+        app.buttons["template-editor-save-button"].tap()
+        XCTAssertTrue(app.staticTexts["Template Reorder"].waitForExistence(timeout: 5))
+
+        restartImportedTemplateWorkout(in: app)
+
+        let row = identifiedElement("active-workout-exercise-template-order-row", in: app)
+        let squat = identifiedElement("active-workout-exercise-template-order-squat", in: app)
+        let bench = identifiedElement("active-workout-exercise-template-order-bench", in: app)
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        XCTAssertTrue(squat.waitForExistence(timeout: 5))
+        XCTAssertTrue(bench.waitForExistence(timeout: 5))
+
+        XCTAssertLessThan(row.frame.minY, squat.frame.minY)
+        XCTAssertLessThan(squat.frame.minY, bench.frame.minY)
+    }
+
+    @MainActor
     func testTemplateFileLaunchHookImportsAndShowsPreview() throws {
         let app = launchApp(launchEnvironment: [
             "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
@@ -868,6 +950,86 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(identifiedElement("active-workout-postWorkout-card", in: app).waitForExistence(timeout: 5))
         XCTAssertTrue(identifiedElement("workout-set-0-weight-field", in: app).waitForExistence(timeout: 5))
         XCTAssertFalse(identifiedElement("workout-set-1-weight-field", in: app).waitForExistence(timeout: 1))
+    }
+
+    @MainActor
+    func testActiveWorkoutMoveExerciseToPositionCanUpdateTemplateOrder() throws {
+        let app = launchApp(launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Workout Reorder",
+                notes: "Reorder during the workout and push it back to the template.",
+                exercises: [
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "workout-order-bench",
+                        exerciseNameSnapshot: "Bench Press",
+                        categorySnapshot: "Chest",
+                        muscleSummarySnapshot: "Chest",
+                        targetRepMin: 6,
+                        targetRepMax: 8,
+                        restSeconds: 120,
+                        sets: [templatePayloadSet(targetReps: 6, targetWeight: 100, loadUnit: "kg", restSeconds: 120, isWarmup: false)]
+                    ),
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "workout-order-row",
+                        exerciseNameSnapshot: "Barbell Row",
+                        categorySnapshot: "Back",
+                        muscleSummarySnapshot: "Lats",
+                        targetRepMin: 8,
+                        targetRepMax: 10,
+                        restSeconds: 120,
+                        sets: [templatePayloadSet(targetReps: 8, targetWeight: 80, loadUnit: "kg", restSeconds: 120, isWarmup: false)]
+                    ),
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "workout-order-squat",
+                        exerciseNameSnapshot: "Back Squat",
+                        categorySnapshot: "Legs",
+                        muscleSummarySnapshot: "Quads",
+                        targetRepMin: 5,
+                        targetRepMax: 8,
+                        restSeconds: 180,
+                        sets: [templatePayloadSet(targetReps: 5, targetWeight: 140, loadUnit: "kg", restSeconds: 180, isWarmup: false)]
+                    ),
+                ]
+            ),
+        ])
+
+        startPreviewedTemplateWorkout(in: app)
+
+        let benchActionsButton = identifiedElement(
+            "active-workout-exercise-workout-order-bench-actions-button",
+            in: app
+        )
+        XCTAssertTrue(benchActionsButton.waitForExistence(timeout: 5))
+        benchActionsButton.tap()
+
+        XCTAssertTrue(app.buttons["Move to position"].waitForExistence(timeout: 5))
+        app.buttons["Move to position"].tap()
+
+        let reorderSheet = identifiedElement("active-workout-reorder-sheet", in: app)
+        XCTAssertTrue(reorderSheet.waitForExistence(timeout: 5))
+        app.buttons["active-workout-reorder-position-3"].tap()
+
+        finishTemplateWorkout(in: app)
+
+        let reviewSheet = identifiedElement("active-workout-template-review-sheet", in: app)
+        XCTAssertTrue(reviewSheet.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Reordered Exercises"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Position 1 -> 3"].waitForExistence(timeout: 5))
+        app.buttons["active-workout-template-review-apply-button"].tap()
+
+        confirmWorkoutCompletion(in: app)
+        tapTab("Start Workout", in: app)
+        restartImportedTemplateWorkout(in: app)
+
+        let row = identifiedElement("active-workout-exercise-workout-order-row", in: app)
+        let squat = identifiedElement("active-workout-exercise-workout-order-squat", in: app)
+        let bench = identifiedElement("active-workout-exercise-workout-order-bench", in: app)
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        XCTAssertTrue(squat.waitForExistence(timeout: 5))
+        XCTAssertTrue(bench.waitForExistence(timeout: 5))
+
+        XCTAssertLessThan(row.frame.minY, squat.frame.minY)
+        XCTAssertLessThan(squat.frame.minY, bench.frame.minY)
     }
 
     @MainActor

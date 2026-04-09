@@ -45,6 +45,7 @@ struct ActiveWorkoutView: View {
     @State private var exerciseSettingsDraft: ActiveWorkoutExerciseSettingsDraft?
     @State private var exerciseComponentPickerDraft: ActiveWorkoutExerciseComponentPickerDraft?
     @State private var cardioSettingsDraft: WorkoutCardioSettingsDraft?
+    @State private var exerciseReorderRequest: ExerciseReorderRequest?
     @State private var pendingTemplateUpdatePreview: WorkoutTemplateSyncPreview?
     @State private var templateNameDraft = ""
     @State private var templateFolderID: UUID?
@@ -269,6 +270,16 @@ struct ActiveWorkoutView: View {
                 }
                 .wgjSheetSurface()
             }
+            .sheet(item: $exerciseReorderRequest) { request in
+                ExerciseReorderSheet(
+                    request: request,
+                    items: exerciseReorderItems,
+                    contextName: "workout",
+                    accessibilityIDPrefix: "active-workout-reorder"
+                ) { position in
+                    moveExercise(exerciseID: request.exerciseID, toPosition: position)
+                }
+            }
             .sheet(isPresented: $showingSaveTemplateSheet, onDismiss: handleSaveTemplateSheetDismissed) {
                 ActiveWorkoutSaveTemplateSheet(
                     templateNameDraft: $templateNameDraft,
@@ -385,7 +396,7 @@ struct ActiveWorkoutView: View {
                 WGJActionHeader(
                     "Exercises",
                     subtitle: areMainExercisesUnlocked
-                        ? "Swipe the exercise header to delete an exercise, or swipe a set row to delete a set."
+                        ? "Swipe the exercise header to delete an exercise, or use exercise actions to move it anywhere in the workout."
                         : "Main exercises stay visible, but set logging unlocks after the pre-workout cardio block."
                 ) {
                     Button {
@@ -600,6 +611,9 @@ struct ActiveWorkoutView: View {
             onExerciseMoveDown: {
                 moveExerciseDown(index)
             },
+            onExerciseMoveToPosition: sessionExercises.count > 1 ? {
+                presentExerciseReorder(for: exercise)
+            } : nil,
             onExerciseDelete: {
                 removeExercise(exerciseID: exerciseID)
             }
@@ -1043,6 +1057,14 @@ struct ActiveWorkoutView: View {
         moveExercise(fromOffsets: IndexSet(integer: index), toOffset: index + 2)
     }
 
+    private func moveExercise(exerciseID: UUID, toPosition position: Int) {
+        guard let currentIndex = sessionExercises.firstIndex(where: { $0.id == exerciseID }) else { return }
+        guard position >= 0, position < sessionExercises.count, position != currentIndex else { return }
+
+        let destination = position > currentIndex ? position + 1 : position
+        moveExercise(fromOffsets: IndexSet(integer: currentIndex), toOffset: destination)
+    }
+
     private func moveExercise(fromOffsets: IndexSet, toOffset: Int) {
         var capturedError: Error?
 
@@ -1062,6 +1084,13 @@ struct ActiveWorkoutView: View {
         if let capturedError {
             showError(capturedError)
         }
+    }
+
+    private func presentExerciseReorder(for exercise: ActiveWorkoutDraftExercise) {
+        exerciseReorderRequest = ExerciseReorderRequest(
+            exerciseID: exercise.id,
+            exerciseName: exercise.exerciseNameSnapshot
+        )
     }
 
     private func removeExercise(exerciseID: UUID) {
@@ -1531,6 +1560,12 @@ struct ActiveWorkoutView: View {
         WGJKeyboard.dismiss()
     }
 
+    private var exerciseReorderItems: [ExerciseReorderListItem] {
+        sessionExercises.map { exercise in
+            ExerciseReorderListItem(id: exercise.id, name: exercise.exerciseNameSnapshot)
+        }
+    }
+
     @MainActor
     private func discardRemovedExerciseState(keeping currentIDs: Set<UUID>) {
         let knownIDs =
@@ -1840,6 +1875,7 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
     let onExerciseComponentPicker: () -> Void
     let onExerciseMoveUp: () -> Void
     let onExerciseMoveDown: () -> Void
+    let onExerciseMoveToPosition: (() -> Void)?
     let onExerciseDelete: () -> Void
 
     @State private var localRestSeconds: Int
@@ -1879,6 +1915,7 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
         onExerciseComponentPicker: @escaping () -> Void,
         onExerciseMoveUp: @escaping () -> Void,
         onExerciseMoveDown: @escaping () -> Void,
+        onExerciseMoveToPosition: (() -> Void)? = nil,
         onExerciseDelete: @escaping () -> Void
     ) {
         self.exerciseID = exerciseID
@@ -1910,6 +1947,7 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
         self.onExerciseComponentPicker = onExerciseComponentPicker
         self.onExerciseMoveUp = onExerciseMoveUp
         self.onExerciseMoveDown = onExerciseMoveDown
+        self.onExerciseMoveToPosition = onExerciseMoveToPosition
         self.onExerciseDelete = onExerciseDelete
         self._localRestSeconds = State(initialValue: restSeconds)
         self._localSetDrafts = State(initialValue: setDrafts)
@@ -1982,6 +2020,7 @@ private struct ActiveWorkoutExerciseRowView: View, Equatable {
             canMoveExerciseDown: canMoveDown,
             onExerciseMoveUp: onExerciseMoveUp,
             onExerciseMoveDown: onExerciseMoveDown,
+            onExerciseMoveToPosition: onExerciseMoveToPosition,
             onExerciseDelete: onExerciseDelete
         )
         .onChange(of: restSeconds) { _, newValue in

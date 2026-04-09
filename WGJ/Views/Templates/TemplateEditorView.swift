@@ -21,6 +21,7 @@ struct TemplateEditorView: View {
     @State private var hasLoadedInitialData = false
     @State private var pickerTarget: TemplateEditorPickerTarget?
     @State private var cardioSettingsDraft: WorkoutCardioSettingsDraft?
+    @State private var exerciseReorderRequest: ExerciseReorderRequest?
     @State private var errorMessage = ""
     @State private var showingError = false
 
@@ -86,6 +87,16 @@ struct TemplateEditorView: View {
                     )
                 }
                 .wgjSheetSurface()
+            }
+            .sheet(item: $exerciseReorderRequest) { request in
+                ExerciseReorderSheet(
+                    request: request,
+                    items: exerciseReorderItems,
+                    contextName: "template",
+                    accessibilityIDPrefix: "template-editor-reorder"
+                ) { position in
+                    moveExercise(withID: request.exerciseID, toPosition: position)
+                }
             }
             .alert("Template Error", isPresented: $showingError) {
                 Button("OK", role: .cancel) { }
@@ -202,7 +213,7 @@ struct TemplateEditorView: View {
         } else {
             WGJActionHeader(
                 "Exercises",
-                subtitle: "Swipe from the top of a card to delete, or use the card menu to reorder."
+                subtitle: "Swipe from the top of a card to delete, or use the card menu to move exercises anywhere in the template."
             ) {
                 Button {
                     pickerTarget = .exercise
@@ -233,6 +244,9 @@ struct TemplateEditorView: View {
                 exerciseIndexTitle: "Exercise \(row.index + 1)",
                 canMoveUp: row.index > 0,
                 canMoveDown: row.index < rows.count - 1,
+                onMoveToPosition: rows.count > 1 ? {
+                    presentExerciseReorder(for: row.draftStore)
+                } : nil,
                 preferredLoadUnit: preferredLoadUnit,
                 onMoveUp: {
                     moveExerciseUp(row.index)
@@ -372,6 +386,23 @@ struct TemplateEditorView: View {
         }
     }
 
+    private func moveExercise(withID exerciseID: UUID, toPosition position: Int) {
+        guard let currentIndex = exerciseDrafts.firstIndex(where: { $0.id == exerciseID }) else { return }
+        guard position >= 0, position < exerciseDrafts.count, position != currentIndex else { return }
+
+        withAnimation(WGJMotion.quickAnimation(reduceMotion: reduceMotion)) {
+            let movingDraft = exerciseDrafts.remove(at: currentIndex)
+            exerciseDrafts.insert(movingDraft, at: position)
+        }
+    }
+
+    private func presentExerciseReorder(for draftStore: TemplateExerciseDraftStore) {
+        exerciseReorderRequest = ExerciseReorderRequest(
+            exerciseID: draftStore.id,
+            exerciseName: draftStore.exerciseNameSnapshot
+        )
+    }
+
     private func containsComponentCatalogUUID(_ catalogExerciseUUID: String) -> Bool {
         exerciseDrafts.contains { draftStore in
             draftStore.components.contains { $0.catalogExerciseUUID == catalogExerciseUUID }
@@ -475,6 +506,12 @@ struct TemplateEditorView: View {
                 recommendation: recommendationByExerciseID[draftStore.id]
                     ?? templateRecommendation(for: draftStore, catalogByUUID: [:])
             )
+        }
+    }
+
+    private var exerciseReorderItems: [ExerciseReorderListItem] {
+        exerciseDrafts.map { draftStore in
+            ExerciseReorderListItem(id: draftStore.id, name: draftStore.exerciseNameSnapshot)
         }
     }
 
@@ -605,6 +642,7 @@ private struct TemplateEditorExerciseRow: View {
     let exerciseIndexTitle: String
     let canMoveUp: Bool
     let canMoveDown: Bool
+    let onMoveToPosition: (() -> Void)?
     let preferredLoadUnit: TemplateLoadUnit
     let onMoveUp: () -> Void
     let onMoveDown: () -> Void
@@ -630,6 +668,7 @@ private struct TemplateEditorExerciseRow: View {
                 exerciseName: draftStore.exerciseNameSnapshot,
                 muscleSummary: draftStore.muscleSummarySnapshot,
                 category: draftStore.categorySnapshot,
+                exerciseAccessibilityIdentifier: "template-editor-exercise-\(draftStore.catalogExerciseUUID)",
                 recommendation: recommendation,
                 exerciseIndexTitle: exerciseIndexTitle,
                 canMoveUp: canMoveUp,
@@ -656,6 +695,7 @@ private struct TemplateEditorExerciseRow: View {
                 onSetDraftsChanged: updateSetDrafts,
                 onMoveUp: onMoveUp,
                 onMoveDown: onMoveDown,
+                onMoveToPosition: onMoveToPosition,
                 onExerciseDelete: onExerciseDelete,
                 components: draftStore.components,
                 componentAccessibilityIDPrefix: "template-editor-component-\(draftStore.id.uuidString.lowercased())",
@@ -699,6 +739,7 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
     let exerciseName: String
     let muscleSummary: String
     let category: String
+    let exerciseAccessibilityIdentifier: String
     let recommendation: TemplateExerciseRecommendation?
     let exerciseIndexTitle: String
     let canMoveUp: Bool
@@ -720,6 +761,7 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
     let onSetDraftsChanged: ([TemplateExerciseSetDraft]) -> Void
     let onMoveUp: () -> Void
     let onMoveDown: () -> Void
+    let onMoveToPosition: (() -> Void)?
     let onExerciseDelete: () -> Void
     let components: [TemplateExerciseComponentDraft]
     let componentAccessibilityIDPrefix: String
@@ -732,6 +774,7 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
         lhs.exerciseName == rhs.exerciseName
             && lhs.muscleSummary == rhs.muscleSummary
             && lhs.category == rhs.category
+            && lhs.exerciseAccessibilityIdentifier == rhs.exerciseAccessibilityIdentifier
             && lhs.recommendation == rhs.recommendation
             && lhs.exerciseIndexTitle == rhs.exerciseIndexTitle
             && lhs.canMoveUp == rhs.canMoveUp
@@ -750,6 +793,7 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
             exerciseName: exerciseName,
             muscleSummary: muscleSummary,
             category: category,
+            exerciseAccessibilityIdentifier: exerciseAccessibilityIdentifier,
             recommendation: recommendation,
             supplementaryContent: AnyView(
                 TemplateExerciseComponentsSection(
@@ -788,6 +832,7 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
             ),
             onMoveUp: onMoveUp,
             onMoveDown: onMoveDown,
+            onMoveToPosition: onMoveToPosition,
             onExerciseDelete: onExerciseDelete
         )
     }

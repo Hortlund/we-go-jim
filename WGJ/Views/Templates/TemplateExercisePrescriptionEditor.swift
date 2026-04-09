@@ -16,6 +16,7 @@ struct TemplateExercisePrescriptionEditor: View {
     let exerciseName: String
     let muscleSummary: String
     let category: String
+    let exerciseAccessibilityIdentifier: String?
     let infoDestination: AnyView?
     let exerciseIndexTitle: String?
     let canMoveUp: Bool
@@ -34,6 +35,7 @@ struct TemplateExercisePrescriptionEditor: View {
     var onRestChanged: ((Int) -> Void)?
     var onMoveUp: (() -> Void)?
     var onMoveDown: (() -> Void)?
+    var onMoveToPosition: (() -> Void)?
     var onExerciseDelete: (() -> Void)?
 
     private let externalIsExpanded: Binding<Bool>?
@@ -52,6 +54,7 @@ struct TemplateExercisePrescriptionEditor: View {
         exerciseName: String,
         muscleSummary: String,
         category: String,
+        exerciseAccessibilityIdentifier: String? = nil,
         infoDestination: AnyView? = nil,
         recommendation: TemplateExerciseRecommendation? = nil,
         supplementaryContent: AnyView? = nil,
@@ -70,11 +73,13 @@ struct TemplateExercisePrescriptionEditor: View {
         onRestChanged: ((Int) -> Void)? = nil,
         onMoveUp: (() -> Void)? = nil,
         onMoveDown: (() -> Void)? = nil,
+        onMoveToPosition: (() -> Void)? = nil,
         onExerciseDelete: (() -> Void)? = nil
     ) {
         self.exerciseName = exerciseName
         self.muscleSummary = muscleSummary
         self.category = category
+        self.exerciseAccessibilityIdentifier = exerciseAccessibilityIdentifier
         self.infoDestination = infoDestination
         self.recommendation = recommendation
         self.supplementaryContent = supplementaryContent
@@ -92,6 +97,7 @@ struct TemplateExercisePrescriptionEditor: View {
         self.onRestChanged = onRestChanged
         self.onMoveUp = onMoveUp
         self.onMoveDown = onMoveDown
+        self.onMoveToPosition = onMoveToPosition
         self.onExerciseDelete = onExerciseDelete
         self._localIsExpanded = State(initialValue: isExpanded?.wrappedValue ?? initiallyExpanded)
     }
@@ -183,6 +189,7 @@ struct TemplateExercisePrescriptionEditor: View {
                         .font(.title3.weight(.semibold))
                         .foregroundStyle(WGJTheme.accentBlue)
                         .wgjSingleLineText(scale: 0.8)
+                        .accessibilityIdentifier(exerciseAccessibilityIdentifier ?? "")
                 }
                 .buttonStyle(.plain)
             } else {
@@ -190,6 +197,7 @@ struct TemplateExercisePrescriptionEditor: View {
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(WGJTheme.accentBlue)
                     .wgjSingleLineText(scale: 0.8)
+                    .accessibilityIdentifier(exerciseAccessibilityIdentifier ?? "")
             }
         }
     }
@@ -507,6 +515,14 @@ struct TemplateExercisePrescriptionEditor: View {
                 .disabled(!canMoveDown)
             }
 
+            if let onMoveToPosition {
+                Button {
+                    onMoveToPosition()
+                } label: {
+                    Label("Move to position", systemImage: "list.number")
+                }
+            }
+
             if let onExerciseDelete {
                 Button(role: .destructive) {
                     onExerciseDelete()
@@ -517,10 +533,14 @@ struct TemplateExercisePrescriptionEditor: View {
         } label: {
             headerIcon(symbol: "ellipsis.circle")
         }
+        .accessibilityIdentifier(
+            exerciseAccessibilityIdentifier.map { "\($0)-actions-button" }
+                ?? "template-editor-exercise-actions-button"
+        )
     }
 
     private var hasHeaderMenu: Bool {
-        onMoveUp != nil || onMoveDown != nil || onExerciseDelete != nil
+        onMoveUp != nil || onMoveDown != nil || onMoveToPosition != nil || onExerciseDelete != nil
     }
 
     private func headerSummaryChips(presentation: SetPresentation) -> some View {
