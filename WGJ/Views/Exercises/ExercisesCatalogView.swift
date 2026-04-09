@@ -72,7 +72,8 @@ struct ExercisesCatalogView: View {
     private let indexRailWidth: CGFloat = 28
 
     private var contentTrailingPadding: CGFloat {
-        shouldShowIndexRail ? indexRailWidth : 0
+        // Keep the content width stable even while search temporarily hides the rail.
+        reservesIndexRailSpace ? indexRailWidth : 0
     }
 
     private var shouldUseCompactFilterLayout: Bool {
