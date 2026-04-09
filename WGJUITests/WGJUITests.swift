@@ -475,6 +475,76 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testActiveWorkoutRestoreKeepsScrolledExerciseVisibleAfterMinimize() throws {
+        let app = launchApp(launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Scroll Restore Workout",
+                notes: "Minimize and reopen should keep the current position.",
+                exercises: (1...10).map { index in
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "scroll-restore-\(index)",
+                        exerciseNameSnapshot: "Scroll Exercise \(index)",
+                        categorySnapshot: "Strength",
+                        muscleSummarySnapshot: "Full Body",
+                        targetRepMin: 8,
+                        targetRepMax: 10,
+                        restSeconds: 90,
+                        sets: [
+                            templatePayloadSet(
+                                targetReps: 8,
+                                targetWeight: Double(40 + index * 5),
+                                loadUnit: "kg",
+                                restSeconds: 90,
+                                isWarmup: false
+                            ),
+                        ]
+                    )
+                }
+            ),
+        ])
+
+        startPreviewedTemplateWorkout(in: app)
+
+        let laterExercise = identifiedElement("active-workout-exercise-scroll-restore-8", in: app)
+        let laterExerciseActions = identifiedElement(
+            "active-workout-exercise-scroll-restore-8-actions-button",
+            in: app
+        )
+        revealElement(laterExercise, in: app, maxSwipes: 10)
+
+        var remainingSwipes = 6
+        while laterExercise.frame.minY > 320, remainingSwipes > 0 {
+            app.swipeUp()
+            remainingSwipes -= 1
+        }
+
+        var remainingReverseSwipes = 3
+        while laterExercise.frame.minY < 120, remainingReverseSwipes > 0 {
+            app.swipeDown()
+            remainingReverseSwipes -= 1
+        }
+
+        XCTAssertTrue(laterExercise.waitForExistence(timeout: 5))
+        XCTAssertTrue(laterExerciseActions.waitForExistence(timeout: 5))
+        XCTAssertTrue(laterExercise.isHittable)
+        XCTAssertTrue(laterExerciseActions.isHittable)
+
+        let minimizeButton = app.buttons["active-workout-minimize-button"]
+        XCTAssertTrue(minimizeButton.waitForExistence(timeout: 5))
+        minimizeButton.tap()
+
+        let strip = identifiedElement("active-workout-strip", in: app)
+        XCTAssertTrue(strip.waitForExistence(timeout: 5))
+        strip.tap()
+
+        XCTAssertTrue(laterExercise.waitForExistence(timeout: 5))
+        XCTAssertTrue(laterExerciseActions.waitForExistence(timeout: 5))
+        XCTAssertTrue(laterExercise.isHittable)
+        XCTAssertTrue(laterExerciseActions.isHittable)
+        XCTAssertFalse(identifiedElement("active-workout-exercise-scroll-restore-1-actions-button", in: app).isHittable)
+    }
+
+    @MainActor
     func testExerciseCatalogAddAttachesToMinimizedActiveWorkout() throws {
         let app = launchApp()
 

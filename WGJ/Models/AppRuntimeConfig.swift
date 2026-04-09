@@ -354,6 +354,14 @@ struct WorkoutCompletionPresentation: Identifiable, Equatable {
     var id: UUID { sessionID }
 }
 
+enum ActiveWorkoutScrollTarget: Hashable {
+    case header
+    case preWorkoutCardio
+    case exercise(UUID)
+    case postWorkoutCardio
+    case cancelSection
+}
+
 @MainActor
 @Observable
 final class WorkoutCompletionPresentationState {
@@ -386,8 +394,12 @@ final class ActiveWorkoutPresentationState {
     var activeSessionID: UUID?
     var isActiveWorkoutPresented = false
     var isActiveWorkoutStripCollapsed = false
+    var scrollTarget: ActiveWorkoutScrollTarget?
 
     func present(sessionID: UUID) {
+        if activeSessionID != sessionID {
+            scrollTarget = nil
+        }
         guard
             activeSessionID != sessionID
                 || !isActiveWorkoutPresented
@@ -420,6 +432,7 @@ final class ActiveWorkoutPresentationState {
         activeSessionID = nil
         isActiveWorkoutPresented = false
         isActiveWorkoutStripCollapsed = false
+        scrollTarget = nil
     }
 
     func clearActiveWorkout(restTimerState: RestTimerState? = nil) {

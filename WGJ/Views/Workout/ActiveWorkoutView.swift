@@ -52,6 +52,7 @@ struct ActiveWorkoutView: View {
     @State private var saveTemplateFolders: [TemplateFolder] = []
     @State private var preferredLoadUnit: TemplateLoadUnit = .kg
     @State private var isKeyboardVisible = false
+    @State private var shouldTrackVisibleScrollTarget = false
 
     @State private var errorMessage = ""
     @State private var showingError = false
@@ -60,6 +61,7 @@ struct ActiveWorkoutView: View {
     private let cancelSectionFocusSpacerHeight: CGFloat = 160
     private let cancelSectionDockClearanceHeight: CGFloat = 96
     private let cancelSectionScrollTarget = ActiveWorkoutScrollTarget.cancelSection
+    private let scrollCoordinateSpaceName = "ActiveWorkoutScrollView"
     private let guidanceService = TrainingGuidanceService()
 
     private var activeWorkoutRepository: ActiveWorkoutDraftRepository {
@@ -122,6 +124,8 @@ struct ActiveWorkoutView: View {
                             onSubmit: persistSessionMeta,
                             onAddCardio: showCardioPicker
                         )
+                        .id(ActiveWorkoutScrollTarget.header)
+                        .trackScrollTarget(.header, in: scrollCoordinateSpaceName)
                         if preWorkoutCardio != nil {
                             cardioSection(for: .preWorkout, scrollProxy: scrollProxy)
                         }
@@ -192,14 +196,17 @@ struct ActiveWorkoutView: View {
                             }
                         )
                         .id(cancelSectionScrollTarget)
+                        .trackScrollTarget(cancelSectionScrollTarget, in: scrollCoordinateSpaceName)
 
                         Color.clear
                             .frame(height: cancelSectionBottomSpacerHeight)
                             .accessibilityHidden(true)
                     }
                 }
+                .scrollTargetLayout()
                 .padding(16)
             }
+            .coordinateSpace(name: scrollCoordinateSpaceName)
             .scrollDismissesKeyboard(.interactively)
             .wgjScreenBackground()
             .wgjNavigationChrome()
@@ -329,6 +336,15 @@ struct ActiveWorkoutView: View {
             }
             .background {
                 WorkoutRestTimerExpiryObserver()
+            }
+            .onPreferenceChange(ActiveWorkoutScrollTargetFramePreferenceKey.self) { positions in
+                guard shouldTrackVisibleScrollTarget else { return }
+                guard let closestTarget = positions.min(by: { abs($0.value) < abs($1.value) })?.key else {
+                    return
+                }
+                if activeWorkoutPresentationState.scrollTarget != closestTarget {
+                    activeWorkoutPresentationState.scrollTarget = closestTarget
+                }
             }
             .wgjMinimalKeyboardToolbar()
         }
@@ -484,6 +500,7 @@ struct ActiveWorkoutView: View {
                     }
                 }
                 .id(cardioScrollTarget(for: phase))
+                .trackScrollTarget(cardioScrollTarget(for: phase), in: scrollCoordinateSpaceName)
                 .accessibilityIdentifier("active-workout-\(phase.rawValue)-card")
             }
         }
@@ -627,7 +644,8 @@ struct ActiveWorkoutView: View {
             }
         )
         .equatable()
-        .id(exerciseID)
+        .id(ActiveWorkoutScrollTarget.exercise(exerciseID))
+        .trackScrollTarget(.exercise(exerciseID), in: scrollCoordinateSpaceName)
         .transition(exerciseCardTransition)
     }
 
@@ -702,6 +720,7 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func loadExerciseStateIfNeeded(using scrollProxy: ScrollViewProxy) async {
+        shouldTrackVisibleScrollTarget = false
         discardRemovedExerciseState(keeping: Set(sessionExercises.map(\.id)))
         let currentStamp = exerciseHydrationStamp
         guard currentStamp != loadedExerciseStateStamp else { return }
@@ -753,24 +772,15 @@ struct ActiveWorkoutView: View {
             )
         )
         loadedExerciseStateStamp = currentStamp
-
-        let initialScrollTarget = preferredInitialScrollTarget(
+        seedOrRepairScrollTarget(
             draftsByExerciseID: result.draftsByExerciseID
         )
-
         await Task.yield()
         guard !Task.isCancelled, currentStamp == exerciseHydrationStamp else { return }
-        if let initialScrollTarget {
-            withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
-                scrollProxy.scrollTo(initialScrollTarget, anchor: .top)
-            }
-        }
-
-        try? await Task.sleep(for: .milliseconds(120))
+        restoreScrollTarget(using: scrollProxy)
+        await Task.yield()
         guard !Task.isCancelled, currentStamp == exerciseHydrationStamp else { return }
-        if let initialScrollTarget {
-            scrollProxy.scrollTo(initialScrollTarget, anchor: .top)
-        }
+        shouldTrackVisibleScrollTarget = true
 
         let loadedPrevious = WGJPerformance.measure("active-workout.hydrate.history") {
             loadPreviousByExerciseID(using: result.draftsByExerciseID)
@@ -1233,7 +1243,7 @@ struct ActiveWorkoutView: View {
                 if shouldFocusPostWorkoutCardio {
                     scrollProxy.scrollTo(cardioScrollTarget(for: .postWorkout), anchor: .top)
                 } else if let nextExerciseID {
-                    scrollProxy.scrollTo(nextExerciseID, anchor: .top)
+                    scrollProxy.scrollTo(ActiveWorkoutScrollTarget.exercise(nextExerciseID), anchor: .top)
                 }
             }
             if isCompleted {
@@ -1328,37 +1338,73 @@ struct ActiveWorkoutView: View {
     @MainActor
     private func preferredInitialScrollTarget(
         draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
-    ) -> AnyHashable? {
+    ) -> ActiveWorkoutScrollTarget? {
         if let preWorkoutCardio, !preWorkoutCardio.isCompleted {
-            return AnyHashable(cardioScrollTarget(for: .preWorkout))
+            return cardioScrollTarget(for: .preWorkout)
         }
 
         if let firstIncompleteExerciseID = firstIncompleteExerciseID(
             from: sessionExercises,
             draftsByExerciseID: draftsByExerciseID
         ) {
-            return AnyHashable(firstIncompleteExerciseID)
+            return .exercise(firstIncompleteExerciseID)
         }
 
         if let postWorkoutCardio,
            !postWorkoutCardio.isCompleted,
            allExercisesCompleted(from: sessionExercises, draftsByExerciseID: draftsByExerciseID) {
-            return AnyHashable(cardioScrollTarget(for: .postWorkout))
+            return cardioScrollTarget(for: .postWorkout)
         }
 
         if let firstExerciseID = sessionExercises.first?.id {
-            return AnyHashable(firstExerciseID)
+            return .exercise(firstExerciseID)
         }
 
         if preWorkoutCardio != nil {
-            return AnyHashable(cardioScrollTarget(for: .preWorkout))
+            return cardioScrollTarget(for: .preWorkout)
         }
 
         if postWorkoutCardio != nil {
-            return AnyHashable(cardioScrollTarget(for: .postWorkout))
+            return cardioScrollTarget(for: .postWorkout)
         }
 
-        return nil
+        return session != nil ? .header : nil
+    }
+
+    @MainActor
+    private func seedOrRepairScrollTarget(
+        draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
+    ) {
+        if let savedScrollTarget = activeWorkoutPresentationState.scrollTarget,
+           isValidScrollTarget(savedScrollTarget) {
+            return
+        }
+
+        activeWorkoutPresentationState.scrollTarget = preferredInitialScrollTarget(
+            draftsByExerciseID: draftsByExerciseID
+        )
+    }
+
+    @MainActor
+    private func restoreScrollTarget(using scrollProxy: ScrollViewProxy) {
+        guard let scrollTarget = activeWorkoutPresentationState.scrollTarget else { return }
+        scrollProxy.scrollTo(scrollTarget, anchor: .top)
+    }
+
+    @MainActor
+    private func isValidScrollTarget(_ target: ActiveWorkoutScrollTarget) -> Bool {
+        switch target {
+        case .header:
+            return session != nil
+        case .preWorkoutCardio:
+            return preWorkoutCardio != nil
+        case .exercise(let exerciseID):
+            return sessionExercises.contains(where: { $0.id == exerciseID })
+        case .postWorkoutCardio:
+            return postWorkoutCardio != nil
+        case .cancelSection:
+            return session != nil && !isEndingSession
+        }
     }
 
     private var exerciseCardTransition: AnyTransition {
@@ -1740,7 +1786,7 @@ struct ActiveWorkoutView: View {
                 draftsByExerciseID: setDraftsByExerciseID
             ) {
                 withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
-                    scrollProxy.scrollTo(firstIncompleteExerciseID, anchor: .top)
+                    scrollProxy.scrollTo(ActiveWorkoutScrollTarget.exercise(firstIncompleteExerciseID), anchor: .top)
                 }
             } else if postWorkoutCardio != nil {
                 withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
@@ -1850,10 +1896,25 @@ struct ActiveWorkoutView: View {
     }
 }
 
-private enum ActiveWorkoutScrollTarget: Hashable {
-    case preWorkoutCardio
-    case postWorkoutCardio
-    case cancelSection
+private struct ActiveWorkoutScrollTargetFramePreferenceKey: PreferenceKey {
+    static let defaultValue: [ActiveWorkoutScrollTarget: CGFloat] = [:]
+
+    static func reduce(value: inout [ActiveWorkoutScrollTarget: CGFloat], nextValue: () -> [ActiveWorkoutScrollTarget: CGFloat]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
+private extension View {
+    func trackScrollTarget(_ target: ActiveWorkoutScrollTarget, in coordinateSpaceName: String) -> some View {
+        background {
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: ActiveWorkoutScrollTargetFramePreferenceKey.self,
+                    value: [target: proxy.frame(in: .named(coordinateSpaceName)).minY]
+                )
+            }
+        }
+    }
 }
 
 private struct ActiveWorkoutHeaderCard: View {
