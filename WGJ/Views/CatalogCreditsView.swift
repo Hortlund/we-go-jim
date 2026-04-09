@@ -47,6 +47,7 @@ struct CatalogCreditsView: View {
         .wgjScreenBackground()
         .wgjNavigationChrome()
         .navigationTitle("Catalog Credits")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private var deduplicatedAttributions: [CreditsAttributionRow] {

@@ -53,6 +53,7 @@ struct DeleteMyDataView: View {
         .wgjScreenBackground()
         .wgjNavigationChrome()
         .navigationTitle("Delete My Data")
+        .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog(
             "Delete all app data?",
             isPresented: $showingConfirmation,

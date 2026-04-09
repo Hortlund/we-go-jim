@@ -49,9 +49,7 @@ struct HistoryOverviewView: View {
 
                 ForEach(controller.snapshot.sections) { section in
                     VStack(alignment: .leading, spacing: 10) {
-                        Text(section.title.uppercased())
-                            .font(.headline.weight(.semibold))
-                            .foregroundStyle(WGJTheme.textSecondary)
+                        WGJCompactSectionHeader(section.title)
 
                         ForEach(section.cards) { card in
                             historyCard(card)
@@ -75,6 +73,7 @@ struct HistoryOverviewView: View {
             NavigationStack {
                 HistoryArchivedWorkoutsSheet()
             }
+            .wgjSheetSurface()
             .presentationDetents([.large])
         }
         .task(id: isTabActive) {
@@ -384,19 +383,15 @@ private struct HistorySessionCardView: View, Equatable {
 
                     Spacer()
 
-                    WGJActionMenuButton("Workout Actions") {
+                    WGJActionMenuButton("Workout Actions", usesPlainButtonStyle: false) {
                         Button(action: onArchive) {
                             Label("Hide", systemImage: "archivebox")
                         }
                     } label: {
                         Image(systemName: "ellipsis")
                             .font(.headline)
-                            .frame(width: 34, height: 34)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(WGJTheme.field)
-                            )
                     }
+                    .buttonStyle(WGJIconButtonStyle(tint: WGJTheme.accentBlue, background: WGJTheme.field))
                     .foregroundStyle(WGJTheme.accentBlue)
                 }
 
@@ -522,6 +517,7 @@ private struct HistoryArchivedWorkoutsSheet: View {
         }
         .wgjScreenBackground()
         .navigationTitle("Hidden Workouts")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Done") {

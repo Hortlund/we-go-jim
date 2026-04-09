@@ -173,7 +173,7 @@ struct MainTabView: View {
                     icon: "bell.badge.fill",
                     tint: WGJTheme.success
                 )
-                .padding(.horizontal, 12)
+                .padding(.horizontal, WGJSpacing.page)
                 .padding(.bottom, popupBottomLift(bottomSafeAreaInset: bottomSafeAreaInset))
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }

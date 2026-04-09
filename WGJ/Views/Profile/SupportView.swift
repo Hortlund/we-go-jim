@@ -72,6 +72,7 @@ struct SupportView: View {
         .wgjScreenBackground()
         .wgjNavigationChrome()
         .navigationTitle("Support")
+        .navigationBarTitleDisplayMode(.inline)
         .alert(alertTitle, isPresented: $showingAlert) {
             Button("OK", role: .cancel) { }
         } message: {

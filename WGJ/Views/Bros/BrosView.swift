@@ -813,6 +813,7 @@ struct BrosView: View {
         }
         .sheet(item: $reactionDetailPresentation) { presentation in
             BroReactionDetailSheet(presentation: presentation)
+                .wgjSheetSurface()
         }
         .wgjMinimalKeyboardToolbar()
     }
@@ -990,7 +991,7 @@ struct BrosView: View {
                 Spacer(minLength: 0)
 
                 if snapshot.isCurrentUserOwner, member.id != snapshot.currentMember.id {
-                    WGJActionMenuButton("Member Actions") {
+                    WGJActionMenuButton("Member Actions", usesPlainButtonStyle: false) {
                         Button(role: .destructive) {
                             Task {
                                 await viewModel.removeMember(membershipID: member.id, modelContext: modelContext)
@@ -1129,7 +1130,7 @@ struct BrosView: View {
                     eventKindBadge(event.kind)
 
                     if event.actorUserRecordName != currentUserRecordName {
-                        WGJActionMenuButton("Post Actions") {
+                        WGJActionMenuButton("Post Actions", usesPlainButtonStyle: false) {
                             Button {
                                 reportEvent(snapshot: snapshot, event: event)
                             } label: {
@@ -1590,6 +1591,7 @@ private struct BroCircleManagementView: View {
             .padding(.bottom, 28)
         }
         .wgjScreenBackground()
+        .wgjNavigationChrome()
         .navigationTitle(presentation.navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: snapshot.circle.memberLimit) { _, newValue in
@@ -1841,7 +1843,7 @@ private struct BroCircleManagementView: View {
             Spacer(minLength: 12)
 
             if presentation.allowsMemberRemoval, member.id != snapshot.currentMember.id {
-                WGJActionMenuButton("Member Actions") {
+                WGJActionMenuButton("Member Actions", usesPlainButtonStyle: false) {
                     Button(role: .destructive) {
                         onRemoveMember(member)
                     } label: {
@@ -1923,8 +1925,8 @@ private struct BroReactionDetailSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: WGJSpacing.section) {
-                    WGJRootHeader(
-                        "Reaction Details",
+                    WGJSectionHeader(
+                        "Who Reacted",
                         subtitle: "\(presentation.emoji.rawValue) \(presentation.reactors.count) bro\(presentation.reactors.count == 1 ? "" : "s")"
                     )
 

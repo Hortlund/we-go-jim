@@ -45,6 +45,7 @@ struct CommunityGuidelinesView: View {
         .wgjScreenBackground()
         .wgjNavigationChrome()
         .navigationTitle("Guidelines")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private func guidelineCard(title: String, lines: [String]) -> some View {

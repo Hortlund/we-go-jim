@@ -170,16 +170,21 @@ struct ProfileAthleteTypePickerView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
                 RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
-                    .fill(selectedAthleteType == option.value ? WGJTheme.fieldStrong : WGJTheme.field)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
-                            .stroke(
-                                selectedAthleteType == option.value
-                                    ? WGJTheme.accentBlue.opacity(0.44)
-                                    : WGJTheme.outline.opacity(0.82),
-                                lineWidth: 1
-                            )
-                    }
+                    .fill(
+                        selectedAthleteType == option.value
+                            ? WGJTheme.accentBlue.opacity(0.10)
+                            : Color.clear
+                    )
+            }
+            .wgjCardContainer(cornerRadius: WGJRadius.control)
+            .overlay {
+                RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
+                    .stroke(
+                        selectedAthleteType == option.value
+                            ? WGJTheme.accentBlue.opacity(0.36)
+                            : Color.clear,
+                        lineWidth: 1
+                    )
             }
         }
         .buttonStyle(.plain)

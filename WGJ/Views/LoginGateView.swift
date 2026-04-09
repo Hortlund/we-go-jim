@@ -27,10 +27,10 @@ struct LoginGateView: View {
             ZStack {
                 Color.clear.wgjScreenBackground()
 
-                VStack(spacing: 18) {
+                VStack(spacing: WGJSpacing.section) {
                     WGJRootHeader("We Go Jim", subtitle: "Lift solo or with a private bro circle, with iCloud sync when available.")
 
-                    VStack(spacing: 10) {
+                    VStack(spacing: WGJSpacing.control) {
                         Image(systemName: "person.crop.circle.badge.checkmark")
                             .font(.system(size: 50, weight: .semibold))
                             .foregroundStyle(WGJTheme.accentBlue)
@@ -57,7 +57,7 @@ struct LoginGateView: View {
                             .foregroundStyle(WGJTheme.textSecondary)
                             .multilineTextAlignment(.center)
                     }
-                    .padding(16)
+                    .padding(WGJSpacing.page)
                     .wgjCardContainer(strong: true)
 
                     if cloudSyncEnabled {
@@ -69,8 +69,8 @@ struct LoginGateView: View {
                     Spacer()
                 }
                 .padding(.top, 8)
-                .padding(16)
-                .wgjGlassContainer(spacing: 18)
+                .padding(WGJSpacing.page)
+                .wgjGlassContainer(spacing: WGJSpacing.section)
             }
             .toolbar(.hidden, for: .navigationBar)
             .task {

@@ -41,7 +41,12 @@ struct TemplatesOverviewView: View {
 
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
-                headerActions
+                WGJRootHeader(
+                    "Templates",
+                    subtitle: "Create, file, and tweak reusable workout plans."
+                ) {
+                    headerActions
+                }
 
                 VStack(alignment: .leading, spacing: 10) {
                     WGJSectionHeader("Folder Filter", subtitle: "Use chips to focus templates")
@@ -92,11 +97,11 @@ struct TemplatesOverviewView: View {
                     }
                 }
             }
+            .padding(.top, 8)
             .padding(16)
         }
         .wgjScreenBackground()
-        .wgjNavigationChrome()
-        .navigationTitle("Templates")
+        .toolbar(.hidden, for: .navigationBar)
         .sheet(item: $templateEditorContext) { context in
             TemplateEditorView(folderID: context.folderID, templateID: context.templateID)
         }

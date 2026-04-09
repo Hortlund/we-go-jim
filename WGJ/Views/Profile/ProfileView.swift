@@ -46,6 +46,7 @@ struct ProfileView: View {
             NavigationStack {
                 ProfileWidgetManagerView()
             }
+            .wgjSheetSurface()
             .onDisappear {
                 reloadProfileIfActive()
             }
@@ -112,7 +113,7 @@ struct ProfileView: View {
                 .lineLimit(2)
 
             if let athleteType = currentProfile?.athleteType {
-                athleteTypeBadge(title: athleteType.title, tint: WGJTheme.accentGold)
+                ProfileAthleteTypeBadge(title: athleteType.title, tint: WGJTheme.accentGold)
             } else {
                 Text("No athlete type selected")
                     .font(.caption)
@@ -649,23 +650,6 @@ struct ProfileView: View {
 
         let direction = delta > 0 ? "up" : "down"
         return "\(formatWeight(abs(delta))) \(series.loadUnit.shortLabel) \(direction) across your last \(series.points.count) logged workouts."
-    }
-
-    private func athleteTypeBadge(title: String, tint: Color) -> some View {
-        Text(title)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(tint)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                Capsule()
-                    .fill(tint.opacity(0.12))
-                    .wgjCapsuleGlass(tint: tint.opacity(0.12))
-            )
-            .overlay(
-                Capsule()
-                    .stroke(tint.opacity(0.24), lineWidth: 1)
-            )
     }
 
     private func showError(_ error: Error) {

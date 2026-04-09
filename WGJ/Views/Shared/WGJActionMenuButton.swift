@@ -4,6 +4,7 @@ struct WGJActionMenuButton<Label: View, Actions: View>: View {
     let title: String
     let titleVisibility: Visibility
     let message: String?
+    let usesPlainButtonStyle: Bool
     let label: () -> Label
     let actions: () -> Actions
 
@@ -13,12 +14,14 @@ struct WGJActionMenuButton<Label: View, Actions: View>: View {
         _ title: String,
         titleVisibility: Visibility = .visible,
         message: String? = nil,
+        usesPlainButtonStyle: Bool = true,
         @ViewBuilder actions: @escaping () -> Actions,
         @ViewBuilder label: @escaping () -> Label
     ) {
         self.title = title
         self.titleVisibility = titleVisibility
         self.message = message
+        self.usesPlainButtonStyle = usesPlainButtonStyle
         self.actions = actions
         self.label = label
     }
@@ -29,13 +32,26 @@ struct WGJActionMenuButton<Label: View, Actions: View>: View {
         } label: {
             label()
         }
-        .buttonStyle(.plain)
+        .modifier(WGJOptionalPlainButtonStyle(isEnabled: usesPlainButtonStyle))
         .confirmationDialog(title, isPresented: $isPresented, titleVisibility: titleVisibility) {
             actions()
         } message: {
             if let message {
                 Text(message)
             }
+        }
+    }
+}
+
+private struct WGJOptionalPlainButtonStyle: ViewModifier {
+    let isEnabled: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isEnabled {
+            content.buttonStyle(.plain)
+        } else {
+            content
         }
     }
 }

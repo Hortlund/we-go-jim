@@ -63,6 +63,7 @@ struct PrivacyOverviewView: View {
         .wgjScreenBackground()
         .wgjNavigationChrome()
         .navigationTitle("Privacy")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private func privacyCard(title: String, lines: [String]) -> some View {

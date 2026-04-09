@@ -59,6 +59,7 @@ struct FolderDetailView: View {
         .wgjScreenBackground()
         .wgjNavigationChrome()
         .navigationTitle(folderName)
+        .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $templateEditorContext) { context in
             TemplateEditorView(folderID: context.folderID, templateID: context.templateID)
         }
@@ -186,7 +187,7 @@ struct FolderDetailView: View {
             }
         }
         .padding(14)
-        .wgjCardContainer()
+        .wgjCardContainer(strong: true)
     }
 
     private var addExistingSheet: some View {

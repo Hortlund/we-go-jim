@@ -78,6 +78,7 @@ struct ProfileManagementView: View {
         }
         .sheet(isPresented: $showingAthleteTypePicker) {
             ProfileAthleteTypePickerView(selectedAthleteType: $athleteType)
+                .wgjSheetSurface()
         }
         .alert("Profile Error", isPresented: $showingError) {
             Button("OK", role: .cancel) { }
@@ -99,7 +100,7 @@ struct ProfileManagementView: View {
                         .lineLimit(2)
 
                     if let athleteType {
-                        athleteTypeBadge(title: athleteType.title, tint: WGJTheme.accentGold)
+                        ProfileAthleteTypeBadge(title: athleteType.title, tint: WGJTheme.accentGold)
                     }
 
                     avatarActionRow
@@ -117,7 +118,7 @@ struct ProfileManagementView: View {
                     .lineLimit(2)
 
                 if let athleteType {
-                    athleteTypeBadge(title: athleteType.title, tint: WGJTheme.accentGold)
+                    ProfileAthleteTypeBadge(title: athleteType.title, tint: WGJTheme.accentGold)
                 }
 
                 avatarActionRow
@@ -260,23 +261,6 @@ struct ProfileManagementView: View {
         Task {
             await stageAvatar(from: item)
         }
-    }
-
-    private func athleteTypeBadge(title: String, tint: Color) -> some View {
-        Text(title)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(tint)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                Capsule()
-                    .fill(tint.opacity(0.12))
-                    .wgjCapsuleGlass(tint: tint.opacity(0.12))
-            )
-            .overlay(
-                Capsule()
-                    .stroke(tint.opacity(0.24), lineWidth: 1)
-            )
     }
 
     private func showError(_ error: Error) {

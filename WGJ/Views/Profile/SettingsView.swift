@@ -374,6 +374,7 @@ struct SettingsView: View {
         .wgjScreenBackground()
         .wgjNavigationChrome()
         .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.inline)
         .task {
             await bootstrapCatalog()
             await loadProfileIfNeeded()

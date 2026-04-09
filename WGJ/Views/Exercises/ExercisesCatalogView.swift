@@ -123,10 +123,8 @@ struct ExercisesCatalogView: View {
                                 LazyVStack(alignment: .leading, spacing: 0) {
                                     ForEach(viewModel.sections) { section in
                                         VStack(alignment: .leading, spacing: 0) {
-                                            Text(section.title)
+                                            WGJCompactSectionHeader(section.title)
                                                 .id(section.id)
-                                                .font(.title2.weight(.semibold))
-                                                .foregroundStyle(WGJTheme.textSecondary)
                                                 .padding(.vertical, 8)
 
                                             LazyVStack(alignment: .leading, spacing: 0) {

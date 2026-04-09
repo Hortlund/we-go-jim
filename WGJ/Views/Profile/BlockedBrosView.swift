@@ -59,6 +59,7 @@ struct BlockedBrosView: View {
         .wgjScreenBackground()
         .wgjNavigationChrome()
         .navigationTitle("Blocked Bros")
+        .navigationBarTitleDisplayMode(.inline)
         .alert("Blocked Bros", isPresented: $showingError) {
             Button("OK", role: .cancel) { }
         } message: {

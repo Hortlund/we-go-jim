@@ -92,6 +92,7 @@ struct ProfileWidgetManagerView: View {
                     saveExerciseSelection(option, for: kind, enableWidget: enableAfterSelection)
                 }
             )
+            .wgjSheetSurface()
         }
         .alert("Widget Error", isPresented: $showingError) {
             Button("OK", role: .cancel) { }
