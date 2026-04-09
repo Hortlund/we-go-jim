@@ -814,6 +814,7 @@ struct BrosView: View {
         .sheet(item: $reactionDetailPresentation) { presentation in
             BroReactionDetailSheet(presentation: presentation)
         }
+        .wgjMinimalKeyboardToolbar()
     }
 
     private var loadingCard: some View {

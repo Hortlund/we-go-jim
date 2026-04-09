@@ -84,7 +84,6 @@ struct ProfileManagementView: View {
         } message: {
             Text(errorMessage)
         }
-        .wgjMinimalKeyboardToolbar()
     }
 
     private var avatarSection: some View {

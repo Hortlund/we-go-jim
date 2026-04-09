@@ -751,6 +751,7 @@ extension View {
     func wgjSheetSurface() -> some View {
         wgjScreenBackground()
             .wgjNavigationChrome()
+            .wgjMinimalKeyboardToolbar()
             .presentationDragIndicator(.visible)
     }
 

@@ -251,6 +251,7 @@ struct ExercisesCatalogView: View {
             isSearchFieldFocused = false
             WGJKeyboard.dismiss()
         }
+        .wgjMinimalKeyboardToolbar()
     }
 
     private var searchField: some View {
