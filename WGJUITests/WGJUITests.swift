@@ -867,6 +867,8 @@ final class WGJUITests: XCTestCase {
 
         let reopenedWeightField = identifiedElement("workout-set-0-weight-field", in: app)
         let reopenedRepsField = identifiedElement("workout-set-0-reps-field", in: app)
+        XCTAssertTrue(waitForElementToDisappear(weightGhost, timeout: 5))
+        XCTAssertTrue(waitForElementToDisappear(repsGhost, timeout: 5))
         XCTAssertEqual(reopenedWeightField.value as? String, "100")
         XCTAssertEqual(reopenedRepsField.value as? String, "8")
     }
@@ -1007,6 +1009,8 @@ final class WGJUITests: XCTestCase {
 
         let completedWeightField = identifiedElement("workout-set-0-weight-field", in: app)
         let completedRepsField = identifiedElement("workout-set-0-reps-field", in: app)
+        XCTAssertTrue(waitForElementToDisappear(weightGhost, timeout: 5))
+        XCTAssertTrue(waitForElementToDisappear(repsGhost, timeout: 5))
         XCTAssertEqual(completedWeightField.value as? String, "100")
         XCTAssertEqual(completedRepsField.value as? String, "8")
         XCTAssertTrue(app.buttons["Undo"].waitForExistence(timeout: 5))
@@ -1519,6 +1523,12 @@ final class WGJUITests: XCTestCase {
             app.swipeUp()
             remainingSwipes -= 1
         }
+    }
+
+    private func waitForElementToDisappear(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
+        let predicate = NSPredicate(format: "exists == false")
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
+        return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
     }
 
     private func startPreviewedTemplateWorkout(in app: XCUIApplication) {

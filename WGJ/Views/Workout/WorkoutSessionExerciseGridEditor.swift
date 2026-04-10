@@ -739,18 +739,21 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func repsField(at index: Int) -> some View {
-        ZStack {
-            if shouldShowRepsGhost(at: index), let ghostText = repsGhostText(at: index) {
-                ghostValueText(ghostText, accessibilityIdentifier: "workout-set-\(index)-reps-ghost")
+        let displayState = repsFieldDisplayState(at: index)
+
+        return ZStack {
+            if let displayState {
+                metricDisplayText(displayState)
             }
 
-            TextField(shouldShowRepsGhost(at: index) ? "" : "0", text: repsTextBinding(for: index))
+            TextField(displayState == nil ? "0" : "", text: repsTextBinding(for: index))
                 .keyboardType(.numberPad)
                 .submitLabel(.done)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled(true)
                 .font(.system(.title3, design: .rounded).weight(.semibold))
                 .monospacedDigit()
+                .foregroundStyle(displayState == nil ? WGJTheme.textPrimary : Color.clear)
                 .focused($focusedInput, equals: inputFocus(for: index, metric: .reps))
                 .multilineTextAlignment(.center)
                 .disabled(!isSetEditingEnabled || setDrafts[index].isLocked)
@@ -761,20 +764,22 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func loadField(at index: Int) -> some View {
         let isLocked = setDrafts[index].isLocked
+        let displayState = weightFieldDisplayState(at: index)
 
         return HStack(spacing: 6) {
             ZStack {
-                if shouldShowWeightGhost(at: index), let ghostText = weightGhostText(at: index) {
-                    ghostValueText(ghostText, accessibilityIdentifier: "workout-set-\(index)-weight-ghost")
+                if let displayState {
+                    metricDisplayText(displayState)
                 }
 
-                TextField(shouldShowWeightGhost(at: index) ? "" : "0", text: weightTextBinding(for: index))
+                TextField(displayState == nil ? "0" : "", text: weightTextBinding(for: index))
                     .keyboardType(.decimalPad)
                     .submitLabel(.next)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled(true)
                     .font(.system(.title3, design: .rounded).weight(.semibold))
                     .monospacedDigit()
+                    .foregroundStyle(displayState == nil ? WGJTheme.textPrimary : Color.clear)
                     .focused($focusedInput, equals: inputFocus(for: index, metric: .weight))
                     .multilineTextAlignment(.center)
                     .disabled(!isSetEditingEnabled || isLocked)
@@ -1222,14 +1227,56 @@ struct WorkoutSessionExerciseGridEditor: View {
         inlineHintPresentation(at: index)?.repsGhostText
     }
 
-    private func shouldShowWeightGhost(at index: Int) -> Bool {
-        guard setDrafts.indices.contains(index), !isInputFocused(.weight, at: index) else { return false }
-        return setDrafts[index].actualWeight == nil && weightGhostText(at: index) != nil
+    private func weightFieldDisplayState(at index: Int) -> MetricFieldDisplayState? {
+        guard setDrafts.indices.contains(index), !isInputFocused(.weight, at: index) else { return nil }
+
+        if let valueText = weightActualDisplayText(at: index) {
+            return MetricFieldDisplayState(text: valueText, tone: .actual)
+        }
+
+        guard let ghostText = weightGhostText(at: index) else { return nil }
+        return MetricFieldDisplayState(
+            text: ghostText,
+            tone: .ghost,
+            accessibilityIdentifier: "workout-set-\(index)-weight-ghost"
+        )
     }
 
-    private func shouldShowRepsGhost(at index: Int) -> Bool {
-        guard setDrafts.indices.contains(index), !isInputFocused(.reps, at: index) else { return false }
-        return setDrafts[index].actualReps == nil && repsGhostText(at: index) != nil
+    private func repsFieldDisplayState(at index: Int) -> MetricFieldDisplayState? {
+        guard setDrafts.indices.contains(index), !isInputFocused(.reps, at: index) else { return nil }
+
+        if let valueText = repsActualDisplayText(at: index) {
+            return MetricFieldDisplayState(text: valueText, tone: .actual)
+        }
+
+        guard let ghostText = repsGhostText(at: index) else { return nil }
+        return MetricFieldDisplayState(
+            text: ghostText,
+            tone: .ghost,
+            accessibilityIdentifier: "workout-set-\(index)-reps-ghost"
+        )
+    }
+
+    private func weightActualDisplayText(at index: Int) -> String? {
+        guard setDrafts.indices.contains(index) else { return nil }
+        let draft = setDrafts[index]
+
+        if let actualWeight = draft.actualWeight {
+            return formatWeight(actualWeight)
+        }
+
+        let showsBodyweightAsLoggedValue =
+            draft.actualLoadUnit == .bodyweight
+            && (draft.actualReps != nil || draft.isCompleted)
+
+        return showsBodyweightAsLoggedValue ? TemplateLoadUnit.bodyweight.shortLabel : nil
+    }
+
+    private func repsActualDisplayText(at index: Int) -> String? {
+        guard setDrafts.indices.contains(index), let actualReps = setDrafts[index].actualReps else {
+            return nil
+        }
+        return "\(actualReps)"
     }
 
     private func isInputFocused(_ metric: SetInputFocus.Metric, at index: Int) -> Bool {
@@ -1930,14 +1977,45 @@ private extension View {
     }
 }
 
-private func ghostValueText(_ text: String, accessibilityIdentifier: String) -> some View {
-    Text(text)
+private enum MetricFieldDisplayTone {
+    case actual
+    case ghost
+}
+
+private struct MetricFieldDisplayState {
+    let text: String
+    let tone: MetricFieldDisplayTone
+    var accessibilityIdentifier: String?
+}
+
+private func metricDisplayText(_ state: MetricFieldDisplayState) -> some View {
+    Text(state.text)
         .font(.system(.title3, design: .rounded).weight(.semibold))
-        .foregroundStyle(WGJTheme.textTertiary.opacity(0.72))
+        .foregroundStyle(
+            state.tone == .actual
+                ? WGJTheme.textPrimary
+                : WGJTheme.textTertiary.opacity(0.72)
+        )
         .monospacedDigit()
         .frame(maxWidth: .infinity)
         .allowsHitTesting(false)
-        .accessibilityIdentifier(accessibilityIdentifier)
+        .applyIfLet(state.accessibilityIdentifier) { view, identifier in
+            view.accessibilityIdentifier(identifier)
+        }
+}
+
+private extension View {
+    @ViewBuilder
+    func applyIfLet<Value, Content: View>(
+        _ value: Value?,
+        @ViewBuilder transform: (Self, Value) -> Content
+    ) -> some View {
+        if let value {
+            transform(self, value)
+        } else {
+            self
+        }
+    }
 }
 
 private struct WorkoutSessionExerciseSetRowLabel {
