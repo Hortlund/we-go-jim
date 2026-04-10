@@ -56,6 +56,10 @@ struct ActiveWorkoutDraftRepositoryTests {
             templateExerciseID: templateExercise.id,
             restSeconds: 150
         )
+        try templateRepository.updateExerciseNotes(
+            templateExerciseID: templateExercise.id,
+            notes: "Pause on the chest and keep feet planted."
+        )
 
         var templateSetDrafts = try templateRepository.setDrafts(for: templateExercise.id)
         templateSetDrafts[0].targetReps = 8
@@ -76,6 +80,7 @@ struct ActiveWorkoutDraftRepositoryTests {
         #expect(cardioBlocks.map(\.phase) == [.preWorkout])
         #expect(cardioBlocks.first?.targetDurationSeconds == 300)
         #expect(draftExercise.exerciseNameSnapshot == "Bench Press")
+        #expect(draftExercise.notes == "Pause on the chest and keep feet planted.")
         #expect(draftExercise.targetRepMin == 6)
         #expect(draftExercise.targetRepMax == 8)
         #expect(draftExercise.restSeconds == 150)
@@ -195,11 +200,16 @@ struct ActiveWorkoutDraftRepositoryTests {
         try repository.saveSetDrafts(sessionExerciseID: exercise.id, drafts: drafts)
         try repository.updateExerciseRest(sessionExerciseID: exercise.id, restSeconds: 150)
         try repository.updateExerciseRepRange(sessionExerciseID: exercise.id, minReps: 8, maxReps: 12)
+        try repository.updateExerciseNotes(
+            sessionExerciseID: exercise.id,
+            notes: "Use straps only on the top set."
+        )
 
         let refreshedExercise = try #require(try repository.sessionExercises(sessionID: session.id).first)
         let refreshedDrafts = try repository.setDrafts(sessionExerciseID: refreshedExercise.id)
 
         #expect(refreshedExercise.restSeconds == 150)
+        #expect(refreshedExercise.notes == "Use straps only on the top set.")
         #expect(refreshedExercise.targetRepMin == 8)
         #expect(refreshedExercise.targetRepMax == 12)
         #expect(refreshedDrafts[0].targetWeight == 80)
@@ -252,6 +262,10 @@ struct ActiveWorkoutDraftRepositoryTests {
         try repository.updateSessionNotes(sessionID: session.id, notes: "Original draft notes")
 
         let draftExercise = try #require(try repository.sessionExercises(sessionID: session.id).first)
+        try repository.updateExerciseNotes(
+            sessionExerciseID: draftExercise.id,
+            notes: "Keep the bar path stacked over the wrist."
+        )
         let originalSetIDs = try repository.setDrafts(sessionExerciseID: draftExercise.id).map(\.id)
 
         var drafts = try repository.setDrafts(sessionExerciseID: draftExercise.id)
@@ -278,6 +292,7 @@ struct ActiveWorkoutDraftRepositoryTests {
         #expect(completedSession.notes == "Locked in")
         #expect(completedSession.totalVolume == 800)
         #expect(completedExercise.id == draftExercise.id)
+        #expect(completedExercise.notes == "Keep the bar path stacked over the wrist.")
         #expect(completedDrafts.map(\.id) == originalSetIDs)
         #expect(completedDrafts[1].actualWeight == 100)
         #expect(completedDrafts[1].actualReps == 8)

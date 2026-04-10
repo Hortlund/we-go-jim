@@ -141,6 +141,7 @@ struct WorkoutTemplateSyncExerciseMutation: Equatable {
     let exerciseNameSnapshot: String
     let categorySnapshot: String
     let muscleSummarySnapshot: String
+    let notes: String
     let targetRepMin: Int?
     let targetRepMax: Int?
     let restSeconds: Int
@@ -153,6 +154,7 @@ struct WorkoutTemplateSyncExerciseMutation: Equatable {
         exerciseNameSnapshot: String,
         categorySnapshot: String,
         muscleSummarySnapshot: String,
+        notes: String,
         targetRepMin: Int?,
         targetRepMax: Int?,
         restSeconds: Int,
@@ -164,6 +166,7 @@ struct WorkoutTemplateSyncExerciseMutation: Equatable {
         self.exerciseNameSnapshot = exerciseNameSnapshot
         self.categorySnapshot = categorySnapshot
         self.muscleSummarySnapshot = muscleSummarySnapshot
+        self.notes = notes
         self.targetRepMin = targetRepMin
         self.targetRepMax = targetRepMax
         self.restSeconds = restSeconds
@@ -420,6 +423,7 @@ final class WorkoutTemplateSyncService {
             exerciseNameSnapshot: primaryComponent?.exerciseNameSnapshot ?? sessionExercise.exerciseNameSnapshot,
             categorySnapshot: primaryComponent?.categorySnapshot ?? sessionExercise.categorySnapshot,
             muscleSummarySnapshot: primaryComponent?.muscleSummarySnapshot ?? sessionExercise.muscleSummarySnapshot,
+            notes: sessionExercise.notes,
             targetRepMin: sessionExercise.targetRepMin,
             targetRepMax: sessionExercise.targetRepMax,
             restSeconds: normalizedRest(sessionExercise.restSeconds),
@@ -520,6 +524,21 @@ final class WorkoutTemplateSyncService {
 
         if templateExercise.restSeconds != normalizedSessionRest {
             changes.append("Rest \(formattedRest(templateExercise.restSeconds)) -> \(formattedRest(normalizedSessionRest))")
+        }
+
+        let normalizedTemplateNotes = normalizedExerciseNotes(templateExercise.notes)
+        let normalizedSessionNotes = normalizedExerciseNotes(sessionExercise.notes)
+        if normalizedTemplateNotes != normalizedSessionNotes {
+            switch (normalizedTemplateNotes.isEmpty, normalizedSessionNotes.isEmpty) {
+            case (true, false):
+                changes.append("Notes added")
+            case (false, true):
+                changes.append("Notes removed")
+            case (false, false):
+                changes.append("Notes updated")
+            case (true, true):
+                break
+            }
         }
 
         let templateSetSnapshots = orderedSets(for: templateExercise).map(TemplateOwnedSetSnapshot.init(templateSet:))
@@ -671,6 +690,10 @@ final class WorkoutTemplateSyncService {
 
     private func normalizedCardioDuration(_ seconds: Int) -> Int {
         min(24 * 60 * 60, max(0, seconds))
+    }
+
+    private func normalizedExerciseNotes(_ notes: String) -> String {
+        notes.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func orderedSets(for exercise: TemplateExercise) -> [TemplateExerciseSet] {

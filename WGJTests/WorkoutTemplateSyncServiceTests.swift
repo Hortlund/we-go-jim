@@ -91,6 +91,10 @@ struct WorkoutTemplateSyncServiceTests {
         let exercise = try #require(try sessionRepository.sessionExercises(sessionID: session.id).first)
         try sessionRepository.updateExerciseRepRange(sessionExerciseID: exercise.id, minReps: 6, maxReps: 8)
         try sessionRepository.updateExerciseRest(sessionExerciseID: exercise.id, restSeconds: 150)
+        try sessionRepository.updateExerciseNotes(
+            sessionExerciseID: exercise.id,
+            notes: "Drive elbows toward the hips and stay braced."
+        )
         try sessionRepository.addSet(sessionExerciseID: exercise.id)
         try sessionRepository.finishSession(sessionID: session.id)
 
@@ -104,6 +108,7 @@ struct WorkoutTemplateSyncServiceTests {
         let edited = try #require(preview.editedExercises.first)
         #expect(edited.changes.contains(where: { $0.contains("Rep range") }))
         #expect(edited.changes.contains(where: { $0.contains("Rest") }))
+        #expect(edited.changes.contains(where: { $0.contains("Notes") }))
         #expect(edited.changes.contains(where: { $0.contains("Set count") }))
     }
 
@@ -370,6 +375,10 @@ struct WorkoutTemplateSyncServiceTests {
         let session = try sessionRepository.createSessionFromTemplate(templateID: template.id)
         let exercise = try #require(try sessionRepository.sessionExercises(sessionID: session.id).first)
         try sessionRepository.updateExerciseRest(sessionExerciseID: exercise.id, restSeconds: 210)
+        try sessionRepository.updateExerciseNotes(
+            sessionExerciseID: exercise.id,
+            notes: "Sit back into the heels before each rep."
+        )
         var drafts = try sessionRepository.setDrafts(sessionExerciseID: exercise.id)
         drafts[1].actualWeight = 165
         drafts[1].actualReps = 6
@@ -384,6 +393,7 @@ struct WorkoutTemplateSyncServiceTests {
         let updatedSetDrafts = try templateRepository.setDrafts(for: templateExercise.id)
 
         #expect(templateExercise.restSeconds == 210)
+        #expect(templateExercise.notes == "Sit back into the heels before each rep.")
         #expect(updatedSetDrafts[1].targetWeight == 160)
         #expect(updatedSetDrafts[1].targetReps == 5)
     }

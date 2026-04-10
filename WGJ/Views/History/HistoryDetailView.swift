@@ -19,6 +19,7 @@ struct HistoryDetailView: View {
     @State private var preferredLoadUnit: TemplateLoadUnit = .kg
     @State private var setDraftsByExerciseID: [UUID: [WorkoutSessionSetDraft]] = [:]
     @State private var restByExerciseID: [UUID: Int] = [:]
+    @State private var notesByExerciseID: [UUID: String] = [:]
     @State private var previousByExerciseID: [UUID: [Int: WorkoutPreviousSetSnapshot]] = [:]
     @State private var personalRecordPresentationByExerciseID: [UUID: HistoryExercisePersonalRecordPresentation] = [:]
     @State private var loadedExerciseStateStamp: HistoryExerciseStateStamp?
@@ -288,21 +289,25 @@ struct HistoryDetailView: View {
         let result = WGJPerformance.measure("history-detail.hydrate.local") { () -> HistoryExerciseLocalHydrationResult in
             var loadedDrafts: [UUID: [WorkoutSessionSetDraft]] = [:]
             var loadedRests: [UUID: Int] = [:]
+            var loadedNotes: [UUID: String] = [:]
 
             for exercise in sessionExercises {
                 let drafts = makeDrafts(from: exercise)
                 loadedDrafts[exercise.id] = drafts
                 loadedRests[exercise.id] = exercise.restSeconds
+                loadedNotes[exercise.id] = exercise.notes
             }
 
             return HistoryExerciseLocalHydrationResult(
                 draftsByExerciseID: loadedDrafts,
-                restsByExerciseID: loadedRests
+                restsByExerciseID: loadedRests,
+                notesByExerciseID: loadedNotes
             )
         }
 
         setDraftsByExerciseID = result.draftsByExerciseID
         restByExerciseID = result.restsByExerciseID
+        notesByExerciseID = result.notesByExerciseID
         previousByExerciseID = previousByExerciseID.filter { result.draftsByExerciseID[$0.key] != nil }
         let filteredPersonalRecordPresentation = personalRecordPresentationByExerciseID.filter {
             result.draftsByExerciseID[$0.key] != nil
@@ -361,9 +366,13 @@ struct HistoryDetailView: View {
             personalRecordSummaryKinds: personalRecordPresentation?.summaryKinds ?? [],
             personalRecordKindsBySetID: personalRecordPresentation?.setKindsBySetID ?? [:],
             preferredLoadUnit: preferredLoadUnit,
+            exerciseNotes: notesByExerciseID[exercise.id] ?? exercise.notes,
             restSeconds: restSeconds,
             setDrafts: drafts,
             isExpanded: expandedExerciseIDs[exercise.id] ?? false,
+            onExerciseNotesCommitted: { notes in
+                updateNotesValue(notes, for: exercise.id)
+            },
             onSetDraftsCommitted: { drafts in
                 updateDraftsValue(drafts, for: exercise.id)
             },
@@ -457,6 +466,11 @@ struct HistoryDetailView: View {
                 try sessionRepository.updateExerciseRest(sessionExerciseID: exercise.id, restSeconds: rest)
             }
 
+            for exercise in sessionExercises {
+                let notes = notesByExerciseID[exercise.id] ?? exercise.notes
+                try sessionRepository.updateExerciseNotes(sessionExerciseID: exercise.id, notes: notes)
+            }
+
             try sessionRepository.recalculateSessionSummary(sessionID: sessionID)
             dismiss()
         } catch {
@@ -489,6 +503,7 @@ struct HistoryDetailView: View {
                 try sessionRepository.removeExercise(sessionID: sessionID, sessionExerciseID: exerciseID)
                 setDraftsByExerciseID.removeValue(forKey: exerciseID)
                 restByExerciseID.removeValue(forKey: exerciseID)
+                notesByExerciseID.removeValue(forKey: exerciseID)
                 previousByExerciseID.removeValue(forKey: exerciseID)
                 loadedExerciseStateStamp = nil
             } catch {
@@ -576,6 +591,12 @@ struct HistoryDetailView: View {
         restByExerciseID[exerciseID] = normalized
     }
 
+    @MainActor
+    private func updateNotesValue(_ updated: String, for exerciseID: UUID) {
+        guard notesByExerciseID[exerciseID] != updated else { return }
+        notesByExerciseID[exerciseID] = updated
+    }
+
     private func cardioDescriptor(category: String, muscleSummary: String) -> String? {
         let trimmedMuscleSummary = muscleSummary.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedMuscleSummary.isEmpty {
@@ -590,6 +611,7 @@ struct HistoryDetailView: View {
 private struct HistoryExerciseLocalHydrationResult {
     let draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
     let restsByExerciseID: [UUID: Int]
+    let notesByExerciseID: [UUID: String]
 }
 
 private struct HistoryExerciseStateStamp: Hashable {

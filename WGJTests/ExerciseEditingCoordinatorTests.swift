@@ -30,15 +30,19 @@ struct ExerciseEditingCoordinatorTests {
         let coordinator = WorkoutExerciseEditingCoordinator(
             setDrafts: [initialDraft],
             restSeconds: 120,
+            notes: "",
+            commitDebounce: .milliseconds(10),
             onDraftsCommitted: { committedDrafts.append($0) },
             onRestCommitted: { _ in },
+            onNotesCommitted: { _ in },
             onCompletionChanged: { _, _, _, _ in }
         )
 
         coordinator.scheduleDraftCommit([updatedDraft])
         coordinator.scheduleDraftCommit([latestDraft])
 
-        try? await Task.sleep(for: .milliseconds(180))
+        try? await Task.sleep(for: .milliseconds(120))
+        await Task.yield()
 
         #expect(committedDrafts.count == 1)
         #expect(committedDrafts.first == [latestDraft])
@@ -62,14 +66,16 @@ struct ExerciseEditingCoordinatorTests {
         let coordinator = WorkoutExerciseEditingCoordinator(
             setDrafts: [initialDraft],
             restSeconds: 120,
+            notes: "",
             onDraftsCommitted: { committedDrafts.append($0) },
             onRestCommitted: { committedRests.append($0) },
+            onNotesCommitted: { _ in },
             onCompletionChanged: { _, _, _, _ in }
         )
 
         coordinator.scheduleDraftCommit([updatedDraft])
         coordinator.scheduleRestCommit(150)
-        coordinator.requestImmediateCommit(setDrafts: [updatedDraft], restSeconds: 150)
+        coordinator.requestImmediateCommit(setDrafts: [updatedDraft], restSeconds: 150, notes: "")
 
         #expect(committedDrafts == [[updatedDraft]])
         #expect(committedRests == [150])
@@ -93,13 +99,15 @@ struct ExerciseEditingCoordinatorTests {
         let coordinator = WorkoutExerciseEditingCoordinator(
             setDrafts: [initialDraft],
             restSeconds: 120,
+            notes: "",
             onDraftsCommitted: { committedDrafts.append($0) },
             onRestCommitted: { _ in },
+            onNotesCommitted: { _ in },
             onCompletionChanged: { _, _, _, _ in }
         )
 
         coordinator.scheduleDraftCommit([bozarResolvedDraft])
-        coordinator.requestImmediateCommit(setDrafts: [initialDraft], restSeconds: 120)
+        coordinator.requestImmediateCommit(setDrafts: [initialDraft], restSeconds: 120, notes: "")
 
         #expect(committedDrafts == [[bozarResolvedDraft]])
     }
@@ -111,8 +119,10 @@ struct ExerciseEditingCoordinatorTests {
         let coordinator = WorkoutExerciseEditingCoordinator(
             setDrafts: [],
             restSeconds: 120,
+            notes: "",
             onDraftsCommitted: { _ in },
             onRestCommitted: { _ in },
+            onNotesCommitted: { _ in },
             onCompletionChanged: { setID, setLabel, restSeconds, isCompleted in
                 receivedEvent = (setID, setLabel, restSeconds, isCompleted)
             }
@@ -143,21 +153,26 @@ struct ExerciseEditingCoordinatorTests {
 
         var committedRanges: [(Int?, Int?)] = []
         var committedRests: [Int] = []
+        var committedNotes: [String] = []
         var committedDrafts: [[TemplateExerciseSetDraft]] = []
         let coordinator = TemplateExerciseEditingCoordinator(
+            notes: "",
             targetRepMin: 6,
             targetRepMax: 8,
             restSeconds: 120,
             setDrafts: [initialDraft],
+            onNotesCommitted: { committedNotes.append($0) },
             onRepRangeCommitted: { committedRanges.append(($0, $1)) },
             onRestCommitted: { committedRests.append($0) },
             onSetDraftsCommitted: { committedDrafts.append($0) }
         )
 
+        coordinator.scheduleNotesCommit("Use a smooth tempo.")
         coordinator.scheduleRepRangeCommit(targetRepMin: 8, targetRepMax: 10)
         coordinator.scheduleSetDraftCommit([updatedDraft])
         coordinator.scheduleRestCommit(150)
         coordinator.requestImmediateCommit(
+            notes: "Use a smooth tempo.",
             targetRepMin: 8,
             targetRepMax: 10,
             restSeconds: 150,
@@ -168,6 +183,7 @@ struct ExerciseEditingCoordinatorTests {
         #expect(committedRanges.first?.0 == 8)
         #expect(committedRanges.first?.1 == 10)
         #expect(committedRests == [150])
+        #expect(committedNotes == ["Use a smooth tempo."])
         #expect(committedDrafts == [[updatedDraft]])
     }
 }

@@ -48,6 +48,7 @@ struct TemplateTransferServiceTests {
                     exerciseNameSnapshot: "Bench Press",
                     categorySnapshot: "Chest",
                     muscleSummarySnapshot: "Chest, Triceps",
+                    notes: "Pause the first rep and keep shoulders pinned.",
                     targetRepMin: 4,
                     targetRepMax: 6,
                     restSeconds: 180,
@@ -73,6 +74,7 @@ struct TemplateTransferServiceTests {
                     exerciseNameSnapshot: "Weighted Dip",
                     categorySnapshot: "Chest",
                     muscleSummarySnapshot: "Chest, Triceps",
+                    notes: "Lean slightly forward and stay smooth at lockout.",
                     targetRepMin: 8,
                     targetRepMax: 10,
                     restSeconds: 120,
@@ -102,6 +104,10 @@ struct TemplateTransferServiceTests {
         #expect(importedCardio.map(\.exerciseNameSnapshot) == ["Bike", "Incline Treadmill Walk"])
         #expect(importedCardio.map(\.targetDurationSeconds) == [300, 1200])
         #expect(importedExercises.map(\.exerciseNameSnapshot) == ["Bench Press", "Weighted Dip"])
+        #expect(importedExercises.map(\.notes) == [
+            "Pause the first rep and keep shoulders pinned.",
+            "Lean slightly forward and stay smooth at lockout.",
+        ])
         #expect(importedExercises.map(\.targetRepMin) == [4, 8])
         #expect(importedExercises.map(\.targetRepMax) == [6, 10])
         #expect(importedExercises.map(\.restSeconds) == [180, 120])
@@ -174,7 +180,7 @@ struct TemplateTransferServiceTests {
     }
 
     @Test
-    func exportImportRoundTripPreservesMultiComponentExerciseOptionsAndUsesFormatVersionThree() throws {
+    func exportImportRoundTripPreservesMultiComponentExerciseOptionsAndUsesFormatVersionFour() throws {
         let context = try makeInMemoryContext()
         let repository = TemplateRepository(modelContext: context)
         let service = TemplateTransferService(modelContext: context)
@@ -225,7 +231,7 @@ struct TemplateTransferServiceTests {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let envelope = try decoder.decode(TemplateTransferEnvelope.self, from: exportedData)
-        #expect(envelope.formatVersion == 3)
+        #expect(envelope.formatVersion == 4)
         #expect(envelope.template.exercises.first?.components?.map(\.exerciseNameSnapshot) == ["Reverse Curl", "Wrist Curl"])
 
         let importedTemplate = try service.importTemplate(from: exportedData)

@@ -31,6 +31,9 @@ struct TemplateDetailView: View {
     @State private var restSecondsByExerciseID: [UUID: Int] = [:]
     @State private var lastPersistedRestSecondsByExerciseID: [UUID: Int] = [:]
     @State private var pendingRestSaveTasks: [UUID: Task<Void, Never>] = [:]
+    @State private var notesByExerciseID: [UUID: String] = [:]
+    @State private var lastPersistedNotesByExerciseID: [UUID: String] = [:]
+    @State private var pendingNotesSaveTasks: [UUID: Task<Void, Never>] = [:]
 
     @State private var loadedTemplateExerciseIDs: [UUID] = []
     @State private var hasLoadedExerciseStateOnce = false
@@ -283,9 +286,17 @@ struct TemplateDetailView: View {
                 ),
                 recommendation: row.recommendation,
                 supplementaryContent: AnyView(
-                    TemplateExerciseComponentsSection(
-                        components: componentDrafts(for: row.exercise)
-                    )
+                    VStack(alignment: .leading, spacing: 12) {
+                        WGJExerciseNotesEditor(
+                            placeholder: "Add notes for this exercise",
+                            accessibilityIdentifier: "template-detail-exercise-\(row.exercise.catalogExerciseUUID)-notes-field",
+                            notes: notesBinding(for: row.exercise)
+                        )
+
+                        TemplateExerciseComponentsSection(
+                            components: componentDrafts(for: row.exercise)
+                        )
+                    }
                 ),
                 initiallyExpanded: false,
                 isExpanded: isExpandedBinding(for: row.id),
@@ -406,6 +417,19 @@ struct TemplateDetailView: View {
     }
 
     @MainActor
+    private func notesBinding(for templateExercise: TemplateExercise) -> Binding<String> {
+        Binding {
+            if let value = notesByExerciseID[templateExercise.id] {
+                return value
+            }
+            return templateExercise.notes
+        } set: { updated in
+            notesByExerciseID[templateExercise.id] = updated
+            persistNotes(templateExerciseID: templateExercise.id, notes: updated)
+        }
+    }
+
+    @MainActor
     private func persistSetDrafts(templateExerciseID: UUID, drafts: [TemplateExerciseSetDraft]) {
         if lastPersistedSetDraftsByExerciseID[templateExerciseID] == drafts {
             return
@@ -497,6 +521,33 @@ struct TemplateDetailView: View {
     }
 
     @MainActor
+    private func persistNotes(templateExerciseID: UUID, notes: String) {
+        if lastPersistedNotesByExerciseID[templateExerciseID] == notes {
+            return
+        }
+
+        pendingNotesSaveTasks[templateExerciseID]?.cancel()
+        pendingNotesSaveTasks[templateExerciseID] = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(340))
+            guard !Task.isCancelled else { return }
+
+            let latest = notesByExerciseID[templateExerciseID] ?? notes
+            guard lastPersistedNotesByExerciseID[templateExerciseID] != latest else {
+                pendingNotesSaveTasks[templateExerciseID] = nil
+                return
+            }
+
+            do {
+                try repository.updateExerciseNotes(templateExerciseID: templateExerciseID, notes: latest)
+                lastPersistedNotesByExerciseID[templateExerciseID] = latest
+                pendingNotesSaveTasks[templateExerciseID] = nil
+            } catch {
+                showError(error)
+            }
+        }
+    }
+
+    @MainActor
     private func loadSetDraftsIfNeeded() async {
         let currentIDs = templateExercises.map(\.id)
         let currentIDSet = Set(currentIDs)
@@ -514,6 +565,7 @@ struct TemplateDetailView: View {
             var loadedSets: [UUID: [TemplateExerciseSetDraft]] = [:]
             var loadedRanges: [UUID: RepRangeDraft] = [:]
             var loadedRests: [UUID: Int] = [:]
+            var loadedNotes: [UUID: String] = [:]
 
             let persistedExercises = try repository.exercises(in: templateID)
             for exercise in persistedExercises {
@@ -523,6 +575,7 @@ struct TemplateDetailView: View {
 
                 loadedRanges[exercise.id] = RepRangeDraft(min: exercise.targetRepMin, max: exercise.targetRepMax)
                 loadedRests[exercise.id] = exercise.restSeconds
+                loadedNotes[exercise.id] = exercise.notes
             }
 
             setDraftsByExerciseID = loadedSets
@@ -531,6 +584,8 @@ struct TemplateDetailView: View {
             lastPersistedRepRangeByExerciseID = loadedRanges
             restSecondsByExerciseID = loadedRests
             lastPersistedRestSecondsByExerciseID = loadedRests
+            notesByExerciseID = loadedNotes
+            lastPersistedNotesByExerciseID = loadedNotes
             let previousIDs = Set(loadedTemplateExerciseIDs)
             isExpandedByExerciseID = isExpandedByExerciseID.filter { currentIDSet.contains($0.key) }
             for exerciseID in currentIDs where isExpandedByExerciseID[exerciseID] == nil {
@@ -560,6 +615,11 @@ struct TemplateDetailView: View {
             task.cancel()
         }
         pendingRestSaveTasks.removeAll()
+
+        for task in pendingNotesSaveTasks.values {
+            task.cancel()
+        }
+        pendingNotesSaveTasks.removeAll()
 
         for (templateExerciseID, drafts) in setDraftsByExerciseID {
             guard lastPersistedSetDraftsByExerciseID[templateExerciseID] != drafts else {
@@ -599,6 +659,18 @@ struct TemplateDetailView: View {
                     restSeconds: restSeconds
                 )
                 lastPersistedRestSecondsByExerciseID[templateExerciseID] = restSeconds
+            } catch {
+                showError(error)
+            }
+        }
+
+        for (templateExerciseID, notes) in notesByExerciseID {
+            guard lastPersistedNotesByExerciseID[templateExerciseID] != notes else {
+                continue
+            }
+            do {
+                try repository.updateExerciseNotes(templateExerciseID: templateExerciseID, notes: notes)
+                lastPersistedNotesByExerciseID[templateExerciseID] = notes
             } catch {
                 showError(error)
             }
@@ -717,9 +789,12 @@ struct TemplateDetailView: View {
             .union(lastPersistedRepRangeByExerciseID.keys)
             .union(restSecondsByExerciseID.keys)
             .union(lastPersistedRestSecondsByExerciseID.keys)
+            .union(notesByExerciseID.keys)
+            .union(lastPersistedNotesByExerciseID.keys)
             .union(pendingSetSaveTasks.keys)
             .union(pendingRepRangeSaveTasks.keys)
             .union(pendingRestSaveTasks.keys)
+            .union(pendingNotesSaveTasks.keys)
             .union(recommendationByExerciseID.keys)
             .union(isExpandedByExerciseID.keys)
             .union(exerciseSwipeOffsets.keys)
@@ -735,6 +810,7 @@ struct TemplateDetailView: View {
         pendingSetSaveTasks.removeValue(forKey: exerciseID)?.cancel()
         pendingRepRangeSaveTasks.removeValue(forKey: exerciseID)?.cancel()
         pendingRestSaveTasks.removeValue(forKey: exerciseID)?.cancel()
+        pendingNotesSaveTasks.removeValue(forKey: exerciseID)?.cancel()
 
         setDraftsByExerciseID[exerciseID] = nil
         lastPersistedSetDraftsByExerciseID[exerciseID] = nil
@@ -742,6 +818,8 @@ struct TemplateDetailView: View {
         lastPersistedRepRangeByExerciseID[exerciseID] = nil
         restSecondsByExerciseID[exerciseID] = nil
         lastPersistedRestSecondsByExerciseID[exerciseID] = nil
+        notesByExerciseID[exerciseID] = nil
+        lastPersistedNotesByExerciseID[exerciseID] = nil
         recommendationByExerciseID[exerciseID] = nil
         isExpandedByExerciseID[exerciseID] = nil
         loadedTemplateExerciseIDs.removeAll { $0 == exerciseID }

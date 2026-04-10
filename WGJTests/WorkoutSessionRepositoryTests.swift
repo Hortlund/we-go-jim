@@ -112,6 +112,48 @@ struct WorkoutSessionRepositoryTests {
     }
 
     @Test
+    func createSessionFromTemplateCopiesExerciseNotes() throws {
+        let context = try makeInMemoryContext()
+        let templateRepository = TemplateRepository(modelContext: context)
+        let repository = WorkoutSessionRepository(modelContext: context)
+
+        let item = ExerciseCatalogItem(
+            remoteUUID: "template-notes-bench",
+            displayName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(item)
+
+        let template = try templateRepository.createTemplate(name: "Push", notes: "")
+        try templateRepository.setExercises(
+            templateID: template.id,
+            drafts: [
+                TemplateExerciseDraft(
+                    catalogExerciseUUID: item.remoteUUID,
+                    exerciseNameSnapshot: item.displayName,
+                    categorySnapshot: item.categoryName,
+                    muscleSummarySnapshot: item.primaryMuscleNames,
+                    notes: "Elbows tucked and pause the first rep.",
+                    targetRepMin: 6,
+                    targetRepMax: 8,
+                    restSeconds: 120,
+                    setDrafts: [
+                        TemplateExerciseSetDraft(targetReps: 6, targetWeight: 100, loadUnit: .kg, restSeconds: 120),
+                    ]
+                ),
+            ]
+        )
+
+        let session = try repository.createSessionFromTemplate(templateID: template.id)
+        let exercise = try #require(try repository.sessionExercises(sessionID: session.id).first)
+
+        #expect(exercise.notes == "Elbows tucked and pause the first rep.")
+    }
+
+    @Test
     func createSessionFromTemplateRotatesMultiComponentExerciseAcrossCompletedSessions() throws {
         let context = try makeInMemoryContext()
         let templateRepository = TemplateRepository(modelContext: context)
@@ -351,6 +393,10 @@ struct WorkoutSessionRepositoryTests {
         let session = try sessionRepository.createEmptySession(name: "Back Day")
         try sessionRepository.addExercise(sessionID: session.id, catalogItem: item)
         let exercise = try sessionRepository.sessionExercises(sessionID: session.id).first!
+        try sessionRepository.updateExerciseNotes(
+            sessionExerciseID: exercise.id,
+            notes: "Brace hard before every pull."
+        )
         var drafts = try sessionRepository.setDrafts(sessionExerciseID: exercise.id)
         drafts[0].actualWeight = 180
         drafts[0].actualReps = 3
@@ -364,6 +410,7 @@ struct WorkoutSessionRepositoryTests {
         let components = try templateExercise.map { try templateRepository.components(for: $0.id) } ?? []
 
         #expect(templateExercise?.exerciseNameSnapshot == "Deadlift")
+        #expect(templateExercise?.notes == "Brace hard before every pull.")
         #expect(setDrafts.first?.targetWeight == 180)
         #expect(setDrafts.first?.targetReps == 3)
         #expect(components.count == 1)
@@ -493,6 +540,34 @@ struct WorkoutSessionRepositoryTests {
         let refreshed = try repository.sessionExercises(sessionID: session.id).first
         #expect(refreshed?.targetRepMin == 8)
         #expect(refreshed?.targetRepMax == 12)
+    }
+
+    @Test
+    func updateExerciseNotesPersists() throws {
+        let context = try makeInMemoryContext()
+        let repository = WorkoutSessionRepository(modelContext: context)
+
+        let item = ExerciseCatalogItem(
+            remoteUUID: "exercise-notes-1",
+            displayName: "Lat Pulldown",
+            categoryName: "Back",
+            equipmentSummary: "Cable",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(item)
+
+        let session = try repository.createEmptySession()
+        try repository.addExercise(sessionID: session.id, catalogItem: item)
+        let exercise = try #require(try repository.sessionExercises(sessionID: session.id).first)
+
+        try repository.updateExerciseNotes(
+            sessionExerciseID: exercise.id,
+            notes: "Keep chest tall and drive elbows down."
+        )
+
+        let refreshed = try repository.sessionExercises(sessionID: session.id).first
+        #expect(refreshed?.notes == "Keep chest tall and drive elbows down.")
     }
 
     @Test

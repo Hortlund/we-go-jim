@@ -8,7 +8,7 @@ enum TemplateTransferFileFormat {
 }
 
 struct TemplateTransferEnvelope: Codable, Equatable {
-    static let currentFormatVersion = 3
+    static let currentFormatVersion = 4
 
     let formatVersion: Int
     let exportedAt: Date
@@ -60,6 +60,7 @@ struct TemplateTransferExercise: Codable, Equatable {
     let exerciseNameSnapshot: String
     let categorySnapshot: String
     let muscleSummarySnapshot: String
+    let notes: String
     let targetRepMin: Int?
     let targetRepMax: Int?
     let restSeconds: Int
@@ -71,6 +72,7 @@ struct TemplateTransferExercise: Codable, Equatable {
         exerciseNameSnapshot: String,
         categorySnapshot: String,
         muscleSummarySnapshot: String,
+        notes: String = "",
         targetRepMin: Int?,
         targetRepMax: Int?,
         restSeconds: Int,
@@ -81,11 +83,39 @@ struct TemplateTransferExercise: Codable, Equatable {
         self.exerciseNameSnapshot = exerciseNameSnapshot
         self.categorySnapshot = categorySnapshot
         self.muscleSummarySnapshot = muscleSummarySnapshot
+        self.notes = notes
         self.targetRepMin = targetRepMin
         self.targetRepMax = targetRepMax
         self.restSeconds = restSeconds
         self.sets = sets
         self.components = components
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case catalogExerciseUUID
+        case exerciseNameSnapshot
+        case categorySnapshot
+        case muscleSummarySnapshot
+        case notes
+        case targetRepMin
+        case targetRepMax
+        case restSeconds
+        case sets
+        case components
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        catalogExerciseUUID = try container.decode(String.self, forKey: .catalogExerciseUUID)
+        exerciseNameSnapshot = try container.decode(String.self, forKey: .exerciseNameSnapshot)
+        categorySnapshot = try container.decode(String.self, forKey: .categorySnapshot)
+        muscleSummarySnapshot = try container.decode(String.self, forKey: .muscleSummarySnapshot)
+        notes = try container.decodeIfPresent(String.self, forKey: .notes) ?? ""
+        targetRepMin = try container.decodeIfPresent(Int.self, forKey: .targetRepMin)
+        targetRepMax = try container.decodeIfPresent(Int.self, forKey: .targetRepMax)
+        restSeconds = try container.decode(Int.self, forKey: .restSeconds)
+        sets = try container.decode([TemplateTransferSet].self, forKey: .sets)
+        components = try container.decodeIfPresent([TemplateTransferExerciseComponent].self, forKey: .components)
     }
 }
 
@@ -234,6 +264,7 @@ final class TemplateTransferService {
                 exerciseNameSnapshot: exercise.exerciseNameSnapshot,
                 categorySnapshot: exercise.categorySnapshot,
                 muscleSummarySnapshot: exercise.muscleSummarySnapshot,
+                notes: exercise.notes,
                 targetRepMin: exercise.targetRepMin,
                 targetRepMax: exercise.targetRepMax,
                 restSeconds: exercise.restSeconds,
@@ -271,7 +302,7 @@ final class TemplateTransferService {
             throw TemplateTransferError.malformedFile
         }
 
-        guard [1, 2, TemplateTransferEnvelope.currentFormatVersion].contains(envelope.formatVersion) else {
+        guard (1...TemplateTransferEnvelope.currentFormatVersion).contains(envelope.formatVersion) else {
             throw TemplateTransferError.unsupportedVersion(envelope.formatVersion)
         }
 
@@ -305,6 +336,7 @@ final class TemplateTransferService {
             exerciseNameSnapshot: exercise.exerciseNameSnapshot,
             categorySnapshot: exercise.categorySnapshot,
             muscleSummarySnapshot: exercise.muscleSummarySnapshot,
+            notes: exercise.notes,
             targetRepMin: exercise.targetRepMin,
             targetRepMax: exercise.targetRepMax,
             restSeconds: exercise.restSeconds,

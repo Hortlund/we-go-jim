@@ -194,6 +194,7 @@ final class WorkoutSessionRepository {
                 exerciseNameSnapshot: selectedComponent?.exerciseNameSnapshot ?? templateExercise.exerciseNameSnapshot,
                 categorySnapshot: selectedComponent?.categorySnapshot ?? templateExercise.categorySnapshot,
                 muscleSummarySnapshot: selectedComponent?.muscleSummarySnapshot ?? templateExercise.muscleSummarySnapshot,
+                notes: templateExercise.notes,
                 targetRepMin: templateExercise.targetRepMin,
                 targetRepMax: templateExercise.targetRepMax,
                 restSeconds: templateExercise.restSeconds,
@@ -420,6 +421,20 @@ final class WorkoutSessionRepository {
         }
         exercise.targetRepMin = normalized.min
         exercise.targetRepMax = normalized.max
+        exercise.updatedAt = .now
+        try modelContext.save()
+    }
+
+    func updateExerciseNotes(sessionExerciseID: UUID, notes: String) throws {
+        guard let exercise = try sessionExercise(id: sessionExerciseID) else {
+            throw WorkoutSessionRepositoryError.sessionExerciseNotFound
+        }
+
+        guard exercise.notes != notes else {
+            return
+        }
+
+        exercise.notes = notes
         exercise.updatedAt = .now
         try modelContext.save()
     }

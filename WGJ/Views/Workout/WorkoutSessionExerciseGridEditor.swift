@@ -16,6 +16,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     let preferredLoadUnit: TemplateLoadUnit
     let supplementaryContent: AnyView?
 
+    @Binding var exerciseNotes: String
     @Binding var restSeconds: Int
     @Binding var setDrafts: [WorkoutSessionSetDraft]
 
@@ -77,6 +78,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         guidance: ActiveWorkoutExerciseGuidancePresentation? = nil,
         preferredLoadUnit: TemplateLoadUnit = .kg,
         supplementaryContent: AnyView? = nil,
+        exerciseNotes: Binding<String> = .constant(""),
         restSeconds: Binding<Int>,
         setDrafts: Binding<[WorkoutSessionSetDraft]>,
         initiallyExpanded: Bool = false,
@@ -112,6 +114,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.guidance = guidance
         self.preferredLoadUnit = preferredLoadUnit
         self.supplementaryContent = supplementaryContent
+        self._exerciseNotes = exerciseNotes
         self._restSeconds = restSeconds
         self._setDrafts = setDrafts
         self.externalIsExpanded = isExpanded
@@ -157,6 +160,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                 if showsInlineExerciseControls {
                     controlsSection
                 }
+                exerciseNotesSection
                 setsSection
             }
         }
@@ -517,6 +521,16 @@ struct WorkoutSessionExerciseGridEditor: View {
             .disabled(!isSetEditingEnabled)
             .opacity(isSetEditingEnabled ? 1 : 0.5)
         }
+    }
+
+    @ViewBuilder
+    private var exerciseNotesSection: some View {
+        WGJExerciseNotesEditor(
+            subtitle: "Capture setup cues, pain notes, or progression reminders for this exercise.",
+            placeholder: "Add notes for this exercise",
+            accessibilityIdentifier: exerciseAccessibilityIdentifier.map { "\($0)-notes-field" },
+            notes: $exerciseNotes
+        )
     }
 
     private func setCard(_ row: WorkoutSessionExerciseSetRowDisplaySnapshot) -> some View {

@@ -852,6 +852,7 @@ final class TemplateExercise {
     var exerciseNameSnapshot: String = ""
     var categorySnapshot: String = ""
     var muscleSummarySnapshot: String = ""
+    var notes: String = ""
     var targetRepMin: Int?
     var targetRepMax: Int?
     var restSeconds: Int = 120
@@ -870,6 +871,7 @@ final class TemplateExercise {
         exerciseNameSnapshot: String,
         categorySnapshot: String,
         muscleSummarySnapshot: String,
+        notes: String = "",
         targetRepMin: Int? = nil,
         targetRepMax: Int? = nil,
         restSeconds: Int = 120,
@@ -884,6 +886,7 @@ final class TemplateExercise {
         self.exerciseNameSnapshot = exerciseNameSnapshot
         self.categorySnapshot = categorySnapshot
         self.muscleSummarySnapshot = muscleSummarySnapshot
+        self.notes = notes
         self.targetRepMin = targetRepMin
         self.targetRepMax = targetRepMax
         self.restSeconds = max(0, min(3600, restSeconds))
@@ -1093,6 +1096,7 @@ final class ActiveWorkoutDraftExercise {
     var exerciseNameSnapshot: String = ""
     var categorySnapshot: String = ""
     var muscleSummarySnapshot: String = ""
+    var notes: String = ""
     var targetRepMin: Int?
     var targetRepMax: Int?
     var restSeconds: Int = 120
@@ -1112,6 +1116,7 @@ final class ActiveWorkoutDraftExercise {
         exerciseNameSnapshot: String,
         categorySnapshot: String,
         muscleSummarySnapshot: String,
+        notes: String = "",
         targetRepMin: Int? = nil,
         targetRepMax: Int? = nil,
         restSeconds: Int = 120,
@@ -1127,6 +1132,7 @@ final class ActiveWorkoutDraftExercise {
         self.exerciseNameSnapshot = exerciseNameSnapshot
         self.categorySnapshot = categorySnapshot
         self.muscleSummarySnapshot = muscleSummarySnapshot
+        self.notes = notes
         self.targetRepMin = targetRepMin
         self.targetRepMax = targetRepMax
         self.restSeconds = max(0, min(3600, restSeconds))
@@ -1364,6 +1370,7 @@ final class WorkoutSessionExercise {
     var exerciseNameSnapshot: String = ""
     var categorySnapshot: String = ""
     var muscleSummarySnapshot: String = ""
+    var notes: String = ""
     var targetRepMin: Int?
     var targetRepMax: Int?
     var restSeconds: Int = 120
@@ -1382,6 +1389,7 @@ final class WorkoutSessionExercise {
         exerciseNameSnapshot: String,
         categorySnapshot: String,
         muscleSummarySnapshot: String,
+        notes: String = "",
         targetRepMin: Int? = nil,
         targetRepMax: Int? = nil,
         restSeconds: Int = 120,
@@ -1397,6 +1405,7 @@ final class WorkoutSessionExercise {
         self.exerciseNameSnapshot = exerciseNameSnapshot
         self.categorySnapshot = categorySnapshot
         self.muscleSummarySnapshot = muscleSummarySnapshot
+        self.notes = notes
         self.targetRepMin = targetRepMin
         self.targetRepMax = targetRepMax
         self.restSeconds = max(0, min(3600, restSeconds))

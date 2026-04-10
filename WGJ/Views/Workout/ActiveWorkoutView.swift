@@ -25,6 +25,9 @@ struct ActiveWorkoutView: View {
     @State private var restByExerciseID: [UUID: Int] = [:]
     @State private var lastPersistedRestByExerciseID: [UUID: Int] = [:]
     @State private var pendingRestTasks: [UUID: Task<Void, Never>] = [:]
+    @State private var notesByExerciseID: [UUID: String] = [:]
+    @State private var lastPersistedNotesByExerciseID: [UUID: String] = [:]
+    @State private var pendingNotesTasks: [UUID: Task<Void, Never>] = [:]
 
     @State private var previousByExerciseID: [UUID: [Int: WorkoutPreviousSetSnapshot]] = [:]
     @State private var componentResolutionByExerciseID: [UUID: ExerciseComponentRotationResolution] = [:]
@@ -596,6 +599,7 @@ struct ActiveWorkoutView: View {
             supplementaryContentKey: componentResolutionByExerciseID[exerciseID].map { resolution in
                 "\(resolution.selectedComponent.catalogExerciseUUID)-\(resolution.availableComponents.count)"
             },
+            exerciseNotes: resolvedNotes(for: exercise),
             restSeconds: resolvedRest(for: exercise),
             setDrafts: drafts,
             isExpanded: cardStateController.isExpanded(for: exerciseID),
@@ -604,6 +608,10 @@ struct ActiveWorkoutView: View {
             isSetEditingEnabled: areMainExercisesUnlocked,
             canMoveExerciseUp: index > 0,
             canMoveExerciseDown: index < sessionExercises.count - 1,
+            onExerciseNotesCommitted: { notes in
+                updateNotesValue(notes, for: exerciseID)
+                persistNotes(sessionExerciseID: exerciseID, notes: notes)
+            },
             onSetDraftsCommitted: { drafts in
                 handleDraftsChanged(drafts, for: exercise, scrollProxy: scrollProxy)
             },
@@ -666,6 +674,11 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
+    private func resolvedNotes(for exercise: ActiveWorkoutDraftExercise) -> String {
+        notesByExerciseID[exercise.id] ?? exercise.notes
+    }
+
+    @MainActor
     private func updateDraftsValue(_ updated: [WorkoutSessionSetDraft], for exerciseID: UUID) {
         guard setDraftsByExerciseID[exerciseID] != updated else { return }
         setDraftsByExerciseID[exerciseID] = updated
@@ -676,6 +689,12 @@ struct ActiveWorkoutView: View {
         let normalized = max(0, min(3600, updated))
         guard restByExerciseID[exerciseID] != normalized else { return }
         restByExerciseID[exerciseID] = normalized
+    }
+
+    @MainActor
+    private func updateNotesValue(_ updated: String, for exerciseID: UUID) {
+        guard notesByExerciseID[exerciseID] != updated else { return }
+        notesByExerciseID[exerciseID] = updated
     }
 
     @MainActor
@@ -734,6 +753,7 @@ struct ActiveWorkoutView: View {
             var loadedDrafts: [UUID: [WorkoutSessionSetDraft]] = [:]
             var persistedDrafts: [UUID: [WorkoutSessionSetDraft]] = [:]
             var loadedRests: [UUID: Int] = [:]
+            var loadedNotes: [UUID: String] = [:]
             let catalogByUUID = (try? catalogRepository.exerciseMap(
                 for: sessionExercises.map(\.catalogExerciseUUID)
             )) ?? [:]
@@ -746,12 +766,14 @@ struct ActiveWorkoutView: View {
                 )
                 persistedDrafts[exercise.id] = drafts
                 loadedRests[exercise.id] = exercise.restSeconds
+                loadedNotes[exercise.id] = exercise.notes
             }
 
             return ActiveWorkoutHydrationResult(
                 draftsByExerciseID: loadedDrafts,
                 persistedDraftsByExerciseID: persistedDrafts,
                 restsByExerciseID: loadedRests,
+                notesByExerciseID: loadedNotes,
                 previousByExerciseID: [:],
                 catalogMatchesByUUID: catalogByUUID
             )
@@ -761,6 +783,8 @@ struct ActiveWorkoutView: View {
         lastPersistedDraftsByExerciseID = result.persistedDraftsByExerciseID
         restByExerciseID = result.restsByExerciseID
         lastPersistedRestByExerciseID = result.restsByExerciseID
+        notesByExerciseID = result.notesByExerciseID
+        lastPersistedNotesByExerciseID = result.notesByExerciseID
         catalogMatchesByUUID = result.catalogMatchesByUUID
         previousByExerciseID = previousByExerciseID.filter { result.draftsByExerciseID[$0.key] != nil }
         componentResolutionByExerciseID = componentResolutionByExerciseID.filter { result.draftsByExerciseID[$0.key] != nil }
@@ -1010,6 +1034,38 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
+    private func persistNotes(sessionExerciseID: UUID, notes: String) {
+        if lastPersistedNotesByExerciseID[sessionExerciseID] == notes {
+            return
+        }
+
+        pendingNotesTasks[sessionExerciseID]?.cancel()
+        pendingNotesTasks[sessionExerciseID] = Task { @MainActor in
+            try? await Task.sleep(for: interactivePersistenceDebounce)
+            guard !Task.isCancelled else { return }
+
+            let latest = notesByExerciseID[sessionExerciseID] ?? notes
+            guard lastPersistedNotesByExerciseID[sessionExerciseID] != latest else {
+                pendingNotesTasks[sessionExerciseID] = nil
+                return
+            }
+
+            do {
+                try WGJPerformance.measure("active-workout.persist.notes") {
+                    try activeWorkoutRepository.updateExerciseNotes(
+                        sessionExerciseID: sessionExerciseID,
+                        notes: latest
+                    )
+                }
+                lastPersistedNotesByExerciseID[sessionExerciseID] = latest
+                pendingNotesTasks[sessionExerciseID] = nil
+            } catch {
+                showError(error)
+            }
+        }
+    }
+
+    @MainActor
     private func flushPendingSaves() {
         for task in pendingSaveTasks.values {
             task.cancel()
@@ -1020,6 +1076,11 @@ struct ActiveWorkoutView: View {
             task.cancel()
         }
         pendingRestTasks.removeAll()
+
+        for task in pendingNotesTasks.values {
+            task.cancel()
+        }
+        pendingNotesTasks.removeAll()
 
         for (exerciseID, drafts) in setDraftsByExerciseID {
             guard lastPersistedDraftsByExerciseID[exerciseID] != drafts else { continue }
@@ -1042,6 +1103,16 @@ struct ActiveWorkoutView: View {
                     previousDefaultRest: previousDefaultRest,
                     updatedRest: rest
                 )
+            } catch {
+                showError(error)
+            }
+        }
+
+        for (exerciseID, notes) in notesByExerciseID {
+            guard lastPersistedNotesByExerciseID[exerciseID] != notes else { continue }
+            do {
+                try activeWorkoutRepository.updateExerciseNotes(sessionExerciseID: exerciseID, notes: notes)
+                lastPersistedNotesByExerciseID[exerciseID] = notes
             } catch {
                 showError(error)
             }
@@ -1657,10 +1728,13 @@ struct ActiveWorkoutView: View {
             .union(lastPersistedDraftsByExerciseID.keys)
             .union(restByExerciseID.keys)
             .union(lastPersistedRestByExerciseID.keys)
+            .union(notesByExerciseID.keys)
+            .union(lastPersistedNotesByExerciseID.keys)
             .union(previousByExerciseID.keys)
             .union(componentResolutionByExerciseID.keys)
             .union(pendingSaveTasks.keys)
             .union(pendingRestTasks.keys)
+            .union(pendingNotesTasks.keys)
 
         for exerciseID in knownIDs where !currentIDs.contains(exerciseID) {
             discardExerciseState(for: exerciseID)
@@ -1673,10 +1747,13 @@ struct ActiveWorkoutView: View {
 
         pendingSaveTasks.removeValue(forKey: exerciseID)?.cancel()
         pendingRestTasks.removeValue(forKey: exerciseID)?.cancel()
+        pendingNotesTasks.removeValue(forKey: exerciseID)?.cancel()
         setDraftsByExerciseID[exerciseID] = nil
         lastPersistedDraftsByExerciseID[exerciseID] = nil
         restByExerciseID[exerciseID] = nil
         lastPersistedRestByExerciseID[exerciseID] = nil
+        notesByExerciseID[exerciseID] = nil
+        lastPersistedNotesByExerciseID[exerciseID] = nil
         previousByExerciseID[exerciseID] = nil
         componentResolutionByExerciseID[exerciseID] = nil
 
@@ -2445,6 +2522,7 @@ private struct ActiveWorkoutHydrationResult {
     let draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
     let persistedDraftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
     let restsByExerciseID: [UUID: Int]
+    let notesByExerciseID: [UUID: String]
     let previousByExerciseID: [UUID: [Int: WorkoutPreviousSetSnapshot]]
     let catalogMatchesByUUID: [String: ExerciseCatalogItem]
 }

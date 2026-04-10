@@ -16,6 +16,7 @@ struct WorkoutExerciseRowHostView: View, Equatable {
     let preferredLoadUnit: TemplateLoadUnit
     let supplementaryContent: AnyView?
     let supplementaryContentKey: String?
+    let exerciseNotes: String
     let restSeconds: Int
     let setDrafts: [WorkoutSessionSetDraft]
     let isExpanded: Bool
@@ -28,6 +29,7 @@ struct WorkoutExerciseRowHostView: View, Equatable {
     let emphasizesExerciseCompletion: Bool
     let canMoveExerciseUp: Bool
     let canMoveExerciseDown: Bool
+    let onExerciseNotesCommitted: (String) -> Void
     let onSetDraftsCommitted: ([WorkoutSessionSetDraft]) -> Void
     let onRestCommitted: (Int) -> Void
     let onExpandedChanged: (Bool) -> Void
@@ -41,6 +43,7 @@ struct WorkoutExerciseRowHostView: View, Equatable {
 
     @State private var localRestSeconds: Int
     @State private var localSetDrafts: [WorkoutSessionSetDraft]
+    @State private var localExerciseNotes: String
     @State private var editingCoordinator: WorkoutExerciseEditingCoordinator
 
     init(
@@ -59,6 +62,7 @@ struct WorkoutExerciseRowHostView: View, Equatable {
         preferredLoadUnit: TemplateLoadUnit,
         supplementaryContent: AnyView? = nil,
         supplementaryContentKey: String? = nil,
+        exerciseNotes: String = "",
         restSeconds: Int,
         setDrafts: [WorkoutSessionSetDraft],
         isExpanded: Bool,
@@ -71,6 +75,7 @@ struct WorkoutExerciseRowHostView: View, Equatable {
         emphasizesExerciseCompletion: Bool = true,
         canMoveExerciseUp: Bool = false,
         canMoveExerciseDown: Bool = false,
+        onExerciseNotesCommitted: @escaping (String) -> Void = { _ in },
         onSetDraftsCommitted: @escaping ([WorkoutSessionSetDraft]) -> Void,
         onRestCommitted: @escaping (Int) -> Void,
         onExpandedChanged: @escaping (Bool) -> Void,
@@ -97,6 +102,7 @@ struct WorkoutExerciseRowHostView: View, Equatable {
         self.preferredLoadUnit = preferredLoadUnit
         self.supplementaryContent = supplementaryContent
         self.supplementaryContentKey = supplementaryContentKey
+        self.exerciseNotes = exerciseNotes
         self.restSeconds = restSeconds
         self.setDrafts = setDrafts
         self.isExpanded = isExpanded
@@ -109,6 +115,7 @@ struct WorkoutExerciseRowHostView: View, Equatable {
         self.emphasizesExerciseCompletion = emphasizesExerciseCompletion
         self.canMoveExerciseUp = canMoveExerciseUp
         self.canMoveExerciseDown = canMoveExerciseDown
+        self.onExerciseNotesCommitted = onExerciseNotesCommitted
         self.onSetDraftsCommitted = onSetDraftsCommitted
         self.onRestCommitted = onRestCommitted
         self.onExpandedChanged = onExpandedChanged
@@ -121,12 +128,15 @@ struct WorkoutExerciseRowHostView: View, Equatable {
         self.onExerciseDelete = onExerciseDelete
         self._localRestSeconds = State(initialValue: restSeconds)
         self._localSetDrafts = State(initialValue: setDrafts)
+        self._localExerciseNotes = State(initialValue: exerciseNotes)
         self._editingCoordinator = State(
             initialValue: WorkoutExerciseEditingCoordinator(
                 setDrafts: setDrafts,
                 restSeconds: restSeconds,
+                notes: exerciseNotes,
                 onDraftsCommitted: onSetDraftsCommitted,
                 onRestCommitted: onRestCommitted,
+                onNotesCommitted: onExerciseNotesCommitted,
                 onCompletionChanged: onSetCompletionChange
             )
         )
@@ -147,6 +157,7 @@ struct WorkoutExerciseRowHostView: View, Equatable {
             && lhs.guidance == rhs.guidance
             && lhs.preferredLoadUnit == rhs.preferredLoadUnit
             && lhs.supplementaryContentKey == rhs.supplementaryContentKey
+            && lhs.exerciseNotes == rhs.exerciseNotes
             && lhs.restSeconds == rhs.restSeconds
             && lhs.setDrafts == rhs.setDrafts
             && lhs.isExpanded == rhs.isExpanded
@@ -176,6 +187,13 @@ struct WorkoutExerciseRowHostView: View, Equatable {
             guidance: guidance,
             preferredLoadUnit: preferredLoadUnit,
             supplementaryContent: supplementaryContent,
+            exerciseNotes: Binding(
+                get: { localExerciseNotes },
+                set: { updated in
+                    localExerciseNotes = updated
+                    editingCoordinator.scheduleNotesCommit(updated)
+                }
+            ),
             restSeconds: Binding(
                 get: { localRestSeconds },
                 set: { updated in
@@ -204,7 +222,8 @@ struct WorkoutExerciseRowHostView: View, Equatable {
             onCommitRequest: { drafts, restSeconds in
                 editingCoordinator.requestImmediateCommit(
                     setDrafts: drafts,
-                    restSeconds: restSeconds
+                    restSeconds: restSeconds,
+                    notes: localExerciseNotes
                 )
             },
             onSetCompletionChange: { setID, setLabel, restSeconds, isCompleted in
@@ -225,14 +244,31 @@ struct WorkoutExerciseRowHostView: View, Equatable {
             onExerciseDelete: onExerciseDelete
         )
         .onChange(of: restSeconds) { _, newValue in
-            editingCoordinator.syncCommittedState(setDrafts: setDrafts, restSeconds: newValue)
+            editingCoordinator.syncCommittedState(
+                setDrafts: setDrafts,
+                restSeconds: newValue,
+                notes: exerciseNotes
+            )
             guard localRestSeconds != newValue else { return }
             localRestSeconds = newValue
         }
         .onChange(of: setDrafts) { _, newValue in
-            editingCoordinator.syncCommittedState(setDrafts: newValue, restSeconds: restSeconds)
+            editingCoordinator.syncCommittedState(
+                setDrafts: newValue,
+                restSeconds: restSeconds,
+                notes: exerciseNotes
+            )
             guard localSetDrafts != newValue else { return }
             localSetDrafts = newValue
+        }
+        .onChange(of: exerciseNotes) { _, newValue in
+            editingCoordinator.syncCommittedState(
+                setDrafts: setDrafts,
+                restSeconds: restSeconds,
+                notes: newValue
+            )
+            guard localExerciseNotes != newValue else { return }
+            localExerciseNotes = newValue
         }
         .onDisappear {
             flushPendingEditsIfNeeded()
@@ -240,10 +276,17 @@ struct WorkoutExerciseRowHostView: View, Equatable {
     }
 
     private func flushPendingEditsIfNeeded() {
-        guard localSetDrafts != setDrafts || localRestSeconds != restSeconds else { return }
+        guard
+            localSetDrafts != setDrafts
+                || localRestSeconds != restSeconds
+                || localExerciseNotes != exerciseNotes
+        else {
+            return
+        }
         editingCoordinator.requestImmediateCommit(
             setDrafts: localSetDrafts,
-            restSeconds: localRestSeconds
+            restSeconds: localRestSeconds,
+            notes: localExerciseNotes
         )
     }
 }

@@ -76,6 +76,7 @@ final class ActiveWorkoutDraftRepository {
                 exerciseNameSnapshot: selectedComponent?.exerciseNameSnapshot ?? templateExercise.exerciseNameSnapshot,
                 categorySnapshot: selectedComponent?.categorySnapshot ?? templateExercise.categorySnapshot,
                 muscleSummarySnapshot: selectedComponent?.muscleSummarySnapshot ?? templateExercise.muscleSummarySnapshot,
+                notes: templateExercise.notes,
                 targetRepMin: templateExercise.targetRepMin,
                 targetRepMax: templateExercise.targetRepMax,
                 restSeconds: templateExercise.restSeconds,
@@ -446,6 +447,20 @@ final class ActiveWorkoutDraftRepository {
         try modelContext.save()
     }
 
+    func updateExerciseNotes(sessionExerciseID: UUID, notes: String) throws {
+        guard let exercise = try sessionExercise(id: sessionExerciseID) else {
+            throw WorkoutSessionRepositoryError.sessionExerciseNotFound
+        }
+
+        guard exercise.notes != notes else {
+            return
+        }
+
+        exercise.notes = notes
+        exercise.updatedAt = .now
+        try modelContext.save()
+    }
+
     func saveSetDrafts(sessionExerciseID: UUID, drafts: [WorkoutSessionSetDraft]) throws {
         guard let exercise = try sessionExercise(id: sessionExerciseID) else {
             throw WorkoutSessionRepositoryError.sessionExerciseNotFound
@@ -598,6 +613,7 @@ final class ActiveWorkoutDraftRepository {
                 exerciseNameSnapshot: legacyExercise.exerciseNameSnapshot,
                 categorySnapshot: legacyExercise.categorySnapshot,
                 muscleSummarySnapshot: legacyExercise.muscleSummarySnapshot,
+                notes: legacyExercise.notes,
                 targetRepMin: legacyExercise.targetRepMin,
                 targetRepMax: legacyExercise.targetRepMax,
                 restSeconds: legacyExercise.restSeconds,
@@ -706,6 +722,7 @@ final class ActiveWorkoutDraftRepository {
                 exerciseNameSnapshot: draftExercise.exerciseNameSnapshot,
                 categorySnapshot: draftExercise.categorySnapshot,
                 muscleSummarySnapshot: draftExercise.muscleSummarySnapshot,
+                notes: draftExercise.notes,
                 targetRepMin: draftExercise.targetRepMin,
                 targetRepMax: draftExercise.targetRepMax,
                 restSeconds: draftExercise.restSeconds,

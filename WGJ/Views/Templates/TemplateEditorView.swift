@@ -586,6 +586,7 @@ private enum TemplateEditorPickerTarget: Identifiable {
 @Observable
 private final class TemplateExerciseDraftStore: Identifiable {
     let id: UUID
+    var notes: String
     var targetRepMin: Int?
     var targetRepMax: Int?
     var restSeconds: Int
@@ -595,6 +596,7 @@ private final class TemplateExerciseDraftStore: Identifiable {
 
     init(draft: TemplateExerciseDraft, isExpanded: Bool = false) {
         id = draft.id
+        notes = draft.notes
         targetRepMin = draft.targetRepMin
         targetRepMax = draft.targetRepMax
         restSeconds = draft.restSeconds
@@ -626,6 +628,7 @@ private final class TemplateExerciseDraftStore: Identifiable {
             exerciseNameSnapshot: exerciseNameSnapshot,
             categorySnapshot: categorySnapshot,
             muscleSummarySnapshot: muscleSummarySnapshot,
+            notes: notes,
             targetRepMin: targetRepMin,
             targetRepMax: targetRepMax,
             restSeconds: restSeconds,
@@ -654,6 +657,7 @@ private struct TemplateEditorExerciseRow: View {
 
     @State private var swipeOffset: CGFloat = 0
     @State private var swipeRemoving = false
+    @State private var localNotes: String
     @State private var localTargetRepMin: Int?
     @State private var localTargetRepMax: Int?
     @State private var localRestSeconds: Int
@@ -690,16 +694,22 @@ private struct TemplateEditorExerciseRow: View {
         self.onMoveComponentUp = onMoveComponentUp
         self.onMoveComponentDown = onMoveComponentDown
         self.onDeleteComponent = onDeleteComponent
+        self._localNotes = State(initialValue: draftStore.notes)
         self._localTargetRepMin = State(initialValue: draftStore.targetRepMin)
         self._localTargetRepMax = State(initialValue: draftStore.targetRepMax)
         self._localRestSeconds = State(initialValue: draftStore.restSeconds)
         self._localSetDrafts = State(initialValue: draftStore.setDrafts)
         self._editingCoordinator = State(
             initialValue: TemplateExerciseEditingCoordinator(
+                notes: draftStore.notes,
                 targetRepMin: draftStore.targetRepMin,
                 targetRepMax: draftStore.targetRepMax,
                 restSeconds: draftStore.restSeconds,
                 setDrafts: draftStore.setDrafts,
+                onNotesCommitted: { notes in
+                    guard draftStore.notes != notes else { return }
+                    draftStore.notes = notes
+                },
                 onRepRangeCommitted: { minReps, maxReps in
                     if draftStore.targetRepMin != minReps {
                         draftStore.targetRepMin = minReps
@@ -740,6 +750,7 @@ private struct TemplateEditorExerciseRow: View {
                 canMoveUp: canMoveUp,
                 canMoveDown: canMoveDown,
                 preferredLoadUnit: preferredLoadUnit,
+                notes: localNotes,
                 targetRepMin: localTargetRepMin,
                 targetRepMax: localTargetRepMax,
                 restSeconds: localRestSeconds,
@@ -747,6 +758,7 @@ private struct TemplateEditorExerciseRow: View {
                 isExpanded: draftStore.isExpanded,
                 onCommitRequest: {
                     editingCoordinator.requestImmediateCommit(
+                        notes: localNotes,
                         targetRepMin: localTargetRepMin,
                         targetRepMax: localTargetRepMax,
                         restSeconds: localRestSeconds,
@@ -754,6 +766,10 @@ private struct TemplateEditorExerciseRow: View {
                     )
                 },
                 onExpandedChanged: updateExpanded,
+                onNotesChanged: { value in
+                    localNotes = value
+                    editingCoordinator.scheduleNotesCommit(value)
+                },
                 onTargetRepMinChanged: { value in
                     localTargetRepMin = value
                     editingCoordinator.scheduleRepRangeCommit(
@@ -791,6 +807,7 @@ private struct TemplateEditorExerciseRow: View {
         }
         .onChange(of: draftStore.targetRepMin) { _, newValue in
             editingCoordinator.syncCommittedState(
+                notes: draftStore.notes,
                 targetRepMin: newValue,
                 targetRepMax: draftStore.targetRepMax,
                 restSeconds: draftStore.restSeconds,
@@ -801,6 +818,7 @@ private struct TemplateEditorExerciseRow: View {
         }
         .onChange(of: draftStore.targetRepMax) { _, newValue in
             editingCoordinator.syncCommittedState(
+                notes: draftStore.notes,
                 targetRepMin: draftStore.targetRepMin,
                 targetRepMax: newValue,
                 restSeconds: draftStore.restSeconds,
@@ -811,6 +829,7 @@ private struct TemplateEditorExerciseRow: View {
         }
         .onChange(of: draftStore.restSeconds) { _, newValue in
             editingCoordinator.syncCommittedState(
+                notes: draftStore.notes,
                 targetRepMin: draftStore.targetRepMin,
                 targetRepMax: draftStore.targetRepMax,
                 restSeconds: newValue,
@@ -821,6 +840,7 @@ private struct TemplateEditorExerciseRow: View {
         }
         .onChange(of: draftStore.setDrafts) { _, newValue in
             editingCoordinator.syncCommittedState(
+                notes: draftStore.notes,
                 targetRepMin: draftStore.targetRepMin,
                 targetRepMax: draftStore.targetRepMax,
                 restSeconds: draftStore.restSeconds,
@@ -828,6 +848,17 @@ private struct TemplateEditorExerciseRow: View {
             )
             guard localSetDrafts != newValue else { return }
             localSetDrafts = newValue
+        }
+        .onChange(of: draftStore.notes) { _, newValue in
+            editingCoordinator.syncCommittedState(
+                notes: newValue,
+                targetRepMin: draftStore.targetRepMin,
+                targetRepMax: draftStore.targetRepMax,
+                restSeconds: draftStore.restSeconds,
+                setDrafts: draftStore.setDrafts
+            )
+            guard localNotes != newValue else { return }
+            localNotes = newValue
         }
     }
 
@@ -847,6 +878,7 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
     let canMoveUp: Bool
     let canMoveDown: Bool
     let preferredLoadUnit: TemplateLoadUnit
+    let notes: String
     let targetRepMin: Int?
     let targetRepMax: Int?
     let restSeconds: Int
@@ -855,6 +887,7 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
 
     let onCommitRequest: () -> Void
     let onExpandedChanged: (Bool) -> Void
+    let onNotesChanged: (String) -> Void
     let onTargetRepMinChanged: (Int?) -> Void
     let onTargetRepMaxChanged: (Int?) -> Void
     let onRestChanged: (Int) -> Void
@@ -880,6 +913,7 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
             && lhs.canMoveUp == rhs.canMoveUp
             && lhs.canMoveDown == rhs.canMoveDown
             && lhs.preferredLoadUnit == rhs.preferredLoadUnit
+            && lhs.notes == rhs.notes
             && lhs.targetRepMin == rhs.targetRepMin
             && lhs.targetRepMax == rhs.targetRepMax
             && lhs.restSeconds == rhs.restSeconds
@@ -896,14 +930,25 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
             exerciseAccessibilityIdentifier: exerciseAccessibilityIdentifier,
             recommendation: recommendation,
             supplementaryContent: AnyView(
-                TemplateExerciseComponentsSection(
-                    components: components,
-                    accessibilityIDPrefix: componentAccessibilityIDPrefix,
-                    onAddComponent: onAddComponent,
-                    onMoveComponentUp: onMoveComponentUp,
-                    onMoveComponentDown: onMoveComponentDown,
-                    onDeleteComponent: onDeleteComponent
-                )
+                VStack(alignment: .leading, spacing: 12) {
+                    WGJExerciseNotesEditor(
+                        placeholder: "Add notes for this exercise",
+                        accessibilityIdentifier: "\(exerciseAccessibilityIdentifier)-notes-field",
+                        notes: Binding(
+                            get: { notes },
+                            set: { onNotesChanged($0) }
+                        )
+                    )
+
+                    TemplateExerciseComponentsSection(
+                        components: components,
+                        accessibilityIDPrefix: componentAccessibilityIDPrefix,
+                        onAddComponent: onAddComponent,
+                        onMoveComponentUp: onMoveComponentUp,
+                        onMoveComponentDown: onMoveComponentDown,
+                        onDeleteComponent: onDeleteComponent
+                    )
+                }
             ),
             initiallyExpanded: false,
             isExpanded: Binding(

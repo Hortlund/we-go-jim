@@ -95,6 +95,7 @@ struct TemplateExerciseDraft: Identifiable, Equatable {
     var exerciseNameSnapshot: String
     var categorySnapshot: String
     var muscleSummarySnapshot: String
+    var notes: String
     var targetRepMin: Int?
     var targetRepMax: Int?
     var restSeconds: Int
@@ -107,6 +108,7 @@ struct TemplateExerciseDraft: Identifiable, Equatable {
         exerciseNameSnapshot: String,
         categorySnapshot: String,
         muscleSummarySnapshot: String,
+        notes: String = "",
         targetRepMin: Int? = nil,
         targetRepMax: Int? = nil,
         restSeconds: Int = 120,
@@ -126,6 +128,7 @@ struct TemplateExerciseDraft: Identifiable, Equatable {
         self.exerciseNameSnapshot = primaryComponent?.exerciseNameSnapshot ?? exerciseNameSnapshot
         self.categorySnapshot = primaryComponent?.categorySnapshot ?? categorySnapshot
         self.muscleSummarySnapshot = primaryComponent?.muscleSummarySnapshot ?? muscleSummarySnapshot
+        self.notes = notes
         self.targetRepMin = targetRepMin
         self.targetRepMax = targetRepMax
         self.restSeconds = restSeconds
@@ -150,6 +153,7 @@ struct TemplateExerciseDraft: Identifiable, Equatable {
         self.exerciseNameSnapshot = primaryComponent?.exerciseNameSnapshot ?? model.exerciseNameSnapshot
         self.categorySnapshot = primaryComponent?.categorySnapshot ?? model.categorySnapshot
         self.muscleSummarySnapshot = primaryComponent?.muscleSummarySnapshot ?? model.muscleSummarySnapshot
+        self.notes = model.notes
         self.targetRepMin = model.targetRepMin
         self.targetRepMax = model.targetRepMax
         self.restSeconds = model.restSeconds
@@ -186,6 +190,7 @@ struct TemplateExerciseDraft: Identifiable, Equatable {
         self.exerciseNameSnapshot = catalogItem.displayName
         self.categorySnapshot = catalogItem.categoryName
         self.muscleSummarySnapshot = catalogItem.primaryMuscleNames
+        self.notes = ""
         self.targetRepMin = nil
         self.targetRepMax = nil
         self.restSeconds = 120
@@ -434,6 +439,7 @@ final class TemplateRepository {
                 exerciseNameSnapshot: exercise.exerciseNameSnapshot,
                 categorySnapshot: exercise.categorySnapshot,
                 muscleSummarySnapshot: exercise.muscleSummarySnapshot,
+                notes: exercise.notes,
                 targetRepMin: nil,
                 targetRepMax: nil,
                 restSeconds: exercise.restSeconds,
@@ -487,6 +493,20 @@ final class TemplateRepository {
         let normalized = sanitizedRepRange(min: minReps, max: maxReps)
         exercise.targetRepMin = normalized.min
         exercise.targetRepMax = normalized.max
+        exercise.updatedAt = .now
+        try modelContext.save()
+    }
+
+    func updateExerciseNotes(templateExerciseID: UUID, notes: String) throws {
+        guard let exercise = try templateExercise(id: templateExerciseID) else {
+            throw TemplateRepositoryError.templateExerciseNotFound
+        }
+
+        guard exercise.notes != notes else {
+            return
+        }
+
+        exercise.notes = notes
         exercise.updatedAt = .now
         try modelContext.save()
     }
@@ -982,6 +1002,7 @@ final class TemplateRepository {
                     exerciseNameSnapshot: mutation.exerciseNameSnapshot,
                     categorySnapshot: mutation.categorySnapshot,
                     muscleSummarySnapshot: mutation.muscleSummarySnapshot,
+                    notes: mutation.notes,
                     targetRepMin: mutation.targetRepMin,
                     targetRepMax: mutation.targetRepMax,
                     restSeconds: mutation.restSeconds,
@@ -1021,6 +1042,7 @@ final class TemplateRepository {
                 exerciseNameSnapshot: primaryComponent?.exerciseNameSnapshot ?? mutation.exerciseNameSnapshot,
                 categorySnapshot: primaryComponent?.categorySnapshot ?? mutation.categorySnapshot,
                 muscleSummarySnapshot: primaryComponent?.muscleSummarySnapshot ?? mutation.muscleSummarySnapshot,
+                notes: mutation.notes,
                 targetRepMin: normalizedRange.min,
                 targetRepMax: normalizedRange.max,
                 restSeconds: normalizedRest,
@@ -1034,6 +1056,7 @@ final class TemplateRepository {
 
             exercise.templateID = templateID
             exercise.template = template
+            exercise.notes = mutation.notes
             exercise.targetRepMin = normalizedRange.min
             exercise.targetRepMax = normalizedRange.max
             exercise.restSeconds = normalizedRest
@@ -1223,6 +1246,7 @@ final class TemplateRepository {
                 exerciseNameSnapshot: primaryComponent?.exerciseNameSnapshot ?? draft.exerciseNameSnapshot,
                 categorySnapshot: primaryComponent?.categorySnapshot ?? draft.categorySnapshot,
                 muscleSummarySnapshot: primaryComponent?.muscleSummarySnapshot ?? draft.muscleSummarySnapshot,
+                notes: draft.notes,
                 targetRepMin: normalizedRange.min,
                 targetRepMax: normalizedRange.max,
                 restSeconds: normalizedRest,
@@ -1278,6 +1302,7 @@ final class TemplateRepository {
             exerciseNameSnapshot: primaryComponent?.exerciseNameSnapshot ?? draft.exerciseNameSnapshot,
             categorySnapshot: primaryComponent?.categorySnapshot ?? draft.categorySnapshot,
             muscleSummarySnapshot: primaryComponent?.muscleSummarySnapshot ?? draft.muscleSummarySnapshot,
+            notes: draft.notes,
             targetRepMin: normalizedRange.min,
             targetRepMax: normalizedRange.max,
             restSeconds: normalizedRest,
