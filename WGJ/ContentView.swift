@@ -50,20 +50,19 @@ struct ContentView: View {
         .task {
             installUITestPendingTemplateIfNeeded()
             restTimerState.clearExpiredRestTimerIfNeeded()
-            requestAppMaintenance()
             syncWorkoutNotificationPreferences()
             updateIdleTimerState()
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 restTimerState.clearExpiredRestTimerIfNeeded()
-                requestAppMaintenance()
+                requestAppMaintenanceIfNeeded()
             }
             updateIdleTimerState()
         }
         .onChange(of: appPhase) { _, newPhase in
             if newPhase == .main {
-                requestAppMaintenance()
+                requestAppMaintenanceIfNeeded()
                 routePendingTemplateFileIfNeeded()
             }
             updateIdleTimerState()
@@ -170,6 +169,14 @@ struct ContentView: View {
         socialMaintenanceScheduler.schedule {
             await performAppMaintenance()
         }
+    }
+
+    private func requestAppMaintenanceIfNeeded() {
+        guard AppMaintenancePolicy.shouldSchedule(appPhase: appPhase, scenePhase: scenePhase) else {
+            return
+        }
+
+        requestAppMaintenance()
     }
 
     @MainActor
@@ -285,46 +292,6 @@ private enum AppStartupRouting {
 #else
         return false
 #endif
-    }
-}
-
-enum SocialMaintenancePlanner {
-    static func shouldRun(
-        hasKnownMembership: Bool,
-        hasPendingOutboxItems: Bool
-    ) -> Bool {
-        hasKnownMembership || hasPendingOutboxItems
-    }
-}
-
-enum BrosCleanStartPolicy {
-    static let currentSchemaVersion = 1
-    static let defaultsKey = "bros.cleanStartSchemaVersion"
-
-    static func needsLocalReset(appliedVersion: Int) -> Bool {
-        appliedVersion < currentSchemaVersion
-    }
-
-    @MainActor
-    static func applyIfNeeded(
-        modelContext: ModelContext,
-        defaults: UserDefaults = .standard
-    ) {
-        let appliedVersion = defaults.integer(forKey: defaultsKey)
-        guard needsLocalReset(appliedVersion: appliedVersion) else { return }
-
-        if let profile = try? ProfileRepository(modelContext: modelContext).currentProfile() {
-            profile.clearBrosMembership()
-        }
-
-        if let outboxItems = try? modelContext.fetch(FetchDescriptor<SocialOutboxItem>()) {
-            for item in outboxItems {
-                modelContext.delete(item)
-            }
-        }
-
-        try? modelContext.save()
-        defaults.set(currentSchemaVersion, forKey: defaultsKey)
     }
 }
 

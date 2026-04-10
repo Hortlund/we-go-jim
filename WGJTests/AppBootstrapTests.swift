@@ -1,4 +1,5 @@
 import Testing
+import SwiftUI
 @testable import WGJ
 
 struct AppBootstrapTests {
@@ -48,5 +49,14 @@ struct AppBootstrapTests {
         #expect(!BrosCleanStartPolicy.needsLocalReset(
             appliedVersion: BrosCleanStartPolicy.currentSchemaVersion
         ))
+    }
+
+    @Test
+    func appMaintenanceOnlySchedulesInMainActiveState() {
+        #expect(!AppMaintenancePolicy.shouldSchedule(appPhase: .splash, scenePhase: .active))
+        #expect(!AppMaintenancePolicy.shouldSchedule(appPhase: .login, scenePhase: .active))
+        #expect(!AppMaintenancePolicy.shouldSchedule(appPhase: .main, scenePhase: .inactive))
+        #expect(!AppMaintenancePolicy.shouldSchedule(appPhase: .main, scenePhase: .background))
+        #expect(AppMaintenancePolicy.shouldSchedule(appPhase: .main, scenePhase: .active))
     }
 }
