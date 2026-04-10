@@ -235,7 +235,15 @@ struct WorkoutExerciseRowHostView: View, Equatable {
             localSetDrafts = newValue
         }
         .onDisappear {
-            editingCoordinator.flushCommits()
+            flushPendingEditsIfNeeded()
         }
+    }
+
+    private func flushPendingEditsIfNeeded() {
+        guard localSetDrafts != setDrafts || localRestSeconds != restSeconds else { return }
+        editingCoordinator.requestImmediateCommit(
+            setDrafts: localSetDrafts,
+            restSeconds: localRestSeconds
+        )
     }
 }

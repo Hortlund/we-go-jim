@@ -173,7 +173,6 @@ struct WorkoutSessionExerciseGridEditor: View {
         .onAppear(perform: refreshDisplayRows)
         .onDisappear {
             flushPendingEditorState()
-            requestCommitForCurrentState()
         }
         .onChange(of: setDrafts) { _, _ in
             handleSetDraftsChange()

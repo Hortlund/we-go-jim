@@ -22,6 +22,7 @@ struct HistoryDetailView: View {
     @State private var previousByExerciseID: [UUID: [Int: WorkoutPreviousSetSnapshot]] = [:]
     @State private var personalRecordPresentationByExerciseID: [UUID: HistoryExercisePersonalRecordPresentation] = [:]
     @State private var loadedExerciseStateStamp: HistoryExerciseStateStamp?
+    @State private var deferredHydrationTask: Task<Void, Never>?
     @State private var expandedExerciseIDs: [UUID: Bool] = [:]
     @State private var personalRecordSummary = HistoryWorkoutPersonalRecordSummary(highlightedSetCount: 0)
 
@@ -138,6 +139,10 @@ struct HistoryDetailView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(errorMessage)
+        }
+        .onDisappear {
+            deferredHydrationTask?.cancel()
+            deferredHydrationTask = nil
         }
         .wgjMinimalKeyboardToolbar()
     }
@@ -277,47 +282,43 @@ struct HistoryDetailView: View {
     private func loadExerciseStateIfNeeded() async {
         let currentStamp = HistoryExerciseStateStamp(exercises: sessionExercises)
         guard currentStamp != loadedExerciseStateStamp else { return }
+        deferredHydrationTask?.cancel()
+        deferredHydrationTask = nil
 
-        let result = WGJPerformance.measure("history-detail.hydrate") { () -> HistoryExerciseHydrationResult in
+        let result = WGJPerformance.measure("history-detail.hydrate.local") { () -> HistoryExerciseLocalHydrationResult in
             var loadedDrafts: [UUID: [WorkoutSessionSetDraft]] = [:]
             var loadedRests: [UUID: Int] = [:]
-            var loadedPrevious: [UUID: [Int: WorkoutPreviousSetSnapshot]] = [:]
-            let personalRecordPresentation = loadPersonalRecordPresentation()
-            let startedAt = session?.startedAt ?? .now
-            let requestedExerciseUUIDs = Array(Set(sessionExercises.map(\.catalogExerciseUUID)))
-            let previousMaps = (try? sessionRepository.previousSetMaps(
-                forExercises: requestedExerciseUUIDs,
-                before: startedAt,
-                excludingSessionID: sessionID
-            )) ?? [:]
 
             for exercise in sessionExercises {
                 let drafts = makeDrafts(from: exercise)
                 loadedDrafts[exercise.id] = drafts
                 loadedRests[exercise.id] = exercise.restSeconds
-                let base = previousMaps[exercise.catalogExerciseUUID] ?? [:]
-                loadedPrevious[exercise.id] = resolvedPreviousMap(baseMap: base, maxSetCount: drafts.count)
             }
 
-            return HistoryExerciseHydrationResult(
+            return HistoryExerciseLocalHydrationResult(
                 draftsByExerciseID: loadedDrafts,
-                restsByExerciseID: loadedRests,
-                previousByExerciseID: loadedPrevious,
-                personalRecordPresentationByExerciseID: personalRecordPresentation
+                restsByExerciseID: loadedRests
             )
         }
 
         setDraftsByExerciseID = result.draftsByExerciseID
         restByExerciseID = result.restsByExerciseID
-        previousByExerciseID = result.previousByExerciseID
-        personalRecordPresentationByExerciseID = result.personalRecordPresentationByExerciseID
+        previousByExerciseID = previousByExerciseID.filter { result.draftsByExerciseID[$0.key] != nil }
+        let filteredPersonalRecordPresentation = personalRecordPresentationByExerciseID.filter {
+            result.draftsByExerciseID[$0.key] != nil
+        }
+        personalRecordPresentationByExerciseID = filteredPersonalRecordPresentation
         personalRecordSummary = HistoryWorkoutPersonalRecordSummary(
-            highlightedSetCount: result.personalRecordPresentationByExerciseID.values.reduce(0) { partialResult, presentation in
+            highlightedSetCount: filteredPersonalRecordPresentation.values.reduce(0) { partialResult, presentation in
                 partialResult + presentation.highlightedSetCount
             }
         )
         syncExpandedExerciseState()
         loadedExerciseStateStamp = currentStamp
+        scheduleDeferredHydration(
+            for: currentStamp,
+            draftsByExerciseID: result.draftsByExerciseID
+        )
     }
 
     private func resolvedPreviousMap(
@@ -375,6 +376,63 @@ struct HistoryDetailView: View {
             }
         )
         .equatable()
+    }
+
+    @MainActor
+    private func scheduleDeferredHydration(
+        for stamp: HistoryExerciseStateStamp,
+        draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
+    ) {
+        deferredHydrationTask?.cancel()
+        deferredHydrationTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(60))
+            guard !Task.isCancelled, loadedExerciseStateStamp == stamp else { return }
+
+            let loadedPrevious = WGJPerformance.measure("history-detail.hydrate.history") {
+                loadPreviousByExerciseID(using: draftsByExerciseID)
+            }
+            guard !Task.isCancelled, loadedExerciseStateStamp == stamp else { return }
+            previousByExerciseID = loadedPrevious
+
+            await Task.yield()
+            guard !Task.isCancelled, loadedExerciseStateStamp == stamp else { return }
+
+            let personalRecordPresentation = WGJPerformance.measure("history-detail.hydrate.prs") {
+                loadPersonalRecordPresentation()
+            }
+            guard !Task.isCancelled, loadedExerciseStateStamp == stamp else { return }
+            personalRecordPresentationByExerciseID = personalRecordPresentation
+            personalRecordSummary = HistoryWorkoutPersonalRecordSummary(
+                highlightedSetCount: personalRecordPresentation.values.reduce(0) { partialResult, presentation in
+                    partialResult + presentation.highlightedSetCount
+                }
+            )
+            deferredHydrationTask = nil
+        }
+    }
+
+    @MainActor
+    private func loadPreviousByExerciseID(
+        using draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
+    ) -> [UUID: [Int: WorkoutPreviousSetSnapshot]] {
+        let startedAt = session?.startedAt ?? .now
+        let requestedExerciseUUIDs = Array(Set(sessionExercises.map(\.catalogExerciseUUID)))
+        let previousMaps = (try? sessionRepository.previousSetMaps(
+            forExercises: requestedExerciseUUIDs,
+            before: startedAt,
+            excludingSessionID: sessionID
+        )) ?? [:]
+
+        var loadedPrevious: [UUID: [Int: WorkoutPreviousSetSnapshot]] = [:]
+        loadedPrevious.reserveCapacity(sessionExercises.count)
+
+        for exercise in sessionExercises {
+            let drafts = draftsByExerciseID[exercise.id] ?? makeDrafts(from: exercise)
+            let base = previousMaps[exercise.catalogExerciseUUID] ?? [:]
+            loadedPrevious[exercise.id] = resolvedPreviousMap(baseMap: base, maxSetCount: drafts.count)
+        }
+
+        return loadedPrevious
     }
 
     private func saveChanges() {
@@ -529,11 +587,9 @@ struct HistoryDetailView: View {
     }
 }
 
-private struct HistoryExerciseHydrationResult {
+private struct HistoryExerciseLocalHydrationResult {
     let draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
     let restsByExerciseID: [UUID: Int]
-    let previousByExerciseID: [UUID: [Int: WorkoutPreviousSetSnapshot]]
-    let personalRecordPresentationByExerciseID: [UUID: HistoryExercisePersonalRecordPresentation]
 }
 
 private struct HistoryExerciseStateStamp: Hashable {

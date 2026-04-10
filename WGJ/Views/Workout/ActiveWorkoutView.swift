@@ -30,6 +30,7 @@ struct ActiveWorkoutView: View {
     @State private var componentResolutionByExerciseID: [UUID: ExerciseComponentRotationResolution] = [:]
     @State private var catalogMatchesByUUID: [String: ExerciseCatalogItem] = [:]
     @State private var loadedExerciseStateStamp: ActiveWorkoutExerciseStateStamp?
+    @State private var deferredHydrationTask: Task<Void, Never>?
     @State private var cardStateController = ActiveWorkoutExerciseCardStateController()
 
     @State private var sessionNameDraft = ""
@@ -327,6 +328,8 @@ struct ActiveWorkoutView: View {
                 isCancelArmed = false
                 pendingCompletionTask?.cancel()
                 pendingCompletionTask = nil
+                deferredHydrationTask?.cancel()
+                deferredHydrationTask = nil
                 flushPendingSaves()
             }
             .alert("Workout Error", isPresented: $showingError) {
@@ -724,6 +727,8 @@ struct ActiveWorkoutView: View {
         discardRemovedExerciseState(keeping: Set(sessionExercises.map(\.id)))
         let currentStamp = exerciseHydrationStamp
         guard currentStamp != loadedExerciseStateStamp else { return }
+        deferredHydrationTask?.cancel()
+        deferredHydrationTask = nil
 
         let result = WGJPerformance.measure("active-workout.hydrate.local") { () -> ActiveWorkoutHydrationResult in
             var loadedDrafts: [UUID: [WorkoutSessionSetDraft]] = [:]
@@ -758,6 +763,7 @@ struct ActiveWorkoutView: View {
         lastPersistedRestByExerciseID = result.restsByExerciseID
         catalogMatchesByUUID = result.catalogMatchesByUUID
         previousByExerciseID = previousByExerciseID.filter { result.draftsByExerciseID[$0.key] != nil }
+        componentResolutionByExerciseID = componentResolutionByExerciseID.filter { result.draftsByExerciseID[$0.key] != nil }
         let completedExerciseIDs = Set(
             result.draftsByExerciseID.compactMap { exerciseID, drafts in
                 isExerciseCompleted(drafts) ? exerciseID : nil
@@ -781,18 +787,38 @@ struct ActiveWorkoutView: View {
         await Task.yield()
         guard !Task.isCancelled, currentStamp == exerciseHydrationStamp else { return }
         shouldTrackVisibleScrollTarget = true
+        scheduleDeferredHydration(
+            for: currentStamp,
+            draftsByExerciseID: result.draftsByExerciseID
+        )
+    }
 
-        let loadedPrevious = WGJPerformance.measure("active-workout.hydrate.history") {
-            loadPreviousByExerciseID(using: result.draftsByExerciseID)
-        }
-        guard !Task.isCancelled, currentStamp == exerciseHydrationStamp else { return }
-        previousByExerciseID = loadedPrevious
+    @MainActor
+    private func scheduleDeferredHydration(
+        for stamp: ActiveWorkoutExerciseStateStamp,
+        draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
+    ) {
+        deferredHydrationTask?.cancel()
+        deferredHydrationTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(80))
+            guard !Task.isCancelled, loadedExerciseStateStamp == stamp else { return }
 
-        let loadedComponentResolutions = WGJPerformance.measure("active-workout.hydrate.components") {
-            loadComponentResolutionByExerciseID()
+            let loadedPrevious = WGJPerformance.measure("active-workout.hydrate.history") {
+                loadPreviousByExerciseID(using: draftsByExerciseID)
+            }
+            guard !Task.isCancelled, loadedExerciseStateStamp == stamp else { return }
+            previousByExerciseID = loadedPrevious
+
+            await Task.yield()
+            guard !Task.isCancelled, loadedExerciseStateStamp == stamp else { return }
+
+            let loadedComponentResolutions = WGJPerformance.measure("active-workout.hydrate.components") {
+                loadComponentResolutionByExerciseID()
+            }
+            guard !Task.isCancelled, loadedExerciseStateStamp == stamp else { return }
+            componentResolutionByExerciseID = loadedComponentResolutions
+            deferredHydrationTask = nil
         }
-        guard !Task.isCancelled, currentStamp == exerciseHydrationStamp else { return }
-        componentResolutionByExerciseID = loadedComponentResolutions
     }
 
     @MainActor
