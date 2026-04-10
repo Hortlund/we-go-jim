@@ -475,6 +475,56 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testActiveWorkoutGuidanceBadgeExpandsCoachTip() throws {
+        let app = launchApp(launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Guidance Badge Workout",
+                notes: "Smoke the coach guidance badge.",
+                exercises: [
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "ui-guidance-bench",
+                        exerciseNameSnapshot: "Bench Press",
+                        categorySnapshot: "Chest",
+                        muscleSummarySnapshot: "Chest, Triceps",
+                        targetRepMin: 6,
+                        targetRepMax: 8,
+                        restSeconds: 120,
+                        sets: [
+                            templatePayloadSet(
+                                targetReps: 6,
+                                targetWeight: 100,
+                                loadUnit: "kg",
+                                restSeconds: 120,
+                                isWarmup: false
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+        ])
+
+        startPreviewedTemplateWorkout(in: app)
+
+        let badgeButton = identifiedElement(
+            "active-workout-exercise-ui-guidance-bench-guidance-badge-button",
+            in: app
+        )
+        let detail = identifiedElement(
+            "active-workout-exercise-ui-guidance-bench-guidance-detail",
+            in: app
+        )
+
+        XCTAssertTrue(badgeButton.waitForExistence(timeout: 5))
+        XCTAssertFalse(detail.exists)
+
+        badgeButton.tap()
+        XCTAssertTrue(detail.waitForExistence(timeout: 5))
+
+        badgeButton.tap()
+        XCTAssertTrue(waitForElementToDisappear(detail, timeout: 5))
+    }
+
+    @MainActor
     func testActiveWorkoutRestoreKeepsScrolledExerciseVisibleAfterMinimize() throws {
         let app = launchApp(launchEnvironment: [
             "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(

@@ -131,7 +131,7 @@ struct TrainingGuidanceServiceTests {
         #expect(cue?.suggestedLoadUnit == .kg)
         #expect(cue?.suggestedRepRange == 6...8)
         let increaseWeightText = "\(WGJFormatters.decimalString(102.5)) kg"
-        #expect(cue?.summary == "You cleared the whole range. Go to \(increaseWeightText) next time and own 6-8 clean reps.")
+        #expect(cue?.summary == "You cleared the whole range. Go to \(increaseWeightText) next time and bring it back to 6-8 clean reps.")
     }
 
     @Test
@@ -156,7 +156,7 @@ struct TrainingGuidanceServiceTests {
         #expect(cue?.suggestedLoadUnit == .kg)
         #expect(cue?.suggestedRepRange == 5...8)
         let decreaseWeightText = "\(WGJFormatters.decimalString(137.5)) kg"
-        #expect(cue?.summary == "You missed the floor of the range. Drop to \(decreaseWeightText), take your rest, and rebuild 5-8 clean reps.")
+        #expect(cue?.summary == "You missed the floor. Drop to \(decreaseWeightText) next time, take your rest, and rebuild 5-8 clean reps.")
     }
 
     @Test
@@ -259,10 +259,13 @@ struct TrainingGuidanceServiceTests {
 
         let presentation = ActiveWorkoutExerciseGuidancePresentation.make(cue: cue)
 
-        #expect(presentation?.title == "You earned a load jump")
+        #expect(presentation?.title == "Go up in load next time")
         let nextWeightText = "\(WGJFormatters.decimalString(102.5)) kg"
-        #expect(presentation?.summary == "You cleared the whole range. Go to \(nextWeightText) next time and own 6-8 clean reps.")
+        #expect(presentation?.summary == "You cleared the whole range. Go to \(nextWeightText) next time and bring it back to 6-8 clean reps.")
         #expect(presentation?.tone == .success)
+        #expect(presentation?.badge.title == "Load Up")
+        #expect(presentation?.badge.subtitle == "Next: \(nextWeightText)")
+        #expect(presentation?.badge.systemImage == "arrow.up.circle.fill")
     }
 
     @Test
@@ -292,9 +295,12 @@ struct TrainingGuidanceServiceTests {
 
         let presentation = ActiveWorkoutExerciseGuidancePresentation.make(cue: cue)
 
-        #expect(presentation?.title == "Stay here and sharpen it")
+        #expect(presentation?.title == "Hold the load")
         #expect(presentation?.summary == "100 kg is right for now. Keep every work set inside 6-8 before you move it.")
         #expect(presentation?.tone == .accent)
+        #expect(presentation?.badge.title == "Hold Load")
+        #expect(presentation?.badge.subtitle == "Next: 100 kg")
+        #expect(presentation?.badge.systemImage == "equal.circle.fill")
     }
 
     @Test
@@ -311,9 +317,12 @@ struct TrainingGuidanceServiceTests {
             setDrafts: []
         )
 
-        #expect(presentation.title == "Coach cue: set the shoulders")
+        #expect(presentation.title == "Warm up and set the shoulders")
         #expect(presentation.summary == "Take 1-2 ramp-up sets before the work sets. Pack the shoulders, keep the path repeatable, and hunt 6-8 reps.")
         #expect(presentation.tone == .accent)
+        #expect(presentation.badge.title == "Warm Up")
+        #expect(presentation.badge.subtitle == "1-2 ramp sets")
+        #expect(presentation.badge.systemImage == "flame.circle.fill")
     }
 
     @Test
@@ -333,9 +342,12 @@ struct TrainingGuidanceServiceTests {
             ]
         )
 
-        #expect(presentation.title == "Repeat that standard")
-        #expect(presentation.summary == "100 kg is landing right where it should. Match the setup and keep the next set in 6-8 clean reps.")
+        #expect(presentation.title == "Add a rep before load")
+        #expect(presentation.summary == "100 kg is still in the pocket. Try to beat 7 with the same setup and keep it inside 6-8.")
         #expect(presentation.tone == .accent)
+        #expect(presentation.badge.title == "Reps Up")
+        #expect(presentation.badge.subtitle == "Same 100 kg")
+        #expect(presentation.badge.systemImage == "arrow.up.circle.fill")
     }
 
     @Test
@@ -354,9 +366,37 @@ struct TrainingGuidanceServiceTests {
             ]
         )
 
-        #expect(presentation.title == "Make bodyweight harder, not sloppier")
-        #expect(presentation.summary == "That last set hit 10 reps. Slow the lowering, add a pause, or progress the variation so the next one still earns 6-8 clean reps.")
+        #expect(presentation.title == "Make the variation harder")
+        #expect(presentation.summary == "That set hit 10 reps. Slow the lowering, add a pause, or progress the variation so the next one comes back to 6-8 clean reps.")
         #expect(presentation.tone == .accent)
+        #expect(presentation.badge.title == "Reps Down")
+        #expect(presentation.badge.subtitle == "Harder variation")
+        #expect(presentation.badge.systemImage == "arrow.down.circle.fill")
+    }
+
+    @Test
+    func activeWorkoutGuidanceUsesRepsUpBadgeWhenSetDropsBelowRange() {
+        let presentation = service.activeWorkoutGuidance(
+            for: TrainingGuidanceCatalogSnapshot(
+                exerciseName: "Bench Press",
+                categoryName: "Chest",
+                equipmentSummary: "Barbell",
+                primaryMuscleNames: "Chest, Triceps"
+            ),
+            targetRepMin: 6,
+            targetRepMax: 8,
+            setDrafts: [
+                makeWorkoutSet(reps: 4, weight: 100, completed: true),
+                makeWorkoutSet(reps: nil, weight: nil, completed: false),
+            ]
+        )
+
+        #expect(presentation.title == "Get the reps back")
+        #expect(presentation.summary == "That set dropped to 4 reps. Take a little more rest or trim the load so the next set gets back into 6-8 clean reps.")
+        #expect(presentation.tone == .caution)
+        #expect(presentation.badge.title == "Reps Up")
+        #expect(presentation.badge.subtitle == "Rest or trim load")
+        #expect(presentation.badge.systemImage == "arrow.up.circle.fill")
     }
 
     @Test

@@ -255,11 +255,9 @@ struct WorkoutSessionExerciseGridEditor: View {
                 }
 
                 if let guidance {
-                    TrainingGuidanceBannerView(
-                        title: guidance.title,
-                        message: guidance.summary,
-                        tone: guidance.tone,
-                        compact: true
+                    ActiveWorkoutGuidanceDisclosureView(
+                        guidance: guidance,
+                        accessibilityIdentifier: exerciseAccessibilityIdentifier
                     )
                 }
 
