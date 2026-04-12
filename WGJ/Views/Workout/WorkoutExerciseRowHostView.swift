@@ -25,6 +25,8 @@ struct WorkoutExerciseRowHostView: View, Equatable {
     let manualCompletionMode: Bool
     let isBozarModeEnabled: Bool
     let isSetEditingEnabled: Bool
+    let isSetCompletionEnabled: Bool
+    let setCompletionGatePresentation: WorkoutSetCompletionGatePresentation?
     let enablesHeaderSwipeDelete: Bool
     let emphasizesExerciseCompletion: Bool
     let canMoveExerciseUp: Bool
@@ -71,6 +73,8 @@ struct WorkoutExerciseRowHostView: View, Equatable {
         manualCompletionMode: Bool = true,
         isBozarModeEnabled: Bool = false,
         isSetEditingEnabled: Bool = true,
+        isSetCompletionEnabled: Bool = true,
+        setCompletionGatePresentation: WorkoutSetCompletionGatePresentation? = nil,
         enablesHeaderSwipeDelete: Bool = true,
         emphasizesExerciseCompletion: Bool = true,
         canMoveExerciseUp: Bool = false,
@@ -111,6 +115,8 @@ struct WorkoutExerciseRowHostView: View, Equatable {
         self.manualCompletionMode = manualCompletionMode
         self.isBozarModeEnabled = isBozarModeEnabled
         self.isSetEditingEnabled = isSetEditingEnabled
+        self.isSetCompletionEnabled = isSetCompletionEnabled
+        self.setCompletionGatePresentation = setCompletionGatePresentation
         self.enablesHeaderSwipeDelete = enablesHeaderSwipeDelete
         self.emphasizesExerciseCompletion = emphasizesExerciseCompletion
         self.canMoveExerciseUp = canMoveExerciseUp
@@ -166,6 +172,8 @@ struct WorkoutExerciseRowHostView: View, Equatable {
             && lhs.manualCompletionMode == rhs.manualCompletionMode
             && lhs.isBozarModeEnabled == rhs.isBozarModeEnabled
             && lhs.isSetEditingEnabled == rhs.isSetEditingEnabled
+            && lhs.isSetCompletionEnabled == rhs.isSetCompletionEnabled
+            && lhs.setCompletionGatePresentation == rhs.setCompletionGatePresentation
             && lhs.enablesHeaderSwipeDelete == rhs.enablesHeaderSwipeDelete
             && lhs.emphasizesExerciseCompletion == rhs.emphasizesExerciseCompletion
             && lhs.canMoveExerciseUp == rhs.canMoveExerciseUp
@@ -217,6 +225,8 @@ struct WorkoutExerciseRowHostView: View, Equatable {
             manualCompletionMode: manualCompletionMode,
             isBozarModeEnabled: isBozarModeEnabled,
             isSetEditingEnabled: isSetEditingEnabled,
+            isSetCompletionEnabled: isSetCompletionEnabled,
+            setCompletionGatePresentation: setCompletionGatePresentation,
             enablesHeaderSwipeDelete: enablesHeaderSwipeDelete,
             emphasizesExerciseCompletion: emphasizesExerciseCompletion,
             onCommitRequest: { drafts, restSeconds in

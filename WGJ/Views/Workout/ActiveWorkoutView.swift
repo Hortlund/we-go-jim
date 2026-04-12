@@ -599,10 +599,14 @@ struct ActiveWorkoutView: View {
             exerciseNotes: resolvedNotes(for: exercise),
             restSeconds: resolvedRest(for: exercise),
             setDrafts: drafts,
-            isExpanded: areMainExercisesUnlocked && cardStateController.isExpanded(for: exerciseID),
+            isExpanded: cardStateController.isExpanded(for: exerciseID),
             manualCompletionMode: true,
             isBozarModeEnabled: currentProfile?.isBozarModeEnabled ?? false,
-            isSetEditingEnabled: areMainExercisesUnlocked,
+            isSetEditingEnabled: true,
+            isSetCompletionEnabled: areMainExercisesUnlocked,
+            setCompletionGatePresentation: areMainExercisesUnlocked
+                ? nil
+                : .preWorkoutCardioRequired,
             canMoveExerciseUp: index > 0,
             canMoveExerciseDown: index < sessionExercises.count - 1,
             onExerciseNotesCommitted: { notes in
@@ -813,10 +817,12 @@ struct ActiveWorkoutView: View {
         cardStateController.sync(
             exerciseIDs: sessionExercises.map(\.id),
             completedExerciseIDs: completedExerciseIDs,
-            firstIncompleteExerciseID: firstIncompleteExerciseID(
-                from: sessionExercises,
-                draftsByExerciseID: result.draftsByExerciseID
-            )
+            firstIncompleteExerciseID: areMainExercisesUnlocked
+                ? firstIncompleteExerciseID(
+                    from: sessionExercises,
+                    draftsByExerciseID: result.draftsByExerciseID
+                )
+                : nil
         )
         loadedExerciseStateStamp = currentStamp
         seedOrRepairScrollTarget(
@@ -1876,6 +1882,7 @@ struct ActiveWorkoutView: View {
                 from: sessionExercises,
                 draftsByExerciseID: setDraftsByExerciseID
             ) {
+                cardStateController.setExpanded(true, for: firstIncompleteExerciseID)
                 scrollToTarget(
                     ActiveWorkoutScrollTarget.exercise(firstIncompleteExerciseID),
                     using: scrollProxy

@@ -25,6 +25,8 @@ struct WorkoutSessionExerciseGridEditor: View {
     var manualCompletionMode: Bool
     var isBozarModeEnabled: Bool
     var isSetEditingEnabled: Bool
+    var isSetCompletionEnabled: Bool
+    var setCompletionGatePresentation: WorkoutSetCompletionGatePresentation?
     var enablesHeaderSwipeDelete: Bool
     var emphasizesExerciseCompletion: Bool
     var onCommitRequest: (([WorkoutSessionSetDraft], Int) -> Void)?
@@ -49,6 +51,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     @State private var repsInputTextBySetID: [UUID: String] = [:]
     @State private var weightInputTextBySetID: [UUID: String] = [:]
     @State private var pendingBozarCompletionSetIDs: Set<UUID> = []
+    @State private var revealedCompletionGateSetIDs: Set<UUID> = []
     @State private var pendingDisplayRefreshTask: Task<Void, Never>?
     @State private var suppressNextFocusLossCommit = false
     @FocusState private var focusedInput: SetInputFocus?
@@ -90,6 +93,8 @@ struct WorkoutSessionExerciseGridEditor: View {
         manualCompletionMode: Bool = false,
         isBozarModeEnabled: Bool = false,
         isSetEditingEnabled: Bool = true,
+        isSetCompletionEnabled: Bool = true,
+        setCompletionGatePresentation: WorkoutSetCompletionGatePresentation? = nil,
         enablesHeaderSwipeDelete: Bool = false,
         emphasizesExerciseCompletion: Bool = false,
         onCommitRequest: (([WorkoutSessionSetDraft], Int) -> Void)? = nil,
@@ -125,6 +130,8 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.manualCompletionMode = manualCompletionMode
         self.isBozarModeEnabled = isBozarModeEnabled
         self.isSetEditingEnabled = isSetEditingEnabled
+        self.isSetCompletionEnabled = isSetCompletionEnabled
+        self.setCompletionGatePresentation = setCompletionGatePresentation
         self.enablesHeaderSwipeDelete = enablesHeaderSwipeDelete
         self.emphasizesExerciseCompletion = emphasizesExerciseCompletion
         self.onCommitRequest = onCommitRequest
@@ -197,6 +204,11 @@ struct WorkoutSessionExerciseGridEditor: View {
         }
         .onChange(of: focusedInput) { previousFocus, newFocus in
             handleFocusedInputChange(previousFocus, newFocus)
+        }
+        .onChange(of: isSetCompletionEnabled) { _, isEnabled in
+            if isEnabled {
+                revealedCompletionGateSetIDs.removeAll()
+            }
         }
     }
 
@@ -355,6 +367,10 @@ struct WorkoutSessionExerciseGridEditor: View {
                     headerIcon(symbol: isExpanded ? "chevron.up.circle.fill" : "chevron.down.circle.fill")
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier(
+                    exerciseAccessibilityIdentifier.map { "\($0)-expand-button" }
+                        ?? "workout-exercise-expand-button"
+                )
             }
         }
     }
@@ -1838,6 +1854,8 @@ struct WorkoutSessionExerciseGridEditor: View {
     private func completionRow(for row: WorkoutSessionExerciseSetRowDisplaySnapshot) -> some View {
         let index = row.index
         let set = row.set
+        let completionGatePresentation = isSetCompletionEnabled ? nil : setCompletionGatePresentation
+        let isCompletionGateRevealed = revealedCompletionGateSetIDs.contains(set.id)
 
         return Group {
             if pendingBozarCompletionSetIDs.contains(set.id) {
@@ -1889,17 +1907,79 @@ struct WorkoutSessionExerciseGridEditor: View {
                         )
                 )
             } else {
-                Button {
-                    requestCompletionChange(at: index, isCompleted: true)
-                } label: {
-                    Label(row.completionButtonTitle, systemImage: "checkmark.circle.fill")
-                        .frame(maxWidth: .infinity)
-                        .wgjSingleLineText(scale: 0.82)
+                VStack(alignment: .leading, spacing: 8) {
+                    if let completionGatePresentation {
+                        completionGateNotice(
+                            completionGatePresentation,
+                            at: index,
+                            isRevealed: isCompletionGateRevealed
+                        )
+                        Button {
+                            requestCompletionChange(at: index, isCompleted: true)
+                        } label: {
+                            Label(row.completionButtonTitle, systemImage: "lock.fill")
+                                .frame(maxWidth: .infinity)
+                                .wgjSingleLineText(scale: 0.82)
+                                .foregroundStyle(WGJTheme.accentGold)
+                                .padding(.vertical, 12)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .fill(WGJTheme.accentGold.opacity(isCompletionGateRevealed ? 0.16 : 0.10))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                .stroke(WGJTheme.accentGold.opacity(isCompletionGateRevealed ? 0.40 : 0.24), lineWidth: 1)
+                                        )
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!isSetEditingEnabled || set.isLocked)
+                        .accessibilityIdentifier("workout-set-\(index)-completion-button")
+                    } else {
+                        Button {
+                            requestCompletionChange(at: index, isCompleted: true)
+                        } label: {
+                            Label(row.completionButtonTitle, systemImage: "checkmark.circle.fill")
+                                .frame(maxWidth: .infinity)
+                                .wgjSingleLineText(scale: 0.82)
+                        }
+                        .buttonStyle(WGJCompactPrimaryButtonStyle())
+                        .disabled(!isSetEditingEnabled || set.isLocked)
+                        .accessibilityIdentifier("workout-set-\(index)-completion-button")
+                    }
                 }
-                .buttonStyle(WGJCompactPrimaryButtonStyle())
-                .disabled(!isSetEditingEnabled || set.isLocked)
             }
         }
+    }
+
+    private func completionGateNotice(
+        _ presentation: WorkoutSetCompletionGatePresentation,
+        at index: Int,
+        isRevealed: Bool
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(presentation.title, systemImage: presentation.iconSystemName)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(WGJTheme.accentGold)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if isRevealed {
+                Text(presentation.detail)
+                    .font(.caption)
+                    .foregroundStyle(WGJTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("workout-set-\(index)-completion-gate-message")
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(WGJTheme.accentGold.opacity(isRevealed ? 0.14 : 0.10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(WGJTheme.accentGold.opacity(isRevealed ? 0.34 : 0.22), lineWidth: 1)
+                )
+        )
     }
 
     private func toggleCompletion(at index: Int) {
@@ -1910,6 +1990,14 @@ struct WorkoutSessionExerciseGridEditor: View {
     private func requestCompletionChange(at index: Int, isCompleted: Bool) {
         guard setDrafts.indices.contains(index) else { return }
         guard !setDrafts[index].isLocked else { return }
+        if isCompleted, !isSetCompletionEnabled {
+            _ = withAnimation(.easeInOut(duration: 0.2)) {
+                revealedCompletionGateSetIDs.insert(setDrafts[index].id)
+            }
+            return
+        }
+
+        revealedCompletionGateSetIDs.remove(setDrafts[index].id)
         let focusedSetInput = focusedInput?.setID == setDrafts[index].id ? focusedInput : nil
 
         guard isCompleted else {
@@ -2220,6 +2308,18 @@ private struct WorkoutSessionExerciseSetRowDisplaySnapshot: Identifiable, Equata
     let targetRepsText: String?
     let inlineHintPresentation: WorkoutSetInlineHintPresentation?
     let completionButtonTitle: String
+}
+
+struct WorkoutSetCompletionGatePresentation: Equatable {
+    let title: String
+    let detail: String
+    let iconSystemName: String
+
+    static let preWorkoutCardioRequired = WorkoutSetCompletionGatePresentation(
+        title: "Finish pre-workout cardio before completing sets",
+        detail: "Complete the warmup block above before you mark any main-work sets done.",
+        iconSystemName: "lock.fill"
+    )
 }
 
 struct WorkoutSetInlineHintPresentation: Equatable {

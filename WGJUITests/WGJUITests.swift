@@ -1603,21 +1603,20 @@ final class WGJUITests: XCTestCase {
         let preToggle = app.buttons["Complete Pre Cardio"]
         let postToggle = app.buttons["Complete Post Cardio"]
         let exerciseHeader = identifiedElement("active-workout-exercise-gated-bench-1", in: app)
+        let expandButton = identifiedElement("active-workout-exercise-gated-bench-1-expand-button", in: app)
         let weightField = identifiedElement("workout-set-0-weight-field", in: app)
-        let completeSetButton = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
-        ).firstMatch
+        let completeSetButton = identifiedElement("workout-set-0-completion-button", in: app)
+        let completionGateMessage = identifiedElement("workout-set-0-completion-gate-message", in: app)
 
         XCTAssertTrue(preToggle.waitForExistence(timeout: 5))
         XCTAssertTrue(postToggle.waitForExistence(timeout: 5))
         XCTAssertTrue(exerciseHeader.waitForExistence(timeout: 5))
+        XCTAssertTrue(expandButton.waitForExistence(timeout: 5))
 
         XCTAssertFalse(weightField.exists)
-        XCTAssertFalse(completeSetButton.exists)
         XCTAssertFalse(postToggle.isEnabled)
 
-        preToggle.tap()
-
+        expandButton.tap()
         XCTAssertTrue(weightField.waitForExistence(timeout: 5))
         XCTAssertTrue(completeSetButton.waitForExistence(timeout: 5))
         XCTAssertTrue(weightField.isEnabled)
@@ -1625,8 +1624,15 @@ final class WGJUITests: XCTestCase {
         XCTAssertFalse(postToggle.isEnabled)
 
         completeSetButton.tap()
+        XCTAssertTrue(completionGateMessage.waitForExistence(timeout: 5))
+        XCTAssertTrue(completionGateMessage.label.contains("warmup block above"))
+        XCTAssertFalse(postToggle.isEnabled)
 
+        preToggle.tap()
+
+        XCTAssertTrue(completeSetButton.waitForExistence(timeout: 5))
         XCTAssertTrue(postToggle.waitForExistence(timeout: 5))
+        completeSetButton.tap()
         XCTAssertTrue(postToggle.isEnabled)
     }
 
@@ -2203,7 +2209,19 @@ final class WGJUITests: XCTestCase {
                 .waitForExistence(timeout: 5)
         )
         XCTAssertTrue(
+            identifiedElement("template-preview-exercise-row-1-component-summary-last", in: app)
+                .waitForExistence(timeout: 5)
+        )
+        XCTAssertEqual(
+            identifiedElement("template-preview-exercise-row-1-component-summary-last", in: app).label,
+            "Last Reverse Curl"
+        )
+        XCTAssertTrue(
             app.staticTexts["Next Reverse Curl"].waitForExistence(timeout: 5)
+        )
+        XCTAssertTrue(
+            identifiedElement("template-preview-exercise-row-1-options", in: app)
+                .waitForExistence(timeout: 5)
         )
 
         startPreviewedTemplateWorkout(in: app)

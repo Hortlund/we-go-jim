@@ -1275,6 +1275,7 @@ struct StartWorkoutTemplatePreview: Identifiable, Equatable {
         let exerciseName: String
         let componentNames: [String]
         let componentOptionCount: Int
+        let lastExerciseName: String?
         let nextExerciseName: String?
         let focusArea: String?
         let descriptor: String?
@@ -1300,6 +1301,9 @@ struct StartWorkoutTemplatePreview: Identifiable, Equatable {
                 componentNames = orderedComponentNames
             }
             componentOptionCount = componentNames.count
+            lastExerciseName = componentOptionCount > 1
+                ? componentResolution?.lastPerformedComponent?.exerciseNameSnapshot
+                : nil
             nextExerciseName = componentOptionCount > 1
                 ? componentResolution?.nextComponent.exerciseNameSnapshot
                 : nil
@@ -1596,44 +1600,52 @@ private struct TemplateStartPreviewSheet: View {
                         .fill(WGJTheme.accentBlue.opacity(0.12))
                 }
 
-            VStack(alignment: .leading, spacing: 5) {
-                Text(exercise.exerciseName)
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(WGJTheme.textPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("template-preview-exercise-row-\(index)-name")
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(exercise.exerciseName)
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(WGJTheme.textPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("template-preview-exercise-row-\(index)-name")
 
-                if let descriptor = exercise.descriptor {
-                    Text(descriptor)
-                        .font(.caption)
-                        .foregroundStyle(WGJTheme.textSecondary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
+                        if let descriptor = exercise.descriptor {
+                            Text(descriptor)
+                                .font(.caption)
+                                .foregroundStyle(WGJTheme.textSecondary)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text(primaryPrescriptionText(for: exercise))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(WGJTheme.textPrimary)
+
+                        if let secondary = secondaryPrescriptionText(for: exercise) {
+                            Text(secondary)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(WGJTheme.textSecondary)
+                        }
+                    }
                 }
 
                 if exercise.componentOptionCount > 1 {
-                    componentContainerSummary(for: exercise, index: index)
+                    VStack(alignment: .leading, spacing: 8) {
+                        componentContainerSummary(for: exercise, index: index)
 
-                    Text("Options: \(exercise.componentNames.joined(separator: ", "))")
-                        .font(.caption)
-                        .foregroundStyle(WGJTheme.textSecondary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
+                        Text("Options: \(exercise.componentNames.joined(separator: ", "))")
+                            .font(.caption)
+                            .foregroundStyle(WGJTheme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("template-preview-exercise-row-\(index)-options")
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-
-            VStack(alignment: .trailing, spacing: 4) {
-                Text(primaryPrescriptionText(for: exercise))
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(WGJTheme.textPrimary)
-
-                if let secondary = secondaryPrescriptionText(for: exercise) {
-                    Text(secondary)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(WGJTheme.textSecondary)
-                }
-            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
@@ -1655,6 +1667,15 @@ private struct TemplateStartPreviewSheet: View {
                 )
                 .accessibilityIdentifier("template-preview-exercise-row-\(index)-component-summary")
 
+                if let lastExerciseName = exercise.lastExerciseName {
+                    componentSummaryChip(
+                        title: "Last \(lastExerciseName)",
+                        systemImage: "clock.arrow.circlepath",
+                        tint: WGJTheme.accentGold
+                    )
+                    .accessibilityIdentifier("template-preview-exercise-row-\(index)-component-summary-last")
+                }
+
                 if let nextExerciseName = exercise.nextExerciseName {
                     componentSummaryChip(
                         title: "Next \(nextExerciseName)",
@@ -1672,6 +1693,15 @@ private struct TemplateStartPreviewSheet: View {
                     tint: WGJTheme.accentBlue
                 )
                 .accessibilityIdentifier("template-preview-exercise-row-\(index)-component-summary")
+
+                if let lastExerciseName = exercise.lastExerciseName {
+                    componentSummaryChip(
+                        title: "Last \(lastExerciseName)",
+                        systemImage: "clock.arrow.circlepath",
+                        tint: WGJTheme.accentGold
+                    )
+                    .accessibilityIdentifier("template-preview-exercise-row-\(index)-component-summary-last")
+                }
 
                 if let nextExerciseName = exercise.nextExerciseName {
                     componentSummaryChip(
@@ -1693,7 +1723,9 @@ private struct TemplateStartPreviewSheet: View {
         Label(title, systemImage: systemImage)
             .font(.caption.weight(.semibold))
             .foregroundStyle(tint)
-            .lineLimit(1)
+            .lineLimit(2)
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(
