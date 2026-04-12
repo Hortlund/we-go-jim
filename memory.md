@@ -148,4 +148,13 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 - How to Verify Next Time: With an active minimized strip, run the UI flow that scrolls Start Workout template actions above the strip and confirm the target control exists, is hittable, and ends above the strip frame.
 - Status: active
 
+## 2026-04-12 - Workout Metric Overlays Are For Ghost Hints Only
+
+- Date: 2026-04-12
+- Trigger/Problem: Bozar could fill the underlying workout draft correctly while the completed row still looked visually like gray placeholder text instead of a real `Fill Last` value.
+- Root Cause: This over-corrected from a real Bozar rendering bug and replaced explicit non-focused actual-value rendering with `TextField`-only drawing, which made the visible state more fragile again.
+- Durable Rule: Superseded by `2026-04-10 - Workout Grid Needs Explicit Actual-vs-Ghost Rendering After Programmatic Fills`. Keep explicit rendering for both non-focused actual values and ghost hints so programmatic fills do not depend on `TextField` redraw behavior.
+- How to Verify Next Time: Use the `Fill Last` and Bozar UI tests to confirm ghost identifiers disappear and explicit actual-value identifiers appear after a programmatic fill.
+- Status: superseded
+
 Promote a lesson here only when it clears the bar above.

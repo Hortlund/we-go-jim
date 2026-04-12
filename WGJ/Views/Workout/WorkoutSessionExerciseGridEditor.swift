@@ -1246,9 +1246,12 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func weightFieldDisplayState(at index: Int) -> MetricFieldDisplayState? {
         guard setDrafts.indices.contains(index), !isInputFocused(.weight, at: index) else { return nil }
-
         if let valueText = weightActualDisplayText(at: index) {
-            return MetricFieldDisplayState(text: valueText, tone: .actual)
+            return MetricFieldDisplayState(
+                text: valueText,
+                tone: .actual,
+                accessibilityIdentifier: "workout-set-\(index)-weight-actual"
+            )
         }
 
         guard let ghostText = weightGhostText(at: index) else { return nil }
@@ -1261,9 +1264,12 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func repsFieldDisplayState(at index: Int) -> MetricFieldDisplayState? {
         guard setDrafts.indices.contains(index), !isInputFocused(.reps, at: index) else { return nil }
-
         if let valueText = repsActualDisplayText(at: index) {
-            return MetricFieldDisplayState(text: valueText, tone: .actual)
+            return MetricFieldDisplayState(
+                text: valueText,
+                tone: .actual,
+                accessibilityIdentifier: "workout-set-\(index)-reps-actual"
+            )
         }
 
         guard let ghostText = repsGhostText(at: index) else { return nil }
@@ -1931,14 +1937,9 @@ struct WorkoutSessionExerciseGridEditor: View {
                 dismissInputFocus(suppressCommit: true)
             }
             pendingBozarCompletionSetIDs.insert(setID)
-        case .completeImmediately(let updatedDrafts):
-            if let focusedSetInput {
-                syncInputDraft(for: focusedSetInput, using: updatedDrafts[index])
-                dismissInputFocus(suppressCommit: true)
-            }
+        case .completeImmediately:
             pendingBozarCompletionSetIDs.remove(setDrafts[index].id)
-            setDrafts = updatedDrafts
-            setCompletion(true, at: index, draftOverride: updatedDrafts)
+            completeSetUsingBozar(at: index)
         }
     }
 
@@ -2060,11 +2061,23 @@ struct WorkoutSessionExerciseGridEditor: View {
             switch decision {
             case .waitForPreviousPerformance:
                 break
-            case .completeImmediately(let updatedDrafts):
-                setDrafts = updatedDrafts
-                setCompletion(true, at: index, draftOverride: updatedDrafts)
+            case .completeImmediately:
+                completeSetUsingBozar(at: index)
             }
         }
+    }
+
+    private func completeSetUsingBozar(at index: Int) {
+        guard setDrafts.indices.contains(index) else { return }
+
+        // Bozar is intentionally "Fill Last" plus completion, not a separate mutation.
+        if previousPerformanceResolution.previous(at: index) != nil {
+            applyPreviousPerformance(at: index)
+        } else if focusedInput?.setID == setDrafts[index].id {
+            dismissInputFocus(suppressCommit: true)
+        }
+
+        setCompletion(true, at: index)
     }
 
     private func clearInputDraft(for focus: SetInputFocus) {
