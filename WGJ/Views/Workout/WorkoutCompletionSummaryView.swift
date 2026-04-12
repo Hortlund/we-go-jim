@@ -59,7 +59,7 @@ struct WorkoutCompletionSummaryView: View {
                 .font(.headline.weight(.semibold))
                 .foregroundStyle(WGJTheme.textPrimary)
 
-            Text("Saving the session and lining up the victory lap.")
+            Text("Saving the session and preparing your summary.")
                 .font(.subheadline)
                 .foregroundStyle(WGJTheme.textSecondary)
         }
@@ -376,22 +376,22 @@ enum WorkoutCompletionSnapshotBuilder {
         switch personalRecords.count {
         case 0:
             prHeadline = "No new PRs today"
-            prSupportText = "Still stacked \(completedSetCount) completed sets across \(exercises.count) exercise\(exercises.count == 1 ? "" : "s")."
+            prSupportText = "You logged \(completedSetCount) completed sets across \(exercises.count) exercise\(exercises.count == 1 ? "" : "s")."
         case 1:
             prHeadline = "1 new PR today"
-            prSupportText = "Your strongest breakthrough from this session is locked in below."
+            prSupportText = "Your new PR from this session is listed below."
         default:
             prHeadline = "\(personalRecords.count) new PRs today"
-            prSupportText = "Your strongest breakthroughs from this session are locked in below."
+            prSupportText = "Your new PRs from this session are listed below."
         }
 
         return WorkoutCompletionSnapshot(
             sessionID: session.id,
             sessionName: session.name,
-            celebrationTitle: personalRecords.isEmpty ? "Workout Complete" : "Workout Crushed",
+            celebrationTitle: personalRecords.isEmpty ? "Workout Complete" : "New PRs Logged",
             celebrationSubtitle: personalRecords.isEmpty
-                ? "Nice work. Session logged, saved, and ready for the history tab."
-                : "Nice work. Fresh PRs logged and ready for the history tab.",
+                ? "Your session has been saved and is ready in History."
+                : "Your session has been saved, and your new PRs are ready in History.",
             completedAtText: (session.endedAt ?? session.startedAt).formatted(date: .abbreviated, time: .shortened),
             durationText: formattedDuration(session.durationSeconds),
             exerciseCount: exercises.count,

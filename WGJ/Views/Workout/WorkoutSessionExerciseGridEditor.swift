@@ -568,7 +568,8 @@ struct WorkoutSessionExerciseGridEditor: View {
                         }
                     }
 
-                    if !manualCompletionMode || inlineHintPresentation == nil {
+                    if (!manualCompletionMode || inlineHintPresentation == nil),
+                       !row.previousSummary.isEmpty {
                         Text(row.previousSummary)
                             .font(.caption)
                             .foregroundStyle(WGJTheme.textSecondary)
@@ -1618,6 +1619,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                     badgeTitle: label.badgeTitle,
                     title: label.title,
                     previousSummary: previousSummaryText(
+                        for: draft,
                         for: previousPerformanceResolution,
                         at: index,
                         formatWeight: formatWeight
@@ -1641,16 +1643,21 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private static func previousSummaryText(
+        for draft: WorkoutSessionSetDraft,
         for previousPerformanceResolution: WorkoutPreviousPerformanceResolution,
         at index: Int,
         formatWeight: (Double) -> String
     ) -> String {
+        guard !draft.showsLoggedPerformance else {
+            return ""
+        }
+
         if previousPerformanceResolution.isLoading {
-            return "Loading previous log..."
+            return ""
         }
 
         guard let snapshot = previousPerformanceResolution.previous(at: index) else {
-            return "No previous log for this slot."
+            return ""
         }
 
         let previousText: String
@@ -1659,7 +1666,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         } else if let reps = snapshot.reps {
             previousText = "\(reps) reps"
         } else {
-            return "No previous log for this slot."
+            return ""
         }
 
         return "Previous \(previousText)"
@@ -1838,7 +1845,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                     ProgressView()
                         .controlSize(.small)
 
-                    Text("Waiting for last set...")
+                    Text("Loading previous set...")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(WGJTheme.textPrimary)
                         .wgjSingleLineText(scale: 0.9)
@@ -2219,6 +2226,10 @@ struct WorkoutSetInlineHintPresentation: Equatable {
         targetRepMax: Int?,
         formatWeight: (Double) -> String = { WGJFormatters.decimalString($0) }
     ) -> WorkoutSetInlineHintPresentation? {
+        guard !draft.showsLoggedPerformance else {
+            return nil
+        }
+
         guard let reference = WorkoutSetProgressReference.make(
             draft: draft,
             previous: previous,
@@ -2268,6 +2279,14 @@ enum WorkoutSetBozarCompletionResolver {
 }
 
 private extension WorkoutSessionSetDraft {
+    var showsLoggedPerformance: Bool {
+        if actualWeight != nil || actualReps != nil {
+            return true
+        }
+
+        return actualLoadUnit == .bodyweight && isCompleted
+    }
+
     func applyingPreviousPerformance(_ previous: WorkoutPreviousSetSnapshot?) -> WorkoutSessionSetDraft {
         guard let previous else { return self }
 

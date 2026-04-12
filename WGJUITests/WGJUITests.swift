@@ -961,6 +961,7 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(waitForElementToDisappear(repsGhost, timeout: 5))
         XCTAssertTrue(weightActual.waitForExistence(timeout: 5))
         XCTAssertTrue(repsActual.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Previous 100 kg x 8"].exists)
         XCTAssertEqual(reopenedWeightField.value as? String, "100")
         XCTAssertEqual(reopenedRepsField.value as? String, "8")
     }
@@ -1005,6 +1006,7 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(completeSetButton.waitForExistence(timeout: 5))
         completeSetButton.tap()
 
+        XCTAssertFalse(app.staticTexts["No previous log for this slot."].exists)
         XCTAssertTrue(app.buttons["Undo"].waitForExistence(timeout: 5))
     }
 
@@ -1107,6 +1109,7 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(waitForElementToDisappear(repsGhost, timeout: 5))
         XCTAssertTrue(weightActual.waitForExistence(timeout: 5))
         XCTAssertTrue(repsActual.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Previous 100 kg x 8"].exists)
         XCTAssertEqual(completedWeightField.value as? String, "100")
         XCTAssertEqual(completedRepsField.value as? String, "8")
         XCTAssertTrue(app.buttons["Undo"].waitForExistence(timeout: 5))
@@ -1197,6 +1200,7 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(waitForElementToDisappear(repsGhost, timeout: 5))
         XCTAssertTrue(weightActual.waitForExistence(timeout: 5))
         XCTAssertTrue(repsActual.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Previous 100 kg x 8"].exists)
         XCTAssertEqual(weightField.value as? String, "100")
         XCTAssertEqual(repsField.value as? String, "8")
         XCTAssertTrue(app.buttons["Undo"].waitForExistence(timeout: 5))
@@ -1284,6 +1288,7 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Undo"].waitForExistence(timeout: 14))
         XCTAssertTrue(weightActual.waitForExistence(timeout: 5))
         XCTAssertTrue(repsActual.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Previous 100 kg x 8"].exists)
         XCTAssertEqual(completedWeightField.value as? String, "100")
         XCTAssertEqual(completedRepsField.value as? String, "8")
     }

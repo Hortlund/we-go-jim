@@ -77,19 +77,19 @@ struct ActiveWorkoutExerciseGuidancePresentation: Equatable {
         switch cue.direction {
         case .increaseLoad:
             return ActiveWorkoutGuidanceBadgePresentation(
-                title: "Load Up",
+                title: "Increase Load",
                 subtitle: suggestedLoadText.map { "Next: \($0)" } ?? "Next workout",
                 systemImage: "arrow.up.circle.fill"
             )
         case .decreaseLoad:
             return ActiveWorkoutGuidanceBadgePresentation(
-                title: "Load Down",
+                title: "Reduce Load",
                 subtitle: suggestedLoadText.map { "Next: \($0)" } ?? "Next workout",
                 systemImage: "arrow.down.circle.fill"
             )
         case .stayCourse:
             return ActiveWorkoutGuidanceBadgePresentation(
-                title: "Hold Load",
+                title: "Keep Load",
                 subtitle: suggestedLoadText.map { "Next: \($0)" }
                     ?? cue.suggestedRepRange.map { "\($0.lowerBound)-\($0.upperBound) clean" },
                 systemImage: "equal.circle.fill"
@@ -385,7 +385,7 @@ struct TrainingGuidanceService {
             return ProgressiveOverloadCue(
                 classification: classification,
                 tone: .success,
-                title: "Go up in load next time",
+                title: "Increase the load next time",
                 summary: summary,
                 direction: .increaseLoad,
                 suggestedNextLoad: adjustedLoad(for: referenceSet, direction: .increaseLoad),
@@ -400,7 +400,7 @@ struct TrainingGuidanceService {
             return ProgressiveOverloadCue(
                 classification: classification,
                 tone: .caution,
-                title: "Pull load back next time",
+                title: "Reduce the load next time",
                 summary: summary,
                 direction: .decreaseLoad,
                 suggestedNextLoad: adjustedLoad(for: referenceSet, direction: .decreaseLoad),
@@ -412,7 +412,7 @@ struct TrainingGuidanceService {
         return ProgressiveOverloadCue(
             classification: classification,
             tone: .accent,
-            title: "Hold the load",
+            title: "Keep the load the same",
             summary: stayCourseSummary(referenceSet: referenceSet, repRange: repRange),
             direction: .stayCourse,
             suggestedNextLoad: referenceSet?.actualWeight,
@@ -504,18 +504,18 @@ struct TrainingGuidanceService {
         if lastReps < repRange.lowerBound {
             return guidancePresentation(
                 title: "Get the reps back",
-                summary: "That set dropped to \(lastReps) reps. Take a little more rest or trim the load so the next set gets back into \(repRangeText(repRange)) clean reps.",
+                summary: "That set dropped to \(lastReps) reps. Take a little more rest or reduce the load so the next set gets back into \(repRangeText(repRange)) clean reps.",
                 tone: .caution,
                 badgeTitle: "Reps Up",
-                badgeSubtitle: "Rest or trim load",
+                badgeSubtitle: "Rest or reduce load",
                 badgeSystemImage: "arrow.up.circle.fill"
             )
         }
 
         if lastReps > repRange.upperBound {
             return guidancePresentation(
-                title: "Cap the reps here",
-                summary: "That set hit \(lastReps) reps. Keep the next set inside \(repRangeText(repRange)) clean reps. If the rest still clear the top, go heavier next workout.",
+                title: "Keep the reps in range",
+                summary: "That set hit \(lastReps) reps. Keep the next set inside \(repRangeText(repRange)) clean reps. If the rest of the work sets still clear the top, increase the load next session.",
                 tone: .success,
                 badgeTitle: "Reps Down",
                 badgeSubtitle: "Keep \(repRangeText(repRange))",
@@ -526,8 +526,8 @@ struct TrainingGuidanceService {
         if let loadText = loggedLoadText(for: lastCompletedWorkingSet) {
             if lastReps < repRange.upperBound {
                 return guidancePresentation(
-                    title: "Add a rep before load",
-                    summary: "\(loadText) is still in the pocket. Try to beat \(lastReps) with the same setup and keep it inside \(repRangeText(repRange)).",
+                    title: "Add a rep before increasing load",
+                    summary: "\(loadText) is still working well. Try to beat \(lastReps) with the same setup and keep it inside \(repRangeText(repRange)).",
                     tone: .accent,
                     badgeTitle: "Reps Up",
                     badgeSubtitle: "Same \(loadText)",
@@ -536,10 +536,10 @@ struct TrainingGuidanceService {
             }
 
             return guidancePresentation(
-                title: "Hold that load",
-                summary: "\(loadText) is right on target. Match it again clean before you move the load.",
+                title: "Keep that load",
+                summary: "\(loadText) is right on target. Match it again clean before you increase it.",
                 tone: .accent,
-                badgeTitle: "Hold Load",
+                badgeTitle: "Keep Load",
                 badgeSubtitle: loadText,
                 badgeSystemImage: "equal.circle.fill"
             )
@@ -627,7 +627,7 @@ struct TrainingGuidanceService {
             return "You cleared the whole range. Add a little load next time and bring it back to \(repRangeText(repRange)) clean reps."
         }
 
-        return "You cleared the whole range. Go to \(loadText) next time and bring it back to \(repRangeText(repRange)) clean reps."
+        return "You cleared the whole range. Move to \(loadText) next time and work back into \(repRangeText(repRange)) clean reps."
     }
 
     private func decreaseLoadSummary(
@@ -638,7 +638,7 @@ struct TrainingGuidanceService {
             return "You missed the floor. Pull the load back a touch next time and rebuild \(repRangeText(repRange)) clean reps."
         }
 
-        return "You missed the floor. Drop to \(loadText) next time, take your rest, and rebuild \(repRangeText(repRange)) clean reps."
+        return "You missed the floor. Drop to \(loadText) next time and rebuild \(repRangeText(repRange)) clean reps."
     }
 
     private func stayCourseSummary(
@@ -656,7 +656,7 @@ struct TrainingGuidanceService {
             load: weight,
             unit: referenceSet.actualLoadUnit
         ) ?? "\(WGJFormatters.decimalString(weight)) \(referenceSet.actualLoadUnit.shortLabel)"
-        return "\(loadText) is right for now. Keep every work set inside \(repRangeText(repRange)) before you move it."
+        return "\(loadText) is in the right spot for now. Keep every work set inside \(repRangeText(repRange)) before you increase it."
     }
 
     private func adjustedLoadText(
@@ -722,8 +722,8 @@ struct TrainingGuidanceService {
             )
         case .upperBodyCompound:
             return guidancePresentation(
-                title: "Warm up and set the shoulders",
-                summary: "\(warmupInstruction) Pack the shoulders, keep the path repeatable, and hunt \(repRangeText(repRange)) reps.",
+                title: "Warm up and set your shoulders",
+                summary: "\(warmupInstruction) Pack the shoulders, repeat the same bar path, and aim for \(repRangeText(repRange)) reps.",
                 tone: .accent,
                 badgeTitle: "Warm Up",
                 badgeSubtitle: warmupBadgeSubtitle(
@@ -734,8 +734,8 @@ struct TrainingGuidanceService {
             )
         case .isolation:
             return guidancePresentation(
-                title: "Warm up and chase tension",
-                summary: "\(warmupInstruction) Slow the squeeze, own the stretch, and make \(repRangeText(repRange)) reps feel deliberate.",
+                title: "Warm up and stay controlled",
+                summary: "\(warmupInstruction) Control the stretch, keep tension on the target muscle, and make \(repRangeText(repRange)) reps feel deliberate.",
                 tone: .accent,
                 badgeTitle: "Warm Up",
                 badgeSubtitle: warmupBadgeSubtitle(
@@ -758,8 +758,8 @@ struct TrainingGuidanceService {
             )
         case .conditioning:
             return guidancePresentation(
-                title: "Warm up and pace it",
-                summary: "\(warmupInstruction) Start smooth so the later rounds still hit \(repRangeText(repRange)) reps with control.",
+                title: "Warm up and pace the effort",
+                summary: "\(warmupInstruction) Start smooth so the later rounds can still hit \(repRangeText(repRange)) reps with control.",
                 tone: .accent,
                 badgeTitle: "Warm Up",
                 badgeSubtitle: warmupBadgeSubtitle(
@@ -770,8 +770,8 @@ struct TrainingGuidanceService {
             )
         case .unknown:
             return guidancePresentation(
-                title: "Warm up and find the groove",
-                summary: "\(warmupInstruction) Use the early sets to lock the pattern in and aim for \(repRangeText(repRange)) clean reps.",
+                title: "Warm up and find a consistent groove",
+                summary: "\(warmupInstruction) Use the early sets to settle the pattern and aim for \(repRangeText(repRange)) clean reps.",
                 tone: .accent,
                 badgeTitle: "Warm Up",
                 badgeSubtitle: warmupBadgeSubtitle(
@@ -791,24 +791,24 @@ struct TrainingGuidanceService {
 
         switch classification {
         case .lowerBodyCompound:
-            summary = "Your work sets are underway. Keep the brace honest and make the next one land in \(repRangeText(repRange)) clean reps."
+            summary = "Your work sets are in progress. Keep the brace solid and make the next one land in \(repRangeText(repRange)) clean reps."
         case .upperBodyCompound:
-            summary = "Your work sets are underway. Set the shoulders, repeat the path, and keep the next one in \(repRangeText(repRange)) clean reps."
+            summary = "Your work sets are in progress. Set the shoulders, repeat the same path, and keep the next one in \(repRangeText(repRange)) clean reps."
         case .isolation:
-            summary = "Your work sets are underway. Chase tension, not momentum, and keep the next one in \(repRangeText(repRange)) clean reps."
+            summary = "Your work sets are in progress. Stay on the target muscle, avoid momentum, and keep the next one in \(repRangeText(repRange)) clean reps."
         case .core:
-            summary = "Your work sets are underway. Keep ribs down, brace first, and make the next one land in \(repRangeText(repRange)) clean reps."
+            summary = "Your work sets are in progress. Keep ribs down, brace first, and make the next one land in \(repRangeText(repRange)) clean reps."
         case .conditioning:
-            summary = "Your work sets are underway. Keep the early pace under control so the next effort still hits \(repRangeText(repRange)) reps."
+            summary = "Your work sets are in progress. Keep the early pace under control so the next effort still hits \(repRangeText(repRange)) reps."
         case .unknown:
-            summary = "Your work sets are underway. Repeat the same setup and keep the next one around \(repRangeText(repRange)) clean reps."
+            summary = "Your work sets are in progress. Repeat the same setup and keep the next one around \(repRangeText(repRange)) clean reps."
         }
 
         return guidancePresentation(
-            title: "Lock the next set in",
+            title: "Keep the next set consistent",
             summary: summary,
             tone: .accent,
-            badgeTitle: "Lock Form",
+            badgeTitle: "Stay Consistent",
             badgeSubtitle: "\(repRangeText(repRange)) clean",
             badgeSystemImage: "scope"
         )
@@ -821,7 +821,7 @@ struct TrainingGuidanceService {
         if lastReps < repRange.lowerBound {
             return guidancePresentation(
                 title: "Get the reps back",
-                summary: "That set dropped to \(lastReps) reps. Take a little more rest or use assistance so the next one gets back to \(repRangeText(repRange)) clean reps.",
+                summary: "That set dropped to \(lastReps) reps. Take a little more rest or use assistance so the next one gets back into \(repRangeText(repRange)) clean reps.",
                 tone: .caution,
                 badgeTitle: "Reps Up",
                 badgeSubtitle: "Rest or assist",
@@ -832,7 +832,7 @@ struct TrainingGuidanceService {
         if lastReps > repRange.upperBound {
             return guidancePresentation(
                 title: "Make the variation harder",
-                summary: "That set hit \(lastReps) reps. Slow the lowering, add a pause, or progress the variation so the next one comes back to \(repRangeText(repRange)) clean reps.",
+                summary: "That set hit \(lastReps) reps. Slow the lowering, add a pause, or progress the variation so the next one comes back into \(repRangeText(repRange)) clean reps.",
                 tone: .accent,
                 badgeTitle: "Reps Down",
                 badgeSubtitle: "Harder variation",
@@ -842,7 +842,7 @@ struct TrainingGuidanceService {
 
         if lastReps < repRange.upperBound {
             return guidancePresentation(
-                title: "Add reps before a harder variation",
+                title: "Add reps before you progress the variation",
                 summary: "That set was on target. Stay with the same variation and try to beat \(lastReps) while keeping it inside \(repRangeText(repRange)).",
                 tone: .accent,
                 badgeTitle: "Reps Up",
@@ -852,10 +852,10 @@ struct TrainingGuidanceService {
         }
 
         return guidancePresentation(
-            title: "Own the top of the range",
+            title: "Repeat the top end",
             summary: "That set hit the top clean. Match it again before you make the variation harder.",
             tone: .accent,
-            badgeTitle: "Keep Reps",
+            badgeTitle: "Match Reps",
             badgeSubtitle: "Match the set",
             badgeSystemImage: "equal.circle.fill"
         )
