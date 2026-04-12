@@ -52,6 +52,17 @@ struct ExerciseComponentRotationResolution: Equatable {
     var hasOverride: Bool {
         selectedComponent.catalogExerciseUUID != suggestedComponent.catalogExerciseUUID
     }
+
+    var nextComponent: ExerciseComponentSnapshot {
+        guard let selectedIndex = availableComponents.firstIndex(where: {
+            $0.catalogExerciseUUID == selectedComponent.catalogExerciseUUID
+        }) else {
+            return suggestedComponent
+        }
+
+        let nextIndex = (selectedIndex + 1) % availableComponents.count
+        return availableComponents[nextIndex]
+    }
 }
 
 @MainActor

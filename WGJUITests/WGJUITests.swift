@@ -2130,6 +2130,10 @@ final class WGJUITests: XCTestCase {
             identifiedElement("active-workout-exercise-ui-rotation-reverse-curl-component-summary-next", in: app)
                 .waitForExistence(timeout: 5)
         )
+        XCTAssertEqual(
+            identifiedElement("active-workout-exercise-ui-rotation-reverse-curl-component-summary-next", in: app).label,
+            "Next Wrist Curl"
+        )
 
         let completeSetButton = app.buttons.matching(
             NSPredicate(format: "label BEGINSWITH %@", "Complete Set")

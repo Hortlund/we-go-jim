@@ -26,7 +26,7 @@ struct ActiveWorkoutExerciseComponentSummaryView: View {
 
             summaryChip(
                 title: "Next",
-                value: resolution.suggestedComponent.exerciseNameSnapshot,
+                value: resolution.nextComponent.exerciseNameSnapshot,
                 tint: WGJTheme.accentBlue,
                 accessibilityIdentifier: accessibilityIdentifierPrefix.map { "\($0)-next" }
             )
@@ -85,6 +85,7 @@ struct ActiveWorkoutExerciseComponentSummaryView: View {
             Capsule(style: .continuous)
                 .fill(tint.opacity(0.10))
         )
+        .accessibilityLabel("\(title) \(value)")
         .accessibilityIdentifier(accessibilityIdentifier ?? "")
     }
 }
