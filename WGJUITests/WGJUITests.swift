@@ -1112,6 +1112,13 @@ final class WGJUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Previous 100 kg x 8"].exists)
         XCTAssertEqual(completedWeightField.value as? String, "100")
         XCTAssertEqual(completedRepsField.value as? String, "8")
+        sleep(1)
+        XCTAssertTrue(weightActual.exists)
+        XCTAssertTrue(repsActual.exists)
+        XCTAssertFalse(identifiedElement("workout-set-0-weight-ghost", in: app).exists)
+        XCTAssertFalse(identifiedElement("workout-set-0-reps-ghost", in: app).exists)
+        XCTAssertEqual(completedWeightField.value as? String, "100")
+        XCTAssertEqual(completedRepsField.value as? String, "8")
         XCTAssertTrue(app.buttons["Undo"].waitForExistence(timeout: 5))
     }
 

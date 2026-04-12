@@ -757,21 +757,21 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func repsField(at index: Int) -> some View {
-        let displayState = repsFieldDisplayState(at: index)
+        let overlayState = repsFieldDisplayState(at: index)
 
         return ZStack {
-            if let displayState {
-                metricDisplayText(displayState)
+            if let overlayState {
+                metricDisplayText(overlayState)
             }
 
-            TextField(displayState == nil ? "0" : "", text: repsTextBinding(for: index))
+            TextField(overlayState == nil ? "0" : "", text: repsTextBinding(for: index))
                 .keyboardType(.numberPad)
                 .submitLabel(.done)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled(true)
                 .font(.system(.title3, design: .rounded).weight(.semibold))
                 .monospacedDigit()
-                .foregroundStyle(displayState == nil ? WGJTheme.textPrimary : Color.clear)
+                .foregroundStyle(overlayState == nil ? WGJTheme.textPrimary : Color.clear)
                 .focused($focusedInput, equals: inputFocus(for: index, metric: .reps))
                 .multilineTextAlignment(.center)
                 .disabled(!isSetEditingEnabled || setDrafts[index].isLocked)
@@ -782,22 +782,22 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func loadField(at index: Int) -> some View {
         let isLocked = setDrafts[index].isLocked
-        let displayState = weightFieldDisplayState(at: index)
+        let overlayState = weightFieldDisplayState(at: index)
 
         return HStack(spacing: 6) {
             ZStack {
-                if let displayState {
-                    metricDisplayText(displayState)
+                if let overlayState {
+                    metricDisplayText(overlayState)
                 }
 
-                TextField(displayState == nil ? "0" : "", text: weightTextBinding(for: index))
+                TextField(overlayState == nil ? "0" : "", text: weightTextBinding(for: index))
                     .keyboardType(.decimalPad)
                     .submitLabel(.next)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled(true)
                     .font(.system(.title3, design: .rounded).weight(.semibold))
                     .monospacedDigit()
-                    .foregroundStyle(displayState == nil ? WGJTheme.textPrimary : Color.clear)
+                    .foregroundStyle(overlayState == nil ? WGJTheme.textPrimary : Color.clear)
                     .focused($focusedInput, equals: inputFocus(for: index, metric: .weight))
                     .multilineTextAlignment(.center)
                     .disabled(!isSetEditingEnabled || isLocked)
