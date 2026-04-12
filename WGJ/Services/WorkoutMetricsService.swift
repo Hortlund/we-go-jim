@@ -125,6 +125,30 @@ struct ExerciseMetricSeries: Equatable {
     let points: [ExerciseMetricPoint]
 }
 
+struct ExerciseDetailBestPerformance: Equatable {
+    enum Kind: String, Equatable {
+        case weighted
+        case bodyweight
+    }
+
+    let kind: Kind
+    let reps: Int
+    let weight: Double?
+    let loadUnit: TemplateLoadUnit
+    let estimatedOneRepMax: Double?
+    let achievedAt: Date
+}
+
+struct ExerciseDetailStatsSnapshot: Equatable {
+    let catalogExerciseUUID: String
+    let exerciseName: String
+    let sessionCount: Int
+    let lastPerformedAt: Date
+    let bestPerformance: ExerciseDetailBestPerformance?
+    let oneRepMaxTrend: ExerciseMetricSeries?
+    let volumeTrend: ExerciseMetricSeries?
+}
+
 struct ProfileOverviewStats: Equatable {
     let totalWorkouts: Int
     let totalPRHits: Int
@@ -718,6 +742,71 @@ final class WorkoutMetricsService {
         )
     }
 
+    func exerciseDetailStats(
+        for catalogExerciseUUID: String,
+        preferredExerciseName: String? = nil,
+        limit: Int = 8
+    ) throws -> ExerciseDetailStatsSnapshot? {
+        let normalizedUUID = catalogExerciseUUID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedUUID.isEmpty else {
+            return nil
+        }
+
+        let snapshot = try metricsSnapshot()
+        guard let frequency = snapshot.exerciseFrequencyByUUID[normalizedUUID] else {
+            return nil
+        }
+
+        let weightedBest = snapshot.bestPRByExercise[normalizedUUID].map { record in
+            ExerciseDetailBestPerformance(
+                kind: .weighted,
+                reps: record.reps,
+                weight: record.weight,
+                loadUnit: record.loadUnit,
+                estimatedOneRepMax: record.estimatedOneRepMax,
+                achievedAt: record.achievedAt
+            )
+        }
+        let bodyweightBest = snapshot.bestBodyweightByExercise[normalizedUUID].map { record in
+            ExerciseDetailBestPerformance(
+                kind: .bodyweight,
+                reps: record.reps,
+                weight: nil,
+                loadUnit: .bodyweight,
+                estimatedOneRepMax: nil,
+                achievedAt: record.achievedAt
+            )
+        }
+        let resolvedName = preferredExerciseName?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nonEmpty
+            ?? weightedBest.map { _ in frequency.exerciseName }
+            ?? bodyweightBest.map { _ in frequency.exerciseName }
+            ?? frequency.exerciseName
+        let oneRepMaxTrend = try weightedTrendSeriesIfAvailable(
+            for: normalizedUUID,
+            preferredExerciseName: resolvedName,
+            limit: limit,
+            kind: .oneRepMax
+        )
+        let volumeTrend = try weightedTrendSeriesIfAvailable(
+            for: normalizedUUID,
+            preferredExerciseName: resolvedName,
+            limit: limit,
+            kind: .volume
+        )
+
+        return ExerciseDetailStatsSnapshot(
+            catalogExerciseUUID: normalizedUUID,
+            exerciseName: resolvedName,
+            sessionCount: frequency.sessionCount,
+            lastPerformedAt: frequency.lastPerformedAt,
+            bestPerformance: weightedBest ?? bodyweightBest,
+            oneRepMaxTrend: oneRepMaxTrend,
+            volumeTrend: volumeTrend
+        )
+    }
+
     func profileDashboardSnapshot(prLimit: Int = 8, weeks: Int = 8) throws -> ProfileDashboardSnapshot {
         let safePRLimit = max(1, prLimit)
         let safeWeeks = max(1, weeks)
@@ -809,6 +898,7 @@ final class WorkoutMetricsService {
             let facts = try historyProjectionRepository.allFacts()
             let visibleSessionIDs = Set(sessions.map(\.id))
             var bestPRByExercise: [String: WorkoutPRRecord] = [:]
+            var bestBodyweightByExercise: [String: BodyweightExerciseBestRecord] = [:]
             var countsByWeek: [Date: Int] = [:]
             var countsByDay: [Date: Int] = [:]
             var exerciseFrequencyByUUID: [String: CollectedExerciseFrequency] = [:]
@@ -909,6 +999,23 @@ final class WorkoutMetricsService {
                     }
                 }
 
+                if fact.loadUnit == .bodyweight && fact.reps > 0 {
+                    let record = BodyweightExerciseBestRecord(
+                        catalogExerciseUUID: fact.catalogExerciseUUID,
+                        exerciseName: fact.exerciseNameSnapshot,
+                        reps: fact.reps,
+                        achievedAt: fact.completedAt
+                    )
+
+                    if let existing = bestBodyweightByExercise[fact.catalogExerciseUUID] {
+                        if isBetterBodyweightRecord(record, than: existing) {
+                            bestBodyweightByExercise[fact.catalogExerciseUUID] = record
+                        }
+                    } else {
+                        bestBodyweightByExercise[fact.catalogExerciseUUID] = record
+                    }
+                }
+
                 if let volumeKg = fact.volumeKg {
                     historyEntry.totalWeightedVolumeInKilograms += volumeKg
                     historyEntry.weightedVolumeUnit = fact.loadUnit
@@ -946,6 +1053,7 @@ final class WorkoutMetricsService {
             return MetricsSnapshotCache(
                 completedSessions: sessions,
                 bestPRByExercise: bestPRByExercise,
+                bestBodyweightByExercise: bestBodyweightByExercise,
                 countsByWeek: countsByWeek,
                 countsByDay: countsByDay,
                 exerciseFrequencyByUUID: exerciseFrequencyByUUID,
@@ -1197,6 +1305,57 @@ final class WorkoutMetricsService {
         return candidate.achievedAt > existing.achievedAt
     }
 
+    private func isBetterBodyweightRecord(
+        _ candidate: BodyweightExerciseBestRecord,
+        than existing: BodyweightExerciseBestRecord
+    ) -> Bool {
+        if candidate.reps != existing.reps {
+            return candidate.reps > existing.reps
+        }
+
+        return candidate.achievedAt > existing.achievedAt
+    }
+
+    private enum WeightedTrendKind {
+        case oneRepMax
+        case volume
+    }
+
+    private func weightedTrendSeriesIfAvailable(
+        for catalogExerciseUUID: String,
+        preferredExerciseName: String,
+        limit: Int,
+        kind: WeightedTrendKind
+    ) throws -> ExerciseMetricSeries? {
+        let entries = try metricsSnapshot().exerciseHistoryByUUID[catalogExerciseUUID] ?? []
+        let hasPoints: Bool
+        switch kind {
+        case .oneRepMax:
+            hasPoints = entries.contains(where: { $0.weightedOneRepMaxInKilograms != nil })
+        case .volume:
+            hasPoints = entries.contains(where: { $0.totalWeightedVolumeInKilograms != nil })
+        }
+
+        guard hasPoints else {
+            return nil
+        }
+
+        switch kind {
+        case .oneRepMax:
+            return try exerciseOneRepMaxTrend(
+                for: catalogExerciseUUID,
+                preferredExerciseName: preferredExerciseName,
+                limit: limit
+            )
+        case .volume:
+            return try exerciseVolumeTrend(
+                for: catalogExerciseUUID,
+                preferredExerciseName: preferredExerciseName,
+                limit: limit
+            )
+        }
+    }
+
     private func isBetterProjectedWeightedFact(_ candidate: CompletedSetFact, than existing: CompletedSetFact) -> Bool {
         guard
             let candidateOneRepMax = candidate.estimatedOneRepMaxKg,
@@ -1239,6 +1398,7 @@ private struct PriorSetMetricPeaks {
 private struct MetricsSnapshotCache {
     let completedSessions: [WorkoutSession]
     let bestPRByExercise: [String: WorkoutPRRecord]
+    let bestBodyweightByExercise: [String: BodyweightExerciseBestRecord]
     let countsByWeek: [Date: Int]
     let countsByDay: [Date: Int]
     let exerciseFrequencyByUUID: [String: CollectedExerciseFrequency]
@@ -1276,6 +1436,13 @@ private struct CollectedExerciseFrequency {
     let lastPerformedAt: Date
 }
 
+private struct BodyweightExerciseBestRecord {
+    let catalogExerciseUUID: String
+    let exerciseName: String
+    let reps: Int
+    let achievedAt: Date
+}
+
 private struct SessionExerciseHistoryKey: Hashable {
     let sessionID: UUID
     let catalogExerciseUUID: String
@@ -1288,5 +1455,11 @@ private extension CompletedSetFact {
             && estimatedOneRepMaxKg != nil
             && volumeKg != nil
             && loadUnit != .bodyweight
+    }
+}
+
+private extension String {
+    var nonEmpty: String? {
+        isEmpty ? nil : self
     }
 }

@@ -766,6 +766,7 @@ struct ExercisesSectionSnapshot: Identifiable, Equatable {
 }
 
 struct ExerciseDetailDestinationView: View {
+    @Environment(\.modelContext) private var modelContext
     @Query(sort: [SortDescriptor(\MuscleGroup.name, order: .forward)])
     private var muscleGroups: [MuscleGroup]
     @Query(sort: [SortDescriptor(\ExerciseCatalogItem.categoryName, order: .forward)])
@@ -778,6 +779,7 @@ struct ExerciseDetailDestinationView: View {
 
     @State private var showingCustomExerciseEditor = false
     @State private var customExerciseDraft = CustomExerciseDraft.empty
+    @State private var statsSnapshot: ExerciseDetailStatsSnapshot?
     @State private var errorMessage = ""
     @State private var showingError = false
 
@@ -814,6 +816,8 @@ struct ExerciseDetailDestinationView: View {
                 if !exercise.secondaryMuscleNames.isEmpty {
                     detailInfoRow(title: "Secondary muscles", value: exercise.secondaryMuscleNames)
                 }
+
+                ExerciseDetailStatsSection(snapshot: statsSnapshot)
 
                 if !exercise.instructionSteps.isEmpty {
                     detailStepList(title: "How to perform", steps: exercise.instructionSteps)
@@ -889,6 +893,9 @@ struct ExerciseDetailDestinationView: View {
         } message: {
             Text(errorMessage)
         }
+        .task(id: exercise.remoteUUID) {
+            loadStatsSnapshot()
+        }
     }
 
     private func detailInfoRow(title: String, value: String) -> some View {
@@ -956,6 +963,19 @@ struct ExerciseDetailDestinationView: View {
         do {
             try repository.updateCustomExercise(exercise, draft: customExerciseDraft)
             showingCustomExerciseEditor = false
+        } catch {
+            errorMessage = String(describing: error)
+            showingError = true
+        }
+    }
+
+    private func loadStatsSnapshot() {
+        do {
+            statsSnapshot = try WorkoutMetricsService(modelContext: modelContext).exerciseDetailStats(
+                for: exercise.remoteUUID,
+                preferredExerciseName: exercise.displayName,
+                limit: 8
+            )
         } catch {
             errorMessage = String(describing: error)
             showingError = true

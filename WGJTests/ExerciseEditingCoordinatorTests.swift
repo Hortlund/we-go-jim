@@ -41,8 +41,10 @@ struct ExerciseEditingCoordinatorTests {
         coordinator.scheduleDraftCommit([updatedDraft])
         coordinator.scheduleDraftCommit([latestDraft])
 
-        try? await Task.sleep(for: .milliseconds(120))
-        await Task.yield()
+        for _ in 0..<20 where committedDrafts.isEmpty {
+            try? await Task.sleep(for: .milliseconds(50))
+            await Task.yield()
+        }
 
         #expect(committedDrafts.count == 1)
         #expect(committedDrafts.first == [latestDraft])

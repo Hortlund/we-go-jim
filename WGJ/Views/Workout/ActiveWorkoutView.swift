@@ -33,6 +33,7 @@ struct ActiveWorkoutView: View {
 
     @State private var sessionNameDraft = ""
     @State private var notesDraft = ""
+    @State private var pendingSessionNotesSaveTask: Task<Void, Never>?
     @State private var pickerTarget: ActiveWorkoutPickerTarget?
     @State private var showingFinishConfirmation = false
     @State private var isCancelArmed = false
@@ -318,6 +319,9 @@ struct ActiveWorkoutView: View {
             .onChange(of: isKeyboardVisible) { _, isVisible in
                 guard isCancelArmed, !isVisible else { return }
                 focusCancelSection(using: scrollProxy)
+            }
+            .onChange(of: notesDraft) { _, _ in
+                scheduleSessionNotesPersistence()
             }
             .onDisappear {
                 shouldTrackVisibleScrollTarget = false
@@ -1037,6 +1041,10 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func flushPendingSaves() {
+        pendingSessionNotesSaveTask?.cancel()
+        pendingSessionNotesSaveTask = nil
+        persistSessionNotesIfNeeded()
+
         for task in pendingExercisePersistenceTasks.values {
             task.cancel()
         }
@@ -1054,10 +1062,32 @@ struct ActiveWorkoutView: View {
                    sessionNameDraft != session.name {
                     try activeWorkoutRepository.updateSessionName(sessionID: sessionID, name: sessionNameDraft)
                 }
-                if notesDraft != session.notes {
-                    try activeWorkoutRepository.updateSessionNotes(sessionID: sessionID, notes: notesDraft)
-                }
+                persistSessionNotesIfNeeded()
             }
+        } catch {
+            showError(error)
+        }
+    }
+
+    @MainActor
+    private func scheduleSessionNotesPersistence() {
+        pendingSessionNotesSaveTask?.cancel()
+        pendingSessionNotesSaveTask = Task { @MainActor in
+            try? await Task.sleep(for: interactivePersistenceDebounce)
+            guard !Task.isCancelled else { return }
+            pendingSessionNotesSaveTask = nil
+            persistSessionNotesIfNeeded()
+        }
+    }
+
+    @MainActor
+    private func persistSessionNotesIfNeeded() {
+        guard let session, notesDraft != session.notes else {
+            return
+        }
+
+        do {
+            try activeWorkoutRepository.updateSessionNotes(sessionID: sessionID, notes: notesDraft)
         } catch {
             showError(error)
         }
@@ -1974,6 +2004,7 @@ private struct ActiveWorkoutHeaderCard: View {
                 .lineLimit(2...4)
                 .textInputAutocapitalization(.sentences)
                 .wgjPillField()
+                .accessibilityIdentifier("active-workout-notes-field")
                 .onSubmit(onSubmit)
 
             HStack(spacing: 10) {

@@ -1319,6 +1319,162 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testTemplateWorkoutFinishUpdateTemplateAppliesWorkoutNotes() throws {
+        let app = launchApp(launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Apply Workout Notes",
+                notes: "Original reusable note",
+                exercises: [
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "template-notes-apply-bench",
+                        exerciseNameSnapshot: "Bench Press",
+                        categorySnapshot: "Chest",
+                        muscleSummarySnapshot: "Chest",
+                        targetRepMin: 6,
+                        targetRepMax: 8,
+                        restSeconds: 120,
+                        sets: [
+                            templatePayloadSet(
+                                targetReps: 6,
+                                targetWeight: 100,
+                                loadUnit: "kg",
+                                restSeconds: 120,
+                                isWarmup: false
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+        ])
+
+        startPreviewedTemplateWorkout(in: app)
+
+        let notesField = identifiedElement("active-workout-notes-field", in: app)
+        XCTAssertTrue(notesField.waitForExistence(timeout: 5))
+        notesField.tap()
+        notesField.typeText(" Updated")
+        let editedNotes = (notesField.value as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        finishTemplateWorkout(in: app)
+
+        let reviewSheet = identifiedElement("active-workout-template-review-sheet", in: app)
+        XCTAssertTrue(reviewSheet.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Workout Notes"].waitForExistence(timeout: 5))
+        app.buttons["active-workout-template-review-apply-button"].tap()
+
+        confirmWorkoutCompletion(in: app)
+        tapTab("Start Workout", in: app)
+        restartImportedTemplateWorkout(in: app)
+
+        let reopenedNotesField = identifiedElement("active-workout-notes-field", in: app)
+        XCTAssertTrue(reopenedNotesField.waitForExistence(timeout: 5))
+        XCTAssertEqual(reopenedNotesField.value as? String, editedNotes)
+    }
+
+    @MainActor
+    func testTemplateWorkoutFinishKeepTemplatePreservesWorkoutNotes() throws {
+        let app = launchApp(launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Keep Workout Notes",
+                notes: "Original reusable note",
+                exercises: [
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "template-notes-keep-bench",
+                        exerciseNameSnapshot: "Bench Press",
+                        categorySnapshot: "Chest",
+                        muscleSummarySnapshot: "Chest",
+                        targetRepMin: 6,
+                        targetRepMax: 8,
+                        restSeconds: 120,
+                        sets: [
+                            templatePayloadSet(
+                                targetReps: 6,
+                                targetWeight: 100,
+                                loadUnit: "kg",
+                                restSeconds: 120,
+                                isWarmup: false
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+        ])
+
+        startPreviewedTemplateWorkout(in: app)
+
+        let notesField = identifiedElement("active-workout-notes-field", in: app)
+        XCTAssertTrue(notesField.waitForExistence(timeout: 5))
+        notesField.tap()
+        notesField.typeText(" Updated")
+
+        finishTemplateWorkout(in: app)
+
+        let reviewSheet = identifiedElement("active-workout-template-review-sheet", in: app)
+        XCTAssertTrue(reviewSheet.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Workout Notes"].waitForExistence(timeout: 5))
+        app.buttons["active-workout-template-review-keep-button"].tap()
+
+        confirmWorkoutCompletion(in: app)
+        tapTab("Start Workout", in: app)
+        restartImportedTemplateWorkout(in: app)
+
+        let reopenedNotesField = identifiedElement("active-workout-notes-field", in: app)
+        XCTAssertTrue(reopenedNotesField.waitForExistence(timeout: 5))
+        XCTAssertEqual(reopenedNotesField.value as? String, "Original reusable note")
+    }
+
+    @MainActor
+    func testActiveWorkoutNotesPersistAcrossMinimizeRestore() throws {
+        let app = launchApp(launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Minimize Workout Notes",
+                notes: "Original reusable note",
+                exercises: [
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "template-notes-minimize-bench",
+                        exerciseNameSnapshot: "Bench Press",
+                        categorySnapshot: "Chest",
+                        muscleSummarySnapshot: "Chest",
+                        targetRepMin: 6,
+                        targetRepMax: 8,
+                        restSeconds: 120,
+                        sets: [
+                            templatePayloadSet(
+                                targetReps: 6,
+                                targetWeight: 100,
+                                loadUnit: "kg",
+                                restSeconds: 120,
+                                isWarmup: false
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+        ])
+
+        startPreviewedTemplateWorkout(in: app)
+
+        let notesField = identifiedElement("active-workout-notes-field", in: app)
+        XCTAssertTrue(notesField.waitForExistence(timeout: 5))
+        notesField.tap()
+        notesField.typeText(" Minimized")
+        let editedNotes = notesField.value as? String
+
+        let minimizeButton = app.buttons["active-workout-minimize-button"]
+        XCTAssertTrue(minimizeButton.waitForExistence(timeout: 5))
+        minimizeButton.tap()
+
+        let strip = identifiedElement("active-workout-strip", in: app)
+        XCTAssertTrue(strip.waitForExistence(timeout: 5))
+        strip.tap()
+
+        let reopenedNotesField = identifiedElement("active-workout-notes-field", in: app)
+        XCTAssertTrue(reopenedNotesField.waitForExistence(timeout: 5))
+        XCTAssertEqual(reopenedNotesField.value as? String, editedNotes)
+    }
+
+    @MainActor
     func testTemplateWorkoutFinishUpdateTemplateAppliesNewStructure() throws {
         let app = launchApp(launchEnvironment: [
             "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(

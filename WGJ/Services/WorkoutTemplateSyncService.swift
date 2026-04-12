@@ -4,6 +4,7 @@ import SwiftData
 struct WorkoutTemplateSyncPreview: Equatable, Identifiable {
     let templateID: UUID
     let templateName: String
+    let editedWorkoutNotes: WorkoutTemplateSyncEditedWorkoutNotes?
     let addedCardioBlocks: [WorkoutTemplateSyncAddedCardioBlock]
     let removedCardioBlocks: [WorkoutTemplateSyncRemovedCardioBlock]
     let editedCardioBlocks: [WorkoutTemplateSyncEditedCardioBlock]
@@ -16,7 +17,8 @@ struct WorkoutTemplateSyncPreview: Equatable, Identifiable {
     var id: UUID { templateID }
 
     var totalChangeCount: Int {
-        addedCardioBlocks.count
+        (editedWorkoutNotes == nil ? 0 : 1)
+            + addedCardioBlocks.count
             + removedCardioBlocks.count
             + editedCardioBlocks.count
             + addedExercises.count
@@ -27,6 +29,10 @@ struct WorkoutTemplateSyncPreview: Equatable, Identifiable {
 
     var summary: String {
         var parts: [String] = []
+
+        if editedWorkoutNotes != nil {
+            parts.append("updated workout notes")
+        }
 
         if !addedCardioBlocks.isEmpty {
             parts.append(countText(addedCardioBlocks.count, singular: "added cardio block"))
@@ -56,12 +62,16 @@ struct WorkoutTemplateSyncPreview: Equatable, Identifiable {
             parts.append(countText(editedExercises.count, singular: "edited exercise"))
         }
 
-        return parts.joined(separator: " • ")
+        return parts.isEmpty ? "No reusable template changes" : parts.joined(separator: " • ")
     }
 
     private func countText(_ count: Int, singular: String) -> String {
         "\(count) \(singular)" + (count == 1 ? "" : "s")
     }
+}
+
+struct WorkoutTemplateSyncEditedWorkoutNotes: Equatable {
+    let changes: [String]
 }
 
 struct WorkoutTemplateSyncAddedCardioBlock: Identifiable, Equatable {
@@ -122,6 +132,7 @@ struct WorkoutTemplateSyncEditedExercise: Identifiable, Equatable {
 }
 
 struct WorkoutTemplateSyncMutation: Equatable {
+    let templateNotes: String
     let cardioBlocks: [WorkoutTemplateSyncCardioMutation]
     let exercises: [WorkoutTemplateSyncExerciseMutation]
 }
@@ -197,6 +208,10 @@ final class WorkoutTemplateSyncService {
         let orderedSessionExercises = (session.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
         let orderedTemplateCardioBlocks = orderedCardioBlocks(for: template)
         let orderedSessionCardioBlocks = orderedCardioBlocks(for: session)
+        let editedWorkoutNotes = editedWorkoutNotesChange(
+            templateNotes: template.notes,
+            sessionNotes: session.notes
+        )
         let templateCardioByPhase = Dictionary(
             uniqueKeysWithValues: orderedTemplateCardioBlocks.map { ($0.phase, $0) }
         )
@@ -343,6 +358,8 @@ final class WorkoutTemplateSyncService {
         }
 
         guard
+            editedWorkoutNotes != nil
+                ||
             !addedCardioBlocks.isEmpty
                 || !removedCardioBlocks.isEmpty
                 || !editedCardioBlocks.isEmpty
@@ -358,6 +375,7 @@ final class WorkoutTemplateSyncService {
         return WorkoutTemplateSyncPreview(
             templateID: templateID,
             templateName: template.name,
+            editedWorkoutNotes: editedWorkoutNotes,
             addedCardioBlocks: addedCardioBlocks,
             removedCardioBlocks: removedCardioBlocks,
             editedCardioBlocks: editedCardioBlocks,
@@ -366,6 +384,7 @@ final class WorkoutTemplateSyncService {
             reorderedExercises: reorderedExercises,
             editedExercises: editedExercises,
             mutation: WorkoutTemplateSyncMutation(
+                templateNotes: normalizedWorkoutNotes(session.notes),
                 cardioBlocks: orderedSessionCardioBlocks.map(makeMutation(from:)),
                 exercises: orderedSessionExercises.map { sessionExercise in
                     makeMutation(
@@ -385,6 +404,7 @@ final class WorkoutTemplateSyncService {
         let repository = TemplateRepository(modelContext: modelContext)
         try repository.applyWorkoutTemplateSync(
             templateID: preview.templateID,
+            templateNotes: preview.mutation.templateNotes,
             exercises: preview.mutation.exercises,
             cardioBlocks: preview.mutation.cardioBlocks
         )
@@ -565,6 +585,37 @@ final class WorkoutTemplateSyncService {
         return changes
     }
 
+    private func editedWorkoutNotesChange(
+        templateNotes: String,
+        sessionNotes: String
+    ) -> WorkoutTemplateSyncEditedWorkoutNotes? {
+        let normalizedTemplate = normalizedWorkoutNotes(templateNotes)
+        let normalizedSession = normalizedWorkoutNotes(sessionNotes)
+        guard normalizedTemplate != normalizedSession else {
+            return nil
+        }
+
+        var changes: [String] = []
+        switch (normalizedTemplate.isEmpty, normalizedSession.isEmpty) {
+        case (true, false):
+            changes.append("Notes added")
+        case (false, true):
+            changes.append("Notes removed")
+        case (false, false):
+            changes.append("Notes updated")
+        case (true, true):
+            break
+        }
+
+        if normalizedSession.isEmpty {
+            changes.append("The reusable workout note will be cleared.")
+        } else {
+            changes.append(normalizedSession)
+        }
+
+        return WorkoutTemplateSyncEditedWorkoutNotes(changes: changes)
+    }
+
     private func editedCardioChangeSummaries(
         templateCardioBlock: TemplateCardioBlock,
         sessionCardioBlock: WorkoutSessionCardioBlock
@@ -693,6 +744,10 @@ final class WorkoutTemplateSyncService {
     }
 
     private func normalizedExerciseNotes(_ notes: String) -> String {
+        notes.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func normalizedWorkoutNotes(_ notes: String) -> String {
         notes.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 

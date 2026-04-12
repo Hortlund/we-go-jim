@@ -77,6 +77,7 @@ struct ActiveWorkoutDraftRepositoryTests {
         let draftSetDrafts = try repository.setDrafts(sessionExerciseID: draftExercise.id)
 
         #expect(draftSession.templateID == template.id)
+        #expect(draftSession.notes == "Heavy")
         #expect(cardioBlocks.map(\.phase) == [.preWorkout])
         #expect(cardioBlocks.first?.targetDurationSeconds == 300)
         #expect(draftExercise.exerciseNameSnapshot == "Bench Press")

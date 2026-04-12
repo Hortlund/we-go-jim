@@ -154,6 +154,22 @@ struct WorkoutSessionRepositoryTests {
     }
 
     @Test
+    func createSessionFromTemplateCopiesWorkoutNotes() throws {
+        let context = try makeInMemoryContext()
+        let templateRepository = TemplateRepository(modelContext: context)
+        let repository = WorkoutSessionRepository(modelContext: context)
+
+        let template = try templateRepository.createTemplate(
+            name: "Push",
+            notes: "Keep the workout moving and log every top set."
+        )
+
+        let session = try repository.createSessionFromTemplate(templateID: template.id)
+
+        #expect(session.notes == "Keep the workout moving and log every top set.")
+    }
+
+    @Test
     func createSessionFromTemplateRotatesMultiComponentExerciseAcrossCompletedSessions() throws {
         let context = try makeInMemoryContext()
         let templateRepository = TemplateRepository(modelContext: context)

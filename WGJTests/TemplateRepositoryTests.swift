@@ -161,7 +161,10 @@ struct TemplateRepositoryTests {
         try templateRepository.addExercise(templateID: sourceTemplate.id, catalogItem: bench)
 
         let session = try sessionRepository.createSessionFromTemplate(templateID: sourceTemplate.id)
-        try sessionRepository.finishSession(sessionID: session.id)
+        try sessionRepository.finishSession(
+            sessionID: session.id,
+            notes: "Carry this note into the reusable template."
+        )
 
         let savedTemplate = try templateRepository.createTemplate(
             fromSessionID: session.id,
@@ -169,6 +172,7 @@ struct TemplateRepositoryTests {
         )
 
         let cardioBlocks = try templateRepository.cardioBlocks(templateID: savedTemplate.id)
+        #expect(savedTemplate.notes == "Carry this note into the reusable template.")
         #expect(cardioBlocks.map(\.phase) == [.preWorkout, .postWorkout])
         #expect(cardioBlocks.map(\.targetDurationSeconds) == [300, 1200])
     }

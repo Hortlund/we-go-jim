@@ -154,7 +154,8 @@ final class WorkoutSessionRepository {
 
         let session = WorkoutSession(
             templateID: template.id,
-            name: ReviewModerationService.sanitizedForSharing(template.name, kind: .workoutName)
+            name: ReviewModerationService.sanitizedForSharing(template.name, kind: .workoutName),
+            notes: template.notes
         )
         modelContext.insert(session)
 

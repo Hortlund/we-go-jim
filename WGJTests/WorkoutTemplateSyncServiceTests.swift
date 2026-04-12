@@ -113,6 +113,51 @@ struct WorkoutTemplateSyncServiceTests {
     }
 
     @Test
+    func previewAndApplyTemplateUpdateHandleWorkoutNoteOnlyChanges() throws {
+        let context = try makeInMemoryContext()
+        let templateRepository = TemplateRepository(modelContext: context)
+        let sessionRepository = WorkoutSessionRepository(modelContext: context)
+        let syncService = WorkoutTemplateSyncService(modelContext: context)
+
+        let bench = catalogItem(
+            remoteUUID: "sync-notes-bench",
+            displayName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell"
+        )
+        context.insert(bench)
+
+        let template = try makeTemplate(
+            name: "Push",
+            exercises: [
+                draft(for: bench, minReps: 6, maxReps: 8, restSeconds: 120, targetWeight: 100),
+            ],
+            repository: templateRepository
+        )
+        template.notes = "Original reusable note."
+        try context.save()
+
+        let session = try sessionRepository.createSessionFromTemplate(templateID: template.id)
+        try sessionRepository.updateSessionNotes(
+            sessionID: session.id,
+            notes: "Updated reusable note from the workout."
+        )
+        try sessionRepository.finishSession(sessionID: session.id)
+
+        let preview = try #require(try syncService.previewTemplateUpdate(forSessionID: session.id))
+        #expect(preview.editedWorkoutNotes?.changes.contains("Notes updated") == true)
+        #expect(preview.editedExercises.isEmpty)
+        #expect(preview.addedExercises.isEmpty)
+        #expect(preview.removedExercises.isEmpty)
+        #expect(preview.summary.contains("updated workout notes"))
+
+        try syncService.applyTemplateUpdate(preview)
+
+        let updatedTemplate = try #require(try templateRepository.template(id: template.id))
+        #expect(updatedTemplate.notes == "Updated reusable note from the workout.")
+    }
+
+    @Test
     func previewTreatsTemplateSwapAsRemoveAddAndReorder() throws {
         let context = try makeInMemoryContext()
         let templateRepository = TemplateRepository(modelContext: context)

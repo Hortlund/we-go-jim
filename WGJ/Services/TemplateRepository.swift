@@ -264,6 +264,10 @@ final class TemplateRepository {
         return (try? profileRepository.currentProfile()?.preferredLoadUnit) ?? .kg
     }
 
+    private func normalizedTemplateNotes(_ notes: String) -> String {
+        notes.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     func folders() throws -> [TemplateFolder] {
         let descriptor = FetchDescriptor<TemplateFolder>(
             sortBy: [
@@ -419,7 +423,7 @@ final class TemplateRepository {
         let template = try createTemplate(
             folderID: folderID,
             name: name,
-            notes: "Saved from workout \(session.startedAt.formatted(date: .abbreviated, time: .shortened))"
+            notes: normalizedTemplateNotes(session.notes)
         )
 
         let sessionExercises = try workoutSessionExercises(sessionID: sessionID)
@@ -990,12 +994,16 @@ final class TemplateRepository {
 
     func applyWorkoutTemplateSync(
         templateID: UUID,
+        templateNotes: String,
         exercises mutations: [WorkoutTemplateSyncExerciseMutation],
         cardioBlocks cardioMutations: [WorkoutTemplateSyncCardioMutation]
     ) throws {
         guard let template = try template(id: templateID) else {
             throw TemplateRepositoryError.templateNotFound
         }
+
+        template.notes = normalizedTemplateNotes(templateNotes)
+        template.updatedAt = .now
 
         try validateUniqueComponentCatalogUUIDs(
             in: mutations.map { mutation in

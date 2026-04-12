@@ -11,6 +11,19 @@ struct ActiveWorkoutTemplateSyncReviewSheet: View {
                 VStack(alignment: .leading, spacing: 16) {
                     summaryCard
 
+                    if let editedWorkoutNotes = preview.editedWorkoutNotes {
+                        section(
+                            title: "Workout Notes",
+                            subtitle: "Reusable workout-level notes that changed during this session."
+                        ) {
+                            summaryRow(
+                                title: "Workout Notes",
+                                details: editedWorkoutNotes.changes,
+                                tint: WGJTheme.accentBlue
+                            )
+                        }
+                    }
+
                     if !preview.addedCardioBlocks.isEmpty {
                         section(
                             title: "Added Cardio",
@@ -147,7 +160,7 @@ struct ActiveWorkoutTemplateSyncReviewSheet: View {
                 .foregroundStyle(WGJTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text("Apply these structural changes to the template, or keep the original template and just save the finished workout.")
+            Text("Apply these reusable changes to the template, or keep the original template and just save the finished workout.")
                 .font(.caption)
                 .foregroundStyle(WGJTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -223,6 +236,7 @@ struct ActiveWorkoutTemplateSyncReviewSheet: View {
                         .font(.subheadline)
                         .foregroundStyle(WGJTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(nil)
                 }
             }
         }
