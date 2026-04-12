@@ -443,7 +443,7 @@ struct StartWorkoutHomeView: View {
 
     private func startButton(for template: WorkoutTemplate) -> some View {
         Button {
-            selectedTemplatePreview = StartWorkoutTemplatePreview(template: template)
+            selectedTemplatePreview = makeTemplatePreview(for: template)
         } label: {
             Text("Start")
                 .frame(maxWidth: .infinity)
@@ -939,10 +939,32 @@ struct StartWorkoutHomeView: View {
             expandedFolderIDs[TemplateRepository.unfiledFolderID] = true
             persistExpandedFolderState()
             try controller.reload(modelContext: modelContext)
-            selectedTemplatePreview = StartWorkoutTemplatePreview(template: importedTemplate)
+            selectedTemplatePreview = makeTemplatePreview(for: importedTemplate)
         } catch {
             showError(error)
         }
+    }
+
+    @MainActor
+    private func makeTemplatePreview(for template: WorkoutTemplate) -> StartWorkoutTemplatePreview {
+        let componentRotationResolver = TemplateExerciseComponentRotationResolver(modelContext: modelContext)
+        var componentResolutionByExerciseID: [UUID: ExerciseComponentRotationResolution] = [:]
+
+        for exercise in (template.exercises ?? []) {
+            guard let resolution = try? componentRotationResolver.resolution(
+                for: template,
+                exercise: exercise
+            ) else {
+                continue
+            }
+
+            componentResolutionByExerciseID[exercise.id] = resolution
+        }
+
+        return StartWorkoutTemplatePreview(
+            template: template,
+            componentResolutionByExerciseID: componentResolutionByExerciseID
+        )
     }
 
     private func exportTemplate(templateID: UUID) {
@@ -1252,6 +1274,8 @@ struct StartWorkoutTemplatePreview: Identifiable, Equatable {
         let sortOrder: Int
         let exerciseName: String
         let componentNames: [String]
+        let componentOptionCount: Int
+        let nextExerciseName: String?
         let focusArea: String?
         let descriptor: String?
         let targetRepMin: Int?
@@ -1259,21 +1283,29 @@ struct StartWorkoutTemplatePreview: Identifiable, Equatable {
         let restSeconds: Int
         let plannedSetCount: Int
 
-        init(templateExercise: TemplateExercise) {
+        init(
+            templateExercise: TemplateExercise,
+            componentResolution: ExerciseComponentRotationResolution? = nil
+        ) {
             id = templateExercise.id
             sortOrder = templateExercise.sortOrder
-            exerciseName = templateExercise.exerciseNameSnapshot
             let orderedComponentNames = (templateExercise.components ?? [])
                 .sorted { $0.sortOrder < $1.sortOrder }
                 .map(\.exerciseNameSnapshot)
+            let selectedComponent = componentResolution?.selectedComponent
+            exerciseName = selectedComponent?.exerciseNameSnapshot ?? templateExercise.exerciseNameSnapshot
             if orderedComponentNames.isEmpty {
                 componentNames = [templateExercise.exerciseNameSnapshot]
             } else {
                 componentNames = orderedComponentNames
             }
+            componentOptionCount = componentNames.count
+            nextExerciseName = componentOptionCount > 1
+                ? componentResolution?.nextComponent.exerciseNameSnapshot
+                : nil
             let resolvedDescriptor = Self.makeDescriptor(
-                muscleSummary: templateExercise.muscleSummarySnapshot,
-                category: templateExercise.categorySnapshot
+                muscleSummary: selectedComponent?.muscleSummarySnapshot ?? templateExercise.muscleSummarySnapshot,
+                category: selectedComponent?.categorySnapshot ?? templateExercise.categorySnapshot
             )
             focusArea = resolvedDescriptor
             descriptor = resolvedDescriptor
@@ -1307,7 +1339,10 @@ struct StartWorkoutTemplatePreview: Identifiable, Equatable {
     let totalPlannedSets: Int
     let focusAreaSummary: String?
 
-    init(template: WorkoutTemplate) {
+    init(
+        template: WorkoutTemplate,
+        componentResolutionByExerciseID: [UUID: ExerciseComponentRotationResolution] = [:]
+    ) {
         id = template.id
         templateID = template.id
         folderID = template.folderID
@@ -1322,7 +1357,12 @@ struct StartWorkoutTemplatePreview: Identifiable, Equatable {
         postWorkoutCardio = cardioByPhase[.postWorkout].map(CardioBlock.init(templateCardioBlock:))
         exercises = (template.exercises ?? [])
             .sorted { $0.sortOrder < $1.sortOrder }
-            .map(Exercise.init(templateExercise:))
+            .map { exercise in
+                Exercise(
+                    templateExercise: exercise,
+                    componentResolution: componentResolutionByExerciseID[exercise.id]
+                )
+            }
         totalPlannedSets = exercises.reduce(0) { partialResult, exercise in
             partialResult + exercise.plannedSetCount
         }
@@ -1561,6 +1601,7 @@ private struct TemplateStartPreviewSheet: View {
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(WGJTheme.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("template-preview-exercise-row-\(index)-name")
 
                 if let descriptor = exercise.descriptor {
                     Text(descriptor)
@@ -1570,7 +1611,9 @@ private struct TemplateStartPreviewSheet: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                if exercise.componentNames.count > 1 {
+                if exercise.componentOptionCount > 1 {
+                    componentContainerSummary(for: exercise, index: index)
+
                     Text("Options: \(exercise.componentNames.joined(separator: ", "))")
                         .font(.caption)
                         .foregroundStyle(WGJTheme.textSecondary)
@@ -1595,7 +1638,70 @@ private struct TemplateStartPreviewSheet: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("template-preview-exercise-row-\(index)")
+    }
+
+    private func componentContainerSummary(
+        for exercise: StartWorkoutTemplatePreview.Exercise,
+        index: Int
+    ) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                componentSummaryChip(
+                    title: "\(exercise.componentOptionCount) exercise options",
+                    systemImage: "square.stack.3d.up.fill",
+                    tint: WGJTheme.accentBlue
+                )
+                .accessibilityIdentifier("template-preview-exercise-row-\(index)-component-summary")
+
+                if let nextExerciseName = exercise.nextExerciseName {
+                    componentSummaryChip(
+                        title: "Next \(nextExerciseName)",
+                        systemImage: "arrow.right.circle.fill",
+                        tint: WGJTheme.accentCyan
+                    )
+                    .accessibilityIdentifier("template-preview-exercise-row-\(index)-component-summary-next")
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                componentSummaryChip(
+                    title: "\(exercise.componentOptionCount) exercise options",
+                    systemImage: "square.stack.3d.up.fill",
+                    tint: WGJTheme.accentBlue
+                )
+                .accessibilityIdentifier("template-preview-exercise-row-\(index)-component-summary")
+
+                if let nextExerciseName = exercise.nextExerciseName {
+                    componentSummaryChip(
+                        title: "Next \(nextExerciseName)",
+                        systemImage: "arrow.right.circle.fill",
+                        tint: WGJTheme.accentCyan
+                    )
+                    .accessibilityIdentifier("template-preview-exercise-row-\(index)-component-summary-next")
+                }
+            }
+        }
+    }
+
+    private func componentSummaryChip(
+        title: String,
+        systemImage: String,
+        tint: Color
+    ) -> some View {
+        Label(title, systemImage: systemImage)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(tint)
+            .lineLimit(1)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(tint.opacity(0.12))
+            )
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(title)
     }
 
     private func cardioSection(_ cardioBlock: StartWorkoutTemplatePreview.CardioBlock) -> some View {

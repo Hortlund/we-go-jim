@@ -599,7 +599,7 @@ struct ActiveWorkoutView: View {
             exerciseNotes: resolvedNotes(for: exercise),
             restSeconds: resolvedRest(for: exercise),
             setDrafts: drafts,
-            isExpanded: cardStateController.isExpanded(for: exerciseID),
+            isExpanded: areMainExercisesUnlocked && cardStateController.isExpanded(for: exerciseID),
             manualCompletionMode: true,
             isBozarModeEnabled: currentProfile?.isBozarModeEnabled ?? false,
             isSetEditingEnabled: areMainExercisesUnlocked,
@@ -2227,11 +2227,13 @@ private struct ActiveWorkoutFinishPopover: View {
                     Text(content.title)
                         .font(.headline.weight(.semibold))
                         .foregroundStyle(WGJTheme.textPrimary)
+                        .accessibilityIdentifier("active-workout-finish-confirmation-title")
 
                     Text(content.message)
                         .font(.subheadline)
                         .foregroundStyle(WGJTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("active-workout-finish-confirmation-message")
                 }
             }
 
@@ -2259,6 +2261,8 @@ struct ActiveWorkoutFinishConfirmationContent: Equatable {
     let incompleteExerciseCount: Int
     let incompleteSetCount: Int
     let incompleteCardioCount: Int
+    let incompletePreWorkoutCardioCount: Int
+    let incompletePostWorkoutCardioCount: Int
 
     init(
         exerciseDrafts: [[WorkoutSessionSetDraft]],
@@ -2277,7 +2281,13 @@ struct ActiveWorkoutFinishConfirmationContent: Equatable {
 
         self.incompleteExerciseCount = incompleteExerciseCount
         self.incompleteSetCount = incompleteSetCount
-        self.incompleteCardioCount = cardioBlocks.filter { !$0.isCompleted }.count
+        self.incompletePreWorkoutCardioCount = cardioBlocks.filter {
+            $0.phase == .preWorkout && !$0.isCompleted
+        }.count
+        self.incompletePostWorkoutCardioCount = cardioBlocks.filter {
+            $0.phase == .postWorkout && !$0.isCompleted
+        }.count
+        self.incompleteCardioCount = incompletePreWorkoutCardioCount + incompletePostWorkoutCardioCount
     }
 
     var hasIncompleteWork: Bool {
@@ -2285,12 +2295,28 @@ struct ActiveWorkoutFinishConfirmationContent: Equatable {
     }
 
     var title: String {
-        hasIncompleteWork ? "Finish With Unfinished Work?" : "Finish Workout?"
+        if incompletePreWorkoutCardioCount > 0 {
+            return "Pre-workout Cardio Incomplete"
+        }
+
+        return hasIncompleteWork ? "Finish With Unfinished Work?" : "Finish Workout?"
     }
 
     var message: String {
         guard hasIncompleteWork else {
             return "This will close the active workout and add it to your history."
+        }
+
+        if incompletePreWorkoutCardioCount > 0 && incompleteSetCount > 0 {
+            return "Pre-workout cardio is still incomplete, and you still have \(countText(incompleteSetCount, singular: "unfinished set")) across \(countText(incompleteExerciseCount, singular: "exercise")). Finish anyway or go back and complete the warmup first."
+        }
+
+        if incompletePreWorkoutCardioCount > 0 && incompletePostWorkoutCardioCount > 0 {
+            return "Pre-workout cardio is still incomplete, and you also have \(countText(incompletePostWorkoutCardioCount, singular: "unfinished cooldown block")). Finish anyway or go back and complete the warmup first."
+        }
+
+        if incompletePreWorkoutCardioCount > 0 {
+            return "Pre-workout cardio is still incomplete. Finish anyway or go back and complete the warmup first."
         }
 
         if incompleteSetCount > 0 && incompleteCardioCount > 0 {

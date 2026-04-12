@@ -1602,23 +1602,24 @@ final class WGJUITests: XCTestCase {
 
         let preToggle = app.buttons["Complete Pre Cardio"]
         let postToggle = app.buttons["Complete Post Cardio"]
+        let exerciseHeader = identifiedElement("active-workout-exercise-gated-bench-1", in: app)
+        let weightField = identifiedElement("workout-set-0-weight-field", in: app)
         let completeSetButton = app.buttons.matching(
             NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
         ).firstMatch
-        let weightField = identifiedElement("workout-set-0-weight-field", in: app)
 
         XCTAssertTrue(preToggle.waitForExistence(timeout: 5))
         XCTAssertTrue(postToggle.waitForExistence(timeout: 5))
-        XCTAssertTrue(weightField.waitForExistence(timeout: 5))
-        XCTAssertTrue(completeSetButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(exerciseHeader.waitForExistence(timeout: 5))
 
-        XCTAssertFalse(weightField.isEnabled)
-        XCTAssertFalse(completeSetButton.isEnabled)
+        XCTAssertFalse(weightField.exists)
+        XCTAssertFalse(completeSetButton.exists)
         XCTAssertFalse(postToggle.isEnabled)
 
         preToggle.tap()
 
         XCTAssertTrue(weightField.waitForExistence(timeout: 5))
+        XCTAssertTrue(completeSetButton.waitForExistence(timeout: 5))
         XCTAssertTrue(weightField.isEnabled)
         XCTAssertTrue(completeSetButton.isEnabled)
         XCTAssertFalse(postToggle.isEnabled)
@@ -1627,6 +1628,49 @@ final class WGJUITests: XCTestCase {
 
         XCTAssertTrue(postToggle.waitForExistence(timeout: 5))
         XCTAssertTrue(postToggle.isEnabled)
+    }
+
+    @MainActor
+    func testActiveWorkoutFinishWarningCallsOutIncompletePreWorkoutCardio() throws {
+        let app = launchApp(launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Finish Warmup Warning Workout",
+                notes: "Finishing before warmup should call it out.",
+                preWorkoutCardio: templatePayloadCardio(
+                    catalogExerciseUUID: "finish-warning-bike-1",
+                    exerciseNameSnapshot: "Bike",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Warmup",
+                    targetDurationSeconds: 300
+                ),
+                exercises: [
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "finish-warning-bench-1",
+                        exerciseNameSnapshot: "Bench Press",
+                        categorySnapshot: "Chest",
+                        muscleSummarySnapshot: "Chest",
+                        targetRepMin: 6,
+                        targetRepMax: 8,
+                        restSeconds: 120,
+                        sets: [templatePayloadSet(targetReps: 6, targetWeight: 100, loadUnit: "kg", restSeconds: 120, isWarmup: false)]
+                    ),
+                ]
+            ),
+        ])
+
+        startPreviewedTemplateWorkout(in: app)
+
+        let finishButton = app.buttons["active-workout-finish-button"]
+        XCTAssertTrue(finishButton.waitForExistence(timeout: 5))
+        finishButton.tap()
+
+        let title = identifiedElement("active-workout-finish-confirmation-title", in: app)
+        let message = identifiedElement("active-workout-finish-confirmation-message", in: app)
+
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        XCTAssertEqual(title.label, "Pre-workout Cardio Incomplete")
+        XCTAssertTrue(message.waitForExistence(timeout: 5))
+        XCTAssertTrue(message.label.contains("Pre-workout cardio is still incomplete"))
     }
 
     @MainActor
@@ -2144,7 +2188,25 @@ final class WGJUITests: XCTestCase {
         finishTemplateWorkout(in: app)
         confirmWorkoutCompletion(in: app)
         tapTab("Start Workout", in: app)
-        restartImportedTemplateWorkout(in: app)
+
+        let startButton = app.buttons["Start"].firstMatch
+        XCTAssertTrue(startButton.waitForExistence(timeout: 5))
+        startButton.tap()
+
+        let previewSheet = identifiedElement("template-preview-sheet", in: app)
+        XCTAssertTrue(previewSheet.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            app.staticTexts["Wrist Curl"].waitForExistence(timeout: 5)
+        )
+        XCTAssertTrue(
+            identifiedElement("template-preview-exercise-row-1-component-summary", in: app)
+                .waitForExistence(timeout: 5)
+        )
+        XCTAssertTrue(
+            app.staticTexts["Next Reverse Curl"].waitForExistence(timeout: 5)
+        )
+
+        startPreviewedTemplateWorkout(in: app)
 
         XCTAssertTrue(
             identifiedElement("active-workout-exercise-ui-rotation-wrist-curl", in: app)
