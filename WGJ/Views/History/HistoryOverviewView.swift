@@ -494,6 +494,7 @@ private struct HistoryArchivedWorkoutsSheet: View {
     @Environment(\.modelContext) private var modelContext
 
     @State private var archivedSessions: [WorkoutSession] = []
+    @State private var pendingDeletion: ArchivedWorkoutDeletionCandidate?
     @State private var errorMessage = ""
     @State private var showingError = false
 
@@ -525,6 +526,22 @@ private struct HistoryArchivedWorkoutsSheet: View {
                 }
             }
         }
+        .confirmationDialog(
+            "Delete hidden workout?",
+            isPresented: pendingDeletionPresented,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Workout", role: .destructive) {
+                guard let pendingDeletion else { return }
+                deleteSession(pendingDeletion.id)
+            }
+
+            Button("Cancel", role: .cancel) {
+                pendingDeletion = nil
+            }
+        } message: {
+            Text("This permanently removes the workout from history.")
+        }
         .task {
             await loadArchivedSessions()
         }
@@ -551,16 +568,54 @@ private struct HistoryArchivedWorkoutsSheet: View {
                 WGJMetricPill(systemImage: "scalemass.fill", value: formattedVolume(session.totalVolume))
             }
 
-            Button {
-                restoreSession(session.id)
-            } label: {
-                Label("Restore Workout", systemImage: "arrow.uturn.backward")
-                    .frame(maxWidth: .infinity)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) {
+                    restoreWorkoutButton(for: session)
+                    deleteWorkoutButton(for: session)
+                }
+
+                VStack(spacing: 10) {
+                    restoreWorkoutButton(for: session)
+                    deleteWorkoutButton(for: session)
+                }
             }
-            .buttonStyle(WGJPrimaryButtonStyle())
         }
         .padding(14)
         .wgjCardContainer(strong: true)
+        .accessibilityIdentifier("history-hidden-session-card")
+    }
+
+    private var pendingDeletionPresented: Binding<Bool> {
+        Binding(
+            get: { pendingDeletion != nil },
+            set: { isPresented in
+                if !isPresented {
+                    pendingDeletion = nil
+                }
+            }
+        )
+    }
+
+    private func restoreWorkoutButton(for session: WorkoutSession) -> some View {
+        Button {
+            restoreSession(session.id)
+        } label: {
+            Label("Restore Workout", systemImage: "arrow.uturn.backward")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(WGJPrimaryButtonStyle())
+        .accessibilityIdentifier("history-hidden-restore-button")
+    }
+
+    private func deleteWorkoutButton(for session: WorkoutSession) -> some View {
+        Button {
+            pendingDeletion = ArchivedWorkoutDeletionCandidate(id: session.id)
+        } label: {
+            Label("Delete Permanently", systemImage: "trash")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(WGJDestructiveButtonStyle())
+        .accessibilityIdentifier("history-hidden-delete-button")
     }
 
     @MainActor
@@ -583,6 +638,17 @@ private struct HistoryArchivedWorkoutsSheet: View {
         }
     }
 
+    private func deleteSession(_ sessionID: UUID) {
+        do {
+            try WorkoutSessionRepository(modelContext: modelContext).deleteSession(id: sessionID)
+            archivedSessions.removeAll { $0.id == sessionID }
+            pendingDeletion = nil
+        } catch {
+            errorMessage = String(describing: error)
+            showingError = true
+        }
+    }
+
     private func formattedDuration(_ seconds: Int) -> String {
         let mins = max(0, seconds) / 60
         let hours = mins / 60
@@ -599,6 +665,10 @@ private struct HistoryArchivedWorkoutsSheet: View {
         }
         return "\(WGJFormatters.integerString(volume)) kg"
     }
+}
+
+private struct ArchivedWorkoutDeletionCandidate: Identifiable {
+    let id: UUID
 }
 
 private struct HistoryWorkoutCalendarSheet: View {

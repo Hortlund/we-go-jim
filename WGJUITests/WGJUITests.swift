@@ -892,6 +892,60 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testHiddenWorkoutCanBeDeletedFromHistory() throws {
+        let app = launchApp()
+
+        tapTab("Start Workout", in: app)
+
+        let startButton = app.buttons["start-workout-empty-button"]
+        XCTAssertTrue(startButton.waitForExistence(timeout: 5))
+        startButton.tap()
+
+        let emptyAddExerciseButton = identifiedElement("active-workout-empty-add-exercise-button", in: app)
+        XCTAssertTrue(emptyAddExerciseButton.waitForExistence(timeout: 5))
+        emptyAddExerciseButton.tap()
+        pickExercise(named: "bench", in: app)
+
+        finishTemplateWorkout(in: app)
+        let skipButton = app.buttons["Skip"]
+        if skipButton.waitForExistence(timeout: 10) {
+            skipButton.tap()
+        }
+        confirmWorkoutCompletion(in: app)
+
+        let workoutCard = identifiedElement("history-session-card", in: app)
+        XCTAssertTrue(workoutCard.waitForExistence(timeout: 10))
+        workoutCard.tap()
+
+        let hideButton = app.buttons["Hide"]
+        XCTAssertTrue(hideButton.waitForExistence(timeout: 5))
+        hideButton.tap()
+
+        let hideWorkoutButton = app.buttons["Hide Workout"]
+        XCTAssertTrue(hideWorkoutButton.waitForExistence(timeout: 5))
+        hideWorkoutButton.tap()
+
+        XCTAssertTrue(app.buttons["history-calendar-button"].waitForExistence(timeout: 5))
+
+        let hiddenButton = app.buttons["history-hidden-button"]
+        XCTAssertTrue(hiddenButton.waitForExistence(timeout: 5))
+        hiddenButton.tap()
+
+        let hiddenCard = identifiedElement("history-hidden-session-card", in: app)
+        XCTAssertTrue(hiddenCard.waitForExistence(timeout: 5))
+
+        let deleteWorkoutButton = app.buttons["Delete Permanently"]
+        XCTAssertTrue(deleteWorkoutButton.waitForExistence(timeout: 5))
+        deleteWorkoutButton.tap()
+
+        let confirmDeleteButton = app.buttons["Delete Workout"]
+        XCTAssertTrue(confirmDeleteButton.waitForExistence(timeout: 5))
+        confirmDeleteButton.tap()
+
+        XCTAssertTrue(app.staticTexts["No hidden workouts"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testActiveWorkoutRestTimerStartsOnSetCompletion() throws {
         let app = launchApp()
 

@@ -184,4 +184,13 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 - How to Verify Next Time: Run the template workout finish flows that edit workout notes and choose both `Keep Template` and `Apply Template`; confirm the review sheet appears immediately after finishing and the flow advances to workout completion without getting stuck on `Wrapping up workout`.
 - Status: active
 
+## 2026-04-12 - History Detail Hydration Must Stay Scoped To Expanded Exercise Cards
+
+- Date: 2026-04-12
+- Trigger/Problem: History detail still felt laggy after opening a saved workout and then scrolling through the exercise cards.
+- Root Cause: `HistoryDetailView` reused the full `WorkoutExerciseRowHostView` stack and then hydrated previous-performance plus PR payloads into every exercise row after first render, including collapsed cards. That fanned a main-actor hydration pass into broad row invalidation and display-row refresh work during scrolling.
+- Durable Rule: On history detail, only hydrate heavy previous-performance and PR presentation data for expanded exercise cards, and keep header-level summary badges sourced from persisted session summary data instead of row-scoped hydration state.
+- How to Verify Next Time: Open a completed workout with several exercises, scroll immediately after the screen appears, then expand a lower exercise and confirm its previous-performance/PR content still loads without the whole screen hitching.
+- Status: active
+
 Promote a lesson here only when it clears the bar above.
