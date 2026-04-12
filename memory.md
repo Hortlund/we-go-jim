@@ -94,4 +94,13 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 - How to Verify Next Time: Run the Bozar UI regression that completes a set from previous performance and confirm the ghost elements disappear while the field values remain `100` / `8`; when possible, also cover the same disappearance in the `Fill Last` path.
 - Status: active
 
+## 2026-04-12 - Bozar Completion Must Share Fill-Last Mutation Semantics
+
+- Date: 2026-04-12
+- Trigger/Problem: Bozar mode completion still did not behave like `Fill Last`; completing a set could preserve partial current actuals instead of fully applying the previous performance.
+- Root Cause: `WorkoutSetBozarCompletionResolver` and the explicit `Fill Last` action mutated workout drafts through separate code paths. The resolver only patched missing fields, while `Fill Last` replaced weight, reps, and unit together.
+- Durable Rule: When Bozar mode is meant to act like `Fill Last` plus completion, route both features through the same previous-performance draft mutation helper before firing completion/rest side effects.
+- How to Verify Next Time: Run `WorkoutSetBozarCompletionResolverTests` plus the Bozar UI smoke tests that complete a set with and without previous performance, and confirm the filled values exactly match the previous set while the completion/rest flow still triggers.
+- Status: active
+
 Promote a lesson here only when it clears the bar above.

@@ -23,10 +23,10 @@ struct WorkoutSetBozarCompletionResolverTests {
     }
 
     @Test
-    func keepsManualEntriesAndOnlyFillsMissingPreviousValues() {
+    func matchesFillLastByReplacingExistingActualsWithPreviousPerformance() {
         let draft = WorkoutSessionSetDraft(
             actualReps: 10,
-            actualWeight: nil,
+            actualWeight: 50,
             actualLoadUnit: .lb
         )
         let previous = WorkoutPreviousSetSnapshot(reps: 8, weight: 45, unit: .kg)
@@ -36,17 +36,17 @@ struct WorkoutSetBozarCompletionResolverTests {
             previous: previous
         )
 
-        #expect(resolution.actualReps == 10)
+        #expect(resolution.actualReps == 8)
         #expect(resolution.actualWeight == 45)
         #expect(resolution.actualLoadUnit == .kg)
     }
 
     @Test
-    func leavesDraftEmptyWhenNoPreviousValuesExist() {
+    func leavesExistingActualsUntouchedWhenNoPreviousValuesExist() {
         let draft = WorkoutSessionSetDraft(
-            actualReps: nil,
-            actualWeight: nil,
-            actualLoadUnit: .kg
+            actualReps: 9,
+            actualWeight: 95,
+            actualLoadUnit: .lb
         )
 
         let resolution = WorkoutSetBozarCompletionResolver.resolve(
@@ -54,9 +54,9 @@ struct WorkoutSetBozarCompletionResolverTests {
             previous: nil
         )
 
-        #expect(resolution.actualWeight == nil)
-        #expect(resolution.actualReps == nil)
-        #expect(resolution.actualLoadUnit == .kg)
+        #expect(resolution.actualWeight == 95)
+        #expect(resolution.actualReps == 9)
+        #expect(resolution.actualLoadUnit == .lb)
     }
 
     @Test

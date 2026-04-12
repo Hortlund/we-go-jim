@@ -1681,9 +1681,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         guard setDrafts.indices.contains(index), let previous = previousBySetIndex[index] else { return }
         guard isSetEditingEnabled, !setDrafts[index].isLocked else { return }
 
-        setDrafts[index].actualWeight = previous.weight
-        setDrafts[index].actualReps = previous.reps
-        setDrafts[index].actualLoadUnit = previous.unit
+        setDrafts[index] = setDrafts[index].applyingPreviousPerformance(previous)
 
         if !manualCompletionMode {
             setDrafts[index].isCompleted = previous.weight != nil || previous.reps != nil
@@ -2108,26 +2106,18 @@ enum WorkoutSetBozarCompletionResolver {
         draft: WorkoutSessionSetDraft,
         previous: WorkoutPreviousSetSnapshot?
     ) -> WorkoutSessionSetDraft {
-        var resolvedDraft = draft
+        draft.applyingPreviousPerformance(previous)
+    }
+}
 
-        if resolvedDraft.actualWeight == nil, let previousWeight = previous?.weight {
-            resolvedDraft.actualWeight = previousWeight
-            resolvedDraft.actualLoadUnit = previous?.unit ?? resolvedDraft.actualLoadUnit
-        }
+private extension WorkoutSessionSetDraft {
+    func applyingPreviousPerformance(_ previous: WorkoutPreviousSetSnapshot?) -> WorkoutSessionSetDraft {
+        guard let previous else { return self }
 
-        if resolvedDraft.actualReps == nil, let previousReps = previous?.reps {
-            resolvedDraft.actualReps = previousReps
-        }
-
-        let shouldApplyBodyweightUnit =
-            previous?.unit == .bodyweight
-            && resolvedDraft.actualWeight == nil
-            && ((previous?.reps) != nil || resolvedDraft.actualReps != nil)
-
-        if shouldApplyBodyweightUnit {
-            resolvedDraft.actualLoadUnit = .bodyweight
-        }
-
-        return resolvedDraft
+        var updatedDraft = self
+        updatedDraft.actualWeight = previous.weight
+        updatedDraft.actualReps = previous.reps
+        updatedDraft.actualLoadUnit = previous.unit
+        return updatedDraft
     }
 }
