@@ -577,16 +577,24 @@ struct ActiveWorkoutView: View {
             previousPerformanceResolution: previousResolutionByExerciseID[exerciseID] ?? .loading,
             guidance: guidance,
             preferredLoadUnit: preferredLoadUnit,
-            supplementaryContent: componentResolutionByExerciseID[exerciseID].map { resolution in
-                AnyView(
+            supplementaryContent: componentResolutionByExerciseID[exerciseID].flatMap { resolution in
+                guard resolution.availableComponents.count > 1 else {
+                    return nil
+                }
+
+                return AnyView(
                     ActiveWorkoutExerciseComponentSummaryView(
                         resolution: resolution,
-                        showsSuggestedComponent: false
+                        accessibilityIdentifierPrefix: "active-workout-exercise-\(exercise.catalogExerciseUUID)-component-summary"
                     )
                 )
             },
-            supplementaryContentKey: componentResolutionByExerciseID[exerciseID].map { resolution in
-                "\(resolution.selectedComponent.catalogExerciseUUID)-\(resolution.availableComponents.count)"
+            supplementaryContentKey: componentResolutionByExerciseID[exerciseID].flatMap { resolution in
+                guard resolution.availableComponents.count > 1 else {
+                    return nil
+                }
+
+                return "\(resolution.selectedComponent.catalogExerciseUUID)-\(resolution.availableComponents.count)"
             },
             exerciseNotes: resolvedNotes(for: exercise),
             restSeconds: resolvedRest(for: exercise),

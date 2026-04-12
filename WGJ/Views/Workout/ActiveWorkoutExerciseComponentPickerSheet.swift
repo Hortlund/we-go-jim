@@ -9,25 +9,27 @@ struct ActiveWorkoutExerciseComponentPickerDraft: Identifiable, Equatable {
 
 struct ActiveWorkoutExerciseComponentSummaryView: View {
     let resolution: ExerciseComponentRotationResolution
-    var showsSuggestedComponent: Bool = true
+    var accessibilityIdentifierPrefix: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            componentIndicator
+
             if let lastPerformedComponent = resolution.lastPerformedComponent {
                 summaryChip(
                     title: "Last",
                     value: lastPerformedComponent.exerciseNameSnapshot,
-                    tint: WGJTheme.accentGold
+                    tint: WGJTheme.accentGold,
+                    accessibilityIdentifier: accessibilityIdentifierPrefix.map { "\($0)-last" }
                 )
             }
 
-            if showsSuggestedComponent {
-                summaryChip(
-                    title: "Next",
-                    value: resolution.suggestedComponent.exerciseNameSnapshot,
-                    tint: WGJTheme.accentBlue
-                )
-            }
+            summaryChip(
+                title: "Next",
+                value: resolution.suggestedComponent.exerciseNameSnapshot,
+                tint: WGJTheme.accentBlue,
+                accessibilityIdentifier: accessibilityIdentifierPrefix.map { "\($0)-next" }
+            )
 
             if resolution.hasOverride {
                 Text("Override active")
@@ -37,8 +39,42 @@ struct ActiveWorkoutExerciseComponentSummaryView: View {
         }
     }
 
-    private func summaryChip(title: String, value: String, tint: Color) -> some View {
-        HStack(spacing: 6) {
+    private var componentIndicator: some View {
+        let content = HStack(spacing: 8) {
+            Label(
+                "\(resolution.availableComponents.count) exercise options",
+                systemImage: "square.stack.3d.up.fill"
+            )
+            .font(.caption.weight(.bold))
+            .foregroundStyle(WGJTheme.accentBlue)
+
+            if resolution.hasOverride {
+                Text("Override")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(WGJTheme.success)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(WGJTheme.success.opacity(0.12))
+                    )
+            }
+        }
+
+        if let accessibilityIdentifierPrefix {
+            content.accessibilityIdentifier(accessibilityIdentifierPrefix)
+        } else {
+            content
+        }
+    }
+
+    private func summaryChip(
+        title: String,
+        value: String,
+        tint: Color,
+        accessibilityIdentifier: String?
+    ) -> some View {
+        let content = HStack(spacing: 6) {
             Text("\(title):")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(tint)
@@ -54,6 +90,12 @@ struct ActiveWorkoutExerciseComponentSummaryView: View {
             Capsule(style: .continuous)
                 .fill(tint.opacity(0.10))
         )
+
+        if let accessibilityIdentifier {
+            content.accessibilityIdentifier(accessibilityIdentifier)
+        } else {
+            content
+        }
     }
 }
 
