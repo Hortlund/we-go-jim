@@ -121,7 +121,11 @@ struct MainTabView: View {
             return 0
         }
 
-        return activeWorkoutStripHeight + Self.activeWorkoutScrollClearance
+        // The minimized strip floats above the tab bar by an additional bottom gap.
+        // Scroll content needs clearance for both that lift and the strip itself.
+        return activeWorkoutStripHeight
+            + Self.activeWorkoutStripBottomGap
+            + Self.activeWorkoutScrollClearance
     }
 
     private func rootTab<Content: View>(
@@ -131,12 +135,7 @@ struct MainTabView: View {
         @ViewBuilder content: @escaping () -> Content
     ) -> some View {
         LazyTabContainer(tab: tab, content: content)
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                Color.clear
-                    .frame(height: activeWorkoutOverlayBottomInset)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-            }
+            .contentMargins(.bottom, activeWorkoutOverlayBottomInset, for: .scrollContent)
             .animation(overlayAnimation, value: activeWorkoutOverlayBottomInset)
             .tabItem {
                 Label(title, systemImage: systemImage)

@@ -50,6 +50,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     @State private var weightInputTextBySetID: [UUID: String] = [:]
     @State private var pendingBozarCompletionSetIDs: Set<UUID> = []
     @State private var pendingDisplayRefreshTask: Task<Void, Never>?
+    @State private var suppressNextFocusLossCommit = false
     @FocusState private var focusedInput: SetInputFocus?
 
     private let restPresets = [10, 15, 20, 30, 45, 60, 75, 90, 105, 120, 150, 180, 210, 240]
@@ -1306,6 +1307,13 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func dismissInputFocus() {
+        dismissInputFocus(suppressCommit: false)
+    }
+
+    private func dismissInputFocus(suppressCommit: Bool) {
+        if suppressCommit, focusedInput != nil {
+            suppressNextFocusLossCommit = true
+        }
         focusedInput = nil
     }
 
@@ -1707,6 +1715,11 @@ struct WorkoutSessionExerciseGridEditor: View {
         ) else {
             return
         }
+        let focusedSetInput = focusedInput?.setID == setDrafts[index].id ? focusedInput : nil
+        if let focusedSetInput {
+            syncInputDraft(for: focusedSetInput, using: updatedDrafts[index])
+            dismissInputFocus(suppressCommit: true)
+        }
 
         if !manualCompletionMode {
             var autoCompletedDrafts = updatedDrafts
@@ -1884,18 +1897,21 @@ struct WorkoutSessionExerciseGridEditor: View {
     private func requestCompletionChange(at index: Int, isCompleted: Bool) {
         guard setDrafts.indices.contains(index) else { return }
         guard !setDrafts[index].isLocked else { return }
-
-        if focusedInput?.setID == setDrafts[index].id {
-            dismissInputFocus()
-        }
+        let focusedSetInput = focusedInput?.setID == setDrafts[index].id ? focusedInput : nil
 
         guard isCompleted else {
+            if focusedSetInput != nil {
+                dismissInputFocus(suppressCommit: true)
+            }
             pendingBozarCompletionSetIDs.remove(setDrafts[index].id)
             setCompletion(false, at: index)
             return
         }
 
         guard manualCompletionMode, isBozarModeEnabled else {
+            if focusedSetInput != nil {
+                dismissInputFocus(suppressCommit: true)
+            }
             pendingBozarCompletionSetIDs.remove(setDrafts[index].id)
             setCompletion(true, at: index)
             return
@@ -1911,8 +1927,15 @@ struct WorkoutSessionExerciseGridEditor: View {
 
         switch decision {
         case .waitForPreviousPerformance(let setID):
+            if focusedSetInput != nil {
+                dismissInputFocus(suppressCommit: true)
+            }
             pendingBozarCompletionSetIDs.insert(setID)
         case .completeImmediately(let updatedDrafts):
+            if let focusedSetInput {
+                syncInputDraft(for: focusedSetInput, using: updatedDrafts[index])
+                dismissInputFocus(suppressCommit: true)
+            }
             pendingBozarCompletionSetIDs.remove(setDrafts[index].id)
             setDrafts = updatedDrafts
             setCompletion(true, at: index, draftOverride: updatedDrafts)
@@ -1928,7 +1951,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         guard updatedDrafts.indices.contains(index) else { return }
         guard !updatedDrafts[index].isLocked else { return }
         if focusedInput?.setID == updatedDrafts[index].id {
-            dismissInputFocus()
+            dismissInputFocus(suppressCommit: true)
         }
 
         let setID = updatedDrafts[index].id
@@ -1961,8 +1984,14 @@ struct WorkoutSessionExerciseGridEditor: View {
     private func handleFocusedInputChange(_ previousFocus: SetInputFocus?, _ newFocus: SetInputFocus?) {
         guard previousFocus != newFocus else { return }
         if let previousFocus {
-            clearInputDraft(for: previousFocus)
-            requestCommitForCurrentState()
+            if suppressNextFocusLossCommit {
+                suppressNextFocusLossCommit = false
+            } else {
+                clearInputDraft(for: previousFocus)
+                requestCommitForCurrentState()
+            }
+        } else {
+            suppressNextFocusLossCommit = false
         }
         if newFocus == nil {
             flushPendingDisplayRefresh()
@@ -2044,6 +2073,17 @@ struct WorkoutSessionExerciseGridEditor: View {
             weightInputTextBySetID[focus.setID] = nil
         case .reps:
             repsInputTextBySetID[focus.setID] = nil
+        }
+    }
+
+    private func syncInputDraft(for focus: SetInputFocus, using draft: WorkoutSessionSetDraft) {
+        guard focus.setID == draft.id else { return }
+
+        switch focus.metric {
+        case .weight:
+            weightInputTextBySetID[draft.id] = draft.actualWeight.map(formatWeight) ?? ""
+        case .reps:
+            repsInputTextBySetID[draft.id] = draft.actualReps.map(String.init) ?? ""
         }
     }
 

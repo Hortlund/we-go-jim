@@ -130,4 +130,22 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 - How to Verify Next Time: Run unit coverage for waiting vs resolved completion behavior, plus UI coverage that taps `Complete Set` before history resolves and confirms the set waits, fills, and then completes once previous performance arrives.
 - Status: active
 
+## 2026-04-12 - Programmatic Workout Fills Must Handle Focused Field Blur
+
+- Date: 2026-04-12
+- Trigger/Problem: Bozar completion could still leave one metric at the user's partially typed value when `Complete Set` was tapped while a weight or reps field was focused.
+- Root Cause: The focused `TextField` could emit one last stale binding write during blur after a programmatic fill had already updated the draft, so the blur path reintroduced the pre-fill text for the still-focused metric.
+- Durable Rule: When workout metrics are filled programmatically while a field is focused, sync the focused input draft to the new value before dismissing focus and do not let the programmatic blur path immediately clear that draft.
+- How to Verify Next Time: Run the Bozar UI regression that types partial values into a focused set, taps `Complete Set`, and confirms both metrics switch to the previous-performance values instead of preserving the last typed reps or weight.
+- Status: active
+
+## 2026-04-12 - Active Workout Strip Clearance Must Target Scroll Content
+
+- Date: 2026-04-12
+- Trigger/Problem: The minimized active-workout strip kept covering lower controls across tabs, and a tab-shell `safeAreaInset` patch fixed the container chrome without giving scroll views enough real runway.
+- Root Cause: Adding bottom space at the tab shell changed overall layout, but it did not reliably adjust the descendant scroll views' content area or lazy row instantiation, so bottom actions could still sit under the strip.
+- Durable Rule: For minimized active-workout strip clearance, reserve space in scroll content with content margins or screen-level scroll insets; do not rely on a shell-only spacer below the tab root.
+- How to Verify Next Time: With an active minimized strip, run the UI flow that scrolls Start Workout template actions above the strip and confirm the target control exists, is hittable, and ends above the strip frame.
+- Status: active
+
 Promote a lesson here only when it clears the bar above.
