@@ -1612,15 +1612,14 @@ final class WGJUITests: XCTestCase {
 
         startPreviewedTemplateWorkout(in: app)
 
+        let preCard = identifiedElement("active-workout-preWorkout-card", in: app)
         let preToggle = app.buttons["Complete Pre Cardio"]
-        let preActions = identifiedElement("active-workout-preWorkout-actions-button", in: app)
 
+        XCTAssertTrue(preCard.waitForExistence(timeout: 5))
         XCTAssertTrue(preToggle.waitForExistence(timeout: 5))
-        XCTAssertTrue(preActions.waitForExistence(timeout: 5))
         XCTAssertTrue(preToggle.isHittable)
-        XCTAssertTrue(preActions.isHittable)
         XCTAssertEqual(preToggle.label, "Complete Pre Cardio")
-        XCTAssertGreaterThan(preToggle.frame.width, preActions.frame.width + 100)
+        XCTAssertGreaterThan(preToggle.frame.width, preCard.frame.width * 0.55)
     }
 
     @MainActor

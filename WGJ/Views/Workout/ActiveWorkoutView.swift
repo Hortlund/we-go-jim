@@ -36,6 +36,7 @@ struct ActiveWorkoutView: View {
     @State private var pendingSessionNotesSaveTask: Task<Void, Never>?
     @State private var pickerTarget: ActiveWorkoutPickerTarget?
     @State private var showingFinishConfirmation = false
+    @State private var pendingFinishAfterConfirmation = false
     @State private var isCancelArmed = false
     @State private var isEndingSession = false
     @State private var completedSessionID: UUID?
@@ -327,9 +328,13 @@ struct ActiveWorkoutView: View {
             .onChange(of: notesDraft) { _, _ in
                 scheduleSessionNotesPersistence()
             }
+            .onChange(of: showingFinishConfirmation) { oldValue, newValue in
+                handleFinishConfirmationChange(from: oldValue, to: newValue)
+            }
             .onDisappear {
                 shouldTrackVisibleScrollTarget = false
                 isCancelArmed = false
+                pendingFinishAfterConfirmation = false
                 pendingCompletionTask?.cancel()
                 pendingCompletionTask = nil
                 deferredHydrationTask?.cancel()
@@ -474,71 +479,39 @@ struct ActiveWorkoutView: View {
         scrollProxy: ScrollViewProxy
     ) -> some View {
         if let cardioBlock = cardioBlock(for: phase) {
-            VStack(alignment: .leading, spacing: 12) {
-                WGJActionHeader(
-                    phase.title,
-                    subtitle: cardioSectionSubtitle(for: phase)
-                ) {
-                    cardioSectionActionsButton(for: cardioBlock)
-                }
-
-                WorkoutCardioPhaseCard(
-                    phase: phase,
-                    exerciseName: cardioBlock.exerciseNameSnapshot,
-                    descriptor: cardioDescriptor(
-                        category: cardioBlock.categorySnapshot,
-                        muscleSummary: cardioBlock.muscleSummarySnapshot
-                    ),
-                    targetDurationSeconds: cardioBlock.targetDurationSeconds,
-                    statusText: cardioStatusText(for: cardioBlock),
-                    statusTint: cardioStatusTint(for: cardioBlock),
-                    footnote: cardioFootnote(for: cardioBlock)
-                ) {
-                    cardioCompletionButton(
-                        for: cardioBlock,
-                        scrollProxy: scrollProxy
-                    )
-                }
-                .id(cardioScrollTarget(for: phase))
-                .accessibilityIdentifier("active-workout-\(phase.rawValue)-card")
-            }
-        }
-    }
-
-    @MainActor
-    private func cardioCompletionButton(
-        for cardioBlock: ActiveWorkoutDraftCardioBlock,
-        scrollProxy: ScrollViewProxy
-    ) -> some View {
-        Group {
-            if cardioBlock.isCompleted {
-                Button {
+            ActiveWorkoutCardioPhaseCard(
+                phase: phase,
+                exerciseName: cardioBlock.exerciseNameSnapshot,
+                descriptor: cardioDescriptor(
+                    category: cardioBlock.categorySnapshot,
+                    muscleSummary: cardioBlock.muscleSummarySnapshot
+                ),
+                targetDurationSeconds: cardioBlock.targetDurationSeconds,
+                statusText: cardioStatusText(for: cardioBlock),
+                statusTint: cardioStatusTint(for: cardioBlock),
+                footnote: cardioFootnote(for: cardioBlock),
+                isCompleted: cardioBlock.isCompleted,
+                canComplete: canToggleCompletion(for: cardioBlock),
+                completionTitle: "Complete \(cardioBlock.phase.shortTitle)",
+                completionAccessibilityLabel: cardioCompletionAccessibilityLabel(for: cardioBlock),
+                undoAccessibilityLabel: cardioCompletionAccessibilityLabel(for: cardioBlock),
+                completionAccessibilityIdentifier: "active-workout-\(cardioBlock.phase.rawValue)-toggle-button",
+                accessibilityIdentifier: "active-workout-\(phase.rawValue)-card",
+                onToggleCompletion: {
                     toggleCardioCompletion(for: cardioBlock, scrollProxy: scrollProxy)
-                } label: {
-                    Label("Mark Incomplete", systemImage: "arrow.uturn.backward.circle")
-                        .frame(maxWidth: .infinity)
                 }
-                .accessibilityLabel(cardioCompletionAccessibilityLabel(for: cardioBlock))
-                .buttonStyle(WGJGhostButtonStyle())
-                .accessibilityIdentifier("active-workout-\(cardioBlock.phase.rawValue)-toggle-button")
-            } else {
-                Button {
-                    toggleCardioCompletion(for: cardioBlock, scrollProxy: scrollProxy)
-                } label: {
-                    Label("Complete", systemImage: "checkmark.circle.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .accessibilityLabel(cardioCompletionAccessibilityLabel(for: cardioBlock))
-                .buttonStyle(WGJPrimaryButtonStyle())
-                .accessibilityIdentifier("active-workout-\(cardioBlock.phase.rawValue)-toggle-button")
+            ) {
+                cardioSectionActionsButton(for: cardioBlock)
             }
+            .id(cardioScrollTarget(for: phase))
         }
-        .disabled(!canToggleCompletion(for: cardioBlock))
     }
 
     @MainActor
     private func cardioSectionActionsButton(for cardioBlock: ActiveWorkoutDraftCardioBlock) -> some View {
-        WGJActionMenuButton("Cardio Actions", titleVisibility: .hidden) {
+        let accessibilityIdentifier = "active-workout-\(cardioBlock.phase.rawValue)-actions-button"
+
+        return Menu {
             Button("Edit Duration") {
                 cardioSettingsDraft = makeCardioSettingsDraft(from: cardioBlock)
             }
@@ -551,10 +524,24 @@ struct ActiveWorkoutView: View {
                 removeCardioBlock(phase: cardioBlock.phase)
             }
         } label: {
-            Label("Edit", systemImage: "slider.horizontal.3")
+            ActiveWorkoutCardioHeaderActionIcon(tint: cardioHeaderTint(for: cardioBlock))
         }
-        .buttonStyle(WGJCompactGhostButtonStyle())
-        .accessibilityIdentifier("active-workout-\(cardioBlock.phase.rawValue)-actions-button")
+        .menuIndicator(.hidden)
+        .accessibilityLabel("Cardio Actions")
+        .accessibilityIdentifier(accessibilityIdentifier)
+    }
+
+    private func cardioHeaderTint(for cardioBlock: ActiveWorkoutDraftCardioBlock) -> Color {
+        if cardioBlock.isCompleted {
+            return WGJTheme.success
+        }
+
+        switch cardioBlock.phase {
+        case .preWorkout:
+            return WGJTheme.accentBlue
+        case .postWorkout:
+            return WGJTheme.accentGold
+        }
     }
 
     private func cardioCompletionAccessibilityLabel(for cardioBlock: ActiveWorkoutDraftCardioBlock) -> String {
@@ -1558,6 +1545,7 @@ struct ActiveWorkoutView: View {
 
     private func finishWorkout() {
         dismissKeyboard()
+        pendingFinishAfterConfirmation = false
         isCancelArmed = false
         guard !isEndingSession else { return }
         isEndingSession = true
@@ -1740,13 +1728,27 @@ struct ActiveWorkoutView: View {
     private func presentFinishConfirmation() {
         dismissKeyboard()
         guard !isEndingSession else { return }
+        pendingFinishAfterConfirmation = false
         isCancelArmed = false
         showingFinishConfirmation = true
     }
 
     private func confirmFinishWorkout() {
+        guard !isEndingSession else { return }
+        pendingFinishAfterConfirmation = true
         showingFinishConfirmation = false
-        finishWorkout()
+    }
+
+    @MainActor
+    private func handleFinishConfirmationChange(from oldValue: Bool, to newValue: Bool) {
+        guard oldValue, !newValue, pendingFinishAfterConfirmation else { return }
+        pendingFinishAfterConfirmation = false
+
+        Task { @MainActor in
+            await Task.yield()
+            guard !showingFinishConfirmation else { return }
+            finishWorkout()
+        }
     }
 
     @MainActor

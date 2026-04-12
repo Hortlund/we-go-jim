@@ -175,4 +175,13 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 - How to Verify Next Time: Launch a preview template with pre-workout cardio, post-workout cardio, and several exercises; drag upward from the summary area and confirm the lower cardio content and `Start Workout` button become hittable.
 - Status: active
 
+## 2026-04-12 - Finish Follow-Up Sheets Must Wait For The Finish Popover To Dismiss
+
+- Date: 2026-04-12
+- Trigger/Problem: Finishing a template-backed workout after editing notes could get stuck on `Wrapping up workout` instead of showing the template review or completion flow.
+- Root Cause: `ActiveWorkoutView` could finish the session and try to present the next sheet while the finish confirmation popover was still dismissing, which produced a SwiftUI presentation conflict and left the active draft gone without its follow-up presentation.
+- Durable Rule: When a finish/cancel confirmation popover leads into another modal surface, defer the actual state transition until the popover has fully dismissed. Do not start template-review, save-template, or completion-summary presentation work from the same tap that still owns the active popover.
+- How to Verify Next Time: Run the template workout finish flows that edit workout notes and choose both `Keep Template` and `Apply Template`; confirm the review sheet appears immediately after finishing and the flow advances to workout completion without getting stuck on `Wrapping up workout`.
+- Status: active
+
 Promote a lesson here only when it clears the bar above.
