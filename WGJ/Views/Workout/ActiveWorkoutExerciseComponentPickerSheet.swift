@@ -40,7 +40,7 @@ struct ActiveWorkoutExerciseComponentSummaryView: View {
     }
 
     private var componentIndicator: some View {
-        let content = HStack(spacing: 8) {
+        HStack(spacing: 8) {
             Label(
                 "\(resolution.availableComponents.count) exercise options",
                 systemImage: "square.stack.3d.up.fill"
@@ -60,12 +60,7 @@ struct ActiveWorkoutExerciseComponentSummaryView: View {
                     )
             }
         }
-
-        if let accessibilityIdentifierPrefix {
-            content.accessibilityIdentifier(accessibilityIdentifierPrefix)
-        } else {
-            content
-        }
+        .accessibilityIdentifier(accessibilityIdentifierPrefix ?? "")
     }
 
     private func summaryChip(
@@ -74,7 +69,7 @@ struct ActiveWorkoutExerciseComponentSummaryView: View {
         tint: Color,
         accessibilityIdentifier: String?
     ) -> some View {
-        let content = HStack(spacing: 6) {
+        HStack(spacing: 6) {
             Text("\(title):")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(tint)
@@ -90,12 +85,7 @@ struct ActiveWorkoutExerciseComponentSummaryView: View {
             Capsule(style: .continuous)
                 .fill(tint.opacity(0.10))
         )
-
-        if let accessibilityIdentifier {
-            content.accessibilityIdentifier(accessibilityIdentifier)
-        } else {
-            content
-        }
+        .accessibilityIdentifier(accessibilityIdentifier ?? "")
     }
 }
 
