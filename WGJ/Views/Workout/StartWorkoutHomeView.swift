@@ -6,7 +6,6 @@ import UniformTypeIdentifiers
 struct StartWorkoutHomeView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.isTabActive) private var isTabActive
-    @Environment(\.activeWorkoutOverlayBottomInset) private var activeWorkoutOverlayBottomInset
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
     @Environment(TemplateFileOpenState.self) private var templateFileOpenState
@@ -81,15 +80,6 @@ struct StartWorkoutHomeView: View {
             .padding(16)
         }
         .wgjScreenBackground()
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            Color.clear
-                .frame(height: activeWorkoutOverlayBottomInset)
-                .allowsHitTesting(false)
-        }
-        .animation(
-            WGJMotion.overlayAnimation(reduceMotion: reduceMotion),
-            value: activeWorkoutOverlayBottomInset
-        )
         .toolbar(.hidden, for: .navigationBar)
         .sheet(item: $selectedTemplatePreview) { preview in
             TemplateStartPreviewSheet(

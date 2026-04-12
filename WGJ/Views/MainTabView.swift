@@ -131,6 +131,13 @@ struct MainTabView: View {
         @ViewBuilder content: @escaping () -> Content
     ) -> some View {
         LazyTabContainer(tab: tab, content: content)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                Color.clear
+                    .frame(height: activeWorkoutOverlayBottomInset)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+            .animation(overlayAnimation, value: activeWorkoutOverlayBottomInset)
             .tabItem {
                 Label(title, systemImage: systemImage)
             }

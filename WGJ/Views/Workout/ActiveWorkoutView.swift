@@ -448,6 +448,7 @@ struct ActiveWorkoutView: View {
                 onCancel: { showingFinishConfirmation = false }
             )
             .presentationCompactAdaptation(.popover)
+            .presentationBackground(.clear)
         }
     }
 
