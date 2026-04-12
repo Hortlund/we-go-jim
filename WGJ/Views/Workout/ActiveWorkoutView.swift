@@ -67,6 +67,10 @@ struct ActiveWorkoutView: View {
         ActiveWorkoutDraftRepository(modelContext: modelContext)
     }
 
+    private var currentProfile: UserProfile? {
+        UserProfileSelection.currentProfile(in: profiles)
+    }
+
     private var completedSessionRepository: WorkoutSessionRepository {
         WorkoutSessionRepository(modelContext: modelContext)
     }
@@ -604,7 +608,7 @@ struct ActiveWorkoutView: View {
             setDrafts: drafts,
             isExpanded: cardStateController.isExpanded(for: exerciseID),
             manualCompletionMode: true,
-            isBozarModeEnabled: profiles.first?.isBozarModeEnabled ?? false,
+            isBozarModeEnabled: currentProfile?.isBozarModeEnabled ?? false,
             isSetEditingEnabled: areMainExercisesUnlocked,
             canMoveExerciseUp: index > 0,
             canMoveExerciseDown: index < sessionExercises.count - 1,
@@ -1324,7 +1328,7 @@ struct ActiveWorkoutView: View {
     }
 
     private var isTrainingGuidanceEnabled: Bool {
-        profiles.first?.isTrainingGuidanceEnabled ?? true
+        currentProfile?.isTrainingGuidanceEnabled ?? true
     }
 
     @MainActor

@@ -38,6 +38,10 @@ struct SettingsView: View {
         ProfileRepository(modelContext: modelContext)
     }
 
+    private var currentProfile: UserProfile? {
+        UserProfileSelection.currentProfile(in: profiles)
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -238,7 +242,7 @@ struct SettingsView: View {
                     infoRow("Templates", value: "\(templates.count)")
                     infoRow("Workouts", value: "\(sessions.count)")
 
-                    if let lastProfileUpdate = profiles.first?.updatedAt {
+                    if let lastProfileUpdate = currentProfile?.updatedAt {
                         infoRow(
                             "Last profile save",
                             value: lastProfileUpdate.formatted(date: .abbreviated, time: .shortened)
@@ -496,7 +500,7 @@ struct SettingsView: View {
 
         do {
             cloudProbe = try await CloudSyncDebugProbeService().writeProbe(
-                profileName: profiles.first?.displayName,
+                profileName: currentProfile?.displayName,
                 templateCount: templates.count,
                 workoutCount: sessions.count
             )

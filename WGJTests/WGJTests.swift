@@ -672,6 +672,71 @@ struct WGJTests {
     }
 
     @Test
+    func userProfileSelectionChoosesEarliestCreatedProfileForPreferences() {
+        let laterProfile = UserProfile(
+            displayName: "Later",
+            isTrainingGuidanceEnabled: true,
+            isBozarModeEnabled: false,
+            createdAt: Date(timeIntervalSince1970: 200),
+            updatedAt: Date(timeIntervalSince1970: 200)
+        )
+        let earlierProfile = UserProfile(
+            displayName: "Earlier",
+            isTrainingGuidanceEnabled: false,
+            isBozarModeEnabled: true,
+            createdAt: Date(timeIntervalSince1970: 100),
+            updatedAt: Date(timeIntervalSince1970: 100)
+        )
+
+        let selected = UserProfileSelection.currentProfile(in: [laterProfile, earlierProfile])
+
+        #expect(selected?.id == earlierProfile.id)
+        #expect(selected?.isTrainingGuidanceEnabled == false)
+        #expect(selected?.isBozarModeEnabled == true)
+    }
+
+    @Test
+    func profileRepositoryUpdatesCanonicalProfileWhenDuplicateProfilesExist() throws {
+        let context = try makeInMemoryContext()
+        let repository = ProfileRepository(modelContext: context)
+        let canonicalProfile = UserProfile(
+            displayName: "Canonical",
+            workoutNotificationStyle: .timeSensitive,
+            keepsScreenAwake: false,
+            isBozarModeEnabled: false,
+            createdAt: Date(timeIntervalSince1970: 100),
+            updatedAt: Date(timeIntervalSince1970: 100)
+        )
+        let duplicateProfile = UserProfile(
+            displayName: "Duplicate",
+            workoutNotificationStyle: .timeSensitive,
+            keepsScreenAwake: false,
+            isBozarModeEnabled: false,
+            createdAt: Date(timeIntervalSince1970: 200),
+            updatedAt: Date(timeIntervalSince1970: 200)
+        )
+        context.insert(duplicateProfile)
+        context.insert(canonicalProfile)
+        try context.save()
+
+        try repository.updateKeepsScreenAwake(true)
+        try repository.updateBozarModeEnabled(true)
+        try repository.updateWorkoutNotificationStyle(.standard)
+
+        let profiles = try context.fetch(FetchDescriptor<UserProfile>())
+        let refreshedCanonical = try #require(profiles.first(where: { $0.id == canonicalProfile.id }))
+        let refreshedDuplicate = try #require(profiles.first(where: { $0.id == duplicateProfile.id }))
+
+        #expect(refreshedCanonical.keepsScreenAwake == true)
+        #expect(refreshedCanonical.isBozarModeEnabled == true)
+        #expect(refreshedCanonical.workoutNotificationStyle == .standard)
+
+        #expect(refreshedDuplicate.keepsScreenAwake == false)
+        #expect(refreshedDuplicate.isBozarModeEnabled == false)
+        #expect(refreshedDuplicate.workoutNotificationStyle == WorkoutNotificationStyle.timeSensitive)
+    }
+
+    @Test
     func profileRepositoryPersistsWorkoutNotificationStyle() throws {
         let context = try makeInMemoryContext()
         let repository = ProfileRepository(modelContext: context)

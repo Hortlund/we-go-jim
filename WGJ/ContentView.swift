@@ -21,6 +21,10 @@ struct ContentView: View {
     @State private var isPreparingMainPhase = false
     @State private var hasInstalledUITestPendingTemplate = false
 
+    private var currentProfile: UserProfile? {
+        UserProfileSelection.currentProfile(in: storedProfiles)
+    }
+
     var body: some View {
         Group {
             switch appPhase {
@@ -70,10 +74,10 @@ struct ContentView: View {
         .onOpenURL { url in
             handleIncomingTemplateFileURL(url)
         }
-        .onChange(of: storedProfiles.first?.keepsScreenAwake) { _, _ in
+        .onChange(of: currentProfile?.keepsScreenAwake) { _, _ in
             updateIdleTimerState()
         }
-        .onChange(of: storedProfiles.first?.workoutNotificationStyleRaw) { _, _ in
+        .onChange(of: currentProfile?.workoutNotificationStyleRaw) { _, _ in
             syncWorkoutNotificationPreferences()
         }
         .onReceive(NotificationCenter.default.publisher(for: .wgjDidDeleteAllUserData)) { _ in
@@ -260,12 +264,12 @@ struct ContentView: View {
 
     private func syncWorkoutNotificationPreferences() {
         AppRuntimeState.shared.updateWorkoutNotificationStyle(
-            storedProfiles.first?.workoutNotificationStyle ?? .timeSensitive
+            currentProfile?.workoutNotificationStyle ?? .timeSensitive
         )
     }
 
     private var shouldKeepScreenAwake: Bool {
-        scenePhase == .active && (storedProfiles.first?.keepsScreenAwake ?? false)
+        scenePhase == .active && (currentProfile?.keepsScreenAwake ?? false)
     }
 
     private func updateIdleTimerState() {

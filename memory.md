@@ -157,4 +157,13 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 - How to Verify Next Time: Use the `Fill Last` and Bozar UI tests to confirm ghost identifiers disappear and explicit actual-value identifiers appear after a programmatic fill.
 - Status: superseded
 
+## 2026-04-12 - Profile-Backed Settings Must Resolve A Canonical UserProfile
+
+- Date: 2026-04-12
+- Trigger/Problem: Bozar mode could look enabled in Settings while Active Workout behaved as if it were off, and the same mismatch risk applied to other profile-backed preferences like keep-screen-awake and workout notification style.
+- Root Cause: WGJ can accumulate multiple `UserProfile` rows, and some screens/runtime hooks were reading `profiles.first` from unsorted `@Query` results while Settings writes went through `ProfileRepository.currentProfile()`. That let different parts of the app target different profile rows.
+- Durable Rule: Any WGJ setting or runtime behavior sourced from `UserProfile` must resolve the same canonical profile row as `ProfileRepository.currentProfile()`. Do not read preference toggles from raw `profiles.first` or `storedProfiles.first`.
+- How to Verify Next Time: With duplicate `UserProfile` rows in tests, confirm Settings writes mutate only the canonical earliest-created profile and confirm UI/runtime readers like Active Workout and `ContentView` observe that same row for Bozar, keep-screen-awake, training guidance, preferred unit, and notification style.
+- Status: active
+
 Promote a lesson here only when it clears the bar above.

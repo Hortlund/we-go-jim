@@ -33,8 +33,12 @@ struct TemplateEditorView: View {
         ExerciseCatalogRepository(modelContext: modelContext)
     }
 
+    private var currentProfile: UserProfile? {
+        UserProfileSelection.currentProfile(in: profiles)
+    }
+
     private var preferredLoadUnit: TemplateLoadUnit {
-        profiles.first?.preferredLoadUnit ?? .kg
+        currentProfile?.preferredLoadUnit ?? .kg
     }
 
     private var recommendationReloadKey: TemplateEditorRecommendationReloadKey {
@@ -472,7 +476,7 @@ struct TemplateEditorView: View {
     }
 
     private var isTrainingGuidanceEnabled: Bool {
-        profiles.first?.isTrainingGuidanceEnabled ?? true
+        currentProfile?.isTrainingGuidanceEnabled ?? true
     }
 
     private func templateRecommendation(

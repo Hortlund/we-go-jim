@@ -31,8 +31,12 @@ struct TemplatesOverviewView: View {
         TemplateRepository(modelContext: modelContext)
     }
 
+    private var currentProfile: UserProfile? {
+        UserProfileSelection.currentProfile(in: profiles)
+    }
+
     private var preferredLoadUnit: TemplateLoadUnit {
-        profiles.first?.preferredLoadUnit ?? .kg
+        currentProfile?.preferredLoadUnit ?? .kg
     }
 
     var body: some View {

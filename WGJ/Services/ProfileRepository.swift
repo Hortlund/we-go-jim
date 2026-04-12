@@ -15,7 +15,10 @@ final class ProfileRepository {
 
     func currentProfile() throws -> UserProfile? {
         var descriptor = FetchDescriptor<UserProfile>(
-            sortBy: [SortDescriptor(\.createdAt, order: .forward)]
+            sortBy: [
+                SortDescriptor(\.createdAt, order: .forward),
+                SortDescriptor(\.id, order: .forward),
+            ]
         )
         descriptor.fetchLimit = 1
         return try modelContext.fetch(descriptor).first

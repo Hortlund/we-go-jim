@@ -48,8 +48,12 @@ struct TemplateDetailView: View {
         TemplateRepository(modelContext: modelContext)
     }
 
+    private var currentProfile: UserProfile? {
+        UserProfileSelection.currentProfile(in: profiles)
+    }
+
     private var preferredLoadUnit: TemplateLoadUnit {
-        profiles.first?.preferredLoadUnit ?? .kg
+        currentProfile?.preferredLoadUnit ?? .kg
     }
 
     init(templateID: UUID) {
@@ -707,7 +711,7 @@ struct TemplateDetailView: View {
     }
 
     private var isTrainingGuidanceEnabled: Bool {
-        profiles.first?.isTrainingGuidanceEnabled ?? true
+        currentProfile?.isTrainingGuidanceEnabled ?? true
     }
 
     private func isExpandedBinding(for exerciseID: UUID) -> Binding<Bool> {
