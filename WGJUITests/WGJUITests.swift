@@ -1576,6 +1576,54 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testActiveWorkoutCardioSectionsUseWideCompletionAndCompactActions() throws {
+        let app = launchApp(launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Cardio Layout Workout",
+                notes: "Keep the cardio controls readable.",
+                preWorkoutCardio: templatePayloadCardio(
+                    catalogExerciseUUID: "layout-bike-1",
+                    exerciseNameSnapshot: "Bike",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Warmup",
+                    targetDurationSeconds: 300
+                ),
+                postWorkoutCardio: templatePayloadCardio(
+                    catalogExerciseUUID: "layout-treadmill-1",
+                    exerciseNameSnapshot: "Incline Treadmill Walk",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Cooldown",
+                    targetDurationSeconds: 1200
+                ),
+                exercises: [
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "layout-bench-1",
+                        exerciseNameSnapshot: "Bench Press",
+                        categorySnapshot: "Chest",
+                        muscleSummarySnapshot: "Chest",
+                        targetRepMin: 6,
+                        targetRepMax: 8,
+                        restSeconds: 120,
+                        sets: [templatePayloadSet(targetReps: 6, targetWeight: 100, loadUnit: "kg", restSeconds: 120, isWarmup: false)]
+                    ),
+                ]
+            ),
+        ])
+
+        startPreviewedTemplateWorkout(in: app)
+
+        let preToggle = app.buttons["Complete Pre Cardio"]
+        let preActions = identifiedElement("active-workout-preWorkout-actions-button", in: app)
+
+        XCTAssertTrue(preToggle.waitForExistence(timeout: 5))
+        XCTAssertTrue(preActions.waitForExistence(timeout: 5))
+        XCTAssertTrue(preToggle.isHittable)
+        XCTAssertTrue(preActions.isHittable)
+        XCTAssertEqual(preToggle.label, "Complete Pre Cardio")
+        XCTAssertGreaterThan(preToggle.frame.width, preActions.frame.width + 100)
+    }
+
+    @MainActor
     func testActiveWorkoutKeepsMissingCardioHiddenUntilAdded() throws {
         let app = launchApp(launchEnvironment: [
             "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(

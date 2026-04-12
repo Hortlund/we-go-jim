@@ -478,7 +478,9 @@ struct ActiveWorkoutView: View {
                 WGJActionHeader(
                     phase.title,
                     subtitle: cardioSectionSubtitle(for: phase)
-                )
+                ) {
+                    cardioSectionActionsButton(for: cardioBlock)
+                }
 
                 WorkoutCardioPhaseCard(
                     phase: phase,
@@ -492,23 +494,10 @@ struct ActiveWorkoutView: View {
                     statusTint: cardioStatusTint(for: cardioBlock),
                     footnote: cardioFootnote(for: cardioBlock)
                 ) {
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 10) {
-                            cardioCompletionButton(
-                                for: cardioBlock,
-                                scrollProxy: scrollProxy
-                            )
-                            cardioActionsButton(for: cardioBlock)
-                        }
-
-                        VStack(alignment: .leading, spacing: 10) {
-                            cardioCompletionButton(
-                                for: cardioBlock,
-                                scrollProxy: scrollProxy
-                            )
-                            cardioActionsButton(for: cardioBlock)
-                        }
-                    }
+                    cardioCompletionButton(
+                        for: cardioBlock,
+                        scrollProxy: scrollProxy
+                    )
                 }
                 .id(cardioScrollTarget(for: phase))
                 .accessibilityIdentifier("active-workout-\(phase.rawValue)-card")
@@ -529,15 +518,17 @@ struct ActiveWorkoutView: View {
                     Label("Mark Incomplete", systemImage: "arrow.uturn.backward.circle")
                         .frame(maxWidth: .infinity)
                 }
+                .accessibilityLabel(cardioCompletionAccessibilityLabel(for: cardioBlock))
                 .buttonStyle(WGJGhostButtonStyle())
                 .accessibilityIdentifier("active-workout-\(cardioBlock.phase.rawValue)-toggle-button")
             } else {
                 Button {
                     toggleCardioCompletion(for: cardioBlock, scrollProxy: scrollProxy)
                 } label: {
-                    Label("Complete \(cardioBlock.phase.shortTitle)", systemImage: "checkmark.circle.fill")
+                    Label("Complete", systemImage: "checkmark.circle.fill")
                         .frame(maxWidth: .infinity)
                 }
+                .accessibilityLabel(cardioCompletionAccessibilityLabel(for: cardioBlock))
                 .buttonStyle(WGJPrimaryButtonStyle())
                 .accessibilityIdentifier("active-workout-\(cardioBlock.phase.rawValue)-toggle-button")
             }
@@ -546,8 +537,8 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
-    private func cardioActionsButton(for cardioBlock: ActiveWorkoutDraftCardioBlock) -> some View {
-        WGJActionMenuButton("Cardio Actions") {
+    private func cardioSectionActionsButton(for cardioBlock: ActiveWorkoutDraftCardioBlock) -> some View {
+        WGJActionMenuButton("Cardio Actions", titleVisibility: .hidden) {
             Button("Edit Duration") {
                 cardioSettingsDraft = makeCardioSettingsDraft(from: cardioBlock)
             }
@@ -560,11 +551,18 @@ struct ActiveWorkoutView: View {
                 removeCardioBlock(phase: cardioBlock.phase)
             }
         } label: {
-            Label("Actions", systemImage: "ellipsis.circle")
-                .frame(maxWidth: .infinity)
+            Label("Edit", systemImage: "slider.horizontal.3")
         }
-        .buttonStyle(WGJGhostButtonStyle())
+        .buttonStyle(WGJCompactGhostButtonStyle())
         .accessibilityIdentifier("active-workout-\(cardioBlock.phase.rawValue)-actions-button")
+    }
+
+    private func cardioCompletionAccessibilityLabel(for cardioBlock: ActiveWorkoutDraftCardioBlock) -> String {
+        if cardioBlock.isCompleted {
+            return "Mark \(cardioBlock.phase.shortTitle) Incomplete"
+        }
+
+        return "Complete \(cardioBlock.phase.shortTitle)"
     }
 
     @MainActor
