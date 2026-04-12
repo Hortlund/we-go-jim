@@ -166,4 +166,13 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 - How to Verify Next Time: With duplicate `UserProfile` rows in tests, confirm Settings writes mutate only the canonical earliest-created profile and confirm UI/runtime readers like Active Workout and `ContentView` observe that same row for Bozar, keep-screen-awake, training guidance, preferred unit, and notification style.
 - Status: active
 
+## 2026-04-12 - Template Preview Must Use A Single Vertical Scroll Surface
+
+- Date: 2026-04-12
+- Trigger/Problem: The Start Workout template preview could not scroll naturally from the summary area when a template had both pre-workout and post-workout cardio, which left the lower preview content and start action hard to reach.
+- Root Cause: The sheet used a non-scrolling root `VStack` plus a nested `ScrollView` only around the exercise list, so only one band of the preview responded to vertical gestures and the sections below that list were effectively stranded.
+- Durable Rule: For Start Workout preview surfaces that mix summary cards, cardio blocks, exercise rows, and bottom actions, use one parent vertical scroll container for the full flow. Do not nest the main exercise list in its own `ScrollView` when lower sections still need to move with it.
+- How to Verify Next Time: Launch a preview template with pre-workout cardio, post-workout cardio, and several exercises; drag upward from the summary area and confirm the lower cardio content and `Start Workout` button become hittable.
+- Status: active
+
 Promote a lesson here only when it clears the bar above.

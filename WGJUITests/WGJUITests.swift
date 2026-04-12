@@ -379,6 +379,114 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testTemplatePreviewScrollsFromSummaryWhenCardioExistsOnBothSides() throws {
+        let app = launchApp(launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Scrollable Cardio Preview",
+                notes: "Scroll from the summary card to reach the rest of the workout.",
+                preWorkoutCardio: templatePayloadCardio(
+                    catalogExerciseUUID: "scroll-preview-bike-1",
+                    exerciseNameSnapshot: "Bike",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Warmup",
+                    targetDurationSeconds: 300
+                ),
+                postWorkoutCardio: templatePayloadCardio(
+                    catalogExerciseUUID: "scroll-preview-treadmill-1",
+                    exerciseNameSnapshot: "Incline Treadmill Walk",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Cooldown",
+                    targetDurationSeconds: 1200
+                ),
+                exercises: [
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "scroll-preview-1",
+                        exerciseNameSnapshot: "Bench Press",
+                        categorySnapshot: "Chest",
+                        muscleSummarySnapshot: "Chest",
+                        targetRepMin: 6,
+                        targetRepMax: 8,
+                        restSeconds: 120,
+                        sets: [templatePayloadSet(targetReps: 6, targetWeight: 100, loadUnit: "kg", restSeconds: 120, isWarmup: false)]
+                    ),
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "scroll-preview-2",
+                        exerciseNameSnapshot: "Incline Press",
+                        categorySnapshot: "Chest",
+                        muscleSummarySnapshot: "Upper chest",
+                        targetRepMin: 8,
+                        targetRepMax: 10,
+                        restSeconds: 90,
+                        sets: [templatePayloadSet(targetReps: 8, targetWeight: 80, loadUnit: "kg", restSeconds: 90, isWarmup: false)]
+                    ),
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "scroll-preview-3",
+                        exerciseNameSnapshot: "Shoulder Press",
+                        categorySnapshot: "Shoulders",
+                        muscleSummarySnapshot: "Front delts",
+                        targetRepMin: 8,
+                        targetRepMax: 10,
+                        restSeconds: 90,
+                        sets: [templatePayloadSet(targetReps: 8, targetWeight: 50, loadUnit: "kg", restSeconds: 90, isWarmup: false)]
+                    ),
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "scroll-preview-4",
+                        exerciseNameSnapshot: "Cable Fly",
+                        categorySnapshot: "Chest",
+                        muscleSummarySnapshot: "Chest",
+                        targetRepMin: 12,
+                        targetRepMax: 15,
+                        restSeconds: 60,
+                        sets: [templatePayloadSet(targetReps: 12, targetWeight: 20, loadUnit: "kg", restSeconds: 60, isWarmup: false)]
+                    ),
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "scroll-preview-5",
+                        exerciseNameSnapshot: "Lateral Raise",
+                        categorySnapshot: "Shoulders",
+                        muscleSummarySnapshot: "Side delts",
+                        targetRepMin: 12,
+                        targetRepMax: 15,
+                        restSeconds: 60,
+                        sets: [templatePayloadSet(targetReps: 12, targetWeight: 12, loadUnit: "kg", restSeconds: 60, isWarmup: false)]
+                    ),
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "scroll-preview-6",
+                        exerciseNameSnapshot: "Triceps Pushdown",
+                        categorySnapshot: "Arms",
+                        muscleSummarySnapshot: "Triceps",
+                        targetRepMin: 10,
+                        targetRepMax: 12,
+                        restSeconds: 60,
+                        sets: [templatePayloadSet(targetReps: 10, targetWeight: 35, loadUnit: "kg", restSeconds: 60, isWarmup: false)]
+                    ),
+                ]
+            ),
+        ])
+
+        let summaryCard = identifiedElement("template-preview-summary-card", in: app)
+        let startButton = identifiedElement("template-preview-start-button", in: app)
+
+        XCTAssertTrue(summaryCard.waitForExistence(timeout: 5))
+        XCTAssertTrue(startButton.waitForExistence(timeout: 5))
+        XCTAssertFalse(startButton.isHittable)
+
+        let screenOrigin = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+        let dragX = app.frame.midX
+        let dragStartY = summaryCard.frame.maxY + 120
+        let dragEndY = summaryCard.frame.minY + 40
+
+        var remainingDrags = 6
+        while !startButton.isHittable && remainingDrags > 0 {
+            let dragStart = screenOrigin.withOffset(CGVector(dx: dragX, dy: dragStartY))
+            let dragEnd = screenOrigin.withOffset(CGVector(dx: dragX, dy: dragEndY))
+            dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
+            remainingDrags -= 1
+        }
+
+        XCTAssertTrue(startButton.isHittable)
+    }
+
+    @MainActor
     func testTemplatePreviewShowsExerciseOptionsForMultiComponentSlot() throws {
         let app = launchApp(launchEnvironment: [
             "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(

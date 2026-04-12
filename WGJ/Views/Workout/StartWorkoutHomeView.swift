@@ -1364,61 +1364,35 @@ private struct TemplateStartPreviewSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 16) {
-                summaryCard
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    summaryCard
 
-                if let preWorkoutCardio = preview.preWorkoutCardio {
-                    cardioSection(preWorkoutCardio)
-                }
+                    if let preWorkoutCardio = preview.preWorkoutCardio {
+                        cardioSection(preWorkoutCardio)
+                    }
 
-                if orderedExercises.isEmpty {
-                    WGJEmptyStateCard(
-                        title: "No exercises yet",
-                        message: "Edit the template to add exercises before starting from it.",
-                        icon: "list.bullet"
-                    )
-                } else {
-                    VStack(alignment: .leading, spacing: 12) {
-                        WGJActionHeader(
-                            "Exercise Order",
-                            subtitle: "Everything in order before you start."
-                        )
+                    exerciseSection
 
-                        ScrollView {
-                            VStack(spacing: 0) {
-                                ForEach(Array(orderedExercises.enumerated()), id: \.element.id) { index, exercise in
-                                    previewExerciseRow(exercise, index: index + 1)
+                    if let postWorkoutCardio = preview.postWorkoutCardio {
+                        cardioSection(postWorkoutCardio)
+                    }
 
-                                    if index < orderedExercises.count - 1 {
-                                        Rectangle()
-                                            .fill(WGJTheme.rowDivider.opacity(0.42))
-                                            .frame(height: 1)
-                                            .padding(.leading, 60)
-                                    }
-                                }
-                            }
-                            .wgjCardContainer()
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) {
+                            editAction
+                            startAction
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            startAction
+                            editAction
                         }
                     }
                 }
-
-                if let postWorkoutCardio = preview.postWorkoutCardio {
-                    cardioSection(postWorkoutCardio)
-                }
-
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 8) {
-                        editAction
-                        startAction
-                    }
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        startAction
-                        editAction
-                    }
-                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(16)
             .accessibilityIdentifier("template-preview-sheet")
             .wgjGlassContainer(spacing: 16)
             .wgjSheetSurface()
@@ -1443,6 +1417,38 @@ private struct TemplateStartPreviewSheet: View {
             }
         }
         .presentationDetents([.large])
+    }
+
+    @ViewBuilder
+    private var exerciseSection: some View {
+        if orderedExercises.isEmpty {
+            WGJEmptyStateCard(
+                title: "No exercises yet",
+                message: "Edit the template to add exercises before starting from it.",
+                icon: "list.bullet"
+            )
+        } else {
+            VStack(alignment: .leading, spacing: 12) {
+                WGJActionHeader(
+                    "Exercise Order",
+                    subtitle: "Everything in order before you start."
+                )
+
+                VStack(spacing: 0) {
+                    ForEach(Array(orderedExercises.enumerated()), id: \.element.id) { index, exercise in
+                        previewExerciseRow(exercise, index: index + 1)
+
+                        if index < orderedExercises.count - 1 {
+                            Rectangle()
+                                .fill(WGJTheme.rowDivider.opacity(0.42))
+                                .frame(height: 1)
+                                .padding(.leading, 60)
+                        }
+                    }
+                }
+                .wgjCardContainer()
+            }
+        }
     }
 
     private var summaryCard: some View {
@@ -1477,6 +1483,7 @@ private struct TemplateStartPreviewSheet: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityIdentifier("template-preview-summary-card")
         .background {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .fill(WGJTheme.cardStrong.opacity(0.97))
