@@ -222,6 +222,90 @@ struct ActiveWorkoutDraftRepositoryTests {
     }
 
     @Test
+    func persistExerciseSnapshotSavesDraftsRestAndNotesTogether() throws {
+        let context = try makeInMemoryContext()
+        let repository = ActiveWorkoutDraftRepository(modelContext: context)
+
+        let item = makeCatalogItem(
+            remoteUUID: "persist-snapshot-bench-1",
+            displayName: "Bench Press",
+            equipmentSummary: "Barbell",
+            context: context
+        )
+
+        let session = try repository.createEmptySession(name: "Push Day")
+        try repository.addExercise(sessionID: session.id, catalogItem: item)
+
+        let exercise = try #require(try repository.sessionExercises(sessionID: session.id).first)
+        var drafts = try repository.setDrafts(sessionExerciseID: exercise.id)
+        drafts[0].actualWeight = 90
+        drafts[0].actualReps = 8
+        drafts[0].actualLoadUnit = .kg
+        drafts[0].isCompleted = true
+
+        try repository.persistExerciseSnapshot(
+            sessionExerciseID: exercise.id,
+            snapshot: ActiveWorkoutExercisePersistenceSnapshot(
+                setDrafts: drafts,
+                restSeconds: 150,
+                notes: "Pause each rep on the chest."
+            )
+        )
+
+        let refreshedExercise = try #require(try repository.sessionExercises(sessionID: session.id).first)
+        let refreshedDrafts = try repository.setDrafts(sessionExerciseID: refreshedExercise.id)
+
+        #expect(refreshedExercise.restSeconds == 150)
+        #expect(refreshedExercise.notes == "Pause each rep on the chest.")
+        #expect(refreshedDrafts[0].restSeconds == 150)
+        #expect(refreshedDrafts[1].restSeconds == 150)
+        #expect(refreshedDrafts[0].actualWeight == 90)
+        #expect(refreshedDrafts[0].actualReps == 8)
+        #expect(refreshedDrafts[0].actualLoadUnit == .kg)
+        #expect(refreshedDrafts[0].isCompleted)
+    }
+
+    @Test
+    func persistExerciseSnapshotNoOpsWhenSnapshotMatchesPersistedState() throws {
+        let context = try makeInMemoryContext()
+        let repository = ActiveWorkoutDraftRepository(modelContext: context)
+
+        let item = makeCatalogItem(
+            remoteUUID: "persist-snapshot-noop-1",
+            displayName: "Row",
+            equipmentSummary: "Barbell",
+            context: context
+        )
+
+        let session = try repository.createEmptySession(name: "Pull Day")
+        try repository.addExercise(sessionID: session.id, catalogItem: item)
+
+        let exercise = try #require(try repository.sessionExercises(sessionID: session.id).first)
+        let drafts = try repository.setDrafts(sessionExerciseID: exercise.id)
+        let originalExerciseUpdatedAt = exercise.updatedAt
+        let originalSetUpdatedAt = (exercise.sets ?? [])
+            .sorted { $0.sortOrder < $1.sortOrder }
+            .map(\.updatedAt)
+
+        try repository.persistExerciseSnapshot(
+            sessionExerciseID: exercise.id,
+            snapshot: ActiveWorkoutExercisePersistenceSnapshot(
+                setDrafts: drafts,
+                restSeconds: exercise.restSeconds,
+                notes: exercise.notes
+            )
+        )
+
+        let refreshedExercise = try #require(try repository.sessionExercises(sessionID: session.id).first)
+        let refreshedSetUpdatedAt = (refreshedExercise.sets ?? [])
+            .sorted { $0.sortOrder < $1.sortOrder }
+            .map(\.updatedAt)
+
+        #expect(refreshedExercise.updatedAt == originalExerciseUpdatedAt)
+        #expect(refreshedSetUpdatedAt == originalSetUpdatedAt)
+    }
+
+    @Test
     func cancelSessionRemovesDraftRows() throws {
         let context = try makeInMemoryContext()
         let repository = ActiveWorkoutDraftRepository(modelContext: context)

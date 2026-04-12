@@ -19,15 +19,10 @@ struct ActiveWorkoutView: View {
 
     @State private var hasBootstrapped = false
     @State private var setDraftsByExerciseID: [UUID: [WorkoutSessionSetDraft]] = [:]
-    @State private var lastPersistedDraftsByExerciseID: [UUID: [WorkoutSessionSetDraft]] = [:]
-    @State private var pendingSaveTasks: [UUID: Task<Void, Never>] = [:]
-
     @State private var restByExerciseID: [UUID: Int] = [:]
-    @State private var lastPersistedRestByExerciseID: [UUID: Int] = [:]
-    @State private var pendingRestTasks: [UUID: Task<Void, Never>] = [:]
     @State private var notesByExerciseID: [UUID: String] = [:]
-    @State private var lastPersistedNotesByExerciseID: [UUID: String] = [:]
-    @State private var pendingNotesTasks: [UUID: Task<Void, Never>] = [:]
+    @State private var lastPersistedExerciseStateByID: [UUID: ActiveWorkoutExercisePersistenceSnapshot] = [:]
+    @State private var pendingExercisePersistenceTasks: [UUID: Task<Void, Never>] = [:]
 
     @State private var previousByExerciseID: [UUID: [Int: WorkoutPreviousSetSnapshot]] = [:]
     @State private var componentResolutionByExerciseID: [UUID: ExerciseComponentRotationResolution] = [:]
@@ -65,7 +60,6 @@ struct ActiveWorkoutView: View {
     private let cancelSectionFocusSpacerHeight: CGFloat = 160
     private let cancelSectionDockClearanceHeight: CGFloat = 96
     private let cancelSectionScrollTarget = ActiveWorkoutScrollTarget.cancelSection
-    private let scrollCoordinateSpaceName = "ActiveWorkoutScrollView"
     private let guidanceService = TrainingGuidanceService()
 
     private var activeWorkoutRepository: ActiveWorkoutDraftRepository {
@@ -129,7 +123,6 @@ struct ActiveWorkoutView: View {
                             onAddCardio: showCardioPicker
                         )
                         .id(ActiveWorkoutScrollTarget.header)
-                        .trackScrollTarget(.header, in: scrollCoordinateSpaceName)
                         if preWorkoutCardio != nil {
                             cardioSection(for: .preWorkout, scrollProxy: scrollProxy)
                         }
@@ -200,7 +193,6 @@ struct ActiveWorkoutView: View {
                             }
                         )
                         .id(cancelSectionScrollTarget)
-                        .trackScrollTarget(cancelSectionScrollTarget, in: scrollCoordinateSpaceName)
 
                         Color.clear
                             .frame(height: cancelSectionBottomSpacerHeight)
@@ -210,7 +202,7 @@ struct ActiveWorkoutView: View {
                 .scrollTargetLayout()
                 .padding(16)
             }
-            .coordinateSpace(name: scrollCoordinateSpaceName)
+            .scrollPosition(id: scrollPositionBinding, anchor: .top)
             .scrollDismissesKeyboard(.interactively)
             .wgjScreenBackground()
             .wgjNavigationChrome()
@@ -328,6 +320,7 @@ struct ActiveWorkoutView: View {
                 focusCancelSection(using: scrollProxy)
             }
             .onDisappear {
+                shouldTrackVisibleScrollTarget = false
                 isCancelArmed = false
                 pendingCompletionTask?.cancel()
                 pendingCompletionTask = nil
@@ -343,17 +336,20 @@ struct ActiveWorkoutView: View {
             .background {
                 WorkoutRestTimerExpiryObserver()
             }
-            .onPreferenceChange(ActiveWorkoutScrollTargetFramePreferenceKey.self) { positions in
-                guard shouldTrackVisibleScrollTarget else { return }
-                guard let closestTarget = positions.min(by: { abs($0.value) < abs($1.value) })?.key else {
-                    return
-                }
-                if activeWorkoutPresentationState.scrollTarget != closestTarget {
-                    activeWorkoutPresentationState.scrollTarget = closestTarget
-                }
-            }
             .wgjMinimalKeyboardToolbar()
         }
+    }
+
+    private var scrollPositionBinding: Binding<ActiveWorkoutScrollTarget?> {
+        Binding(
+            get: { activeWorkoutPresentationState.scrollTarget },
+            set: { newValue in
+                guard shouldTrackVisibleScrollTarget || newValue == activeWorkoutPresentationState.scrollTarget else {
+                    return
+                }
+                activeWorkoutPresentationState.scrollTarget = newValue
+            }
+        )
     }
 
     private var session: ActiveWorkoutDraftSession? {
@@ -506,7 +502,6 @@ struct ActiveWorkoutView: View {
                     }
                 }
                 .id(cardioScrollTarget(for: phase))
-                .trackScrollTarget(cardioScrollTarget(for: phase), in: scrollCoordinateSpaceName)
                 .accessibilityIdentifier("active-workout-\(phase.rawValue)-card")
             }
         }
@@ -610,14 +605,14 @@ struct ActiveWorkoutView: View {
             canMoveExerciseDown: index < sessionExercises.count - 1,
             onExerciseNotesCommitted: { notes in
                 updateNotesValue(notes, for: exerciseID)
-                persistNotes(sessionExerciseID: exerciseID, notes: notes)
+                scheduleExercisePersistence(sessionExerciseID: exerciseID)
             },
             onSetDraftsCommitted: { drafts in
                 handleDraftsChanged(drafts, for: exercise, scrollProxy: scrollProxy)
             },
             onRestCommitted: { rest in
                 updateRestValue(rest, for: exerciseID)
-                persistRest(sessionExerciseID: exerciseID, restSeconds: rest)
+                scheduleExercisePersistence(sessionExerciseID: exerciseID)
             },
             onExpandedChanged: { isExpanded in
                 cardStateController.setExpanded(isExpanded, for: exerciseID)
@@ -656,7 +651,6 @@ struct ActiveWorkoutView: View {
         )
         .equatable()
         .id(ActiveWorkoutScrollTarget.exercise(exerciseID))
-        .trackScrollTarget(.exercise(exerciseID), in: scrollCoordinateSpaceName)
         .transition(exerciseCardTransition)
     }
 
@@ -676,6 +670,23 @@ struct ActiveWorkoutView: View {
     @MainActor
     private func resolvedNotes(for exercise: ActiveWorkoutDraftExercise) -> String {
         notesByExerciseID[exercise.id] ?? exercise.notes
+    }
+
+    @MainActor
+    private func currentPersistenceSnapshot(for exercise: ActiveWorkoutDraftExercise) -> ActiveWorkoutExercisePersistenceSnapshot {
+        ActiveWorkoutExercisePersistenceSnapshot(
+            setDrafts: resolvedDrafts(for: exercise),
+            restSeconds: resolvedRest(for: exercise),
+            notes: resolvedNotes(for: exercise)
+        )
+    }
+
+    @MainActor
+    private func currentPersistenceSnapshot(for exerciseID: UUID) -> ActiveWorkoutExercisePersistenceSnapshot? {
+        guard let exercise = sessionExercises.first(where: { $0.id == exerciseID }) else {
+            return nil
+        }
+        return currentPersistenceSnapshot(for: exercise)
     }
 
     @MainActor
@@ -751,40 +762,42 @@ struct ActiveWorkoutView: View {
 
         let result = WGJPerformance.measure("active-workout.hydrate.local") { () -> ActiveWorkoutHydrationResult in
             var loadedDrafts: [UUID: [WorkoutSessionSetDraft]] = [:]
-            var persistedDrafts: [UUID: [WorkoutSessionSetDraft]] = [:]
             var loadedRests: [UUID: Int] = [:]
             var loadedNotes: [UUID: String] = [:]
+            var loadedPersistenceState: [UUID: ActiveWorkoutExercisePersistenceSnapshot] = [:]
             let catalogByUUID = (try? catalogRepository.exerciseMap(
                 for: sessionExercises.map(\.catalogExerciseUUID)
             )) ?? [:]
 
             for exercise in sessionExercises {
-                let drafts = makeDrafts(from: exercise)
-                loadedDrafts[exercise.id] = normalizedDraftsForActiveLogging(
-                    drafts,
+                let normalizedDrafts = normalizedDraftsForActiveLogging(
+                    makeDrafts(from: exercise),
                     catalogExercise: catalogByUUID[exercise.catalogExerciseUUID]
                 )
-                persistedDrafts[exercise.id] = drafts
+                loadedDrafts[exercise.id] = normalizedDrafts
                 loadedRests[exercise.id] = exercise.restSeconds
                 loadedNotes[exercise.id] = exercise.notes
+                loadedPersistenceState[exercise.id] = ActiveWorkoutExercisePersistenceSnapshot(
+                    setDrafts: normalizedDrafts,
+                    restSeconds: exercise.restSeconds,
+                    notes: exercise.notes
+                )
             }
 
             return ActiveWorkoutHydrationResult(
                 draftsByExerciseID: loadedDrafts,
-                persistedDraftsByExerciseID: persistedDrafts,
                 restsByExerciseID: loadedRests,
                 notesByExerciseID: loadedNotes,
+                persistenceStateByExerciseID: loadedPersistenceState,
                 previousByExerciseID: [:],
                 catalogMatchesByUUID: catalogByUUID
             )
         }
 
         setDraftsByExerciseID = result.draftsByExerciseID
-        lastPersistedDraftsByExerciseID = result.persistedDraftsByExerciseID
         restByExerciseID = result.restsByExerciseID
-        lastPersistedRestByExerciseID = result.restsByExerciseID
         notesByExerciseID = result.notesByExerciseID
-        lastPersistedNotesByExerciseID = result.notesByExerciseID
+        lastPersistedExerciseStateByID = result.persistenceStateByExerciseID
         catalogMatchesByUUID = result.catalogMatchesByUUID
         previousByExerciseID = previousByExerciseID.filter { result.draftsByExerciseID[$0.key] != nil }
         componentResolutionByExerciseID = componentResolutionByExerciseID.filter { result.draftsByExerciseID[$0.key] != nil }
@@ -969,153 +982,68 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
-    private func persistDrafts(sessionExerciseID: UUID, drafts: [WorkoutSessionSetDraft]) {
-        if lastPersistedDraftsByExerciseID[sessionExerciseID] == drafts {
+    private func scheduleExercisePersistence(sessionExerciseID: UUID) {
+        guard let snapshot = currentPersistenceSnapshot(for: sessionExerciseID) else {
             return
         }
 
-        pendingSaveTasks[sessionExerciseID]?.cancel()
-        pendingSaveTasks[sessionExerciseID] = Task { @MainActor in
+        let persisted = lastPersistedExerciseStateByID[sessionExerciseID] ?? snapshot
+        let changes = ActiveWorkoutExercisePersistenceChangeSet(
+            current: snapshot,
+            persisted: persisted
+        )
+        guard changes.hasChanges else {
+            pendingExercisePersistenceTasks.removeValue(forKey: sessionExerciseID)?.cancel()
+            return
+        }
+
+        pendingExercisePersistenceTasks[sessionExerciseID]?.cancel()
+        pendingExercisePersistenceTasks[sessionExerciseID] = Task { @MainActor in
             try? await Task.sleep(for: interactivePersistenceDebounce)
             guard !Task.isCancelled else { return }
-
-            let latest = setDraftsByExerciseID[sessionExerciseID] ?? drafts
-            guard lastPersistedDraftsByExerciseID[sessionExerciseID] != latest else {
-                pendingSaveTasks[sessionExerciseID] = nil
-                return
-            }
-
-            do {
-                try WGJPerformance.measure("active-workout.persist.drafts") {
-                    try activeWorkoutRepository.saveSetDrafts(sessionExerciseID: sessionExerciseID, drafts: latest)
-                }
-                lastPersistedDraftsByExerciseID[sessionExerciseID] = latest
-                pendingSaveTasks[sessionExerciseID] = nil
-            } catch {
-                showError(error)
-            }
+            pendingExercisePersistenceTasks[sessionExerciseID] = nil
+            persistExerciseSnapshotIfNeeded(sessionExerciseID: sessionExerciseID)
         }
     }
 
     @MainActor
-    private func persistRest(sessionExerciseID: UUID, restSeconds: Int) {
-        let normalized = max(0, min(3600, restSeconds))
-        if lastPersistedRestByExerciseID[sessionExerciseID] == normalized {
+    private func persistExerciseSnapshotIfNeeded(sessionExerciseID: UUID) {
+        guard let snapshot = currentPersistenceSnapshot(for: sessionExerciseID) else {
             return
         }
 
-        pendingRestTasks[sessionExerciseID]?.cancel()
-        pendingRestTasks[sessionExerciseID] = Task { @MainActor in
-            try? await Task.sleep(for: interactivePersistenceDebounce)
-            guard !Task.isCancelled else { return }
+        let persisted = lastPersistedExerciseStateByID[sessionExerciseID] ?? snapshot
+        let changes = ActiveWorkoutExercisePersistenceChangeSet(
+            current: snapshot,
+            persisted: persisted
+        )
+        guard changes.hasChanges else { return }
 
-            let latest = restByExerciseID[sessionExerciseID] ?? normalized
-            guard lastPersistedRestByExerciseID[sessionExerciseID] != latest else {
-                pendingRestTasks[sessionExerciseID] = nil
-                return
-            }
-
-            do {
-                let previousDefaultRest = lastPersistedRestByExerciseID[sessionExerciseID] ?? normalized
-                try WGJPerformance.measure("active-workout.persist.rest") {
-                    try activeWorkoutRepository.updateExerciseRest(sessionExerciseID: sessionExerciseID, restSeconds: latest)
-                }
-                lastPersistedRestByExerciseID[sessionExerciseID] = latest
-                applyPersistedRestChange(
+        do {
+            try WGJPerformance.measure("active-workout.persist.exercise") {
+                try activeWorkoutRepository.persistExerciseSnapshot(
                     sessionExerciseID: sessionExerciseID,
-                    previousDefaultRest: previousDefaultRest,
-                    updatedRest: latest
+                    snapshot: snapshot,
+                    persistDrafts: changes.persistDrafts,
+                    persistRest: changes.persistRest,
+                    persistNotes: changes.persistNotes
                 )
-                pendingRestTasks[sessionExerciseID] = nil
-            } catch {
-                showError(error)
             }
-        }
-    }
-
-    @MainActor
-    private func persistNotes(sessionExerciseID: UUID, notes: String) {
-        if lastPersistedNotesByExerciseID[sessionExerciseID] == notes {
-            return
-        }
-
-        pendingNotesTasks[sessionExerciseID]?.cancel()
-        pendingNotesTasks[sessionExerciseID] = Task { @MainActor in
-            try? await Task.sleep(for: interactivePersistenceDebounce)
-            guard !Task.isCancelled else { return }
-
-            let latest = notesByExerciseID[sessionExerciseID] ?? notes
-            guard lastPersistedNotesByExerciseID[sessionExerciseID] != latest else {
-                pendingNotesTasks[sessionExerciseID] = nil
-                return
-            }
-
-            do {
-                try WGJPerformance.measure("active-workout.persist.notes") {
-                    try activeWorkoutRepository.updateExerciseNotes(
-                        sessionExerciseID: sessionExerciseID,
-                        notes: latest
-                    )
-                }
-                lastPersistedNotesByExerciseID[sessionExerciseID] = latest
-                pendingNotesTasks[sessionExerciseID] = nil
-            } catch {
-                showError(error)
-            }
+            lastPersistedExerciseStateByID[sessionExerciseID] = snapshot
+        } catch {
+            showError(error)
         }
     }
 
     @MainActor
     private func flushPendingSaves() {
-        for task in pendingSaveTasks.values {
+        for task in pendingExercisePersistenceTasks.values {
             task.cancel()
         }
-        pendingSaveTasks.removeAll()
+        pendingExercisePersistenceTasks.removeAll()
 
-        for task in pendingRestTasks.values {
-            task.cancel()
-        }
-        pendingRestTasks.removeAll()
-
-        for task in pendingNotesTasks.values {
-            task.cancel()
-        }
-        pendingNotesTasks.removeAll()
-
-        for (exerciseID, drafts) in setDraftsByExerciseID {
-            guard lastPersistedDraftsByExerciseID[exerciseID] != drafts else { continue }
-            do {
-                try activeWorkoutRepository.saveSetDrafts(sessionExerciseID: exerciseID, drafts: drafts)
-                lastPersistedDraftsByExerciseID[exerciseID] = drafts
-            } catch {
-                showError(error)
-            }
-        }
-
-        for (exerciseID, rest) in restByExerciseID {
-            guard lastPersistedRestByExerciseID[exerciseID] != rest else { continue }
-            do {
-                let previousDefaultRest = lastPersistedRestByExerciseID[exerciseID] ?? rest
-                try activeWorkoutRepository.updateExerciseRest(sessionExerciseID: exerciseID, restSeconds: rest)
-                lastPersistedRestByExerciseID[exerciseID] = rest
-                applyPersistedRestChange(
-                    sessionExerciseID: exerciseID,
-                    previousDefaultRest: previousDefaultRest,
-                    updatedRest: rest
-                )
-            } catch {
-                showError(error)
-            }
-        }
-
-        for (exerciseID, notes) in notesByExerciseID {
-            guard lastPersistedNotesByExerciseID[exerciseID] != notes else { continue }
-            do {
-                try activeWorkoutRepository.updateExerciseNotes(sessionExerciseID: exerciseID, notes: notes)
-                lastPersistedNotesByExerciseID[exerciseID] = notes
-            } catch {
-                showError(error)
-            }
+        for exercise in sessionExercises {
+            persistExerciseSnapshotIfNeeded(sessionExerciseID: exercise.id)
         }
     }
 
@@ -1338,16 +1266,22 @@ struct ActiveWorkoutView: View {
                     completedExerciseIDs: completedExerciseIDs
                 )
                 if shouldFocusPostWorkoutCardio {
-                    scrollProxy.scrollTo(cardioScrollTarget(for: .postWorkout), anchor: .top)
+                    scrollToTarget(
+                        cardioScrollTarget(for: .postWorkout),
+                        using: scrollProxy
+                    )
                 } else if let nextExerciseID {
-                    scrollProxy.scrollTo(ActiveWorkoutScrollTarget.exercise(nextExerciseID), anchor: .top)
+                    scrollToTarget(
+                        ActiveWorkoutScrollTarget.exercise(nextExerciseID),
+                        using: scrollProxy
+                    )
                 }
             }
             if isCompleted {
                 WorkoutFeedbackCenter.shared.exerciseCompleted()
             }
         }
-        persistDrafts(sessionExerciseID: exercise.id, drafts: drafts)
+        scheduleExercisePersistence(sessionExerciseID: exercise.id)
     }
 
     private func isExerciseCompleted(_ drafts: [WorkoutSessionSetDraft]) -> Bool {
@@ -1534,8 +1468,8 @@ struct ActiveWorkoutView: View {
 
     private func saveExerciseSettings(_ draft: ActiveWorkoutExerciseSettingsDraft) {
         do {
-            pendingRestTasks[draft.exerciseID]?.cancel()
-            pendingRestTasks[draft.exerciseID] = nil
+            pendingExercisePersistenceTasks[draft.exerciseID]?.cancel()
+            pendingExercisePersistenceTasks[draft.exerciseID] = nil
             let minReps = parsedRepValue(from: draft.minRepsText)
             let maxReps = parsedRepValue(from: draft.maxRepsText)
             try activeWorkoutRepository.updateExerciseRepRange(
@@ -1543,18 +1477,18 @@ struct ActiveWorkoutView: View {
                 minReps: minReps,
                 maxReps: maxReps
             )
-            let previousDefaultRest = lastPersistedRestByExerciseID[draft.exerciseID] ?? draft.restSeconds
             try activeWorkoutRepository.updateExerciseRest(
                 sessionExerciseID: draft.exerciseID,
                 restSeconds: draft.restSeconds
             )
             restByExerciseID[draft.exerciseID] = draft.restSeconds
-            lastPersistedRestByExerciseID[draft.exerciseID] = draft.restSeconds
             applyPersistedRestChange(
                 sessionExerciseID: draft.exerciseID,
-                previousDefaultRest: previousDefaultRest,
                 updatedRest: draft.restSeconds
             )
+            if let snapshot = currentPersistenceSnapshot(for: draft.exerciseID) {
+                lastPersistedExerciseStateByID[draft.exerciseID] = snapshot
+            }
             exerciseSettingsDraft = nil
         } catch {
             showError(error)
@@ -1725,16 +1659,12 @@ struct ActiveWorkoutView: View {
     private func discardRemovedExerciseState(keeping currentIDs: Set<UUID>) {
         let knownIDs =
             Set(setDraftsByExerciseID.keys)
-            .union(lastPersistedDraftsByExerciseID.keys)
             .union(restByExerciseID.keys)
-            .union(lastPersistedRestByExerciseID.keys)
             .union(notesByExerciseID.keys)
-            .union(lastPersistedNotesByExerciseID.keys)
+            .union(lastPersistedExerciseStateByID.keys)
             .union(previousByExerciseID.keys)
             .union(componentResolutionByExerciseID.keys)
-            .union(pendingSaveTasks.keys)
-            .union(pendingRestTasks.keys)
-            .union(pendingNotesTasks.keys)
+            .union(pendingExercisePersistenceTasks.keys)
 
         for exerciseID in knownIDs where !currentIDs.contains(exerciseID) {
             discardExerciseState(for: exerciseID)
@@ -1745,15 +1675,11 @@ struct ActiveWorkoutView: View {
     private func discardExerciseState(for exerciseID: UUID) {
         let removedSetIDs = Set((setDraftsByExerciseID[exerciseID] ?? []).map(\.id))
 
-        pendingSaveTasks.removeValue(forKey: exerciseID)?.cancel()
-        pendingRestTasks.removeValue(forKey: exerciseID)?.cancel()
-        pendingNotesTasks.removeValue(forKey: exerciseID)?.cancel()
+        pendingExercisePersistenceTasks.removeValue(forKey: exerciseID)?.cancel()
         setDraftsByExerciseID[exerciseID] = nil
-        lastPersistedDraftsByExerciseID[exerciseID] = nil
         restByExerciseID[exerciseID] = nil
-        lastPersistedRestByExerciseID[exerciseID] = nil
         notesByExerciseID[exerciseID] = nil
-        lastPersistedNotesByExerciseID[exerciseID] = nil
+        lastPersistedExerciseStateByID[exerciseID] = nil
         previousByExerciseID[exerciseID] = nil
         componentResolutionByExerciseID[exerciseID] = nil
 
@@ -1777,16 +1703,22 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func focusCancelSection(using scrollProxy: ScrollViewProxy) {
-        withAnimation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion)) {
-            scrollProxy.scrollTo(cancelSectionScrollTarget, anchor: .center)
-        }
+        scrollToTarget(
+            cancelSectionScrollTarget,
+            using: scrollProxy,
+            anchor: .center,
+            animation: WGJMotion.overlayAnimation(reduceMotion: reduceMotion)
+        )
 
         Task { @MainActor in
             await Task.yield()
             guard isCancelArmed else { return }
-            withAnimation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion)) {
-                scrollProxy.scrollTo(cancelSectionScrollTarget, anchor: .center)
-            }
+            scrollToTarget(
+                cancelSectionScrollTarget,
+                using: scrollProxy,
+                anchor: .center,
+                animation: WGJMotion.overlayAnimation(reduceMotion: reduceMotion)
+            )
         }
     }
 
@@ -1845,7 +1777,6 @@ struct ActiveWorkoutView: View {
     @MainActor
     private func applyPersistedRestChange(
         sessionExerciseID: UUID,
-        previousDefaultRest _: Int,
         updatedRest: Int
     ) {
         guard var drafts = setDraftsByExerciseID[sessionExerciseID] else { return }
@@ -1858,7 +1789,6 @@ struct ActiveWorkoutView: View {
 
         guard changed else { return }
         setDraftsByExerciseID[sessionExerciseID] = drafts
-        lastPersistedDraftsByExerciseID[sessionExerciseID] = drafts
         let isCompleted = isExerciseCompleted(drafts)
         if cardStateController.didCompleteCurrentCycle(for: sessionExerciseID) != isCompleted {
             cardStateController.updateCompletion(
@@ -1888,16 +1818,32 @@ struct ActiveWorkoutView: View {
                 from: sessionExercises,
                 draftsByExerciseID: setDraftsByExerciseID
             ) {
-                withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
-                    scrollProxy.scrollTo(ActiveWorkoutScrollTarget.exercise(firstIncompleteExerciseID), anchor: .top)
-                }
+                scrollToTarget(
+                    ActiveWorkoutScrollTarget.exercise(firstIncompleteExerciseID),
+                    using: scrollProxy
+                )
             } else if postWorkoutCardio != nil {
-                withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
-                    scrollProxy.scrollTo(cardioScrollTarget(for: .postWorkout), anchor: .top)
-                }
+                scrollToTarget(
+                    cardioScrollTarget(for: .postWorkout),
+                    using: scrollProxy
+                )
             }
         case .postWorkout:
             break
+        }
+    }
+
+    @MainActor
+    private func scrollToTarget(
+        _ target: ActiveWorkoutScrollTarget,
+        using scrollProxy: ScrollViewProxy,
+        anchor: UnitPoint = .top,
+        animation: Animation? = nil
+    ) {
+        activeWorkoutPresentationState.scrollTarget = target
+        let resolvedAnimation = animation ?? WGJMotion.cardAnimation(reduceMotion: reduceMotion)
+        withAnimation(resolvedAnimation) {
+            scrollProxy.scrollTo(target, anchor: anchor)
         }
     }
 
@@ -1996,27 +1942,6 @@ struct ActiveWorkoutView: View {
             ),
             targetDurationSeconds: cardioBlock.targetDurationSeconds
         )
-    }
-}
-
-private struct ActiveWorkoutScrollTargetFramePreferenceKey: PreferenceKey {
-    static let defaultValue: [ActiveWorkoutScrollTarget: CGFloat] = [:]
-
-    static func reduce(value: inout [ActiveWorkoutScrollTarget: CGFloat], nextValue: () -> [ActiveWorkoutScrollTarget: CGFloat]) {
-        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
-    }
-}
-
-private extension View {
-    func trackScrollTarget(_ target: ActiveWorkoutScrollTarget, in coordinateSpaceName: String) -> some View {
-        background {
-            GeometryReader { proxy in
-                Color.clear.preference(
-                    key: ActiveWorkoutScrollTargetFramePreferenceKey.self,
-                    value: [target: proxy.frame(in: .named(coordinateSpaceName)).minY]
-                )
-            }
-        }
     }
 }
 
@@ -2520,9 +2445,9 @@ private struct ActiveWorkoutExerciseSettingsDraft: Identifiable, Equatable {
 
 private struct ActiveWorkoutHydrationResult {
     let draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
-    let persistedDraftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
     let restsByExerciseID: [UUID: Int]
     let notesByExerciseID: [UUID: String]
+    let persistenceStateByExerciseID: [UUID: ActiveWorkoutExercisePersistenceSnapshot]
     let previousByExerciseID: [UUID: [Int: WorkoutPreviousSetSnapshot]]
     let catalogMatchesByUUID: [String: ExerciseCatalogItem]
 }

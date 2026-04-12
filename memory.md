@@ -103,4 +103,13 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 - How to Verify Next Time: Run `WorkoutSetBozarCompletionResolverTests` plus the Bozar UI smoke tests that complete a set with and without previous performance, and confirm the filled values exactly match the previous set while the completion/rest flow still triggers.
 - Status: active
 
+## 2026-04-12 - Active Workout Persistence Baselines Must Match Display Normalization
+
+- Date: 2026-04-12
+- Trigger/Problem: Opening or restoring Active Workout could mark exercises dirty immediately and trigger avoidable draft-store saves, especially when bodyweight rows were normalized for display.
+- Root Cause: The screen hydrated `exerciseDraftsByExerciseID` from a normalized UI snapshot, but the "last persisted" baseline was still seeded from raw persisted drafts. That made first-render comparisons think the user had edited the exercise even when the only difference was display-only normalization.
+- Durable Rule: When Active Workout normalizes persisted exercise drafts for display, seed the persistence baseline from the same effective normalized snapshot used by the UI, and diff combined exercise snapshots before scheduling saves.
+- How to Verify Next Time: Launch Active Workout with persisted bodyweight or normalized rows, make no edits, and confirm no draft persistence fires on hydration or restore; then edit notes, rest, and sets and confirm they batch into one coalesced exercise save.
+- Status: active
+
 Promote a lesson here only when it clears the bar above.

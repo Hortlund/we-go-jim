@@ -1,6 +1,41 @@
 import Foundation
 import SwiftData
 
+struct ActiveWorkoutExercisePersistenceSnapshot: Equatable {
+    var setDrafts: [WorkoutSessionSetDraft]
+    var restSeconds: Int
+    var notes: String
+
+    init(
+        setDrafts: [WorkoutSessionSetDraft],
+        restSeconds: Int,
+        notes: String
+    ) {
+        self.setDrafts = setDrafts
+        self.restSeconds = max(0, min(3600, restSeconds))
+        self.notes = notes
+    }
+}
+
+struct ActiveWorkoutExercisePersistenceChangeSet: Equatable {
+    let persistDrafts: Bool
+    let persistRest: Bool
+    let persistNotes: Bool
+
+    init(
+        current: ActiveWorkoutExercisePersistenceSnapshot,
+        persisted: ActiveWorkoutExercisePersistenceSnapshot
+    ) {
+        persistDrafts = current.setDrafts != persisted.setDrafts
+        persistRest = current.restSeconds != persisted.restSeconds
+        persistNotes = current.notes != persisted.notes
+    }
+
+    var hasChanges: Bool {
+        persistDrafts || persistRest || persistNotes
+    }
+}
+
 @MainActor
 final class ActiveWorkoutDraftRepository {
     private let modelContext: ModelContext
@@ -414,21 +449,10 @@ final class ActiveWorkoutDraftRepository {
             throw WorkoutSessionRepositoryError.sessionExerciseNotFound
         }
 
-        let normalizedRest = sanitizedRest(restSeconds)
-        guard exercise.restSeconds != normalizedRest else {
+        let now = Date()
+        guard applyExerciseRest(restSeconds, to: exercise, now: now) else {
             return
         }
-
-        let previousRest = exercise.restSeconds
-        exercise.restSeconds = normalizedRest
-        for set in exercise.sets ?? [] where !set.isLocked {
-            guard set.restSeconds == previousRest else {
-                continue
-            }
-            set.restSeconds = normalizedRest
-            set.updatedAt = .now
-        }
-        exercise.updatedAt = .now
         try modelContext.save()
     }
 
@@ -452,12 +476,10 @@ final class ActiveWorkoutDraftRepository {
             throw WorkoutSessionRepositoryError.sessionExerciseNotFound
         }
 
-        guard exercise.notes != notes else {
+        let now = Date()
+        guard applyExerciseNotes(notes, to: exercise, now: now) else {
             return
         }
-
-        exercise.notes = notes
-        exercise.updatedAt = .now
         try modelContext.save()
     }
 
@@ -466,53 +488,42 @@ final class ActiveWorkoutDraftRepository {
             throw WorkoutSessionRepositoryError.sessionExerciseNotFound
         }
 
-        let existing = exercise.sets ?? []
-        let existingByID = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
-        let incomingIDs = Set(drafts.map(\.id))
-        let existingOrderedIDs = orderedSessionSets(for: exercise).map(\.id)
-        let incomingOrderedIDs = drafts.map(\.id)
         let now = Date()
-        var didMutateExerciseStructure = existingOrderedIDs != incomingOrderedIDs
-        var didMutateAnySet = false
-
-        for set in existing where !incomingIDs.contains(set.id) {
-            modelContext.delete(set)
-            didMutateExerciseStructure = true
-        }
-
-        var updatedSets: [ActiveWorkoutDraftSet] = []
-        updatedSets.reserveCapacity(drafts.count)
-        for (index, draft) in drafts.enumerated() {
-            let set: ActiveWorkoutDraftSet
-            if let existingSet = existingByID[draft.id] {
-                set = existingSet
-            } else {
-                set = ActiveWorkoutDraftSet(
-                    id: draft.id,
-                    sessionExerciseID: sessionExerciseID,
-                    sessionExercise: exercise
-                )
-                modelContext.insert(set)
-                didMutateExerciseStructure = true
-            }
-
-            let didMutateSet = apply(draft: draft, to: set, sortOrder: index)
-            if didMutateSet {
-                set.updatedAt = now
-                didMutateAnySet = true
-            }
-            updatedSets.append(set)
-        }
-
-        guard didMutateExerciseStructure || didMutateAnySet else {
+        let changes = applySetDrafts(drafts, to: exercise, now: now)
+        guard changes.didMutateExerciseStructure || changes.didMutateAnySet else {
             return
         }
+        try modelContext.save()
+    }
 
-        if didMutateExerciseStructure {
-            exercise.sets = updatedSets
-            exercise.updatedAt = now
+    func persistExerciseSnapshot(
+        sessionExerciseID: UUID,
+        snapshot: ActiveWorkoutExercisePersistenceSnapshot,
+        persistDrafts: Bool = true,
+        persistRest: Bool = true,
+        persistNotes: Bool = true
+    ) throws {
+        guard let exercise = try sessionExercise(id: sessionExerciseID) else {
+            throw WorkoutSessionRepositoryError.sessionExerciseNotFound
         }
 
+        let now = Date()
+        var shouldSave = false
+
+        if persistDrafts {
+            let changes = applySetDrafts(snapshot.setDrafts, to: exercise, now: now)
+            shouldSave = shouldSave || changes.didMutateExerciseStructure || changes.didMutateAnySet
+        }
+
+        if persistRest {
+            shouldSave = applyExerciseRest(snapshot.restSeconds, to: exercise, now: now) || shouldSave
+        }
+
+        if persistNotes {
+            shouldSave = applyExerciseNotes(snapshot.notes, to: exercise, now: now) || shouldSave
+        }
+
+        guard shouldSave else { return }
         try modelContext.save()
     }
 
@@ -923,6 +934,95 @@ final class ActiveWorkoutDraftRepository {
         (exercise.components ?? [])
             .filter { $0.modelContext != nil }
             .sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    private func applySetDrafts(
+        _ drafts: [WorkoutSessionSetDraft],
+        to exercise: ActiveWorkoutDraftExercise,
+        now: Date
+    ) -> (didMutateExerciseStructure: Bool, didMutateAnySet: Bool) {
+        let existing = exercise.sets ?? []
+        let existingByID = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
+        let incomingIDs = Set(drafts.map(\.id))
+        let existingOrderedIDs = orderedSessionSets(for: exercise).map(\.id)
+        let incomingOrderedIDs = drafts.map(\.id)
+        var didMutateExerciseStructure = existingOrderedIDs != incomingOrderedIDs
+        var didMutateAnySet = false
+
+        for set in existing where !incomingIDs.contains(set.id) {
+            modelContext.delete(set)
+            didMutateExerciseStructure = true
+        }
+
+        var updatedSets: [ActiveWorkoutDraftSet] = []
+        updatedSets.reserveCapacity(drafts.count)
+        for (index, draft) in drafts.enumerated() {
+            let set: ActiveWorkoutDraftSet
+            if let existingSet = existingByID[draft.id] {
+                set = existingSet
+            } else {
+                set = ActiveWorkoutDraftSet(
+                    id: draft.id,
+                    sessionExerciseID: exercise.id,
+                    sessionExercise: exercise
+                )
+                modelContext.insert(set)
+                didMutateExerciseStructure = true
+            }
+
+            let didMutateSet = apply(draft: draft, to: set, sortOrder: index)
+            if didMutateSet {
+                set.updatedAt = now
+                didMutateAnySet = true
+            }
+            updatedSets.append(set)
+        }
+
+        if didMutateExerciseStructure {
+            exercise.sets = updatedSets
+            exercise.updatedAt = now
+        }
+
+        return (didMutateExerciseStructure, didMutateAnySet)
+    }
+
+    @discardableResult
+    private func applyExerciseRest(
+        _ restSeconds: Int,
+        to exercise: ActiveWorkoutDraftExercise,
+        now: Date
+    ) -> Bool {
+        let normalizedRest = sanitizedRest(restSeconds)
+        guard exercise.restSeconds != normalizedRest else {
+            return false
+        }
+
+        let previousRest = exercise.restSeconds
+        exercise.restSeconds = normalizedRest
+        for set in exercise.sets ?? [] where !set.isLocked {
+            guard set.restSeconds == previousRest else {
+                continue
+            }
+            set.restSeconds = normalizedRest
+            set.updatedAt = now
+        }
+        exercise.updatedAt = now
+        return true
+    }
+
+    @discardableResult
+    private func applyExerciseNotes(
+        _ notes: String,
+        to exercise: ActiveWorkoutDraftExercise,
+        now: Date
+    ) -> Bool {
+        guard exercise.notes != notes else {
+            return false
+        }
+
+        exercise.notes = notes
+        exercise.updatedAt = now
+        return true
     }
 
     private func apply(
