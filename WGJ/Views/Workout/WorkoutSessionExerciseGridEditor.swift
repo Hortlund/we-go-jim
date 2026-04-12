@@ -1944,9 +1944,9 @@ struct WorkoutSessionExerciseGridEditor: View {
                 dismissInputFocus(suppressCommit: true)
             }
             pendingBozarCompletionSetIDs.insert(setID)
-        case .completeImmediately:
+        case .completeImmediately(let updatedDrafts):
             pendingBozarCompletionSetIDs.remove(setDrafts[index].id)
-            completeSetUsingBozar(at: index)
+            completeSetUsingBozar(at: index, draftOverride: updatedDrafts)
         }
     }
 
@@ -2068,23 +2068,34 @@ struct WorkoutSessionExerciseGridEditor: View {
             switch decision {
             case .waitForPreviousPerformance:
                 break
-            case .completeImmediately:
-                completeSetUsingBozar(at: index)
+            case .completeImmediately(let updatedDrafts):
+                completeSetUsingBozar(at: index, draftOverride: updatedDrafts)
             }
         }
     }
 
-    private func completeSetUsingBozar(at index: Int) {
+    private func completeSetUsingBozar(
+        at index: Int,
+        draftOverride: [WorkoutSessionSetDraft]? = nil
+    ) {
         guard setDrafts.indices.contains(index) else { return }
 
-        // Bozar is intentionally "Fill Last" plus completion, not a separate mutation.
-        if previousPerformanceResolution.previous(at: index) != nil {
-            applyPreviousPerformance(at: index)
-        } else if focusedInput?.setID == setDrafts[index].id {
+        let updatedDrafts =
+            draftOverride
+            ?? WorkoutSetBozarCompletionController.applyPreviousPerformance(
+                to: setDrafts,
+                at: index,
+                previousResolution: previousPerformanceResolution
+            )
+            ?? setDrafts
+        guard updatedDrafts.indices.contains(index) else { return }
+
+        if let focusedSetInput = focusedInput, focusedSetInput.setID == updatedDrafts[index].id {
+            syncInputDraft(for: focusedSetInput, using: updatedDrafts[index])
             dismissInputFocus(suppressCommit: true)
         }
 
-        setCompletion(true, at: index)
+        setCompletion(true, at: index, draftOverride: updatedDrafts)
     }
 
     private func clearInputDraft(for focus: SetInputFocus) {
