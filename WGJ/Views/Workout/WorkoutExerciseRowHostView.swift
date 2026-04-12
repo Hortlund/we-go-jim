@@ -9,7 +9,7 @@ struct WorkoutExerciseRowHostView: View, Equatable {
     let exerciseIndexTitle: String
     let targetRepMin: Int?
     let targetRepMax: Int?
-    let previousBySetIndex: [Int: WorkoutPreviousSetSnapshot]
+    let previousPerformanceResolution: WorkoutPreviousPerformanceResolution
     let personalRecordSummaryKinds: [WorkoutPersonalRecordKind]
     let personalRecordKindsBySetID: [UUID: [WorkoutPersonalRecordKind]]
     let guidance: ActiveWorkoutExerciseGuidancePresentation?
@@ -55,7 +55,7 @@ struct WorkoutExerciseRowHostView: View, Equatable {
         exerciseIndexTitle: String,
         targetRepMin: Int?,
         targetRepMax: Int?,
-        previousBySetIndex: [Int: WorkoutPreviousSetSnapshot],
+        previousPerformanceResolution: WorkoutPreviousPerformanceResolution,
         personalRecordSummaryKinds: [WorkoutPersonalRecordKind] = [],
         personalRecordKindsBySetID: [UUID: [WorkoutPersonalRecordKind]] = [:],
         guidance: ActiveWorkoutExerciseGuidancePresentation? = nil,
@@ -95,7 +95,7 @@ struct WorkoutExerciseRowHostView: View, Equatable {
         self.exerciseIndexTitle = exerciseIndexTitle
         self.targetRepMin = targetRepMin
         self.targetRepMax = targetRepMax
-        self.previousBySetIndex = previousBySetIndex
+        self.previousPerformanceResolution = previousPerformanceResolution
         self.personalRecordSummaryKinds = personalRecordSummaryKinds
         self.personalRecordKindsBySetID = personalRecordKindsBySetID
         self.guidance = guidance
@@ -151,7 +151,7 @@ struct WorkoutExerciseRowHostView: View, Equatable {
             && lhs.exerciseIndexTitle == rhs.exerciseIndexTitle
             && lhs.targetRepMin == rhs.targetRepMin
             && lhs.targetRepMax == rhs.targetRepMax
-            && lhs.previousBySetIndex == rhs.previousBySetIndex
+            && lhs.previousPerformanceResolution == rhs.previousPerformanceResolution
             && lhs.personalRecordSummaryKinds == rhs.personalRecordSummaryKinds
             && lhs.personalRecordKindsBySetID == rhs.personalRecordKindsBySetID
             && lhs.guidance == rhs.guidance
@@ -181,7 +181,7 @@ struct WorkoutExerciseRowHostView: View, Equatable {
             exerciseAccessibilityIdentifier: exerciseAccessibilityIdentifier,
             targetRepMin: targetRepMin,
             targetRepMax: targetRepMax,
-            previousBySetIndex: previousBySetIndex,
+            previousPerformanceResolution: previousPerformanceResolution,
             personalRecordSummaryKinds: personalRecordSummaryKinds,
             personalRecordKindsBySetID: personalRecordKindsBySetID,
             guidance: guidance,

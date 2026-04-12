@@ -9,7 +9,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     let exerciseAccessibilityIdentifier: String?
     let targetRepMin: Int?
     let targetRepMax: Int?
-    let previousBySetIndex: [Int: WorkoutPreviousSetSnapshot]
+    let previousPerformanceResolution: WorkoutPreviousPerformanceResolution
     let personalRecordSummaryKinds: [WorkoutPersonalRecordKind]
     let personalRecordKindsBySetID: [UUID: [WorkoutPersonalRecordKind]]
     let guidance: ActiveWorkoutExerciseGuidancePresentation?
@@ -48,6 +48,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     @State private var setSwipeRemoving: [UUID: Bool] = [:]
     @State private var repsInputTextBySetID: [UUID: String] = [:]
     @State private var weightInputTextBySetID: [UUID: String] = [:]
+    @State private var pendingBozarCompletionSetIDs: Set<UUID> = []
     @State private var pendingDisplayRefreshTask: Task<Void, Never>?
     @FocusState private var focusedInput: SetInputFocus?
 
@@ -72,7 +73,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         exerciseAccessibilityIdentifier: String? = nil,
         targetRepMin: Int? = nil,
         targetRepMax: Int? = nil,
-        previousBySetIndex: [Int: WorkoutPreviousSetSnapshot],
+        previousPerformanceResolution: WorkoutPreviousPerformanceResolution,
         personalRecordSummaryKinds: [WorkoutPersonalRecordKind] = [],
         personalRecordKindsBySetID: [UUID: [WorkoutPersonalRecordKind]] = [:],
         guidance: ActiveWorkoutExerciseGuidancePresentation? = nil,
@@ -108,7 +109,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.exerciseAccessibilityIdentifier = exerciseAccessibilityIdentifier
         self.targetRepMin = targetRepMin
         self.targetRepMax = targetRepMax
-        self.previousBySetIndex = previousBySetIndex
+        self.previousPerformanceResolution = previousPerformanceResolution
         self.personalRecordSummaryKinds = personalRecordSummaryKinds
         self.personalRecordKindsBySetID = personalRecordKindsBySetID
         self.guidance = guidance
@@ -138,7 +139,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         self._localIsExpanded = State(initialValue: isExpanded?.wrappedValue ?? initiallyExpanded)
         let initialRows = Self.makeDisplayRows(
             setDrafts: setDrafts.wrappedValue,
-            previousBySetIndex: previousBySetIndex,
+            previousPerformanceResolution: previousPerformanceResolution,
             targetRepMin: targetRepMin,
             targetRepMax: targetRepMax,
             restSeconds: restSeconds.wrappedValue,
@@ -181,8 +182,8 @@ struct WorkoutSessionExerciseGridEditor: View {
         .onChange(of: setDrafts) { _, _ in
             handleSetDraftsChange()
         }
-        .onChange(of: previousBySetIndex) { _, _ in
-            refreshDisplayRows()
+        .onChange(of: previousPerformanceResolution) { _, _ in
+            handlePreviousPerformanceResolutionChange()
         }
         .onChange(of: restSeconds) { _, _ in
             refreshDisplayRows()
@@ -196,6 +197,10 @@ struct WorkoutSessionExerciseGridEditor: View {
         .onChange(of: focusedInput) { previousFocus, newFocus in
             handleFocusedInputChange(previousFocus, newFocus)
         }
+    }
+
+    private var previousBySetIndex: [Int: WorkoutPreviousSetSnapshot] {
+        previousPerformanceResolution.previousBySetIndex
     }
 
     @ViewBuilder
@@ -1516,7 +1521,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         let snapshot = WGJPerformance.measure("workout-grid.row-refresh") {
             Self.makeDisplayRows(
                 setDrafts: currentDrafts,
-                previousBySetIndex: previousBySetIndex,
+                previousPerformanceResolution: previousPerformanceResolution,
                 targetRepMin: targetRepMin,
                 targetRepMax: targetRepMax,
                 restSeconds: currentRestSeconds,
@@ -1554,12 +1559,19 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func flushPendingEditorState() {
+        pendingBozarCompletionSetIDs.removeAll()
         flushPendingDisplayRefresh()
+    }
+
+    private func handlePreviousPerformanceResolutionChange() {
+        prunePendingBozarCompletions()
+        resolvePendingBozarCompletionsIfNeeded()
+        refreshDisplayRows()
     }
 
     private static func makeDisplayRows(
         setDrafts: [WorkoutSessionSetDraft],
-        previousBySetIndex: [Int: WorkoutPreviousSetSnapshot],
+        previousPerformanceResolution: WorkoutPreviousPerformanceResolution,
         targetRepMin: Int?,
         targetRepMax: Int?,
         restSeconds: Int,
@@ -1591,13 +1603,17 @@ struct WorkoutSessionExerciseGridEditor: View {
                     set: draft,
                     badgeTitle: label.badgeTitle,
                     title: label.title,
-                    previousSummary: previousSummaryText(for: previousBySetIndex[index], formatWeight: formatWeight),
+                    previousSummary: previousSummaryText(
+                        for: previousPerformanceResolution,
+                        at: index,
+                        formatWeight: formatWeight
+                    ),
                     metadataLine: metadataLine(for: draft, restSeconds: restSeconds),
                     targetWeightText: targetWeightText(for: draft, formatWeight: formatWeight),
                     targetRepsText: targetRepsText(for: draft),
                     inlineHintPresentation: WorkoutSetInlineHintPresentation.make(
                         draft: draft,
-                        previous: previousBySetIndex[index],
+                        previous: previousPerformanceResolution.previous(at: index),
                         targetRepMin: targetRepMin,
                         targetRepMax: targetRepMax,
                         formatWeight: formatWeight
@@ -1611,10 +1627,15 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private static func previousSummaryText(
-        for snapshot: WorkoutPreviousSetSnapshot?,
+        for previousPerformanceResolution: WorkoutPreviousPerformanceResolution,
+        at index: Int,
         formatWeight: (Double) -> String
     ) -> String {
-        guard let snapshot else {
+        if previousPerformanceResolution.isLoading {
+            return "Loading previous log..."
+        }
+
+        guard let snapshot = previousPerformanceResolution.previous(at: index) else {
             return "No previous log for this slot."
         }
 
@@ -1677,16 +1698,26 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func applyPreviousPerformance(at index: Int) {
-        guard setDrafts.indices.contains(index), let previous = previousBySetIndex[index] else { return }
+        guard setDrafts.indices.contains(index) else { return }
         guard isSetEditingEnabled, !setDrafts[index].isLocked else { return }
-
-        setDrafts[index] = setDrafts[index].applyingPreviousPerformance(previous)
-
-        if !manualCompletionMode {
-            setDrafts[index].isCompleted = previous.weight != nil || previous.reps != nil
+        guard let updatedDrafts = WorkoutSetBozarCompletionController.applyPreviousPerformance(
+            to: setDrafts,
+            at: index,
+            previousResolution: previousPerformanceResolution
+        ) else {
+            return
         }
 
-        notifyChanged()
+        if !manualCompletionMode {
+            var autoCompletedDrafts = updatedDrafts
+            autoCompletedDrafts[index].isCompleted = true
+            setDrafts = autoCompletedDrafts
+            notifyChanged(drafts: autoCompletedDrafts)
+            return
+        }
+
+        setDrafts = updatedDrafts
+        notifyChanged(drafts: updatedDrafts)
     }
 
     private func setTitle(for index: Int, in drafts: [WorkoutSessionSetDraft]? = nil) -> String {
@@ -1783,7 +1814,30 @@ struct WorkoutSessionExerciseGridEditor: View {
         let set = row.set
 
         return Group {
-            if set.isCompleted {
+            if pendingBozarCompletionSetIDs.contains(set.id) {
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .controlSize(.small)
+
+                    Text("Waiting for last set...")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(WGJTheme.textPrimary)
+                        .wgjSingleLineText(scale: 0.9)
+
+                    Spacer(minLength: 8)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(WGJTheme.field.opacity(0.78))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(WGJTheme.outline.opacity(0.72), lineWidth: 1)
+                        )
+                )
+                .accessibilityIdentifier("workout-set-\(index)-bozar-pending")
+            } else if set.isCompleted {
                 HStack(spacing: 10) {
                     Label("Completed", systemImage: "checkmark.circle.fill")
                         .font(.subheadline.weight(.semibold))
@@ -1836,24 +1890,33 @@ struct WorkoutSessionExerciseGridEditor: View {
         }
 
         guard isCompleted else {
+            pendingBozarCompletionSetIDs.remove(setDrafts[index].id)
             setCompletion(false, at: index)
             return
         }
 
         guard manualCompletionMode, isBozarModeEnabled else {
+            pendingBozarCompletionSetIDs.remove(setDrafts[index].id)
             setCompletion(true, at: index)
             return
         }
 
-        var updatedDrafts = setDrafts
-        let resolution = WorkoutSetBozarCompletionResolver.resolve(
-            draft: updatedDrafts[index],
-            previous: previousBySetIndex[index]
-        )
-        updatedDrafts[index] = resolution
-        setDrafts = updatedDrafts
+        guard let decision = WorkoutSetBozarCompletionController.decision(
+            drafts: setDrafts,
+            at: index,
+            previousResolution: previousPerformanceResolution
+        ) else {
+            return
+        }
 
-        setCompletion(true, at: index, draftOverride: updatedDrafts)
+        switch decision {
+        case .waitForPreviousPerformance(let setID):
+            pendingBozarCompletionSetIDs.insert(setID)
+        case .completeImmediately(let updatedDrafts):
+            pendingBozarCompletionSetIDs.remove(setDrafts[index].id)
+            setDrafts = updatedDrafts
+            setCompletion(true, at: index, draftOverride: updatedDrafts)
+        }
     }
 
     private func setCompletion(
@@ -1868,8 +1931,9 @@ struct WorkoutSessionExerciseGridEditor: View {
             dismissInputFocus()
         }
 
-        guard updatedDrafts[index].isCompleted != isCompleted else { return }
         let setID = updatedDrafts[index].id
+        pendingBozarCompletionSetIDs.remove(setID)
+        guard updatedDrafts[index].isCompleted != isCompleted else { return }
         let setRestSeconds = updatedDrafts[index].restSeconds
         updatedDrafts[index].isCompleted = isCompleted
         setDrafts = updatedDrafts
@@ -1906,6 +1970,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func handleSetDraftsChange() {
+        prunePendingBozarCompletions()
         scheduleDisplayRefresh()
         pruneInputDrafts()
     }
@@ -1930,6 +1995,46 @@ struct WorkoutSessionExerciseGridEditor: View {
 
         if let focusedInput, !validSetIDs.contains(focusedInput.setID) {
             self.focusedInput = nil
+        }
+    }
+
+    private func prunePendingBozarCompletions() {
+        let validSetIDs = Set(
+            setDrafts
+                .filter { !$0.isCompleted }
+                .map(\.id)
+        )
+        pendingBozarCompletionSetIDs = pendingBozarCompletionSetIDs.filter { validSetIDs.contains($0) }
+    }
+
+    private func resolvePendingBozarCompletionsIfNeeded() {
+        guard !previousPerformanceResolution.isLoading, !pendingBozarCompletionSetIDs.isEmpty else {
+            return
+        }
+
+        let pendingSetIDs = pendingBozarCompletionSetIDs
+        for setID in pendingSetIDs {
+            guard let index = setDrafts.firstIndex(where: { $0.id == setID }) else {
+                pendingBozarCompletionSetIDs.remove(setID)
+                continue
+            }
+
+            guard let decision = WorkoutSetBozarCompletionController.decision(
+                drafts: setDrafts,
+                at: index,
+                previousResolution: previousPerformanceResolution
+            ) else {
+                pendingBozarCompletionSetIDs.remove(setID)
+                continue
+            }
+
+            switch decision {
+            case .waitForPreviousPerformance:
+                break
+            case .completeImmediately(let updatedDrafts):
+                setDrafts = updatedDrafts
+                setCompletion(true, at: index, draftOverride: updatedDrafts)
+            }
         }
     }
 

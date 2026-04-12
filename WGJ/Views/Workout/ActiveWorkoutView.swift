@@ -24,7 +24,7 @@ struct ActiveWorkoutView: View {
     @State private var lastPersistedExerciseStateByID: [UUID: ActiveWorkoutExercisePersistenceSnapshot] = [:]
     @State private var pendingExercisePersistenceTasks: [UUID: Task<Void, Never>] = [:]
 
-    @State private var previousByExerciseID: [UUID: [Int: WorkoutPreviousSetSnapshot]] = [:]
+    @State private var previousResolutionByExerciseID: [UUID: WorkoutPreviousPerformanceResolution] = [:]
     @State private var componentResolutionByExerciseID: [UUID: ExerciseComponentRotationResolution] = [:]
     @State private var catalogMatchesByUUID: [String: ExerciseCatalogItem] = [:]
     @State private var loadedExerciseStateStamp: ActiveWorkoutExerciseStateStamp?
@@ -585,7 +585,7 @@ struct ActiveWorkoutView: View {
             exerciseIndexTitle: "Exercise \(index + 1)",
             targetRepMin: exercise.targetRepMin,
             targetRepMax: exercise.targetRepMax,
-            previousBySetIndex: previousByExerciseID[exerciseID] ?? [:],
+            previousPerformanceResolution: previousResolutionByExerciseID[exerciseID] ?? .loading,
             guidance: guidance,
             preferredLoadUnit: preferredLoadUnit,
             supplementaryContent: componentResolutionByExerciseID[exerciseID].map { resolution in
@@ -794,7 +794,9 @@ struct ActiveWorkoutView: View {
                 restsByExerciseID: loadedRests,
                 notesByExerciseID: loadedNotes,
                 persistenceStateByExerciseID: loadedPersistenceState,
-                previousByExerciseID: [:],
+                previousResolutionByExerciseID: Dictionary(
+                    uniqueKeysWithValues: sessionExercises.map { ($0.id, WorkoutPreviousPerformanceResolution.loading) }
+                ),
                 catalogMatchesByUUID: catalogByUUID
             )
         }
@@ -804,7 +806,7 @@ struct ActiveWorkoutView: View {
         notesByExerciseID = result.notesByExerciseID
         lastPersistedExerciseStateByID = result.persistenceStateByExerciseID
         catalogMatchesByUUID = result.catalogMatchesByUUID
-        previousByExerciseID = previousByExerciseID.filter { result.draftsByExerciseID[$0.key] != nil }
+        previousResolutionByExerciseID = result.previousResolutionByExerciseID
         componentResolutionByExerciseID = componentResolutionByExerciseID.filter { result.draftsByExerciseID[$0.key] != nil }
         let completedExerciseIDs = Set(
             result.draftsByExerciseID.compactMap { exerciseID, drafts in
@@ -842,14 +844,14 @@ struct ActiveWorkoutView: View {
     ) {
         deferredHydrationTask?.cancel()
         deferredHydrationTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(80))
+            try? await Task.sleep(for: previousPerformanceHydrationDelay)
             guard !Task.isCancelled, loadedExerciseStateStamp == stamp else { return }
 
-            let loadedPrevious = WGJPerformance.measure("active-workout.hydrate.history") {
-                loadPreviousByExerciseID(using: draftsByExerciseID)
+            let loadedPreviousResolution = WGJPerformance.measure("active-workout.hydrate.history") {
+                loadPreviousResolutionByExerciseID(using: draftsByExerciseID)
             }
             guard !Task.isCancelled, loadedExerciseStateStamp == stamp else { return }
-            previousByExerciseID = loadedPrevious
+            previousResolutionByExerciseID = loadedPreviousResolution
 
             await Task.yield()
             guard !Task.isCancelled, loadedExerciseStateStamp == stamp else { return }
@@ -935,9 +937,9 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
-    private func loadPreviousByExerciseID(
+    private func loadPreviousResolutionByExerciseID(
         using draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
-    ) -> [UUID: [Int: WorkoutPreviousSetSnapshot]] {
+    ) -> [UUID: WorkoutPreviousPerformanceResolution] {
         let startedAt = session?.startedAt ?? .now
         let requestedExerciseUUIDs = Array(Set(sessionExercises.map(\.catalogExerciseUUID)))
         let previousMaps = (try? activeWorkoutRepository.previousSetMaps(
@@ -946,19 +948,21 @@ struct ActiveWorkoutView: View {
             excludingSessionID: sessionID
         )) ?? [:]
 
-        var loadedPrevious: [UUID: [Int: WorkoutPreviousSetSnapshot]] = [:]
-        loadedPrevious.reserveCapacity(sessionExercises.count)
+        var loadedPreviousResolution: [UUID: WorkoutPreviousPerformanceResolution] = [:]
+        loadedPreviousResolution.reserveCapacity(sessionExercises.count)
 
         for exercise in sessionExercises {
             let drafts = draftsByExerciseID[exercise.id] ?? makeDrafts(from: exercise)
             let base = previousMaps[exercise.catalogExerciseUUID] ?? [:]
-            loadedPrevious[exercise.id] = resolvedPreviousMap(
-                baseMap: base,
-                maxSetCount: drafts.count
+            loadedPreviousResolution[exercise.id] = .resolved(
+                resolvedPreviousMap(
+                    baseMap: base,
+                    maxSetCount: drafts.count
+                )
             )
         }
 
-        return loadedPrevious
+        return loadedPreviousResolution
     }
 
     @MainActor
@@ -1473,6 +1477,17 @@ struct ActiveWorkoutView: View {
         WGJMotion.cardTransition(reduceMotion: reduceMotion)
     }
 
+    private var previousPerformanceHydrationDelay: Duration {
+        guard AppRuntimeConfig.isRunningTests,
+              let rawValue = ProcessInfo.processInfo.environment["UITEST_ACTIVE_WORKOUT_PREVIOUS_PERFORMANCE_DELAY_MS"],
+              let milliseconds = Int(rawValue)
+        else {
+            return .milliseconds(80)
+        }
+
+        return .milliseconds(max(0, milliseconds))
+    }
+
     private func showExerciseSettings(for exercise: ActiveWorkoutDraftExercise) {
         dismissKeyboard()
         exerciseSettingsDraft = ActiveWorkoutExerciseSettingsDraft(
@@ -1693,7 +1708,7 @@ struct ActiveWorkoutView: View {
             .union(restByExerciseID.keys)
             .union(notesByExerciseID.keys)
             .union(lastPersistedExerciseStateByID.keys)
-            .union(previousByExerciseID.keys)
+            .union(previousResolutionByExerciseID.keys)
             .union(componentResolutionByExerciseID.keys)
             .union(pendingExercisePersistenceTasks.keys)
 
@@ -1711,7 +1726,7 @@ struct ActiveWorkoutView: View {
         restByExerciseID[exerciseID] = nil
         notesByExerciseID[exerciseID] = nil
         lastPersistedExerciseStateByID[exerciseID] = nil
-        previousByExerciseID[exerciseID] = nil
+        previousResolutionByExerciseID[exerciseID] = nil
         componentResolutionByExerciseID[exerciseID] = nil
 
         if let restTimerSourceSetID = restTimerState.restTimerSourceSetID,
@@ -2480,7 +2495,7 @@ private struct ActiveWorkoutHydrationResult {
     let restsByExerciseID: [UUID: Int]
     let notesByExerciseID: [UUID: String]
     let persistenceStateByExerciseID: [UUID: ActiveWorkoutExercisePersistenceSnapshot]
-    let previousByExerciseID: [UUID: [Int: WorkoutPreviousSetSnapshot]]
+    let previousResolutionByExerciseID: [UUID: WorkoutPreviousPerformanceResolution]
     let catalogMatchesByUUID: [String: ExerciseCatalogItem]
 }
 

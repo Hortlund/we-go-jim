@@ -368,7 +368,7 @@ struct HistoryDetailView: View {
             exerciseIndexTitle: "Exercise \(index + 1)",
             targetRepMin: exercise.targetRepMin,
             targetRepMax: exercise.targetRepMax,
-            previousBySetIndex: previousSets,
+            previousPerformanceResolution: .resolved(previousSets),
             personalRecordSummaryKinds: personalRecordPresentation?.summaryKinds ?? [],
             personalRecordKindsBySetID: personalRecordPresentation?.setKindsBySetID ?? [:],
             preferredLoadUnit: preferredLoadUnit,

@@ -775,22 +775,44 @@ struct WGJTests {
     }
 
     @Test
-    func cloudStartupPreflightKeepsCloudAttemptForTransientStatuses() {
-        let statuses: [CloudStartupAccountStatus] = [
-            .temporarilyUnavailable,
-            .couldNotDetermine,
-            .timedOut,
-            .error,
+    func cloudStartupPreflightChoosesLocalFallbackForAnyUncertainStartupStatus() {
+        let expectations: [(CloudStartupAccountStatus, String)] = [
+            (.temporarilyUnavailable, "temporarily unavailable"),
+            (.couldNotDetermine, "could not verify"),
+            (.timedOut, "timed out"),
+            (.error, "CloudKit startup error"),
         ]
 
-        for status in statuses {
+        for (status, expectedMessageFragment) in expectations {
             let decision = CloudStartupPreflight.makeDecision(
                 statusProvider: MockCloudStartupAccountStatusProvider(status: status)
             )
 
-            #expect(decision.storeMode == .cloudBacked)
-            #expect(decision.cloudSyncEnabled)
-            #expect(decision.cloudSyncErrorDescription == nil)
+            #expect(decision.storeMode == .localFallback)
+            #expect(!decision.cloudSyncEnabled)
+            #expect(decision.cloudSyncErrorDescription?.contains(expectedMessageFragment) == true)
+        }
+    }
+
+    @Test
+    func cloudStartupPreflightPreservesFallbackReasonsForAllLocalOnlyStatuses() {
+        let expectations: [(CloudStartupAccountStatus, String)] = [
+            (.noAccount, "No iCloud account"),
+            (.restricted, "restricted"),
+            (.containerUnavailable, "CloudKit is unavailable"),
+            (.temporarilyUnavailable, "temporarily unavailable"),
+            (.couldNotDetermine, "could not verify"),
+            (.timedOut, "timed out"),
+            (.error, "CloudKit startup error"),
+        ]
+
+        for (status, expectedMessageFragment) in expectations {
+            let decision = CloudStartupPreflight.makeDecision(
+                statusProvider: MockCloudStartupAccountStatusProvider(status: status)
+            )
+
+            #expect(decision.storeMode == .localFallback)
+            #expect(decision.cloudSyncErrorDescription?.contains(expectedMessageFragment) == true)
         }
     }
 

@@ -99,25 +99,40 @@ enum CloudStartupPreflight {
                 cloudSyncErrorDescription: nil
             )
         case .noAccount:
-            return CloudStartupDecision(
-                storeMode: .localFallback,
-                cloudSyncErrorDescription: "No iCloud account is signed in on this device. Using local-only mode for this session."
+            return localFallbackDecision(
+                "No iCloud account is signed in on this device. Using local-only mode for this session."
             )
         case .restricted:
-            return CloudStartupDecision(
-                storeMode: .localFallback,
-                cloudSyncErrorDescription: "iCloud is restricted on this device. Using local-only mode for this session."
+            return localFallbackDecision(
+                "iCloud is restricted on this device. Using local-only mode for this session."
             )
         case .containerUnavailable:
-            return CloudStartupDecision(
-                storeMode: .localFallback,
-                cloudSyncErrorDescription: "CloudKit is unavailable for this build. Using local-only mode for this session."
+            return localFallbackDecision(
+                "CloudKit is unavailable for this build. Using local-only mode for this session."
             )
-        case .temporarilyUnavailable, .couldNotDetermine, .timedOut, .error:
-            return CloudStartupDecision(
-                storeMode: .cloudBacked,
-                cloudSyncErrorDescription: nil
+        case .temporarilyUnavailable:
+            return localFallbackDecision(
+                "iCloud is temporarily unavailable on this device. Using local-only mode for this session."
+            )
+        case .couldNotDetermine:
+            return localFallbackDecision(
+                "WGJ could not verify iCloud availability at launch. Using local-only mode for this session."
+            )
+        case .timedOut:
+            return localFallbackDecision(
+                "The iCloud account check timed out during launch. Using local-only mode for this session."
+            )
+        case .error:
+            return localFallbackDecision(
+                "WGJ hit a CloudKit startup error during launch. Using local-only mode for this session."
             )
         }
+    }
+
+    private static func localFallbackDecision(_ description: String) -> CloudStartupDecision {
+        CloudStartupDecision(
+            storeMode: .localFallback,
+            cloudSyncErrorDescription: description
+        )
     }
 }
