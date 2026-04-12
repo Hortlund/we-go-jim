@@ -128,12 +128,24 @@ struct WGJTests {
         )
         context.insert(catalogExercise)
         try repository.addExercise(templateID: template.id, catalogItem: catalogExercise)
+        try repository.upsertCardioBlock(
+            templateID: template.id,
+            draft: TemplateCardioBlockDraft(
+                phase: .preWorkout,
+                catalogExerciseUUID: "seed-bike",
+                exerciseNameSnapshot: "Bike Warmup",
+                categorySnapshot: "Cardio",
+                muscleSummarySnapshot: "Legs",
+                targetDurationSeconds: 300
+            )
+        )
 
         try repository.deleteFolder(id: folder.id)
 
         #expect(try repository.folders().isEmpty)
         #expect(try context.fetch(FetchDescriptor<WorkoutTemplate>()).isEmpty)
         #expect(try context.fetch(FetchDescriptor<TemplateExercise>()).isEmpty)
+        #expect(try context.fetch(FetchDescriptor<TemplateCardioBlock>()).isEmpty)
     }
 
     @Test

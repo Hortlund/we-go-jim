@@ -1376,7 +1376,11 @@ final class CloudKitBrosSocialService: BrosSocialService {
             return
         }
 
-        _ = await reactionNotificationRegistrar()
+        guard await reactionNotificationRegistrar() else {
+            try? await save(subscriptions: [], deleting: [subscriptionID])
+            return
+        }
+
         try await save(
             subscriptions: [makeReactionNotificationSubscription(targetUserRecordName: userRecordName)],
             deleting: []

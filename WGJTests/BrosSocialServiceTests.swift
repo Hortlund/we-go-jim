@@ -1514,6 +1514,43 @@ struct BrosSocialServiceTests {
         #expect(deletedSubscriptionIDs == [BrosRecordNames.reactionNotificationSubscriptionID(userRecordName: "user-2")])
     }
 
+    @Test
+    func syncReactionNotificationSubscriptionDeletesExistingSubscriptionWhenRegistrationFails() async throws {
+        let context = try makeInMemoryContext()
+        let profile = try ProfileRepository(modelContext: context).loadOrCreateProfile()
+        profile.updateBrosMembership(
+            circleID: "circle-1",
+            membershipID: "membership-circle-1-user-2",
+            userRecordName: "user-2",
+            joinedAt: Date(timeIntervalSince1970: 120),
+            role: .member
+        )
+        try context.save()
+
+        let store = TestBrosCloudStore()
+        store.currentUserRecordNameValue = "user-2"
+
+        var savedSubscriptions: [CKSubscription] = []
+        var deletedSubscriptionIDs: [CKSubscription.ID] = []
+        store.saveSubscriptionsHandler = { subscriptions, subscriptionIDs in
+            savedSubscriptions = subscriptions
+            deletedSubscriptionIDs = subscriptionIDs
+        }
+
+        let service = CloudKitBrosSocialService(
+            modelContext: context,
+            cloudStore: store,
+            reactionNotificationRegistrar: { false }
+        )
+
+        try await service.syncReactionNotificationSubscription()
+
+        #expect(savedSubscriptions.isEmpty)
+        #expect(deletedSubscriptionIDs == [
+            BrosRecordNames.reactionNotificationSubscriptionID(userRecordName: "user-2")
+        ])
+    }
+
     private func makeEvent(id: String, createdAt: Date) -> BroFeedEvent {
         BroFeedEvent(
             id: id,

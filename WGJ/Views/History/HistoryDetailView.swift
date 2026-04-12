@@ -26,6 +26,7 @@ struct HistoryDetailView: View {
     @State private var deferredHydrationTask: Task<Void, Never>?
     @State private var expandedExerciseIDs: [UUID: Bool] = [:]
     @State private var personalRecordSummary = HistoryWorkoutPersonalRecordSummary(highlightedSetCount: 0)
+    @State private var hasPendingSummaryRebuild = false
 
     @State private var showingExercisePicker = false
     @State private var showingArchiveConfirmation = false
@@ -133,7 +134,7 @@ struct HistoryDetailView: View {
         .task {
             await bootstrapIfNeeded()
         }
-        .task(id: sessionExercises.count) {
+        .task(id: historyExerciseStateStamp) {
             await loadExerciseStateIfNeeded()
         }
         .alert("History Error", isPresented: $showingError) {
@@ -154,6 +155,11 @@ struct HistoryDetailView: View {
 
     private var orderedCardioBlocks: [WorkoutSessionCardioBlock] {
         sessionCardioBlocks.sorted { $0.phase.sortOrder < $1.phase.sortOrder }
+    }
+
+    @MainActor
+    private var historyExerciseStateStamp: HistoryExerciseStateStamp {
+        HistoryExerciseStateStamp(exercises: sessionExercises)
     }
 
     private var exercisesSectionHeader: some View {
@@ -446,32 +452,49 @@ struct HistoryDetailView: View {
 
     private func saveChanges() {
         do {
+            var didPersistChanges = hasPendingSummaryRebuild
+
             if let session {
                 if !sessionNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                    sessionNameDraft != session.name {
                     try sessionRepository.updateSessionName(sessionID: sessionID, name: sessionNameDraft)
+                    didPersistChanges = true
                 }
                 if notesDraft != session.notes {
                     try sessionRepository.updateSessionNotes(sessionID: sessionID, notes: notesDraft)
+                    didPersistChanges = true
                 }
             }
 
             for exercise in sessionExercises {
                 let drafts = setDraftsByExerciseID[exercise.id] ?? makeDrafts(from: exercise)
-                try sessionRepository.saveSetDrafts(sessionExerciseID: exercise.id, drafts: drafts)
+                let persistedDrafts = makeDrafts(from: exercise)
+                if drafts != persistedDrafts {
+                    try sessionRepository.saveSetDrafts(sessionExerciseID: exercise.id, drafts: drafts)
+                    didPersistChanges = true
+                }
             }
 
             for exercise in sessionExercises {
                 let rest = restByExerciseID[exercise.id] ?? exercise.restSeconds
-                try sessionRepository.updateExerciseRest(sessionExerciseID: exercise.id, restSeconds: rest)
+                if rest != exercise.restSeconds {
+                    try sessionRepository.updateExerciseRest(sessionExerciseID: exercise.id, restSeconds: rest)
+                    didPersistChanges = true
+                }
             }
 
             for exercise in sessionExercises {
                 let notes = notesByExerciseID[exercise.id] ?? exercise.notes
-                try sessionRepository.updateExerciseNotes(sessionExerciseID: exercise.id, notes: notes)
+                if notes != exercise.notes {
+                    try sessionRepository.updateExerciseNotes(sessionExerciseID: exercise.id, notes: notes)
+                    didPersistChanges = true
+                }
             }
 
-            try sessionRepository.recalculateSessionSummary(sessionID: sessionID)
+            if didPersistChanges {
+                try sessionRepository.recalculateSessionSummary(sessionID: sessionID)
+                hasPendingSummaryRebuild = false
+            }
             dismiss()
         } catch {
             showError(error)
@@ -485,6 +508,7 @@ struct HistoryDetailView: View {
             do {
                 try sessionRepository.addExercise(sessionID: sessionID, catalogItem: item)
                 loadedExerciseStateStamp = nil
+                hasPendingSummaryRebuild = true
             } catch {
                 capturedError = error
             }
@@ -506,6 +530,7 @@ struct HistoryDetailView: View {
                 notesByExerciseID.removeValue(forKey: exerciseID)
                 previousByExerciseID.removeValue(forKey: exerciseID)
                 loadedExerciseStateStamp = nil
+                hasPendingSummaryRebuild = true
             } catch {
                 capturedError = error
             }

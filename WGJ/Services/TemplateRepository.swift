@@ -324,6 +324,9 @@ final class TemplateRepository {
         }
 
         for template in folder.templates ?? [] {
+            for cardioBlock in template.cardioBlocks ?? [] {
+                modelContext.delete(cardioBlock)
+            }
             for exercise in template.exercises ?? [] {
                 modelContext.delete(exercise)
             }

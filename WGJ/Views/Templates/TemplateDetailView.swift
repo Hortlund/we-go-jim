@@ -137,8 +137,11 @@ struct TemplateDetailView: View {
         } message: {
             Text(errorMessage)
         }
-        .task(id: templateExerciseIdentityStamp) {
-            await loadExerciseStateIfNeeded()
+        .task(id: exerciseStateReloadKey) {
+            await loadSetDraftsIfNeeded()
+        }
+        .task(id: recommendationReloadKey) {
+            await loadCatalogMatches()
         }
         .onDisappear {
             flushPendingSaves()
@@ -148,6 +151,28 @@ struct TemplateDetailView: View {
 
     private var template: WorkoutTemplate? {
         templates.first
+    }
+
+    private var exerciseStateReloadKey: TemplateExerciseStateReloadKey {
+        TemplateExerciseStateReloadKey(
+            exerciseIDs: templateExercises
+                .map(\.id)
+                .sorted { $0.uuidString < $1.uuidString }
+        )
+    }
+
+    private var recommendationReloadKey: TemplateExerciseRecommendationReloadKey {
+        let requestedCatalogUUIDs = Set(
+            templateExercises
+                .map(\.catalogExerciseUUID)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        )
+
+        return TemplateExerciseRecommendationReloadKey(
+            catalogExerciseUUIDs: requestedCatalogUUIDs.sorted(),
+            isTrainingGuidanceEnabled: isTrainingGuidanceEnabled
+        )
     }
 
     private func templateHeaderCard(_ template: WorkoutTemplate) -> some View {
@@ -552,7 +577,7 @@ struct TemplateDetailView: View {
         let currentIDs = templateExercises.map(\.id)
         let currentIDSet = Set(currentIDs)
         discardRemovedExerciseState(keeping: currentIDSet)
-        guard currentIDs != loadedTemplateExerciseIDs else {
+        guard currentIDSet != Set(loadedTemplateExerciseIDs) else {
             if !hasLoadedExerciseStateOnce {
                 hasLoadedExerciseStateOnce = true
             }
@@ -712,16 +737,25 @@ struct TemplateDetailView: View {
     }
 
     @MainActor
-    private func loadExerciseStateIfNeeded() async {
-        await loadSetDraftsIfNeeded()
-        await loadCatalogMatches()
-    }
-
-    @MainActor
     private func loadCatalogMatches() async {
+        guard isTrainingGuidanceEnabled else {
+            recommendationByExerciseID = Dictionary(
+                uniqueKeysWithValues: templateExercises.map { ($0.id, nil as TemplateExerciseRecommendation?) }
+            )
+            return
+        }
+
+        let requestedCatalogUUIDs = recommendationReloadKey.catalogExerciseUUIDs
+        guard !requestedCatalogUUIDs.isEmpty else {
+            recommendationByExerciseID = Dictionary(
+                uniqueKeysWithValues: templateExercises.map { ($0.id, nil as TemplateExerciseRecommendation?) }
+            )
+            return
+        }
+
         do {
             let matches = try ExerciseCatalogRepository(modelContext: modelContext)
-                .exerciseMap(for: templateExercises.map(\.catalogExerciseUUID))
+                .exerciseMap(for: requestedCatalogUUIDs)
             recommendationByExerciseID = Dictionary(uniqueKeysWithValues: templateExercises.map { exercise in
                 (exercise.id, templateRecommendation(for: exercise, catalogByUUID: matches))
             })
@@ -871,13 +905,6 @@ struct TemplateDetailView: View {
         }
     }
 
-    private var templateExerciseIdentityStamp: TemplateExerciseIdentityStamp {
-        TemplateExerciseIdentityStamp(
-            ids: templateExercises.map(\.id),
-            catalogExerciseUUIDs: templateExercises.map(\.catalogExerciseUUID)
-        )
-    }
-
     private var exerciseRows: [TemplateExerciseRowData] {
         templateExercises.enumerated().map { index, exercise in
             TemplateExerciseRowData(
@@ -968,9 +995,13 @@ private struct RepRangeDraft: Equatable {
     var max: Int?
 }
 
-private struct TemplateExerciseIdentityStamp: Hashable {
-    let ids: [UUID]
+private struct TemplateExerciseStateReloadKey: Hashable {
+    let exerciseIDs: [UUID]
+}
+
+private struct TemplateExerciseRecommendationReloadKey: Hashable {
     let catalogExerciseUUIDs: [String]
+    let isTrainingGuidanceEnabled: Bool
 }
 
 private struct TemplateExerciseRowData: Identifiable {

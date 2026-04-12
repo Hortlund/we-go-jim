@@ -37,6 +37,20 @@ struct TemplateEditorView: View {
         profiles.first?.preferredLoadUnit ?? .kg
     }
 
+    private var recommendationReloadKey: TemplateEditorRecommendationReloadKey {
+        let requestedCatalogUUIDs = Set(
+            exerciseDrafts
+                .map(\.catalogExerciseUUID)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        )
+
+        return TemplateEditorRecommendationReloadKey(
+            catalogExerciseUUIDs: requestedCatalogUUIDs.sorted(),
+            isTrainingGuidanceEnabled: isTrainingGuidanceEnabled
+        )
+    }
+
     init(folderID: UUID? = nil, templateID: UUID? = nil) {
         self.folderID = folderID
         self.templateID = templateID
@@ -106,7 +120,7 @@ struct TemplateEditorView: View {
             .task {
                 await loadInitialDataIfNeeded()
             }
-            .task(id: exerciseDrafts.map(\.catalogExerciseUUID)) {
+            .task(id: recommendationReloadKey) {
                 await loadCatalogMatches()
             }
         }
@@ -482,8 +496,23 @@ struct TemplateEditorView: View {
 
     @MainActor
     private func loadCatalogMatches() async {
+        guard isTrainingGuidanceEnabled else {
+            recommendationByExerciseID = Dictionary(
+                uniqueKeysWithValues: exerciseDrafts.map { ($0.id, nil as TemplateExerciseRecommendation?) }
+            )
+            return
+        }
+
+        let requestedCatalogUUIDs = recommendationReloadKey.catalogExerciseUUIDs
+        guard !requestedCatalogUUIDs.isEmpty else {
+            recommendationByExerciseID = Dictionary(
+                uniqueKeysWithValues: exerciseDrafts.map { ($0.id, nil as TemplateExerciseRecommendation?) }
+            )
+            return
+        }
+
         do {
-            let matches = try catalogRepository.exerciseMap(for: exerciseDrafts.map(\.catalogExerciseUUID))
+            let matches = try catalogRepository.exerciseMap(for: requestedCatalogUUIDs)
             recommendationByExerciseID = Dictionary(uniqueKeysWithValues: exerciseDrafts.map { draftStore in
                 (draftStore.id, templateRecommendation(for: draftStore, catalogByUUID: matches))
             })
@@ -989,6 +1018,11 @@ private struct TemplateEditorExerciseRowData: Identifiable {
     let index: Int
     let draftStore: TemplateExerciseDraftStore
     let recommendation: TemplateExerciseRecommendation?
+}
+
+private struct TemplateEditorRecommendationReloadKey: Hashable {
+    let catalogExerciseUUIDs: [String]
+    let isTrainingGuidanceEnabled: Bool
 }
 
 #Preview {

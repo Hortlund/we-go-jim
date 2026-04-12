@@ -626,6 +626,55 @@ struct WorkoutSessionRepositoryTests {
     }
 
     @Test
+    func saveSetDraftsNoOpPreservesExistingTimestamps() throws {
+        let context = try makeInMemoryContext()
+        let repository = WorkoutSessionRepository(modelContext: context)
+
+        let item = ExerciseCatalogItem(
+            remoteUUID: "draft-noop-1",
+            displayName: "Chest Press",
+            categoryName: "Chest",
+            equipmentSummary: "Machine",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(item)
+
+        let session = try repository.createEmptySession(name: "Push")
+        try repository.addExercise(sessionID: session.id, catalogItem: item)
+
+        let initialSession = try #require(try repository.session(id: session.id))
+        let initialExercise = try #require(try repository.sessionExercises(sessionID: session.id).first)
+        let initialSets = (initialExercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
+        let baselineSessionUpdatedAt = Date(timeIntervalSince1970: 4_000)
+        let baselineExerciseUpdatedAt = Date(timeIntervalSince1970: 5_000)
+
+        initialSession.updatedAt = baselineSessionUpdatedAt
+        initialExercise.updatedAt = baselineExerciseUpdatedAt
+
+        var baselineSetUpdatedAtByID: [UUID: Date] = [:]
+        for (index, set) in initialSets.enumerated() {
+            let updatedAt = Date(timeIntervalSince1970: 6_000 + Double(index))
+            set.updatedAt = updatedAt
+            baselineSetUpdatedAtByID[set.id] = updatedAt
+        }
+        try context.save()
+
+        let drafts = try repository.setDrafts(sessionExerciseID: initialExercise.id)
+        try repository.saveSetDrafts(sessionExerciseID: initialExercise.id, drafts: drafts)
+
+        let refreshedSession = try #require(try repository.session(id: session.id))
+        let refreshedExercise = try #require(try repository.sessionExercises(sessionID: session.id).first)
+        let refreshedSets = (refreshedExercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
+
+        #expect(refreshedSession.updatedAt == baselineSessionUpdatedAt)
+        #expect(refreshedExercise.updatedAt == baselineExerciseUpdatedAt)
+        for set in refreshedSets {
+            #expect(set.updatedAt == baselineSetUpdatedAtByID[set.id])
+        }
+    }
+
+    @Test
     func deleteSessionRemovesFromHistory() throws {
         let context = try makeInMemoryContext()
         let repository = WorkoutSessionRepository(modelContext: context)

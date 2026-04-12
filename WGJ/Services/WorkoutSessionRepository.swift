@@ -509,6 +509,7 @@ final class WorkoutSessionRepository {
         let incomingOrderedIDs = drafts.map(\.id)
         let now = Date()
         var didMutateExerciseStructure = existingOrderedIDs != incomingOrderedIDs
+        var didMutateAnySet = false
 
         for set in existing where !incomingIDs.contains(set.id) {
             modelContext.delete(set)
@@ -533,6 +534,7 @@ final class WorkoutSessionRepository {
 
             let didMutateSet = apply(draft: draft, to: set, sortOrder: index)
             if didMutateSet {
+                didMutateAnySet = true
                 set.updatedAt = now
             }
             updatedSets.append(set)
@@ -541,6 +543,10 @@ final class WorkoutSessionRepository {
         if didMutateExerciseStructure {
             exercise.sets = updatedSets
             exercise.updatedAt = now
+        }
+
+        guard didMutateExerciseStructure || didMutateAnySet else {
+            return
         }
 
         try modelContext.save()
