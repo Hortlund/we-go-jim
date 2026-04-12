@@ -526,7 +526,6 @@ struct WorkoutSessionExerciseGridEditor: View {
     @ViewBuilder
     private var exerciseNotesSection: some View {
         WGJExerciseNotesEditor(
-            subtitle: "Capture setup cues, pain notes, or progression reminders for this exercise.",
             placeholder: "Add notes for this exercise",
             accessibilityIdentifier: exerciseAccessibilityIdentifier.map { "\($0)-notes-field" },
             notes: $exerciseNotes
