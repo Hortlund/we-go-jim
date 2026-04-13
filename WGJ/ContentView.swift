@@ -5,6 +5,7 @@ import UIKit
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.appBackgroundStore) private var appBackgroundStore
 
     @Query(sort: [SortDescriptor(\UserProfile.updatedAt, order: .reverse)])
     private var storedProfiles: [UserProfile]
@@ -236,63 +237,95 @@ struct ContentView: View {
             return
         }
 
-        let work = currentDeferredMaintenanceWork()
+        let work = await currentDeferredMaintenanceWork()
         guard work.hasWork else {
             deferredMaintenanceState.markCompleted()
             return
         }
 
         await WGJPerformance.measureAsync("app.maintenance") {
-            if work.shouldApplyCleanStart {
-                BrosCleanStartPolicy.applyIfNeeded(modelContext: modelContext)
-                deferredMaintenanceState.markCleanStartApplied()
-            }
+            if let appBackgroundStore {
+                let outcome = await ((try? appBackgroundStore.performAsync("app.maintenance.work") { backgroundContext in
+                    if work.shouldApplyCleanStart {
+                        BrosCleanStartPolicy.applyIfNeeded(modelContext: backgroundContext)
+                    }
 
-            if work.shouldPrimeCatalog {
-                catalogSyncCoordinator.primeLocalCatalogIfNeeded(modelContext: modelContext)
-            }
+                    if work.shouldPrimeCatalog {
+                        try? ExerciseCatalogRepository(modelContext: backgroundContext).ensureSeedImportedIfNeeded()
+                    }
 
-            if work.shouldBackfillHistoryProjection {
-                let rebuiltProjectionCount = (try? HistoryProjectionRepository(modelContext: modelContext).backfillIfNeeded(
-                    persistChanges: false
-                )) ?? 0
-                if rebuiltProjectionCount > 0 {
-                    try? modelContext.save()
+                    if work.shouldBackfillHistoryProjection {
+                        _ = try? HistoryProjectionRepository(modelContext: backgroundContext).backfillIfNeeded(
+                            persistChanges: true
+                        )
+                    }
+
+                    if work.shouldBackfillSessionSummaries {
+                        _ = try? WorkoutSessionRepository(modelContext: backgroundContext)
+                            .backfillCompletedSessionSummariesIfNeeded()
+                    }
+
+                    if work.shouldRunSocialMaintenance {
+                        await Self.runSocialMaintenance(modelContext: backgroundContext)
+                    }
+
+                    return DeferredMaintenanceExecutionOutcome(
+                        didApplyCleanStart: work.shouldApplyCleanStart,
+                        didPrimeCatalog: work.shouldPrimeCatalog
+                    )
+                })) ?? .none
+
+                if outcome.didApplyCleanStart {
+                    deferredMaintenanceState.markCleanStartApplied()
                 }
-            }
+                if outcome.didPrimeCatalog {
+                    catalogSyncCoordinator.markPrimed()
+                }
+            } else {
+                if work.shouldApplyCleanStart {
+                    BrosCleanStartPolicy.applyIfNeeded(modelContext: modelContext)
+                    deferredMaintenanceState.markCleanStartApplied()
+                }
 
-            if work.shouldBackfillSessionSummaries {
-                _ = try? WorkoutSessionRepository(modelContext: modelContext).backfillCompletedSessionSummariesIfNeeded()
-            }
+                if work.shouldPrimeCatalog {
+                    catalogSyncCoordinator.primeLocalCatalogIfNeeded(modelContext: modelContext)
+                }
 
-            if work.shouldRunSocialMaintenance {
-                await runSocialMaintenance()
+                if work.shouldBackfillHistoryProjection {
+                    let rebuiltProjectionCount = (try? HistoryProjectionRepository(modelContext: modelContext).backfillIfNeeded(
+                        persistChanges: false
+                    )) ?? 0
+                    if rebuiltProjectionCount > 0 {
+                        try? modelContext.save()
+                    }
+                }
+
+                if work.shouldBackfillSessionSummaries {
+                    _ = try? WorkoutSessionRepository(modelContext: modelContext).backfillCompletedSessionSummariesIfNeeded()
+                }
+
+                if work.shouldRunSocialMaintenance {
+                    await Self.runSocialMaintenance(modelContext: modelContext)
+                }
             }
         }
 
         deferredMaintenanceState.markCompleted()
     }
 
-    @MainActor
-    private func runSocialMaintenance() async {
-        guard shouldRunSocialMaintenance(),
-              let service = CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)
+    private static func runSocialMaintenance(modelContext: ModelContext) async {
+        guard shouldRunSocialMaintenance(modelContext: modelContext),
+              let service = CloudKitBrosSocialService(modelContext: modelContext)
         else {
             return
         }
 
-        await WGJPerformance.measureAsync("bros.refresh-membership") {
-            await service.refreshLocalMembershipState()
-        }
-        await WGJPerformance.measureAsync("bros.sync-notifications") {
-            try? await service.syncReactionNotificationSubscription()
-        }
-        await WGJPerformance.measureAsync("bros.flush-outbox") {
-            await service.flushOutbox()
-        }
+        await service.refreshLocalMembershipState()
+        try? await service.syncReactionNotificationSubscription()
+        await service.flushOutbox()
     }
 
-    private func shouldRunSocialMaintenance() -> Bool {
+    private static func shouldRunSocialMaintenance(modelContext: ModelContext) -> Bool {
         let profile = try? ProfileRepository(modelContext: modelContext).currentProfile()
         let hasKnownBrosMembership =
             profile?.brosMembershipID != nil
@@ -309,7 +342,46 @@ struct ContentView: View {
         )
     }
 
-    private func currentDeferredMaintenanceWork() -> AppDeferredMaintenanceWork {
+    private func currentDeferredMaintenanceWork() async -> AppDeferredMaintenanceWork {
+        let hasAppliedCleanStart = deferredMaintenanceState.hasAppliedCleanStart
+        let hasPrimedCatalog = catalogSyncCoordinator.hasPrimedLocalCatalog
+        let brosCloudAvailable = appRuntimeState.isBrosCloudAvailable
+
+        guard let appBackgroundStore else {
+            return currentDeferredMaintenanceWorkFallback(
+                hasAppliedCleanStart: hasAppliedCleanStart,
+                hasPrimedCatalog: hasPrimedCatalog,
+                brosCloudAvailable: brosCloudAvailable
+            )
+        }
+
+        return (try? await appBackgroundStore.perform("app.maintenance.plan") { backgroundContext in
+            let historyProjectionRepository = HistoryProjectionRepository(modelContext: backgroundContext)
+            let workoutRepository = WorkoutSessionRepository(modelContext: backgroundContext)
+
+            let shouldBackfillHistoryProjection = (try? historyProjectionRepository.needsBackfill()) ?? false
+            let shouldBackfillSessionSummaries = (try? workoutRepository.hasStaleCompletedSessionSummaries()) ?? false
+
+            return AppDeferredMaintenancePlanner.plan(
+                hasAppliedCleanStart: hasAppliedCleanStart,
+                hasPrimedCatalog: hasPrimedCatalog,
+                needsHistoryProjectionBackfill: shouldBackfillHistoryProjection,
+                needsSessionSummaryBackfill: shouldBackfillSessionSummaries,
+                shouldRunSocialMaintenance: brosCloudAvailable
+                    && Self.shouldRunSocialMaintenance(modelContext: backgroundContext)
+            )
+        }) ?? currentDeferredMaintenanceWorkFallback(
+            hasAppliedCleanStart: hasAppliedCleanStart,
+            hasPrimedCatalog: hasPrimedCatalog,
+            brosCloudAvailable: brosCloudAvailable
+        )
+    }
+
+    private func currentDeferredMaintenanceWorkFallback(
+        hasAppliedCleanStart: Bool,
+        hasPrimedCatalog: Bool,
+        brosCloudAvailable: Bool
+    ) -> AppDeferredMaintenanceWork {
         let historyProjectionRepository = HistoryProjectionRepository(modelContext: modelContext)
         let workoutRepository = WorkoutSessionRepository(modelContext: modelContext)
 
@@ -317,11 +389,12 @@ struct ContentView: View {
         let shouldBackfillSessionSummaries = (try? workoutRepository.hasStaleCompletedSessionSummaries()) ?? false
 
         return AppDeferredMaintenancePlanner.plan(
-            hasAppliedCleanStart: deferredMaintenanceState.hasAppliedCleanStart,
-            hasPrimedCatalog: catalogSyncCoordinator.hasPrimedLocalCatalog,
+            hasAppliedCleanStart: hasAppliedCleanStart,
+            hasPrimedCatalog: hasPrimedCatalog,
             needsHistoryProjectionBackfill: shouldBackfillHistoryProjection,
             needsSessionSummaryBackfill: shouldBackfillSessionSummaries,
-            shouldRunSocialMaintenance: shouldRunSocialMaintenance()
+            shouldRunSocialMaintenance: brosCloudAvailable
+                && Self.shouldRunSocialMaintenance(modelContext: modelContext)
         )
     }
 
@@ -338,15 +411,25 @@ struct ContentView: View {
     }
 
     private func bootstrapProfileIdentityIfNeeded() async {
-        let repository = ProfileRepository(modelContext: modelContext)
+        let cloudSyncEnabled = appRuntimeState.cloudSyncEnabled
 
         do {
-            let profile = try await repository.bootstrapProfileIdentity(
-                cloudSyncEnabled: appRuntimeState.cloudSyncEnabled
-            )
-            AppRuntimeState.shared.updateWorkoutNotificationStyle(profile.workoutNotificationStyle)
+            if let appBackgroundStore {
+                let snapshot = try await appBackgroundStore.performAsync("profile.bootstrap") { backgroundContext in
+                    try await ProfileRepository(modelContext: backgroundContext).bootstrapProfileIdentitySnapshot(
+                        cloudSyncEnabled: cloudSyncEnabled
+                    )
+                }
+                AppRuntimeState.shared.updateWorkoutNotificationStyle(snapshot.workoutNotificationStyle)
+            } else {
+                let repository = ProfileRepository(modelContext: modelContext)
+                let profile = try await repository.bootstrapProfileIdentity(
+                    cloudSyncEnabled: cloudSyncEnabled
+                )
+                AppRuntimeState.shared.updateWorkoutNotificationStyle(profile.workoutNotificationStyle)
+            }
         } catch {
-            if let profile = try? repository.loadOrCreateProfile() {
+            if let profile = try? ProfileRepository(modelContext: modelContext).loadOrCreateProfile() {
                 AppRuntimeState.shared.updateWorkoutNotificationStyle(profile.workoutNotificationStyle)
             }
         }
@@ -365,6 +448,16 @@ struct ContentView: View {
     private func updateIdleTimerState() {
         UIApplication.shared.isIdleTimerDisabled = shouldKeepScreenAwake
     }
+}
+
+private struct DeferredMaintenanceExecutionOutcome: Sendable {
+    let didApplyCleanStart: Bool
+    let didPrimeCatalog: Bool
+
+    static let none = DeferredMaintenanceExecutionOutcome(
+        didApplyCleanStart: false,
+        didPrimeCatalog: false
+    )
 }
 
 private enum AppStartupRouting {

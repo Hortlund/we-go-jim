@@ -119,7 +119,6 @@ enum WorkoutSessionRepositoryError: Error {
     case invalidSessionState
 }
 
-@MainActor
 final class WorkoutSessionRepository {
     private let modelContext: ModelContext
     private var historyProjectionRepository: HistoryProjectionRepository {
@@ -137,6 +136,17 @@ final class WorkoutSessionRepository {
 
     private var componentRotationResolver: TemplateExerciseComponentRotationResolver {
         TemplateExerciseComponentRotationResolver(modelContext: modelContext)
+    }
+
+    private func invalidateAnalyticsCache() {
+        HistoryAnalyticsCache.shared.invalidate(container: modelContext.container)
+    }
+
+    private func scheduleProjectionRebuild(for sessionID: UUID) {
+        HistoryProjectionBackgroundReconciler.shared.scheduleRebuild(
+            sessionID: sessionID,
+            container: modelContext.container
+        )
     }
 
     func createEmptySession(name: String = "Empty Workout") throws -> WorkoutSession {
@@ -655,15 +665,16 @@ final class WorkoutSessionRepository {
         session.durationSeconds = max(0, Int((session.endedAt ?? .now).timeIntervalSince(session.startedAt)))
         session.updatedAt = now
 
-        try historyProjectionRepository.rebuildFacts(forSessionID: sessionID, persistChanges: false)
-
         let metrics = WorkoutMetricsService(modelContext: modelContext)
-        let summary = try metrics.sessionSummary(sessionID: sessionID)
+        let projectedFacts = HistoryProjectionSnapshotBuilder.projectedFacts(from: session)
+        let summary = try metrics.sessionSummary(session: session, projectedFacts: projectedFacts)
         session.totalVolume = summary.totalVolume
         session.prHitsCount = summary.prHitsCount
         session.summaryMetricsVersion = WorkoutMetricsService.currentSummaryMetricsVersion
 
         try modelContext.save()
+        invalidateAnalyticsCache()
+        scheduleProjectionRebuild(for: sessionID)
         try? CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)?.queueCompletedSessionPublish(sessionID: sessionID)
     }
 
@@ -682,6 +693,7 @@ final class WorkoutSessionRepository {
         session.archivedAt = now
         session.updatedAt = now
         try modelContext.save()
+        invalidateAnalyticsCache()
     }
 
     func restoreArchivedSession(id: UUID) throws {
@@ -698,6 +710,7 @@ final class WorkoutSessionRepository {
         session.archivedAt = nil
         session.updatedAt = Date()
         try modelContext.save()
+        invalidateAnalyticsCache()
     }
 
     func cancelSession(sessionID: UUID) throws {
@@ -710,6 +723,7 @@ final class WorkoutSessionRepository {
 
         modelContext.delete(session)
         try modelContext.save()
+        invalidateAnalyticsCache()
     }
 
     func recalculateSessionSummary(sessionID: UUID) throws {
@@ -719,10 +733,10 @@ final class WorkoutSessionRepository {
 
         let now = Date()
         session.updatedAt = now
-        try historyProjectionRepository.rebuildFacts(forSessionID: sessionID, persistChanges: false)
 
         let metrics = WorkoutMetricsService(modelContext: modelContext)
-        let summary = try metrics.sessionSummary(sessionID: sessionID)
+        let projectedFacts = HistoryProjectionSnapshotBuilder.projectedFacts(from: session)
+        let summary = try metrics.sessionSummary(session: session, projectedFacts: projectedFacts)
         session.totalVolume = summary.totalVolume
         session.prHitsCount = summary.prHitsCount
         session.summaryMetricsVersion = WorkoutMetricsService.currentSummaryMetricsVersion
@@ -733,6 +747,8 @@ final class WorkoutSessionRepository {
         }
 
         try modelContext.save()
+        invalidateAnalyticsCache()
+        scheduleProjectionRebuild(for: sessionID)
     }
 
     @discardableResult
@@ -759,6 +775,7 @@ final class WorkoutSessionRepository {
         }
 
         try modelContext.save()
+        invalidateAnalyticsCache()
         return staleSessions.count
     }
 
@@ -778,6 +795,7 @@ final class WorkoutSessionRepository {
         try historyProjectionRepository.deleteFacts(forSessionID: id, persistChanges: false)
         modelContext.delete(session)
         try modelContext.save()
+        invalidateAnalyticsCache()
     }
 
     private func template(id: UUID) throws -> WorkoutTemplate? {
@@ -924,16 +942,13 @@ final class WorkoutSessionRepository {
             excludingSessionID: excludingSessionID
         )
 
-        let unresolved = requested.subtracting(latestSessionIDByExercise.keys)
-        if !unresolved.isEmpty {
-            let fallbackSessionIDs = try latestCanonicalSessionIDs(
-                forExercises: unresolved,
-                before: date,
-                excludingSessionID: excludingSessionID
-            )
-            for (catalogExerciseUUID, sessionID) in fallbackSessionIDs {
-                latestSessionIDByExercise[catalogExerciseUUID] = sessionID
-            }
+        let canonicalSessionIDs = try latestCanonicalSessionIDs(
+            forExercises: requested,
+            before: date,
+            excludingSessionID: excludingSessionID
+        )
+        for (catalogExerciseUUID, sessionID) in canonicalSessionIDs {
+            latestSessionIDByExercise[catalogExerciseUUID] = sessionID
         }
 
         guard !latestSessionIDByExercise.isEmpty else { return [:] }
@@ -965,7 +980,6 @@ final class WorkoutSessionRepository {
         before date: Date,
         excludingSessionID: UUID?
     ) throws -> [String: UUID] {
-        _ = try historyProjectionRepository.backfillIfNeeded(persistChanges: false)
         let facts = try historyProjectionRepository.allFacts()
         let visibleSessionIDs = Set(
             try completedSessions(

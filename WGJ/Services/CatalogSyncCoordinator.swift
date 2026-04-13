@@ -22,4 +22,8 @@ final class CatalogSyncCoordinator {
             // Priming errors are surfaced by view-level empty/retry states.
         }
     }
+
+    func markPrimed() {
+        hasPrimedLocalCatalog = true
+    }
 }

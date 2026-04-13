@@ -127,8 +127,14 @@ final class BrosViewModel {
         scheduleOutboxFlush(modelContext: modelContext)
 
         do {
+            let snapshot = try await Task { [weak self] () throws -> BrosFeedSnapshot? in
+                guard let self else { return nil }
+                let service = try await MainActor.run { try self.service(modelContext: modelContext) }
+                return try await service.fetchSnapshot()
+            }.value
+
             try await applyFetchedSnapshot(
-                service.fetchSnapshot(),
+                snapshot,
                 preservingPendingReactions: true
             )
         } catch {
@@ -245,7 +251,11 @@ final class BrosViewModel {
                 self.pendingReactionEventIDs.remove(eventID)
                 self.lastSuccessfulSnapshotRefreshAt = nil
                 guard !Task.isCancelled else { return }
-                await self.hydrateActiveSnapshot(modelContext: modelContext)
+                let snapshot = try await service.fetchSnapshot()
+                try await self.applyFetchedSnapshot(
+                    snapshot,
+                    preservingPendingReactions: true
+                )
             } catch {
                 self.pendingReactionEventIDs.remove(eventID)
                 self.restoreReactionState(forEventID: eventID, reactions: originalReactions)
@@ -305,11 +315,11 @@ final class BrosViewModel {
     }
 
     private func scheduleReactionNotificationSync(modelContext: ModelContext) {
-        Task { @MainActor [weak self] in
+        Task { [weak self] in
             guard let self else { return }
 
             do {
-                let service = try self.service(modelContext: modelContext)
+                let service = try await MainActor.run { try self.service(modelContext: modelContext) }
                 try await service.syncReactionNotificationSubscription()
             } catch {
                 // Leave the current screen state alone if notification sync fails.
@@ -320,16 +330,21 @@ final class BrosViewModel {
     private func scheduleOutboxFlush(modelContext: ModelContext) {
         guard outboxFlushTask == nil else { return }
 
-        outboxFlushTask = Task { @MainActor [weak self] in
+        outboxFlushTask = Task { [weak self] in
             guard let self else { return }
-            defer { self.outboxFlushTask = nil }
+            defer {
+                Task { @MainActor [weak self] in
+                    self?.outboxFlushTask = nil
+                }
+            }
 
             do {
-                let service = try self.service(modelContext: modelContext)
+                let service = try await MainActor.run { try self.service(modelContext: modelContext) }
                 await service.flushOutbox()
                 guard !Task.isCancelled else { return }
-                guard !self.isSnapshotRefreshInFlight else {
-                    self.pendingOutboxHydration = true
+                let shouldDeferHydration = await MainActor.run { self.isSnapshotRefreshInFlight }
+                guard !shouldDeferHydration else {
+                    await MainActor.run { self.pendingOutboxHydration = true }
                     return
                 }
                 await self.hydrateSnapshotAfterOutboxFlush(modelContext: modelContext)
@@ -345,15 +360,21 @@ final class BrosViewModel {
         isSnapshotRefreshInFlight = true
         defer { isSnapshotRefreshInFlight = false }
 
-        do {
-            let service = try service(modelContext: modelContext)
-            try await applyFetchedSnapshot(
-                service.fetchSnapshot(),
-                preservingPendingReactions: false
-            )
-        } catch {
-            // Keep the current state if the follow-up hydration fails.
+        let task = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let service = try await MainActor.run { try self.service(modelContext: modelContext) }
+                let snapshot = try await service.fetchSnapshot()
+                try await self.applyFetchedSnapshot(
+                    snapshot,
+                    preservingPendingReactions: false
+                )
+            } catch {
+                // Keep the current state if the follow-up hydration fails.
+            }
         }
+
+        await task.value
     }
 
     private func hydrateActiveSnapshot(modelContext: ModelContext) async {
@@ -364,15 +385,21 @@ final class BrosViewModel {
         isSnapshotRefreshInFlight = true
         defer { isSnapshotRefreshInFlight = false }
 
-        do {
-            let service = try service(modelContext: modelContext)
-            try await applyFetchedSnapshot(
-                service.fetchSnapshot(),
-                preservingPendingReactions: true
-            )
-        } catch {
-            // Keep the optimistic active state instead of regressing to unavailable.
+        let task = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let service = try await MainActor.run { try self.service(modelContext: modelContext) }
+                let snapshot = try await service.fetchSnapshot()
+                try await self.applyFetchedSnapshot(
+                    snapshot,
+                    preservingPendingReactions: true
+                )
+            } catch {
+                // Keep the optimistic active state instead of regressing to unavailable.
+            }
         }
+
+        await task.value
     }
 
     private func message(for reason: AccountUnavailableReason) -> String {

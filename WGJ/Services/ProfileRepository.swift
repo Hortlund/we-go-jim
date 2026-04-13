@@ -1,7 +1,6 @@
 import Foundation
 import SwiftData
 
-@MainActor
 final class ProfileRepository {
     private static var localDefaultDisplayName: String {
         ReviewModerationService.sanitizedForSharing("Athlete", kind: .displayName)
@@ -22,6 +21,10 @@ final class ProfileRepository {
         )
         descriptor.fetchLimit = 1
         return try modelContext.fetch(descriptor).first
+    }
+
+    func currentProfileSnapshot() throws -> ProfileIdentitySnapshot? {
+        try currentProfile().map(ProfileIdentitySnapshot.init(profile:))
     }
 
     @discardableResult
@@ -55,7 +58,7 @@ final class ProfileRepository {
             existing.displayName = preferredDisplayName
             existing.updatedAt = .now
             try modelContext.save()
-            try? CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)?.queueCurrentProfileSync()
+            scheduleProfileSync()
             return existing
         }
 
@@ -63,6 +66,18 @@ final class ProfileRepository {
         modelContext.insert(profile)
         try modelContext.save()
         return profile
+    }
+
+    func bootstrapProfileIdentitySnapshot(
+        cloudSyncEnabled: Bool,
+        defaultDisplayNameProvider: (any ProfileDefaultDisplayNameProviding)? = nil
+    ) async throws -> ProfileIdentitySnapshot {
+        ProfileIdentitySnapshot(
+            profile: try await bootstrapProfileIdentity(
+                cloudSyncEnabled: cloudSyncEnabled,
+                defaultDisplayNameProvider: defaultDisplayNameProvider
+            )
+        )
     }
 
     func updateIdentity(name: String, athleteType: ProfileAthleteType?) throws {
@@ -101,7 +116,7 @@ final class ProfileRepository {
         profile.avatarImageData = avatarImageData
         profile.updatedAt = .now
         try modelContext.save()
-        try? CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)?.queueCurrentProfileSync()
+        scheduleProfileSync()
     }
 
     func updateWeeklyWorkoutGoal(_ goal: Int) throws {
@@ -170,5 +185,11 @@ final class ProfileRepository {
         }
 
         return currentName != preferredDisplayName
+    }
+
+    private func scheduleProfileSync() {
+        Task { @MainActor [modelContext] in
+            try? CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)?.queueCurrentProfileSync()
+        }
     }
 }

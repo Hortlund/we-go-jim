@@ -192,6 +192,45 @@ struct WorkoutMetricsServiceTests {
     }
 
     @Test
+    func sessionMetricsFallbackToProjectedFactsWhenPersistedFactsAreMissing() throws {
+        let context = try makeInMemoryContext()
+        let sessionRepository = WorkoutSessionRepository(modelContext: context)
+        let projectionRepository = HistoryProjectionRepository(modelContext: context)
+        let metrics = WorkoutMetricsService(modelContext: context)
+
+        let exercise = ExerciseCatalogItem(
+            remoteUUID: "projection-fallback-bench",
+            displayName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(exercise)
+
+        let session = try sessionRepository.createEmptySession(name: "Fallback")
+        try sessionRepository.addExercise(sessionID: session.id, catalogItem: exercise)
+        let sessionExercise = try #require(try sessionRepository.sessionExercises(sessionID: session.id).first)
+        var drafts = try sessionRepository.setDrafts(sessionExerciseID: sessionExercise.id)
+        drafts[1].actualWeight = 100
+        drafts[1].actualReps = 5
+        drafts[1].isCompleted = true
+        try sessionRepository.saveSetDrafts(sessionExerciseID: sessionExercise.id, drafts: drafts)
+        try sessionRepository.finishSession(sessionID: session.id)
+
+        try projectionRepository.deleteFacts(forSessionID: session.id)
+
+        let achievements = try metrics.sessionPRAchievements(sessionID: session.id)
+        let trend = try metrics.exerciseOneRepMaxTrend(for: exercise.remoteUUID, limit: 8)
+        let snapshot = try metrics.profileDashboardSnapshot(prLimit: 5, weeks: 4)
+
+        #expect(achievements.count == 1)
+        #expect(trend.points.count == 1)
+        #expect(snapshot.personalRecords.count == 1)
+        #expect(snapshot.overviewStats.totalWorkouts == 1)
+    }
+
+    @Test
     func sessionSummaryExcludesWarmupsAndNormalizesMixedUnitsForVolume() throws {
         let context = try makeInMemoryContext()
         let sessionRepository = WorkoutSessionRepository(modelContext: context)

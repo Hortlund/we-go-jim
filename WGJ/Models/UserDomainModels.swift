@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-enum TemplateLoadUnit: String, Codable, CaseIterable, Equatable, Identifiable {
+enum TemplateLoadUnit: String, Codable, CaseIterable, Equatable, Identifiable, Sendable {
     case kg
     case lb
     case bodyweight
@@ -44,7 +44,7 @@ enum TemplateLoadUnit: String, Codable, CaseIterable, Equatable, Identifiable {
     }
 }
 
-enum PreferredWeightUnit: String, Codable, CaseIterable, Equatable, Identifiable {
+enum PreferredWeightUnit: String, Codable, CaseIterable, Equatable, Identifiable, Sendable {
     case kg
     case lb
 
@@ -69,7 +69,7 @@ enum PreferredWeightUnit: String, Codable, CaseIterable, Equatable, Identifiable
     }
 }
 
-enum WorkoutNotificationStyle: String, Codable, CaseIterable, Equatable, Identifiable {
+enum WorkoutNotificationStyle: String, Codable, CaseIterable, Equatable, Identifiable, Sendable {
     case standard
     case timeSensitive
 
@@ -94,7 +94,7 @@ enum WorkoutNotificationStyle: String, Codable, CaseIterable, Equatable, Identif
     }
 }
 
-enum ProfileAthleteType: String, Codable, CaseIterable, Equatable, Identifiable {
+enum ProfileAthleteType: String, Codable, CaseIterable, Equatable, Identifiable, Sendable {
     case strengthTraining
     case powerlifting
     case olympicLifting
@@ -453,7 +453,7 @@ struct WorkoutCardioBlockDraft: Identifiable, Equatable {
     }
 }
 
-enum ProfileWidgetKind: String, Codable, CaseIterable, Equatable, Hashable, Identifiable {
+enum ProfileWidgetKind: String, Codable, CaseIterable, Equatable, Hashable, Identifiable, Sendable {
     case prs
     case weeklyGoals
     case exerciseOneRMTrend
@@ -493,12 +493,12 @@ enum ProfileWidgetKind: String, Codable, CaseIterable, Equatable, Hashable, Iden
     }
 }
 
-enum BroMembershipRole: String, Codable, CaseIterable, Equatable {
+enum BroMembershipRole: String, Codable, CaseIterable, Equatable, Sendable {
     case owner
     case member
 }
 
-enum SocialOutboxOperationKind: String, Codable, CaseIterable, Equatable {
+enum SocialOutboxOperationKind: String, Codable, CaseIterable, Equatable, Sendable {
     case publishWorkoutEvent
     case publishPREvent
     case deleteRecord

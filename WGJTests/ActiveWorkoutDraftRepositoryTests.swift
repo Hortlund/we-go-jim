@@ -370,6 +370,13 @@ struct ActiveWorkoutDraftRepositoryTests {
             try completedRepository.sessionExercises(sessionID: completedSessionID).first
         )
         let completedDrafts = try completedRepository.setDrafts(sessionExerciseID: completedExercise.id)
+        let projectionRepository = HistoryProjectionRepository(modelContext: context)
+
+        try waitForProjectedFacts(
+            sessionID: completedSessionID,
+            expectedCount: 1,
+            repository: projectionRepository
+        )
         let facts = try context.fetch(FetchDescriptor<CompletedSetFact>())
 
         #expect(completedSessionID == session.id)
@@ -581,6 +588,23 @@ struct ActiveWorkoutDraftRepositoryTests {
 
         let container = try ModelContainer(for: schema, configurations: configurations)
         return ModelContext(container)
+    }
+
+    private func waitForProjectedFacts(
+        sessionID: UUID,
+        expectedCount: Int,
+        repository: HistoryProjectionRepository,
+        timeout: TimeInterval = 1.0
+    ) throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if (try? repository.facts(forSessionID: sessionID).count) == expectedCount {
+                return
+            }
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+
+        #expect(try repository.facts(forSessionID: sessionID).count == expectedCount)
     }
 
     @discardableResult

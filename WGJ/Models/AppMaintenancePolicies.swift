@@ -1,13 +1,13 @@
 import SwiftData
 import SwiftUI
 
-enum AppMaintenanceTrigger: Equatable {
+enum AppMaintenanceTrigger: Equatable, Sendable {
     case enteredMain
     case sceneActivated
     case activeWorkoutEnded
 }
 
-struct AppDeferredMaintenanceWork: Equatable {
+struct AppDeferredMaintenanceWork: Equatable, Sendable {
     let shouldApplyCleanStart: Bool
     let shouldPrimeCatalog: Bool
     let shouldBackfillHistoryProjection: Bool
@@ -99,7 +99,6 @@ enum BrosCleanStartPolicy {
         appliedVersion < currentSchemaVersion
     }
 
-    @MainActor
     static func applyIfNeeded(
         modelContext: ModelContext,
         defaults: UserDefaults = .standard

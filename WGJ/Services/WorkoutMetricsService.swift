@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-struct WorkoutPRRecord: Identifiable, Equatable {
+struct WorkoutPRRecord: Identifiable, Equatable, Sendable {
     let id: String
     let catalogExerciseUUID: String
     let exerciseName: String
@@ -12,7 +12,7 @@ struct WorkoutPRRecord: Identifiable, Equatable {
     let achievedAt: Date
 }
 
-struct SessionPRAchievement: Identifiable, Equatable {
+struct SessionPRAchievement: Identifiable, Equatable, Sendable {
     let id: String
     let catalogExerciseUUID: String
     let exerciseName: String
@@ -22,12 +22,12 @@ struct SessionPRAchievement: Identifiable, Equatable {
     let loadUnit: TemplateLoadUnit
 }
 
-struct WorkoutSessionSummaryMetrics: Equatable {
+struct WorkoutSessionSummaryMetrics: Equatable, Sendable {
     let totalVolume: Double
     let prHitsCount: Int
 }
 
-enum WorkoutPersonalRecordKind: String, Identifiable, CaseIterable, Equatable, Hashable, Comparable {
+enum WorkoutPersonalRecordKind: String, Identifiable, CaseIterable, Equatable, Hashable, Comparable, Sendable {
     case strength
     case weight
     case reps
@@ -83,7 +83,7 @@ enum WorkoutPersonalRecordKind: String, Identifiable, CaseIterable, Equatable, H
     }
 }
 
-struct SessionSetPRAchievement: Identifiable, Equatable {
+struct SessionSetPRAchievement: Identifiable, Equatable, Sendable {
     let id: String
     let sessionExerciseID: UUID
     let setID: UUID
@@ -97,14 +97,14 @@ struct SessionSetPRAchievement: Identifiable, Equatable {
     let loadUnit: TemplateLoadUnit
 }
 
-struct WeeklyWorkoutProgressPoint: Identifiable, Equatable {
+struct WeeklyWorkoutProgressPoint: Identifiable, Equatable, Sendable {
     let id: String
     let weekStart: Date
     let completedWorkouts: Int
     let goal: Int
 }
 
-struct ExerciseHistoryOption: Identifiable, Equatable {
+struct ExerciseHistoryOption: Identifiable, Equatable, Sendable {
     let catalogExerciseUUID: String
     let exerciseName: String
     let lastPerformedAt: Date
@@ -112,20 +112,20 @@ struct ExerciseHistoryOption: Identifiable, Equatable {
     var id: String { catalogExerciseUUID }
 }
 
-struct ExerciseMetricPoint: Identifiable, Equatable {
+struct ExerciseMetricPoint: Identifiable, Equatable, Sendable {
     let id: String
     let completedAt: Date
     let value: Double
 }
 
-struct ExerciseMetricSeries: Equatable {
+struct ExerciseMetricSeries: Equatable, Sendable {
     let catalogExerciseUUID: String
     let exerciseName: String
     let loadUnit: TemplateLoadUnit
     let points: [ExerciseMetricPoint]
 }
 
-struct ExerciseDetailBestPerformance: Equatable {
+struct ExerciseDetailBestPerformance: Equatable, Sendable {
     enum Kind: String, Equatable {
         case weighted
         case bodyweight
@@ -139,7 +139,7 @@ struct ExerciseDetailBestPerformance: Equatable {
     let achievedAt: Date
 }
 
-struct ExerciseDetailStatsSnapshot: Equatable {
+struct ExerciseDetailStatsSnapshot: Equatable, Sendable {
     let catalogExerciseUUID: String
     let exerciseName: String
     let sessionCount: Int
@@ -149,7 +149,7 @@ struct ExerciseDetailStatsSnapshot: Equatable {
     let volumeTrend: ExerciseMetricSeries?
 }
 
-struct ProfileOverviewStats: Equatable {
+struct ProfileOverviewStats: Equatable, Sendable {
     let totalWorkouts: Int
     let totalPRHits: Int
     let totalDurationSeconds: Int
@@ -169,7 +169,7 @@ struct ProfileOverviewStats: Equatable {
     )
 }
 
-struct ProfileTopExerciseStat: Identifiable, Equatable {
+struct ProfileTopExerciseStat: Identifiable, Equatable, Sendable {
     let catalogExerciseUUID: String
     let exerciseName: String
     let sessionCount: Int
@@ -178,14 +178,14 @@ struct ProfileTopExerciseStat: Identifiable, Equatable {
     var id: String { catalogExerciseUUID }
 }
 
-struct ProfileActivityDay: Identifiable, Equatable {
+struct ProfileActivityDay: Identifiable, Equatable, Sendable {
     let date: Date
     let workoutCount: Int
 
     var id: String { date.formatted(date: .numeric, time: .omitted) }
 }
 
-struct ProfileDashboardSnapshot: Equatable {
+struct ProfileDashboardSnapshot: Equatable, Sendable {
     let personalRecords: [WorkoutPRRecord]
     let weeklyProgress: [WeeklyWorkoutProgressPoint]
     let weeklyGoal: Int
@@ -420,7 +420,6 @@ private enum WorkoutMetricsPolicy {
     }
 }
 
-@MainActor
 final class WorkoutMetricsService {
     static let currentSummaryMetricsVersion = WorkoutMetricsPolicy.summaryMetricsVersion
 
@@ -430,6 +429,7 @@ final class WorkoutMetricsService {
     private let historyProjectionRepository: HistoryProjectionRepository
     private var cachedGoal: Int?
     private var cachedMetricsSnapshot: MetricsSnapshotCache?
+    private var cachedMetricsSnapshotRevision: Int?
 
     init(modelContext: ModelContext, calendar: Calendar = .current) {
         self.modelContext = modelContext
@@ -473,10 +473,23 @@ final class WorkoutMetricsService {
     }
 
     func sessionPRAchievements(sessionID: UUID) throws -> [SessionPRAchievement] {
-        try ensureHistoryFacts()
         guard let session = try session(id: sessionID) else { return [] }
 
-        let sessionFacts = try historyProjectionRepository.facts(forSessionID: sessionID)
+        let sessionFacts = try resolvedFacts(for: session)
+        return try sessionPRAchievements(session: session, sessionFacts: sessionFacts)
+    }
+
+    func sessionSetPRAchievements(sessionID: UUID) throws -> [SessionSetPRAchievement] {
+        guard let session = try session(id: sessionID) else { return [] }
+
+        let sessionFacts = try resolvedFacts(for: session)
+        return try sessionSetPRAchievements(session: session, sessionFacts: sessionFacts)
+    }
+
+    private func sessionPRAchievements(
+        session: WorkoutSession,
+        sessionFacts: [CompletedSetFact]
+    ) throws -> [SessionPRAchievement] {
         var achievements: [SessionPRAchievement] = []
         var seenExerciseUUIDs: Set<String> = []
 
@@ -533,11 +546,10 @@ final class WorkoutMetricsService {
         return achievements
     }
 
-    func sessionSetPRAchievements(sessionID: UUID) throws -> [SessionSetPRAchievement] {
-        try ensureHistoryFacts()
-        guard let session = try session(id: sessionID) else { return [] }
-
-        let sessionFacts = try historyProjectionRepository.facts(forSessionID: sessionID)
+    private func sessionSetPRAchievements(
+        session: WorkoutSession,
+        sessionFacts: [CompletedSetFact]
+    ) throws -> [SessionSetPRAchievement] {
         var achievements: [SessionSetPRAchievement] = []
 
         for exercise in orderedSessionExercises(session) {
@@ -631,6 +643,19 @@ final class WorkoutMetricsService {
         return WorkoutSessionSummaryMetrics(
             totalVolume: totalWeightedVolume(for: session),
             prHitsCount: try sessionSetPRAchievements(sessionID: sessionID).count
+        )
+    }
+
+    func sessionSummary(
+        session: WorkoutSession,
+        projectedFacts: [CompletedSetFactDraft]
+    ) throws -> WorkoutSessionSummaryMetrics {
+        WorkoutSessionSummaryMetrics(
+            totalVolume: totalWeightedVolume(for: session),
+            prHitsCount: try sessionSetPRAchievements(
+                session: session,
+                sessionFacts: projectedFacts.map { $0.makeModel() }
+            ).count
         )
     }
 
@@ -883,60 +908,72 @@ final class WorkoutMetricsService {
         Set(try repository.completedSessions().map(\.id))
     }
 
-    private func ensureHistoryFacts() throws {
-        _ = try historyProjectionRepository.backfillIfNeeded(persistChanges: false)
-    }
-
     private func metricsSnapshot() throws -> MetricsSnapshotCache {
-        if let cachedMetricsSnapshot {
+        let revisionAtStart = HistoryAnalyticsCache.shared.currentRevision(for: modelContext.container)
+        if let cachedMetricsSnapshot, cachedMetricsSnapshotRevision == revisionAtStart {
             return cachedMetricsSnapshot
         }
 
-        let snapshot = try WGJPerformance.measure("metrics.snapshot") {
-            try ensureHistoryFacts()
-            let sessions = try repository.completedSessions()
-            let facts = try historyProjectionRepository.allFacts()
-            let visibleSessionIDs = Set(sessions.map(\.id))
-            var bestPRByExercise: [String: WorkoutPRRecord] = [:]
-            var bestBodyweightByExercise: [String: BodyweightExerciseBestRecord] = [:]
-            var countsByWeek: [Date: Int] = [:]
-            var countsByDay: [Date: Int] = [:]
-            var exerciseFrequencyByUUID: [String: CollectedExerciseFrequency] = [:]
-            var exerciseHistoryByUUID: [String: [CompletedExerciseHistoryEntry]] = [:]
-            var perSessionHistory: [SessionExerciseHistoryKey: WorkingExerciseHistoryEntry] = [:]
-            var totalDurationSeconds = 0
-            var totalPRHits = 0
-            var firstWorkoutDate: Date?
+        let snapshot = try HistoryAnalyticsCache.shared.cachedMetricsSnapshot(
+            for: modelContext.container
+        ) {
+            try WGJPerformance.measure("metrics.snapshot") {
+                try buildMetricsSnapshot()
+            }
+        }
 
-            for session in sessions {
-                let completedAt = session.endedAt ?? session.startedAt
-                let week = weekStart(for: completedAt)
-                let day = calendar.startOfDay(for: completedAt)
-                countsByWeek[week, default: 0] += 1
-                countsByDay[day, default: 0] += 1
-                totalDurationSeconds += max(0, session.durationSeconds)
-                totalPRHits += max(0, session.prHitsCount)
+        let revisionAtEnd = HistoryAnalyticsCache.shared.currentRevision(for: modelContext.container)
+        if revisionAtEnd == revisionAtStart {
+            cachedMetricsSnapshot = snapshot
+            cachedMetricsSnapshotRevision = revisionAtEnd
+        } else {
+            cachedMetricsSnapshot = nil
+            cachedMetricsSnapshotRevision = nil
+        }
+        return snapshot
+    }
 
-                if let existingFirstWorkoutDate = firstWorkoutDate {
-                    if completedAt < existingFirstWorkoutDate {
-                        firstWorkoutDate = completedAt
-                    }
-                } else {
+    private func buildMetricsSnapshot() throws -> MetricsSnapshotCache {
+        let sessions = try repository.completedSessions()
+        let facts = try historyProjectionRepository.allFacts()
+        let factsBySessionID = Dictionary(grouping: facts, by: \.sessionID)
+
+        var bestPRByExercise: [String: WorkoutPRRecord] = [:]
+        var bestBodyweightByExercise: [String: BodyweightExerciseBestRecord] = [:]
+        var countsByWeek: [Date: Int] = [:]
+        var countsByDay: [Date: Int] = [:]
+        var exerciseFrequencyByUUID: [String: CollectedExerciseFrequency] = [:]
+        var exerciseHistoryByUUID: [String: [CompletedExerciseHistoryEntry]] = [:]
+        var perSessionHistory: [SessionExerciseHistoryKey: WorkingExerciseHistoryEntry] = [:]
+        var totalDurationSeconds = 0
+        var totalPRHits = 0
+        var firstWorkoutDate: Date?
+
+        for session in sessions {
+            let completedAt = session.endedAt ?? session.startedAt
+            let week = weekStart(for: completedAt)
+            let day = calendar.startOfDay(for: completedAt)
+            countsByWeek[week, default: 0] += 1
+            countsByDay[day, default: 0] += 1
+            totalDurationSeconds += max(0, session.durationSeconds)
+            totalPRHits += max(0, session.prHitsCount)
+
+            if let existingFirstWorkoutDate = firstWorkoutDate {
+                if completedAt < existingFirstWorkoutDate {
                     firstWorkoutDate = completedAt
                 }
+            } else {
+                firstWorkoutDate = completedAt
             }
 
-            var countedExerciseKeys: Set<SessionExerciseHistoryKey> = []
+            let sessionFacts = resolvedFacts(
+                for: session,
+                existingFacts: factsBySessionID[session.id] ?? []
+            )
 
-            for fact in facts where !fact.isWarmup {
-                guard visibleSessionIDs.contains(fact.sessionID) else { continue }
-
-                let key = SessionExerciseHistoryKey(
-                    sessionID: fact.sessionID,
-                    catalogExerciseUUID: fact.catalogExerciseUUID
-                )
-
-                if countedExerciseKeys.insert(key).inserted {
+            var countedExerciseUUIDs: Set<String> = []
+            for fact in sessionFacts where !fact.isWarmup {
+                if countedExerciseUUIDs.insert(fact.catalogExerciseUUID).inserted {
                     if let existing = exerciseFrequencyByUUID[fact.catalogExerciseUUID] {
                         exerciseFrequencyByUUID[fact.catalogExerciseUUID] = CollectedExerciseFrequency(
                             exerciseName: fact.completedAt >= existing.lastPerformedAt ? fact.exerciseNameSnapshot : existing.exerciseName,
@@ -951,6 +988,11 @@ final class WorkoutMetricsService {
                         )
                     }
                 }
+
+                let key = SessionExerciseHistoryKey(
+                    sessionID: fact.sessionID,
+                    catalogExerciseUUID: fact.catalogExerciseUUID
+                )
 
                 var historyEntry = perSessionHistory[key]
                     ?? WorkingExerciseHistoryEntry(
@@ -1024,48 +1066,63 @@ final class WorkoutMetricsService {
 
                 perSessionHistory[key] = historyEntry
             }
+        }
 
-            for (key, historyEntry) in perSessionHistory
-                where historyEntry.comparisonOneRepMax != nil || historyEntry.hasWeightedMetrics
-            {
-                exerciseHistoryByUUID[key.catalogExerciseUUID, default: []].append(
-                    CompletedExerciseHistoryEntry(
-                        sessionID: key.sessionID,
-                        completedAt: historyEntry.completedAt,
-                        exerciseName: historyEntry.exerciseName,
-                        comparisonOneRepMax: historyEntry.comparisonOneRepMax,
-                        weightedOneRepMaxInKilograms: historyEntry.weightedOneRepMaxInKilograms,
-                        weightedOneRepMaxUnit: historyEntry.weightedOneRepMaxUnit ?? .kg,
-                        totalWeightedVolumeInKilograms: historyEntry.hasWeightedMetrics
-                            ? historyEntry.totalWeightedVolumeInKilograms
-                            : nil,
-                        weightedVolumeUnit: historyEntry.weightedVolumeUnit ?? .kg
-                    )
+        var exerciseHistoryEntriesByUUID: [String: [CompletedExerciseHistoryEntry]] = [:]
+        for (key, historyEntry) in perSessionHistory
+            where historyEntry.comparisonOneRepMax != nil || historyEntry.hasWeightedMetrics
+        {
+            exerciseHistoryEntriesByUUID[key.catalogExerciseUUID, default: []].append(
+                CompletedExerciseHistoryEntry(
+                    sessionID: key.sessionID,
+                    completedAt: historyEntry.completedAt,
+                    exerciseName: historyEntry.exerciseName,
+                    comparisonOneRepMax: historyEntry.comparisonOneRepMax,
+                    weightedOneRepMaxInKilograms: historyEntry.weightedOneRepMaxInKilograms,
+                    weightedOneRepMaxUnit: historyEntry.weightedOneRepMaxUnit ?? .kg,
+                    totalWeightedVolumeInKilograms: historyEntry.hasWeightedMetrics
+                        ? historyEntry.totalWeightedVolumeInKilograms
+                        : nil,
+                    weightedVolumeUnit: historyEntry.weightedVolumeUnit ?? .kg
                 )
-            }
-
-            for key in exerciseHistoryByUUID.keys {
-                exerciseHistoryByUUID[key]?.sort { lhs, rhs in
-                    lhs.completedAt > rhs.completedAt
-                }
-            }
-
-            return MetricsSnapshotCache(
-                completedSessions: sessions,
-                bestPRByExercise: bestPRByExercise,
-                bestBodyweightByExercise: bestBodyweightByExercise,
-                countsByWeek: countsByWeek,
-                countsByDay: countsByDay,
-                exerciseFrequencyByUUID: exerciseFrequencyByUUID,
-                exerciseHistoryByUUID: exerciseHistoryByUUID,
-                totalDurationSeconds: totalDurationSeconds,
-                totalPRHits: totalPRHits,
-                firstWorkoutDate: firstWorkoutDate
             )
         }
 
-        cachedMetricsSnapshot = snapshot
-        return snapshot
+        for key in exerciseHistoryEntriesByUUID.keys {
+            exerciseHistoryEntriesByUUID[key]?.sort { lhs, rhs in
+                lhs.completedAt > rhs.completedAt
+            }
+        }
+
+        return MetricsSnapshotCache(
+            completedSessions: sessions,
+            bestPRByExercise: bestPRByExercise,
+            bestBodyweightByExercise: bestBodyweightByExercise,
+            countsByWeek: countsByWeek,
+            countsByDay: countsByDay,
+            exerciseFrequencyByUUID: exerciseFrequencyByUUID,
+            exerciseHistoryByUUID: exerciseHistoryEntriesByUUID,
+            totalDurationSeconds: totalDurationSeconds,
+            totalPRHits: totalPRHits,
+            firstWorkoutDate: firstWorkoutDate
+        )
+    }
+
+    private func resolvedFacts(
+        for session: WorkoutSession,
+        existingFacts: [CompletedSetFact]? = nil
+    ) -> [CompletedSetFact] {
+        let persistedFacts = existingFacts ?? (try? historyProjectionRepository.facts(forSessionID: session.id)) ?? []
+        guard !persistedFacts.isEmpty else {
+            return HistoryProjectionSnapshotBuilder.projectedFacts(from: session).map { $0.makeModel() }
+        }
+
+        let sourceUpdatedAt = HistoryProjectionSnapshotBuilder.sourceSessionUpdatedAt(for: session)
+        guard persistedFacts.contains(where: { $0.sourceSessionUpdatedAt != sourceUpdatedAt }) else {
+            return persistedFacts
+        }
+
+        return HistoryProjectionSnapshotBuilder.projectedFacts(from: session).map { $0.makeModel() }
     }
 
     private func session(id: UUID) throws -> WorkoutSession? {
@@ -1118,7 +1175,6 @@ final class WorkoutMetricsService {
         before date: Date? = nil,
         excludingSessionID: UUID? = nil
     ) throws -> PriorSetMetricPeaks {
-        try ensureHistoryFacts()
         let facts = try historyProjectionRepository.allFacts()
         let visibleSessionIDs = try visibleCompletedSessionIDs()
         var peaks = PriorSetMetricPeaks()
@@ -1395,7 +1451,7 @@ private struct PriorSetMetricPeaks {
     var volume: Double = 0
 }
 
-private struct MetricsSnapshotCache {
+struct MetricsSnapshotCache {
     let completedSessions: [WorkoutSession]
     let bestPRByExercise: [String: WorkoutPRRecord]
     let bestBodyweightByExercise: [String: BodyweightExerciseBestRecord]
@@ -1408,7 +1464,7 @@ private struct MetricsSnapshotCache {
     let firstWorkoutDate: Date?
 }
 
-private struct CompletedExerciseHistoryEntry {
+struct CompletedExerciseHistoryEntry {
     let sessionID: UUID
     let completedAt: Date
     let exerciseName: String
@@ -1430,13 +1486,13 @@ private struct WorkingExerciseHistoryEntry {
     var hasWeightedMetrics = false
 }
 
-private struct CollectedExerciseFrequency {
+struct CollectedExerciseFrequency {
     let exerciseName: String
     let sessionCount: Int
     let lastPerformedAt: Date
 }
 
-private struct BodyweightExerciseBestRecord {
+struct BodyweightExerciseBestRecord {
     let catalogExerciseUUID: String
     let exerciseName: String
     let reps: Int

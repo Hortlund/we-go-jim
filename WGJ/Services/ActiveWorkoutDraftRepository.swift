@@ -630,10 +630,23 @@ final class ActiveWorkoutDraftRepository {
         }
 
         let completedSession = materializeCompletedSession(from: draftSession, notes: notes)
+        let projectedFacts = HistoryProjectionSnapshotBuilder.projectedFacts(from: completedSession)
+        let summary = try WorkoutMetricsService(modelContext: modelContext).sessionSummary(
+            session: completedSession,
+            projectedFacts: projectedFacts
+        )
+        completedSession.totalVolume = summary.totalVolume
+        completedSession.prHitsCount = summary.prHitsCount
+        completedSession.summaryMetricsVersion = WorkoutMetricsService.currentSummaryMetricsVersion
+
         modelContext.delete(draftSession)
         try modelContext.save()
 
-        try completedSessionRepository.recalculateSessionSummary(sessionID: completedSession.id)
+        HistoryAnalyticsCache.shared.invalidate(container: modelContext.container)
+        HistoryProjectionBackgroundReconciler.shared.scheduleRebuild(
+            sessionID: completedSession.id,
+            container: modelContext.container
+        )
         try? CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)?
             .queueCompletedSessionPublish(sessionID: completedSession.id)
 

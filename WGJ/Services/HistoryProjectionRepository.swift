@@ -1,7 +1,6 @@
 import Foundation
 import SwiftData
 
-@MainActor
 final class HistoryProjectionRepository {
     private let modelContext: ModelContext
     private let sessionRepository: WorkoutSessionRepository
@@ -17,12 +16,15 @@ final class HistoryProjectionRepository {
             return try deleteFacts(forSessionID: sessionID, persistChanges: persistChanges)
         }
 
-        let drafts = makeFactDrafts(from: session)
+        let drafts = HistoryProjectionSnapshotBuilder.projectedFacts(from: session)
         let existingFacts = try facts(forSessionID: sessionID)
         let didChange = apply(drafts: drafts, to: existingFacts, sessionID: sessionID)
 
         if didChange, persistChanges {
             try modelContext.save()
+        }
+        if didChange {
+            HistoryAnalyticsCache.shared.invalidate(container: modelContext.container)
         }
 
         return didChange ? drafts.count : 0
@@ -40,6 +42,7 @@ final class HistoryProjectionRepository {
         if persistChanges {
             try modelContext.save()
         }
+        HistoryAnalyticsCache.shared.invalidate(container: modelContext.container)
 
         return existingFacts.count
     }
@@ -59,7 +62,7 @@ final class HistoryProjectionRepository {
         }
 
         for session in completedSessions {
-            let drafts = makeFactDrafts(from: session)
+            let drafts = HistoryProjectionSnapshotBuilder.projectedFacts(from: session)
             let existing = factsBySessionID[session.id] ?? []
             guard !factsMatch(existing, drafts: drafts) else { continue }
 
@@ -71,6 +74,9 @@ final class HistoryProjectionRepository {
 
         if didMutate, persistChanges {
             try modelContext.save()
+        }
+        if didMutate {
+            HistoryAnalyticsCache.shared.invalidate(container: modelContext.container)
         }
 
         return rebuiltSessions
@@ -87,7 +93,7 @@ final class HistoryProjectionRepository {
         }
 
         for session in completedSessions {
-            let drafts = makeFactDrafts(from: session)
+            let drafts = HistoryProjectionSnapshotBuilder.projectedFacts(from: session)
             let existing = factsBySessionID[session.id] ?? []
             if factsMatch(existing, drafts: drafts) == false {
                 return true
@@ -184,121 +190,9 @@ final class HistoryProjectionRepository {
         return true
     }
 
-    private func makeFactDrafts(from session: WorkoutSession) -> [CompletedSetFactDraft] {
-        let completedAt = session.endedAt ?? session.startedAt
-        let sourceSessionUpdatedAt = projectionSourceUpdatedAt(for: session)
-        let orderedExercises = (session.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
-
-        return orderedExercises.flatMap { exercise in
-            let orderedSets = (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
-            return orderedSets.compactMap { set in
-                makeFactDraft(
-                    from: set,
-                    session: session,
-                    exercise: exercise,
-                    completedAt: completedAt,
-                    sourceSessionUpdatedAt: sourceSessionUpdatedAt
-                )
-            }
-        }
-    }
-
-    private func makeFactDraft(
-        from set: WorkoutSessionSet,
-        session: WorkoutSession,
-        exercise: WorkoutSessionExercise,
-        completedAt: Date,
-        sourceSessionUpdatedAt: Date
-    ) -> CompletedSetFactDraft? {
-        guard set.isCompleted, let reps = set.actualReps, reps > 0 else {
-            return nil
-        }
-
-        switch set.actualLoadUnit {
-        case .kg, .lb:
-            guard let weight = set.actualWeight, weight > 0 else {
-                return nil
-            }
-
-            let normalizedWeightKg = normalizedLoad(weight, unit: set.actualLoadUnit)
-            let estimatedOneRepMaxKg = normalizedLoad(
-                estimatedOneRepMax(weight: weight, reps: reps),
-                unit: set.actualLoadUnit
-            )
-
-            return CompletedSetFactDraft(
-                sessionSetID: set.id,
-                sessionID: session.id,
-                sessionExerciseID: exercise.id,
-                templateID: session.templateID,
-                catalogExerciseUUID: exercise.catalogExerciseUUID,
-                exerciseNameSnapshot: exercise.exerciseNameSnapshot,
-                completedAt: completedAt,
-                setIndex: set.sortOrder,
-                isWarmup: set.isWarmup,
-                reps: reps,
-                weight: weight,
-                loadUnit: set.actualLoadUnit,
-                normalizedWeightKg: normalizedWeightKg,
-                estimatedOneRepMaxKg: estimatedOneRepMaxKg,
-                volumeKg: normalizedWeightKg * Double(reps),
-                sourceSessionUpdatedAt: sourceSessionUpdatedAt
-            )
-
-        case .bodyweight:
-            return CompletedSetFactDraft(
-                sessionSetID: set.id,
-                sessionID: session.id,
-                sessionExerciseID: exercise.id,
-                templateID: session.templateID,
-                catalogExerciseUUID: exercise.catalogExerciseUUID,
-                exerciseNameSnapshot: exercise.exerciseNameSnapshot,
-                completedAt: completedAt,
-                setIndex: set.sortOrder,
-                isWarmup: set.isWarmup,
-                reps: reps,
-                weight: nil,
-                loadUnit: .bodyweight,
-                normalizedWeightKg: nil,
-                estimatedOneRepMaxKg: nil,
-                volumeKg: nil,
-                sourceSessionUpdatedAt: sourceSessionUpdatedAt
-            )
-        }
-    }
-
-    private func projectionSourceUpdatedAt(for session: WorkoutSession) -> Date {
-        var latest = session.updatedAt
-
-        for exercise in session.exercises ?? [] {
-            latest = max(latest, exercise.updatedAt)
-            for set in exercise.sets ?? [] {
-                latest = max(latest, set.updatedAt)
-            }
-        }
-
-        return latest
-    }
-
-    private func estimatedOneRepMax(weight: Double, reps: Int) -> Double {
-        guard reps > 0 else { return weight }
-        if reps == 1 { return weight }
-        return weight * (1 + (Double(reps) / 30.0))
-    }
-
-    private func normalizedLoad(_ value: Double, unit: TemplateLoadUnit) -> Double {
-        switch unit {
-        case .kg:
-            return value
-        case .lb:
-            return value * 0.45359237
-        case .bodyweight:
-            return value
-        }
-    }
 }
 
-private struct CompletedSetFactDraft: Equatable {
+struct CompletedSetFactDraft: Equatable {
     let sessionSetID: UUID
     let sessionID: UUID
     let sessionExerciseID: UUID

@@ -672,6 +672,34 @@ struct WGJTests {
     }
 
     @Test
+    func profileRepositoryExposesSnapshotForCurrentIdentity() throws {
+        let context = try makeInMemoryContext()
+        let repository = ProfileRepository(modelContext: context)
+        let avatarData = Data([0x0a, 0x0b, 0x0c])
+
+        try repository.saveProfile(
+            name: "Snapshot Bro",
+            athleteType: .garageGymRat,
+            avatarImageData: avatarData
+        )
+
+        let snapshot = try #require(try repository.currentProfileSnapshot())
+        #expect(snapshot.displayName == "Snapshot Bro")
+        #expect(snapshot.athleteType == .garageGymRat)
+        #expect(snapshot.avatarImageData == avatarData)
+    }
+
+    @Test
+    func profileWidgetRepositoryReturnsValueSnapshotsInSortOrder() throws {
+        let context = try makeInMemoryContext()
+        let repository = ProfileWidgetRepository(modelContext: context)
+
+        let snapshots = try repository.configurationSnapshots()
+        #expect(!snapshots.isEmpty)
+        #expect(snapshots == snapshots.sorted { $0.sortOrder < $1.sortOrder })
+    }
+
+    @Test
     func userProfileSelectionChoosesEarliestCreatedProfileForPreferences() {
         let laterProfile = UserProfile(
             displayName: "Later",

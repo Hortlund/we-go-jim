@@ -1724,17 +1724,27 @@ private final class TestBrosCloudStore: BrosCloudStore {
         recordType: String,
         predicate: NSPredicate,
         sortDescriptors: [NSSortDescriptor],
-        resultsLimit: Int
+        request: BrosCloudKitRequestProfile
     ) async throws -> [CKRecord] {
-        try await queryRecordsHandler(recordType, predicate, sortDescriptors, resultsLimit)
+        try await queryRecordsHandler(recordType, predicate, sortDescriptors, request.resultsLimit)
     }
 
-    func fetchRecord(recordType: String, recordName: String) async throws -> CKRecord? {
-        try await fetchRecordHandler(recordType, recordName)
+    func fetchRecord(
+        recordType: String,
+        recordName: String,
+        request: BrosCloudKitRequestProfile
+    ) async throws -> CKRecord? {
+        _ = request
+        return try await fetchRecordHandler(recordType, recordName)
     }
 
-    func fetchRecords(recordType: String, recordNames: [String]) async throws -> [CKRecord] {
-        try await fetchRecordsHandler(recordType, recordNames)
+    func fetchRecords(
+        recordType: String,
+        recordNames: [String],
+        request: BrosCloudKitRequestProfile
+    ) async throws -> [CKRecord] {
+        _ = request
+        return try await fetchRecordsHandler(recordType, recordNames)
     }
 
     func save(records: [CKRecord], deleting recordIDs: [CKRecord.ID]) async throws {

@@ -215,13 +215,30 @@ struct ProfileManagementView: View {
         hasLoadedProfile = true
 
         do {
-            let profile = try await profileRepository.bootstrapProfileIdentity(cloudSyncEnabled: cloudSyncEnabled)
-            displayName = profile.displayName
-            savedDisplayName = profile.displayName
-            athleteType = profile.athleteType
-            savedAthleteType = profile.athleteType
-            avatarImageData = profile.avatarImageData
-            savedAvatarImageData = profile.avatarImageData
+            let profile = try profileRepository.currentProfileSnapshot()
+                ?? ProfileIdentitySnapshot(profile: try profileRepository.loadOrCreateProfile())
+            apply(profile: profile)
+
+            if cloudSyncEnabled {
+                Task {
+                    do {
+                        let published = try await profileRepository.bootstrapProfileIdentity(
+                            cloudSyncEnabled: cloudSyncEnabled
+                        )
+                        await MainActor.run {
+                            guard hasLoadedProfile else { return }
+                            guard displayName == savedDisplayName,
+                                  athleteType == savedAthleteType,
+                                  avatarImageData == savedAvatarImageData else {
+                                return
+                            }
+                            apply(profile: ProfileIdentitySnapshot(profile: published))
+                        }
+                    } catch {
+                        // Keep the local-first profile snapshot if cloud bootstrap fails.
+                    }
+                }
+            }
         } catch {
             showError(error)
         }
@@ -235,12 +252,7 @@ struct ProfileManagementView: View {
                 avatarImageData: avatarImageData
             )
             if let profile = try profileRepository.currentProfile() {
-                displayName = profile.displayName
-                savedDisplayName = profile.displayName
-                athleteType = profile.athleteType
-                savedAthleteType = profile.athleteType
-                avatarImageData = profile.avatarImageData
-                savedAvatarImageData = profile.avatarImageData
+                apply(profile: ProfileIdentitySnapshot(profile: profile))
                 let cacheKey = profile.brosMembershipID ?? profile.id.uuidString
                 if let avatarImageData {
                     Task {
@@ -283,6 +295,16 @@ struct ProfileManagementView: View {
     private func showError(_ error: Error) {
         errorMessage = String(describing: error)
         showingError = true
+    }
+
+    @MainActor
+    private func apply(profile: ProfileIdentitySnapshot) {
+        displayName = profile.displayName
+        savedDisplayName = profile.displayName
+        athleteType = profile.athleteType
+        savedAthleteType = profile.athleteType
+        avatarImageData = profile.avatarImageData
+        savedAvatarImageData = profile.avatarImageData
     }
 }
 

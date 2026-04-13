@@ -12,7 +12,6 @@ enum ProfileWidgetRepositoryError: LocalizedError {
     }
 }
 
-@MainActor
 final class ProfileWidgetRepository {
     private let modelContext: ModelContext
 
@@ -25,8 +24,16 @@ final class ProfileWidgetRepository {
         return try fetchConfigurations()
     }
 
+    func configurationSnapshots() throws -> [ProfileWidgetConfigSnapshot] {
+        try configurations().map(ProfileWidgetConfigSnapshot.init(config:))
+    }
+
     func enabledConfigurations() throws -> [ProfileWidgetConfig] {
         try configurations().filter { $0.isEnabled }
+    }
+
+    func enabledConfigurationSnapshots() throws -> [ProfileWidgetConfigSnapshot] {
+        try configurationSnapshots().filter { $0.isEnabled }
     }
 
     func setEnabled(kind: ProfileWidgetKind, isEnabled: Bool) throws {

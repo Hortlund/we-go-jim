@@ -1,3 +1,4 @@
+import Foundation
 import SwiftData
 import Testing
 @testable import WGJ
@@ -110,6 +111,11 @@ struct TemplateRepositoryTests {
         try sessionRepository.saveSetDrafts(sessionExerciseID: sessionExercise.id, drafts: drafts)
         try sessionRepository.finishSession(sessionID: session.id)
 
+        try waitForProjectedFacts(
+            sessionID: session.id,
+            expectedCount: 1,
+            repository: projectionRepository
+        )
         #expect(try projectionRepository.facts(forSessionID: session.id).count == 1)
 
         try templateRepository.deleteTemplate(id: template.id)
@@ -418,5 +424,22 @@ struct TemplateRepositoryTests {
         )
         let container = try ModelContainer(for: schema, configurations: [configuration])
         return ModelContext(container)
+    }
+
+    private func waitForProjectedFacts(
+        sessionID: UUID,
+        expectedCount: Int,
+        repository: HistoryProjectionRepository,
+        timeout: TimeInterval = 1.0
+    ) throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if (try? repository.facts(forSessionID: sessionID).count) == expectedCount {
+                return
+            }
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+
+        #expect(try repository.facts(forSessionID: sessionID).count == expectedCount)
     }
 }

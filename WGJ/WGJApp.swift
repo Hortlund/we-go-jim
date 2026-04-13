@@ -5,9 +5,13 @@ import UIKit
 
 @main
 struct WGJApp: App {
-    private let bootstrap = WGJApp.makeContainerBootstrap()
+    private let bootstrap: ModelContainerBootstrap
+    private let appBackgroundStore: AppBackgroundStore
 
     init() {
+        let bootstrap = Self.makeContainerBootstrap()
+        self.bootstrap = bootstrap
+        self.appBackgroundStore = AppBackgroundStore(container: bootstrap.container)
         Self.configureNavigationTitleAppearance()
         RestTimerNotificationManager.shared.configureNotifications()
         CloudSyncEventMonitor.shared.start()
@@ -22,6 +26,7 @@ struct WGJApp: App {
             ContentView()
                 .environment(\.cloudSyncEnabled, bootstrap.cloudSyncEnabled)
                 .environment(\.cloudSyncErrorDescription, bootstrap.cloudSyncErrorDescription)
+                .environment(\.appBackgroundStore, appBackgroundStore)
                 .environment(AppNotificationRouter.shared)
         }
         .modelContainer(bootstrap.container)

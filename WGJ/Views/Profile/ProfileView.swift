@@ -6,8 +6,9 @@ struct ProfileView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.isTabActive) private var isTabActive
     @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
+    @Environment(\.appBackgroundStore) private var appBackgroundStore
 
-    @State private var currentProfile: UserProfile?
+    @State private var currentProfile: ProfileIdentitySnapshot?
     @State private var dashboardContent = ProfileDashboardContent.empty
     @State private var controller = ProfileViewController()
     @State private var trendSeriesLoadTask: Task<Void, Never>?
@@ -558,14 +559,21 @@ struct ProfileView: View {
             trendSeriesLoadTask = nil
             isLoadingTrendSeries = false
 
-            let profile = try await controller.loadProfileIdentity(
+            let localProfile = try controller.loadLocalProfileIdentity(modelContext: modelContext)
+            currentProfile = localProfile
+            dashboardContent.weeklyGoal = localProfile.weeklyWorkoutGoal
+
+            let profile = (try? await controller.loadPublishedProfileIdentity(
                 modelContext: modelContext,
-                cloudSyncEnabled: cloudSyncEnabled
-            )
+                cloudSyncEnabled: cloudSyncEnabled,
+                backgroundStore: appBackgroundStore
+            )) ?? localProfile
             currentProfile = profile
+            dashboardContent.weeklyGoal = profile.weeklyWorkoutGoal
             dashboardContent = try await controller.loadDashboardContent(
                 modelContext: modelContext,
-                profile: profile
+                profile: profile,
+                backgroundStore: appBackgroundStore
             )
             scheduleTrendSeriesLoad()
         } catch {
@@ -586,24 +594,33 @@ struct ProfileView: View {
 
         trendSeriesLoadTask?.cancel()
         isLoadingTrendSeries = true
-        trendSeriesLoadTask = Task { @MainActor in
+        trendSeriesLoadTask = Task {
             try? await Task.sleep(for: .milliseconds(180))
-            guard !Task.isCancelled, isTabActive else { return }
+            guard !Task.isCancelled else { return }
+            let isTabStillActive = await MainActor.run { isTabActive }
+            guard isTabStillActive else { return }
 
             do {
-                let trendSeriesByKind = try controller.loadTrendSeries(
+                let trendSeriesByKind = try await controller.loadTrendSeries(
                     modelContext: modelContext,
-                    enabledWidgets: enabledWidgets
+                    enabledWidgets: enabledWidgets,
+                    backgroundStore: appBackgroundStore
                 )
                 guard !Task.isCancelled else { return }
-                dashboardContent.trendSeriesByKind = trendSeriesByKind
+                await MainActor.run {
+                    dashboardContent.trendSeriesByKind = trendSeriesByKind
+                }
             } catch {
-                showError(error)
+                await MainActor.run {
+                    showError(error)
+                }
             }
 
             if !Task.isCancelled {
-                isLoadingTrendSeries = false
-                trendSeriesLoadTask = nil
+                await MainActor.run {
+                    isLoadingTrendSeries = false
+                    trendSeriesLoadTask = nil
+                }
             }
         }
     }
@@ -664,29 +681,71 @@ struct ProfileView: View {
 @MainActor
 @Observable
 final class ProfileViewController {
-    private struct TrendSeriesCacheKey: Hashable {
+    private struct TrendSeriesCacheKey: Hashable, Sendable {
         let kind: ProfileWidgetKind
         let catalogExerciseUUID: String
     }
 
+    private struct TrendSeriesLoadResult: Sendable {
+        let trendSeriesByKind: [ProfileWidgetKind: ExerciseMetricSeries]
+        let cache: [TrendSeriesCacheKey: ExerciseMetricSeries]
+    }
+
     private var trendSeriesCache: [TrendSeriesCacheKey: ExerciseMetricSeries] = [:]
 
-    func loadProfileIdentity(
+    func loadLocalProfileIdentity(
         modelContext: ModelContext,
-        cloudSyncEnabled: Bool
-    ) async throws -> UserProfile {
+    ) throws -> ProfileIdentitySnapshot {
         let profileRepository = ProfileRepository(modelContext: modelContext)
-        return try await profileRepository.bootstrapProfileIdentity(cloudSyncEnabled: cloudSyncEnabled)
+        if let snapshot = try profileRepository.currentProfileSnapshot() {
+            return snapshot
+        }
+
+        return ProfileIdentitySnapshot(profile: try profileRepository.loadOrCreateProfile())
+    }
+
+    func loadPublishedProfileIdentity(
+        modelContext: ModelContext,
+        cloudSyncEnabled: Bool,
+        backgroundStore: AppBackgroundStore?
+    ) async throws -> ProfileIdentitySnapshot {
+        if let backgroundStore {
+            return try await backgroundStore.performAsync("profile.identity") { backgroundContext in
+                try await ProfileRepository(modelContext: backgroundContext).bootstrapProfileIdentitySnapshot(
+                    cloudSyncEnabled: cloudSyncEnabled
+                )
+            }
+        }
+
+        let profileRepository = ProfileRepository(modelContext: modelContext)
+        return try await profileRepository.bootstrapProfileIdentitySnapshot(cloudSyncEnabled: cloudSyncEnabled)
     }
 
     func loadDashboardContent(
         modelContext: ModelContext,
-        profile: UserProfile
+        profile: ProfileIdentitySnapshot,
+        backgroundStore: AppBackgroundStore?
     ) async throws -> ProfileDashboardContent {
+        if let backgroundStore {
+            return try await backgroundStore.perform("profile.dashboard") { backgroundContext in
+                let widgetRepository = ProfileWidgetRepository(modelContext: backgroundContext)
+                let metricsService = WorkoutMetricsService(modelContext: backgroundContext)
+                let enabled = try widgetRepository.enabledConfigurationSnapshots()
+                let dashboard = try metricsService.profileDashboardSnapshot(prLimit: 5, weeks: 8)
+                var nextContent = ProfileDashboardContent.make(
+                    enabledWidgets: enabled,
+                    dashboard: dashboard,
+                    trendSeriesByKind: [:]
+                )
+                nextContent.weeklyGoal = profile.weeklyWorkoutGoal
+                return nextContent
+            }
+        }
+
         let widgetRepository = ProfileWidgetRepository(modelContext: modelContext)
         return try WGJPerformance.measure("profile.dashboard") {
             let metricsService = WorkoutMetricsService(modelContext: modelContext)
-            let enabled = try widgetRepository.enabledConfigurations()
+            let enabled = try widgetRepository.enabledConfigurationSnapshots()
             let dashboard = try metricsService.profileDashboardSnapshot(prLimit: 5, weeks: 8)
             var nextContent = ProfileDashboardContent.make(
                 enabledWidgets: enabled,
@@ -700,9 +759,65 @@ final class ProfileViewController {
 
     func loadTrendSeries(
         modelContext: ModelContext,
-        enabledWidgets: [ProfileWidgetConfig]
-    ) throws -> [ProfileWidgetKind: ExerciseMetricSeries] {
-        try WGJPerformance.measure("profile.trends") {
+        enabledWidgets: [ProfileWidgetConfigSnapshot],
+        backgroundStore: AppBackgroundStore?
+    ) async throws -> [ProfileWidgetKind: ExerciseMetricSeries] {
+        if let backgroundStore {
+            let cachedSeries = trendSeriesCache
+            let result = try await backgroundStore.perform("profile.trends") { backgroundContext in
+                let metricsService = WorkoutMetricsService(modelContext: backgroundContext)
+                var trendSeriesByKind: [ProfileWidgetKind: ExerciseMetricSeries] = [:]
+                var nextCache = cachedSeries
+                var currentCacheKeys: Set<TrendSeriesCacheKey> = []
+
+                for config in enabledWidgets {
+                    guard let selectedExerciseUUID = config.selectedCatalogExerciseUUID else { continue }
+                    let cacheKey = TrendSeriesCacheKey(
+                        kind: config.kind,
+                        catalogExerciseUUID: selectedExerciseUUID
+                    )
+                    currentCacheKeys.insert(cacheKey)
+
+                    if let cachedSeries = nextCache[cacheKey] {
+                        trendSeriesByKind[config.kind] = cachedSeries.withPreferredName(
+                            config.selectedExerciseNameSnapshot
+                        )
+                        continue
+                    }
+
+                    let series: ExerciseMetricSeries
+                    switch config.kind {
+                    case .exerciseOneRMTrend:
+                        series = try metricsService.exerciseOneRepMaxTrend(
+                            for: selectedExerciseUUID,
+                            preferredExerciseName: config.selectedExerciseNameSnapshot,
+                            limit: 8
+                        )
+                    case .exerciseVolumeTrend:
+                        series = try metricsService.exerciseVolumeTrend(
+                            for: selectedExerciseUUID,
+                            preferredExerciseName: config.selectedExerciseNameSnapshot,
+                            limit: 8
+                        )
+                    case .prs, .weeklyGoals, .streaks, .topExercises, .consistencyCalendar:
+                        continue
+                    }
+
+                    nextCache[cacheKey] = series
+                    trendSeriesByKind[config.kind] = series
+                }
+
+                nextCache = nextCache.filter { currentCacheKeys.contains($0.key) }
+                return TrendSeriesLoadResult(
+                    trendSeriesByKind: trendSeriesByKind,
+                    cache: nextCache
+                )
+            }
+            trendSeriesCache = result.cache
+            return result.trendSeriesByKind
+        }
+
+        return try WGJPerformance.measure("profile.trends") {
             let metricsService = WorkoutMetricsService(modelContext: modelContext)
             var trendSeriesByKind: [ProfileWidgetKind: ExerciseMetricSeries] = [:]
             var currentCacheKeys: Set<TrendSeriesCacheKey> = []
@@ -762,8 +877,8 @@ private extension ExerciseMetricSeries {
     }
 }
 
-struct ProfileDashboardContent {
-    var enabledWidgets: [ProfileWidgetConfig]
+struct ProfileDashboardContent: Sendable {
+    var enabledWidgets: [ProfileWidgetConfigSnapshot]
     var personalRecords: [WorkoutPRRecord]
     var weeklyProgress: [WeeklyWorkoutProgressPoint]
     var trendSeriesByKind: [ProfileWidgetKind: ExerciseMetricSeries]
@@ -784,7 +899,7 @@ struct ProfileDashboardContent {
     )
 
     static func make(
-        enabledWidgets: [ProfileWidgetConfig],
+        enabledWidgets: [ProfileWidgetConfigSnapshot],
         dashboard: ProfileDashboardSnapshot,
         trendSeriesByKind: [ProfileWidgetKind: ExerciseMetricSeries]
     ) -> ProfileDashboardContent {

@@ -63,6 +63,11 @@ struct HistoryProjectionRepositoryTests {
 
         try sessionRepository.finishSession(sessionID: session.id)
 
+        try waitForProjectedFacts(
+            sessionID: session.id,
+            expectedCount: 3,
+            repository: projectionRepository
+        )
         let facts = try projectionRepository.facts(forSessionID: session.id)
         #expect(facts.count == 3)
 
@@ -114,8 +119,14 @@ struct HistoryProjectionRepositoryTests {
         try sessionRepository.saveSetDrafts(sessionExerciseID: exercise.id, drafts: drafts)
         try sessionRepository.recalculateSessionSummary(sessionID: session.id)
 
-        let facts = try projectionRepository.facts(forSessionID: session.id)
-        let updatedFact = try #require(facts.first { $0.sessionSetID == drafts[1].id })
+        let updatedFact = try waitForProjectedFact(
+            sessionID: session.id,
+            repository: projectionRepository
+        ) { fact in
+            fact.sessionSetID == drafts[1].id
+                && fact.weight == 110
+                && fact.reps == 4
+        }
         let refreshedSession = try #require(try sessionRepository.session(id: session.id))
 
         #expect(updatedFact.weight == 110)
@@ -192,6 +203,11 @@ struct HistoryProjectionRepositoryTests {
             sessionRepository: sessionRepository
         )
 
+        try waitForProjectedFacts(
+            sessionID: session.id,
+            expectedCount: 1,
+            repository: projectionRepository
+        )
         #expect(try projectionRepository.backfillIfNeeded(persistChanges: false) == 0)
 
         try projectionRepository.deleteFacts(forSessionID: session.id, persistChanges: false)
@@ -292,5 +308,42 @@ struct HistoryProjectionRepositoryTests {
         try sessionRepository.saveSetDrafts(sessionExerciseID: sessionExercise.id, drafts: drafts)
         try sessionRepository.finishSession(sessionID: session.id)
         return try #require(try sessionRepository.session(id: session.id))
+    }
+
+    private func waitForProjectedFacts(
+        sessionID: UUID,
+        expectedCount: Int,
+        repository: HistoryProjectionRepository,
+        timeout: TimeInterval = 1.0
+    ) throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if (try? repository.facts(forSessionID: sessionID).count) == expectedCount {
+                return
+            }
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+
+        #expect(try repository.facts(forSessionID: sessionID).count == expectedCount)
+    }
+
+    private func waitForProjectedFact(
+        sessionID: UUID,
+        repository: HistoryProjectionRepository,
+        timeout: TimeInterval = 1.0,
+        matching predicate: (CompletedSetFact) -> Bool
+    ) throws -> CompletedSetFact {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let fact = try? repository.facts(forSessionID: sessionID).first(where: predicate) {
+                return fact
+            }
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+
+        let facts = try repository.facts(forSessionID: sessionID)
+        let fact = facts.first(where: predicate)
+        #expect(fact != nil)
+        return fact!
     }
 }

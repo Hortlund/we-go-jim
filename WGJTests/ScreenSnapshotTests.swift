@@ -175,9 +175,9 @@ struct ScreenSnapshotTests {
 
     @Test
     func profileDashboardContentBuildsStableSnapshot() {
-        let widgetConfigs = [
-            ProfileWidgetConfig(kind: .prs, sortOrder: 0),
-            ProfileWidgetConfig(kind: .weeklyGoals, sortOrder: 1),
+        let widgetConfigs: [ProfileWidgetConfigSnapshot] = [
+            ProfileWidgetConfigSnapshot(config: ProfileWidgetConfig(kind: .prs, sortOrder: 0)),
+            ProfileWidgetConfigSnapshot(config: ProfileWidgetConfig(kind: .weeklyGoals, sortOrder: 1)),
         ]
         let dashboard = ProfileDashboardSnapshot(
             personalRecords: [
@@ -226,7 +226,7 @@ struct ScreenSnapshotTests {
             ]
         )
 
-        let trendSeries = [
+        let trendSeries: [ProfileWidgetKind: ExerciseMetricSeries] = [
             ProfileWidgetKind.exerciseOneRMTrend: ExerciseMetricSeries(
                 catalogExerciseUUID: "bench",
                 exerciseName: "Bench Press",

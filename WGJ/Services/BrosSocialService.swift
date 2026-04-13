@@ -460,7 +460,6 @@ enum BrosCloudRecordCoder {
     }
 }
 
-@MainActor
 protocol BrosSocialService {
     func refreshLocalMembershipState() async
     func fetchSnapshot() async throws -> BrosFeedSnapshot?
@@ -478,22 +477,28 @@ protocol BrosSocialService {
     func flushOutbox() async
 }
 
-@MainActor
 protocol BrosCloudStore {
     func currentUserRecordName() async throws -> String
     func queryRecords(
         recordType: String,
         predicate: NSPredicate,
         sortDescriptors: [NSSortDescriptor],
-        resultsLimit: Int
+        request: BrosCloudKitRequestProfile
     ) async throws -> [CKRecord]
-    func fetchRecord(recordType: String, recordName: String) async throws -> CKRecord?
-    func fetchRecords(recordType: String, recordNames: [String]) async throws -> [CKRecord]
+    func fetchRecord(
+        recordType: String,
+        recordName: String,
+        request: BrosCloudKitRequestProfile
+    ) async throws -> CKRecord?
+    func fetchRecords(
+        recordType: String,
+        recordNames: [String],
+        request: BrosCloudKitRequestProfile
+    ) async throws -> [CKRecord]
     func save(records: [CKRecord], deleting recordIDs: [CKRecord.ID]) async throws
     func save(subscriptions: [CKSubscription], deleting subscriptionIDs: [CKSubscription.ID]) async throws
 }
 
-@MainActor
 struct CloudKitBrosCloudStore: BrosCloudStore {
     private let container: CKContainer
     private let database: CKDatabase
@@ -529,105 +534,84 @@ struct CloudKitBrosCloudStore: BrosCloudStore {
         recordType: String,
         predicate: NSPredicate,
         sortDescriptors: [NSSortDescriptor],
-        resultsLimit: Int
+        request: BrosCloudKitRequestProfile
     ) async throws -> [CKRecord] {
-        let query = CKQuery(recordType: recordType, predicate: predicate)
-        query.sortDescriptors = sortDescriptors
-
         var fetched: [CKRecord] = []
         var cursor: CKQueryOperation.Cursor?
 
         repeat {
-            let result: (matchResults: [(CKRecord.ID, Result<CKRecord, any Error>)], queryCursor: CKQueryOperation.Cursor?)
-            if let cursor {
-                result = try await database.records(
-                    continuingMatchFrom: cursor,
-                    resultsLimit: resultsLimit
-                )
-            } else {
-                result = try await database.records(
-                    matching: query,
-                    resultsLimit: resultsLimit
-                )
-            }
-
-            for (_, recordResult) in result.matchResults {
-                fetched.append(try recordResult.get())
-            }
-
-            cursor = result.queryCursor
+            let result = try await BrosCloudKitOperationExecutor.queryRecords(
+                in: database,
+                recordType: recordType,
+                predicate: predicate,
+                sortDescriptors: sortDescriptors,
+                request: request,
+                cursor: cursor
+            )
+            fetched.append(contentsOf: result.0)
+            cursor = result.1
         } while cursor != nil
 
         return fetched
     }
 
-    func fetchRecord(recordType: String, recordName: String) async throws -> CKRecord? {
-        let recordID = CKRecord.ID(recordName: recordName)
+    func fetchRecord(
+        recordType: String,
+        recordName: String,
+        request: BrosCloudKitRequestProfile
+    ) async throws -> CKRecord? {
         do {
-            let results = try await database.records(for: [recordID])
-            guard let result = results[recordID] else {
-                return nil
-            }
-
-            switch result {
-            case let .success(record):
-                return record.recordType == recordType ? record : nil
-            case let .failure(error as CKError) where error.code == .unknownItem:
-                return nil
-            case let .failure(error):
-                throw error
-            }
+            let records = try await fetchRecords(
+                recordType: recordType,
+                recordNames: [recordName],
+                request: request
+            )
+            return records.first
         } catch let error as CKError where error.code == .unknownItem {
             return nil
         }
     }
 
-    func fetchRecords(recordType: String, recordNames: [String]) async throws -> [CKRecord] {
+    func fetchRecords(
+        recordType: String,
+        recordNames: [String],
+        request: BrosCloudKitRequestProfile
+    ) async throws -> [CKRecord] {
         let normalizedRecordNames = BrosCloudRecordCoder.normalizedRecordNames(recordNames)
         guard !normalizedRecordNames.isEmpty else { return [] }
 
         let recordIDs = normalizedRecordNames.map { CKRecord.ID(recordName: $0) }
-        let results = try await database.records(for: recordIDs)
+        let fetched = try await BrosCloudKitOperationExecutor.fetchRecords(
+            in: database,
+            recordIDs: recordIDs,
+            request: request
+        )
         var recordsByName: [String: CKRecord] = [:]
 
-        for (recordID, result) in results {
-            switch result {
-            case let .success(record) where record.recordType == recordType:
-                recordsByName[recordID.recordName] = record
-            case .success:
-                continue
-            case let .failure(error as CKError) where error.code == .unknownItem:
-                continue
-            case let .failure(error):
-                throw error
-            }
+        for record in fetched where record.recordType == recordType {
+            recordsByName[record.recordID.recordName] = record
         }
 
         return normalizedRecordNames.compactMap { recordsByName[$0] }
     }
 
     func save(records: [CKRecord], deleting recordIDs: [CKRecord.ID]) async throws {
-        guard !records.isEmpty || !recordIDs.isEmpty else { return }
-
-        _ = try await database.modifyRecords(
-            saving: records,
-            deleting: recordIDs,
-            savePolicy: .allKeys,
-            atomically: true
+        try await BrosCloudKitOperationExecutor.saveRecords(
+            in: database,
+            records: records,
+            deleting: recordIDs
         )
     }
 
     func save(subscriptions: [CKSubscription], deleting subscriptionIDs: [CKSubscription.ID]) async throws {
-        guard !subscriptions.isEmpty || !subscriptionIDs.isEmpty else { return }
-
-        _ = try await database.modifySubscriptions(
-            saving: subscriptions,
+        try await BrosCloudKitOperationExecutor.saveSubscriptions(
+            in: database,
+            subscriptions: subscriptions,
             deleting: subscriptionIDs
         )
     }
 }
 
-@MainActor
 final class CloudKitBrosSocialService: BrosSocialService {
     private enum RecordType {
         static let circle = "BroCircle"
@@ -752,6 +736,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
         return schemaSignals.contains { message.contains($0) }
     }
 
+    @MainActor
     static func makeIfAvailable(modelContext: ModelContext) -> CloudKitBrosSocialService? {
         guard AppRuntimeState.shared.isBrosCloudAvailable else {
             return nil
@@ -785,7 +770,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
     }
 
     func refreshLocalMembershipState() async {
-        guard let profile = try? ProfileRepository(modelContext: modelContext).loadOrCreateProfile() else { return }
+        guard let profile = try? loadOrCreateLocalProfile() else { return }
 
         do {
             let userRecordName = try await currentUserRecordName()
@@ -827,7 +812,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
 
     func fetchSnapshot() async throws -> BrosFeedSnapshot? {
         let userRecordName = try await currentUserRecordName()
-        let localProfile = try? ProfileRepository(modelContext: modelContext).loadOrCreateProfile()
+        let localProfile = try? loadOrCreateLocalProfile()
 
         let membershipRecord: CKRecord
         switch await resolvedMembershipRecord(
@@ -991,7 +976,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
 
     func createCircle(memberLimit: Int) async throws -> BrosFeedSnapshot {
         let userRecordName = try await currentUserRecordName()
-        let localProfile = try? ProfileRepository(modelContext: modelContext).loadOrCreateProfile()
+        let localProfile = try? loadOrCreateLocalProfile()
         try await ensureNoResolvedMembership(localProfile: localProfile, userRecordName: userRecordName)
 
         try validateMemberLimit(memberLimit)
@@ -1074,7 +1059,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
         }
 
         let userRecordName = try await currentUserRecordName()
-        let localProfile = try? ProfileRepository(modelContext: modelContext).loadOrCreateProfile()
+        let localProfile = try? loadOrCreateLocalProfile()
         try await ensureNoResolvedMembership(localProfile: localProfile, userRecordName: userRecordName)
 
         let circleRecord: CKRecord
@@ -1267,7 +1252,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
         let userRecordName = try await currentUserRecordName()
         let membershipRecord: CKRecord
         switch await resolvedMembershipRecord(
-            localProfile: try? ProfileRepository(modelContext: modelContext).loadOrCreateProfile(),
+            localProfile: try? loadOrCreateLocalProfile(),
             userRecordName: userRecordName
         ) {
         case .found(let record):
@@ -1480,7 +1465,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
     func syncReactionNotificationSubscription() async throws {
         let userRecordName = try await currentUserRecordName()
         let subscriptionID = BrosRecordNames.reactionNotificationSubscriptionID(userRecordName: userRecordName)
-        let profile = try? ProfileRepository(modelContext: modelContext).loadOrCreateProfile()
+        let profile = try? loadOrCreateLocalProfile()
 
         guard hasLocalMembership(profile) else {
             try? await save(subscriptions: [], deleting: [subscriptionID])
@@ -1499,7 +1484,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
     }
 
     func queueCompletedSessionPublish(sessionID: UUID) throws {
-        let profile = try ProfileRepository(modelContext: modelContext).loadOrCreateProfile()
+        let profile = try loadOrCreateLocalProfile()
         guard
             let circleID = profile.brosCircleID,
             let membershipID = profile.brosMembershipID,
@@ -1508,8 +1493,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
             return
         }
 
-        let repository = WorkoutSessionRepository(modelContext: modelContext)
-        guard let session = try repository.session(id: sessionID), session.status == .completed else { return }
+        guard let session = try session(id: sessionID), session.status == .completed else { return }
 
         let createdAt = session.endedAt ?? session.startedAt
         if let joinedAt = profile.brosJoinedAt, createdAt < joinedAt {
@@ -1542,8 +1526,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
             payload: workoutPayload
         )
 
-        let metrics = WorkoutMetricsService(modelContext: modelContext)
-        let achievements = try metrics.sessionPRAchievements(sessionID: sessionID)
+        let achievements = try sessionPRAchievements(sessionID: sessionID)
         for achievement in achievements {
             let payload = PendingPREventPayload(
                 recordName: BrosRecordNames.prEventRecordName(
@@ -1576,8 +1559,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
     }
 
     func queueDeletedSession(sessionID: UUID) throws {
-        let metrics = WorkoutMetricsService(modelContext: modelContext)
-        let achievements = try metrics.sessionPRAchievements(sessionID: sessionID)
+        let achievements = try sessionPRAchievements(sessionID: sessionID)
 
         let workoutRecordName = BrosRecordNames.workoutEventRecordName(sessionID: sessionID)
         try upsertOutboxItem(
@@ -1602,7 +1584,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
     }
 
     func queueCurrentProfileSync() throws {
-        let profile = try ProfileRepository(modelContext: modelContext).loadOrCreateProfile()
+        let profile = try loadOrCreateLocalProfile()
         guard
             let circleID = profile.brosCircleID,
             let membershipID = profile.brosMembershipID,
@@ -1957,7 +1939,10 @@ final class CloudKitBrosSocialService: BrosSocialService {
             recordType: RecordType.membership,
             predicate: NSPredicate(format: "%K == %@", Field.circleID, circleID),
             sortDescriptors: [NSSortDescriptor(key: Field.joinedAt, ascending: true)],
-            resultsLimit: BrosSocialRules.maxMemberLimit
+            request: BrosCloudKitRequestProfile(
+                desiredKeys: BrosCloudKitFieldSets.membershipSummary,
+                resultsLimit: BrosSocialRules.maxMemberLimit
+            )
         )
     }
 
@@ -1975,7 +1960,10 @@ final class CloudKitBrosSocialService: BrosSocialService {
             recordType: RecordType.feedEvent,
             predicate: NSPredicate(format: "%K == %@", Field.circleID, circleID),
             sortDescriptors: [NSSortDescriptor(key: Field.createdAt, ascending: false)],
-            resultsLimit: 80
+            request: BrosCloudKitRequestProfile(
+                desiredKeys: BrosCloudKitFieldSets.feedEventSummary,
+                resultsLimit: 80
+            )
         )
     }
 
@@ -1984,7 +1972,10 @@ final class CloudKitBrosSocialService: BrosSocialService {
             recordType: RecordType.feedEvent,
             predicate: NSPredicate(format: "%K == %@", Field.actorUserRecordName, actorUserRecordName),
             sortDescriptors: [NSSortDescriptor(key: Field.createdAt, ascending: false)],
-            resultsLimit: 160
+            request: BrosCloudKitRequestProfile(
+                desiredKeys: BrosCloudKitFieldSets.feedEventSummary,
+                resultsLimit: 160
+            )
         )
     }
 
@@ -1993,7 +1984,10 @@ final class CloudKitBrosSocialService: BrosSocialService {
             recordType: RecordType.reaction,
             predicate: NSPredicate(format: "%K == %@", Field.circleID, circleID),
             sortDescriptors: [NSSortDescriptor(key: Field.updatedAt, ascending: false)],
-            resultsLimit: 320
+            request: BrosCloudKitRequestProfile(
+                desiredKeys: BrosCloudKitFieldSets.reactionSummary,
+                resultsLimit: 320
+            )
         )
     }
 
@@ -2002,7 +1996,10 @@ final class CloudKitBrosSocialService: BrosSocialService {
             recordType: RecordType.reaction,
             predicate: NSPredicate(format: "%K == %@", Field.userRecordName, userRecordName),
             sortDescriptors: [NSSortDescriptor(key: Field.updatedAt, ascending: false)],
-            resultsLimit: 320
+            request: BrosCloudKitRequestProfile(
+                desiredKeys: BrosCloudKitFieldSets.reactionSummary,
+                resultsLimit: 320
+            )
         )
     }
 
@@ -2016,20 +2013,24 @@ final class CloudKitBrosSocialService: BrosSocialService {
             recordType: RecordType.membership,
             predicate: NSPredicate(format: "%K == %@", Field.userRecordName, userRecordName),
             sortDescriptors: [NSSortDescriptor(key: Field.joinedAt, ascending: false)],
-            resultsLimit: 8,
+            request: .membershipSummary,
             treatSchemaErrorsAsEmpty: false
         )
     }
 
     private func circleRecord(circleID: String) async throws -> CKRecord? {
-        try await fetchRecord(recordType: RecordType.circle, recordName: circleID)
+        try await fetchRecord(
+            recordType: RecordType.circle,
+            recordName: circleID,
+            request: .circleSummary
+        )
     }
 
     private func circleRecord(inviteCode: String) async throws -> CKRecord? {
         let records = try await queryRecords(
             recordType: RecordType.circle,
             predicate: NSPredicate(format: "%K == %@", Field.inviteCode, inviteCode),
-            resultsLimit: 1,
+            request: .circleSummary,
             treatSchemaErrorsAsEmpty: false
         )
         return records.first
@@ -2039,15 +2040,16 @@ final class CloudKitBrosSocialService: BrosSocialService {
         recordType: String,
         predicate: NSPredicate,
         sortDescriptors: [NSSortDescriptor] = [],
-        resultsLimit: Int = CKQueryOperation.maximumResults,
+        request: BrosCloudKitRequestProfile = .empty,
         treatSchemaErrorsAsEmpty: Bool = true
     ) async throws -> [CKRecord] {
+        let resolvedRequest = resolvedRequestProfile(for: recordType, request: request)
         do {
             return try await cloudStore.queryRecords(
                 recordType: recordType,
                 predicate: predicate,
                 sortDescriptors: sortDescriptors,
-                resultsLimit: resultsLimit
+                request: resolvedRequest
             )
         } catch {
             guard treatSchemaErrorsAsEmpty,
@@ -2063,12 +2065,54 @@ final class CloudKitBrosSocialService: BrosSocialService {
         }
     }
 
-    private func fetchRecord(recordType: String, recordName: String) async throws -> CKRecord? {
-        try await cloudStore.fetchRecord(recordType: recordType, recordName: recordName)
+    private func fetchRecord(
+        recordType: String,
+        recordName: String,
+        request: BrosCloudKitRequestProfile = .empty
+    ) async throws -> CKRecord? {
+        let resolvedRequest = resolvedRequestProfile(for: recordType, request: request)
+        return try await cloudStore.fetchRecord(
+            recordType: recordType,
+            recordName: recordName,
+            request: resolvedRequest
+        )
     }
 
-    private func fetchRecords(recordType: String, recordNames: [String]) async throws -> [CKRecord] {
-        try await cloudStore.fetchRecords(recordType: recordType, recordNames: recordNames)
+    private func fetchRecords(
+        recordType: String,
+        recordNames: [String],
+        request: BrosCloudKitRequestProfile = .empty
+    ) async throws -> [CKRecord] {
+        let resolvedRequest = resolvedRequestProfile(for: recordType, request: request)
+        return try await cloudStore.fetchRecords(
+            recordType: recordType,
+            recordNames: recordNames,
+            request: resolvedRequest
+        )
+    }
+
+    private func resolvedRequestProfile(
+        for recordType: String,
+        request: BrosCloudKitRequestProfile
+    ) -> BrosCloudKitRequestProfile {
+        guard request.desiredKeys == nil else {
+            return request
+        }
+
+        switch recordType {
+        case RecordType.circle:
+            return .circleSummary
+        case RecordType.membership:
+            return .membershipSummary
+        case RecordType.feedEvent:
+            return .feedEventSummary
+        case RecordType.reaction:
+            return .reactionSummary
+        case RecordType.inviteLookup:
+            return .inviteLookup
+        default:
+            return request
+        }
     }
 
     private func save(records: [CKRecord], deleting recordIDs: [CKRecord.ID] = []) async throws {
@@ -2083,13 +2127,6 @@ final class CloudKitBrosSocialService: BrosSocialService {
     }
 
     private func memberSummary(from record: CKRecord) async throws -> BroMemberSummary {
-        let avatarImageData: Data?
-        if AppRuntimeConfig.reviewPolicy.syncBrosAvatars {
-            avatarImageData = await loadAssetData(from: (record[Field.avatarAsset] as? CKAsset)?.fileURL)
-        } else {
-            avatarImageData = nil
-        }
-
         let membershipID = record[Field.membershipID] as? String ?? record.recordID.recordName
 
         return BroMemberSummary(
@@ -2101,7 +2138,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
                 kind: .displayName
             ),
             athleteType: ProfileAthleteType(rawValue: record[Field.athleteType] as? String ?? ""),
-            avatarImageData: avatarImageData,
+            avatarCacheKey: membershipID,
             joinedAt: record[Field.joinedAt] as? Date ?? .now,
             role: BroMembershipRole(rawValue: record[Field.role] as? String ?? "") ?? .member
         )
@@ -2133,7 +2170,12 @@ final class CloudKitBrosSocialService: BrosSocialService {
             return remoteSummary
         }
 
-        let avatarImageData = localProfile.avatarImageData
+        if let avatarImageData = localProfile.avatarImageData {
+            BrosAvatarCacheService.shared.primeSynchronously(
+                data: avatarImageData,
+                for: remoteSummary.id
+            )
+        }
 
         return BroMemberSummary(
             id: remoteSummary.id,
@@ -2141,7 +2183,8 @@ final class CloudKitBrosSocialService: BrosSocialService {
             userRecordName: remoteSummary.userRecordName,
             displayName: displayName(from: localProfile),
             athleteType: athleteType(from: localProfile),
-            avatarImageData: avatarImageData,
+            avatarImageData: localProfile.avatarImageData,
+            avatarCacheKey: remoteSummary.id,
             joinedAt: remoteSummary.joinedAt,
             role: remoteSummary.role
         )
@@ -2528,14 +2571,6 @@ final class CloudKitBrosSocialService: BrosSocialService {
         return try modelContext.fetch(descriptor).first
     }
 
-    private nonisolated func loadAssetData(from fileURL: URL?) async -> Data? {
-        guard let fileURL else { return nil }
-
-        return await Task.detached(priority: .userInitiated) {
-            try? Data(contentsOf: fileURL)
-        }.value
-    }
-
     private func makeAsset(data: Data, fileExtension: String) throws -> CKAsset {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("WGJBrosAssets", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -2577,7 +2612,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
         joinedAt: Date,
         role: BroMembershipRole
     ) throws {
-        let profile = try ProfileRepository(modelContext: modelContext).loadOrCreateProfile()
+        let profile = try loadOrCreateLocalProfile()
         let didChangeProfile = profile.updateBrosMembership(
             circleID: circleID,
             membershipID: membershipID,
@@ -2590,7 +2625,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
     }
 
     private func clearLocalMembershipStateIfNeeded() throws {
-        guard let profile = try ProfileRepository(modelContext: modelContext).currentProfile() else { return }
+        guard let profile = try currentLocalProfile() else { return }
         guard profile.clearBrosMembership() else {
             return
         }
@@ -2627,6 +2662,118 @@ final class CloudKitBrosSocialService: BrosSocialService {
             role: role
         )
         return record
+    }
+
+    private func currentLocalProfile() throws -> UserProfile? {
+        var descriptor = FetchDescriptor<UserProfile>(
+            sortBy: [
+                SortDescriptor(\.createdAt, order: .forward),
+                SortDescriptor(\.id, order: .forward),
+            ]
+        )
+        descriptor.fetchLimit = 1
+        return try modelContext.fetch(descriptor).first
+    }
+
+    @discardableResult
+    private func loadOrCreateLocalProfile() throws -> UserProfile {
+        if let existing = try currentLocalProfile() {
+            return existing
+        }
+
+        let profile = UserProfile(displayName: ReviewModerationService.sanitizedForSharing("Athlete", kind: .displayName))
+        modelContext.insert(profile)
+        try modelContext.save()
+        return profile
+    }
+
+    private func session(id: UUID) throws -> WorkoutSession? {
+        var descriptor = FetchDescriptor<WorkoutSession>(
+            predicate: #Predicate { session in
+                session.id == id
+            }
+        )
+        descriptor.fetchLimit = 1
+        return try modelContext.fetch(descriptor).first
+    }
+
+    private func sessionPRAchievements(sessionID: UUID) throws -> [SessionPRAchievement] {
+        guard let session = try session(id: sessionID), session.status == .completed else {
+            return []
+        }
+
+        let factDescriptor = FetchDescriptor<CompletedSetFact>(
+            sortBy: [
+                SortDescriptor(\.completedAt, order: .forward),
+                SortDescriptor(\.sessionSetID, order: .forward),
+            ]
+        )
+        let allFacts = try modelContext.fetch(factDescriptor)
+        let sessionFacts = allFacts.filter { $0.sessionID == sessionID }
+        let historicalFacts = allFacts.filter { $0.completedAt < session.startedAt && $0.sessionID != sessionID }
+
+        var achievements: [SessionPRAchievement] = []
+        var seenExerciseUUIDs: Set<String> = []
+
+        for exercise in (session.exercises ?? []).sorted(by: { $0.sortOrder < $1.sortOrder }) {
+            guard seenExerciseUUIDs.insert(exercise.catalogExerciseUUID).inserted else {
+                continue
+            }
+
+            let bestHistoricalOneRM = historicalFacts
+                .filter { $0.catalogExerciseUUID == exercise.catalogExerciseUUID && !$0.isWarmup }
+                .compactMap(\.estimatedOneRepMaxKg)
+                .max() ?? 0
+
+            let bestSessionFact = sessionFacts
+                .filter {
+                    $0.catalogExerciseUUID == exercise.catalogExerciseUUID
+                        && !$0.isWarmup
+                        && $0.estimatedOneRepMaxKg != nil
+                        && $0.weight != nil
+                }
+                .sorted { lhs, rhs in
+                    let lhsOneRM = lhs.estimatedOneRepMaxKg ?? 0
+                    let rhsOneRM = rhs.estimatedOneRepMaxKg ?? 0
+                    if lhsOneRM != rhsOneRM {
+                        return lhsOneRM > rhsOneRM
+                    }
+
+                    let lhsWeight = lhs.weight ?? 0
+                    let rhsWeight = rhs.weight ?? 0
+                    if lhsWeight != rhsWeight {
+                        return lhsWeight > rhsWeight
+                    }
+
+                    if lhs.reps != rhs.reps {
+                        return lhs.reps > rhs.reps
+                    }
+
+                    return lhs.setIndex < rhs.setIndex
+                }
+                .first(where: { ($0.estimatedOneRepMaxKg ?? 0) > bestHistoricalOneRM })
+
+            guard let bestSessionFact,
+                  let weight = bestSessionFact.weight,
+                  let estimatedOneRepMax = bestSessionFact.estimatedOneRepMaxKg
+            else {
+                continue
+            }
+
+            achievements.append(
+                SessionPRAchievement(
+                    id: "\(session.id.uuidString.lowercased())_\(exercise.catalogExerciseUUID.lowercased())",
+                    catalogExerciseUUID: exercise.catalogExerciseUUID,
+                    exerciseName: exercise.exerciseNameSnapshot,
+                    estimatedOneRepMax: estimatedOneRepMax,
+                    weight: weight,
+                    reps: bestSessionFact.reps,
+                    loadUnit: bestSessionFact.loadUnit
+                )
+            )
+        }
+
+        return achievements
     }
 
     private func unavailableError(
@@ -2770,7 +2917,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
 
     private func currentMembershipRecordForMutation(userRecordName: String) async throws -> CKRecord {
         switch await resolvedMembershipRecord(
-            localProfile: try? ProfileRepository(modelContext: modelContext).loadOrCreateProfile(),
+            localProfile: try? loadOrCreateLocalProfile(),
             userRecordName: userRecordName
         ) {
         case .found(let record):
