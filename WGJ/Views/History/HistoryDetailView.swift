@@ -20,8 +20,7 @@ struct HistoryDetailView: View {
     @State private var setDraftsByExerciseID: [UUID: [WorkoutSessionSetDraft]] = [:]
     @State private var restByExerciseID: [UUID: Int] = [:]
     @State private var notesByExerciseID: [UUID: String] = [:]
-    @State private var previousByExerciseID: [UUID: [Int: WorkoutPreviousSetSnapshot]] = [:]
-    @State private var personalRecordPresentationByExerciseID: [UUID: HistoryExercisePersonalRecordPresentation] = [:]
+    @State private var hydrationPayloadByExerciseID: [UUID: HistoryExerciseHydrationPayload] = [:]
     @State private var loadedExerciseStateStamp: HistoryExerciseStateStamp?
     @State private var deferredHydrationTask: Task<Void, Never>?
     @State private var expandedExerciseIDs: [UUID: Bool] = [:]
@@ -317,11 +316,9 @@ struct HistoryDetailView: View {
         setDraftsByExerciseID = result.draftsByExerciseID
         restByExerciseID = result.restsByExerciseID
         notesByExerciseID = result.notesByExerciseID
-        previousByExerciseID = previousByExerciseID.filter { result.draftsByExerciseID[$0.key] != nil }
-        let filteredPersonalRecordPresentation = personalRecordPresentationByExerciseID.filter {
+        hydrationPayloadByExerciseID = hydrationPayloadByExerciseID.filter {
             result.draftsByExerciseID[$0.key] != nil
         }
-        personalRecordPresentationByExerciseID = filteredPersonalRecordPresentation
         syncExpandedExerciseState()
         loadedExerciseStateStamp = currentStamp
         scheduleDeferredHydration(
@@ -353,43 +350,72 @@ struct HistoryDetailView: View {
 
     private func exerciseSection(_ exercise: WorkoutSessionExercise, index: Int) -> some View {
         let isExpanded = expandedExerciseIDs[exercise.id] ?? false
-        let personalRecordPresentation = isExpanded ? personalRecordPresentationByExerciseID[exercise.id] : nil
-        let previousSets = isExpanded ? (previousByExerciseID[exercise.id] ?? [:]) : [:]
         let drafts = setDraftsByExerciseID[exercise.id] ?? makeDrafts(from: exercise)
         let restSeconds = restByExerciseID[exercise.id] ?? exercise.restSeconds
+        let hydrationPayload = hydrationPayloadByExerciseID[exercise.id]
 
-        return WorkoutExerciseRowHostView(
-            exerciseID: exercise.id,
-            exerciseAccessibilityIdentifier: "history-exercise-\(exercise.catalogExerciseUUID)",
-            exerciseName: exercise.exerciseNameSnapshot,
-            muscleSummary: exercise.muscleSummarySnapshot,
-            category: exercise.categorySnapshot,
-            exerciseIndexTitle: "Exercise \(index + 1)",
+        if isExpanded {
+            return AnyView(
+                WorkoutExerciseRowHostView(
+                    exerciseID: exercise.id,
+                    exerciseAccessibilityIdentifier: "history-exercise-\(exercise.catalogExerciseUUID)",
+                    exerciseName: exercise.exerciseNameSnapshot,
+                    muscleSummary: exercise.muscleSummarySnapshot,
+                    category: exercise.categorySnapshot,
+                    exerciseIndexTitle: "Exercise \(index + 1)",
+                    targetRepMin: exercise.targetRepMin,
+                    targetRepMax: exercise.targetRepMax,
+                    previousPerformanceResolution: hydrationPayload?.previousPerformanceResolution ?? .loading,
+                    personalRecordSummaryKinds: hydrationPayload?.personalRecords.summaryKinds ?? [],
+                    personalRecordKindsBySetID: hydrationPayload?.personalRecords.setKindsBySetID ?? [:],
+                    preferredLoadUnit: preferredLoadUnit,
+                    exerciseNotes: notesByExerciseID[exercise.id] ?? exercise.notes,
+                    restSeconds: restSeconds,
+                    setDrafts: drafts,
+                    isExpanded: true,
+                    onExerciseNotesCommitted: { notes in
+                        updateNotesValue(notes, for: exercise.id)
+                    },
+                    onSetDraftsCommitted: { drafts in
+                        updateDraftsValue(drafts, for: exercise.id)
+                    },
+                    onRestCommitted: { rest in
+                        updateRestValue(rest, for: exercise.id)
+                    },
+                    onExpandedChanged: { handleExpandedChange($0, for: exercise.id) },
+                    onExerciseDelete: {
+                        removeExercise(exerciseID: exercise.id)
+                    }
+                )
+                .equatable()
+            )
+        }
+
+        let collapsedSummary = HistoryExerciseCollapsedSummary(
             targetRepMin: exercise.targetRepMin,
             targetRepMax: exercise.targetRepMax,
-            previousPerformanceResolution: .resolved(previousSets),
-            personalRecordSummaryKinds: personalRecordPresentation?.summaryKinds ?? [],
-            personalRecordKindsBySetID: personalRecordPresentation?.setKindsBySetID ?? [:],
-            preferredLoadUnit: preferredLoadUnit,
-            exerciseNotes: notesByExerciseID[exercise.id] ?? exercise.notes,
+            completedSetCount: drafts.filter(\.isCompleted).count,
+            totalSetCount: drafts.count,
             restSeconds: restSeconds,
-            setDrafts: drafts,
-            isExpanded: isExpanded,
-            onExerciseNotesCommitted: { notes in
-                updateNotesValue(notes, for: exercise.id)
-            },
-            onSetDraftsCommitted: { drafts in
-                updateDraftsValue(drafts, for: exercise.id)
-            },
-            onRestCommitted: { rest in
-                updateRestValue(rest, for: exercise.id)
-            },
-            onExpandedChanged: { handleExpandedChange($0, for: exercise.id) },
-            onExerciseDelete: {
-                removeExercise(exerciseID: exercise.id)
-            }
+            notes: notesByExerciseID[exercise.id] ?? exercise.notes
         )
-        .equatable()
+
+        return AnyView(
+            HistoryCollapsedExerciseCard(
+                exerciseAccessibilityIdentifier: "history-exercise-\(exercise.catalogExerciseUUID)",
+                exerciseName: exercise.exerciseNameSnapshot,
+                muscleSummary: exercise.muscleSummarySnapshot,
+                category: exercise.categorySnapshot,
+                exerciseIndexTitle: "Exercise \(index + 1)",
+                summary: collapsedSummary,
+                onExpand: {
+                    handleExpandedChange(true, for: exercise.id)
+                },
+                onDelete: {
+                    removeExercise(exerciseID: exercise.id)
+                }
+            )
+        )
     }
 
     @MainActor
@@ -397,11 +423,13 @@ struct HistoryDetailView: View {
         for stamp: HistoryExerciseStateStamp,
         draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
     ) {
-        let expandedIDs = Set(sessionExercises.map(\.id).filter { expandedExerciseIDs[$0] ?? false })
-        let previousIDsToHydrate = expandedIDs.filter { previousByExerciseID[$0] == nil }
-        let personalRecordIDsToHydrate = expandedIDs.filter { personalRecordPresentationByExerciseID[$0] == nil }
+        let exerciseIDsToHydrate = HistoryExerciseHydrationPlanner.pendingExerciseIDs(
+            orderedExerciseIDs: sessionExercises.map(\.id),
+            expandedExerciseIDs: expandedExerciseIDs,
+            hydratedExerciseIDs: Set(hydrationPayloadByExerciseID.keys)
+        )
 
-        guard !previousIDsToHydrate.isEmpty || !personalRecordIDsToHydrate.isEmpty else {
+        guard !exerciseIDsToHydrate.isEmpty else {
             deferredHydrationTask?.cancel()
             deferredHydrationTask = nil
             return
@@ -412,36 +440,23 @@ struct HistoryDetailView: View {
             try? await Task.sleep(for: .milliseconds(60))
             guard !Task.isCancelled, loadedExerciseStateStamp == stamp else { return }
 
-            if !previousIDsToHydrate.isEmpty {
-                let loadedPrevious = WGJPerformance.measure("history-detail.hydrate.history") {
-                    loadPreviousByExerciseID(
-                        using: draftsByExerciseID,
-                        exerciseIDs: previousIDsToHydrate
-                    )
-                }
-                guard !Task.isCancelled, loadedExerciseStateStamp == stamp else { return }
-                previousByExerciseID.merge(loadedPrevious) { _, new in new }
+            let loadedPayloads = WGJPerformance.measure("history-detail.hydrate.rows") {
+                loadHydrationPayloadByExerciseID(
+                    using: draftsByExerciseID,
+                    exerciseIDs: exerciseIDsToHydrate
+                )
             }
-
-            await Task.yield()
             guard !Task.isCancelled, loadedExerciseStateStamp == stamp else { return }
-
-            if !personalRecordIDsToHydrate.isEmpty {
-                let personalRecordPresentation = WGJPerformance.measure("history-detail.hydrate.prs") {
-                    loadPersonalRecordPresentation(for: personalRecordIDsToHydrate)
-                }
-                guard !Task.isCancelled, loadedExerciseStateStamp == stamp else { return }
-                personalRecordPresentationByExerciseID.merge(personalRecordPresentation) { _, new in new }
-            }
+            hydrationPayloadByExerciseID.merge(loadedPayloads) { _, new in new }
             deferredHydrationTask = nil
         }
     }
 
     @MainActor
-    private func loadPreviousByExerciseID(
+    private func loadHydrationPayloadByExerciseID(
         using draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]],
         exerciseIDs: Set<UUID>
-    ) -> [UUID: [Int: WorkoutPreviousSetSnapshot]] {
+    ) -> [UUID: HistoryExerciseHydrationPayload] {
         guard !exerciseIDs.isEmpty else { return [:] }
 
         let startedAt = session?.startedAt ?? .now
@@ -453,16 +468,24 @@ struct HistoryDetailView: View {
             excludingSessionID: sessionID
         )) ?? [:]
 
-        var loadedPrevious: [UUID: [Int: WorkoutPreviousSetSnapshot]] = [:]
-        loadedPrevious.reserveCapacity(targetExercises.count)
+        let personalRecordsByExerciseID = loadPersonalRecordPresentation(for: exerciseIDs)
+
+        var payloadByExerciseID: [UUID: HistoryExerciseHydrationPayload] = [:]
+        payloadByExerciseID.reserveCapacity(targetExercises.count)
 
         for exercise in targetExercises {
             let drafts = draftsByExerciseID[exercise.id] ?? makeDrafts(from: exercise)
             let base = previousMaps[exercise.catalogExerciseUUID] ?? [:]
-            loadedPrevious[exercise.id] = resolvedPreviousMap(baseMap: base, maxSetCount: drafts.count)
+            payloadByExerciseID[exercise.id] = HistoryExerciseHydrationPayload(
+                previousPerformanceResolution: .resolved(
+                    resolvedPreviousMap(baseMap: base, maxSetCount: drafts.count)
+                ),
+                personalRecords: personalRecordsByExerciseID[exercise.id]
+                    ?? HistoryExercisePersonalRecordPresentation(summaryKinds: [], setKindsBySetID: [:])
+            )
         }
 
-        return loadedPrevious
+        return payloadByExerciseID
     }
 
     private func saveChanges() {
@@ -543,7 +566,7 @@ struct HistoryDetailView: View {
                 setDraftsByExerciseID.removeValue(forKey: exerciseID)
                 restByExerciseID.removeValue(forKey: exerciseID)
                 notesByExerciseID.removeValue(forKey: exerciseID)
-                previousByExerciseID.removeValue(forKey: exerciseID)
+                hydrationPayloadByExerciseID.removeValue(forKey: exerciseID)
                 loadedExerciseStateStamp = nil
                 hasPendingSummaryRebuild = true
             } catch {
@@ -669,6 +692,11 @@ private struct HistoryExerciseLocalHydrationResult {
     let notesByExerciseID: [UUID: String]
 }
 
+private struct HistoryExerciseHydrationPayload: Equatable {
+    let previousPerformanceResolution: WorkoutPreviousPerformanceResolution
+    let personalRecords: HistoryExercisePersonalRecordPresentation
+}
+
 private struct HistoryExerciseStateStamp: Hashable {
     private let entries: [Entry]
 
@@ -716,6 +744,174 @@ private struct HistoryWorkoutPersonalRecordSummary {
         }
 
         return "\(highlightedSetCount) PR set\(highlightedSetCount == 1 ? "" : "s")"
+    }
+}
+
+private struct HistoryExerciseCollapsedSummary: Equatable {
+    let targetRepMin: Int?
+    let targetRepMax: Int?
+    let completedSetCount: Int
+    let totalSetCount: Int
+    let restSeconds: Int
+    let notes: String
+
+    var repRangeText: String {
+        switch (targetRepMin, targetRepMax) {
+        case let (min?, max?):
+            return min == max ? "\(min) reps" : "\(min)-\(max) reps"
+        case let (min?, nil):
+            return "\(min)+ reps"
+        case let (nil, max?):
+            return "Up to \(max)"
+        case (nil, nil):
+            return "Open reps"
+        }
+    }
+
+    var setProgressText: String {
+        "\(completedSetCount)/\(totalSetCount) sets"
+    }
+
+    var restText: String {
+        guard restSeconds > 0 else {
+            return "No rest"
+        }
+
+        let mins = max(0, restSeconds) / 60
+        let secs = max(0, restSeconds) % 60
+        return "Rest \(String(format: "%d:%02d", mins, secs))"
+    }
+
+    var trimmedNotes: String? {
+        let trimmed = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+private struct HistoryCollapsedExerciseCard: View, Equatable {
+    let exerciseAccessibilityIdentifier: String
+    let exerciseName: String
+    let muscleSummary: String
+    let category: String
+    let exerciseIndexTitle: String
+    let summary: HistoryExerciseCollapsedSummary
+    let onExpand: () -> Void
+    let onDelete: () -> Void
+
+    static func == (lhs: HistoryCollapsedExerciseCard, rhs: HistoryCollapsedExerciseCard) -> Bool {
+        lhs.exerciseAccessibilityIdentifier == rhs.exerciseAccessibilityIdentifier
+            && lhs.exerciseName == rhs.exerciseName
+            && lhs.muscleSummary == rhs.muscleSummary
+            && lhs.category == rhs.category
+            && lhs.exerciseIndexTitle == rhs.exerciseIndexTitle
+            && lhs.summary == rhs.summary
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(exerciseIndexTitle.uppercased())
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(WGJTheme.accentCyan)
+
+                    Text(exerciseName)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(WGJTheme.accentBlue)
+                        .wgjSingleLineText(scale: 0.8)
+                        .accessibilityIdentifier(exerciseAccessibilityIdentifier)
+
+                    Text(summaryLine)
+                        .font(.subheadline)
+                        .foregroundStyle(WGJTheme.textSecondary)
+                        .lineLimit(2)
+
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) {
+                            infoChip(summary.repRangeText, tint: WGJTheme.accentGold)
+                            infoChip(summary.setProgressText, tint: WGJTheme.accentBlue)
+                            infoChip(summary.restText, tint: WGJTheme.textSecondary)
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            infoChip(summary.repRangeText, tint: WGJTheme.accentGold)
+                            infoChip(summary.setProgressText, tint: WGJTheme.accentBlue)
+                            infoChip(summary.restText, tint: WGJTheme.textSecondary)
+                        }
+                    }
+
+                    if let notes = summary.trimmedNotes {
+                        Text(notes)
+                            .font(.caption)
+                            .foregroundStyle(WGJTheme.textSecondary)
+                            .lineLimit(2)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
+
+                Spacer(minLength: 12)
+
+                VStack(spacing: 8) {
+                    Menu {
+                        Button(role: .destructive, action: onDelete) {
+                            Label("Delete exercise", systemImage: "trash")
+                        }
+                    } label: {
+                        headerIcon(symbol: "ellipsis.circle")
+                    }
+                    .menuIndicator(.hidden)
+                    .accessibilityIdentifier("\(exerciseAccessibilityIdentifier)-actions-button")
+
+                    Button(action: onExpand) {
+                        headerIcon(symbol: "chevron.down.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("\(exerciseAccessibilityIdentifier)-expand-button")
+                }
+            }
+        }
+        .padding(16)
+        .wgjCardContainer(strong: true)
+    }
+
+    private var summaryLine: String {
+        if !muscleSummary.isEmpty {
+            return muscleSummary
+        }
+
+        if !category.isEmpty {
+            return category
+        }
+
+        return "Saved exercise"
+    }
+
+    private func infoChip(_ title: String, tint: Color) -> some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(tint.opacity(0.12))
+                    .overlay(
+                        Capsule()
+                            .stroke(tint.opacity(0.24), lineWidth: 1)
+                    )
+            )
+    }
+
+    private func headerIcon(symbol: String) -> some View {
+        Image(systemName: symbol)
+            .font(.title3)
+            .foregroundStyle(WGJTheme.accentBlue)
+            .frame(width: 34, height: 34)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(WGJTheme.field)
+            )
     }
 }
 

@@ -52,11 +52,39 @@ struct AppBootstrapTests {
     }
 
     @Test
-    func appMaintenanceOnlySchedulesInMainActiveState() {
-        #expect(!AppMaintenancePolicy.shouldSchedule(appPhase: .splash, scenePhase: .active))
-        #expect(!AppMaintenancePolicy.shouldSchedule(appPhase: .login, scenePhase: .active))
-        #expect(!AppMaintenancePolicy.shouldSchedule(appPhase: .main, scenePhase: .inactive))
-        #expect(!AppMaintenancePolicy.shouldSchedule(appPhase: .main, scenePhase: .background))
-        #expect(AppMaintenancePolicy.shouldSchedule(appPhase: .main, scenePhase: .active))
+    func appMaintenanceOnlyRunsResumeCriticalInMainActiveState() {
+        #expect(!AppMaintenancePolicy.shouldRunResumeCritical(appPhase: .splash, scenePhase: .active))
+        #expect(!AppMaintenancePolicy.shouldRunResumeCritical(appPhase: .login, scenePhase: .active))
+        #expect(!AppMaintenancePolicy.shouldRunResumeCritical(appPhase: .main, scenePhase: .inactive))
+        #expect(!AppMaintenancePolicy.shouldRunResumeCritical(appPhase: .main, scenePhase: .background))
+        #expect(AppMaintenancePolicy.shouldRunResumeCritical(appPhase: .main, scenePhase: .active))
+    }
+
+    @Test
+    func deferredMaintenanceOnlySchedulesWhenPendingAndNoActiveWorkoutExists() {
+        #expect(
+            !AppMaintenancePolicy.shouldScheduleDeferred(
+                appPhase: .main,
+                scenePhase: .active,
+                activeSessionID: UUID(),
+                hasPendingDeferredMaintenance: true
+            )
+        )
+        #expect(
+            !AppMaintenancePolicy.shouldScheduleDeferred(
+                appPhase: .main,
+                scenePhase: .active,
+                activeSessionID: nil,
+                hasPendingDeferredMaintenance: false
+            )
+        )
+        #expect(
+            AppMaintenancePolicy.shouldScheduleDeferred(
+                appPhase: .main,
+                scenePhase: .active,
+                activeSessionID: nil,
+                hasPendingDeferredMaintenance: true
+            )
+        )
     }
 }

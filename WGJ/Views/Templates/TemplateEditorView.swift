@@ -834,7 +834,16 @@ private struct TemplateEditorExerciseRow: View {
                 onAddComponent: onAddComponent,
                 onMoveComponentUp: onMoveComponentUp,
                 onMoveComponentDown: onMoveComponentDown,
-                onDeleteComponent: onDeleteComponent
+                onDeleteComponent: onDeleteComponent,
+                shouldCommitOnDisappear: {
+                    editingCoordinator.hasPendingChanges(
+                        notes: localNotes,
+                        targetRepMin: localTargetRepMin,
+                        targetRepMax: localTargetRepMax,
+                        restSeconds: localRestSeconds,
+                        setDrafts: localSetDrafts
+                    )
+                }
             )
             .equatable()
         }
@@ -935,6 +944,7 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
     let onMoveComponentUp: (Int) -> Void
     let onMoveComponentDown: (Int) -> Void
     let onDeleteComponent: (UUID) -> Void
+    let shouldCommitOnDisappear: () -> Bool
 
     static func == (lhs: TemplateEditorExerciseCardView, rhs: TemplateEditorExerciseCardView) -> Bool {
         lhs.exerciseName == rhs.exerciseName
@@ -1009,6 +1019,7 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
                 set: { onSetDraftsChanged($0) }
             ),
             onCommitRequest: onCommitRequest,
+            shouldCommitOnDisappear: shouldCommitOnDisappear,
             onMoveUp: onMoveUp,
             onMoveDown: onMoveDown,
             onMoveToPosition: onMoveToPosition,

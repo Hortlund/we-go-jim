@@ -76,6 +76,27 @@ final class HistoryProjectionRepository {
         return rebuiltSessions
     }
 
+    func needsBackfill() throws -> Bool {
+        let completedSessions = try sessionRepository.completedSessions(includeArchived: true)
+        let validSessionIDs = Set(completedSessions.map(\.id))
+        let existingFacts = try allFacts()
+        let factsBySessionID = Dictionary(grouping: existingFacts, by: \.sessionID)
+
+        if existingFacts.contains(where: { !validSessionIDs.contains($0.sessionID) }) {
+            return true
+        }
+
+        for session in completedSessions {
+            let drafts = makeFactDrafts(from: session)
+            let existing = factsBySessionID[session.id] ?? []
+            if factsMatch(existing, drafts: drafts) == false {
+                return true
+            }
+        }
+
+        return false
+    }
+
     func facts(forSessionID sessionID: UUID) throws -> [CompletedSetFact] {
         let descriptor = FetchDescriptor<CompletedSetFact>(
             predicate: #Predicate { fact in

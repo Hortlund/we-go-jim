@@ -1,9 +1,84 @@
 import SwiftData
 import SwiftUI
 
+enum AppMaintenanceTrigger: Equatable {
+    case enteredMain
+    case sceneActivated
+    case activeWorkoutEnded
+}
+
+struct AppDeferredMaintenanceWork: Equatable {
+    let shouldApplyCleanStart: Bool
+    let shouldPrimeCatalog: Bool
+    let shouldBackfillHistoryProjection: Bool
+    let shouldBackfillSessionSummaries: Bool
+    let shouldRunSocialMaintenance: Bool
+
+    var hasWork: Bool {
+        shouldApplyCleanStart
+            || shouldPrimeCatalog
+            || shouldBackfillHistoryProjection
+            || shouldBackfillSessionSummaries
+            || shouldRunSocialMaintenance
+    }
+}
+
+enum AppDeferredMaintenancePlanner {
+    static func plan(
+        hasAppliedCleanStart: Bool,
+        hasPrimedCatalog: Bool,
+        needsHistoryProjectionBackfill: Bool,
+        needsSessionSummaryBackfill: Bool,
+        shouldRunSocialMaintenance: Bool
+    ) -> AppDeferredMaintenanceWork {
+        AppDeferredMaintenanceWork(
+            shouldApplyCleanStart: hasAppliedCleanStart == false,
+            shouldPrimeCatalog: hasPrimedCatalog == false,
+            shouldBackfillHistoryProjection: needsHistoryProjectionBackfill,
+            shouldBackfillSessionSummaries: needsSessionSummaryBackfill,
+            shouldRunSocialMaintenance: shouldRunSocialMaintenance
+        )
+    }
+}
+
+@MainActor
+@Observable
+final class AppDeferredMaintenanceState {
+    private(set) var isPending = true
+    private(set) var hasAppliedCleanStart = false
+
+    func requestRun() {
+        isPending = true
+    }
+
+    func markCompleted() {
+        isPending = false
+    }
+
+    func markCleanStartApplied() {
+        hasAppliedCleanStart = true
+    }
+
+    func reset() {
+        isPending = true
+        hasAppliedCleanStart = false
+    }
+}
+
 enum AppMaintenancePolicy {
-    static func shouldSchedule(appPhase: AppPhase, scenePhase: ScenePhase) -> Bool {
+    static func shouldRunResumeCritical(appPhase: AppPhase, scenePhase: ScenePhase) -> Bool {
         appPhase == .main && scenePhase == .active
+    }
+
+    static func shouldScheduleDeferred(
+        appPhase: AppPhase,
+        scenePhase: ScenePhase,
+        activeSessionID: UUID?,
+        hasPendingDeferredMaintenance: Bool
+    ) -> Bool {
+        shouldRunResumeCritical(appPhase: appPhase, scenePhase: scenePhase)
+            && activeSessionID == nil
+            && hasPendingDeferredMaintenance
     }
 }
 

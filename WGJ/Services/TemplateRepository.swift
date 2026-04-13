@@ -481,13 +481,18 @@ final class TemplateRepository {
 
     func updateTemplate(id: UUID, name: String, notes: String) throws {
         let cleaned = try ReviewModerationService.validateUserInput(name, kind: .templateName)
+        let normalizedNotes = normalizedTemplateNotes(notes)
 
         guard let template = try template(id: id) else {
             throw TemplateRepositoryError.templateNotFound
         }
 
+        guard template.name != cleaned || template.notes != normalizedNotes else {
+            return
+        }
+
         template.name = cleaned
-        template.notes = notes
+        template.notes = normalizedNotes
         template.updatedAt = .now
         try modelContext.save()
     }
@@ -498,6 +503,10 @@ final class TemplateRepository {
         }
 
         let normalized = sanitizedRepRange(min: minReps, max: maxReps)
+        guard exercise.targetRepMin != normalized.min || exercise.targetRepMax != normalized.max else {
+            return
+        }
+
         exercise.targetRepMin = normalized.min
         exercise.targetRepMax = normalized.max
         exercise.updatedAt = .now
@@ -524,9 +533,15 @@ final class TemplateRepository {
         }
 
         let normalized = sanitizedRestSeconds(restSeconds)
+        let orderedSets = (exercise.prescribedSets ?? []).sorted { $0.sortOrder < $1.sortOrder }
+        let needsSetRestUpdate = orderedSets.contains { $0.restSeconds != normalized }
+        guard exercise.restSeconds != normalized || needsSetRestUpdate else {
+            return
+        }
+
         exercise.restSeconds = normalized
 
-        for set in exercise.prescribedSets ?? [] {
+        for set in orderedSets where set.restSeconds != normalized {
             set.restSeconds = normalized
             set.updatedAt = .now
         }
@@ -950,6 +965,17 @@ final class TemplateRepository {
         }
 
         let existingSets = exercise.prescribedSets ?? []
+        let orderedExistingSets = existingSets.sorted { $0.sortOrder < $1.sortOrder }
+        let incomingSignatures = drafts.enumerated().map { index, draft in
+            persistenceSignature(for: draft, at: index)
+        }
+        let existingSignatures = orderedExistingSets.enumerated().map { index, set in
+            persistenceSignature(for: set, at: index)
+        }
+        guard incomingSignatures != existingSignatures else {
+            return
+        }
+
         let incomingIDs = Set(drafts.map(\.id))
 
         for set in existingSets where !incomingIDs.contains(set.id) {
@@ -1694,6 +1720,38 @@ final class TemplateRepository {
         exercise.prescribedSets = ordered
     }
 
+    private func persistenceSignature(
+        for draft: TemplateExerciseSetDraft,
+        at index: Int
+    ) -> TemplateExerciseSetPersistenceSignature {
+        TemplateExerciseSetPersistenceSignature(
+            id: draft.id,
+            sortOrder: index,
+            targetReps: sanitizedReps(draft.targetReps),
+            targetWeight: sanitizedWeight(draft.targetWeight),
+            loadUnit: draft.loadUnit,
+            restSeconds: sanitizedRestSeconds(draft.restSeconds),
+            isWarmup: draft.isWarmup,
+            isLocked: draft.isLocked
+        )
+    }
+
+    private func persistenceSignature(
+        for set: TemplateExerciseSet,
+        at index: Int
+    ) -> TemplateExerciseSetPersistenceSignature {
+        TemplateExerciseSetPersistenceSignature(
+            id: set.id,
+            sortOrder: index,
+            targetReps: set.targetReps,
+            targetWeight: set.targetWeight,
+            loadUnit: set.loadUnit,
+            restSeconds: set.restSeconds,
+            isWarmup: set.isWarmup,
+            isLocked: set.isLocked
+        )
+    }
+
     private func hasTargetDelta(modelSet: TemplateExerciseSet, draft: TemplateExerciseSetDraft) -> Bool {
         sanitizedReps(draft.targetReps) != modelSet.targetReps
             || sanitizedWeight(draft.targetWeight) != modelSet.targetWeight
@@ -1723,4 +1781,15 @@ final class TemplateRepository {
         let safeMax = sanitizedReps(maxReps)
         return (safeMin, safeMax)
     }
+}
+
+private struct TemplateExerciseSetPersistenceSignature: Equatable {
+    let id: UUID
+    let sortOrder: Int
+    let targetReps: Int?
+    let targetWeight: Double?
+    let loadUnit: TemplateLoadUnit
+    let restSeconds: Int
+    let isWarmup: Bool
+    let isLocked: Bool
 }

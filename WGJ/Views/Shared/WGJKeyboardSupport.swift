@@ -27,10 +27,12 @@ private struct WGJKeyboardMaxYPreferenceKey: PreferenceKey {
 
 private struct WGJKeyboardVisibilityModifier: ViewModifier {
     @Binding var isVisible: Bool
+    let isEnabled: Bool
     @State private var viewMaxY = UIScreen.main.bounds.maxY
 
+    @ViewBuilder
     func body(content: Content) -> some View {
-        content
+        let measuredContent = content
             .background {
                 GeometryReader { proxy in
                     Color.clear
@@ -45,14 +47,25 @@ private struct WGJKeyboardVisibilityModifier: ViewModifier {
                 guard abs(updatedMaxY - viewMaxY) > 0.5 else { return }
                 viewMaxY = updatedMaxY
             }
-            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
-                updateVisibility(
-                    WGJKeyboard.isVisible(from: notification, viewMaxY: viewMaxY)
-                )
-            }
-            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-                updateVisibility(false)
-            }
+
+        if isEnabled {
+            measuredContent
+                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
+                    updateVisibility(
+                        WGJKeyboard.isVisible(from: notification, viewMaxY: viewMaxY)
+                    )
+                }
+                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+                    updateVisibility(false)
+                }
+        } else {
+            measuredContent
+                .onChange(of: isEnabled) { _, newValue in
+                    if !newValue {
+                        updateVisibility(false)
+                    }
+                }
+        }
     }
 
     private func updateVisibility(_ newValue: Bool) {
@@ -63,11 +76,19 @@ private struct WGJKeyboardVisibilityModifier: ViewModifier {
 
 private struct WGJMinimalKeyboardToolbarModifier: ViewModifier {
     let onDismiss: () -> Void
-    @State private var isKeyboardVisible = false
+    private let externalIsKeyboardVisible: Binding<Bool>?
+    @State private var localIsKeyboardVisible = false
+
+    init(
+        isKeyboardVisible: Binding<Bool>? = nil,
+        onDismiss: @escaping () -> Void
+    ) {
+        externalIsKeyboardVisible = isKeyboardVisible
+        self.onDismiss = onDismiss
+    }
 
     func body(content: Content) -> some View {
-        content
-            .wgjTrackKeyboardVisibility($isKeyboardVisible)
+        trackedContent(content)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if isKeyboardVisible {
                     HStack {
@@ -109,12 +130,28 @@ private struct WGJMinimalKeyboardToolbarModifier: ViewModifier {
             }
             .animation(.easeOut(duration: 0.18), value: isKeyboardVisible)
     }
+
+    @ViewBuilder
+    private func trackedContent(_ content: Content) -> some View {
+        if externalIsKeyboardVisible == nil {
+            content.wgjTrackKeyboardVisibility($localIsKeyboardVisible)
+        } else {
+            content
+        }
+    }
+
+    private var isKeyboardVisible: Bool {
+        externalIsKeyboardVisible?.wrappedValue ?? localIsKeyboardVisible
+    }
 }
 
 extension View {
     @MainActor
-    func wgjTrackKeyboardVisibility(_ isVisible: Binding<Bool>) -> some View {
-        modifier(WGJKeyboardVisibilityModifier(isVisible: isVisible))
+    func wgjTrackKeyboardVisibility(
+        _ isVisible: Binding<Bool>,
+        isEnabled: Bool = true
+    ) -> some View {
+        modifier(WGJKeyboardVisibilityModifier(isVisible: isVisible, isEnabled: isEnabled))
     }
 
     @MainActor
@@ -122,6 +159,15 @@ extension View {
         modifier(WGJMinimalKeyboardToolbarModifier(onDismiss: {
             WGJKeyboard.dismiss()
         }))
+    }
+
+    func wgjMinimalKeyboardToolbar(isKeyboardVisible: Binding<Bool>) -> some View {
+        modifier(WGJMinimalKeyboardToolbarModifier(
+            isKeyboardVisible: isKeyboardVisible,
+            onDismiss: {
+                WGJKeyboard.dismiss()
+            }
+        ))
     }
 
     func wgjMinimalKeyboardToolbar(onDismiss: @escaping () -> Void) -> some View {

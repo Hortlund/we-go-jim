@@ -441,6 +441,11 @@ final class ActiveWorkoutPresentationState {
         restTimerState?.dismissRestTimerPopup()
     }
 
+    func restoreActiveSessionIfMissing(modelContext: ModelContext) {
+        guard activeSessionID == nil else { return }
+        restoreActiveSessionIfNeeded(modelContext: modelContext)
+    }
+
     func restoreActiveSessionIfNeeded(modelContext: ModelContext) {
         let repository = ActiveWorkoutDraftRepository(modelContext: modelContext)
         do {

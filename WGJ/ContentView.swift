@@ -18,6 +18,7 @@ struct ContentView: View {
     @State private var restTimerState = RestTimerState()
     @State private var catalogSyncCoordinator = CatalogSyncCoordinator()
     @State private var socialMaintenanceScheduler = SocialMaintenanceScheduler()
+    @State private var deferredMaintenanceState = AppDeferredMaintenanceState()
     @State private var isPreparingMainPhase = false
     @State private var hasInstalledUITestPendingTemplate = false
 
@@ -53,23 +54,32 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .task {
             installUITestPendingTemplateIfNeeded()
-            restTimerState.clearExpiredRestTimerIfNeeded()
+            deferredMaintenanceState.requestRun()
+            performResumeCriticalMaintenanceIfNeeded()
+            requestDeferredMaintenance(trigger: .enteredMain)
             syncWorkoutNotificationPreferences()
             updateIdleTimerState()
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
-                restTimerState.clearExpiredRestTimerIfNeeded()
-                requestAppMaintenanceIfNeeded()
+                performResumeCriticalMaintenanceIfNeeded()
+                requestDeferredMaintenance(trigger: .sceneActivated)
             }
             updateIdleTimerState()
         }
         .onChange(of: appPhase) { _, newPhase in
             if newPhase == .main {
-                requestAppMaintenanceIfNeeded()
+                deferredMaintenanceState.requestRun()
+                performResumeCriticalMaintenanceIfNeeded()
+                requestDeferredMaintenance(trigger: .enteredMain)
                 routePendingTemplateFileIfNeeded()
             }
             updateIdleTimerState()
+        }
+        .onChange(of: activeWorkoutPresentationState.activeSessionID) { oldValue, newValue in
+            guard oldValue != nil, newValue == nil else { return }
+            deferredMaintenanceState.requestRun()
+            requestDeferredMaintenance(trigger: .activeWorkoutEnded)
         }
         .onOpenURL { url in
             handleIncomingTemplateFileURL(url)
@@ -169,36 +179,88 @@ struct ContentView: View {
         }
     }
 
-    private func requestAppMaintenance() {
-        socialMaintenanceScheduler.schedule {
-            await performAppMaintenance()
+    private func requestDeferredMaintenance(trigger: AppMaintenanceTrigger) {
+        Task { @MainActor in
+            await scheduleDeferredMaintenanceIfNeeded(trigger: trigger)
         }
     }
 
-    private func requestAppMaintenanceIfNeeded() {
-        guard AppMaintenancePolicy.shouldSchedule(appPhase: appPhase, scenePhase: scenePhase) else {
+    private func scheduleDeferredMaintenance(trigger: AppMaintenanceTrigger) {
+        socialMaintenanceScheduler.schedule {
+            await performDeferredMaintenanceIfNeeded(trigger: trigger)
+        }
+    }
+
+    private func performResumeCriticalMaintenanceIfNeeded() {
+        guard AppMaintenancePolicy.shouldRunResumeCritical(appPhase: appPhase, scenePhase: scenePhase) else {
             return
         }
 
-        requestAppMaintenance()
+        restTimerState.clearExpiredRestTimerIfNeeded()
+        activeWorkoutPresentationState.restoreActiveSessionIfMissing(modelContext: modelContext)
     }
 
     @MainActor
-    private func performAppMaintenance() async {
-        await WGJPerformance.measureAsync("app.maintenance") {
-            BrosCleanStartPolicy.applyIfNeeded(modelContext: modelContext)
-            activeWorkoutPresentationState.restoreActiveSessionIfNeeded(modelContext: modelContext)
-            restTimerState.clearExpiredRestTimerIfNeeded()
-            catalogSyncCoordinator.primeLocalCatalogIfNeeded(modelContext: modelContext)
-            let rebuiltProjectionCount = (try? HistoryProjectionRepository(modelContext: modelContext).backfillIfNeeded(
-                persistChanges: false
-            )) ?? 0
-            if rebuiltProjectionCount > 0 {
-                try? modelContext.save()
-            }
-            _ = try? WorkoutSessionRepository(modelContext: modelContext).backfillCompletedSessionSummariesIfNeeded()
-            await runSocialMaintenance()
+    private func scheduleDeferredMaintenanceIfNeeded(trigger: AppMaintenanceTrigger) async {
+        guard AppMaintenancePolicy.shouldScheduleDeferred(
+            appPhase: appPhase,
+            scenePhase: scenePhase,
+            activeSessionID: activeWorkoutPresentationState.activeSessionID,
+            hasPendingDeferredMaintenance: deferredMaintenanceState.isPending
+        ) else {
+            return
         }
+
+        scheduleDeferredMaintenance(trigger: trigger)
+    }
+
+    @MainActor
+    private func performDeferredMaintenanceIfNeeded(trigger: AppMaintenanceTrigger) async {
+        guard deferredMaintenanceState.isPending else { return }
+        guard AppMaintenancePolicy.shouldScheduleDeferred(
+            appPhase: appPhase,
+            scenePhase: scenePhase,
+            activeSessionID: activeWorkoutPresentationState.activeSessionID,
+            hasPendingDeferredMaintenance: true
+        ) else {
+            return
+        }
+
+        let work = currentDeferredMaintenanceWork()
+        guard work.hasWork else {
+            deferredMaintenanceState.markCompleted()
+            return
+        }
+
+        await WGJPerformance.measureAsync("app.maintenance") {
+            if work.shouldApplyCleanStart {
+                BrosCleanStartPolicy.applyIfNeeded(modelContext: modelContext)
+                deferredMaintenanceState.markCleanStartApplied()
+            }
+
+            if work.shouldPrimeCatalog {
+                catalogSyncCoordinator.primeLocalCatalogIfNeeded(modelContext: modelContext)
+            }
+
+            if work.shouldBackfillHistoryProjection {
+                let rebuiltProjectionCount = (try? HistoryProjectionRepository(modelContext: modelContext).backfillIfNeeded(
+                    persistChanges: false
+                )) ?? 0
+                if rebuiltProjectionCount > 0 {
+                    try? modelContext.save()
+                }
+            }
+
+            if work.shouldBackfillSessionSummaries {
+                _ = try? WorkoutSessionRepository(modelContext: modelContext).backfillCompletedSessionSummariesIfNeeded()
+            }
+
+            if work.shouldRunSocialMaintenance {
+                await runSocialMaintenance()
+            }
+        }
+
+        deferredMaintenanceState.markCompleted()
     }
 
     @MainActor
@@ -237,10 +299,27 @@ struct ContentView: View {
         )
     }
 
+    private func currentDeferredMaintenanceWork() -> AppDeferredMaintenanceWork {
+        let historyProjectionRepository = HistoryProjectionRepository(modelContext: modelContext)
+        let workoutRepository = WorkoutSessionRepository(modelContext: modelContext)
+
+        let shouldBackfillHistoryProjection = (try? historyProjectionRepository.needsBackfill()) ?? false
+        let shouldBackfillSessionSummaries = (try? workoutRepository.hasStaleCompletedSessionSummaries()) ?? false
+
+        return AppDeferredMaintenancePlanner.plan(
+            hasAppliedCleanStart: deferredMaintenanceState.hasAppliedCleanStart,
+            hasPrimedCatalog: catalogSyncCoordinator.hasPrimedLocalCatalog,
+            needsHistoryProjectionBackfill: shouldBackfillHistoryProjection,
+            needsSessionSummaryBackfill: shouldBackfillSessionSummaries,
+            shouldRunSocialMaintenance: shouldRunSocialMaintenance()
+        )
+    }
+
     private func resetToStartupFlow() {
         socialMaintenanceScheduler.cancel()
         activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
         catalogSyncCoordinator = CatalogSyncCoordinator()
+        deferredMaintenanceState.reset()
         updateIdleTimerState()
         withAnimation(.easeInOut(duration: 0.2)) {
             appPhase = .splash

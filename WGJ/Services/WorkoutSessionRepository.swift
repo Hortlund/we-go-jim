@@ -762,6 +762,13 @@ final class WorkoutSessionRepository {
         return staleSessions.count
     }
 
+    func hasStaleCompletedSessionSummaries() throws -> Bool {
+        let sessions = try completedSessions(includeArchived: true)
+        return sessions.contains {
+            $0.summaryMetricsVersion < WorkoutMetricsService.currentSummaryMetricsVersion
+        }
+    }
+
     func deleteSession(id: UUID) throws {
         guard let session = try session(id: id) else {
             throw WorkoutSessionRepositoryError.sessionNotFound

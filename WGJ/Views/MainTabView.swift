@@ -97,7 +97,10 @@ struct MainTabView: View {
                 WorkoutCompletionSummaryView(sessionID: presentation.sessionID)
                     .interactiveDismissDisabled()
             }
-            .wgjTrackKeyboardVisibility($isKeyboardVisible)
+            .wgjTrackKeyboardVisibility(
+                $isKeyboardVisible,
+                isEnabled: !activeWorkoutPresentationState.isActiveWorkoutPresented
+            )
             .task(id: notificationRouter.routeRequestID) {
                 guard let requestedTab = notificationRouter.requestedTab else { return }
                 tabState.selectedTab = requestedTab

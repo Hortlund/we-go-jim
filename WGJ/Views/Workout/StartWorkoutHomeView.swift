@@ -159,7 +159,6 @@ struct StartWorkoutHomeView: View {
         .task(id: isTabActive) {
             guard isTabActive else { return }
             await reloadHomeSnapshot()
-            bootstrapActiveSessionIfNeeded()
         }
         .task(id: templateLibraryStamp) {
             rebuildTemplateSections()
@@ -843,17 +842,13 @@ struct StartWorkoutHomeView: View {
         }
     }
 
-    private func bootstrapActiveSessionIfNeeded() {
-        activeWorkoutPresentationState.restoreActiveSessionIfNeeded(modelContext: modelContext)
-    }
-
     private func activeSessionIDToResume() -> UUID? {
-        if let activeSession = try? activeWorkoutRepository.activeSession() {
-            return activeSession.id
+        if let activeSessionID = activeWorkoutPresentationState.activeSessionID {
+            return activeSessionID
         }
 
-        if activeWorkoutPresentationState.activeSessionID != nil, !activeWorkoutPresentationState.isActiveWorkoutPresented {
-            activeWorkoutPresentationState.clearPresentation()
+        if let activeSession = try? activeWorkoutRepository.activeSession() {
+            return activeSession.id
         }
 
         return nil

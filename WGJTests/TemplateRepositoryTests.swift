@@ -264,6 +264,124 @@ struct TemplateRepositoryTests {
         #expect(storedExercise.exerciseNameSnapshot == "Standing Calf Raise")
     }
 
+    @Test
+    func updateTemplateSkipsTimestampBumpWhenNameAndNotesAreUnchanged() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+
+        let template = try repository.createTemplate(name: "Push Day", notes: "Stable notes")
+        let originalUpdatedAt = template.updatedAt
+
+        try repository.updateTemplate(id: template.id, name: "Push Day", notes: "Stable notes")
+
+        let refreshedTemplate = try #require(try repository.template(id: template.id))
+        #expect(refreshedTemplate.updatedAt == originalUpdatedAt)
+    }
+
+    @Test
+    func updateExerciseRestSecondsSkipsNoOpWhenExerciseAlreadyMatchesDefaultRest() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+
+        let bench = ExerciseCatalogItem(
+            remoteUUID: "template-rest-noop-bench",
+            displayName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(bench)
+
+        let template = try repository.createTemplate(name: "Push", notes: "")
+        try repository.addExercise(templateID: template.id, catalogItem: bench)
+
+        let exercise = try #require(try repository.exercises(in: template.id).first)
+        let originalUpdatedAt = exercise.updatedAt
+        let originalSetTimestamps = try repository.setDrafts(for: exercise.id)
+        let storedSetUpdatedAt = (exercise.prescribedSets ?? [])
+            .sorted { $0.sortOrder < $1.sortOrder }
+            .map(\.updatedAt)
+
+        try repository.updateExerciseRestSeconds(templateExerciseID: exercise.id, restSeconds: exercise.restSeconds)
+
+        let refreshedExercise = try #require(
+            try repository.exercises(in: template.id).first(where: { $0.id == exercise.id })
+        )
+        let refreshedSetTimestamps = (refreshedExercise.prescribedSets ?? [])
+            .sorted { $0.sortOrder < $1.sortOrder }
+            .map(\.updatedAt)
+
+        #expect(refreshedExercise.updatedAt == originalUpdatedAt)
+        #expect(try repository.setDrafts(for: exercise.id) == originalSetTimestamps)
+        #expect(refreshedSetTimestamps == storedSetUpdatedAt)
+    }
+
+    @Test
+    func saveSetDraftsSkipsNoOpWhenIncomingDraftsMatchPersistedSets() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+
+        let row = ExerciseCatalogItem(
+            remoteUUID: "template-save-noop-row",
+            displayName: "Barbell Row",
+            categoryName: "Back",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(row)
+
+        let template = try repository.createTemplate(name: "Pull", notes: "")
+        try repository.addExercise(templateID: template.id, catalogItem: row)
+
+        let exercise = try #require(try repository.exercises(in: template.id).first)
+        let persistedDrafts = try repository.setDrafts(for: exercise.id)
+        let originalUpdatedAt = exercise.updatedAt
+        let originalSetUpdatedAt = (exercise.prescribedSets ?? [])
+            .sorted { $0.sortOrder < $1.sortOrder }
+            .map(\.updatedAt)
+
+        try repository.saveSetDrafts(templateExerciseID: exercise.id, drafts: persistedDrafts)
+
+        let refreshedExercise = try #require(
+            try repository.exercises(in: template.id).first(where: { $0.id == exercise.id })
+        )
+        let refreshedSetUpdatedAt = (refreshedExercise.prescribedSets ?? [])
+            .sorted { $0.sortOrder < $1.sortOrder }
+            .map(\.updatedAt)
+
+        #expect(refreshedExercise.updatedAt == originalUpdatedAt)
+        #expect(refreshedSetUpdatedAt == originalSetUpdatedAt)
+    }
+
+    @Test
+    func ensureDefaultSetPlansIsNoOpWhenTemplateAlreadyHasNormalizedSets() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+
+        let squat = ExerciseCatalogItem(
+            remoteUUID: "template-default-plan-squat",
+            displayName: "Back Squat",
+            categoryName: "Legs",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(squat)
+
+        let template = try repository.createTemplate(name: "Leg Day", notes: "")
+        try repository.addExercise(templateID: template.id, catalogItem: squat)
+
+        let refreshedTemplate = try #require(try repository.template(id: template.id))
+        let originalUpdatedAt = refreshedTemplate.updatedAt
+
+        try repository.ensureDefaultSetPlans(templateID: template.id)
+
+        let afterEnsure = try #require(try repository.template(id: template.id))
+        #expect(afterEnsure.updatedAt == originalUpdatedAt)
+    }
+
     private func makeInMemoryContext() throws -> ModelContext {
         let schema = Schema([
             ExerciseCatalogItem.self,

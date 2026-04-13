@@ -85,6 +85,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 - How to Verify Next Time: Compare against a clean cloud-backed startup after trimming redundant saves, and use Cloud sync success signals or Apple guidance before classifying remaining export-task scheduler logs as a repo bug.
 - Status: active
 
+## 2026-04-13 - Resume Maintenance Must Be Stale-Driven And Workout-Aware
+
+- Date: 2026-04-13
+- Trigger/Problem: Foregrounding WGJ after background/home/rest-notification flows kept causing visible lag in Active Workout and extra CloudKit export-task chatter, even after cloud startup/runtime gating had already been fixed.
+- Root Cause: `ContentView` was still running broad app maintenance on every `.active`, and the active-workout/editor flows still had enough no-op or over-eager saves to wake the shared persistence stack during those resumes.
+- Durable Rule: Keep WGJ resume work split into resume-critical vs deferred maintenance. Resume-critical should only repair root state needed for the current session, while backfills, catalog priming, social maintenance, and similar work must stay stale-driven and must not run while an active workout is in progress.
+- How to Verify Next Time: On simulator and device, background and foreground an in-progress workout, confirm the active screen restores immediately without visible hitching, confirm deferred maintenance does not rerun on every `.active`, and compare app/cloud logs to ensure save bursts are materially lower.
+- Status: active
+
 ## 2026-04-10 - Workout Grid Needs Explicit Actual-vs-Ghost Rendering After Programmatic Fills
 
 - Date: 2026-04-10

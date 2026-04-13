@@ -502,7 +502,6 @@ struct ExercisesCatalogView: View {
         if let activeSessionID = resolvedActiveSessionIDForAdd() {
             do {
                 try activeWorkoutRepository.addExercise(sessionID: activeSessionID, catalogItem: exercise)
-                activeWorkoutPresentationState.restoreActiveSessionIfNeeded(modelContext: modelContext)
                 isSearchFieldFocused = false
                 WGJKeyboard.dismiss()
             } catch {
@@ -545,8 +544,11 @@ struct ExercisesCatalogView: View {
     }
 
     private func resolvedActiveSessionIDForAdd() -> UUID? {
-        activeWorkoutPresentationState.restoreActiveSessionIfNeeded(modelContext: modelContext)
-        return activeWorkoutPresentationState.activeSessionID
+        if let activeSessionID = activeWorkoutPresentationState.activeSessionID {
+            return activeSessionID
+        }
+
+        return try? activeWorkoutRepository.activeSession()?.id
     }
 
     private func scrollToTop(using proxy: ScrollViewProxy) {

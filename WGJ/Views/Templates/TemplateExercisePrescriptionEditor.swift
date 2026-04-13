@@ -44,12 +44,13 @@ struct TemplateExercisePrescriptionEditor: View {
     @State private var repMaxInputText: String?
     @State private var repsInputTextBySetID: [UUID: String] = [:]
     @State private var weightInputTextBySetID: [UUID: String] = [:]
-    @State private var cachedSetPresentation: SetPresentation
+    @State private var expandedSetPresentation: SetPresentation?
     @State private var pendingPresentationRefreshTask: Task<Void, Never>?
     @FocusState private var focusedInput: TemplateEditorInputFocus?
 
     private let restPresets = [10, 15, 20, 30, 45, 60, 75, 90, 105, 120, 150, 180, 210, 240]
     private let presentationRefreshDebounce = Duration.milliseconds(90)
+    private let shouldCommitOnDisappear: (() -> Bool)?
 
     init(
         exerciseName: String,
@@ -70,6 +71,7 @@ struct TemplateExercisePrescriptionEditor: View {
         restSeconds: Binding<Int>,
         setDrafts: Binding<[TemplateExerciseSetDraft]>,
         onCommitRequest: (() -> Void)? = nil,
+        shouldCommitOnDisappear: (() -> Bool)? = nil,
         onMoveUp: (() -> Void)? = nil,
         onMoveDown: (() -> Void)? = nil,
         onMoveToPosition: (() -> Void)? = nil,
@@ -92,25 +94,29 @@ struct TemplateExercisePrescriptionEditor: View {
         self._setDrafts = setDrafts
         self.externalIsExpanded = isExpanded
         self.onCommitRequest = onCommitRequest
+        self.shouldCommitOnDisappear = shouldCommitOnDisappear
         self.onMoveUp = onMoveUp
         self.onMoveDown = onMoveDown
         self.onMoveToPosition = onMoveToPosition
         self.onExerciseDelete = onExerciseDelete
         self._localIsExpanded = State(initialValue: isExpanded?.wrappedValue ?? initiallyExpanded)
-        self._cachedSetPresentation = State(
-            initialValue: Self.makeSetPresentation(
-                setDrafts: setDrafts.wrappedValue,
-                restSeconds: restSeconds.wrappedValue,
-                formatWeight: { WGJFormatters.decimalString($0) }
-            )
+        let startsExpanded = isExpanded?.wrappedValue ?? initiallyExpanded
+        self._expandedSetPresentation = State(
+            initialValue: startsExpanded
+                ? Self.makeSetPresentation(
+                    setDrafts: setDrafts.wrappedValue,
+                    restSeconds: restSeconds.wrappedValue,
+                    formatWeight: { WGJFormatters.decimalString($0) }
+                )
+                : nil
         )
     }
 
     var body: some View {
-        let presentation = cachedSetPresentation
+        let summaryPresentation = collapsedSetPresentation
 
         return VStack(alignment: .leading, spacing: 14) {
-            header(presentation: presentation)
+            header(summary: summaryPresentation.summary)
 
             if isExpanded {
                 if let recommendation {
@@ -131,15 +137,21 @@ struct TemplateExercisePrescriptionEditor: View {
                     setupTipsSection(recommendation: recommendation)
                 }
 
-                setsSection(presentation: presentation)
+                setsSection(presentation: resolvedExpandedSetPresentation)
             }
         }
         .padding(16)
         .wgjCardContainer(strong: true)
-        .onAppear(perform: refreshSetPresentation)
+        .onAppear {
+            if isExpanded {
+                refreshSetPresentation()
+            }
+        }
         .onDisappear {
             flushPendingPresentationRefresh()
-            onCommitRequest?()
+            if shouldCommitOnDisappear?() ?? true {
+                onCommitRequest?()
+            }
         }
         .onChange(of: _setDrafts.wrappedValue) { _, _ in
             scheduleSetPresentationRefresh()
@@ -158,9 +170,18 @@ struct TemplateExercisePrescriptionEditor: View {
                 flushPendingPresentationRefresh()
             }
         }
+        .onChange(of: isExpanded) { _, newValue in
+            if newValue {
+                refreshSetPresentation()
+            } else {
+                pendingPresentationRefreshTask?.cancel()
+                pendingPresentationRefreshTask = nil
+                expandedSetPresentation = nil
+            }
+        }
     }
 
-    private func header(presentation: SetPresentation) -> some View {
+    private func header(summary: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 8) {
                 if let exerciseIndexTitle {
@@ -176,7 +197,7 @@ struct TemplateExercisePrescriptionEditor: View {
                     .foregroundStyle(WGJTheme.textSecondary)
                     .lineLimit(2)
 
-                headerSummaryChips(presentation: presentation)
+                headerSummaryChips(summary: summary)
             }
 
             Spacer(minLength: 12)
@@ -192,6 +213,10 @@ struct TemplateExercisePrescriptionEditor: View {
                     headerIcon(symbol: isExpanded ? "chevron.up.circle.fill" : "chevron.down.circle.fill")
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier(
+                    exerciseAccessibilityIdentifier.map { "\($0)-expand-button" }
+                        ?? "template-editor-exercise-expand-button"
+                )
             }
         }
     }
@@ -560,16 +585,16 @@ struct TemplateExercisePrescriptionEditor: View {
         onMoveUp != nil || onMoveDown != nil || onMoveToPosition != nil || onExerciseDelete != nil
     }
 
-    private func headerSummaryChips(presentation: SetPresentation) -> some View {
+    private func headerSummaryChips(summary: String) -> some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 8) {
                 infoChip(repRangeSummary, tint: WGJTheme.accentGold)
-                infoChip(presentation.summary, tint: WGJTheme.accentBlue)
+                infoChip(summary, tint: WGJTheme.accentBlue)
             }
 
             VStack(alignment: .leading, spacing: 8) {
                 infoChip(repRangeSummary, tint: WGJTheme.accentGold)
-                infoChip(presentation.summary, tint: WGJTheme.accentBlue)
+                infoChip(summary, tint: WGJTheme.accentBlue)
             }
         }
     }
@@ -958,7 +983,11 @@ struct TemplateExercisePrescriptionEditor: View {
     private func requestImmediateCommit() {
         pendingPresentationRefreshTask?.cancel()
         pendingPresentationRefreshTask = nil
-        refreshSetPresentation()
+        if isExpanded {
+            refreshSetPresentation()
+        } else {
+            expandedSetPresentation = nil
+        }
         onCommitRequest?()
     }
 
@@ -1012,8 +1041,26 @@ struct TemplateExercisePrescriptionEditor: View {
 }
 
 private extension TemplateExercisePrescriptionEditor {
+    var collapsedSetPresentation: TemplateExerciseCollapsedSetPresentation {
+        Self.makeCollapsedSetPresentation(setDrafts: setDrafts)
+    }
+
+    var resolvedExpandedSetPresentation: SetPresentation {
+        expandedSetPresentation
+            ?? Self.makeSetPresentation(
+                setDrafts: setDrafts,
+                restSeconds: restSeconds,
+                formatWeight: formatWeight
+            )
+    }
+
     func refreshSetPresentation() {
-        cachedSetPresentation = WGJPerformance.measure("template-editor.set-presentation") {
+        guard isExpanded else {
+            expandedSetPresentation = nil
+            return
+        }
+
+        expandedSetPresentation = WGJPerformance.measure("template-editor.set-presentation") {
             Self.makeSetPresentation(
                 setDrafts: setDrafts,
                 restSeconds: restSeconds,
@@ -1023,6 +1070,13 @@ private extension TemplateExercisePrescriptionEditor {
     }
 
     func scheduleSetPresentationRefresh() {
+        guard isExpanded else {
+            pendingPresentationRefreshTask?.cancel()
+            pendingPresentationRefreshTask = nil
+            expandedSetPresentation = nil
+            return
+        }
+
         guard focusedInput != nil else {
             pendingPresentationRefreshTask?.cancel()
             pendingPresentationRefreshTask = nil
@@ -1043,7 +1097,26 @@ private extension TemplateExercisePrescriptionEditor {
         guard pendingPresentationRefreshTask != nil else { return }
         pendingPresentationRefreshTask?.cancel()
         pendingPresentationRefreshTask = nil
-        refreshSetPresentation()
+        if isExpanded {
+            refreshSetPresentation()
+        }
+    }
+
+    static func makeCollapsedSetPresentation(
+        setDrafts: [TemplateExerciseSetDraft]
+    ) -> TemplateExerciseCollapsedSetPresentation {
+        let warmupCount = setDrafts.filter(\.isWarmup).count
+        let workingSetCount = max(0, setDrafts.count - warmupCount)
+        let summary = warmupCount > 0
+            ? "\(workingSetCount) working • \(warmupCount) warmup"
+            : "\(workingSetCount) working sets"
+
+        return TemplateExerciseCollapsedSetPresentation(
+            totalSetCount: setDrafts.count,
+            warmupCount: warmupCount,
+            workingSetCount: workingSetCount,
+            summary: summary
+        )
     }
 
     static func makeSetPresentation(
@@ -1077,12 +1150,9 @@ private extension TemplateExercisePrescriptionEditor {
             )
         }
 
-        let workingSets = max(0, setDrafts.count - warmupCount)
-        let summary = warmupCount > 0
-            ? "\(workingSets) working • \(warmupCount) warmup"
-            : "\(workingSets) working sets"
+        let collapsed = makeCollapsedSetPresentation(setDrafts: setDrafts)
 
-        return SetPresentation(rows: rows, summary: summary)
+        return SetPresentation(rows: rows, summary: collapsed.summary)
     }
 
     static func previousSummary(
@@ -1128,6 +1198,13 @@ private extension TemplateExercisePrescriptionEditor {
         guard !parts.isEmpty else { return nil }
         return parts.joined(separator: " • ")
     }
+}
+
+private struct TemplateExerciseCollapsedSetPresentation: Equatable {
+    let totalSetCount: Int
+    let warmupCount: Int
+    let workingSetCount: Int
+    let summary: String
 }
 
 private struct SetPresentation: Equatable {

@@ -53,6 +53,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     @State private var pendingBozarCompletionSetIDs: Set<UUID> = []
     @State private var revealedCompletionGateSetIDs: Set<UUID> = []
     @State private var pendingDisplayRefreshTask: Task<Void, Never>?
+    @State private var suppressNextSetDraftsDisplayRefresh = false
     @State private var suppressNextFocusLossCommit = false
     @FocusState private var focusedInput: SetInputFocus?
 
@@ -145,18 +146,21 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.onExerciseMoveToPosition = onExerciseMoveToPosition
         self.onExerciseDelete = onExerciseDelete
         self._localIsExpanded = State(initialValue: isExpanded?.wrappedValue ?? initiallyExpanded)
-        let initialRows = Self.makeDisplayRows(
-            setDrafts: setDrafts.wrappedValue,
-            previousPerformanceResolution: previousPerformanceResolution,
-            targetRepMin: targetRepMin,
-            targetRepMax: targetRepMax,
-            restSeconds: restSeconds.wrappedValue,
-            formatWeight: { WGJFormatters.decimalString($0) }
-        )
+        let startsExpanded = isExpanded?.wrappedValue ?? initiallyExpanded
+        let initialRows = startsExpanded
+            ? Self.makeDisplayRows(
+                setDrafts: setDrafts.wrappedValue,
+                previousPerformanceResolution: previousPerformanceResolution,
+                targetRepMin: targetRepMin,
+                targetRepMax: targetRepMax,
+                restSeconds: restSeconds.wrappedValue,
+                formatWeight: { WGJFormatters.decimalString($0) }
+            )
+            : []
         self._rowSnapshots = State(initialValue: initialRows)
         self._cachedCompletedSetCount = State(
-            initialValue: initialRows.reduce(0) { partialResult, row in
-                partialResult + (row.set.isCompleted ? 1 : 0)
+            initialValue: setDrafts.wrappedValue.reduce(0) { partialResult, draft in
+                partialResult + (draft.isCompleted ? 1 : 0)
             }
         )
     }
@@ -183,7 +187,12 @@ struct WorkoutSessionExerciseGridEditor: View {
             x: 0,
             y: 8
         )
-        .onAppear(perform: refreshDisplayRows)
+        .onAppear {
+            syncCompletedSetCount()
+            if isExpanded {
+                refreshDisplayRows()
+            }
+        }
         .onDisappear {
             flushPendingEditorState()
         }
@@ -204,6 +213,15 @@ struct WorkoutSessionExerciseGridEditor: View {
         }
         .onChange(of: focusedInput) { previousFocus, newFocus in
             handleFocusedInputChange(previousFocus, newFocus)
+        }
+        .onChange(of: isExpanded) { _, newValue in
+            if newValue {
+                refreshDisplayRows()
+            } else {
+                pendingDisplayRefreshTask?.cancel()
+                pendingDisplayRefreshTask = nil
+                rowSnapshots = []
+            }
         }
         .onChange(of: isSetCompletionEnabled) { _, isEnabled in
             if isEnabled {
@@ -1547,6 +1565,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func refreshDisplayRows() {
+        guard isExpanded else { return }
         rebuildDisplayRows()
     }
 
@@ -1554,6 +1573,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         using drafts: [WorkoutSessionSetDraft]? = nil,
         restSeconds overrideRestSeconds: Int? = nil
     ) {
+        guard isExpanded else { return }
         let currentDrafts = drafts ?? _setDrafts.wrappedValue
         let currentRestSeconds = overrideRestSeconds ?? restSeconds
         let snapshot = WGJPerformance.measure("workout-grid.row-refresh") {
@@ -1573,6 +1593,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func scheduleDisplayRefresh() {
+        guard isExpanded else { return }
         guard focusedInput != nil else {
             pendingDisplayRefreshTask?.cancel()
             pendingDisplayRefreshTask = nil
@@ -1593,7 +1614,9 @@ struct WorkoutSessionExerciseGridEditor: View {
         guard pendingDisplayRefreshTask != nil else { return }
         pendingDisplayRefreshTask?.cancel()
         pendingDisplayRefreshTask = nil
-        refreshDisplayRows()
+        if isExpanded {
+            refreshDisplayRows()
+        }
     }
 
     private func flushPendingEditorState() {
@@ -1604,6 +1627,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     private func handlePreviousPerformanceResolutionChange() {
         prunePendingBozarCompletions()
         resolvePendingBozarCompletionsIfNeeded()
+        guard isExpanded else { return }
         refreshDisplayRows()
     }
 
@@ -2080,7 +2104,11 @@ struct WorkoutSessionExerciseGridEditor: View {
         pendingDisplayRefreshTask?.cancel()
         pendingDisplayRefreshTask = nil
         let currentDrafts = drafts ?? setDrafts
-        rebuildDisplayRows(using: currentDrafts, restSeconds: restSeconds)
+        suppressNextSetDraftsDisplayRefresh = true
+        syncCompletedSetCount(using: currentDrafts)
+        if isExpanded {
+            rebuildDisplayRows(using: currentDrafts, restSeconds: restSeconds)
+        }
         requestCommitForCurrentState(drafts: currentDrafts)
     }
 
@@ -2103,7 +2131,12 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func handleSetDraftsChange() {
         prunePendingBozarCompletions()
-        scheduleDisplayRefresh()
+        syncCompletedSetCount()
+        if suppressNextSetDraftsDisplayRefresh {
+            suppressNextSetDraftsDisplayRefresh = false
+        } else if isExpanded {
+            scheduleDisplayRefresh()
+        }
         pruneInputDrafts()
     }
 
@@ -2127,6 +2160,13 @@ struct WorkoutSessionExerciseGridEditor: View {
 
         if let focusedInput, !validSetIDs.contains(focusedInput.setID) {
             self.focusedInput = nil
+        }
+    }
+
+    private func syncCompletedSetCount(using drafts: [WorkoutSessionSetDraft]? = nil) {
+        let currentDrafts = drafts ?? setDrafts
+        cachedCompletedSetCount = currentDrafts.reduce(0) { partialResult, draft in
+            partialResult + (draft.isCompleted ? 1 : 0)
         }
     }
 

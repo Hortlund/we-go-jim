@@ -245,6 +245,72 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testTemplateEditorLongScrollKeepsLowerExerciseInteractive() throws {
+        let app = launchApp(launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Template Long Scroll",
+                notes: "Stress the editor scroll path.",
+                exercises: (1...10).map { index in
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "template-editor-scroll-\(index)",
+                        exerciseNameSnapshot: "Template Scroll Exercise \(index)",
+                        categorySnapshot: "Strength",
+                        muscleSummarySnapshot: "Full Body",
+                        targetRepMin: 8,
+                        targetRepMax: 10,
+                        restSeconds: 90,
+                        sets: [
+                            templatePayloadSet(
+                                targetReps: 8,
+                                targetWeight: Double(40 + index * 5),
+                                loadUnit: "kg",
+                                restSeconds: 90,
+                                isWarmup: false
+                            ),
+                        ]
+                    )
+                }
+            ),
+        ])
+
+        let previewSheet = identifiedElement("template-preview-sheet", in: app)
+        XCTAssertTrue(previewSheet.waitForExistence(timeout: 5))
+        app.buttons["Cancel"].tap()
+
+        tapTab("Start Workout", in: app)
+
+        let actionsButton = identifiedElement("start-workout-template-actions-button", in: app)
+        XCTAssertTrue(actionsButton.waitForExistence(timeout: 5))
+        actionsButton.tap()
+
+        let editButton = identifiedElement("start-workout-template-edit-menu-button", in: app)
+        XCTAssertTrue(editButton.waitForExistence(timeout: 5))
+        editButton.tap()
+
+        let lastExercise = identifiedElement("template-editor-exercise-template-editor-scroll-10", in: app)
+        let lastExpandButton = identifiedElement(
+            "template-editor-exercise-template-editor-scroll-10-expand-button",
+            in: app
+        )
+
+        var remainingSwipes = 14
+        while !lastExercise.exists && remainingSwipes > 0 {
+            app.swipeUp()
+            remainingSwipes -= 1
+        }
+
+        revealElement(lastExercise, in: app, maxSwipes: 6)
+        XCTAssertTrue(lastExercise.isHittable)
+        XCTAssertTrue(lastExpandButton.waitForExistence(timeout: 5))
+        lastExpandButton.tap()
+
+        let notesField = identifiedElement("template-editor-exercise-template-editor-scroll-10-notes-field", in: app)
+        XCTAssertTrue(notesField.waitForExistence(timeout: 5))
+        revealElement(notesField, in: app, maxSwipes: 3)
+        XCTAssertTrue(notesField.isHittable)
+    }
+
+    @MainActor
     func testTemplateFileLaunchHookImportsAndShowsPreview() throws {
         let app = launchApp(launchEnvironment: [
             "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
@@ -580,6 +646,52 @@ final class WGJUITests: XCTestCase {
         strip.tap()
 
         XCTAssertTrue(app.buttons["active-workout-finish-button"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testActiveWorkoutHomeReturnKeepsTypedNotesAndPresentation() throws {
+        let app = launchApp(launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Home Return Workout",
+                notes: "Resume after backgrounding.",
+                exercises: [
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "active-home-return-bench",
+                        exerciseNameSnapshot: "Bench Press",
+                        categorySnapshot: "Chest",
+                        muscleSummarySnapshot: "Chest",
+                        targetRepMin: 6,
+                        targetRepMax: 8,
+                        restSeconds: 120,
+                        sets: [
+                            templatePayloadSet(
+                                targetReps: 6,
+                                targetWeight: 100,
+                                loadUnit: "kg",
+                                restSeconds: 120,
+                                isWarmup: false
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+        ])
+
+        startPreviewedTemplateWorkout(in: app)
+
+        let notesField = identifiedElement("active-workout-notes-field", in: app)
+        XCTAssertTrue(notesField.waitForExistence(timeout: 5))
+        notesField.tap()
+        notesField.typeText(" Home")
+        let editedNotes = notesField.value as? String
+
+        XCUIDevice.shared.press(.home)
+        app.activate()
+
+        let reopenedNotesField = identifiedElement("active-workout-notes-field", in: app)
+        XCTAssertTrue(reopenedNotesField.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["active-workout-finish-button"].waitForExistence(timeout: 5))
+        XCTAssertEqual(reopenedNotesField.value as? String, editedNotes)
     }
 
     @MainActor

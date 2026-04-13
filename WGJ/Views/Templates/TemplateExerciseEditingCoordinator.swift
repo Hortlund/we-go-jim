@@ -122,6 +122,21 @@ final class TemplateExerciseEditingCoordinator {
         )
     }
 
+    func hasPendingChanges(
+        notes: String,
+        targetRepMin: Int?,
+        targetRepMax: Int?,
+        restSeconds: Int,
+        setDrafts: [TemplateExerciseSetDraft]
+    ) -> Bool {
+        let normalizedRestSeconds = max(0, min(3600, restSeconds))
+        return lastCommittedNotes != notes
+            || lastCommittedTargetRepMin != targetRepMin
+            || lastCommittedTargetRepMax != targetRepMax
+            || lastCommittedRestSeconds != normalizedRestSeconds
+            || lastCommittedSetDrafts != setDrafts
+    }
+
     func flushCommits(
         notes: String,
         targetRepMin: Int?,
