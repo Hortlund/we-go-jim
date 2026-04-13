@@ -161,6 +161,46 @@ final class ExerciseCatalogRepository: ExerciseCatalogRepositoryProtocol {
         return Dictionary(uniqueKeysWithValues: matches.map { ($0.remoteUUID, $0) })
     }
 
+    func exactImportMatch(
+        remoteUUID: String,
+        exerciseName: String,
+        categoryName: String
+    ) throws -> ExerciseCatalogItem? {
+        let normalizedUUID = remoteUUID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !normalizedUUID.isEmpty,
+           let exactUUIDMatch = try exerciseMap(for: [normalizedUUID])[normalizedUUID] {
+            return exactUUIDMatch
+        }
+
+        let normalizedName = normalizedImportMatchToken(exerciseName)
+        let normalizedCategory = normalizedImportMatchToken(categoryName)
+        guard !normalizedName.isEmpty, !normalizedCategory.isEmpty else {
+            return nil
+        }
+
+        var matchesByUUID: [String: ExerciseCatalogItem] = [:]
+        for exercise in try allExercises() {
+            guard normalizedImportMatchToken(exercise.categoryName) == normalizedCategory else {
+                continue
+            }
+
+            let displayNameMatches = normalizedImportMatchToken(exercise.displayName) == normalizedName
+            let aliasMatches = exercise.aliases.contains { alias in
+                normalizedImportMatchToken(alias.value) == normalizedName
+            }
+            guard displayNameMatches || aliasMatches else {
+                continue
+            }
+
+            matchesByUUID[exercise.remoteUUID] = exercise
+            if matchesByUUID.count > 1 {
+                return nil
+            }
+        }
+
+        return matchesByUUID.values.first
+    }
+
     func availableMuscles() throws -> [MuscleGroup] {
         try searchService.availableMuscles()
     }
@@ -292,6 +332,12 @@ final class ExerciseCatalogRepository: ExerciseCatalogRepositoryProtocol {
             component.templateExercise?.muscleSummarySnapshot = component.muscleSummarySnapshot
             component.templateExercise?.updatedAt = .now
         }
+    }
+
+    private func normalizedImportMatchToken(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
     }
 }
 

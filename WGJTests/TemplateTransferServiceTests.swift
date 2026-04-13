@@ -45,9 +45,9 @@ struct TemplateTransferServiceTests {
             drafts: [
                 TemplateExerciseDraft(
                     catalogExerciseUUID: "bench-1",
-                    exerciseNameSnapshot: "Bench Press",
-                    categorySnapshot: "Chest",
-                    muscleSummarySnapshot: "Chest, Triceps",
+                    exerciseNameSnapshot: "WGJ Export Press",
+                    categorySnapshot: "WGJ Test Chest",
+                    muscleSummarySnapshot: "WGJ Test Muscles",
                     notes: "Pause the first rep and keep shoulders pinned.",
                     targetRepMin: 4,
                     targetRepMax: 6,
@@ -103,7 +103,7 @@ struct TemplateTransferServiceTests {
         #expect(importedCardio.map(\.phase) == [.preWorkout, .postWorkout])
         #expect(importedCardio.map(\.exerciseNameSnapshot) == ["Bike", "Incline Treadmill Walk"])
         #expect(importedCardio.map(\.targetDurationSeconds) == [300, 1200])
-        #expect(importedExercises.map(\.exerciseNameSnapshot) == ["Bench Press", "Weighted Dip"])
+        #expect(importedExercises.map(\.exerciseNameSnapshot) == ["WGJ Export Press", "Weighted Dip"])
         #expect(importedExercises.map(\.notes) == [
             "Pause the first rep and keep shoulders pinned.",
             "Lean slightly forward and stay smooth at lockout.",
@@ -191,7 +191,7 @@ struct TemplateTransferServiceTests {
             categoryName: "Arms",
             equipmentSummary: "EZ bar",
             isCurated: true,
-            sourceName: "seed"
+            sourceName: "custom"
         )
         let wristCurl = ExerciseCatalogItem(
             remoteUUID: "transfer-wrist-curl",
@@ -199,7 +199,7 @@ struct TemplateTransferServiceTests {
             categoryName: "Arms",
             equipmentSummary: "Barbell",
             isCurated: true,
-            sourceName: "seed"
+            sourceName: "custom"
         )
         context.insert(reverseCurl)
         context.insert(wristCurl)
@@ -243,6 +243,284 @@ struct TemplateTransferServiceTests {
     }
 
     @Test
+    func importUsesLocalCatalogSnapshotsWhenIncomingUUIDAlreadyExists() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+        let service = TemplateTransferService(modelContext: context)
+
+        let localBench = makeCatalogItem(
+            remoteUUID: "existing-bench",
+            displayName: "WGJ UUID Match Press",
+            categoryName: "WGJ Test Chest"
+        )
+        context.insert(localBench)
+        try context.save()
+
+        let importedTemplate = try service.importTemplate(
+            from: try encoded(
+                TemplateTransferEnvelope(
+                    template: TemplateTransferTemplate(
+                        name: "Friend Push",
+                        notes: "",
+                        exercises: [
+                            TemplateTransferExercise(
+                                catalogExerciseUUID: localBench.remoteUUID,
+                                exerciseNameSnapshot: "Wrong Imported Name",
+                                categorySnapshot: "Wrong Imported Category",
+                                muscleSummarySnapshot: "Wrong Imported Muscles",
+                                targetRepMin: 5,
+                                targetRepMax: 8,
+                                restSeconds: 120,
+                                sets: []
+                            ),
+                        ]
+                    )
+                )
+            )
+        )
+
+        let importedExercise = try #require(try repository.exercises(in: importedTemplate.id).first)
+        #expect(importedExercise.catalogExerciseUUID == localBench.remoteUUID)
+        #expect(importedExercise.exerciseNameSnapshot == localBench.displayName)
+        #expect(importedExercise.categorySnapshot == localBench.categoryName)
+        #expect(importedExercise.muscleSummarySnapshot == localBench.primaryMuscleNames)
+    }
+
+    @Test
+    func importRemapsUnknownUUIDToUniqueLocalExerciseAndCarriesPreviousSetHistory() throws {
+        let context = try makeInMemoryContext()
+        let service = TemplateTransferService(modelContext: context)
+        let repository = TemplateRepository(modelContext: context)
+        let sessionRepository = WorkoutSessionRepository(modelContext: context)
+
+        let localBench = makeCatalogItem(
+            remoteUUID: "local-bench",
+            displayName: "WGJ History Press",
+            categoryName: "WGJ Test Chest"
+        )
+        context.insert(localBench)
+        try context.save()
+
+        let priorSession = try sessionRepository.createEmptySession(name: "Existing Push")
+        try sessionRepository.addExercise(sessionID: priorSession.id, catalogItem: localBench)
+        let priorExercise = try #require(try sessionRepository.sessionExercises(sessionID: priorSession.id).first)
+        var priorDrafts = try sessionRepository.setDrafts(sessionExerciseID: priorExercise.id)
+        priorDrafts[0].actualWeight = 100
+        priorDrafts[0].actualReps = 8
+        priorDrafts[0].actualLoadUnit = .kg
+        priorDrafts[0].isCompleted = true
+        try sessionRepository.saveSetDrafts(sessionExerciseID: priorExercise.id, drafts: priorDrafts)
+        try sessionRepository.finishSession(sessionID: priorSession.id)
+
+        let importedTemplate = try service.importTemplate(
+            from: try encoded(
+                TemplateTransferEnvelope(
+                    template: TemplateTransferTemplate(
+                        name: "Shared Push",
+                        notes: "",
+                        exercises: [
+                            TemplateTransferExercise(
+                                catalogExerciseUUID: "friend-bench",
+                                exerciseNameSnapshot: "WGJ History Press",
+                                categorySnapshot: "WGJ Test Chest",
+                                muscleSummarySnapshot: "WGJ Test Muscles",
+                                targetRepMin: 5,
+                                targetRepMax: 8,
+                                restSeconds: 120,
+                                sets: [
+                                    TemplateTransferSet(
+                                        targetReps: 8,
+                                        targetWeight: 100,
+                                        loadUnit: .kg,
+                                        restSeconds: 120,
+                                        isWarmup: false,
+                                        isLocked: false
+                                    ),
+                                ]
+                            ),
+                        ]
+                    )
+                )
+            )
+        )
+
+        let importedExercise = try #require(try repository.exercises(in: importedTemplate.id).first)
+        #expect(importedExercise.catalogExerciseUUID == localBench.remoteUUID)
+
+        let session = try sessionRepository.createSessionFromTemplate(templateID: importedTemplate.id)
+        let sessionExercise = try #require(try sessionRepository.sessionExercises(sessionID: session.id).first)
+        #expect(sessionExercise.catalogExerciseUUID == localBench.remoteUUID)
+
+        let previousMap = try sessionRepository.previousSetMap(
+            for: sessionExercise.catalogExerciseUUID,
+            before: session.startedAt,
+            excludingSessionID: session.id,
+            maxSetCount: 1
+        )
+        let previous = try #require(previousMap[0])
+        #expect(previous.weight == 100)
+        #expect(previous.reps == 8)
+        #expect(previous.unit == .kg)
+    }
+
+    @Test
+    func importDoesNotRemapUnknownUUIDWhenExactNameMatchIsAmbiguous() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+        let service = TemplateTransferService(modelContext: context)
+
+        context.insert(
+            makeCatalogItem(
+                remoteUUID: "bench-a",
+                displayName: "WGJ Ambiguous Press",
+                categoryName: "WGJ Test Chest"
+            )
+        )
+        context.insert(
+            makeCatalogItem(
+                remoteUUID: "bench-b",
+                displayName: "WGJ Ambiguous Press",
+                categoryName: "WGJ Test Chest"
+            )
+        )
+        try context.save()
+
+        let importedTemplate = try service.importTemplate(
+            from: try encoded(
+                TemplateTransferEnvelope(
+                    template: TemplateTransferTemplate(
+                        name: "Ambiguous Push",
+                        notes: "",
+                        exercises: [
+                            TemplateTransferExercise(
+                                catalogExerciseUUID: "friend-flat-bench",
+                                exerciseNameSnapshot: "WGJ Ambiguous Press",
+                                categorySnapshot: "WGJ Test Chest",
+                                muscleSummarySnapshot: "WGJ Test Muscles",
+                                targetRepMin: 5,
+                                targetRepMax: 8,
+                                restSeconds: 120,
+                                sets: []
+                            ),
+                        ]
+                    )
+                )
+            )
+        )
+
+        let importedExercise = try #require(try repository.exercises(in: importedTemplate.id).first)
+        #expect(importedExercise.catalogExerciseUUID == "friend-flat-bench")
+        #expect(importedExercise.exerciseNameSnapshot == "WGJ Ambiguous Press")
+        #expect(importedExercise.categorySnapshot == "WGJ Test Chest")
+    }
+
+    @Test
+    func importDoesNotRemapUnknownUUIDWhenCategoryDoesNotMatchExactly() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+        let service = TemplateTransferService(modelContext: context)
+
+        let localBench = makeCatalogItem(
+            remoteUUID: "bench-local",
+            displayName: "WGJ Category Press",
+            categoryName: "WGJ Test Strength"
+        )
+        context.insert(localBench)
+        try context.save()
+
+        let importedTemplate = try service.importTemplate(
+            from: try encoded(
+                TemplateTransferEnvelope(
+                    template: TemplateTransferTemplate(
+                        name: "Category Mismatch",
+                        notes: "",
+                        exercises: [
+                            TemplateTransferExercise(
+                                catalogExerciseUUID: "friend-bench",
+                                exerciseNameSnapshot: "WGJ Category Press",
+                                categorySnapshot: "WGJ Test Chest",
+                                muscleSummarySnapshot: "WGJ Test Muscles",
+                                targetRepMin: 5,
+                                targetRepMax: 8,
+                                restSeconds: 120,
+                                sets: []
+                            ),
+                        ]
+                    )
+                )
+            )
+        )
+
+        let importedExercise = try #require(try repository.exercises(in: importedTemplate.id).first)
+        #expect(importedExercise.catalogExerciseUUID == "friend-bench")
+        #expect(importedExercise.exerciseNameSnapshot == "WGJ Category Press")
+        #expect(importedExercise.categorySnapshot == "WGJ Test Chest")
+    }
+
+    @Test
+    func importDeduplicatesComponentsThatResolveToSameLocalExercise() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+        let service = TemplateTransferService(modelContext: context)
+
+        let localBench = makeCatalogItem(
+            remoteUUID: "bench-local",
+            displayName: "WGJ Component Press",
+            categoryName: "WGJ Test Chest"
+        )
+        let localAlias = ExerciseAlias(value: "WGJ Alias Press", exercise: localBench)
+        context.insert(localBench)
+        context.insert(localAlias)
+        localBench.aliases = [localAlias]
+        try context.save()
+
+        let importedTemplate = try service.importTemplate(
+            from: try encoded(
+                TemplateTransferEnvelope(
+                    template: TemplateTransferTemplate(
+                        name: "Component Dedupe",
+                        notes: "",
+                        exercises: [
+                            TemplateTransferExercise(
+                                catalogExerciseUUID: "friend-bench-a",
+                                exerciseNameSnapshot: "WGJ Component Press",
+                                categorySnapshot: "WGJ Test Chest",
+                                muscleSummarySnapshot: "WGJ Test Muscles",
+                                targetRepMin: 5,
+                                targetRepMax: 8,
+                                restSeconds: 120,
+                                sets: [],
+                                components: [
+                                    TemplateTransferExerciseComponent(
+                                        catalogExerciseUUID: "friend-bench-a",
+                                        exerciseNameSnapshot: "WGJ Component Press",
+                                        categorySnapshot: "WGJ Test Chest",
+                                        muscleSummarySnapshot: "WGJ Test Muscles"
+                                    ),
+                                    TemplateTransferExerciseComponent(
+                                        catalogExerciseUUID: "friend-bench-b",
+                                        exerciseNameSnapshot: "WGJ Alias Press",
+                                        categorySnapshot: "WGJ Test Chest",
+                                        muscleSummarySnapshot: "WGJ Test Muscles"
+                                    ),
+                                ]
+                            ),
+                        ]
+                    )
+                )
+            )
+        )
+
+        let importedExercise = try #require(try repository.exercises(in: importedTemplate.id).first)
+        let importedComponents = try repository.components(for: importedExercise.id)
+
+        #expect(importedExercise.catalogExerciseUUID == localBench.remoteUUID)
+        #expect(importedComponents.count == 1)
+        #expect(importedComponents.first?.catalogExerciseUUID == localBench.remoteUUID)
+        #expect(importedComponents.first?.exerciseNameSnapshot == localBench.displayName)
+    }
+
+    @Test
     func importedTemplateCanStartWorkoutWithoutCatalogMatch() throws {
         let context = try makeInMemoryContext()
         let service = TemplateTransferService(modelContext: context)
@@ -257,8 +535,8 @@ struct TemplateTransferServiceTests {
                         exercises: [
                             TemplateTransferExercise(
                                 catalogExerciseUUID: "missing-catalog-uuid",
-                                exerciseNameSnapshot: "Sandbag Carry",
-                                categorySnapshot: "Conditioning",
+                                exerciseNameSnapshot: "WGJ Unknown Carry",
+                                categorySnapshot: "WGJ Unknown Category",
                                 muscleSummarySnapshot: "Full Body",
                                 targetRepMin: 2,
                                 targetRepMax: 3,
@@ -284,8 +562,8 @@ struct TemplateTransferServiceTests {
         let sessionExercise = try #require(try sessionRepository.sessionExercises(sessionID: session.id).first)
 
         #expect(sessionExercise.catalogExerciseUUID == "missing-catalog-uuid")
-        #expect(sessionExercise.exerciseNameSnapshot == "Sandbag Carry")
-        #expect(sessionExercise.categorySnapshot == "Conditioning")
+        #expect(sessionExercise.exerciseNameSnapshot == "WGJ Unknown Carry")
+        #expect(sessionExercise.categorySnapshot == "WGJ Unknown Category")
     }
 
     @Test
@@ -364,9 +642,9 @@ struct TemplateTransferServiceTests {
                     exercises: [
                         TemplateTransferExercise(
                             catalogExerciseUUID: "legacy-bench",
-                            exerciseNameSnapshot: "Bench Press",
-                            categorySnapshot: "Chest",
-                            muscleSummarySnapshot: "Chest",
+                            exerciseNameSnapshot: "WGJ Legacy Press",
+                            categorySnapshot: "WGJ Legacy Category",
+                            muscleSummarySnapshot: "WGJ Legacy Muscles",
                             targetRepMin: 5,
                             targetRepMax: 8,
                             restSeconds: 120,
@@ -381,7 +659,7 @@ struct TemplateTransferServiceTests {
 
         #expect(importedTemplate.name == "Legacy Push")
         #expect(try repository.cardioBlocks(templateID: importedTemplate.id).isEmpty)
-        #expect(try repository.exercises(in: importedTemplate.id).map(\.exerciseNameSnapshot) == ["Bench Press"])
+        #expect(try repository.exercises(in: importedTemplate.id).map(\.exerciseNameSnapshot) == ["WGJ Legacy Press"])
     }
 
     @Test
@@ -496,6 +774,21 @@ struct TemplateTransferServiceTests {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         return try encoder.encode(envelope)
+    }
+
+    private func makeCatalogItem(
+        remoteUUID: String,
+        displayName: String,
+        categoryName: String
+    ) -> ExerciseCatalogItem {
+        ExerciseCatalogItem(
+            remoteUUID: remoteUUID,
+            displayName: displayName,
+            categoryName: categoryName,
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "custom"
+        )
     }
 
     private func makeTransferFileURL(envelope: TemplateTransferEnvelope) throws -> URL {

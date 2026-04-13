@@ -217,6 +217,8 @@ final class TemplateTransferService {
     func importTemplate(from data: Data) throws -> WorkoutTemplate {
         let envelope = try decodedEnvelope(from: data)
         let repository = TemplateRepository(modelContext: modelContext)
+        let catalogRepository = ExerciseCatalogRepository(modelContext: modelContext)
+        try? catalogRepository.ensureSeedImportedIfNeeded()
         let importedName = try nextImportedTemplateName(
             baseName: envelope.template.name,
             repository: repository
@@ -229,11 +231,13 @@ final class TemplateTransferService {
         do {
             try repository.importExercises(
                 templateID: template.id,
-                drafts: envelope.template.exercises.map(exerciseDraft(from:))
+                drafts: try envelope.template.exercises.map {
+                    try exerciseDraft(from: $0, catalogRepository: catalogRepository)
+                }
             )
             try repository.setCardioBlocks(
                 templateID: template.id,
-                drafts: cardioDrafts(from: envelope.template)
+                drafts: try cardioDrafts(from: envelope.template, catalogRepository: catalogRepository)
             )
             return template
         } catch {
@@ -330,12 +334,23 @@ final class TemplateTransferService {
         )
     }
 
-    private func exerciseDraft(from exercise: TemplateTransferExercise) -> TemplateExerciseDraft {
-        TemplateExerciseDraft(
+    private func exerciseDraft(
+        from exercise: TemplateTransferExercise,
+        catalogRepository: ExerciseCatalogRepository
+    ) throws -> TemplateExerciseDraft {
+        let resolvedExercise = try resolveImportedExercise(
             catalogExerciseUUID: exercise.catalogExerciseUUID,
             exerciseNameSnapshot: exercise.exerciseNameSnapshot,
             categorySnapshot: exercise.categorySnapshot,
             muscleSummarySnapshot: exercise.muscleSummarySnapshot,
+            catalogRepository: catalogRepository
+        )
+
+        return TemplateExerciseDraft(
+            catalogExerciseUUID: resolvedExercise.catalogExerciseUUID,
+            exerciseNameSnapshot: resolvedExercise.exerciseNameSnapshot,
+            categorySnapshot: resolvedExercise.categorySnapshot,
+            muscleSummarySnapshot: resolvedExercise.muscleSummarySnapshot,
             notes: exercise.notes,
             targetRepMin: exercise.targetRepMin,
             targetRepMax: exercise.targetRepMax,
@@ -351,47 +366,114 @@ final class TemplateTransferService {
                     previousLoadUnit: set.loadUnit
                 )
             },
-            components: exercise.components?.map { component in
-                TemplateExerciseComponentDraft(
-                    catalogExerciseUUID: component.catalogExerciseUUID,
-                    exerciseNameSnapshot: component.exerciseNameSnapshot,
-                    categorySnapshot: component.categorySnapshot,
-                    muscleSummarySnapshot: component.muscleSummarySnapshot
-                )
-            } ?? []
+            components: try componentDrafts(
+                from: exercise.components,
+                catalogRepository: catalogRepository
+            )
         )
     }
 
-    private func cardioDrafts(from template: TemplateTransferTemplate) -> [TemplateCardioBlockDraft] {
+    private func componentDrafts(
+        from components: [TemplateTransferExerciseComponent]?,
+        catalogRepository: ExerciseCatalogRepository
+    ) throws -> [TemplateExerciseComponentDraft] {
+        guard let components, !components.isEmpty else {
+            return []
+        }
+
+        var drafts: [TemplateExerciseComponentDraft] = []
+        drafts.reserveCapacity(components.count)
+        var seenCatalogExerciseUUIDs: Set<String> = []
+
+        for component in components {
+            let resolvedComponent = try resolveImportedExercise(
+                catalogExerciseUUID: component.catalogExerciseUUID,
+                exerciseNameSnapshot: component.exerciseNameSnapshot,
+                categorySnapshot: component.categorySnapshot,
+                muscleSummarySnapshot: component.muscleSummarySnapshot,
+                catalogRepository: catalogRepository
+            )
+            guard seenCatalogExerciseUUIDs.insert(resolvedComponent.catalogExerciseUUID).inserted else {
+                continue
+            }
+
+            drafts.append(resolvedComponent.makeComponentDraft())
+        }
+
+        return drafts
+    }
+
+    private func cardioDrafts(
+        from template: TemplateTransferTemplate,
+        catalogRepository: ExerciseCatalogRepository
+    ) throws -> [TemplateCardioBlockDraft] {
         var drafts: [TemplateCardioBlockDraft] = []
 
         if let preWorkoutCardio = template.preWorkoutCardio {
+            let resolvedPreWorkoutCardio = try resolveImportedExercise(
+                catalogExerciseUUID: preWorkoutCardio.catalogExerciseUUID,
+                exerciseNameSnapshot: preWorkoutCardio.exerciseNameSnapshot,
+                categorySnapshot: preWorkoutCardio.categorySnapshot,
+                muscleSummarySnapshot: preWorkoutCardio.muscleSummarySnapshot,
+                catalogRepository: catalogRepository
+            )
             drafts.append(
                 TemplateCardioBlockDraft(
                     phase: .preWorkout,
-                    catalogExerciseUUID: preWorkoutCardio.catalogExerciseUUID,
-                    exerciseNameSnapshot: preWorkoutCardio.exerciseNameSnapshot,
-                    categorySnapshot: preWorkoutCardio.categorySnapshot,
-                    muscleSummarySnapshot: preWorkoutCardio.muscleSummarySnapshot,
+                    catalogExerciseUUID: resolvedPreWorkoutCardio.catalogExerciseUUID,
+                    exerciseNameSnapshot: resolvedPreWorkoutCardio.exerciseNameSnapshot,
+                    categorySnapshot: resolvedPreWorkoutCardio.categorySnapshot,
+                    muscleSummarySnapshot: resolvedPreWorkoutCardio.muscleSummarySnapshot,
                     targetDurationSeconds: preWorkoutCardio.targetDurationSeconds
                 )
             )
         }
 
         if let postWorkoutCardio = template.postWorkoutCardio {
+            let resolvedPostWorkoutCardio = try resolveImportedExercise(
+                catalogExerciseUUID: postWorkoutCardio.catalogExerciseUUID,
+                exerciseNameSnapshot: postWorkoutCardio.exerciseNameSnapshot,
+                categorySnapshot: postWorkoutCardio.categorySnapshot,
+                muscleSummarySnapshot: postWorkoutCardio.muscleSummarySnapshot,
+                catalogRepository: catalogRepository
+            )
             drafts.append(
                 TemplateCardioBlockDraft(
                     phase: .postWorkout,
-                    catalogExerciseUUID: postWorkoutCardio.catalogExerciseUUID,
-                    exerciseNameSnapshot: postWorkoutCardio.exerciseNameSnapshot,
-                    categorySnapshot: postWorkoutCardio.categorySnapshot,
-                    muscleSummarySnapshot: postWorkoutCardio.muscleSummarySnapshot,
+                    catalogExerciseUUID: resolvedPostWorkoutCardio.catalogExerciseUUID,
+                    exerciseNameSnapshot: resolvedPostWorkoutCardio.exerciseNameSnapshot,
+                    categorySnapshot: resolvedPostWorkoutCardio.categorySnapshot,
+                    muscleSummarySnapshot: resolvedPostWorkoutCardio.muscleSummarySnapshot,
                     targetDurationSeconds: postWorkoutCardio.targetDurationSeconds
                 )
             )
         }
 
         return drafts
+    }
+
+    private func resolveImportedExercise(
+        catalogExerciseUUID: String,
+        exerciseNameSnapshot: String,
+        categorySnapshot: String,
+        muscleSummarySnapshot: String,
+        catalogRepository: ExerciseCatalogRepository
+    ) throws -> ImportedExerciseResolution {
+        if let matchedExercise = try catalogRepository.exactImportMatch(
+            remoteUUID: catalogExerciseUUID,
+            exerciseName: exerciseNameSnapshot,
+            categoryName: categorySnapshot
+        ) {
+            return ImportedExerciseResolution(catalogItem: matchedExercise)
+        }
+
+        return ImportedExerciseResolution(
+            catalogExerciseUUID: catalogExerciseUUID,
+            exerciseNameSnapshot: exerciseNameSnapshot,
+            categorySnapshot: categorySnapshot,
+            muscleSummarySnapshot: muscleSummarySnapshot,
+            wasCanonicalized: false
+        )
     }
 
     private func nextImportedTemplateName(
@@ -450,5 +532,46 @@ final class TemplateTransferService {
         let normalized = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolved = normalized.isEmpty ? ReviewTextKind.templateName.fallbackValue : normalized
         return "\(resolved).\(TemplateTransferFileFormat.filenameExtension)"
+    }
+}
+
+private struct ImportedExerciseResolution: Equatable {
+    let catalogExerciseUUID: String
+    let exerciseNameSnapshot: String
+    let categorySnapshot: String
+    let muscleSummarySnapshot: String
+    let wasCanonicalized: Bool
+
+    init(
+        catalogExerciseUUID: String,
+        exerciseNameSnapshot: String,
+        categorySnapshot: String,
+        muscleSummarySnapshot: String,
+        wasCanonicalized: Bool
+    ) {
+        self.catalogExerciseUUID = catalogExerciseUUID
+        self.exerciseNameSnapshot = exerciseNameSnapshot
+        self.categorySnapshot = categorySnapshot
+        self.muscleSummarySnapshot = muscleSummarySnapshot
+        self.wasCanonicalized = wasCanonicalized
+    }
+
+    init(catalogItem: ExerciseCatalogItem) {
+        self.init(
+            catalogExerciseUUID: catalogItem.remoteUUID,
+            exerciseNameSnapshot: catalogItem.displayName,
+            categorySnapshot: catalogItem.categoryName,
+            muscleSummarySnapshot: catalogItem.primaryMuscleNames,
+            wasCanonicalized: true
+        )
+    }
+
+    func makeComponentDraft() -> TemplateExerciseComponentDraft {
+        TemplateExerciseComponentDraft(
+            catalogExerciseUUID: catalogExerciseUUID,
+            exerciseNameSnapshot: exerciseNameSnapshot,
+            categorySnapshot: categorySnapshot,
+            muscleSummarySnapshot: muscleSummarySnapshot
+        )
     }
 }
