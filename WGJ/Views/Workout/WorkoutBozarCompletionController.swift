@@ -1,5 +1,10 @@
 import Foundation
 
+enum WorkoutPreviousPerformanceApplicationMode: Equatable {
+    case overwriteExisting
+    case fillMissing
+}
+
 enum WorkoutPreviousPerformanceResolution: Equatable {
     case loading
     case resolved([Int: WorkoutPreviousSetSnapshot])
@@ -47,7 +52,8 @@ enum WorkoutSetBozarCompletionController {
             let updatedDrafts = applyPreviousPerformance(
                 to: drafts,
                 at: index,
-                previousResolution: previousResolution
+                previousResolution: previousResolution,
+                mode: .fillMissing
             ) ?? drafts
             return .completeImmediately(updatedDrafts)
         }
@@ -56,7 +62,8 @@ enum WorkoutSetBozarCompletionController {
     static func applyPreviousPerformance(
         to drafts: [WorkoutSessionSetDraft],
         at index: Int,
-        previousResolution: WorkoutPreviousPerformanceResolution
+        previousResolution: WorkoutPreviousPerformanceResolution,
+        mode: WorkoutPreviousPerformanceApplicationMode = .overwriteExisting
     ) -> [WorkoutSessionSetDraft]? {
         guard drafts.indices.contains(index),
               let previous = previousResolution.previous(at: index)
@@ -67,7 +74,8 @@ enum WorkoutSetBozarCompletionController {
         var updatedDrafts = drafts
         updatedDrafts[index] = WorkoutSetBozarCompletionResolver.resolve(
             draft: updatedDrafts[index],
-            previous: previous
+            previous: previous,
+            mode: mode
         )
         return updatedDrafts
     }

@@ -99,8 +99,17 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 - Date: 2026-04-12
 - Trigger/Problem: Bozar mode completion still did not behave like `Fill Last`; completing a set could preserve partial current actuals instead of fully applying the previous performance.
 - Root Cause: `WorkoutSetBozarCompletionResolver` and the explicit `Fill Last` action mutated workout drafts through separate code paths. The resolver only patched missing fields, while `Fill Last` replaced weight, reps, and unit together.
-- Durable Rule: When Bozar mode is meant to act like `Fill Last` plus completion, route both features through the same previous-performance draft mutation helper before firing completion/rest side effects.
-- How to Verify Next Time: Run `WorkoutSetBozarCompletionResolverTests` plus the Bozar UI smoke tests that complete a set with and without previous performance, and confirm the filled values exactly match the previous set while the completion/rest flow still triggers.
+- Durable Rule: Superseded by `2026-04-13 - Bozar Completion Must Backfill Only Missing Metrics`. Explicit `Fill Last` may still overwrite both metrics, but Bozar completion should preserve any manual actual weight/reps and only backfill the missing fields.
+- How to Verify Next Time: Use the replacement entry below.
+- Status: superseded
+
+## 2026-04-13 - Bozar Completion Must Backfill Only Missing Metrics
+
+- Date: 2026-04-13
+- Trigger/Problem: Completing a set in Bozar mode overwrote manually entered weight and/or reps with previous workout values.
+- Root Cause: Bozar completion and the explicit `Fill Last` action shared the same full-overwrite helper, so completion replaced both actual metrics instead of merging previous data only into blank fields.
+- Durable Rule: Keep Bozar completion separate from explicit `Fill Last`. On Bozar completion, preserve any manually entered actual weight or reps and only backfill the missing metric(s) and corresponding unit from previous performance.
+- How to Verify Next Time: Run `WorkoutSetBozarCompletionResolverTests`, `WorkoutSetBozarCompletionControllerTests`, and the Bozar UI smoke that completes a set after manual entry; confirm manual values stay intact while blank fields still backfill from the previous set.
 - Status: active
 
 ## 2026-04-12 - Active Workout Persistence Baselines Must Match Display Normalization

@@ -2173,7 +2173,8 @@ struct WorkoutSessionExerciseGridEditor: View {
             ?? WorkoutSetBozarCompletionController.applyPreviousPerformance(
                 to: setDrafts,
                 at: index,
-                previousResolution: previousPerformanceResolution
+                previousResolution: previousPerformanceResolution,
+                mode: .fillMissing
             )
             ?? setDrafts
         guard updatedDrafts.indices.contains(index) else { return }
@@ -2383,9 +2384,10 @@ struct WorkoutSetInlineHintPresentation: Equatable {
 enum WorkoutSetBozarCompletionResolver {
     static func resolve(
         draft: WorkoutSessionSetDraft,
-        previous: WorkoutPreviousSetSnapshot?
+        previous: WorkoutPreviousSetSnapshot?,
+        mode: WorkoutPreviousPerformanceApplicationMode = .fillMissing
     ) -> WorkoutSessionSetDraft {
-        draft.applyingPreviousPerformance(previous)
+        draft.applyingPreviousPerformance(previous, mode: mode)
     }
 }
 
@@ -2398,13 +2400,24 @@ private extension WorkoutSessionSetDraft {
         return actualLoadUnit == .bodyweight && isCompleted
     }
 
-    func applyingPreviousPerformance(_ previous: WorkoutPreviousSetSnapshot?) -> WorkoutSessionSetDraft {
+    func applyingPreviousPerformance(
+        _ previous: WorkoutPreviousSetSnapshot?,
+        mode: WorkoutPreviousPerformanceApplicationMode = .overwriteExisting
+    ) -> WorkoutSessionSetDraft {
         guard let previous else { return self }
 
         var updatedDraft = self
-        updatedDraft.actualWeight = previous.weight
-        updatedDraft.actualReps = previous.reps
-        updatedDraft.actualLoadUnit = previous.unit
+        let shouldReplaceWeight = mode == .overwriteExisting || updatedDraft.actualWeight == nil
+        let shouldReplaceReps = mode == .overwriteExisting || updatedDraft.actualReps == nil
+
+        if shouldReplaceWeight {
+            updatedDraft.actualWeight = previous.weight
+            updatedDraft.actualLoadUnit = previous.unit
+        }
+
+        if shouldReplaceReps {
+            updatedDraft.actualReps = previous.reps
+        }
         return updatedDraft
     }
 }
