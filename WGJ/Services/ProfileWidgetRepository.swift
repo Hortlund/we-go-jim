@@ -54,7 +54,8 @@ final class ProfileWidgetRepository {
     }
 
     func moveEnabledWidget(fromOffsets: IndexSet, toOffset: Int) throws {
-        var enabled = try enabledConfigurations()
+        let configs = try configurations()
+        var enabled = configs.filter { $0.isEnabled }
         let movingItems = fromOffsets.sorted().map { enabled[$0] }
         for index in fromOffsets.sorted(by: >) {
             enabled.remove(at: index)
@@ -73,7 +74,7 @@ final class ProfileWidgetRepository {
             sortIndex += 1
         }
 
-        let disabled = try configurations().filter { !$0.isEnabled }
+        let disabled = configs.filter { !$0.isEnabled }
         for disabledConfig in disabled {
             disabledConfig.sortOrder = sortIndex
             disabledConfig.updatedAt = .now
@@ -106,19 +107,34 @@ final class ProfileWidgetRepository {
     }
 
     private func ensureDefaultConfigsIfNeeded() throws {
-        var existing = try fetchConfigurations()
-        if try removeDuplicateConfigurations(from: existing) {
-            existing = try fetchConfigurations()
+        let existing = try fetchConfigurations()
+        var didChange = false
+        var seen: Set<ProfileWidgetKind> = []
+        var normalizedConfigs: [ProfileWidgetConfig] = []
+
+        for config in existing {
+            if seen.insert(config.kind).inserted {
+                normalizedConfigs.append(config)
+            } else {
+                modelContext.delete(config)
+                didChange = true
+            }
         }
 
-        if try normalizeExerciseSelections(from: existing) {
-            existing = try fetchConfigurations()
+        for config in normalizedConfigs where config.kind.requiresExerciseSelection {
+            if config.selectedCatalogExerciseUUID == nil || config.selectedExerciseNameSnapshot?.isEmpty != false {
+                if config.isEnabled {
+                    config.isEnabled = false
+                    config.updatedAt = .now
+                    didChange = true
+                }
+            }
         }
 
         var didInsert = false
-        var nextSortOrder = (existing.map(\.sortOrder).max() ?? -1) + 1
+        var nextSortOrder = (normalizedConfigs.map(\.sortOrder).max() ?? -1) + 1
         for kind in ProfileWidgetKind.allCases {
-            if existing.contains(where: { $0.kind == kind }) {
+            if normalizedConfigs.contains(where: { $0.kind == kind }) {
                 continue
             }
 
@@ -132,65 +148,25 @@ final class ProfileWidgetRepository {
             didInsert = true
         }
 
-        if didInsert {
+        if didInsert || didChange {
             try modelContext.save()
         }
-    }
-
-    private func removeDuplicateConfigurations(from configs: [ProfileWidgetConfig]) throws -> Bool {
-        var seen: Set<ProfileWidgetKind> = []
-        var didChange = false
-
-        for config in configs {
-            if seen.contains(config.kind) {
-                modelContext.delete(config)
-                didChange = true
-                continue
-            }
-
-            seen.insert(config.kind)
-        }
-
-        if didChange {
-            try modelContext.save()
-        }
-
-        return didChange
     }
 
     private func config(for kind: ProfileWidgetKind) throws -> ProfileWidgetConfig {
-        if let found = try fetchConfigurations().first(where: { $0.kind == kind }) {
+        let configs = try fetchConfigurations()
+        if let found = configs.first(where: { $0.kind == kind }) {
             return found
         }
 
         let created = ProfileWidgetConfig(
             kind: kind,
             isEnabled: kind.defaultEnabled,
-            sortOrder: (try fetchConfigurations().map(\.sortOrder).max() ?? -1) + 1
+            sortOrder: (configs.map(\.sortOrder).max() ?? -1) + 1
         )
         modelContext.insert(created)
         try modelContext.save()
         return created
-    }
-
-    private func normalizeExerciseSelections(from configs: [ProfileWidgetConfig]) throws -> Bool {
-        var didChange = false
-
-        for config in configs where config.kind.requiresExerciseSelection {
-            if config.selectedCatalogExerciseUUID == nil || config.selectedExerciseNameSnapshot?.isEmpty != false {
-                if config.isEnabled {
-                    config.isEnabled = false
-                    config.updatedAt = .now
-                    didChange = true
-                }
-            }
-        }
-
-        if didChange {
-            try modelContext.save()
-        }
-
-        return didChange
     }
 
     private func fetchConfigurations() throws -> [ProfileWidgetConfig] {

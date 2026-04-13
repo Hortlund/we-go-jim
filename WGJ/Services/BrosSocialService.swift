@@ -33,11 +33,56 @@ struct BroMemberSummary: Identifiable, Equatable {
     let userRecordName: String
     let displayName: String
     let athleteType: ProfileAthleteType?
-    let avatarImageData: Data?
+    let avatarCacheKey: String?
     let joinedAt: Date
     let role: BroMembershipRole
 
     var isOwner: Bool { role == .owner }
+
+    var avatarImageData: Data? {
+        BrosAvatarCacheService.shared.cachedData(for: avatarCacheKey)
+    }
+
+    init(
+        id: String,
+        circleID: String,
+        userRecordName: String,
+        displayName: String,
+        athleteType: ProfileAthleteType?,
+        avatarImageData: Data? = nil,
+        avatarCacheKey: String? = nil,
+        joinedAt: Date,
+        role: BroMembershipRole
+    ) {
+        self.id = id
+        self.circleID = circleID
+        self.userRecordName = userRecordName
+        self.displayName = displayName
+        self.athleteType = athleteType
+        self.avatarCacheKey = resolvedAvatarCacheKey(
+            explicitKey: avatarCacheKey,
+            fallbackKey: id,
+            avatarImageData: avatarImageData
+        )
+        self.joinedAt = joinedAt
+        self.role = role
+
+        let resolvedCacheKey = self.avatarCacheKey ?? id
+        if let avatarImageData {
+            BrosAvatarCacheService.shared.primeSynchronously(
+                data: avatarImageData,
+                for: resolvedCacheKey
+            )
+            Task {
+                await BrosAvatarCacheService.shared.prime(
+                    data: avatarImageData,
+                    for: resolvedCacheKey
+                )
+            }
+        } else if avatarCacheKey == nil {
+            BrosAvatarCacheService.shared.remove(for: resolvedCacheKey)
+        }
+    }
 }
 
 struct BroWorkoutFeedSnapshot: Equatable {
@@ -69,12 +114,79 @@ struct BroFeedEvent: Identifiable, Equatable {
     let actorUserRecordName: String
     let actorMembershipID: String
     let actorDisplayName: String
-    let actorAvatarImageData: Data?
+    let actorAvatarCacheKey: String?
     let createdAt: Date
     let kind: BroFeedEventKind
     let workout: BroWorkoutFeedSnapshot?
     let pr: BroPRFeedSnapshot?
     let reactions: [BroReactionSummary]
+
+    var actorAvatarImageData: Data? {
+        BrosAvatarCacheService.shared.cachedData(for: actorAvatarCacheKey)
+    }
+
+    init(
+        id: String,
+        circleID: String,
+        actorUserRecordName: String,
+        actorMembershipID: String,
+        actorDisplayName: String,
+        actorAvatarImageData: Data? = nil,
+        actorAvatarCacheKey: String? = nil,
+        createdAt: Date,
+        kind: BroFeedEventKind,
+        workout: BroWorkoutFeedSnapshot?,
+        pr: BroPRFeedSnapshot?,
+        reactions: [BroReactionSummary]
+    ) {
+        self.id = id
+        self.circleID = circleID
+        self.actorUserRecordName = actorUserRecordName
+        self.actorMembershipID = actorMembershipID
+        self.actorDisplayName = actorDisplayName
+        self.actorAvatarCacheKey = resolvedAvatarCacheKey(
+            explicitKey: actorAvatarCacheKey,
+            fallbackKey: actorMembershipID,
+            avatarImageData: actorAvatarImageData
+        )
+        self.createdAt = createdAt
+        self.kind = kind
+        self.workout = workout
+        self.pr = pr
+        self.reactions = reactions
+
+        let resolvedCacheKey = self.actorAvatarCacheKey ?? actorMembershipID
+        if let actorAvatarImageData {
+            BrosAvatarCacheService.shared.primeSynchronously(
+                data: actorAvatarImageData,
+                for: resolvedCacheKey
+            )
+            Task {
+                await BrosAvatarCacheService.shared.prime(
+                    data: actorAvatarImageData,
+                    for: resolvedCacheKey
+                )
+            }
+        } else if actorAvatarCacheKey == nil {
+            BrosAvatarCacheService.shared.remove(for: resolvedCacheKey)
+        }
+    }
+}
+
+private func resolvedAvatarCacheKey(
+    explicitKey: String?,
+    fallbackKey: String,
+    avatarImageData: Data?
+) -> String {
+    if let explicitKey, !explicitKey.isEmpty {
+        return explicitKey
+    }
+
+    guard let avatarImageData else {
+        return fallbackKey
+    }
+
+    return "\(fallbackKey)#\(avatarImageData.hashValue)"
 }
 
 struct BrosFeedSnapshot: Equatable {
@@ -226,7 +338,7 @@ enum BrosSocialRules {
                     actorUserRecordName: event.actorUserRecordName,
                     actorMembershipID: event.actorMembershipID,
                     actorDisplayName: event.actorDisplayName,
-                    actorAvatarImageData: event.actorAvatarImageData,
+                    actorAvatarCacheKey: event.actorAvatarCacheKey,
                     createdAt: event.createdAt,
                     kind: event.kind,
                     workout: event.workout,
@@ -1046,7 +1158,6 @@ final class CloudKitBrosSocialService: BrosSocialService {
             joinedAt: joinedAt,
             role: .member
         )
-
         return optimisticSnapshot(
             circle: circle,
             currentMember: currentMember,
@@ -1979,8 +2090,10 @@ final class CloudKitBrosSocialService: BrosSocialService {
             avatarImageData = nil
         }
 
+        let membershipID = record[Field.membershipID] as? String ?? record.recordID.recordName
+
         return BroMemberSummary(
-            id: record[Field.membershipID] as? String ?? record.recordID.recordName,
+            id: membershipID,
             circleID: record[Field.circleID] as? String ?? "",
             userRecordName: record[Field.userRecordName] as? String ?? "",
             displayName: ReviewModerationService.sanitizedForSharing(
@@ -2020,13 +2133,15 @@ final class CloudKitBrosSocialService: BrosSocialService {
             return remoteSummary
         }
 
+        let avatarImageData = localProfile.avatarImageData
+
         return BroMemberSummary(
             id: remoteSummary.id,
             circleID: remoteSummary.circleID,
             userRecordName: remoteSummary.userRecordName,
             displayName: displayName(from: localProfile),
             athleteType: athleteType(from: localProfile),
-            avatarImageData: localProfile.avatarImageData,
+            avatarImageData: avatarImageData,
             joinedAt: remoteSummary.joinedAt,
             role: remoteSummary.role
         )
@@ -2111,6 +2226,8 @@ final class CloudKitBrosSocialService: BrosSocialService {
             kind: .displayName
         )
 
+        let actorAvatarCacheKey = member?.avatarCacheKey ?? actorMembershipID
+
         let workout: BroWorkoutFeedSnapshot?
         let pr: BroPRFeedSnapshot?
 
@@ -2153,7 +2270,7 @@ final class CloudKitBrosSocialService: BrosSocialService {
             actorUserRecordName: actorUserRecordName,
             actorMembershipID: actorMembershipID,
             actorDisplayName: actorDisplayName,
-            actorAvatarImageData: member?.avatarImageData,
+            actorAvatarCacheKey: actorAvatarCacheKey,
             createdAt: createdAt,
             kind: kind,
             workout: workout,

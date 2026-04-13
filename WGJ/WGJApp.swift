@@ -40,46 +40,43 @@ struct WGJApp: App {
             }
         }
 
-        let startupDecision = CloudStartupPreflight.makeDecision()
-        switch startupDecision.storeMode {
-        case .localFallback:
+        guard AppRuntimeConfig.canUseConfiguredCloudKitContainer else {
             do {
                 return ModelContainerBootstrap(
                     container: try makeLocalFallbackContainer(),
-                    cloudSyncEnabled: startupDecision.cloudSyncEnabled,
-                    cloudSyncErrorDescription: startupDecision.cloudSyncErrorDescription
+                    cloudSyncEnabled: false,
+                    cloudSyncErrorDescription: "CloudKit is unavailable for this build. Using local-only mode for this session."
                 )
             } catch {
                 fatalError("Could not create fallback ModelContainer without CloudKit sync: \(describe(error))")
             }
-        case .cloudBacked:
+        }
+
+        do {
+            return ModelContainerBootstrap(
+                container: try makeCloudBackedContainer(),
+                cloudSyncEnabled: true,
+                cloudSyncErrorDescription: nil
+            )
+        } catch {
+            let cloudError = describe(error)
+            let fallbackContainer: ModelContainer
+
             do {
-                let container = try makeCloudBackedContainer()
-                return ModelContainerBootstrap(
-                    container: container,
-                    cloudSyncEnabled: startupDecision.cloudSyncEnabled,
-                    cloudSyncErrorDescription: startupDecision.cloudSyncErrorDescription
-                )
+                fallbackContainer = try makeLocalFallbackContainer()
             } catch {
-                let cloudError = describe(error)
-                let fallbackContainer: ModelContainer
-
-                do {
-                    fallbackContainer = try makeLocalFallbackContainer()
-                } catch {
-                    fatalError("Could not create fallback ModelContainer without CloudKit sync: \(describe(error))")
-                }
-
-                #if DEBUG
-                print("Cloud-backed ModelContainer unavailable. Falling back to local-only mode. Error: \(cloudError)")
-                #endif
-
-                return ModelContainerBootstrap(
-                    container: fallbackContainer,
-                    cloudSyncEnabled: false,
-                    cloudSyncErrorDescription: cloudError
-                )
+                fatalError("Could not create fallback ModelContainer without CloudKit sync: \(describe(error))")
             }
+
+            #if DEBUG
+            print("Cloud-backed ModelContainer unavailable. Falling back to local-only mode. Error: \(cloudError)")
+            #endif
+
+            return ModelContainerBootstrap(
+                container: fallbackContainer,
+                cloudSyncEnabled: false,
+                cloudSyncErrorDescription: cloudError
+            )
         }
     }
 

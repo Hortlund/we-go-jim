@@ -21,6 +21,7 @@ struct ContentView: View {
     @State private var deferredMaintenanceState = AppDeferredMaintenanceState()
     @State private var isPreparingMainPhase = false
     @State private var hasInstalledUITestPendingTemplate = false
+    @State private var hasScheduledInitialDeferredMaintenance = false
 
     private var currentProfile: UserProfile? {
         UserProfileSelection.currentProfile(in: storedProfiles)
@@ -54,25 +55,22 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .task {
             installUITestPendingTemplateIfNeeded()
-            deferredMaintenanceState.requestRun()
-            performResumeCriticalMaintenanceIfNeeded()
-            requestDeferredMaintenance(trigger: .enteredMain)
             syncWorkoutNotificationPreferences()
             updateIdleTimerState()
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 performResumeCriticalMaintenanceIfNeeded()
-                requestDeferredMaintenance(trigger: .sceneActivated)
+                if deferredMaintenanceState.isPending {
+                    requestDeferredMaintenance(trigger: .sceneActivated)
+                }
+                appRuntimeState.refreshCloudAvailabilityIfNeeded()
             }
             updateIdleTimerState()
         }
         .onChange(of: appPhase) { _, newPhase in
             if newPhase == .main {
-                deferredMaintenanceState.requestRun()
-                performResumeCriticalMaintenanceIfNeeded()
-                requestDeferredMaintenance(trigger: .enteredMain)
-                routePendingTemplateFileIfNeeded()
+                handleEnteredMainPhase()
             }
             updateIdleTimerState()
         }
@@ -101,7 +99,7 @@ struct ContentView: View {
             await transition(to: AppStartupRouting.destinationAfterSplash)
             return
         }
-        try? await Task.sleep(for: .seconds(1.1))
+        await Task.yield()
 
         guard appPhase == .splash else { return }
         await transition(to: AppStartupRouting.destinationAfterSplash)
@@ -183,6 +181,18 @@ struct ContentView: View {
         Task { @MainActor in
             await scheduleDeferredMaintenanceIfNeeded(trigger: trigger)
         }
+    }
+
+    private func handleEnteredMainPhase() {
+        if !hasScheduledInitialDeferredMaintenance {
+            hasScheduledInitialDeferredMaintenance = true
+            deferredMaintenanceState.requestRun()
+        }
+
+        performResumeCriticalMaintenanceIfNeeded()
+        requestDeferredMaintenance(trigger: .enteredMain)
+        routePendingTemplateFileIfNeeded()
+        appRuntimeState.refreshCloudAvailabilityIfNeeded()
     }
 
     private func scheduleDeferredMaintenance(trigger: AppMaintenanceTrigger) {
@@ -320,6 +330,7 @@ struct ContentView: View {
         activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
         catalogSyncCoordinator = CatalogSyncCoordinator()
         deferredMaintenanceState.reset()
+        hasScheduledInitialDeferredMaintenance = false
         updateIdleTimerState()
         withAnimation(.easeInOut(duration: 0.2)) {
             appPhase = .splash

@@ -290,40 +290,53 @@ struct HistoryDetailView: View {
     @MainActor
     private func loadExerciseStateIfNeeded() async {
         let currentStamp = HistoryExerciseStateStamp(exercises: sessionExercises)
-        guard currentStamp != loadedExerciseStateStamp else { return }
+        let previousStamp = loadedExerciseStateStamp
+        let changedExerciseIDs = currentStamp.changedExerciseIDs(comparedTo: previousStamp)
+        let removedExerciseIDs = previousStamp.map {
+            $0.exerciseIDs.subtracting(currentStamp.exerciseIDs)
+        } ?? []
+
+        guard previousStamp == nil || !changedExerciseIDs.isEmpty || !removedExerciseIDs.isEmpty else {
+            return
+        }
+
         deferredHydrationTask?.cancel()
         deferredHydrationTask = nil
 
-        let result = WGJPerformance.measure("history-detail.hydrate.local") { () -> HistoryExerciseLocalHydrationResult in
-            var loadedDrafts: [UUID: [WorkoutSessionSetDraft]] = [:]
-            var loadedRests: [UUID: Int] = [:]
-            var loadedNotes: [UUID: String] = [:]
+        let exerciseIDsToRefresh = previousStamp == nil
+            ? currentStamp.exerciseIDs
+            : changedExerciseIDs
 
-            for exercise in sessionExercises {
-                let drafts = makeDrafts(from: exercise)
-                loadedDrafts[exercise.id] = drafts
-                loadedRests[exercise.id] = exercise.restSeconds
-                loadedNotes[exercise.id] = exercise.notes
+        if !removedExerciseIDs.isEmpty {
+            for exerciseID in removedExerciseIDs {
+                clearLocalState(for: exerciseID)
+                hydrationPayloadByExerciseID.removeValue(forKey: exerciseID)
             }
-
-            return HistoryExerciseLocalHydrationResult(
-                draftsByExerciseID: loadedDrafts,
-                restsByExerciseID: loadedRests,
-                notesByExerciseID: loadedNotes
-            )
         }
 
-        setDraftsByExerciseID = result.draftsByExerciseID
-        restByExerciseID = result.restsByExerciseID
-        notesByExerciseID = result.notesByExerciseID
+        if !exerciseIDsToRefresh.isEmpty {
+            WGJPerformance.measure("history-detail.hydrate.local") {
+                for exerciseID in exerciseIDsToRefresh {
+                    guard let exercise = currentStamp.exercise(for: exerciseID) else {
+                        continue
+                    }
+
+                    setDraftsByExerciseID[exerciseID] = makeDrafts(from: exercise)
+                    restByExerciseID[exerciseID] = exercise.restSeconds
+                    notesByExerciseID[exerciseID] = exercise.notes
+                    hydrationPayloadByExerciseID.removeValue(forKey: exerciseID)
+                }
+            }
+        }
+
         hydrationPayloadByExerciseID = hydrationPayloadByExerciseID.filter {
-            result.draftsByExerciseID[$0.key] != nil
+            currentStamp.exerciseIDs.contains($0.key)
         }
         syncExpandedExerciseState()
         loadedExerciseStateStamp = currentStamp
         scheduleDeferredHydration(
             for: currentStamp,
-            draftsByExerciseID: result.draftsByExerciseID
+            draftsByExerciseID: setDraftsByExerciseID
         )
     }
 
@@ -348,6 +361,7 @@ struct HistoryDetailView: View {
         return resolved
     }
 
+    @ViewBuilder
     private func exerciseSection(_ exercise: WorkoutSessionExercise, index: Int) -> some View {
         let isExpanded = expandedExerciseIDs[exercise.id] ?? false
         let drafts = setDraftsByExerciseID[exercise.id] ?? makeDrafts(from: exercise)
@@ -355,52 +369,47 @@ struct HistoryDetailView: View {
         let hydrationPayload = hydrationPayloadByExerciseID[exercise.id]
 
         if isExpanded {
-            return AnyView(
-                WorkoutExerciseRowHostView(
-                    exerciseID: exercise.id,
-                    exerciseAccessibilityIdentifier: "history-exercise-\(exercise.catalogExerciseUUID)",
-                    exerciseName: exercise.exerciseNameSnapshot,
-                    muscleSummary: exercise.muscleSummarySnapshot,
-                    category: exercise.categorySnapshot,
-                    exerciseIndexTitle: "Exercise \(index + 1)",
-                    targetRepMin: exercise.targetRepMin,
-                    targetRepMax: exercise.targetRepMax,
-                    previousPerformanceResolution: hydrationPayload?.previousPerformanceResolution ?? .loading,
-                    personalRecordSummaryKinds: hydrationPayload?.personalRecords.summaryKinds ?? [],
-                    personalRecordKindsBySetID: hydrationPayload?.personalRecords.setKindsBySetID ?? [:],
-                    preferredLoadUnit: preferredLoadUnit,
-                    exerciseNotes: notesByExerciseID[exercise.id] ?? exercise.notes,
-                    restSeconds: restSeconds,
-                    setDrafts: drafts,
-                    isExpanded: true,
-                    onExerciseNotesCommitted: { notes in
-                        updateNotesValue(notes, for: exercise.id)
-                    },
-                    onSetDraftsCommitted: { drafts in
-                        updateDraftsValue(drafts, for: exercise.id)
-                    },
-                    onRestCommitted: { rest in
-                        updateRestValue(rest, for: exercise.id)
-                    },
-                    onExpandedChanged: { handleExpandedChange($0, for: exercise.id) },
-                    onExerciseDelete: {
-                        removeExercise(exerciseID: exercise.id)
-                    }
-                )
-                .equatable()
+            WorkoutExerciseRowHostView(
+                exerciseID: exercise.id,
+                exerciseAccessibilityIdentifier: "history-exercise-\(exercise.catalogExerciseUUID)",
+                exerciseName: exercise.exerciseNameSnapshot,
+                muscleSummary: exercise.muscleSummarySnapshot,
+                category: exercise.categorySnapshot,
+                exerciseIndexTitle: "Exercise \(index + 1)",
+                targetRepMin: exercise.targetRepMin,
+                targetRepMax: exercise.targetRepMax,
+                previousPerformanceResolution: hydrationPayload?.previousPerformanceResolution ?? .loading,
+                personalRecordSummaryKinds: hydrationPayload?.personalRecords.summaryKinds ?? [],
+                personalRecordKindsBySetID: hydrationPayload?.personalRecords.setKindsBySetID ?? [:],
+                preferredLoadUnit: preferredLoadUnit,
+                exerciseNotes: notesByExerciseID[exercise.id] ?? exercise.notes,
+                restSeconds: restSeconds,
+                setDrafts: drafts,
+                isExpanded: true,
+                onExerciseNotesCommitted: { notes in
+                    updateNotesValue(notes, for: exercise.id)
+                },
+                onSetDraftsCommitted: { drafts in
+                    updateDraftsValue(drafts, for: exercise.id)
+                },
+                onRestCommitted: { rest in
+                    updateRestValue(rest, for: exercise.id)
+                },
+                onExpandedChanged: { handleExpandedChange($0, for: exercise.id) },
+                onExerciseDelete: {
+                    removeExercise(exerciseID: exercise.id)
+                }
             )
-        }
+        } else {
+            let collapsedSummary = HistoryExerciseCollapsedSummary(
+                targetRepMin: exercise.targetRepMin,
+                targetRepMax: exercise.targetRepMax,
+                completedSetCount: drafts.filter(\.isCompleted).count,
+                totalSetCount: drafts.count,
+                restSeconds: restSeconds,
+                notes: notesByExerciseID[exercise.id] ?? exercise.notes
+            )
 
-        let collapsedSummary = HistoryExerciseCollapsedSummary(
-            targetRepMin: exercise.targetRepMin,
-            targetRepMax: exercise.targetRepMax,
-            completedSetCount: drafts.filter(\.isCompleted).count,
-            totalSetCount: drafts.count,
-            restSeconds: restSeconds,
-            notes: notesByExerciseID[exercise.id] ?? exercise.notes
-        )
-
-        return AnyView(
             HistoryCollapsedExerciseCard(
                 exerciseAccessibilityIdentifier: "history-exercise-\(exercise.catalogExerciseUUID)",
                 exerciseName: exercise.exerciseNameSnapshot,
@@ -415,7 +424,8 @@ struct HistoryDetailView: View {
                     removeExercise(exerciseID: exercise.id)
                 }
             )
-        )
+        }
+
     }
 
     @MainActor
@@ -545,7 +555,6 @@ struct HistoryDetailView: View {
         withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
             do {
                 try sessionRepository.addExercise(sessionID: sessionID, catalogItem: item)
-                loadedExerciseStateStamp = nil
                 hasPendingSummaryRebuild = true
             } catch {
                 capturedError = error
@@ -563,11 +572,8 @@ struct HistoryDetailView: View {
         withAnimation(WGJMotion.quickAnimation(reduceMotion: reduceMotion)) {
             do {
                 try sessionRepository.removeExercise(sessionID: sessionID, sessionExerciseID: exerciseID)
-                setDraftsByExerciseID.removeValue(forKey: exerciseID)
-                restByExerciseID.removeValue(forKey: exerciseID)
-                notesByExerciseID.removeValue(forKey: exerciseID)
+                clearLocalState(for: exerciseID)
                 hydrationPayloadByExerciseID.removeValue(forKey: exerciseID)
-                loadedExerciseStateStamp = nil
                 hasPendingSummaryRebuild = true
             } catch {
                 capturedError = error
@@ -604,6 +610,12 @@ struct HistoryDetailView: View {
     private func showError(_ error: Error) {
         errorMessage = String(describing: error)
         showingError = true
+    }
+
+    private func clearLocalState(for exerciseID: UUID) {
+        setDraftsByExerciseID.removeValue(forKey: exerciseID)
+        restByExerciseID.removeValue(forKey: exerciseID)
+        notesByExerciseID.removeValue(forKey: exerciseID)
     }
 
     @MainActor
@@ -686,12 +698,6 @@ struct HistoryDetailView: View {
     }
 }
 
-private struct HistoryExerciseLocalHydrationResult {
-    let draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
-    let restsByExerciseID: [UUID: Int]
-    let notesByExerciseID: [UUID: String]
-}
-
 private struct HistoryExerciseHydrationPayload: Equatable {
     let previousPerformanceResolution: WorkoutPreviousPerformanceResolution
     let personalRecords: HistoryExercisePersonalRecordPresentation
@@ -699,10 +705,47 @@ private struct HistoryExerciseHydrationPayload: Equatable {
 
 private struct HistoryExerciseStateStamp: Hashable {
     private let entries: [Entry]
+    private let entriesByID: [UUID: Entry]
+    private let exercisesByID: [UUID: WorkoutSessionExercise]
 
     @MainActor
     init(exercises: [WorkoutSessionExercise]) {
         entries = exercises.map(Entry.init(exercise:))
+        entriesByID = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0) })
+        exercisesByID = Dictionary(uniqueKeysWithValues: exercises.map { ($0.id, $0) })
+    }
+
+    var exerciseIDs: Set<UUID> {
+        Set(entries.map(\.id))
+    }
+
+    func exercise(for exerciseID: UUID) -> WorkoutSessionExercise? {
+        exercisesByID[exerciseID]
+    }
+
+    func changedExerciseIDs(comparedTo previous: HistoryExerciseStateStamp?) -> Set<UUID> {
+        guard let previous else {
+            return exerciseIDs
+        }
+
+        var changed = exerciseIDs.symmetricDifference(previous.exerciseIDs)
+
+        for exerciseID in exerciseIDs.intersection(previous.exerciseIDs) {
+            guard entriesByID[exerciseID] != previous.entriesByID[exerciseID] else {
+                continue
+            }
+            changed.insert(exerciseID)
+        }
+
+        return changed
+    }
+
+    static func == (lhs: HistoryExerciseStateStamp, rhs: HistoryExerciseStateStamp) -> Bool {
+        lhs.entries == rhs.entries
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(entries)
     }
 
     private struct Entry: Hashable {

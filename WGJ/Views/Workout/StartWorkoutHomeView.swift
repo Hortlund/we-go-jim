@@ -18,8 +18,6 @@ struct StartWorkoutHomeView: View {
     @State private var showingFolderEditor = false
     @State private var editingFolderID: UUID?
     @State private var folderNameDraft = ""
-    @State private var lastCompletedByTemplateID: [UUID: Date] = [:]
-    @State private var templateSectionsSnapshot: [StartWorkoutTemplateSection] = []
     @State private var conflictingActiveSessionID: UUID?
     @State private var showingActiveWorkoutConflict = false
     @State private var pendingFolderDeletion: StartWorkoutPendingFolderDeletion?
@@ -43,15 +41,7 @@ struct StartWorkoutHomeView: View {
     }
 
     private var folders: [TemplateFolder] {
-        controller.folders
-    }
-
-    private var templates: [WorkoutTemplate] {
-        controller.templates
-    }
-
-    private var sessions: [WorkoutSession] {
-        controller.completedSessions
+        controller.snapshot.folders
     }
 
     var body: some View {
@@ -62,7 +52,7 @@ struct StartWorkoutHomeView: View {
                 quickStartSection
                 templateWorkspaceSection
 
-                if templateSectionsSnapshot.isEmpty {
+                if controller.snapshot.sections.isEmpty {
                     WGJEmptyStateCard(
                         title: "No templates yet",
                         message: "Create a template or folder to build a cleaner workout library.",
@@ -70,7 +60,7 @@ struct StartWorkoutHomeView: View {
                     )
                 } else {
                     LazyVStack(alignment: .leading, spacing: 12) {
-                        ForEach(templateSectionsSnapshot) { section in
+                        ForEach(controller.snapshot.sections) { section in
                             templateSectionCard(section)
                         }
                     }
@@ -159,12 +149,6 @@ struct StartWorkoutHomeView: View {
         .task(id: isTabActive) {
             guard isTabActive else { return }
             await reloadHomeSnapshot()
-        }
-        .task(id: templateLibraryStamp) {
-            rebuildTemplateSections()
-        }
-        .task(id: sessionDataStamp) {
-            recomputeSessionDerivedState()
         }
         .task(id: pendingTemplateFileTaskKey) {
             importPendingTemplateFileIfNeeded()
@@ -575,50 +559,6 @@ struct StartWorkoutHomeView: View {
         .accessibilityIdentifier("start-workout-import-template-button")
     }
 
-    private var templateLibraryStamp: StartWorkoutTemplateLibraryStamp {
-        _controller.wrappedValue.templateLibraryStamp
-    }
-
-    private func rebuiltTemplateSections() -> [StartWorkoutTemplateSection] {
-        let templatesByFolderID = Dictionary(grouping: templates, by: \.folderID)
-        var sections: [StartWorkoutTemplateSection] = []
-
-        if let unfiledTemplates = templatesByFolderID[TemplateRepository.unfiledFolderID],
-           !unfiledTemplates.isEmpty
-        {
-            sections.append(
-                StartWorkoutTemplateSection(
-                    id: TemplateRepository.unfiledFolderID,
-                    title: "Unfiled",
-                    systemImage: "tray.full.fill",
-                    folderIDForCreation: nil,
-                    templates: unfiledTemplates
-                )
-            )
-        }
-
-        for folder in folders {
-            sections.append(
-                StartWorkoutTemplateSection(
-                    id: folder.id,
-                    title: folder.name,
-                    systemImage: "folder.fill",
-                    folderIDForCreation: folder.id,
-                    templates: templatesByFolderID[folder.id] ?? []
-                )
-            )
-        }
-
-        return sections
-    }
-
-    private func rebuildTemplateSections() {
-        templateSectionsSnapshot = WGJPerformance.measure("start-workout.template-sections") {
-            rebuiltTemplateSections()
-        }
-        synchronizeExpandedFolderState()
-    }
-
     private func isSectionExpanded(_ sectionID: UUID) -> Bool {
         expandedFolderIDs[sectionID] ?? defaultExpandedState(for: sectionID)
     }
@@ -732,11 +672,7 @@ struct StartWorkoutHomeView: View {
     }
 
     private func lastPerformedDate(for templateID: UUID) -> Date? {
-        lastCompletedByTemplateID[templateID]
-    }
-
-    private var sessionDataStamp: StartWorkoutSessionStamp {
-        _controller.wrappedValue.sessionDataStamp
+        controller.snapshot.lastCompletedByTemplateID[templateID]
     }
 
     private var pendingTemplateFileTaskKey: PendingTemplateFileTaskKey {
@@ -744,27 +680,6 @@ struct StartWorkoutHomeView: View {
             requestID: templateFileOpenState.pendingRequest?.requestID,
             isTabActive: isTabActive
         )
-    }
-
-    private func recomputeSessionDerivedState() {
-        var completedByTemplateID: [UUID: Date] = [:]
-
-        for session in sessions {
-            guard session.status == .completed, let templateID = session.templateID else {
-                continue
-            }
-
-            let completedAt = session.endedAt ?? session.startedAt
-            if let existing = completedByTemplateID[templateID] {
-                if completedAt > existing {
-                    completedByTemplateID[templateID] = completedAt
-                }
-            } else {
-                completedByTemplateID[templateID] = completedAt
-            }
-        }
-
-        lastCompletedByTemplateID = completedByTemplateID
     }
 
     private func beginCreatingFolder() {
@@ -982,18 +897,6 @@ struct StartWorkoutHomeView: View {
         return nsError.code == NSUserCancelledError
     }
 
-    private func synchronizeExpandedFolderState() {
-        let validFolderIDs = Set(folders.map(\.id)).union([TemplateRepository.unfiledFolderID])
-        let sanitized = StartWorkoutFolderExpansionPersistence.sanitized(
-            expandedFolderIDs,
-            validFolderIDs: validFolderIDs
-        )
-
-        guard sanitized != expandedFolderIDs else { return }
-        expandedFolderIDs = sanitized
-        persistExpandedFolderState()
-    }
-
     private func persistExpandedFolderState() {
         StartWorkoutFolderExpansionPersistence.save(expandedFolderIDs)
     }
@@ -1029,68 +932,64 @@ struct StartWorkoutHomeView: View {
     }
 }
 
-struct StartWorkoutSessionStamp: Hashable {
-    let completedTemplateSessionCount: Int
-    let latestCompletedSessionUpdate: TimeInterval
+struct StartWorkoutHomeSnapshot {
+    let folders: [TemplateFolder]
+    let templates: [WorkoutTemplate]
+    let completedSessions: [WorkoutSession]
+    let sections: [StartWorkoutTemplateSection]
+    let lastCompletedByTemplateID: [UUID: Date]
 
-    static let empty = StartWorkoutSessionStamp(sessions: [])
-
-    init(sessions: [WorkoutSession]) {
-        var count = 0
-        var latestUpdate = 0.0
-
-        for session in sessions where session.status == .completed && session.templateID != nil {
-            count += 1
-            latestUpdate = max(latestUpdate, session.updatedAt.timeIntervalSinceReferenceDate)
-        }
-
-        completedTemplateSessionCount = count
-        latestCompletedSessionUpdate = latestUpdate
-    }
-}
-
-struct StartWorkoutTemplateLibraryStamp: Hashable {
-    let folderCount: Int
-    let latestFolderUpdate: TimeInterval
-    let templateCount: Int
-    let latestTemplateUpdate: TimeInterval
-
-    static let empty = StartWorkoutTemplateLibraryStamp(folders: [], templates: [])
-
-    init(folders: [TemplateFolder], templates: [WorkoutTemplate]) {
-        folderCount = folders.count
-        latestFolderUpdate = folders
-            .map { $0.updatedAt.timeIntervalSinceReferenceDate }
-            .max() ?? 0
-        templateCount = templates.count
-        latestTemplateUpdate = templates
-            .map { $0.updatedAt.timeIntervalSinceReferenceDate }
-            .max() ?? 0
-    }
+    static let empty = StartWorkoutHomeSnapshot(
+        folders: [],
+        templates: [],
+        completedSessions: [],
+        sections: [],
+        lastCompletedByTemplateID: [:]
+    )
 }
 
 @MainActor
 @Observable
 final class StartWorkoutHomeController {
-    var folders: [TemplateFolder] = []
-    var templates: [WorkoutTemplate] = []
-    var completedSessions: [WorkoutSession] = []
-    var templateLibraryStamp = StartWorkoutTemplateLibraryStamp.empty
-    var sessionDataStamp = StartWorkoutSessionStamp.empty
+    var snapshot = StartWorkoutHomeSnapshot.empty
 
     func reload(modelContext: ModelContext) throws {
         let templateRepository = TemplateRepository(modelContext: modelContext)
         let sessionRepository = WorkoutSessionRepository(modelContext: modelContext)
-
         let loadedFolders = try templateRepository.folders()
-        var loadedTemplates = try templateRepository.templatesWithoutFolder()
-        for folder in loadedFolders {
-            loadedTemplates.append(contentsOf: try templateRepository.templates(in: folder.id))
-        }
-        let folderOrderByID = Dictionary(uniqueKeysWithValues: loadedFolders.enumerated().map { ($0.element.id, $0.offset) })
+        let loadedTemplates = try templateRepository.templates()
+        let completedSessions = try sessionRepository.completedSessions()
 
-        folders = loadedFolders
-        templates = loadedTemplates.sorted {
+        snapshot = StartWorkoutHomeSnapshotBuilder.build(
+            folders: loadedFolders,
+            templates: loadedTemplates,
+            completedSessions: completedSessions
+        )
+    }
+}
+
+enum StartWorkoutHomeSnapshotBuilder {
+    static func build(
+        folders: [TemplateFolder],
+        templates: [WorkoutTemplate],
+        completedSessions: [WorkoutSession]
+    ) -> StartWorkoutHomeSnapshot {
+        let orderedTemplates = orderTemplates(templates, folders: folders)
+        let sections = buildSections(folders: folders, templates: orderedTemplates)
+        let lastCompletedByTemplateID = buildLastCompletedByTemplateID(completedSessions)
+
+        return StartWorkoutHomeSnapshot(
+            folders: folders,
+            templates: orderedTemplates,
+            completedSessions: completedSessions,
+            sections: sections,
+            lastCompletedByTemplateID: lastCompletedByTemplateID
+        )
+    }
+
+    private static func orderTemplates(_ templates: [WorkoutTemplate], folders: [TemplateFolder]) -> [WorkoutTemplate] {
+        let folderOrderByID = Dictionary(uniqueKeysWithValues: folders.enumerated().map { ($0.element.id, $0.offset) })
+        return templates.sorted {
             let lhsFolderOrder = $0.folderID == TemplateRepository.unfiledFolderID
                 ? -1
                 : (folderOrderByID[$0.folderID] ?? Int.max)
@@ -1106,13 +1005,66 @@ final class StartWorkoutHomeController {
             }
             return $0.name.localizedStandardCompare($1.name) == .orderedAscending
         }
-        completedSessions = try sessionRepository.completedSessions()
-        templateLibraryStamp = StartWorkoutTemplateLibraryStamp(folders: loadedFolders, templates: templates)
-        sessionDataStamp = StartWorkoutSessionStamp(sessions: completedSessions)
+    }
+
+    private static func buildSections(
+        folders: [TemplateFolder],
+        templates: [WorkoutTemplate]
+    ) -> [StartWorkoutTemplateSection] {
+        let templatesByFolderID = Dictionary(grouping: templates, by: \.folderID)
+        var sections: [StartWorkoutTemplateSection] = []
+
+        if let unfiledTemplates = templatesByFolderID[TemplateRepository.unfiledFolderID],
+           !unfiledTemplates.isEmpty
+        {
+            sections.append(
+                StartWorkoutTemplateSection(
+                    id: TemplateRepository.unfiledFolderID,
+                    title: "Unfiled",
+                    systemImage: "tray.full.fill",
+                    folderIDForCreation: nil,
+                    templates: unfiledTemplates
+                )
+            )
+        }
+
+        for folder in folders {
+            sections.append(
+                StartWorkoutTemplateSection(
+                    id: folder.id,
+                    title: folder.name,
+                    systemImage: "folder.fill",
+                    folderIDForCreation: folder.id,
+                    templates: templatesByFolderID[folder.id] ?? []
+                )
+            )
+        }
+
+        return sections
+    }
+
+    private static func buildLastCompletedByTemplateID(_ sessions: [WorkoutSession]) -> [UUID: Date] {
+        var completedByTemplateID: [UUID: Date] = [:]
+
+        for session in sessions {
+            guard session.status == .completed, let templateID = session.templateID else {
+                continue
+            }
+            let completedAt = session.endedAt ?? session.startedAt
+            if let existing = completedByTemplateID[templateID] {
+                if completedAt > existing {
+                    completedByTemplateID[templateID] = completedAt
+                }
+            } else {
+                completedByTemplateID[templateID] = completedAt
+            }
+        }
+
+        return completedByTemplateID
     }
 }
 
-private struct StartWorkoutTemplateSection: Identifiable {
+struct StartWorkoutTemplateSection: Identifiable {
     let id: UUID
     let title: String
     let systemImage: String

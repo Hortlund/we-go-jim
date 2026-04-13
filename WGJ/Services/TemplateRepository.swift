@@ -354,6 +354,17 @@ final class TemplateRepository {
         return try modelContext.fetch(descriptor)
     }
 
+    func templates() throws -> [WorkoutTemplate] {
+        let descriptor = FetchDescriptor<WorkoutTemplate>(
+            sortBy: [
+                SortDescriptor(\.folderID, order: .forward),
+                SortDescriptor(\.sortOrder, order: .forward),
+                SortDescriptor(\.name, order: .forward),
+            ]
+        )
+        return try modelContext.fetch(descriptor)
+    }
+
     func templatesWithoutFolder() throws -> [WorkoutTemplate] {
         let rootID = Self.unfiledFolderID
         let descriptor = FetchDescriptor<WorkoutTemplate>(

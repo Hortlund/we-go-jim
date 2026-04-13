@@ -929,6 +929,10 @@ private struct TemplateExerciseDetailDestinationView: View {
 
     let templateExercise: TemplateExercise
 
+    @State private var availableMuscles: [MuscleGroup] = []
+    @State private var suggestedCategories: [String] = []
+    @State private var didLoadCatalogMetadata = false
+
     init(templateExercise: TemplateExercise) {
         self.templateExercise = templateExercise
         let catalogExerciseUUID = templateExercise.catalogExerciseUUID
@@ -940,13 +944,20 @@ private struct TemplateExerciseDetailDestinationView: View {
     }
 
     var body: some View {
-        if let catalogExercise = catalogMatches.first {
-            ExerciseDetailDestinationView(
-                exercise: catalogExercise,
-                repository: ExerciseCatalogRepository(modelContext: modelContext)
-            )
-        } else {
-            fallbackSnapshotDetail
+        Group {
+            if let catalogExercise = catalogMatches.first {
+                ExerciseDetailDestinationView(
+                    exercise: catalogExercise,
+                    repository: ExerciseCatalogRepository(modelContext: modelContext),
+                    availableMuscles: availableMuscles,
+                    suggestedCategories: suggestedCategories
+                )
+            } else {
+                fallbackSnapshotDetail
+            }
+        }
+        .task {
+            loadCatalogMetadataIfNeeded()
         }
     }
 
@@ -980,6 +991,15 @@ private struct TemplateExerciseDetailDestinationView: View {
         .wgjNavigationChrome()
         .navigationTitle("Exercise")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func loadCatalogMetadataIfNeeded() {
+        guard !didLoadCatalogMetadata else { return }
+        didLoadCatalogMetadata = true
+
+        let repository = ExerciseCatalogRepository(modelContext: modelContext)
+        availableMuscles = (try? repository.availableMuscles()) ?? []
+        suggestedCategories = (try? repository.availableCategories(includeUncurated: true)) ?? []
     }
 
     private func snapshotInfoRow(title: String, value: String) -> some View {

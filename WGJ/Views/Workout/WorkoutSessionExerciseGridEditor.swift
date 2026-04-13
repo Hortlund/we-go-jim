@@ -14,7 +14,8 @@ struct WorkoutSessionExerciseGridEditor: View {
     let personalRecordKindsBySetID: [UUID: [WorkoutPersonalRecordKind]]
     let guidance: ActiveWorkoutExerciseGuidancePresentation?
     let preferredLoadUnit: TemplateLoadUnit
-    let supplementaryContent: AnyView?
+    let componentSummaryResolution: ExerciseComponentRotationResolution?
+    let componentSummaryAccessibilityIdentifierPrefix: String?
 
     @Binding var exerciseNotes: String
     @Binding var restSeconds: Int
@@ -83,7 +84,8 @@ struct WorkoutSessionExerciseGridEditor: View {
         personalRecordKindsBySetID: [UUID: [WorkoutPersonalRecordKind]] = [:],
         guidance: ActiveWorkoutExerciseGuidancePresentation? = nil,
         preferredLoadUnit: TemplateLoadUnit = .kg,
-        supplementaryContent: AnyView? = nil,
+        componentSummaryResolution: ExerciseComponentRotationResolution? = nil,
+        componentSummaryAccessibilityIdentifierPrefix: String? = nil,
         exerciseNotes: Binding<String> = .constant(""),
         restSeconds: Binding<Int>,
         setDrafts: Binding<[WorkoutSessionSetDraft]>,
@@ -121,7 +123,8 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.personalRecordKindsBySetID = personalRecordKindsBySetID
         self.guidance = guidance
         self.preferredLoadUnit = preferredLoadUnit
-        self.supplementaryContent = supplementaryContent
+        self.componentSummaryResolution = componentSummaryResolution
+        self.componentSummaryAccessibilityIdentifierPrefix = componentSummaryAccessibilityIdentifierPrefix
         self._exerciseNotes = exerciseNotes
         self._restSeconds = restSeconds
         self._setDrafts = setDrafts
@@ -286,8 +289,12 @@ struct WorkoutSessionExerciseGridEditor: View {
                     .foregroundStyle(WGJTheme.textSecondary)
                     .lineLimit(2)
 
-                if let supplementaryContent {
-                    supplementaryContent
+                if let componentSummaryResolution,
+                   componentSummaryResolution.availableComponents.count > 1 {
+                    ActiveWorkoutExerciseComponentSummaryView(
+                        resolution: componentSummaryResolution,
+                        accessibilityIdentifierPrefix: componentSummaryAccessibilityIdentifierPrefix
+                    )
                 }
 
                 if shouldEmphasizeCompletedExercise {
@@ -2385,7 +2392,7 @@ struct WorkoutSetInlineHintPresentation: Equatable {
         targetRepMax: Int?,
         formatWeight: (Double) -> String = { WGJFormatters.decimalString($0) }
     ) -> WorkoutSetInlineHintPresentation? {
-        guard !draft.showsLoggedPerformance else {
+        guard previous != nil else {
             return nil
         }
 

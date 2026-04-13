@@ -22,8 +22,6 @@ struct ExercisesCatalogView: View {
     @State private var selectedCategory: String?
     @State private var sortDescending = false
     @State private var queryDebounceTask: Task<Void, Never>?
-    @State private var exerciseByUUID: [String: ExerciseCatalogItem] = [:]
-    @State private var viewModel = ExercisesCatalogViewModel()
     @State private var controller = ExercisesCatalogController()
     @State private var isBootstrappingCatalog = false
     @State private var hasAttemptedBootstrap = false
@@ -81,7 +79,7 @@ struct ExercisesCatalogView: View {
     }
 
     private var reservesIndexRailSpace: Bool {
-        viewModel.totalSectionCount > 6
+        controller.snapshot.totalSectionCount > 6
     }
 
     private var shouldShowIndexRail: Bool {
@@ -91,14 +89,6 @@ struct ExercisesCatalogView: View {
 
     private var shouldLoadCatalog: Bool {
         isPickerMode || isTabActive
-    }
-
-    private var catalogExercises: [ExerciseCatalogItem] {
-        controller.catalogExercises
-    }
-
-    private var muscleGroups: [MuscleGroup] {
-        controller.muscleGroups
     }
 
     var body: some View {
@@ -117,11 +107,11 @@ struct ExercisesCatalogView: View {
                             filterRow
                             createExerciseButton
 
-                            if viewModel.sections.isEmpty {
+                            if controller.snapshot.sections.isEmpty {
                                 emptyState
                             } else {
                                 LazyVStack(alignment: .leading, spacing: 0) {
-                                    ForEach(viewModel.sections) { section in
+                                    ForEach(controller.snapshot.sections) { section in
                                         VStack(alignment: .leading, spacing: 0) {
                                             WGJCompactSectionHeader(section.title)
                                                 .id(section.id)
@@ -129,7 +119,7 @@ struct ExercisesCatalogView: View {
 
                                             LazyVStack(alignment: .leading, spacing: 0) {
                                                 ForEach(section.rows) { row in
-                                                    if let exercise = exerciseByUUID[row.id] {
+                                                    if let exercise = controller.snapshot.exerciseByUUID[row.id] {
                                                         exerciseRow(exercise, repository: catalogRepository)
                                                     }
                                                 }
@@ -150,7 +140,7 @@ struct ExercisesCatalogView: View {
 
                 if reservesIndexRailSpace {
                     VStack(spacing: 4) {
-                        ForEach(viewModel.sections) { section in
+                        ForEach(controller.snapshot.sections) { section in
                             Button(section.title) {
                                 withAnimation(.easeInOut(duration: 0.2)) {
                                     proxy.scrollTo(section.id, anchor: .top)
@@ -178,18 +168,18 @@ struct ExercisesCatalogView: View {
                 }
             }
             .onChange(of: debouncedQuery) { _, _ in
-                recomputeSections()
+                applyCurrentFilters()
             }
             .onChange(of: selectedPrimaryMuscleID) { _, _ in
-                recomputeSections()
+                applyCurrentFilters()
                 scrollToTop(using: proxy)
             }
             .onChange(of: selectedCategory) { _, _ in
-                recomputeSections()
+                applyCurrentFilters()
                 scrollToTop(using: proxy)
             }
             .onChange(of: sortDescending) { _, _ in
-                recomputeSections()
+                applyCurrentFilters()
                 scrollToTop(using: proxy)
             }
         }
@@ -216,8 +206,8 @@ struct ExercisesCatalogView: View {
             NavigationStack {
                 CustomExerciseEditorView(
                     draft: $customExerciseDraft,
-                    availableMuscles: muscleGroups,
-                    suggestedCategories: viewModel.availableCategories,
+                    availableMuscles: controller.snapshot.muscleGroups,
+                    suggestedCategories: controller.snapshot.availableCategories,
                     onCancel: {
                         showingCustomExerciseSheet = false
                     },
@@ -232,7 +222,7 @@ struct ExercisesCatalogView: View {
             if hasAttemptedBootstrap {
                 do {
                     try controller.reload(modelContext: modelContext)
-                    rebuildCatalogCache()
+                    applyCurrentFilters()
                 } catch {
                     showError(error)
                 }
@@ -311,13 +301,13 @@ struct ExercisesCatalogView: View {
                 selectedPrimaryMuscleID = nil
             }
 
-            ForEach(viewModel.availableMuscles, id: \.id) { muscle in
+            ForEach(controller.snapshot.availableMuscles, id: \.id) { muscle in
                 Button(muscle.name) {
                     selectedPrimaryMuscleID = muscle.id
                 }
             }
         } label: {
-            compactFilterPill(viewModel.muscleName(for: selectedPrimaryMuscleID) ?? "Any Body Part")
+            compactFilterPill(controller.snapshot.muscleName(for: selectedPrimaryMuscleID) ?? "Any Body Part")
         }
         .accessibilityIdentifier("exercises-body-part-filter")
     }
@@ -328,7 +318,7 @@ struct ExercisesCatalogView: View {
                 selectedCategory = nil
             }
 
-            ForEach(viewModel.availableCategories, id: \.self) { category in
+            ForEach(controller.snapshot.availableCategories, id: \.self) { category in
                 Button(category) {
                     selectedCategory = category
                 }
@@ -370,6 +360,8 @@ struct ExercisesCatalogView: View {
                 ExerciseDetailDestinationView(
                     exercise: exercise,
                     repository: repository,
+                    availableMuscles: controller.snapshot.muscleGroups,
+                    suggestedCategories: controller.snapshot.availableCategories,
                     actionTitle: isPickerMode ? "Add to Template" : "Add to Workout",
                     onSelect: {
                         handleSelection(exercise)
@@ -397,29 +389,13 @@ struct ExercisesCatalogView: View {
         }
     }
 
-    private func rebuildCatalogCache() {
-        let exercises = catalogExercises
-        WGJPerformance.measure("catalog.rebuild") {
-            exerciseByUUID = Dictionary(uniqueKeysWithValues: exercises.map { ($0.remoteUUID, $0) })
-            viewModel.rebuildCatalog(from: exercises)
-        }
-        recomputeSections()
-        if exercises.isEmpty {
-            if loadState == .loading {
-                loadState = .failed
-            }
-        } else {
-            loadState = .ready
-        }
-    }
-
     private var emptyState: some View {
         WGJEmptyStateCard(
             title: emptyStateTitle,
             message: emptyStateMessage,
             icon: emptyStateIcon
         ) {
-            if catalogExercises.isEmpty && loadState != .loading && !isBootstrappingCatalog {
+            if controller.snapshot.catalogExercises.isEmpty && loadState != .loading && !isBootstrappingCatalog {
                 Button("Retry") {
                     beginRetryCatalogBootstrap()
                 }
@@ -434,7 +410,7 @@ struct ExercisesCatalogView: View {
         if loadState == .loading || isBootstrappingCatalog {
             return "Loading exercises"
         }
-        if catalogExercises.isEmpty {
+        if controller.snapshot.catalogExercises.isEmpty {
             return loadState == .failed ? "Library unavailable" : "Exercises still loading"
         }
         return "No exercises match"
@@ -444,7 +420,7 @@ struct ExercisesCatalogView: View {
         if loadState == .loading || isBootstrappingCatalog {
             return "Loading the bundled exercise library."
         }
-        if catalogExercises.isEmpty {
+        if controller.snapshot.catalogExercises.isEmpty {
             return loadState == .failed
                 ? "The bundled exercise library could not be loaded yet."
                 : "The bundled exercise library has not finished loading."
@@ -456,7 +432,7 @@ struct ExercisesCatalogView: View {
         if loadState == .loading || isBootstrappingCatalog {
             return "dumbbell.fill"
         }
-        if catalogExercises.isEmpty {
+        if controller.snapshot.catalogExercises.isEmpty {
             return "tray.full"
         }
         return "line.3.horizontal.decrease.circle"
@@ -477,8 +453,8 @@ struct ExercisesCatalogView: View {
         }
     }
 
-    private func recomputeSections() {
-        viewModel.recomputeSections(
+    private func applyCurrentFilters() {
+        controller.applyFilters(
             query: debouncedQuery,
             selectedPrimaryMuscleID: selectedPrimaryMuscleID,
             selectedCategory: selectedCategory,
@@ -561,11 +537,11 @@ struct ExercisesCatalogView: View {
     private func bootstrapCatalogIfNeeded() async {
         guard !hasAttemptedBootstrap else { return }
         hasAttemptedBootstrap = true
-        if catalogExercises.isEmpty {
+        if controller.snapshot.catalogExercises.isEmpty {
             await retryCatalogBootstrap()
         } else {
             loadState = .ready
-            rebuildCatalogCache()
+            applyCurrentFilters()
         }
     }
 
@@ -589,17 +565,17 @@ struct ExercisesCatalogView: View {
         } catch {
             loadState = .failed
             showError(bootstrapError ?? error)
-            rebuildCatalogCache()
+            applyCurrentFilters()
             return
         }
 
-        if controller.catalogExercises.isEmpty, let bootstrapError {
+        if controller.snapshot.catalogExercises.isEmpty, let bootstrapError {
             loadState = .failed
             showError(bootstrapError)
         } else {
             loadState = .ready
         }
-        rebuildCatalogCache()
+        applyCurrentFilters()
     }
 
     private func saveCustomExercise() {
@@ -621,7 +597,7 @@ struct ExercisesCatalogView: View {
             sortDescending = false
             query = created.displayName
             debouncedQuery = created.displayName
-            rebuildCatalogCache()
+            applyCurrentFilters()
         } catch {
             showError(error)
         }
@@ -636,28 +612,53 @@ struct ExercisesCatalogView: View {
 @MainActor
 @Observable
 final class ExercisesCatalogController {
-    var catalogExercises: [ExerciseCatalogItem] = []
-    var muscleGroups: [MuscleGroup] = []
+    var snapshot = ExercisesCatalogSnapshot.empty
 
     func reload(modelContext: ModelContext) throws {
         let repository = ExerciseCatalogRepository(modelContext: modelContext)
-        catalogExercises = try repository.allExercises()
-        muscleGroups = try repository.availableMuscles()
+        let exercises = try repository.allExercises()
+        let muscles = try repository.availableMuscles()
+        snapshot.rebuild(from: exercises, muscleGroups: muscles)
+    }
+
+    func applyFilters(
+        query: String,
+        selectedPrimaryMuscleID: Int?,
+        selectedCategory: String?,
+        sortDescending: Bool
+    ) {
+        snapshot.applyFilters(
+            query: query,
+            selectedPrimaryMuscleID: selectedPrimaryMuscleID,
+            selectedCategory: selectedCategory,
+            sortDescending: sortDescending
+        )
+    }
+
+    func muscleName(for muscleID: Int?) -> String? {
+        snapshot.muscleName(for: muscleID)
     }
 }
 
 @MainActor
-@Observable
-final class ExercisesCatalogViewModel {
-    private(set) var availableMuscleNamesByID: [Int: String] = [:]
-    private(set) var availableMuscles: [(id: Int, name: String)] = []
-    private(set) var availableCategories: [String] = []
-    private(set) var sections: [ExercisesSectionSnapshot] = []
-    private(set) var totalSectionCount = 0
-
+struct ExercisesCatalogSnapshot {
+    var catalogExercises: [ExerciseCatalogItem] = []
+    var muscleGroups: [MuscleGroup] = []
+    var exerciseByUUID: [String: ExerciseCatalogItem] = [:]
+    var availableMuscleNamesByID: [Int: String] = [:]
+    var availableMuscles: [(id: Int, name: String)] = []
+    var availableCategories: [String] = []
+    var sections: [ExercisesSectionSnapshot] = []
+    var totalSectionCount = 0
     private var allRows: [ExerciseCatalogRowSnapshot] = []
 
-    func rebuildCatalog(from exercises: [ExerciseCatalogItem]) {
+    static let empty = ExercisesCatalogSnapshot()
+
+    mutating func rebuild(from exercises: [ExerciseCatalogItem], muscleGroups: [MuscleGroup]) {
+        catalogExercises = exercises
+        self.muscleGroups = muscleGroups
+        exerciseByUUID = Dictionary(uniqueKeysWithValues: exercises.map { ($0.remoteUUID, $0) })
+
         var muscleNameByID: [Int: String] = [:]
         var categories = Set<String>()
         var rows: [ExerciseCatalogRowSnapshot] = []
@@ -694,25 +695,53 @@ final class ExercisesCatalogViewModel {
             )
         }
 
-        allRows = rows
-        totalSectionCount = Set(rows.map(\.indexKey)).count
         availableMuscleNamesByID = muscleNameByID
         availableMuscles = muscleNameByID
             .map { ($0.key, $0.value) }
             .sorted { $0.1.localizedStandardCompare($1.1) == .orderedAscending }
         availableCategories = categories
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        totalSectionCount = Set(rows.map(\.indexKey)).count
+        allRows = rows
+        sections = Self.sections(
+            from: rows,
+            query: "",
+            selectedPrimaryMuscleID: nil,
+            selectedCategory: nil,
+            sortDescending: false
+        )
     }
 
-    func recomputeSections(
+    mutating func applyFilters(
         query: String,
         selectedPrimaryMuscleID: Int?,
         selectedCategory: String?,
         sortDescending: Bool
     ) {
+        sections = Self.sections(
+            from: allRows,
+            query: query,
+            selectedPrimaryMuscleID: selectedPrimaryMuscleID,
+            selectedCategory: selectedCategory,
+            sortDescending: sortDescending
+        )
+    }
+
+    func muscleName(for muscleID: Int?) -> String? {
+        guard let muscleID else { return nil }
+        return availableMuscleNamesByID[muscleID]
+    }
+
+    private static func sections(
+        from rows: [ExerciseCatalogRowSnapshot],
+        query: String,
+        selectedPrimaryMuscleID: Int?,
+        selectedCategory: String?,
+        sortDescending: Bool
+    ) -> [ExercisesSectionSnapshot] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
-        var filtered = allRows
+        var filtered = rows
         let queryTokens = trimmed
             .split(whereSeparator: \.isWhitespace)
             .map(String.init)
@@ -740,15 +769,10 @@ final class ExercisesCatalogViewModel {
             return sortDescending ? order == .orderedDescending : order == .orderedAscending
         }
 
-        sections = sortedKeys.map { key in
+        return sortedKeys.map { key in
             let rows = grouped[key, default: []]
             return ExercisesSectionSnapshot(id: key, title: key, rows: rows)
         }
-    }
-
-    func muscleName(for muscleID: Int?) -> String? {
-        guard let muscleID else { return nil }
-        return availableMuscleNamesByID[muscleID]
     }
 }
 
@@ -769,13 +793,11 @@ struct ExercisesSectionSnapshot: Identifiable, Equatable {
 
 struct ExerciseDetailDestinationView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: [SortDescriptor(\MuscleGroup.name, order: .forward)])
-    private var muscleGroups: [MuscleGroup]
-    @Query(sort: [SortDescriptor(\ExerciseCatalogItem.categoryName, order: .forward)])
-    private var catalogExercises: [ExerciseCatalogItem]
 
     let exercise: ExerciseCatalogItem
     let repository: ExerciseCatalogRepository
+    let availableMuscles: [MuscleGroup]
+    let suggestedCategories: [String]
     var actionTitle: String?
     var onSelect: (() -> Void)?
 
@@ -877,7 +899,7 @@ struct ExerciseDetailDestinationView: View {
             NavigationStack {
                 CustomExerciseEditorView(
                     draft: $customExerciseDraft,
-                    availableMuscles: muscleGroups,
+                    availableMuscles: availableMuscles,
                     suggestedCategories: suggestedCategories,
                     title: "Edit Exercise",
                     subtitle: "Update your custom movement.",
@@ -942,18 +964,6 @@ struct ExerciseDetailDestinationView: View {
             && attribution.licenseURL.isEmpty
 
         return isBundledWGJAttribution ? nil : attribution
-    }
-
-    private var suggestedCategories: [String] {
-        Array(
-            Set(
-                catalogExercises
-                    .filter { !$0.isHidden }
-                    .map(\.categoryName)
-                    .filter { !$0.isEmpty }
-            )
-        )
-        .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
     private func presentCustomExerciseEditor() {

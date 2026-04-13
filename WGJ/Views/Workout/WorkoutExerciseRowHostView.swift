@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct WorkoutExerciseRowHostView: View, Equatable {
+struct WorkoutExerciseRowHostView: View {
     let exerciseID: UUID
     let exerciseAccessibilityIdentifier: String
     let exerciseName: String
@@ -14,8 +14,8 @@ struct WorkoutExerciseRowHostView: View, Equatable {
     let personalRecordKindsBySetID: [UUID: [WorkoutPersonalRecordKind]]
     let guidance: ActiveWorkoutExerciseGuidancePresentation?
     let preferredLoadUnit: TemplateLoadUnit
-    let supplementaryContent: AnyView?
-    let supplementaryContentKey: String?
+    let componentSummaryResolution: ExerciseComponentRotationResolution?
+    let componentSummaryAccessibilityIdentifierPrefix: String?
     let exerciseNotes: String
     let restSeconds: Int
     let setDrafts: [WorkoutSessionSetDraft]
@@ -62,8 +62,8 @@ struct WorkoutExerciseRowHostView: View, Equatable {
         personalRecordKindsBySetID: [UUID: [WorkoutPersonalRecordKind]] = [:],
         guidance: ActiveWorkoutExerciseGuidancePresentation? = nil,
         preferredLoadUnit: TemplateLoadUnit,
-        supplementaryContent: AnyView? = nil,
-        supplementaryContentKey: String? = nil,
+        componentSummaryResolution: ExerciseComponentRotationResolution? = nil,
+        componentSummaryAccessibilityIdentifierPrefix: String? = nil,
         exerciseNotes: String = "",
         restSeconds: Int,
         setDrafts: [WorkoutSessionSetDraft],
@@ -104,8 +104,8 @@ struct WorkoutExerciseRowHostView: View, Equatable {
         self.personalRecordKindsBySetID = personalRecordKindsBySetID
         self.guidance = guidance
         self.preferredLoadUnit = preferredLoadUnit
-        self.supplementaryContent = supplementaryContent
-        self.supplementaryContentKey = supplementaryContentKey
+        self.componentSummaryResolution = componentSummaryResolution
+        self.componentSummaryAccessibilityIdentifierPrefix = componentSummaryAccessibilityIdentifierPrefix
         self.exerciseNotes = exerciseNotes
         self.restSeconds = restSeconds
         self.setDrafts = setDrafts
@@ -148,38 +148,6 @@ struct WorkoutExerciseRowHostView: View, Equatable {
         )
     }
 
-    static func == (lhs: WorkoutExerciseRowHostView, rhs: WorkoutExerciseRowHostView) -> Bool {
-        lhs.exerciseID == rhs.exerciseID
-            && lhs.exerciseAccessibilityIdentifier == rhs.exerciseAccessibilityIdentifier
-            && lhs.exerciseName == rhs.exerciseName
-            && lhs.muscleSummary == rhs.muscleSummary
-            && lhs.category == rhs.category
-            && lhs.exerciseIndexTitle == rhs.exerciseIndexTitle
-            && lhs.targetRepMin == rhs.targetRepMin
-            && lhs.targetRepMax == rhs.targetRepMax
-            && lhs.previousPerformanceResolution == rhs.previousPerformanceResolution
-            && lhs.personalRecordSummaryKinds == rhs.personalRecordSummaryKinds
-            && lhs.personalRecordKindsBySetID == rhs.personalRecordKindsBySetID
-            && lhs.guidance == rhs.guidance
-            && lhs.preferredLoadUnit == rhs.preferredLoadUnit
-            && lhs.supplementaryContentKey == rhs.supplementaryContentKey
-            && lhs.exerciseNotes == rhs.exerciseNotes
-            && lhs.restSeconds == rhs.restSeconds
-            && lhs.setDrafts == rhs.setDrafts
-            && lhs.isExpanded == rhs.isExpanded
-            && lhs.showsInlineExerciseControls == rhs.showsInlineExerciseControls
-            && lhs.showsSetProgressChip == rhs.showsSetProgressChip
-            && lhs.manualCompletionMode == rhs.manualCompletionMode
-            && lhs.isBozarModeEnabled == rhs.isBozarModeEnabled
-            && lhs.isSetEditingEnabled == rhs.isSetEditingEnabled
-            && lhs.isSetCompletionEnabled == rhs.isSetCompletionEnabled
-            && lhs.setCompletionGatePresentation == rhs.setCompletionGatePresentation
-            && lhs.enablesHeaderSwipeDelete == rhs.enablesHeaderSwipeDelete
-            && lhs.emphasizesExerciseCompletion == rhs.emphasizesExerciseCompletion
-            && lhs.canMoveExerciseUp == rhs.canMoveExerciseUp
-            && lhs.canMoveExerciseDown == rhs.canMoveExerciseDown
-    }
-
     var body: some View {
         WorkoutSessionExerciseGridEditor(
             exerciseName: exerciseName,
@@ -194,7 +162,8 @@ struct WorkoutExerciseRowHostView: View, Equatable {
             personalRecordKindsBySetID: personalRecordKindsBySetID,
             guidance: guidance,
             preferredLoadUnit: preferredLoadUnit,
-            supplementaryContent: supplementaryContent,
+            componentSummaryResolution: componentSummaryResolution,
+            componentSummaryAccessibilityIdentifierPrefix: componentSummaryAccessibilityIdentifierPrefix,
             exerciseNotes: Binding(
                 get: { localExerciseNotes },
                 set: { updated in

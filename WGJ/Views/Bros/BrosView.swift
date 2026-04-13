@@ -1,4 +1,3 @@
-import ImageIO
 import SwiftData
 import SwiftUI
 import UIKit
@@ -45,6 +44,7 @@ final class BrosViewModel {
     private var outboxFlushTask: Task<Void, Never>?
     private var memberLimitFeedbackTask: Task<Void, Never>?
     private(set) var lastSuccessfulSnapshotRefreshAt: Date?
+    private let snapshotFreshnessInterval: TimeInterval = 60
     private let accountStatusProvider: @MainActor () async -> AccountStatus
     private let serviceFactory: @MainActor (ModelContext) -> (any BrosSocialService)?
 
@@ -71,7 +71,8 @@ final class BrosViewModel {
         await refresh(
             modelContext: modelContext,
             cloudSyncEnabled: cloudSyncEnabled,
-            cloudSyncErrorDescription: cloudSyncErrorDescription
+            cloudSyncErrorDescription: cloudSyncErrorDescription,
+            force: true
         )
         switch state {
         case .active, .onboarding:
@@ -84,9 +85,11 @@ final class BrosViewModel {
     func refresh(
         modelContext: ModelContext,
         cloudSyncEnabled: Bool,
-        cloudSyncErrorDescription: String?
+        cloudSyncErrorDescription: String?,
+        force: Bool = false
     ) async {
         guard !isSnapshotRefreshInFlight else { return }
+        guard shouldRefreshSnapshot(force: force) else { return }
         isSnapshotRefreshInFlight = true
         defer { isSnapshotRefreshInFlight = false }
 
@@ -124,21 +127,10 @@ final class BrosViewModel {
         scheduleOutboxFlush(modelContext: modelContext)
 
         do {
-            if let snapshot = try await service.fetchSnapshot() {
-                if case .active(let currentSnapshot) = state, !pendingReactionEventIDs.isEmpty {
-                    state = .active(
-                        snapshotPreservingPendingReactions(
-                            freshSnapshot: snapshot,
-                            currentSnapshot: currentSnapshot
-                        )
-                    )
-                } else {
-                    state = .active(snapshot)
-                }
-            } else {
-                state = .onboarding
-            }
-            lastSuccessfulSnapshotRefreshAt = .now
+            try await applyFetchedSnapshot(
+                service.fetchSnapshot(),
+                preservingPendingReactions: true
+            )
         } catch {
             state = .unavailable(error.localizedDescription)
         }
@@ -271,16 +263,11 @@ final class BrosViewModel {
         cloudSyncEnabled: Bool,
         cloudSyncErrorDescription: String?
     ) async {
-        if let lastSuccessfulSnapshotRefreshAt,
-           Date().timeIntervalSince(lastSuccessfulSnapshotRefreshAt) < 60
-        {
-            return
-        }
-
         await refresh(
             modelContext: modelContext,
             cloudSyncEnabled: cloudSyncEnabled,
-            cloudSyncErrorDescription: cloudSyncErrorDescription
+            cloudSyncErrorDescription: cloudSyncErrorDescription,
+            force: false
         )
     }
 
@@ -360,14 +347,10 @@ final class BrosViewModel {
 
         do {
             let service = try service(modelContext: modelContext)
-            if let snapshot = try await service.fetchSnapshot() {
-                state = .active(snapshot)
-            } else {
-                state = .onboarding
-                joinCode = ""
-                circleMemberLimit = BrosSocialRules.defaultMemberLimit
-            }
-            lastSuccessfulSnapshotRefreshAt = .now
+            try await applyFetchedSnapshot(
+                service.fetchSnapshot(),
+                preservingPendingReactions: false
+            )
         } catch {
             // Keep the current state if the follow-up hydration fails.
         }
@@ -376,20 +359,17 @@ final class BrosViewModel {
     private func hydrateActiveSnapshot(modelContext: ModelContext) async {
         guard case .active = state else { return }
         guard pendingReactionEventIDs.isEmpty, !isSnapshotRefreshInFlight else { return }
+        guard shouldRefreshSnapshot(force: false) else { return }
 
         isSnapshotRefreshInFlight = true
         defer { isSnapshotRefreshInFlight = false }
 
         do {
             let service = try service(modelContext: modelContext)
-            if let snapshot = try await service.fetchSnapshot() {
-                state = .active(snapshot)
-            } else {
-                state = .onboarding
-                joinCode = ""
-                circleMemberLimit = BrosSocialRules.defaultMemberLimit
-            }
-            lastSuccessfulSnapshotRefreshAt = .now
+            try await applyFetchedSnapshot(
+                service.fetchSnapshot(),
+                preservingPendingReactions: true
+            )
         } catch {
             // Keep the optimistic active state instead of regressing to unavailable.
         }
@@ -422,6 +402,39 @@ final class BrosViewModel {
             throw BrosSocialServiceError.unavailable
         }
         return service
+    }
+
+    private func shouldRefreshSnapshot(force: Bool) -> Bool {
+        guard !force else { return true }
+        guard let lastSuccessfulSnapshotRefreshAt else { return true }
+        return Date().timeIntervalSince(lastSuccessfulSnapshotRefreshAt) >= snapshotFreshnessInterval
+    }
+
+    private func applyFetchedSnapshot(
+        _ snapshot: BrosFeedSnapshot?,
+        preservingPendingReactions: Bool
+    ) async throws {
+        if let snapshot {
+            if preservingPendingReactions,
+               case .active(let currentSnapshot) = state,
+               !pendingReactionEventIDs.isEmpty
+            {
+                state = .active(
+                    snapshotPreservingPendingReactions(
+                        freshSnapshot: snapshot,
+                        currentSnapshot: currentSnapshot
+                    )
+                )
+            } else {
+                state = .active(snapshot)
+            }
+        } else {
+            state = .onboarding
+            joinCode = ""
+            circleMemberLimit = BrosSocialRules.defaultMemberLimit
+        }
+
+        lastSuccessfulSnapshotRefreshAt = .now
     }
 
     private func clearMemberLimitSaveFeedback() {
@@ -477,7 +490,7 @@ final class BrosViewModel {
                 actorUserRecordName: event.actorUserRecordName,
                 actorMembershipID: event.actorMembershipID,
                 actorDisplayName: event.actorDisplayName,
-                actorAvatarImageData: event.actorAvatarImageData,
+                actorAvatarCacheKey: event.actorAvatarCacheKey,
                 createdAt: event.createdAt,
                 kind: event.kind,
                 workout: event.workout,
@@ -513,7 +526,7 @@ final class BrosViewModel {
                 actorUserRecordName: event.actorUserRecordName,
                 actorMembershipID: event.actorMembershipID,
                 actorDisplayName: event.actorDisplayName,
-                actorAvatarImageData: event.actorAvatarImageData,
+                actorAvatarCacheKey: event.actorAvatarCacheKey,
                 createdAt: event.createdAt,
                 kind: event.kind,
                 workout: event.workout,
@@ -552,7 +565,7 @@ final class BrosViewModel {
                 actorUserRecordName: event.actorUserRecordName,
                 actorMembershipID: event.actorMembershipID,
                 actorDisplayName: event.actorDisplayName,
-                actorAvatarImageData: event.actorAvatarImageData,
+                actorAvatarCacheKey: event.actorAvatarCacheKey,
                 createdAt: event.createdAt,
                 kind: event.kind,
                 workout: event.workout,
@@ -751,7 +764,8 @@ struct BrosView: View {
             await viewModel.refresh(
                 modelContext: modelContext,
                 cloudSyncEnabled: cloudSyncEnabled,
-                cloudSyncErrorDescription: cloudSyncErrorDescription
+                cloudSyncErrorDescription: cloudSyncErrorDescription,
+                force: true
             )
         }
         .wgjScreenBackground()
@@ -772,7 +786,8 @@ struct BrosView: View {
             await viewModel.refresh(
                 modelContext: modelContext,
                 cloudSyncEnabled: cloudSyncEnabled,
-                cloudSyncErrorDescription: cloudSyncErrorDescription
+                cloudSyncErrorDescription: cloudSyncErrorDescription,
+                force: true
             )
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -986,7 +1001,11 @@ struct BrosView: View {
 
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 10) {
-                BroAvatarView(imageData: member.avatarImageData, name: resolvedDisplayName(member.displayName), size: 44)
+                BroAvatarView(
+                    avatarCacheKey: member.avatarCacheKey,
+                    name: resolvedDisplayName(member.displayName),
+                    size: 44
+                )
 
                 Spacer(minLength: 0)
 
@@ -1107,7 +1126,7 @@ struct BrosView: View {
         return VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 12) {
                 BroAvatarView(
-                    imageData: event.actorAvatarImageData,
+                    avatarCacheKey: event.actorAvatarCacheKey,
                     name: resolvedDisplayName(event.actorDisplayName),
                     size: 46
                 )
@@ -1813,7 +1832,7 @@ private struct BroCircleManagementView: View {
     private func memberRow(_ member: BroMemberSummary) -> some View {
         HStack(alignment: .center, spacing: 12) {
             BroAvatarView(
-                imageData: member.avatarImageData,
+                avatarCacheKey: member.avatarCacheKey,
                 name: resolvedDisplayName(member.displayName),
                 size: 46
             )
@@ -1971,7 +1990,7 @@ private struct BroReactionDetailSheet: View {
 }
 
 private struct BroAvatarView: View {
-    let imageData: Data?
+    let avatarCacheKey: String?
     let name: String
     let size: CGFloat
     @State private var image: UIImage?
@@ -2005,7 +2024,7 @@ private struct BroAvatarView: View {
             Circle()
                 .stroke(WGJTheme.outlineStrong, lineWidth: 1)
         }
-        .task(id: imageData) {
+        .task(id: avatarCacheKey) {
             await loadImage()
         }
     }
@@ -2021,45 +2040,27 @@ private struct BroAvatarView: View {
 
     @MainActor
     private func loadImage() async {
-        guard let imageData else {
+        guard let avatarCacheKey else {
             image = nil
             return
         }
 
-        let decodedImage = await AvatarImageDecoder.decode(
-            imageData,
-            maxPixelSize: min(size * 2, 256)
-        )
-
-        guard !Task.isCancelled else { return }
-        image = decodedImage
-    }
-}
-
-private enum AvatarImageDecoder {
-    static func decode(_ data: Data, maxPixelSize: CGFloat) async -> UIImage? {
-        let displayScale = await MainActor.run { UIScreen.main.scale }
-
-        return await Task.detached(priority: .utility) {
-            let options = [kCGImageSourceShouldCache: false] as CFDictionary
-            guard let source = CGImageSourceCreateWithData(data as CFData, options) else {
-                return UIImage(data: data)
-            }
-
-            let thumbnailOptions = [
-                kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceThumbnailMaxPixelSize: Int(maxPixelSize),
-                kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceShouldCacheImmediately: false,
-            ] as CFDictionary
-
-            if let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions) {
-                return UIImage(cgImage: cgImage, scale: displayScale, orientation: .up)
-            }
-
-            return UIImage(data: data)
+        if let cachedImage = BrosAvatarCacheService.shared.cachedThumbnail(for: avatarCacheKey) {
+            image = cachedImage
+            return
         }
-        .value
+
+        if let cachedData = BrosAvatarCacheService.shared.cachedData(for: avatarCacheKey) {
+            let decodedImage = await AvatarImageCodec.thumbnail(
+                from: cachedData,
+                maxPixelSize: min(size * 2, 256)
+            )
+            guard !Task.isCancelled else { return }
+            image = decodedImage
+            return
+        }
+
+        image = nil
     }
 }
 

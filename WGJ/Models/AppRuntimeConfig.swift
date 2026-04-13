@@ -177,11 +177,15 @@ final class AppRuntimeState {
     var latestCloudSyncEvent: CloudSyncEventSummary?
     var workoutNotificationStyle: WorkoutNotificationStyle = .timeSensitive
 
+    @ObservationIgnored private var hasResolvedRuntimeCloudAvailability = false
+    @ObservationIgnored private var isRefreshingRuntimeCloudAvailability = false
+
     private init() { }
 
     func updateCloudState(isEnabled: Bool, errorDescription: String?) {
         cloudSyncEnabled = isEnabled
         cloudSyncErrorDescription = errorDescription
+        hasResolvedRuntimeCloudAvailability = false
     }
 
     func updateCloudRuntimeError(_ errorDescription: String?) {
@@ -196,6 +200,35 @@ final class AppRuntimeState {
         workoutNotificationStyle = style
     }
 
+    func refreshCloudAvailabilityIfNeeded(
+        force: Bool = false,
+        accountService: (any AccountStatusProviding)? = nil
+    ) {
+        guard cloudSyncEnabled else { return }
+        guard force || !hasResolvedRuntimeCloudAvailability else { return }
+        guard !isRefreshingRuntimeCloudAvailability else { return }
+
+        isRefreshingRuntimeCloudAvailability = true
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                self.isRefreshingRuntimeCloudAvailability = false
+                self.hasResolvedRuntimeCloudAvailability = true
+            }
+
+            let status = await (accountService ?? AccountStatusService()).fetchAccountStatus()
+            switch status {
+            case .checking:
+                break
+            case .available:
+                self.updateCloudRuntimeError(nil)
+            case .unavailable(let reason):
+                self.updateCloudRuntimeError(Self.runtimeErrorDescription(for: reason))
+            }
+        }
+    }
+
     func isBrosCloudAvailable(cloudContainerAvailable: Bool) -> Bool {
         AppRuntimeConfig.reviewPolicy.brosEnabled
             && cloudSyncEnabled
@@ -205,6 +238,19 @@ final class AppRuntimeState {
 
     var isBrosCloudAvailable: Bool {
         isBrosCloudAvailable(cloudContainerAvailable: AppRuntimeConfig.canUseConfiguredCloudKitContainer)
+    }
+
+    private static func runtimeErrorDescription(for reason: AccountUnavailableReason) -> String {
+        switch reason {
+        case .noAccount:
+            return "No iCloud account is signed in on this device. Cloud features are unavailable for this session."
+        case .restricted:
+            return "iCloud is restricted on this device. Cloud features are unavailable for this session."
+        case .temporarilyUnavailable:
+            return "iCloud is temporarily unavailable on this device. Cloud features are temporarily unavailable."
+        case .unknown:
+            return "WGJ could not verify iCloud availability right now. Cloud features are temporarily unavailable."
+        }
     }
 }
 

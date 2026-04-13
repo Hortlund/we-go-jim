@@ -103,7 +103,10 @@ struct HistoryOverviewView: View {
     }
 
     private func historyCard(_ card: HistorySessionCardData) -> some View {
-        HistorySessionCardView(card: card) {
+        HistorySessionCardView(
+            card: card,
+            session: controller.sessionsByID[card.sessionID]
+        ) {
             archiveSession(card.sessionID)
         }
         .equatable()
@@ -193,13 +196,12 @@ struct HistoryMonthSection: Identifiable {
 struct HistorySessionCardData: Identifiable, Equatable {
     let id: String
     let sessionID: UUID
+    let updatedAtStamp: TimeInterval
     let name: String
     let dateText: String
     let durationText: String
     let volumeText: String
     let prsText: String
-    let exerciseRows: [String]
-    let bestSetRows: [String]
 }
 
 struct HistoryOverviewSnapshot {
@@ -212,32 +214,16 @@ struct HistoryOverviewSnapshot {
     )
 }
 
-struct HistorySessionDataStamp: Hashable {
-    let completedSessionCount: Int
-    let latestCompletedSessionUpdate: TimeInterval
-
-    init(sessions: [WorkoutSession]) {
-        var count = 0
-        var latestUpdate = 0.0
-
-        for session in sessions where session.status == .completed {
-            count += 1
-            latestUpdate = max(latestUpdate, session.updatedAt.timeIntervalSinceReferenceDate)
-        }
-
-        completedSessionCount = count
-        latestCompletedSessionUpdate = latestUpdate
-    }
-}
-
 @MainActor
 @Observable
 final class HistoryOverviewController {
     var completedSessions: [WorkoutSession] = []
+    var sessionsByID: [UUID: WorkoutSession] = [:]
     var snapshot = HistoryOverviewSnapshot.empty
 
     func reload(modelContext: ModelContext) throws {
         completedSessions = try WorkoutSessionRepository(modelContext: modelContext).completedSessions()
+        sessionsByID = Dictionary(uniqueKeysWithValues: completedSessions.map { ($0.id, $0) })
         snapshot = HistoryOverviewSnapshotBuilder.build(
             sessions: completedSessions,
             selectedDayFilter: nil
@@ -289,18 +275,15 @@ enum HistoryOverviewSnapshotBuilder {
     }
 
     private static func makeCardData(_ session: WorkoutSession) -> HistorySessionCardData {
-        let summary = summaryRows(for: session)
-
         return HistorySessionCardData(
             id: session.id.uuidString,
             sessionID: session.id,
+            updatedAtStamp: session.updatedAt.timeIntervalSinceReferenceDate,
             name: session.name,
             dateText: formattedSessionDate(session),
             durationText: formattedDuration(session.durationSeconds),
             volumeText: formattedVolume(session.totalVolume),
-            prsText: "\(session.prHitsCount) PRs",
-            exerciseRows: summary.exerciseRows,
-            bestSetRows: summary.bestSetRows
+            prsText: "\(session.prHitsCount) PRs"
         )
     }
 
@@ -326,26 +309,6 @@ enum HistoryOverviewSnapshotBuilder {
         return "\(WGJFormatters.integerString(volume)) kg"
     }
 
-    private static func summaryRows(for session: WorkoutSession) -> (exerciseRows: [String], bestSetRows: [String]) {
-        let exercises = (session.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
-        var exerciseRows: [String] = []
-        var bestSetRows: [String] = []
-        exerciseRows.reserveCapacity(min(6, exercises.count))
-        bestSetRows.reserveCapacity(min(6, exercises.count))
-
-        for exercise in exercises.prefix(6) {
-            let sets = (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
-            exerciseRows.append("\(sets.count) x \(exercise.exerciseNameSnapshot)")
-            bestSetRows.append(bestSetLine(for: sets))
-        }
-
-        return (exerciseRows, bestSetRows)
-    }
-
-    private static func bestSetLine(for sets: [WorkoutSessionSet]) -> String {
-        WorkoutMetricsService.bestSetText(for: sets)
-    }
-
     private static func startOfMonth(for date: Date, calendar: Calendar) -> Date {
         let components = calendar.dateComponents([.year, .month], from: date)
         return calendar.date(from: components) ?? date
@@ -358,6 +321,7 @@ enum HistoryOverviewSnapshotBuilder {
 
 private struct HistorySessionCardView: View, Equatable {
     let card: HistorySessionCardData
+    let session: WorkoutSession?
     let onArchive: () -> Void
 
     static func == (lhs: HistorySessionCardView, rhs: HistorySessionCardView) -> Bool {
@@ -421,15 +385,8 @@ private struct HistorySessionCardView: View, Equatable {
     }
 
     private var summaryRows: [HistorySessionSummaryRow] {
-        let rowCount = max(card.exerciseRows.count, card.bestSetRows.count)
-
-        return (0..<rowCount).map { index in
-            HistorySessionSummaryRow(
-                id: index,
-                exercise: card.exerciseRows.indices.contains(index) ? card.exerciseRows[index] : "-",
-                bestSet: card.bestSetRows.indices.contains(index) ? card.bestSetRows[index] : "-"
-            )
-        }
+        guard let session else { return [] }
+        return HistorySessionSummaryBuilder.rows(for: session)
     }
 
     private var summarySection: some View {
@@ -481,9 +438,24 @@ private struct HistorySessionCardView: View, Equatable {
             .minimumScaleFactor(0.82)
             .fixedSize(horizontal: true, vertical: false)
     }
+
 }
 
-private struct HistorySessionSummaryRow: Identifiable {
+enum HistorySessionSummaryBuilder {
+    static func rows(for session: WorkoutSession, limit: Int = 6) -> [HistorySessionSummaryRow] {
+        let exercises = (session.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
+        return exercises.prefix(limit).enumerated().map { index, exercise in
+            let sets = (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
+            return HistorySessionSummaryRow(
+                id: index,
+                exercise: "\(sets.count) x \(exercise.exerciseNameSnapshot)",
+                bestSet: WorkoutMetricsService.bestSetText(for: sets)
+            )
+        }
+    }
+}
+
+struct HistorySessionSummaryRow: Identifiable, Equatable {
     let id: Int
     let exercise: String
     let bestSet: String

@@ -5,7 +5,7 @@ import Testing
 @MainActor
 struct ScreenSnapshotTests {
     @Test
-    func exercisesCatalogViewModelBuildsFilteredSections() {
+    func exercisesCatalogSnapshotBuildsFilteredSections() {
         let chest = MuscleGroup(remoteID: 1, name: "Chest", nameEn: "Chest")
         let legs = MuscleGroup(remoteID: 2, name: "Legs", nameEn: "Legs")
 
@@ -37,22 +37,72 @@ struct ScreenSnapshotTests {
         )
         hidden.primaryMuscles = [chest]
 
-        let viewModel = ExercisesCatalogViewModel()
-        viewModel.rebuildCatalog(from: [bench, squat, hidden])
+        var snapshot = ExercisesCatalogSnapshot.empty
+        snapshot.rebuild(from: [bench, squat, hidden], muscleGroups: [chest, legs])
 
-        #expect(viewModel.availableCategories == ["Strength"])
-        #expect(viewModel.availableMuscles.map(\.name) == ["Chest", "Legs"])
+        #expect(snapshot.availableCategories == ["Strength"])
+        #expect(snapshot.availableMuscles.map(\.name) == ["Chest", "Legs"])
+        #expect(snapshot.exerciseByUUID["bench"]?.displayName == "Bench Press")
 
-        viewModel.recomputeSections(
+        snapshot.applyFilters(
             query: "bench",
             selectedPrimaryMuscleID: chest.remoteID,
             selectedCategory: "Strength",
             sortDescending: false
         )
 
-        #expect(viewModel.sections.count == 1)
-        #expect(viewModel.sections.first?.title == "B")
-        #expect(viewModel.sections.first?.rows.map(\.displayName) == ["Bench Press"])
+        #expect(snapshot.sections.count == 1)
+        #expect(snapshot.sections.first?.title == "B")
+        #expect(snapshot.sections.first?.rows.map(\.displayName) == ["Bench Press"])
+    }
+
+    @Test
+    func startWorkoutHomeSnapshotBuildsGroupedSectionsAndLastCompletedLookup() {
+        let folder = TemplateFolder(name: "Push", sortOrder: 0)
+        let unfiledTemplate = WorkoutTemplate(
+            folderID: TemplateRepository.unfiledFolderID,
+            name: "Unfiled Template"
+        )
+        let filedTemplate = WorkoutTemplate(
+            folderID: folder.id,
+            name: "Filed Template"
+        )
+        filedTemplate.sortOrder = 1
+        unfiledTemplate.sortOrder = 0
+
+        let completedSession = WorkoutSession(
+            templateID: filedTemplate.id,
+            name: "Push Day",
+            status: .completed,
+            startedAt: Date(timeIntervalSince1970: 1_736_035_200),
+            endedAt: Date(timeIntervalSince1970: 1_736_038_800),
+            durationSeconds: 3600,
+            totalVolume: 1200,
+            prHitsCount: 1
+        )
+        let olderSession = WorkoutSession(
+            templateID: filedTemplate.id,
+            name: "Push Day",
+            status: .completed,
+            startedAt: Date(timeIntervalSince1970: 1_736_000_000),
+            endedAt: Date(timeIntervalSince1970: 1_736_001_000),
+            durationSeconds: 1200,
+            totalVolume: 500,
+            prHitsCount: 0
+        )
+
+        let snapshot = StartWorkoutHomeSnapshotBuilder.build(
+            folders: [folder],
+            templates: [filedTemplate, unfiledTemplate],
+            completedSessions: [olderSession, completedSession]
+        )
+
+        #expect(snapshot.sections.count == 2)
+        #expect(snapshot.sections.first?.title == "Unfiled")
+        #expect(snapshot.sections.last?.title == "Push")
+        #expect(snapshot.sections.first?.templates.map { $0.name } == ["Unfiled Template"])
+        #expect(snapshot.sections.last?.templates.map { $0.name } == ["Filed Template"])
+        #expect(snapshot.lastCompletedByTemplateID[filedTemplate.id] == completedSession.endedAt)
     }
 
     @Test

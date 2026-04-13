@@ -220,4 +220,13 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 - How to Verify Next Time: Open a completed workout with several exercises, scroll immediately after the screen appears, then expand a lower exercise and confirm its previous-performance/PR content still loads without the whole screen hitching.
 - Status: active
 
+## 2026-04-13 - Bros Avatar Cache Keys Must Be Versioned When Inline Data Is Present
+
+- Date: 2026-04-13
+- Trigger/Problem: After slimming Bros feed/member models to cache-backed avatar references, the full `WGJTests` suite still failed intermittently because current-member avatars could disappear even though the isolated test passed.
+- Root Cause: `BroMemberSummary` and `BroFeedEvent` shared a global avatar cache keyed only by membership/user identity. Parallel snapshot construction could reuse the same key for different avatar payload states, and redundant service-level warming still touched the unversioned base key, so one path could stomp or clear another path's cache entry.
+- Durable Rule: When a Bros summary/event is initialized with inline avatar bytes, derive a versioned cache key from the identity key plus the payload revision and treat explicit cache keys as references that must not clear the shared entry.
+- How to Verify Next Time: Run the full `WGJTests` target, not just isolated Bros tests, and confirm `fetchSnapshotPrefersNewerLocalProfileIdentityForCurrentMember` stays green while current-member and feed-event avatars still render after concurrent snapshot work.
+- Status: active
+
 Promote a lesson here only when it clears the bar above.

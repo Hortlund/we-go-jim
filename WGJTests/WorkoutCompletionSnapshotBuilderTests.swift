@@ -236,9 +236,11 @@ struct WorkoutCompletionSnapshotBuilderTests {
             sessions: [storedSession],
             selectedDayFilter: nil
         )
+        let historySummaryRows = HistorySessionSummaryBuilder.rows(for: storedSession)
 
         #expect(completionSnapshot.exerciseRecap.first?.bestSetText == "85 kg x 8")
-        #expect(historySnapshot.sections.first?.cards.first?.bestSetRows.first == "85 kg x 8")
+        #expect(historySnapshot.sections.first?.cards.first?.sessionID == storedSession.id)
+        #expect(historySummaryRows.first?.bestSet == "85 kg x 8")
     }
 
     @Test

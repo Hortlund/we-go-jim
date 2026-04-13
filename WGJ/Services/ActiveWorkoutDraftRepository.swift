@@ -36,6 +36,12 @@ struct ActiveWorkoutExercisePersistenceChangeSet: Equatable {
     }
 }
 
+struct ActiveWorkoutCheckpointPersistenceResult: Equatable {
+    let didPersistSessionMeta: Bool
+    let handledExerciseIDs: Set<UUID>
+    let persistedExerciseIDs: Set<UUID>
+}
+
 @MainActor
 final class ActiveWorkoutDraftRepository {
     private let modelContext: ModelContext
@@ -526,6 +532,83 @@ final class ActiveWorkoutDraftRepository {
 
         guard shouldSave else { return }
         try modelContext.save()
+    }
+
+    func persistCheckpoint(
+        sessionID: UUID,
+        sessionName: String,
+        sessionNotes: String,
+        dirtyExerciseIDs: Set<UUID>,
+        snapshotsByExerciseID: [UUID: ActiveWorkoutExercisePersistenceSnapshot],
+        persistedSnapshotsByExerciseID: [UUID: ActiveWorkoutExercisePersistenceSnapshot]
+    ) throws -> ActiveWorkoutCheckpointPersistenceResult {
+        guard let session = try session(id: sessionID) else {
+            throw WorkoutSessionRepositoryError.sessionNotFound
+        }
+
+        let now = Date()
+        var shouldSave = false
+        var didPersistSessionMeta = false
+        var handledExerciseIDs: Set<UUID> = []
+        var persistedExerciseIDs: Set<UUID> = []
+
+        if try applySessionMeta(
+            name: sessionName,
+            notes: sessionNotes,
+            to: session,
+            now: now
+        ) {
+            shouldSave = true
+            didPersistSessionMeta = true
+        }
+
+        let exerciseByID = Dictionary(uniqueKeysWithValues: try sessionExercises(sessionID: sessionID).map { ($0.id, $0) })
+
+        for exerciseID in dirtyExerciseIDs {
+            handledExerciseIDs.insert(exerciseID)
+
+            guard let exercise = exerciseByID[exerciseID],
+                  let snapshot = snapshotsByExerciseID[exerciseID]
+            else {
+                continue
+            }
+
+            let persistedSnapshot = persistedSnapshotsByExerciseID[exerciseID] ?? snapshot
+            let changes = ActiveWorkoutExercisePersistenceChangeSet(
+                current: snapshot,
+                persisted: persistedSnapshot
+            )
+            guard changes.hasChanges else { continue }
+
+            var didMutateExercise = false
+
+            if changes.persistDrafts {
+                let draftChanges = applySetDrafts(snapshot.setDrafts, to: exercise, now: now)
+                didMutateExercise = draftChanges.didMutateExerciseStructure || draftChanges.didMutateAnySet
+            }
+
+            if changes.persistRest {
+                didMutateExercise = applyExerciseRest(snapshot.restSeconds, to: exercise, now: now) || didMutateExercise
+            }
+
+            if changes.persistNotes {
+                didMutateExercise = applyExerciseNotes(snapshot.notes, to: exercise, now: now) || didMutateExercise
+            }
+
+            guard didMutateExercise else { continue }
+            persistedExerciseIDs.insert(exerciseID)
+            shouldSave = true
+        }
+
+        if shouldSave {
+            try modelContext.save()
+        }
+
+        return ActiveWorkoutCheckpointPersistenceResult(
+            didPersistSessionMeta: didPersistSessionMeta,
+            handledExerciseIDs: handledExerciseIDs,
+            persistedExerciseIDs: persistedExerciseIDs
+        )
     }
 
     func previousSetMaps(
@@ -1024,6 +1107,36 @@ final class ActiveWorkoutDraftRepository {
         exercise.notes = notes
         exercise.updatedAt = now
         return true
+    }
+
+    @discardableResult
+    private func applySessionMeta(
+        name: String,
+        notes: String,
+        to session: ActiveWorkoutDraftSession,
+        now: Date
+    ) throws -> Bool {
+        var didChange = false
+        let normalizedSessionName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !normalizedSessionName.isEmpty {
+            let cleaned = try ReviewModerationService.validateUserInput(name, kind: .workoutName)
+            if session.name != cleaned {
+                session.name = cleaned
+                didChange = true
+            }
+        }
+
+        if session.notes != notes {
+            session.notes = notes
+            didChange = true
+        }
+
+        if didChange {
+            session.updatedAt = now
+        }
+
+        return didChange
     }
 
     private func apply(

@@ -1,5 +1,4 @@
 import PhotosUI
-import ImageIO
 import SwiftData
 import SwiftUI
 import UIKit
@@ -242,6 +241,17 @@ struct ProfileManagementView: View {
                 savedAthleteType = profile.athleteType
                 avatarImageData = profile.avatarImageData
                 savedAvatarImageData = profile.avatarImageData
+                let cacheKey = profile.brosMembershipID ?? profile.id.uuidString
+                if let avatarImageData {
+                    Task {
+                        await BrosAvatarCacheService.shared.prime(
+                            data: avatarImageData,
+                            for: cacheKey
+                        )
+                    }
+                } else {
+                    BrosAvatarCacheService.shared.remove(for: cacheKey)
+                }
             }
             dismiss()
         } catch {
@@ -251,7 +261,14 @@ struct ProfileManagementView: View {
 
     private func stageAvatar(from item: PhotosPickerItem) async {
         do {
-            avatarImageData = try await item.loadTransferable(type: Data.self)
+            guard let rawData = try await item.loadTransferable(type: Data.self) else {
+                avatarImageData = nil
+                return
+            }
+            avatarImageData = await AvatarImageCodec.compressedAvatarData(
+                from: rawData,
+                maxPixelSize: 640
+            ) ?? rawData
         } catch {
             showError(error)
         }
@@ -310,40 +327,13 @@ struct ProfileAvatarView: View {
             return
         }
 
-        let decodedImage = await AvatarImageDecoder.decode(
-            imageData,
+        let decodedImage = await AvatarImageCodec.thumbnail(
+            from: imageData,
             maxPixelSize: 176
         )
 
         guard !Task.isCancelled else { return }
         image = decodedImage
-    }
-}
-
-private enum AvatarImageDecoder {
-    static func decode(_ data: Data, maxPixelSize: CGFloat) async -> UIImage? {
-        let displayScale = await MainActor.run { UIScreen.main.scale }
-
-        return await Task.detached(priority: .utility) {
-            let options = [kCGImageSourceShouldCache: false] as CFDictionary
-            guard let source = CGImageSourceCreateWithData(data as CFData, options) else {
-                return UIImage(data: data)
-            }
-
-            let thumbnailOptions = [
-                kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceThumbnailMaxPixelSize: Int(maxPixelSize),
-                kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceShouldCacheImmediately: false,
-            ] as CFDictionary
-
-            if let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions) {
-                return UIImage(cgImage: cgImage, scale: displayScale, orientation: .up)
-            }
-
-            return UIImage(data: data)
-        }
-        .value
     }
 }
 

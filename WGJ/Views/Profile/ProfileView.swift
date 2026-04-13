@@ -558,12 +558,15 @@ struct ProfileView: View {
             trendSeriesLoadTask = nil
             isLoadingTrendSeries = false
 
-            let snapshot = try await controller.reloadOverview(
+            let profile = try await controller.loadProfileIdentity(
                 modelContext: modelContext,
                 cloudSyncEnabled: cloudSyncEnabled
             )
-            currentProfile = snapshot.profile
-            dashboardContent = snapshot.dashboardContent
+            currentProfile = profile
+            dashboardContent = try await controller.loadDashboardContent(
+                modelContext: modelContext,
+                profile: profile
+            )
             scheduleTrendSeriesLoad()
         } catch {
             showError(error)
@@ -658,23 +661,30 @@ struct ProfileView: View {
     }
 }
 
-struct ProfileOverviewSnapshot {
-    let profile: UserProfile?
-    let dashboardContent: ProfileDashboardContent
-}
-
 @MainActor
 @Observable
 final class ProfileViewController {
-    func reloadOverview(
+    private struct TrendSeriesCacheKey: Hashable {
+        let kind: ProfileWidgetKind
+        let catalogExerciseUUID: String
+    }
+
+    private var trendSeriesCache: [TrendSeriesCacheKey: ExerciseMetricSeries] = [:]
+
+    func loadProfileIdentity(
         modelContext: ModelContext,
         cloudSyncEnabled: Bool
-    ) async throws -> ProfileOverviewSnapshot {
+    ) async throws -> UserProfile {
         let profileRepository = ProfileRepository(modelContext: modelContext)
-        let widgetRepository = ProfileWidgetRepository(modelContext: modelContext)
+        return try await profileRepository.bootstrapProfileIdentity(cloudSyncEnabled: cloudSyncEnabled)
+    }
 
-        let profile = try await profileRepository.bootstrapProfileIdentity(cloudSyncEnabled: cloudSyncEnabled)
-        let dashboardContent = try WGJPerformance.measure("profile.dashboard") {
+    func loadDashboardContent(
+        modelContext: ModelContext,
+        profile: UserProfile
+    ) async throws -> ProfileDashboardContent {
+        let widgetRepository = ProfileWidgetRepository(modelContext: modelContext)
+        return try WGJPerformance.measure("profile.dashboard") {
             let metricsService = WorkoutMetricsService(modelContext: modelContext)
             let enabled = try widgetRepository.enabledConfigurations()
             let dashboard = try metricsService.profileDashboardSnapshot(prLimit: 5, weeks: 8)
@@ -686,11 +696,6 @@ final class ProfileViewController {
             nextContent.weeklyGoal = profile.weeklyWorkoutGoal
             return nextContent
         }
-
-        return ProfileOverviewSnapshot(
-            profile: profile,
-            dashboardContent: dashboardContent
-        )
     }
 
     func loadTrendSeries(
@@ -700,30 +705,60 @@ final class ProfileViewController {
         try WGJPerformance.measure("profile.trends") {
             let metricsService = WorkoutMetricsService(modelContext: modelContext)
             var trendSeriesByKind: [ProfileWidgetKind: ExerciseMetricSeries] = [:]
+            var currentCacheKeys: Set<TrendSeriesCacheKey> = []
 
             for config in enabledWidgets {
                 guard let selectedExerciseUUID = config.selectedCatalogExerciseUUID else { continue }
+                let cacheKey = TrendSeriesCacheKey(kind: config.kind, catalogExerciseUUID: selectedExerciseUUID)
+                currentCacheKeys.insert(cacheKey)
 
+                if let cachedSeries = trendSeriesCache[cacheKey] {
+                    trendSeriesByKind[config.kind] = cachedSeries.withPreferredName(
+                        config.selectedExerciseNameSnapshot
+                    )
+                    continue
+                }
+
+                let series: ExerciseMetricSeries
                 switch config.kind {
                 case .exerciseOneRMTrend:
-                    trendSeriesByKind[config.kind] = try metricsService.exerciseOneRepMaxTrend(
+                    series = try metricsService.exerciseOneRepMaxTrend(
                         for: selectedExerciseUUID,
                         preferredExerciseName: config.selectedExerciseNameSnapshot,
                         limit: 8
                     )
                 case .exerciseVolumeTrend:
-                    trendSeriesByKind[config.kind] = try metricsService.exerciseVolumeTrend(
+                    series = try metricsService.exerciseVolumeTrend(
                         for: selectedExerciseUUID,
                         preferredExerciseName: config.selectedExerciseNameSnapshot,
                         limit: 8
                     )
                 case .prs, .weeklyGoals, .streaks, .topExercises, .consistencyCalendar:
-                    break
+                    continue
                 }
+
+                trendSeriesCache[cacheKey] = series
+                trendSeriesByKind[config.kind] = series
             }
+
+            trendSeriesCache = trendSeriesCache.filter { currentCacheKeys.contains($0.key) }
 
             return trendSeriesByKind
         }
+    }
+}
+
+private extension ExerciseMetricSeries {
+    func withPreferredName(_ preferredName: String?) -> ExerciseMetricSeries {
+        let trimmed = preferredName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmed, !trimmed.isEmpty else { return self }
+
+        return ExerciseMetricSeries(
+            catalogExerciseUUID: catalogExerciseUUID,
+            exerciseName: trimmed,
+            loadUnit: loadUnit,
+            points: points
+        )
     }
 }
 
