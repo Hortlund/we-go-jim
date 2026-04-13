@@ -1254,11 +1254,18 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func weightGhostText(at index: Int) -> String? {
-        inlineHintPresentation(at: index)?.weightGhostText
+        guard setDrafts.indices.contains(index) else { return nil }
+        return WorkoutSetInlineHintPresentation.weightGhostText(
+            from: previousBySetIndex[index],
+            formatWeight: formatWeight
+        )
     }
 
     private func repsGhostText(at index: Int) -> String? {
-        inlineHintPresentation(at: index)?.repsGhostText
+        guard setDrafts.indices.contains(index) else { return nil }
+        return WorkoutSetInlineHintPresentation.repsGhostText(
+            from: previousBySetIndex[index]
+        )
     }
 
     private func weightFieldDisplayState(at index: Int) -> MetricFieldDisplayState? {
@@ -2362,7 +2369,7 @@ struct WorkoutSetInlineHintPresentation: Equatable {
         )
     }
 
-    private static func weightGhostText(
+    static func weightGhostText(
         from previous: WorkoutPreviousSetSnapshot?,
         formatWeight: (Double) -> String
     ) -> String? {
@@ -2376,7 +2383,7 @@ struct WorkoutSetInlineHintPresentation: Equatable {
         return formatWeight(weight)
     }
 
-    private static func repsGhostText(from previous: WorkoutPreviousSetSnapshot?) -> String? {
+    static func repsGhostText(from previous: WorkoutPreviousSetSnapshot?) -> String? {
         previous?.reps.map(String.init)
     }
 }

@@ -112,6 +112,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 - How to Verify Next Time: Run `WorkoutSetBozarCompletionResolverTests`, `WorkoutSetBozarCompletionControllerTests`, and the Bozar UI smoke that completes a set after manual entry; confirm manual values stay intact while blank fields still backfill from the previous set.
 - Status: active
 
+## 2026-04-13 - Workout Metric Ghost Hints Must Be Computed Per Field
+
+- Date: 2026-04-13
+- Trigger/Problem: Typing a new weight in Bozar mode made the reps ghost hint disappear, and the same risk existed in reverse for reps vs weight.
+- Root Cause: The workout grid sourced field ghost text through the set-level `WorkoutSetInlineHintPresentation`, which returned `nil` as soon as any logged performance existed on the row, even if the other metric was still blank.
+- Durable Rule: Keep workout metric ghost hints field-specific. Weight and reps ghost text should resolve directly from previous performance for that metric and must not depend on a whole-row "has logged performance" gate.
+- How to Verify Next Time: In UI tests, type only weight and confirm the reps ghost stays visible; type only reps and confirm the weight ghost stays visible; then complete the set and confirm missing fields still backfill correctly.
+- Status: active
+
 ## 2026-04-12 - Active Workout Persistence Baselines Must Match Display Normalization
 
 - Date: 2026-04-12

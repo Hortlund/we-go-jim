@@ -1482,6 +1482,150 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testBozarModeKeepsOtherMetricGhostVisibleWhileTypingWeight() throws {
+        let app = launchApp(launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Bozar Ghost Template",
+                notes: "Seed previous bench performance for partial ghost visibility.",
+                exercises: [
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "seed-bench-press",
+                        exerciseNameSnapshot: "Barbell Bench Press",
+                        categorySnapshot: "Chest",
+                        muscleSummarySnapshot: "Chest",
+                        targetRepMin: 8,
+                        targetRepMax: 8,
+                        restSeconds: 120,
+                        sets: [templatePayloadSet(targetReps: 8, targetWeight: 100, loadUnit: "kg", restSeconds: 120, isWarmup: false)]
+                    ),
+                ]
+            ),
+        ])
+
+        startPreviewedTemplateWorkout(in: app)
+
+        let firstCompleteSetButton = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
+        ).firstMatch
+        XCTAssertTrue(firstCompleteSetButton.waitForExistence(timeout: 5))
+        firstCompleteSetButton.tap()
+
+        finishTemplateWorkout(in: app)
+        let skipButton = app.buttons["Skip"]
+        if skipButton.waitForExistence(timeout: 10) {
+            skipButton.tap()
+        }
+        confirmWorkoutCompletion(in: app)
+
+        tapTab("Profile", in: app)
+        let settingsTile = identifiedElement("profile-settings-tile", in: app)
+        XCTAssertTrue(settingsTile.waitForExistence(timeout: 5))
+        settingsTile.tap()
+
+        let bozarToggle = identifiedElement("settings-bozar-mode-toggle", in: app)
+        XCTAssertTrue(bozarToggle.waitForExistence(timeout: 5))
+        if let currentValue = bozarToggle.value as? String, currentValue == "0" {
+            bozarToggle.tap()
+        }
+
+        tapTab("Start Workout", in: app)
+        let startButton = app.buttons["start-workout-empty-button"]
+        XCTAssertTrue(startButton.waitForExistence(timeout: 5))
+        startButton.tap()
+
+        let addExerciseButton = app.buttons["active-workout-empty-add-exercise-button"]
+        XCTAssertTrue(addExerciseButton.waitForExistence(timeout: 5))
+        addExerciseButton.tap()
+        pickExercise(named: "bench", in: app)
+
+        let weightGhost = identifiedElement("workout-set-0-weight-ghost", in: app)
+        let repsGhost = identifiedElement("workout-set-0-reps-ghost", in: app)
+        XCTAssertTrue(weightGhost.waitForExistence(timeout: 5))
+        XCTAssertTrue(repsGhost.waitForExistence(timeout: 5))
+
+        let weightField = identifiedElement("workout-set-0-weight-field", in: app)
+        revealElement(weightField, in: app)
+        XCTAssertTrue(weightField.waitForExistence(timeout: 5))
+        weightField.tap()
+        weightField.typeText("95")
+
+        XCTAssertTrue(waitForElementToDisappear(weightGhost, timeout: 5))
+        XCTAssertTrue(repsGhost.exists)
+    }
+
+    @MainActor
+    func testBozarModeKeepsOtherMetricGhostVisibleWhileTypingReps() throws {
+        let app = launchApp(launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Bozar Reverse Ghost Template",
+                notes: "Seed previous bench performance for reverse partial ghost visibility.",
+                exercises: [
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "seed-bench-press",
+                        exerciseNameSnapshot: "Barbell Bench Press",
+                        categorySnapshot: "Chest",
+                        muscleSummarySnapshot: "Chest",
+                        targetRepMin: 8,
+                        targetRepMax: 8,
+                        restSeconds: 120,
+                        sets: [templatePayloadSet(targetReps: 8, targetWeight: 100, loadUnit: "kg", restSeconds: 120, isWarmup: false)]
+                    ),
+                ]
+            ),
+        ])
+
+        startPreviewedTemplateWorkout(in: app)
+
+        let firstCompleteSetButton = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
+        ).firstMatch
+        XCTAssertTrue(firstCompleteSetButton.waitForExistence(timeout: 5))
+        firstCompleteSetButton.tap()
+
+        finishTemplateWorkout(in: app)
+        let skipButton = app.buttons["Skip"]
+        if skipButton.waitForExistence(timeout: 10) {
+            skipButton.tap()
+        }
+        confirmWorkoutCompletion(in: app)
+
+        tapTab("Profile", in: app)
+        let settingsTile = identifiedElement("profile-settings-tile", in: app)
+        XCTAssertTrue(settingsTile.waitForExistence(timeout: 5))
+        settingsTile.tap()
+
+        let bozarToggle = identifiedElement("settings-bozar-mode-toggle", in: app)
+        XCTAssertTrue(bozarToggle.waitForExistence(timeout: 5))
+        if let currentValue = bozarToggle.value as? String, currentValue == "0" {
+            bozarToggle.tap()
+        }
+
+        tapTab("Start Workout", in: app)
+        let startButton = app.buttons["start-workout-empty-button"]
+        XCTAssertTrue(startButton.waitForExistence(timeout: 5))
+        startButton.tap()
+
+        let addExerciseButton = app.buttons["active-workout-empty-add-exercise-button"]
+        XCTAssertTrue(addExerciseButton.waitForExistence(timeout: 5))
+        addExerciseButton.tap()
+        pickExercise(named: "bench", in: app)
+
+        let weightGhost = identifiedElement("workout-set-0-weight-ghost", in: app)
+        let repsGhost = identifiedElement("workout-set-0-reps-ghost", in: app)
+        XCTAssertTrue(weightGhost.waitForExistence(timeout: 5))
+        XCTAssertTrue(repsGhost.waitForExistence(timeout: 5))
+
+        let repsField = identifiedElement("workout-set-0-reps-field", in: app)
+        revealElement(repsField, in: app)
+        XCTAssertTrue(repsField.waitForExistence(timeout: 5))
+        repsField.tap()
+        repsField.typeText("6")
+
+        XCTAssertTrue(waitForElementToDisappear(repsGhost, timeout: 5))
+        XCTAssertTrue(weightGhost.exists)
+    }
+
+    @MainActor
     func testBozarModeSecondSetCompletionClearsHintUI() throws {
         let app = launchApp(launchEnvironment: [
             "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
