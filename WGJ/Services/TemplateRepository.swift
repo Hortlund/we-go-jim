@@ -508,6 +508,25 @@ final class TemplateRepository {
         try modelContext.save()
     }
 
+    func updateTemplateContents(
+        id: UUID,
+        name: String,
+        notes: String,
+        exerciseDrafts: [TemplateExerciseDraft],
+        cardioDrafts: [TemplateCardioBlockDraft]
+    ) throws {
+        let cleaned = try ReviewModerationService.validateUserInput(name, kind: .templateName)
+        let normalizedNotes = normalizedTemplateNotes(notes)
+
+        try persistTemplateContents(
+            templateID: id,
+            templateName: cleaned,
+            templateNotes: normalizedNotes,
+            exercises: exerciseDrafts.map { templateSyncExerciseMutation(from: $0) },
+            cardioBlocks: cardioDrafts.map { templateSyncCardioMutation(from: $0) }
+        )
+    }
+
     func updateExerciseRepRange(templateExerciseID: UUID, minReps: Int?, maxReps: Int?) throws {
         guard let exercise = try templateExercise(id: templateExerciseID) else {
             throw TemplateRepositoryError.templateExerciseNotFound
@@ -1035,11 +1054,30 @@ final class TemplateRepository {
         exercises mutations: [WorkoutTemplateSyncExerciseMutation],
         cardioBlocks cardioMutations: [WorkoutTemplateSyncCardioMutation]
     ) throws {
+        try persistTemplateContents(
+            templateID: templateID,
+            templateName: nil,
+            templateNotes: normalizedTemplateNotes(templateNotes),
+            exercises: mutations,
+            cardioBlocks: cardioMutations
+        )
+    }
+
+    private func persistTemplateContents(
+        templateID: UUID,
+        templateName: String?,
+        templateNotes: String,
+        exercises mutations: [WorkoutTemplateSyncExerciseMutation],
+        cardioBlocks cardioMutations: [WorkoutTemplateSyncCardioMutation]
+    ) throws {
         guard let template = try template(id: templateID) else {
             throw TemplateRepositoryError.templateNotFound
         }
 
-        template.notes = normalizedTemplateNotes(templateNotes)
+        if let templateName {
+            template.name = templateName
+        }
+        template.notes = templateNotes
         template.updatedAt = .now
 
         try validateUniqueComponentCatalogUUIDs(
@@ -1085,18 +1123,19 @@ final class TemplateRepository {
             let exercise = mutation.templateExerciseID.flatMap { existingByID[$0] }
                 ?? existingByCatalogUUID[mutation.catalogExerciseUUID]
                 ?? TemplateExercise(
-                templateID: templateID,
-                catalogExerciseUUID: primaryComponent?.catalogExerciseUUID ?? mutation.catalogExerciseUUID,
-                exerciseNameSnapshot: primaryComponent?.exerciseNameSnapshot ?? mutation.exerciseNameSnapshot,
-                categorySnapshot: primaryComponent?.categorySnapshot ?? mutation.categorySnapshot,
-                muscleSummarySnapshot: primaryComponent?.muscleSummarySnapshot ?? mutation.muscleSummarySnapshot,
-                notes: mutation.notes,
-                targetRepMin: normalizedRange.min,
-                targetRepMax: normalizedRange.max,
-                restSeconds: normalizedRest,
-                sortOrder: index,
-                template: template
-            )
+                    id: mutation.templateExerciseID ?? UUID(),
+                    templateID: templateID,
+                    catalogExerciseUUID: primaryComponent?.catalogExerciseUUID ?? mutation.catalogExerciseUUID,
+                    exerciseNameSnapshot: primaryComponent?.exerciseNameSnapshot ?? mutation.exerciseNameSnapshot,
+                    categorySnapshot: primaryComponent?.categorySnapshot ?? mutation.categorySnapshot,
+                    muscleSummarySnapshot: primaryComponent?.muscleSummarySnapshot ?? mutation.muscleSummarySnapshot,
+                    notes: mutation.notes,
+                    targetRepMin: normalizedRange.min,
+                    targetRepMax: normalizedRange.max,
+                    restSeconds: normalizedRest,
+                    sortOrder: index,
+                    template: template
+                )
 
             if exercise.modelContext == nil {
                 modelContext.insert(exercise)
@@ -1684,13 +1723,15 @@ final class TemplateRepository {
         defaultRestSeconds: Int
     ) {
         let existingSets = (exercise.prescribedSets ?? []).sorted { $0.sortOrder < $1.sortOrder }
+        let existingByID = Dictionary(uniqueKeysWithValues: existingSets.map { ($0.id, $0) })
+        let incomingIDs = Set(desiredDrafts.map(\.id))
         var updatedSets: [TemplateExerciseSet] = []
         updatedSets.reserveCapacity(desiredDrafts.count)
 
         for (index, draft) in desiredDrafts.enumerated() {
-            let modelSet = existingSets.indices.contains(index)
-                ? existingSets[index]
-                : TemplateExerciseSet(
+            let modelSet = existingByID[draft.id]
+                ?? TemplateExerciseSet(
+                    id: draft.id,
                     templateExerciseID: exercise.id,
                     sortOrder: index,
                     restSeconds: defaultRestSeconds,
@@ -1719,11 +1760,42 @@ final class TemplateRepository {
             updatedSets.append(modelSet)
         }
 
-        for extraSet in existingSets.dropFirst(desiredDrafts.count) {
+        for extraSet in existingSets where !incomingIDs.contains(extraSet.id) {
             modelContext.delete(extraSet)
         }
 
         exercise.prescribedSets = updatedSets
+    }
+
+    private func templateSyncExerciseMutation(
+        from draft: TemplateExerciseDraft
+    ) -> WorkoutTemplateSyncExerciseMutation {
+        WorkoutTemplateSyncExerciseMutation(
+            templateExerciseID: draft.id,
+            catalogExerciseUUID: draft.catalogExerciseUUID,
+            exerciseNameSnapshot: draft.exerciseNameSnapshot,
+            categorySnapshot: draft.categorySnapshot,
+            muscleSummarySnapshot: draft.muscleSummarySnapshot,
+            notes: draft.notes,
+            targetRepMin: draft.targetRepMin,
+            targetRepMax: draft.targetRepMax,
+            restSeconds: draft.restSeconds,
+            setDrafts: draft.setDrafts,
+            components: draft.components
+        )
+    }
+
+    private func templateSyncCardioMutation(
+        from draft: TemplateCardioBlockDraft
+    ) -> WorkoutTemplateSyncCardioMutation {
+        WorkoutTemplateSyncCardioMutation(
+            phase: draft.phase,
+            catalogExerciseUUID: draft.catalogExerciseUUID,
+            exerciseNameSnapshot: draft.exerciseNameSnapshot,
+            categorySnapshot: draft.categorySnapshot,
+            muscleSummarySnapshot: draft.muscleSummarySnapshot,
+            targetDurationSeconds: draft.targetDurationSeconds
+        )
     }
 
     private func normalizeWarmupSet(for exercise: TemplateExercise) {

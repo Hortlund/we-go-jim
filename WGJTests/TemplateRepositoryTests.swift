@@ -285,6 +285,137 @@ struct TemplateRepositoryTests {
     }
 
     @Test
+    func updateTemplateContentsPreservesTemplateExerciseIdentityAndLeavesActiveDraftUntouched() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+        let activeWorkoutRepository = ActiveWorkoutDraftRepository(modelContext: context)
+
+        let bench = ExerciseCatalogItem(
+            remoteUUID: "template-update-bench",
+            displayName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        let row = ExerciseCatalogItem(
+            remoteUUID: "template-update-row",
+            displayName: "Barbell Row",
+            categoryName: "Back",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(bench)
+        context.insert(row)
+
+        let template = try repository.createTemplate(name: "Push", notes: "Original reusable notes")
+        try repository.setExercises(
+            templateID: template.id,
+            drafts: [
+                TemplateExerciseDraft(
+                    catalogExerciseUUID: bench.remoteUUID,
+                    exerciseNameSnapshot: bench.displayName,
+                    categorySnapshot: bench.categoryName,
+                    muscleSummarySnapshot: bench.primaryMuscleNames,
+                    notes: "Pause on the chest.",
+                    targetRepMin: 6,
+                    targetRepMax: 8,
+                    restSeconds: 150,
+                    setDrafts: [
+                        TemplateExerciseSetDraft(
+                            targetReps: 10,
+                            targetWeight: 60,
+                            loadUnit: .kg,
+                            restSeconds: 150,
+                            isWarmup: true
+                        ),
+                        TemplateExerciseSetDraft(
+                            targetReps: 8,
+                            targetWeight: 100,
+                            loadUnit: .kg,
+                            restSeconds: 150
+                        ),
+                        TemplateExerciseSetDraft(
+                            targetReps: 6,
+                            targetWeight: 110,
+                            loadUnit: .kg,
+                            restSeconds: 150
+                        ),
+                    ],
+                    components: [TemplateExerciseComponentDraft(catalogItem: bench)]
+                ),
+            ]
+        )
+
+        let storedExercise = try #require(try repository.exercises(in: template.id).first)
+        let storedSetDrafts = try repository.setDrafts(for: storedExercise.id)
+
+        let draftSession = try activeWorkoutRepository.createSessionFromTemplate(templateID: template.id)
+        let activeDraftExercise = try #require(try activeWorkoutRepository.sessionExercises(sessionID: draftSession.id).first)
+        let originalActiveSetDrafts = try activeWorkoutRepository.setDrafts(sessionExerciseID: activeDraftExercise.id)
+        let originalActiveNotes = activeDraftExercise.notes
+        let originalActiveRest = activeDraftExercise.restSeconds
+
+        var updatedPrimaryDraft = TemplateExerciseDraft(model: storedExercise, preferredLoadUnit: .kg)
+        updatedPrimaryDraft.notes = "Touch-and-go only on the final set."
+        updatedPrimaryDraft.restSeconds = 165
+        let appendedSetDraft = TemplateExerciseSetDraft(
+            targetReps: 5,
+            targetWeight: 115,
+            loadUnit: .kg,
+            restSeconds: 165
+        )
+        updatedPrimaryDraft.setDrafts = [
+            storedSetDrafts[1],
+            storedSetDrafts[0],
+            storedSetDrafts[2],
+            appendedSetDraft,
+        ]
+
+        var addedExerciseDraft = TemplateExerciseDraft(catalogItem: row, preferredLoadUnit: .kg)
+        addedExerciseDraft.notes = "Keep the torso rigid."
+        addedExerciseDraft.targetRepMin = 8
+        addedExerciseDraft.targetRepMax = 10
+        addedExerciseDraft.restSeconds = 120
+
+        try repository.updateTemplateContents(
+            id: template.id,
+            name: "Push Updated",
+            notes: "Updated reusable notes",
+            exerciseDrafts: [updatedPrimaryDraft, addedExerciseDraft],
+            cardioDrafts: []
+        )
+
+        let refreshedTemplate = try #require(try repository.template(id: template.id))
+        let refreshedExercises = try repository.exercises(in: template.id)
+        let refreshedPrimaryExercise = try #require(refreshedExercises.first)
+        let refreshedPrimarySetDrafts = try repository.setDrafts(for: refreshedPrimaryExercise.id)
+        let unchangedActiveExercise = try #require(
+            try activeWorkoutRepository.sessionExercises(sessionID: draftSession.id).first
+        )
+        let unchangedActiveSetDrafts = try activeWorkoutRepository.setDrafts(
+            sessionExerciseID: unchangedActiveExercise.id
+        )
+
+        #expect(refreshedTemplate.name == "Push Updated")
+        #expect(refreshedTemplate.notes == "Updated reusable notes")
+        #expect(refreshedExercises.count == 2)
+        #expect(refreshedPrimaryExercise.id == storedExercise.id)
+        #expect(refreshedExercises[1].id == addedExerciseDraft.id)
+        #expect(refreshedPrimarySetDrafts.map(\.id) == [
+            storedSetDrafts[1].id,
+            storedSetDrafts[0].id,
+            storedSetDrafts[2].id,
+            appendedSetDraft.id,
+        ])
+        #expect(unchangedActiveExercise.templateExerciseID == storedExercise.id)
+        #expect(unchangedActiveExercise.notes == originalActiveNotes)
+        #expect(unchangedActiveExercise.restSeconds == originalActiveRest)
+        #expect(unchangedActiveSetDrafts == originalActiveSetDrafts)
+    }
+
+    @Test
     func updateExerciseRestSecondsSkipsNoOpWhenExerciseAlreadyMatchesDefaultRest() throws {
         let context = try makeInMemoryContext()
         let repository = TemplateRepository(modelContext: context)

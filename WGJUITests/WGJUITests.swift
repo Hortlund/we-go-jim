@@ -894,6 +894,70 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testEditingSameTemplateWhileWorkoutIsMinimizedCanScrollBottomWithoutCrash() throws {
+        let app = launchApp(launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Active Template Scroll Crash",
+                notes: "Scroll the editor while the same workout stays active.",
+                exercises: (1...11).map { index in
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "active-template-scroll-\(index)",
+                        exerciseNameSnapshot: "Active Template Exercise \(index)",
+                        categorySnapshot: "Strength",
+                        muscleSummarySnapshot: "Full Body",
+                        targetRepMin: 8,
+                        targetRepMax: 10,
+                        restSeconds: 90,
+                        sets: [
+                            templatePayloadSet(
+                                targetReps: 8,
+                                targetWeight: Double(40 + index * 5),
+                                loadUnit: "kg",
+                                restSeconds: 90,
+                                isWarmup: false
+                            ),
+                        ]
+                    )
+                }
+            ),
+        ])
+
+        openTemplateEditorFromMinimizedActiveWorkout(in: app)
+        assertTemplateEditorBottomExerciseRemainsInteractive(
+            catalogExerciseUUID: "active-template-scroll-11",
+            in: app
+        )
+    }
+
+    @MainActor
+    func testEditingLegacyTemplateWithoutStoredSetsWhileWorkoutIsMinimizedDoesNotCrash() throws {
+        let app = launchApp(launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Legacy Empty Set Template",
+                notes: "Opening the editor should stay read-only until save.",
+                exercises: (1...11).map { index in
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "legacy-template-scroll-\(index)",
+                        exerciseNameSnapshot: "Legacy Template Exercise \(index)",
+                        categorySnapshot: "Strength",
+                        muscleSummarySnapshot: "Full Body",
+                        targetRepMin: 8,
+                        targetRepMax: 10,
+                        restSeconds: 90,
+                        sets: []
+                    )
+                }
+            ),
+        ])
+
+        openTemplateEditorFromMinimizedActiveWorkout(in: app)
+        assertTemplateEditorBottomExerciseRemainsInteractive(
+            catalogExerciseUUID: "legacy-template-scroll-11",
+            in: app
+        )
+    }
+
+    @MainActor
     func testWorkoutFinishShowsCelebrationBeforeHistory() throws {
         let app = launchApp()
 
@@ -2701,6 +2765,17 @@ final class WGJUITests: XCTestCase {
         }
     }
 
+    private func revealLazyElement(_ element: XCUIElement, in app: XCUIApplication, maxSwipes: Int = 6) {
+        var remainingSwipes = maxSwipes
+        while !element.exists && remainingSwipes > 0 {
+            app.swipeUp()
+            remainingSwipes -= 1
+        }
+
+        XCTAssertTrue(element.waitForExistence(timeout: 5))
+        revealElement(element, in: app, maxSwipes: maxSwipes)
+    }
+
     private func revealElementAbove(
         _ blocker: XCUIElement,
         target: XCUIElement,
@@ -2743,6 +2818,53 @@ final class WGJUITests: XCTestCase {
         }
 
         XCTAssertTrue(app.buttons["active-workout-finish-button"].waitForExistence(timeout: 5))
+    }
+
+    private func openTemplateEditorFromMinimizedActiveWorkout(in app: XCUIApplication) {
+        startPreviewedTemplateWorkout(in: app)
+
+        let minimizeButton = app.buttons["active-workout-minimize-button"]
+        XCTAssertTrue(minimizeButton.waitForExistence(timeout: 5))
+        minimizeButton.tap()
+
+        tapTab("Start Workout", in: app)
+
+        let strip = identifiedElement("active-workout-strip", in: app)
+        XCTAssertTrue(strip.waitForExistence(timeout: 5))
+
+        let editButton = identifiedElement("start-workout-template-inline-edit-button", in: app)
+        revealElementAbove(strip, target: editButton, in: app, maxSwipes: 10)
+
+        XCTAssertTrue(editButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(editButton.isHittable)
+        editButton.tap()
+
+        XCTAssertTrue(app.buttons["template-editor-save-button"].waitForExistence(timeout: 5))
+    }
+
+    private func assertTemplateEditorBottomExerciseRemainsInteractive(
+        catalogExerciseUUID: String,
+        in app: XCUIApplication
+    ) {
+        let exerciseIdentifier = "template-editor-exercise-\(catalogExerciseUUID)"
+        let exercise = identifiedElement(exerciseIdentifier, in: app)
+        revealLazyElement(exercise, in: app, maxSwipes: 16)
+        XCTAssertTrue(exercise.isHittable)
+
+        app.swipeDown()
+        app.swipeUp()
+
+        revealLazyElement(exercise, in: app, maxSwipes: 8)
+        XCTAssertTrue(exercise.isHittable)
+
+        let expandButton = identifiedElement("\(exerciseIdentifier)-expand-button", in: app)
+        XCTAssertTrue(expandButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(expandButton.isHittable)
+        expandButton.tap()
+
+        let notesField = identifiedElement("\(exerciseIdentifier)-notes-field", in: app)
+        revealLazyElement(notesField, in: app, maxSwipes: 6)
+        XCTAssertTrue(notesField.isHittable)
     }
 
     private func restartImportedTemplateWorkout(in app: XCUIApplication) {

@@ -432,9 +432,13 @@ struct TemplateEditorView: View {
             let drafts = exerciseDrafts.map(\.draft)
             let cardioDrafts = WorkoutCardioPhase.allCases.compactMap { cardioDraftsByPhase[$0] }
             if let templateID {
-                try templateRepository.updateTemplate(id: templateID, name: templateName, notes: templateNotes)
-                try templateRepository.setExercises(templateID: templateID, drafts: drafts)
-                try templateRepository.setCardioBlocks(templateID: templateID, drafts: cardioDrafts)
+                try templateRepository.updateTemplateContents(
+                    id: templateID,
+                    name: templateName,
+                    notes: templateNotes,
+                    exerciseDrafts: drafts,
+                    cardioDrafts: cardioDrafts
+                )
             } else {
                 let created = try templateRepository.createTemplate(folderID: folderID, name: templateName, notes: templateNotes)
                 try templateRepository.setExercises(templateID: created.id, drafts: drafts)
@@ -458,7 +462,6 @@ struct TemplateEditorView: View {
                 templateName = template.name
                 templateNotes = template.notes
             }
-            try templateRepository.ensureDefaultSetPlans(templateID: templateID)
             exerciseDrafts = try templateRepository.exercises(in: templateID).map {
                 TemplateExerciseDraftStore(
                     draft: TemplateExerciseDraft(model: $0, preferredLoadUnit: preferredLoadUnit)

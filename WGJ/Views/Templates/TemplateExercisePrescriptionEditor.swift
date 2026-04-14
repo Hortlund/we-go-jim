@@ -44,12 +44,9 @@ struct TemplateExercisePrescriptionEditor: View {
     @State private var repMaxInputText: String?
     @State private var repsInputTextBySetID: [UUID: String] = [:]
     @State private var weightInputTextBySetID: [UUID: String] = [:]
-    @State private var expandedSetPresentation: SetPresentation?
-    @State private var pendingPresentationRefreshTask: Task<Void, Never>?
     @FocusState private var focusedInput: TemplateEditorInputFocus?
 
     private let restPresets = [10, 15, 20, 30, 45, 60, 75, 90, 105, 120, 150, 180, 210, 240]
-    private let presentationRefreshDebounce = Duration.milliseconds(90)
     private let shouldCommitOnDisappear: (() -> Bool)?
 
     init(
@@ -100,16 +97,6 @@ struct TemplateExercisePrescriptionEditor: View {
         self.onMoveToPosition = onMoveToPosition
         self.onExerciseDelete = onExerciseDelete
         self._localIsExpanded = State(initialValue: isExpanded?.wrappedValue ?? initiallyExpanded)
-        let startsExpanded = isExpanded?.wrappedValue ?? initiallyExpanded
-        self._expandedSetPresentation = State(
-            initialValue: startsExpanded
-                ? Self.makeSetPresentation(
-                    setDrafts: setDrafts.wrappedValue,
-                    restSeconds: restSeconds.wrappedValue,
-                    formatWeight: { WGJFormatters.decimalString($0) }
-                )
-                : nil
-        )
     }
 
     var body: some View {
@@ -137,46 +124,24 @@ struct TemplateExercisePrescriptionEditor: View {
                     setupTipsSection(recommendation: recommendation)
                 }
 
-                setsSection(presentation: resolvedExpandedSetPresentation)
+                setsSection
             }
         }
         .padding(16)
         .wgjCardContainer(strong: true)
-        .onAppear {
-            if isExpanded {
-                refreshSetPresentation()
-            }
-        }
         .onDisappear {
-            flushPendingPresentationRefresh()
             if shouldCommitOnDisappear?() ?? true {
                 onCommitRequest?()
             }
         }
         .onChange(of: _setDrafts.wrappedValue) { _, _ in
-            scheduleSetPresentationRefresh()
             pruneInputDrafts()
-        }
-        .onChange(of: restSeconds) { _, _ in
-            scheduleSetPresentationRefresh()
         }
         .onChange(of: focusedInput) { previousFocus, newFocus in
             guard previousFocus != newFocus else { return }
             if let previousFocus {
                 clearInputDraft(for: previousFocus)
                 onCommitRequest?()
-            }
-            if newFocus == nil {
-                flushPendingPresentationRefresh()
-            }
-        }
-        .onChange(of: isExpanded) { _, newValue in
-            if newValue {
-                refreshSetPresentation()
-            } else {
-                pendingPresentationRefreshTask?.cancel()
-                pendingPresentationRefreshTask = nil
-                expandedSetPresentation = nil
             }
         }
     }
@@ -419,8 +384,10 @@ struct TemplateExercisePrescriptionEditor: View {
         }
     }
 
-    private func setsSection(presentation: SetPresentation) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+    private var setsSection: some View {
+        let presentation = currentSetPresentation
+
+        return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Set Plan")
                     .font(.subheadline.weight(.semibold))
@@ -454,7 +421,6 @@ struct TemplateExercisePrescriptionEditor: View {
                     } content: {
                         TemplateExerciseSetCardView(
                             row: row,
-                            set: setDrafts[row.index],
                             defaultRestSeconds: restSeconds,
                             restPresets: restPresets,
                             canMoveDown: row.index < presentation.rows.count - 1,
@@ -981,13 +947,6 @@ struct TemplateExercisePrescriptionEditor: View {
     }
 
     private func requestImmediateCommit() {
-        pendingPresentationRefreshTask?.cancel()
-        pendingPresentationRefreshTask = nil
-        if isExpanded {
-            refreshSetPresentation()
-        } else {
-            expandedSetPresentation = nil
-        }
         onCommitRequest?()
     }
 
@@ -1045,60 +1004,13 @@ private extension TemplateExercisePrescriptionEditor {
         Self.makeCollapsedSetPresentation(setDrafts: setDrafts)
     }
 
-    var resolvedExpandedSetPresentation: SetPresentation {
-        expandedSetPresentation
-            ?? Self.makeSetPresentation(
-                setDrafts: setDrafts,
-                restSeconds: restSeconds,
-                formatWeight: formatWeight
-            )
-    }
-
-    func refreshSetPresentation() {
-        guard isExpanded else {
-            expandedSetPresentation = nil
-            return
-        }
-
-        expandedSetPresentation = WGJPerformance.measure("template-editor.set-presentation") {
+    var currentSetPresentation: SetPresentation {
+        WGJPerformance.measure("template-editor.set-presentation") {
             Self.makeSetPresentation(
                 setDrafts: setDrafts,
                 restSeconds: restSeconds,
                 formatWeight: formatWeight
             )
-        }
-    }
-
-    func scheduleSetPresentationRefresh() {
-        guard isExpanded else {
-            pendingPresentationRefreshTask?.cancel()
-            pendingPresentationRefreshTask = nil
-            expandedSetPresentation = nil
-            return
-        }
-
-        guard focusedInput != nil else {
-            pendingPresentationRefreshTask?.cancel()
-            pendingPresentationRefreshTask = nil
-            refreshSetPresentation()
-            return
-        }
-
-        pendingPresentationRefreshTask?.cancel()
-        pendingPresentationRefreshTask = Task { @MainActor in
-            try? await Task.sleep(for: presentationRefreshDebounce)
-            guard !Task.isCancelled else { return }
-            pendingPresentationRefreshTask = nil
-            refreshSetPresentation()
-        }
-    }
-
-    func flushPendingPresentationRefresh() {
-        guard pendingPresentationRefreshTask != nil else { return }
-        pendingPresentationRefreshTask?.cancel()
-        pendingPresentationRefreshTask = nil
-        if isExpanded {
-            refreshSetPresentation()
         }
     }
 
@@ -1141,6 +1053,7 @@ private extension TemplateExercisePrescriptionEditor {
                 SetRowData(
                     id: set.id,
                     index: index,
+                    set: set,
                     title: set.isWarmup ? "Warmup Set" : "Working Set \(workingSetNumber)",
                     badgeTitle: set.isWarmup ? "W" : "\(workingSetNumber)",
                     previousSummary: previousSummary(for: set, formatWeight: formatWeight),
@@ -1215,6 +1128,7 @@ private struct SetPresentation: Equatable {
 private struct SetRowData: Identifiable, Equatable {
     let id: UUID
     let index: Int
+    let set: TemplateExerciseSetDraft
     let title: String
     let badgeTitle: String
     let previousSummary: String
@@ -1224,7 +1138,6 @@ private struct SetRowData: Identifiable, Equatable {
 
 private struct TemplateExerciseSetCardView: View, Equatable {
     let row: SetRowData
-    let set: TemplateExerciseSetDraft
     let defaultRestSeconds: Int
     let restPresets: [Int]
     let canMoveDown: Bool
@@ -1245,7 +1158,6 @@ private struct TemplateExerciseSetCardView: View, Equatable {
 
     static func == (lhs: TemplateExerciseSetCardView, rhs: TemplateExerciseSetCardView) -> Bool {
         lhs.row == rhs.row
-            && lhs.set == rhs.set
             && lhs.defaultRestSeconds == rhs.defaultRestSeconds
             && lhs.restPresets == rhs.restPresets
             && lhs.canMoveDown == rhs.canMoveDown
@@ -1326,6 +1238,10 @@ private struct TemplateExerciseSetCardView: View, Equatable {
                         )
                 )
         )
+    }
+
+    private var set: TemplateExerciseSetDraft {
+        row.set
     }
 
     private var repsField: some View {
