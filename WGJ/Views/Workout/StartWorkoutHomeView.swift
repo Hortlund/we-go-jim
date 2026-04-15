@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 
 struct StartWorkoutHomeView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(\.isTabActive) private var isTabActive
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
@@ -838,20 +839,32 @@ struct StartWorkoutHomeView: View {
     }
 
     private func importTemplate(from fileURL: URL, clearingPendingRequestID requestID: UUID? = nil) {
-        defer {
-            if let requestID {
-                templateFileOpenState.clear(requestID: requestID)
+        Task { @MainActor in
+            defer {
+                if let requestID {
+                    templateFileOpenState.clear(requestID: requestID)
+                }
             }
-        }
 
-        do {
-            let importedTemplate = try templateTransferService.importTemplate(from: fileURL)
-            expandedFolderIDs[TemplateRepository.unfiledFolderID] = true
-            persistExpandedFolderState()
-            try controller.reload(modelContext: modelContext)
-            selectedTemplatePreview = makeTemplatePreview(for: importedTemplate)
-        } catch {
-            showError(error)
+            do {
+                let importedTemplateID: UUID
+                if let appBackgroundStore {
+                    importedTemplateID = try await appBackgroundStore.performWrite("start-workout.template.import") { backgroundContext in
+                        try TemplateTransferService(modelContext: backgroundContext)
+                            .importTemplate(from: fileURL)
+                            .id
+                    }
+                } else {
+                    importedTemplateID = try templateTransferService.importTemplate(from: fileURL).id
+                }
+
+                expandedFolderIDs[TemplateRepository.unfiledFolderID] = true
+                persistExpandedFolderState()
+                try controller.reload(modelContext: modelContext)
+                selectImportedTemplatePreview(templateID: importedTemplateID)
+            } catch {
+                showError(error)
+            }
         }
     }
 
@@ -877,12 +890,32 @@ struct StartWorkoutHomeView: View {
         )
     }
 
+    @MainActor
+    private func selectImportedTemplatePreview(templateID: UUID) {
+        guard let importedTemplate = try? templateRepository.template(id: templateID) else {
+            selectedTemplatePreview = nil
+            return
+        }
+
+        selectedTemplatePreview = makeTemplatePreview(for: importedTemplate)
+    }
+
     private func exportTemplate(templateID: UUID) {
-        do {
-            let fileURL = try templateTransferService.writeExportFile(templateID: templateID)
-            templateShareSheet = StartWorkoutTemplateShareSheet(fileURL: fileURL)
-        } catch {
-            showError(error)
+        Task { @MainActor in
+            do {
+                let fileURL: URL
+                if let appBackgroundStore {
+                    fileURL = try await appBackgroundStore.performWrite("start-workout.template.export") { backgroundContext in
+                        try TemplateTransferService(modelContext: backgroundContext)
+                            .writeExportFile(templateID: templateID)
+                    }
+                } else {
+                    fileURL = try templateTransferService.writeExportFile(templateID: templateID)
+                }
+                templateShareSheet = StartWorkoutTemplateShareSheet(fileURL: fileURL)
+            } catch {
+                showError(error)
+            }
         }
     }
 

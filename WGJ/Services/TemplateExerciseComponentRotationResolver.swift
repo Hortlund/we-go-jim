@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-struct ExerciseComponentSnapshot: Identifiable, Equatable {
+struct ExerciseComponentSnapshot: Identifiable, Equatable, Sendable {
     let id: UUID
     let catalogExerciseUUID: String
     let exerciseNameSnapshot: String
@@ -43,7 +43,7 @@ struct ExerciseComponentSnapshot: Identifiable, Equatable {
     }
 }
 
-struct ExerciseComponentRotationResolution: Equatable {
+struct ExerciseComponentRotationResolution: Equatable, Sendable {
     let availableComponents: [ExerciseComponentSnapshot]
     let selectedComponent: ExerciseComponentSnapshot
     let suggestedComponent: ExerciseComponentSnapshot
@@ -65,7 +65,6 @@ struct ExerciseComponentRotationResolution: Equatable {
     }
 }
 
-@MainActor
 final class TemplateExerciseComponentRotationResolver {
     private let modelContext: ModelContext
 

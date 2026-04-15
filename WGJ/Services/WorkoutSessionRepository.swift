@@ -1,13 +1,13 @@
 import Foundation
 import SwiftData
 
-struct WorkoutPreviousSetSnapshot: Equatable {
+struct WorkoutPreviousSetSnapshot: Equatable, Sendable {
     var reps: Int?
     var weight: Double?
     var unit: TemplateLoadUnit
 }
 
-struct WorkoutSessionSetDraft: Identifiable, Equatable {
+struct WorkoutSessionSetDraft: Identifiable, Equatable, Sendable {
     let id: UUID
     var isWarmup: Bool
     var restSeconds: Int
@@ -142,6 +142,11 @@ final class WorkoutSessionRepository {
         HistoryAnalyticsCache.shared.invalidate(container: modelContext.container)
     }
 
+    private func saveUserDataChanges() throws {
+        try modelContext.save()
+        UserDataSyncTrackerBridge.markLocalMutation()
+    }
+
     private func scheduleProjectionRebuild(for sessionID: UUID) {
         HistoryProjectionBackgroundReconciler.shared.scheduleRebuild(
             sessionID: sessionID,
@@ -153,7 +158,7 @@ final class WorkoutSessionRepository {
         let cleanedName = ReviewModerationService.sanitizedForSharing(name, kind: .workoutName)
         let created = WorkoutSession(name: cleanedName)
         modelContext.insert(created)
-        try modelContext.save()
+        try saveUserDataChanges()
         return created
     }
 
@@ -248,7 +253,7 @@ final class WorkoutSessionRepository {
             exercise.sets = createdSets
         }
 
-        try modelContext.save()
+        try saveUserDataChanges()
         return session
     }
 
@@ -328,7 +333,7 @@ final class WorkoutSessionRepository {
 
         session.name = cleaned
         session.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func updateSessionNotes(sessionID: UUID, notes: String) throws {
@@ -338,7 +343,7 @@ final class WorkoutSessionRepository {
 
         session.notes = notes
         session.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func addExercise(sessionID: UUID, catalogItem: ExerciseCatalogItem, restSeconds: Int = 120) throws {
@@ -375,7 +380,7 @@ final class WorkoutSessionRepository {
         created.sets = sets
 
         session.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func removeExercise(sessionID: UUID, sessionExerciseID: UUID) throws {
@@ -396,7 +401,7 @@ final class WorkoutSessionRepository {
         }
 
         session.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func updateExerciseRest(sessionExerciseID: UUID, restSeconds: Int) throws {
@@ -418,7 +423,7 @@ final class WorkoutSessionRepository {
             set.updatedAt = .now
         }
         exercise.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func updateExerciseRepRange(sessionExerciseID: UUID, minReps: Int?, maxReps: Int?) throws {
@@ -433,7 +438,7 @@ final class WorkoutSessionRepository {
         exercise.targetRepMin = normalized.min
         exercise.targetRepMax = normalized.max
         exercise.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func updateExerciseNotes(sessionExerciseID: UUID, notes: String) throws {
@@ -447,7 +452,7 @@ final class WorkoutSessionRepository {
 
         exercise.notes = notes
         exercise.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func addSet(sessionExerciseID: UUID) throws {
@@ -479,7 +484,7 @@ final class WorkoutSessionRepository {
         sets.append(newSet)
         exercise.sets = sets
         exercise.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func removeSet(sessionExerciseID: UUID, setID: UUID) throws {
@@ -503,7 +508,7 @@ final class WorkoutSessionRepository {
 
         exercise.sets = remaining
         exercise.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func saveSetDrafts(sessionExerciseID: UUID, drafts: [WorkoutSessionSetDraft]) throws {
@@ -560,7 +565,7 @@ final class WorkoutSessionRepository {
             return
         }
 
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func previousSet(
@@ -672,7 +677,7 @@ final class WorkoutSessionRepository {
         session.prHitsCount = summary.prHitsCount
         session.summaryMetricsVersion = WorkoutMetricsService.currentSummaryMetricsVersion
 
-        try modelContext.save()
+        try saveUserDataChanges()
         invalidateAnalyticsCache()
         scheduleProjectionRebuild(for: sessionID)
         try? CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)?.queueCompletedSessionPublish(sessionID: sessionID)
@@ -692,7 +697,7 @@ final class WorkoutSessionRepository {
         let now = Date()
         session.archivedAt = now
         session.updatedAt = now
-        try modelContext.save()
+        try saveUserDataChanges()
         invalidateAnalyticsCache()
     }
 
@@ -709,7 +714,7 @@ final class WorkoutSessionRepository {
 
         session.archivedAt = nil
         session.updatedAt = Date()
-        try modelContext.save()
+        try saveUserDataChanges()
         invalidateAnalyticsCache()
     }
 
@@ -722,7 +727,7 @@ final class WorkoutSessionRepository {
         }
 
         modelContext.delete(session)
-        try modelContext.save()
+        try saveUserDataChanges()
         invalidateAnalyticsCache()
     }
 
@@ -746,7 +751,7 @@ final class WorkoutSessionRepository {
             session.durationSeconds = max(0, Int(end.timeIntervalSince(session.startedAt)))
         }
 
-        try modelContext.save()
+        try saveUserDataChanges()
         invalidateAnalyticsCache()
         scheduleProjectionRebuild(for: sessionID)
     }
@@ -760,7 +765,7 @@ final class WorkoutSessionRepository {
         }
         guard !staleSessions.isEmpty else {
             if rebuiltProjectionCount > 0 {
-                try modelContext.save()
+                try saveUserDataChanges()
             }
             return 0
         }
@@ -774,7 +779,7 @@ final class WorkoutSessionRepository {
             session.summaryMetricsVersion = WorkoutMetricsService.currentSummaryMetricsVersion
         }
 
-        try modelContext.save()
+        try saveUserDataChanges()
         invalidateAnalyticsCache()
         return staleSessions.count
     }
@@ -794,7 +799,7 @@ final class WorkoutSessionRepository {
         try? CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)?.queueDeletedSession(sessionID: id)
         try historyProjectionRepository.deleteFacts(forSessionID: id, persistChanges: false)
         modelContext.delete(session)
-        try modelContext.save()
+        try saveUserDataChanges()
         invalidateAnalyticsCache()
     }
 

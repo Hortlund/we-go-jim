@@ -46,6 +46,7 @@ struct ContentView: View {
         }
         .environment(\.cloudSyncEnabled, appRuntimeState.cloudSyncEnabled)
         .environment(\.cloudSyncErrorDescription, appRuntimeState.cloudSyncErrorDescription)
+        .environment(\.userDataSyncStatus, appRuntimeState.userDataSyncStatus)
         .environment(appTabState)
         .environment(templateFileOpenState)
         .environment(workoutCompletionPresentationState)

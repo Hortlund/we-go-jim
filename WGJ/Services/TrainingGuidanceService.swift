@@ -1,12 +1,12 @@
 import Foundation
 
-enum TrainingGuidanceTone: Equatable {
+enum TrainingGuidanceTone: Equatable, Sendable {
     case accent
     case success
     case caution
 }
 
-enum TrainingExerciseClassification: Equatable {
+enum TrainingExerciseClassification: Equatable, Sendable {
     case lowerBodyCompound
     case upperBodyCompound
     case isolation
@@ -15,13 +15,13 @@ enum TrainingExerciseClassification: Equatable {
     case unknown
 }
 
-enum ProgressiveOverloadDirection: Equatable {
+enum ProgressiveOverloadDirection: Equatable, Sendable {
     case increaseLoad
     case decreaseLoad
     case stayCourse
 }
 
-struct TemplateExerciseRecommendation: Equatable {
+struct TemplateExerciseRecommendation: Equatable, Sendable {
     let classification: TrainingExerciseClassification
     let tone: TrainingGuidanceTone
     let title: String
@@ -32,13 +32,13 @@ struct TemplateExerciseRecommendation: Equatable {
     let suggestedRestSeconds: ClosedRange<Int>
 }
 
-struct ActiveWorkoutGuidanceBadgePresentation: Equatable {
+struct ActiveWorkoutGuidanceBadgePresentation: Equatable, Sendable {
     let title: String
     let subtitle: String?
     let systemImage: String
 }
 
-struct ProgressiveOverloadCue: Equatable {
+struct ProgressiveOverloadCue: Equatable, Sendable {
     let classification: TrainingExerciseClassification
     let tone: TrainingGuidanceTone
     let title: String
@@ -49,7 +49,7 @@ struct ProgressiveOverloadCue: Equatable {
     let suggestedRepRange: ClosedRange<Int>?
 }
 
-struct ActiveWorkoutExerciseGuidancePresentation: Equatable {
+struct ActiveWorkoutExerciseGuidancePresentation: Equatable, Sendable {
     let title: String
     let summary: String
     let tone: TrainingGuidanceTone
@@ -109,7 +109,7 @@ private func trainingGuidanceLoadText(load: Double?, unit: TemplateLoadUnit?) ->
     return "\(WGJFormatters.decimalString(load)) \(unit.shortLabel)"
 }
 
-struct TrainingGuidanceCatalogSnapshot: Equatable {
+struct TrainingGuidanceCatalogSnapshot: Equatable, Sendable {
     let exerciseName: String
     let categoryName: String
     let equipmentSummary: String

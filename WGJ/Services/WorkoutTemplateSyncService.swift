@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-struct WorkoutTemplateSyncPreview: Equatable, Identifiable {
+struct WorkoutTemplateSyncPreview: Equatable, Identifiable, Sendable {
     let templateID: UUID
     let templateName: String
     let editedWorkoutNotes: WorkoutTemplateSyncEditedWorkoutNotes?
@@ -70,11 +70,11 @@ struct WorkoutTemplateSyncPreview: Equatable, Identifiable {
     }
 }
 
-struct WorkoutTemplateSyncEditedWorkoutNotes: Equatable {
+struct WorkoutTemplateSyncEditedWorkoutNotes: Equatable, Sendable {
     let changes: [String]
 }
 
-struct WorkoutTemplateSyncAddedCardioBlock: Identifiable, Equatable {
+struct WorkoutTemplateSyncAddedCardioBlock: Identifiable, Equatable, Sendable {
     let phase: WorkoutCardioPhase
     let exerciseName: String
     let summary: String
@@ -82,7 +82,7 @@ struct WorkoutTemplateSyncAddedCardioBlock: Identifiable, Equatable {
     var id: String { phase.rawValue }
 }
 
-struct WorkoutTemplateSyncRemovedCardioBlock: Identifiable, Equatable {
+struct WorkoutTemplateSyncRemovedCardioBlock: Identifiable, Equatable, Sendable {
     let phase: WorkoutCardioPhase
     let exerciseName: String
     let summary: String
@@ -90,7 +90,7 @@ struct WorkoutTemplateSyncRemovedCardioBlock: Identifiable, Equatable {
     var id: String { phase.rawValue }
 }
 
-struct WorkoutTemplateSyncEditedCardioBlock: Identifiable, Equatable {
+struct WorkoutTemplateSyncEditedCardioBlock: Identifiable, Equatable, Sendable {
     let phase: WorkoutCardioPhase
     let exerciseName: String
     let changes: [String]
@@ -98,7 +98,7 @@ struct WorkoutTemplateSyncEditedCardioBlock: Identifiable, Equatable {
     var id: String { phase.rawValue }
 }
 
-struct WorkoutTemplateSyncAddedExercise: Identifiable, Equatable {
+struct WorkoutTemplateSyncAddedExercise: Identifiable, Equatable, Sendable {
     let catalogExerciseUUID: String
     let exerciseName: String
     let summary: String
@@ -106,7 +106,7 @@ struct WorkoutTemplateSyncAddedExercise: Identifiable, Equatable {
     var id: String { catalogExerciseUUID }
 }
 
-struct WorkoutTemplateSyncRemovedExercise: Identifiable, Equatable {
+struct WorkoutTemplateSyncRemovedExercise: Identifiable, Equatable, Sendable {
     let catalogExerciseUUID: String
     let exerciseName: String
     let summary: String
@@ -114,7 +114,7 @@ struct WorkoutTemplateSyncRemovedExercise: Identifiable, Equatable {
     var id: String { catalogExerciseUUID }
 }
 
-struct WorkoutTemplateSyncReorderedExercise: Identifiable, Equatable {
+struct WorkoutTemplateSyncReorderedExercise: Identifiable, Equatable, Sendable {
     let catalogExerciseUUID: String
     let exerciseName: String
     let fromPosition: Int
@@ -123,7 +123,7 @@ struct WorkoutTemplateSyncReorderedExercise: Identifiable, Equatable {
     var id: String { catalogExerciseUUID }
 }
 
-struct WorkoutTemplateSyncEditedExercise: Identifiable, Equatable {
+struct WorkoutTemplateSyncEditedExercise: Identifiable, Equatable, Sendable {
     let catalogExerciseUUID: String
     let exerciseName: String
     let changes: [String]
@@ -131,13 +131,13 @@ struct WorkoutTemplateSyncEditedExercise: Identifiable, Equatable {
     var id: String { catalogExerciseUUID }
 }
 
-struct WorkoutTemplateSyncMutation: Equatable {
+struct WorkoutTemplateSyncMutation: Equatable, Sendable {
     let templateNotes: String
     let cardioBlocks: [WorkoutTemplateSyncCardioMutation]
     let exercises: [WorkoutTemplateSyncExerciseMutation]
 }
 
-struct WorkoutTemplateSyncCardioMutation: Equatable {
+struct WorkoutTemplateSyncCardioMutation: Equatable, Sendable {
     let phase: WorkoutCardioPhase
     let catalogExerciseUUID: String
     let exerciseNameSnapshot: String
@@ -146,7 +146,7 @@ struct WorkoutTemplateSyncCardioMutation: Equatable {
     let targetDurationSeconds: Int
 }
 
-struct WorkoutTemplateSyncExerciseMutation: Equatable {
+struct WorkoutTemplateSyncExerciseMutation: Equatable, Sendable {
     let templateExerciseID: UUID?
     let catalogExerciseUUID: String
     let exerciseNameSnapshot: String

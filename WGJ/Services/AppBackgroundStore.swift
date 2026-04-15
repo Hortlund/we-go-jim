@@ -33,8 +33,7 @@ actor AppBackgroundStore {
     ) async throws -> T {
         _ = operationName
 
-        let context = ModelContext(container)
-        context.autosaveEnabled = false
+        let context = makeContext()
         return try operation(context)
     }
 
@@ -44,9 +43,36 @@ actor AppBackgroundStore {
     ) async throws -> T {
         _ = operationName
 
-        let context = ModelContext(container)
-        context.autosaveEnabled = false
+        let context = makeContext()
         return try await operation(context)
+    }
+
+    func performWrite<T: Sendable>(
+        _ operationName: StaticString? = nil,
+        _ operation: @Sendable (ModelContext) throws -> T
+    ) async throws -> T {
+        _ = operationName
+
+        let context = makeContext()
+        let result = try operation(context)
+        if context.hasChanges {
+            try context.save()
+        }
+        return result
+    }
+
+    func performWriteAsync<T: Sendable>(
+        _ operationName: StaticString? = nil,
+        _ operation: @Sendable (ModelContext) async throws -> T
+    ) async throws -> T {
+        _ = operationName
+
+        let context = makeContext()
+        let result = try await operation(context)
+        if context.hasChanges {
+            try context.save()
+        }
+        return result
     }
 
     func scheduleCoalesced(
@@ -67,8 +93,7 @@ actor AppBackgroundStore {
         let task = Task.detached(priority: priority) { [weak self] in
             _ = operationName
 
-            let context = ModelContext(container)
-            context.autosaveEnabled = false
+            let context = Self.makeContext(container: container)
             await operation(context)
             await self?.finishJob(for: key)
         }
@@ -83,6 +108,16 @@ actor AppBackgroundStore {
 
     private func finishJob(for key: AppBackgroundJobKey) {
         runningJobs[key] = nil
+    }
+
+    private func makeContext() -> ModelContext {
+        Self.makeContext(container: container)
+    }
+
+    private static func makeContext(container: ModelContainer) -> ModelContext {
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        return context
     }
 }
 

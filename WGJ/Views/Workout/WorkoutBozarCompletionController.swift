@@ -1,11 +1,11 @@
 import Foundation
 
-enum WorkoutPreviousPerformanceApplicationMode: Equatable {
+enum WorkoutPreviousPerformanceApplicationMode: Equatable, Sendable {
     case overwriteExisting
     case fillMissing
 }
 
-enum WorkoutPreviousPerformanceResolution: Equatable {
+enum WorkoutPreviousPerformanceResolution: Equatable, Sendable {
     case loading
     case resolved([Int: WorkoutPreviousSetSnapshot])
 
@@ -30,7 +30,7 @@ enum WorkoutPreviousPerformanceResolution: Equatable {
     }
 }
 
-enum WorkoutSetBozarCompletionDecision: Equatable {
+enum WorkoutSetBozarCompletionDecision: Equatable, Sendable {
     case waitForPreviousPerformance(setID: UUID)
     case completeImmediately([WorkoutSessionSetDraft])
 }

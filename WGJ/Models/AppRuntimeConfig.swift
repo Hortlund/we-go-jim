@@ -11,7 +11,7 @@ struct AppReviewPolicy {
     let syncBrosAvatars: Bool
 }
 
-enum CloudSyncEventType: Equatable {
+enum CloudSyncEventType: Equatable, Sendable {
     case setup
     case `import`
     case export
@@ -31,7 +31,7 @@ enum CloudSyncEventType: Equatable {
     }
 }
 
-enum CloudSyncEventStatus: Equatable {
+enum CloudSyncEventStatus: Equatable, Sendable {
     case running
     case succeeded
     case failed
@@ -48,7 +48,7 @@ enum CloudSyncEventStatus: Equatable {
     }
 }
 
-struct CloudSyncErrorSnapshot: Equatable {
+struct CloudSyncErrorSnapshot: Equatable, Sendable {
     let domain: String
     let code: Int
     let underlyingDomain: String?
@@ -56,7 +56,7 @@ struct CloudSyncErrorSnapshot: Equatable {
     let description: String
 }
 
-struct CloudSyncEventSummary: Equatable {
+struct CloudSyncEventSummary: Equatable, Sendable {
     let type: CloudSyncEventType
     let status: CloudSyncEventStatus
     let storeIdentifier: String
@@ -69,7 +69,7 @@ struct CloudSyncEventSummary: Equatable {
     var errorDescription: String? { error?.description }
 }
 
-enum CloudKitContainerAvailabilityError: Error {
+enum CloudKitContainerAvailabilityError: Error, Sendable {
     case unavailable
 }
 
@@ -175,6 +175,7 @@ final class AppRuntimeState {
     var cloudSyncEnabled = false
     var cloudSyncErrorDescription: String?
     var latestCloudSyncEvent: CloudSyncEventSummary?
+    var userDataSyncStatus = UserDataSyncStatusSnapshot.localOnly(reason: nil)
     var workoutNotificationStyle: WorkoutNotificationStyle = .timeSensitive
 
     @ObservationIgnored private var hasResolvedRuntimeCloudAvailability = false
@@ -194,6 +195,10 @@ final class AppRuntimeState {
 
     func updateLatestCloudSyncEvent(_ summary: CloudSyncEventSummary?) {
         latestCloudSyncEvent = summary
+    }
+
+    func updateUserDataSyncStatus(_ snapshot: UserDataSyncStatusSnapshot) {
+        userDataSyncStatus = snapshot
     }
 
     func updateWorkoutNotificationStyle(_ style: WorkoutNotificationStyle) {
@@ -999,6 +1004,10 @@ private struct CloudSyncErrorDescriptionKey: EnvironmentKey {
     static let defaultValue: String? = nil
 }
 
+private struct UserDataSyncStatusKey: EnvironmentKey {
+    static let defaultValue = UserDataSyncStatusSnapshot.localOnly(reason: nil)
+}
+
 extension EnvironmentValues {
     var cloudSyncEnabled: Bool {
         get { self[CloudSyncEnabledKey.self] }
@@ -1008,5 +1017,10 @@ extension EnvironmentValues {
     var cloudSyncErrorDescription: String? {
         get { self[CloudSyncErrorDescriptionKey.self] }
         set { self[CloudSyncErrorDescriptionKey.self] = newValue }
+    }
+
+    var userDataSyncStatus: UserDataSyncStatusSnapshot {
+        get { self[UserDataSyncStatusKey.self] }
+        set { self[UserDataSyncStatusKey.self] = newValue }
     }
 }

@@ -107,6 +107,7 @@ final class CloudSyncEventMonitor {
             let resolution = CloudSyncEventHealthClassifier.resolution(for: summary)
             Task { @MainActor in
                 AppRuntimeState.shared.updateLatestCloudSyncEvent(summary)
+                UserDataSyncTrackerBridge.recordCloudEvent(summary)
                 switch resolution {
                 case .noChange:
                     break

@@ -2,11 +2,13 @@ import Combine
 import Foundation
 import SwiftData
 import SwiftUI
+import UIKit
 
 struct ActiveWorkoutView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(WorkoutCompletionPresentationState.self) private var workoutCompletionPresentationState
     @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
     @Environment(RestTimerState.self) private var restTimerState
@@ -28,10 +30,11 @@ struct ActiveWorkoutView: View {
     @State private var previousResolutionByExerciseID: [UUID: WorkoutPreviousPerformanceResolution] = [:]
     @State private var componentResolutionByExerciseID: [UUID: ExerciseComponentRotationResolution] = [:]
     @State private var guidanceByExerciseID: [UUID: ActiveWorkoutExerciseGuidancePresentation?] = [:]
-    @State private var catalogMatchesByUUID: [String: ExerciseCatalogItem] = [:]
+    @State private var catalogMatchesByUUID: [String: TrainingGuidanceCatalogSnapshot] = [:]
     @State private var loadedExerciseStateStamp: ActiveWorkoutExerciseStateStamp?
     @State private var loadedExerciseEntryStampByID: [UUID: ActiveWorkoutExerciseEntryStamp] = [:]
     @State private var deferredHydrationTask: Task<Void, Never>?
+    @State private var pendingCheckpointScheduleTask: Task<Void, Never>?
     @State private var cardStateController = ActiveWorkoutExerciseCardStateController()
 
     @State private var sessionNameDraft = ""
@@ -52,7 +55,7 @@ struct ActiveWorkoutView: View {
     @State private var pendingTemplateUpdatePreview: WorkoutTemplateSyncPreview?
     @State private var templateNameDraft = ""
     @State private var templateFolderID: UUID?
-    @State private var saveTemplateFolders: [TemplateFolder] = []
+    @State private var saveTemplateFolders: [ActiveWorkoutTemplateFolderSnapshot] = []
     @State private var preferredLoadUnit: TemplateLoadUnit = .kg
     @State private var isKeyboardVisible = false
     @State private var shouldTrackVisibleScrollTarget = false
@@ -340,7 +343,9 @@ struct ActiveWorkoutView: View {
             }
             .onChange(of: scenePhase) { _, newPhase in
                 guard newPhase != .active else { return }
-                flushDirtyWrites(checkpoint: .sceneTransition)
+                performExpiringBackgroundFlush(named: "active-workout.scene-transition") {
+                    _ = await flushDirtyWritesNow(checkpoint: .sceneTransition)
+                }
             }
             .onDisappear {
                 shouldTrackVisibleScrollTarget = false
@@ -350,11 +355,15 @@ struct ActiveWorkoutView: View {
                 pendingCompletionTask = nil
                 deferredHydrationTask?.cancel()
                 deferredHydrationTask = nil
+                pendingCheckpointScheduleTask?.cancel()
+                pendingCheckpointScheduleTask = nil
                 if scenePhase == .active,
                    activeWorkoutPresentationState.activeSessionID == sessionID,
                    !isEndingSession
                 {
-                    flushDirtyWrites(checkpoint: .minimize)
+                    performExpiringBackgroundFlush(named: "active-workout.minimize") {
+                        _ = await flushDirtyWritesNow(checkpoint: .minimize)
+                    }
                 }
             }
             .alert("Workout Error", isPresented: $showingError) {
@@ -706,6 +715,7 @@ struct ActiveWorkoutView: View {
         guard setDraftsByExerciseID[exerciseID] != updated else { return }
         setDraftsByExerciseID[exerciseID] = updated
         pendingWrites.markExerciseDirty(exerciseID)
+        scheduleCheckpointFlush(checkpoint: .coalesced)
         refreshGuidance(for: exerciseID)
     }
 
@@ -715,6 +725,7 @@ struct ActiveWorkoutView: View {
         guard restByExerciseID[exerciseID] != normalized else { return }
         restByExerciseID[exerciseID] = normalized
         pendingWrites.markExerciseDirty(exerciseID)
+        scheduleCheckpointFlush(checkpoint: .coalesced)
     }
 
     @MainActor
@@ -722,6 +733,7 @@ struct ActiveWorkoutView: View {
         guard notesByExerciseID[exerciseID] != updated else { return }
         notesByExerciseID[exerciseID] = updated
         pendingWrites.markExerciseDirty(exerciseID)
+        scheduleCheckpointFlush(checkpoint: .coalesced)
     }
 
     @MainActor
@@ -784,41 +796,26 @@ struct ActiveWorkoutView: View {
         deferredHydrationTask = nil
 
         if !changedExerciseIDs.isEmpty {
-            let changedExercises = sessionExercises.filter { changedExerciseIDs.contains($0.id) }
-            let result = WGJPerformance.measure("active-workout.hydrate.local") { () -> ActiveWorkoutHydrationResult in
-                var loadedDrafts: [UUID: [WorkoutSessionSetDraft]] = [:]
-                var loadedRests: [UUID: Int] = [:]
-                var loadedNotes: [UUID: String] = [:]
-                var loadedPersistenceState: [UUID: ActiveWorkoutExercisePersistenceSnapshot] = [:]
-                let catalogByUUID = (try? catalogRepository.exerciseMap(
-                    for: Array(Set(changedExercises.map(\.catalogExerciseUUID)))
-                )) ?? [:]
-
-                for exercise in changedExercises {
-                    let normalizedDrafts = normalizedDraftsForActiveLogging(
-                        makeDrafts(from: exercise),
-                        catalogExercise: catalogByUUID[exercise.catalogExerciseUUID]
-                    )
-                    loadedDrafts[exercise.id] = normalizedDrafts
-                    loadedRests[exercise.id] = exercise.restSeconds
-                    loadedNotes[exercise.id] = exercise.notes
-                    loadedPersistenceState[exercise.id] = ActiveWorkoutExercisePersistenceSnapshot(
-                        setDrafts: normalizedDrafts,
-                        restSeconds: exercise.restSeconds,
-                        notes: exercise.notes
+            let result: ActiveWorkoutHydrationResult
+            do {
+                if let appBackgroundStore {
+                    result = try await appBackgroundStore.perform("active-workout.hydrate.local") { backgroundContext in
+                        try Self.loadHydrationResult(
+                            modelContext: backgroundContext,
+                            sessionID: sessionID,
+                            exerciseIDs: changedExerciseIDs
+                        )
+                    }
+                } else {
+                    result = try Self.loadHydrationResult(
+                        modelContext: modelContext,
+                        sessionID: sessionID,
+                        exerciseIDs: changedExerciseIDs
                     )
                 }
-
-                return ActiveWorkoutHydrationResult(
-                    draftsByExerciseID: loadedDrafts,
-                    restsByExerciseID: loadedRests,
-                    notesByExerciseID: loadedNotes,
-                    persistenceStateByExerciseID: loadedPersistenceState,
-                    previousResolutionByExerciseID: Dictionary(
-                        uniqueKeysWithValues: changedExercises.map { ($0.id, WorkoutPreviousPerformanceResolution.loading) }
-                    ),
-                    catalogMatchesByUUID: catalogByUUID
-                )
+            } catch {
+                showError(error)
+                return
             }
 
             setDraftsByExerciseID.merge(result.draftsByExerciseID) { _, new in new }
@@ -833,6 +830,7 @@ struct ActiveWorkoutView: View {
                 guidanceByExerciseID[exerciseID] = nil
             }
 
+            let changedExercises = sessionExercises.filter { changedExerciseIDs.contains($0.id) }
             for exercise in changedExercises {
                 guidanceByExerciseID[exercise.id] = guidancePresentation(
                     for: exercise,
@@ -897,23 +895,38 @@ struct ActiveWorkoutView: View {
             try? await Task.sleep(for: previousPerformanceHydrationDelay)
             guard !Task.isCancelled, loadedExerciseStateStamp == stamp else { return }
 
-            let loadedPreviousResolution = WGJPerformance.measure("active-workout.hydrate.history") {
-                loadPreviousResolutionByExerciseID(
-                    using: draftsByExerciseID,
-                    exerciseIDs: previousExerciseIDs
-                )
+            let loadedHydration: ActiveWorkoutDeferredHydrationResult
+            do {
+                if let appBackgroundStore {
+                    loadedHydration = try await appBackgroundStore.perform("active-workout.hydrate.deferred") { backgroundContext in
+                        try Self.loadDeferredHydrationResult(
+                            modelContext: backgroundContext,
+                            sessionID: sessionID,
+                            exerciseIDs: expandedExerciseIDs,
+                            draftsByExerciseID: draftsByExerciseID
+                        )
+                    }
+                } else {
+                    loadedHydration = try Self.loadDeferredHydrationResult(
+                        modelContext: modelContext,
+                        sessionID: sessionID,
+                        exerciseIDs: expandedExerciseIDs,
+                        draftsByExerciseID: draftsByExerciseID
+                    )
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                showError(error)
+                deferredHydrationTask = nil
+                return
             }
             guard !Task.isCancelled, loadedExerciseStateStamp == stamp else { return }
-            previousResolutionByExerciseID.merge(loadedPreviousResolution) { _, new in new }
-
-            await Task.yield()
-            guard !Task.isCancelled, loadedExerciseStateStamp == stamp else { return }
-
-            let loadedComponentResolutions = WGJPerformance.measure("active-workout.hydrate.components") {
-                loadComponentResolutionByExerciseID(exerciseIDs: componentExerciseIDs)
-            }
-            guard !Task.isCancelled, loadedExerciseStateStamp == stamp else { return }
-            componentResolutionByExerciseID.merge(loadedComponentResolutions) { _, new in new }
+            previousResolutionByExerciseID.merge(
+                loadedHydration.previousResolutionByExerciseID.filter { previousExerciseIDs.contains($0.key) }
+            ) { _, new in new }
+            componentResolutionByExerciseID.merge(
+                loadedHydration.componentResolutionByExerciseID.filter { componentExerciseIDs.contains($0.key) }
+            ) { _, new in new }
             deferredHydrationTask = nil
         }
     }
@@ -932,43 +945,34 @@ struct ActiveWorkoutView: View {
         }
     }
 
-    private func handleCompletedSessionTransition(sessionID: UUID) {
+    private func handleCompletedSessionTransition(_ result: ActiveWorkoutFinishResult) {
         dismissKeyboard()
         showingFinishConfirmation = false
         isCancelArmed = false
         isEndingSession = true
-        completedSessionID = sessionID
+        completedSessionID = result.completedSessionID
         restTimerState.clearRestTimer()
 
         guard !pendingCompletionAfterSaveTemplateSheet else { return }
         guard !showingSaveTemplateSheet, pendingTemplateUpdatePreview == nil else { return }
 
-        guard let latestSession = try? completedSessionRepository.session(id: sessionID) else {
-            presentWorkoutCompletionSummary()
-            return
-        }
-
-        if latestSession.templateID == nil {
+        if result.completedTemplateID == nil {
             if templateNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                templateNameDraft = latestSession.name == "Empty Workout" ? "New Template" : latestSession.name
+                templateNameDraft = result.completedSessionName == "Empty Workout" ? "New Template" : result.completedSessionName
             }
-            loadSaveTemplateFoldersIfNeeded()
+            saveTemplateFolders = result.saveTemplateFolders
             showingSaveTemplateSheet = true
             return
         }
 
-        do {
-            if let preview = try templateSyncService.previewTemplateUpdate(forSessionID: latestSession.id) {
-                pendingTemplateUpdatePreview = preview
-            } else {
-                presentWorkoutCompletionSummary()
-            }
-        } catch {
-            showError(error)
+        if let preview = result.templateUpdatePreview {
+            pendingTemplateUpdatePreview = preview
+        } else {
+            presentWorkoutCompletionSummary()
         }
     }
 
-    private func resolvedPreviousMap(
+    nonisolated private static func resolvedPreviousMap(
         baseMap: [Int: WorkoutPreviousSetSnapshot],
         maxSetCount: Int
     ) -> [Int: WorkoutPreviousSetSnapshot] {
@@ -990,68 +994,6 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
-    private func loadPreviousResolutionByExerciseID(
-        using draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]],
-        exerciseIDs: Set<UUID>
-    ) -> [UUID: WorkoutPreviousPerformanceResolution] {
-        guard !exerciseIDs.isEmpty else { return [:] }
-
-        let startedAt = session?.startedAt ?? .now
-        let targetExercises = sessionExercises.filter { exerciseIDs.contains($0.id) }
-        let requestedExerciseUUIDs = Array(Set(targetExercises.map(\.catalogExerciseUUID)))
-        let previousMaps = (try? activeWorkoutRepository.previousSetMaps(
-            forExercises: requestedExerciseUUIDs,
-            before: startedAt,
-            excludingSessionID: sessionID
-        )) ?? [:]
-
-        var loadedPreviousResolution: [UUID: WorkoutPreviousPerformanceResolution] = [:]
-        loadedPreviousResolution.reserveCapacity(targetExercises.count)
-
-        for exercise in targetExercises {
-            let drafts = draftsByExerciseID[exercise.id] ?? makeDrafts(from: exercise)
-            let base = previousMaps[exercise.catalogExerciseUUID] ?? [:]
-            loadedPreviousResolution[exercise.id] = .resolved(
-                resolvedPreviousMap(
-                    baseMap: base,
-                    maxSetCount: drafts.count
-                )
-            )
-        }
-
-        return loadedPreviousResolution
-    }
-
-    @MainActor
-    private func loadComponentResolutionByExerciseID(
-        exerciseIDs: Set<UUID>
-    ) -> [UUID: ExerciseComponentRotationResolution] {
-        guard let session else {
-            return [:]
-        }
-        guard !exerciseIDs.isEmpty else { return [:] }
-
-        var loaded: [UUID: ExerciseComponentRotationResolution] = [:]
-        let targetExercises = sessionExercises.filter { exerciseIDs.contains($0.id) }
-        loaded.reserveCapacity(targetExercises.count)
-
-        for exercise in targetExercises {
-            guard let resolution = try? componentRotationResolver.resolution(
-                for: exercise,
-                templateID: session.templateID,
-                before: session.startedAt,
-                excludingSessionID: sessionID
-            ) else {
-                continue
-            }
-
-            loaded[exercise.id] = resolution
-        }
-
-        return loaded
-    }
-
-    @MainActor
     private func scheduleExpandedExerciseHydrationIfNeeded() {
         guard let loadedExerciseStateStamp else { return }
         scheduleDeferredHydration(
@@ -1062,50 +1004,11 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func flushDirtyWrites(checkpoint: ActiveWorkoutWriteCheckpoint) {
-        guard pendingWrites.hasDirtyWrites else { return }
-        guard session != nil else {
-            pendingWrites = ActiveWorkoutPendingWrites()
-            return
-        }
-
-        let validExerciseIDs = Set(sessionExercises.map(\.id))
-        let dirtyExerciseIDs = pendingWrites.dirtyExerciseIDs(validIDs: validExerciseIDs)
-        let dirtySnapshotsByExerciseID = Dictionary(
-            uniqueKeysWithValues: dirtyExerciseIDs.compactMap { exerciseID in
-                currentPersistenceSnapshot(for: exerciseID).map { (exerciseID, $0) }
-            }
-        )
-
-        do {
-            let result = try WGJPerformance.measure("active-workout.persist.checkpoint") {
-                try activeWorkoutRepository.persistCheckpoint(
-                    sessionID: sessionID,
-                    sessionName: sessionNameDraft,
-                    sessionNotes: notesDraft,
-                    dirtyExerciseIDs: dirtyExerciseIDs,
-                    snapshotsByExerciseID: dirtySnapshotsByExerciseID,
-                    persistedSnapshotsByExerciseID: lastPersistedExerciseStateByID
-                )
-            }
-
-            if result.didPersistSessionMeta || pendingWrites.isSessionMetaDirty {
-                pendingWrites.clearSessionMeta()
-            }
-
-            for exerciseID in result.handledExerciseIDs {
-                pendingWrites.clearExercise(exerciseID)
-            }
-
-            for exerciseID in result.persistedExerciseIDs {
-                if let snapshot = dirtySnapshotsByExerciseID[exerciseID] {
-                    lastPersistedExerciseStateByID[exerciseID] = snapshot
-                }
-            }
-        } catch {
-            showError(error)
-        }
+        guard checkpoint != .finish, checkpoint != .cancel else { return }
+        scheduleCheckpointFlush(checkpoint: checkpoint)
     }
 
+    @MainActor
     private func persistSessionMeta() {
         syncSessionMetaDirtyState()
         flushDirtyWrites(checkpoint: .manual)
@@ -1350,6 +1253,9 @@ struct ActiveWorkoutView: View {
         let hasNameChange = !normalizedSessionName.isEmpty && normalizedSessionName != session.name
         let hasNotesChange = notesDraft != session.notes
         pendingWrites.setSessionMetaDirty(hasNameChange || hasNotesChange)
+        if hasNameChange || hasNotesChange {
+            scheduleCheckpointFlush(checkpoint: .coalesced)
+        }
     }
 
     @MainActor
@@ -1376,7 +1282,7 @@ struct ActiveWorkoutView: View {
     @MainActor
     private func buildGuidanceCache(
         draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]],
-        catalogMatchesByUUID: [String: ExerciseCatalogItem]
+        catalogMatchesByUUID: [String: TrainingGuidanceCatalogSnapshot]
     ) -> [UUID: ActiveWorkoutExerciseGuidancePresentation?] {
         guard isTrainingGuidanceEnabled else {
             return Dictionary(uniqueKeysWithValues: sessionExercises.map { ($0.id, nil as ActiveWorkoutExerciseGuidancePresentation?) })
@@ -1644,41 +1550,62 @@ struct ActiveWorkoutView: View {
     }
 
     private func finishWorkout() {
-        dismissKeyboard()
-        pendingFinishAfterConfirmation = false
-        isCancelArmed = false
-        guard !isEndingSession else { return }
-        isEndingSession = true
-        persistSessionMeta()
-        flushDirtyWrites(checkpoint: .finish)
-        restTimerState.clearRestTimer()
+        Task { @MainActor in
+            dismissKeyboard()
+            pendingFinishAfterConfirmation = false
+            isCancelArmed = false
+            guard !isEndingSession else { return }
+            isEndingSession = true
+            syncSessionMetaDirtyState()
+            let flushed = await flushDirtyWritesNow(checkpoint: .finish)
+            guard flushed else {
+                isEndingSession = false
+                return
+            }
+            restTimerState.clearRestTimer()
+            let finalNotes = notesDraft
 
-        do {
-            let finishedSessionID = try activeWorkoutRepository.finishSession(sessionID: sessionID, notes: notesDraft)
-            handleCompletedSessionTransition(sessionID: finishedSessionID)
-        } catch {
-            isEndingSession = false
-            showError(error)
+            do {
+                let result = try await performFinishCommand(notes: finalNotes)
+                handleCompletedSessionTransition(result)
+            } catch {
+                isEndingSession = false
+                showError(error)
+            }
         }
     }
 
     private func saveSessionAsTemplate() {
-        dismissKeyboard()
-        do {
-            _ = try templateRepository.createTemplate(
-                fromSessionID: sessionID,
-                name: templateNameDraft,
-                folderID: templateFolderID
-            )
-            requestCompletionAfterSaveTemplateSheetDismissal()
-        } catch {
-            showError(error)
+        Task { @MainActor in
+            dismissKeyboard()
+            let templateName = templateNameDraft
+            let selectedFolderID = templateFolderID
+            do {
+                if let appBackgroundStore {
+                    _ = try await appBackgroundStore.performWrite("active-workout.template.create-from-session") { backgroundContext in
+                        let repository = TemplateRepository(modelContext: backgroundContext, autoSaveChanges: false)
+                        let template = try repository.createTemplate(
+                            fromSessionID: sessionID,
+                            name: templateName,
+                            folderID: selectedFolderID
+                        )
+                        try repository.finalizeDeferredUserDataChangesIfNeeded()
+                        return template.id
+                    }
+                } else {
+                    let repository = TemplateRepository(modelContext: modelContext, autoSaveChanges: false)
+                    _ = try repository.createTemplate(
+                        fromSessionID: sessionID,
+                        name: templateName,
+                        folderID: selectedFolderID
+                    )
+                    try repository.finalizeDeferredUserDataChangesIfNeeded()
+                }
+                requestCompletionAfterSaveTemplateSheetDismissal()
+            } catch {
+                showError(error)
+            }
         }
-    }
-
-    private func loadSaveTemplateFoldersIfNeeded() {
-        guard saveTemplateFolders.isEmpty else { return }
-        saveTemplateFolders = (try? templateRepository.folders()) ?? []
     }
 
     private func skipSavingSessionAsTemplate() {
@@ -1721,27 +1648,41 @@ struct ActiveWorkoutView: View {
     private func minimizeWorkout() {
         dismissKeyboard()
         isCancelArmed = false
-        flushDirtyWrites(checkpoint: .minimize)
+        performExpiringBackgroundFlush(named: "active-workout.minimize") {
+            _ = await flushDirtyWritesNow(checkpoint: .minimize)
+        }
         activeWorkoutPresentationState.collapseActiveWorkout()
         dismiss()
     }
 
     private func cancelWorkout() {
-        dismissKeyboard()
-        isCancelArmed = false
-        guard !isEndingSession else { return }
-        isEndingSession = true
-        persistSessionMeta()
-        flushDirtyWrites(checkpoint: .cancel)
-        restTimerState.clearRestTimer()
+        Task { @MainActor in
+            dismissKeyboard()
+            isCancelArmed = false
+            guard !isEndingSession else { return }
+            isEndingSession = true
+            syncSessionMetaDirtyState()
+            let flushed = await flushDirtyWritesNow(checkpoint: .cancel)
+            guard flushed else {
+                isEndingSession = false
+                return
+            }
+            restTimerState.clearRestTimer()
 
-        do {
-            try activeWorkoutRepository.cancelSession(sessionID: sessionID)
-            activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
-            dismiss()
-        } catch {
-            isEndingSession = false
-            showError(error)
+            do {
+                if let appBackgroundStore {
+                    try await appBackgroundStore.performWrite("active-workout.cancel") { backgroundContext in
+                        try ActiveWorkoutDraftRepository(modelContext: backgroundContext).cancelSession(sessionID: sessionID)
+                    }
+                } else {
+                    try activeWorkoutRepository.cancelSession(sessionID: sessionID)
+                }
+                activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
+                dismiss()
+            } catch {
+                isEndingSession = false
+                showError(error)
+            }
         }
     }
 
@@ -1773,12 +1714,20 @@ struct ActiveWorkoutView: View {
     }
 
     private func applyTemplateUpdate(_ preview: WorkoutTemplateSyncPreview) {
-        pendingTemplateUpdatePreview = nil
-        do {
-            try templateSyncService.applyTemplateUpdate(preview)
-            presentWorkoutCompletionSummary()
-        } catch {
-            showError(error)
+        Task { @MainActor in
+            pendingTemplateUpdatePreview = nil
+            do {
+                if let appBackgroundStore {
+                    try await appBackgroundStore.performWrite("active-workout.template.apply-sync") { backgroundContext in
+                        try WorkoutTemplateSyncService(modelContext: backgroundContext).applyTemplateUpdate(preview)
+                    }
+                } else {
+                    try templateSyncService.applyTemplateUpdate(preview)
+                }
+                presentWorkoutCompletionSummary()
+            } catch {
+                showError(error)
+            }
         }
     }
 
@@ -1897,9 +1846,151 @@ struct ActiveWorkoutView: View {
         orderedSessionSets(for: exercise).map(WorkoutSessionSetDraft.init(model:))
     }
 
-    private func normalizedDraftsForActiveLogging(
+    nonisolated private static func loadHydrationResult(
+        modelContext: ModelContext,
+        sessionID: UUID,
+        exerciseIDs: Set<UUID>
+    ) throws -> ActiveWorkoutHydrationResult {
+        guard !exerciseIDs.isEmpty else {
+            return ActiveWorkoutHydrationResult(
+                draftsByExerciseID: [:],
+                restsByExerciseID: [:],
+                notesByExerciseID: [:],
+                persistenceStateByExerciseID: [:],
+                previousResolutionByExerciseID: [:],
+                catalogMatchesByUUID: [:]
+            )
+        }
+
+        let repository = ActiveWorkoutDraftRepository(modelContext: modelContext)
+        let exercises = try repository.sessionExercises(sessionID: sessionID)
+            .filter { exerciseIDs.contains($0.id) }
+        let catalogByUUID = try loadCatalogSnapshots(
+            modelContext: modelContext,
+            remoteUUIDs: Array(Set(exercises.map(\.catalogExerciseUUID)))
+        )
+
+        var loadedDrafts: [UUID: [WorkoutSessionSetDraft]] = [:]
+        var loadedRests: [UUID: Int] = [:]
+        var loadedNotes: [UUID: String] = [:]
+        var loadedPersistenceState: [UUID: ActiveWorkoutExercisePersistenceSnapshot] = [:]
+
+        for exercise in exercises {
+            let orderedSets = (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
+            let drafts = orderedSets.map(WorkoutSessionSetDraft.init(model:))
+            let normalizedDrafts = Self.normalizedDraftsForActiveLogging(
+                drafts,
+                catalogExercise: catalogByUUID[exercise.catalogExerciseUUID]
+            )
+            loadedDrafts[exercise.id] = normalizedDrafts
+            loadedRests[exercise.id] = exercise.restSeconds
+            loadedNotes[exercise.id] = exercise.notes
+            loadedPersistenceState[exercise.id] = ActiveWorkoutExercisePersistenceSnapshot(
+                setDrafts: normalizedDrafts,
+                restSeconds: exercise.restSeconds,
+                notes: exercise.notes
+            )
+        }
+
+        return ActiveWorkoutHydrationResult(
+            draftsByExerciseID: loadedDrafts,
+            restsByExerciseID: loadedRests,
+            notesByExerciseID: loadedNotes,
+            persistenceStateByExerciseID: loadedPersistenceState,
+            previousResolutionByExerciseID: Dictionary(
+                uniqueKeysWithValues: exercises.map { ($0.id, WorkoutPreviousPerformanceResolution.loading) }
+            ),
+            catalogMatchesByUUID: catalogByUUID
+        )
+    }
+
+    nonisolated private static func loadDeferredHydrationResult(
+        modelContext: ModelContext,
+        sessionID: UUID,
+        exerciseIDs: Set<UUID>,
+        draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
+    ) throws -> ActiveWorkoutDeferredHydrationResult {
+        guard !exerciseIDs.isEmpty else {
+            return ActiveWorkoutDeferredHydrationResult(
+                previousResolutionByExerciseID: [:],
+                componentResolutionByExerciseID: [:]
+            )
+        }
+
+        let repository = ActiveWorkoutDraftRepository(modelContext: modelContext)
+        guard let session = try repository.session(id: sessionID) else {
+            throw WorkoutSessionRepositoryError.sessionNotFound
+        }
+
+        let targetExercises = try repository.sessionExercises(sessionID: sessionID)
+            .filter { exerciseIDs.contains($0.id) }
+        let previousMaps = try repository.previousSetMaps(
+            forExercises: Array(Set(targetExercises.map(\.catalogExerciseUUID))),
+            before: session.startedAt,
+            excludingSessionID: sessionID
+        )
+
+        var previousResolutionByExerciseID: [UUID: WorkoutPreviousPerformanceResolution] = [:]
+        var componentResolutionByExerciseID: [UUID: ExerciseComponentRotationResolution] = [:]
+        let componentResolver = TemplateExerciseComponentRotationResolver(modelContext: modelContext)
+
+        for exercise in targetExercises {
+            let drafts = draftsByExerciseID[exercise.id] ?? orderedSessionSetDrafts(for: exercise)
+            previousResolutionByExerciseID[exercise.id] = .resolved(
+                Self.resolvedPreviousMap(
+                    baseMap: previousMaps[exercise.catalogExerciseUUID] ?? [:],
+                    maxSetCount: drafts.count
+                )
+            )
+
+            if let resolution = try? componentResolver.resolution(
+                for: exercise,
+                templateID: session.templateID,
+                before: session.startedAt,
+                excludingSessionID: sessionID
+            ) {
+                componentResolutionByExerciseID[exercise.id] = resolution
+            }
+        }
+
+        return ActiveWorkoutDeferredHydrationResult(
+            previousResolutionByExerciseID: previousResolutionByExerciseID,
+            componentResolutionByExerciseID: componentResolutionByExerciseID
+        )
+    }
+
+    nonisolated private static func loadCatalogSnapshots(
+        modelContext: ModelContext,
+        remoteUUIDs: [String]
+    ) throws -> [String: TrainingGuidanceCatalogSnapshot] {
+        let requestedUUIDs = Set(
+            remoteUUIDs
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        )
+        guard !requestedUUIDs.isEmpty else { return [:] }
+
+        let requestedList = Array(requestedUUIDs)
+        let descriptor = FetchDescriptor<ExerciseCatalogItem>(
+            predicate: #Predicate { exercise in
+                requestedList.contains(exercise.remoteUUID)
+            }
+        )
+        let matches = try modelContext.fetch(descriptor)
+        return Dictionary(
+            uniqueKeysWithValues: matches.map { ($0.remoteUUID, TrainingGuidanceCatalogSnapshot(exercise: $0)) }
+        )
+    }
+
+    nonisolated private static func orderedSessionSetDrafts(for exercise: ActiveWorkoutDraftExercise) -> [WorkoutSessionSetDraft] {
+        (exercise.sets ?? [])
+            .sorted { $0.sortOrder < $1.sortOrder }
+            .map(WorkoutSessionSetDraft.init(model:))
+    }
+
+    nonisolated private static func normalizedDraftsForActiveLogging(
         _ drafts: [WorkoutSessionSetDraft],
-        catalogExercise: ExerciseCatalogItem?
+        catalogExercise: TrainingGuidanceCatalogSnapshot?
     ) -> [WorkoutSessionSetDraft] {
         guard TemplateLoadUnit.inferredDefault(
             fromEquipmentSummary: catalogExercise?.equipmentSummary ?? ""
@@ -1927,6 +2018,242 @@ struct ActiveWorkoutView: View {
         }
 
         return changed ? normalized : drafts
+    }
+
+    @MainActor
+    private func scheduleCheckpointFlush(checkpoint: ActiveWorkoutWriteCheckpoint) {
+        guard checkpoint == .coalesced else {
+            pendingCheckpointScheduleTask?.cancel()
+            pendingCheckpointScheduleTask = nil
+            guard let command = makeCheckpointCommand(for: checkpoint) else { return }
+            performScheduledCheckpointFlush(command)
+            return
+        }
+
+        pendingCheckpointScheduleTask?.cancel()
+        pendingCheckpointScheduleTask = Task { @MainActor in
+            try? await Task.sleep(for: checkpointWriteDelay)
+            guard !Task.isCancelled else { return }
+            guard let command = makeCheckpointCommand(for: checkpoint) else { return }
+            performScheduledCheckpointFlush(command)
+        }
+    }
+
+    @MainActor
+    private func performScheduledCheckpointFlush(_ command: ActiveWorkoutCheckpointCommand) {
+        if let appBackgroundStore {
+            Task {
+                await appBackgroundStore.scheduleCoalesced(
+                    key: .session("active-workout.checkpoint", sessionID: command.sessionID),
+                    operationName: "active-workout.persist.checkpoint",
+                    priority: .utility,
+                    cancelExisting: true
+                ) { _ in
+                    await performCheckpointCommand(command)
+                }
+            }
+            return
+        }
+
+        Task {
+            await performCheckpointCommand(command)
+        }
+    }
+
+    @MainActor
+    private func flushDirtyWritesNow(checkpoint: ActiveWorkoutWriteCheckpoint) async -> Bool {
+        pendingCheckpointScheduleTask?.cancel()
+        pendingCheckpointScheduleTask = nil
+
+        guard let command = makeCheckpointCommand(for: checkpoint) else {
+            return true
+        }
+
+        do {
+            let result: ActiveWorkoutCheckpointPersistenceResult
+            if let appBackgroundStore {
+                result = try await appBackgroundStore.perform("active-workout.persist.checkpoint") { backgroundContext in
+                    try Self.runCheckpointCommand(command, in: backgroundContext)
+                }
+            } else {
+                result = try Self.runCheckpointCommand(command, in: modelContext)
+            }
+            applyCheckpointResult(result, command: command)
+            return true
+        } catch {
+            showError(error)
+            return false
+        }
+    }
+
+    private func performExpiringBackgroundFlush(
+        named taskName: String,
+        operation: @escaping @MainActor () async -> Void
+    ) {
+        let application = UIApplication.shared
+        var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
+        backgroundTaskID = application.beginBackgroundTask(withName: taskName) {
+            if backgroundTaskID != .invalid {
+                application.endBackgroundTask(backgroundTaskID)
+                backgroundTaskID = .invalid
+            }
+        }
+
+        Task { @MainActor in
+            await operation()
+            if backgroundTaskID != .invalid {
+                application.endBackgroundTask(backgroundTaskID)
+            }
+        }
+    }
+
+    @MainActor
+    private func makeCheckpointCommand(for checkpoint: ActiveWorkoutWriteCheckpoint) -> ActiveWorkoutCheckpointCommand? {
+        guard pendingWrites.hasDirtyWrites else { return nil }
+        guard session != nil else {
+            pendingWrites = ActiveWorkoutPendingWrites()
+            return nil
+        }
+
+        let validExerciseIDs = Set(sessionExercises.map(\.id))
+        let dirtyExerciseIDs = pendingWrites.dirtyExerciseIDs(validIDs: validExerciseIDs)
+        let dirtySnapshotsByExerciseID = Dictionary(
+            uniqueKeysWithValues: dirtyExerciseIDs.compactMap { exerciseID in
+                currentPersistenceSnapshot(for: exerciseID).map { (exerciseID, $0) }
+            }
+        )
+
+        return ActiveWorkoutCheckpointCommand(
+            sessionID: sessionID,
+            checkpoint: checkpoint,
+            sessionMeta: ActiveWorkoutSessionMetaSnapshot(
+                name: sessionNameDraft,
+                notes: notesDraft
+            ),
+            dirtyExerciseIDs: dirtyExerciseIDs,
+            snapshotsByExerciseID: dirtySnapshotsByExerciseID,
+            persistedSnapshotsByExerciseID: lastPersistedExerciseStateByID
+        )
+    }
+
+    nonisolated private static func runCheckpointCommand(
+        _ command: ActiveWorkoutCheckpointCommand,
+        in modelContext: ModelContext
+    ) throws -> ActiveWorkoutCheckpointPersistenceResult {
+        try WGJPerformance.measure("active-workout.persist.checkpoint") {
+            try ActiveWorkoutDraftRepository(modelContext: modelContext).persistCheckpoint(
+                sessionID: command.sessionID,
+                sessionName: command.sessionMeta.name,
+                sessionNotes: command.sessionMeta.notes,
+                dirtyExerciseIDs: command.dirtyExerciseIDs,
+                snapshotsByExerciseID: command.snapshotsByExerciseID,
+                persistedSnapshotsByExerciseID: command.persistedSnapshotsByExerciseID
+            )
+        }
+    }
+
+    @MainActor
+    private func applyCheckpointResult(
+        _ result: ActiveWorkoutCheckpointPersistenceResult,
+        command: ActiveWorkoutCheckpointCommand
+    ) {
+        let currentSessionMeta = ActiveWorkoutSessionMetaSnapshot(
+            name: sessionNameDraft,
+            notes: notesDraft
+        )
+        if currentSessionMeta == command.sessionMeta {
+            pendingWrites.clearSessionMeta()
+        }
+
+        for exerciseID in result.handledExerciseIDs {
+            guard let snapshot = command.snapshotsByExerciseID[exerciseID] else { continue }
+            if currentPersistenceSnapshot(for: exerciseID) == snapshot {
+                pendingWrites.clearExercise(exerciseID)
+            }
+        }
+
+        for exerciseID in result.persistedExerciseIDs {
+            if let snapshot = command.snapshotsByExerciseID[exerciseID] {
+                lastPersistedExerciseStateByID[exerciseID] = snapshot
+            }
+        }
+    }
+
+    private func performCheckpointCommand(_ command: ActiveWorkoutCheckpointCommand) async {
+        do {
+            let result: ActiveWorkoutCheckpointPersistenceResult
+            if let appBackgroundStore {
+                result = try await appBackgroundStore.perform("active-workout.persist.checkpoint") { backgroundContext in
+                    try Self.runCheckpointCommand(command, in: backgroundContext)
+                }
+            } else {
+                result = try Self.runCheckpointCommand(command, in: modelContext)
+            }
+
+            await MainActor.run {
+                applyCheckpointResult(result, command: command)
+            }
+        } catch {
+            await MainActor.run {
+                showError(error)
+            }
+        }
+    }
+
+    private func performFinishCommand(notes: String) async throws -> ActiveWorkoutFinishResult {
+        if let appBackgroundStore {
+            return try await appBackgroundStore.performWrite("active-workout.finish") { backgroundContext in
+                try Self.finishSession(
+                    sessionID: sessionID,
+                    notes: notes,
+                    modelContext: backgroundContext
+                )
+            }
+        }
+
+        return try Self.finishSession(
+            sessionID: sessionID,
+            notes: notes,
+            modelContext: modelContext
+        )
+    }
+
+    nonisolated private static func finishSession(
+        sessionID: UUID,
+        notes: String,
+        modelContext: ModelContext
+    ) throws -> ActiveWorkoutFinishResult {
+        let draftRepository = ActiveWorkoutDraftRepository(modelContext: modelContext)
+        let finishedSessionID = try draftRepository.finishSession(sessionID: sessionID, notes: notes)
+        let completedSessionRepository = WorkoutSessionRepository(modelContext: modelContext)
+        guard let completedSession = try completedSessionRepository.session(id: finishedSessionID) else {
+            throw WorkoutSessionRepositoryError.sessionNotFound
+        }
+
+        let folderSnapshots: [ActiveWorkoutTemplateFolderSnapshot]
+        let templateUpdatePreview: WorkoutTemplateSyncPreview?
+        if completedSession.templateID == nil {
+            folderSnapshots = try TemplateRepository(modelContext: modelContext)
+                .folders()
+                .map(ActiveWorkoutTemplateFolderSnapshot.init(folder:))
+            templateUpdatePreview = nil
+        } else {
+            folderSnapshots = []
+            templateUpdatePreview = try WorkoutTemplateSyncService(modelContext: modelContext)
+                .previewTemplateUpdate(forSessionID: completedSession.id)
+        }
+
+        return ActiveWorkoutFinishResult(
+            completedSessionID: completedSession.id,
+            completedSessionName: completedSession.name,
+            completedTemplateID: completedSession.templateID,
+            saveTemplateFolders: folderSnapshots,
+            templateUpdatePreview: templateUpdatePreview
+        )
+    }
+
+    private var checkpointWriteDelay: Duration {
+        .milliseconds(400)
     }
 
     @MainActor
@@ -2540,7 +2867,7 @@ private struct ActiveWorkoutSaveTemplateSheet: View {
     @Binding var templateNameDraft: String
     @Binding var templateFolderID: UUID?
 
-    let folders: [TemplateFolder]
+    let folders: [ActiveWorkoutTemplateFolderSnapshot]
     let onSkip: () -> Void
     let onSave: () -> Void
 
@@ -2610,16 +2937,54 @@ private struct ActiveWorkoutExerciseSettingsDraft: Identifiable, Equatable {
     var id: UUID { exerciseID }
 }
 
-private struct ActiveWorkoutHydrationResult {
+private struct ActiveWorkoutHydrationResult: Sendable {
     let draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
     let restsByExerciseID: [UUID: Int]
     let notesByExerciseID: [UUID: String]
     let persistenceStateByExerciseID: [UUID: ActiveWorkoutExercisePersistenceSnapshot]
     let previousResolutionByExerciseID: [UUID: WorkoutPreviousPerformanceResolution]
-    let catalogMatchesByUUID: [String: ExerciseCatalogItem]
+    let catalogMatchesByUUID: [String: TrainingGuidanceCatalogSnapshot]
 }
 
-private enum ActiveWorkoutWriteCheckpoint {
+private struct ActiveWorkoutDeferredHydrationResult: Sendable {
+    let previousResolutionByExerciseID: [UUID: WorkoutPreviousPerformanceResolution]
+    let componentResolutionByExerciseID: [UUID: ExerciseComponentRotationResolution]
+}
+
+private struct ActiveWorkoutSessionMetaSnapshot: Equatable, Sendable {
+    let name: String
+    let notes: String
+}
+
+private struct ActiveWorkoutCheckpointCommand: Sendable {
+    let sessionID: UUID
+    let checkpoint: ActiveWorkoutWriteCheckpoint
+    let sessionMeta: ActiveWorkoutSessionMetaSnapshot
+    let dirtyExerciseIDs: Set<UUID>
+    let snapshotsByExerciseID: [UUID: ActiveWorkoutExercisePersistenceSnapshot]
+    let persistedSnapshotsByExerciseID: [UUID: ActiveWorkoutExercisePersistenceSnapshot]
+}
+
+private struct ActiveWorkoutTemplateFolderSnapshot: Identifiable, Equatable, Sendable {
+    let id: UUID
+    let name: String
+
+    init(folder: TemplateFolder) {
+        self.id = folder.id
+        self.name = folder.name
+    }
+}
+
+private struct ActiveWorkoutFinishResult: Sendable {
+    let completedSessionID: UUID
+    let completedSessionName: String
+    let completedTemplateID: UUID?
+    let saveTemplateFolders: [ActiveWorkoutTemplateFolderSnapshot]
+    let templateUpdatePreview: WorkoutTemplateSyncPreview?
+}
+
+private enum ActiveWorkoutWriteCheckpoint: Sendable {
+    case coalesced
     case manual
     case minimize
     case sceneTransition

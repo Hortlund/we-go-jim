@@ -5,6 +5,7 @@ struct LoginGateView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
     @Environment(\.cloudSyncErrorDescription) private var cloudSyncErrorDescription
+    @Environment(\.userDataSyncStatus) private var userDataSyncStatus
 
     private let accountService: any AccountStatusProviding
     private let onAuthenticated: @MainActor () async -> Void
@@ -65,6 +66,18 @@ struct LoginGateView: View {
                     } else {
                         cloudDisabledActions
                     }
+
+                    VStack(spacing: 6) {
+                        Text(userDataSyncStatus.title)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(WGJTheme.accentBlue)
+
+                        Text(userDataSyncStatus.detail)
+                            .font(.caption)
+                            .foregroundStyle(WGJTheme.textSecondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.horizontal, WGJSpacing.page)
 
                     Spacer()
                 }
@@ -153,9 +166,8 @@ struct LoginGateView: View {
 
     private var cloudDisabledActions: some View {
         WGJEmptyStateCard(
-            title: "Local Mode",
-            message: cloudSyncErrorDescription
-                ?? "CloudKit could not initialize for this build or device environment. Data will be stored locally.",
+            title: userDataSyncStatus.title,
+            message: userDataSyncStatus.detail,
             icon: "internaldrive"
         ) {
             Button {
@@ -172,14 +184,23 @@ struct LoginGateView: View {
 
     private var statusDescription: String {
         if !cloudSyncEnabled {
-            return cloudSyncErrorDescription ?? "Cloud sync could not be initialized. You can continue locally."
+            return userDataSyncStatus.detail
         }
 
         switch accountStatus {
         case .checking:
             return "Checking your iCloud account status."
         case .available:
-            return "iCloud is available for sync and Bros. You can also keep using the app locally."
+            switch userDataSyncStatus.state {
+            case .caughtUp:
+                return "iCloud is available and durable user data looks caught up."
+            case .pendingExport:
+                return "iCloud is available. Recent local changes are still waiting to export."
+            case .degraded:
+                return userDataSyncStatus.detail
+            case .localOnly:
+                return "iCloud is available for account features, but this session is currently local-only."
+            }
         case .unavailable(let reason):
             switch reason {
             case .noAccount:

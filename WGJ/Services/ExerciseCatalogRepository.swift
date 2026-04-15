@@ -8,6 +8,7 @@ protocol ExerciseCatalogRepositoryProtocol {
     func searchExercises(query: String, filters: ExerciseFilters) throws -> [ExerciseCatalogItem]
     func groupedByMuscle(primaryOnly: Bool) throws -> [ExerciseMuscleGroupSection]
     func exerciseMap(for remoteUUIDs: [String]) throws -> [String: ExerciseCatalogItem]
+    func exerciseSnapshotMap(for remoteUUIDs: [String]) throws -> [String: TrainingGuidanceCatalogSnapshot]
     func createCustomExercise(draft: CustomExerciseDraft) throws -> ExerciseCatalogItem
     func updateCustomExercise(_ exercise: ExerciseCatalogItem, draft: CustomExerciseDraft) throws
 }
@@ -159,6 +160,10 @@ final class ExerciseCatalogRepository: ExerciseCatalogRepositoryProtocol {
         )
         let matches = try modelContext.fetch(descriptor)
         return Dictionary(uniqueKeysWithValues: matches.map { ($0.remoteUUID, $0) })
+    }
+
+    func exerciseSnapshotMap(for remoteUUIDs: [String]) throws -> [String: TrainingGuidanceCatalogSnapshot] {
+        try exerciseMap(for: remoteUUIDs).mapValues(TrainingGuidanceCatalogSnapshot.init(exercise:))
     }
 
     func exactImportMatch(

@@ -35,7 +35,7 @@ final class ProfileRepository {
 
         let profile = UserProfile(displayName: Self.localDefaultDisplayName)
         modelContext.insert(profile)
-        try modelContext.save()
+        try saveUserDataChanges()
         return profile
     }
 
@@ -57,14 +57,14 @@ final class ProfileRepository {
 
             existing.displayName = preferredDisplayName
             existing.updatedAt = .now
-            try modelContext.save()
+            try saveUserDataChanges()
             scheduleProfileSync()
             return existing
         }
 
         let profile = UserProfile(displayName: preferredDisplayName)
         modelContext.insert(profile)
-        try modelContext.save()
+        try saveUserDataChanges()
         return profile
     }
 
@@ -115,7 +115,7 @@ final class ProfileRepository {
         profile.athleteType = athleteType
         profile.avatarImageData = avatarImageData
         profile.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
         scheduleProfileSync()
     }
 
@@ -123,42 +123,42 @@ final class ProfileRepository {
         let profile = try loadOrCreateProfile()
         profile.weeklyWorkoutGoal = max(1, min(14, goal))
         profile.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func updateTrainingGuidanceEnabled(_ isEnabled: Bool) throws {
         let profile = try loadOrCreateProfile()
         profile.isTrainingGuidanceEnabled = isEnabled
         profile.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func updateKeepsScreenAwake(_ isEnabled: Bool) throws {
         let profile = try loadOrCreateProfile()
         profile.keepsScreenAwake = isEnabled
         profile.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func updateBozarModeEnabled(_ isEnabled: Bool) throws {
         let profile = try loadOrCreateProfile()
         profile.isBozarModeEnabled = isEnabled
         profile.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func updatePreferredWeightUnit(_ unit: PreferredWeightUnit) throws {
         let profile = try loadOrCreateProfile()
         profile.preferredWeightUnit = unit
         profile.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func updateWorkoutNotificationStyle(_ style: WorkoutNotificationStyle) throws {
         let profile = try loadOrCreateProfile()
         profile.workoutNotificationStyle = style
         profile.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     private func resolvedDefaultDisplayName(
@@ -187,9 +187,23 @@ final class ProfileRepository {
         return currentName != preferredDisplayName
     }
 
+    private func saveUserDataChanges() throws {
+        try modelContext.save()
+        UserDataSyncTrackerBridge.markLocalMutation()
+    }
+
     private func scheduleProfileSync() {
-        Task { @MainActor [modelContext] in
-            try? CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)?.queueCurrentProfileSync()
+        let container = modelContext.container
+        Task.detached(priority: .utility) {
+            let isBrosCloudAvailable = await MainActor.run {
+                AppRuntimeState.shared.isBrosCloudAvailable
+            }
+            guard isBrosCloudAvailable else { return }
+
+            let backgroundContext = ModelContext(container)
+            backgroundContext.autosaveEnabled = false
+            try? CloudKitBrosSocialService(modelContext: backgroundContext)?
+                .queueCurrentProfileSync()
         }
     }
 }

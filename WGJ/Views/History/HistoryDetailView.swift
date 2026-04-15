@@ -5,6 +5,7 @@ import SwiftUI
 struct HistoryDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let sessionID: UUID
@@ -315,17 +316,33 @@ struct HistoryDetailView: View {
         }
 
         if !exerciseIDsToRefresh.isEmpty {
-            WGJPerformance.measure("history-detail.hydrate.local") {
-                for exerciseID in exerciseIDsToRefresh {
-                    guard let exercise = currentStamp.exercise(for: exerciseID) else {
-                        continue
+            do {
+                let localState: HistoryExerciseLocalStateResult
+                if let appBackgroundStore {
+                    localState = try await appBackgroundStore.perform("history-detail.hydrate.local") { backgroundContext in
+                        try Self.loadLocalExerciseState(
+                            modelContext: backgroundContext,
+                            sessionID: sessionID,
+                            exerciseIDs: exerciseIDsToRefresh
+                        )
                     }
+                } else {
+                    localState = try Self.loadLocalExerciseState(
+                        modelContext: modelContext,
+                        sessionID: sessionID,
+                        exerciseIDs: exerciseIDsToRefresh
+                    )
+                }
 
-                    setDraftsByExerciseID[exerciseID] = makeDrafts(from: exercise)
-                    restByExerciseID[exerciseID] = exercise.restSeconds
-                    notesByExerciseID[exerciseID] = exercise.notes
+                setDraftsByExerciseID.merge(localState.setDraftsByExerciseID) { _, new in new }
+                restByExerciseID.merge(localState.restByExerciseID) { _, new in new }
+                notesByExerciseID.merge(localState.notesByExerciseID) { _, new in new }
+                for exerciseID in exerciseIDsToRefresh {
                     hydrationPayloadByExerciseID.removeValue(forKey: exerciseID)
                 }
+            } catch {
+                showError(error)
+                return
             }
         }
 
@@ -340,7 +357,7 @@ struct HistoryDetailView: View {
         )
     }
 
-    private func resolvedPreviousMap(
+    nonisolated private static func resolvedPreviousMap(
         baseMap: [Int: WorkoutPreviousSetSnapshot],
         maxSetCount: Int
     ) -> [Int: WorkoutPreviousSetSnapshot] {
@@ -450,11 +467,30 @@ struct HistoryDetailView: View {
             try? await Task.sleep(for: .milliseconds(60))
             guard !Task.isCancelled, loadedExerciseStateStamp == stamp else { return }
 
-            let loadedPayloads = WGJPerformance.measure("history-detail.hydrate.rows") {
-                loadHydrationPayloadByExerciseID(
-                    using: draftsByExerciseID,
-                    exerciseIDs: exerciseIDsToHydrate
-                )
+            let loadedPayloads: [UUID: HistoryExerciseHydrationPayload]
+            do {
+                if let appBackgroundStore {
+                    loadedPayloads = try await appBackgroundStore.perform("history-detail.hydrate.rows") { backgroundContext in
+                        try Self.loadHydrationPayloadByExerciseID(
+                            modelContext: backgroundContext,
+                            sessionID: sessionID,
+                            exerciseIDs: exerciseIDsToHydrate,
+                            draftsByExerciseID: draftsByExerciseID
+                        )
+                    }
+                } else {
+                    loadedPayloads = try Self.loadHydrationPayloadByExerciseID(
+                        modelContext: modelContext,
+                        sessionID: sessionID,
+                        exerciseIDs: exerciseIDsToHydrate,
+                        draftsByExerciseID: draftsByExerciseID
+                    )
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                showError(error)
+                deferredHydrationTask = nil
+                return
             }
             guard !Task.isCancelled, loadedExerciseStateStamp == stamp else { return }
             hydrationPayloadByExerciseID.merge(loadedPayloads) { _, new in new }
@@ -462,23 +498,33 @@ struct HistoryDetailView: View {
         }
     }
 
-    @MainActor
-    private func loadHydrationPayloadByExerciseID(
-        using draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]],
-        exerciseIDs: Set<UUID>
-    ) -> [UUID: HistoryExerciseHydrationPayload] {
+    nonisolated private static func loadHydrationPayloadByExerciseID(
+        modelContext: ModelContext,
+        sessionID: UUID,
+        exerciseIDs: Set<UUID>,
+        draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
+    ) throws -> [UUID: HistoryExerciseHydrationPayload] {
         guard !exerciseIDs.isEmpty else { return [:] }
 
-        let startedAt = session?.startedAt ?? .now
-        let targetExercises = sessionExercises.filter { exerciseIDs.contains($0.id) }
+        let sessionRepository = WorkoutSessionRepository(modelContext: modelContext)
+        guard let session = try sessionRepository.session(id: sessionID) else {
+            throw WorkoutSessionRepositoryError.sessionNotFound
+        }
+        let startedAt = session.startedAt
+        let targetExercises = try sessionRepository.sessionExercises(sessionID: sessionID)
+            .filter { exerciseIDs.contains($0.id) }
         let requestedExerciseUUIDs = Array(Set(targetExercises.map(\.catalogExerciseUUID)))
-        let previousMaps = (try? sessionRepository.previousSetMaps(
+        let previousMaps = try sessionRepository.previousSetMaps(
             forExercises: requestedExerciseUUIDs,
             before: startedAt,
             excludingSessionID: sessionID
-        )) ?? [:]
+        )
 
-        let personalRecordsByExerciseID = loadPersonalRecordPresentation(for: exerciseIDs)
+        let personalRecordsByExerciseID = try Self.loadPersonalRecordPresentation(
+            modelContext: modelContext,
+            sessionID: sessionID,
+            for: exerciseIDs
+        )
 
         var payloadByExerciseID: [UUID: HistoryExerciseHydrationPayload] = [:]
         payloadByExerciseID.reserveCapacity(targetExercises.count)
@@ -488,7 +534,7 @@ struct HistoryDetailView: View {
             let base = previousMaps[exercise.catalogExerciseUUID] ?? [:]
             payloadByExerciseID[exercise.id] = HistoryExerciseHydrationPayload(
                 previousPerformanceResolution: .resolved(
-                    resolvedPreviousMap(baseMap: base, maxSetCount: drafts.count)
+                    Self.resolvedPreviousMap(baseMap: base, maxSetCount: drafts.count)
                 ),
                 personalRecords: personalRecordsByExerciseID[exercise.id]
                     ?? HistoryExercisePersonalRecordPresentation(summaryKinds: [], setKindsBySetID: [:])
@@ -499,53 +545,31 @@ struct HistoryDetailView: View {
     }
 
     private func saveChanges() {
-        do {
-            var didPersistChanges = hasPendingSummaryRebuild
-
-            if let session {
-                if !sessionNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                   sessionNameDraft != session.name {
-                    try sessionRepository.updateSessionName(sessionID: sessionID, name: sessionNameDraft)
-                    didPersistChanges = true
+        Task { @MainActor in
+            do {
+                let command = makeSaveCommand()
+                let didPersistChanges: Bool
+                if let appBackgroundStore {
+                    didPersistChanges = try await appBackgroundStore.performWrite("history-detail.save") { backgroundContext in
+                        try Self.saveChanges(
+                            command: command,
+                            modelContext: backgroundContext
+                        )
+                    }
+                } else {
+                    didPersistChanges = try Self.saveChanges(
+                        command: command,
+                        modelContext: modelContext
+                    )
                 }
-                if notesDraft != session.notes {
-                    try sessionRepository.updateSessionNotes(sessionID: sessionID, notes: notesDraft)
-                    didPersistChanges = true
-                }
-            }
 
-            for exercise in sessionExercises {
-                let drafts = setDraftsByExerciseID[exercise.id] ?? makeDrafts(from: exercise)
-                let persistedDrafts = makeDrafts(from: exercise)
-                if drafts != persistedDrafts {
-                    try sessionRepository.saveSetDrafts(sessionExerciseID: exercise.id, drafts: drafts)
-                    didPersistChanges = true
+                if didPersistChanges {
+                    hasPendingSummaryRebuild = false
                 }
+                dismiss()
+            } catch {
+                showError(error)
             }
-
-            for exercise in sessionExercises {
-                let rest = restByExerciseID[exercise.id] ?? exercise.restSeconds
-                if rest != exercise.restSeconds {
-                    try sessionRepository.updateExerciseRest(sessionExerciseID: exercise.id, restSeconds: rest)
-                    didPersistChanges = true
-                }
-            }
-
-            for exercise in sessionExercises {
-                let notes = notesByExerciseID[exercise.id] ?? exercise.notes
-                if notes != exercise.notes {
-                    try sessionRepository.updateExerciseNotes(sessionExerciseID: exercise.id, notes: notes)
-                    didPersistChanges = true
-                }
-            }
-
-            if didPersistChanges {
-                try sessionRepository.recalculateSessionSummary(sessionID: sessionID)
-                hasPendingSummaryRebuild = false
-            }
-            dismiss()
-        } catch {
-            showError(error)
         }
     }
 
@@ -618,14 +642,14 @@ struct HistoryDetailView: View {
         notesByExerciseID.removeValue(forKey: exerciseID)
     }
 
-    @MainActor
-    private func loadPersonalRecordPresentation(
+    nonisolated private static func loadPersonalRecordPresentation(
+        modelContext: ModelContext,
+        sessionID: UUID,
         for exerciseIDs: Set<UUID>
-    ) -> [UUID: HistoryExercisePersonalRecordPresentation] {
+    ) throws -> [UUID: HistoryExercisePersonalRecordPresentation] {
         guard !exerciseIDs.isEmpty else { return [:] }
-        guard let achievements = try? WorkoutMetricsService(modelContext: modelContext).sessionSetPRAchievements(sessionID: sessionID) else {
-            return [:]
-        }
+        let achievements = try WorkoutMetricsService(modelContext: modelContext)
+            .sessionSetPRAchievements(sessionID: sessionID)
 
         var groupedSetKindsByExerciseID: [UUID: [UUID: [WorkoutPersonalRecordKind]]] = [:]
         var groupedSummaryKindsByExerciseID: [UUID: Set<WorkoutPersonalRecordKind>] = [:]
@@ -647,14 +671,17 @@ struct HistoryDetailView: View {
         return presentationByExerciseID
     }
 
-    @MainActor
-    private func orderedSessionSets(for exercise: WorkoutSessionExercise) -> [WorkoutSessionSet] {
+    nonisolated private static func orderedSessionSets(for exercise: WorkoutSessionExercise) -> [WorkoutSessionSet] {
         (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    nonisolated private static func makeDrafts(from exercise: WorkoutSessionExercise) -> [WorkoutSessionSetDraft] {
+        orderedSessionSets(for: exercise).map(WorkoutSessionSetDraft.init(model:))
     }
 
     @MainActor
     private func makeDrafts(from exercise: WorkoutSessionExercise) -> [WorkoutSessionSetDraft] {
-        orderedSessionSets(for: exercise).map(WorkoutSessionSetDraft.init(model:))
+        Self.makeDrafts(from: exercise)
     }
 
     @MainActor
@@ -687,6 +714,114 @@ struct HistoryDetailView: View {
         )
     }
 
+    @MainActor
+    private func makeSaveCommand() -> HistorySaveCommand {
+        let exercises = Dictionary(uniqueKeysWithValues: sessionExercises.map { ($0.id, $0) })
+        let snapshots = Dictionary(
+            uniqueKeysWithValues: sessionExercises.map { exercise in
+                (
+                    exercise.id,
+                    HistoryExerciseSaveSnapshot(
+                        setDrafts: setDraftsByExerciseID[exercise.id] ?? Self.makeDrafts(from: exercise),
+                        restSeconds: restByExerciseID[exercise.id] ?? exercise.restSeconds,
+                        notes: notesByExerciseID[exercise.id] ?? exercise.notes
+                    )
+                )
+            }
+        )
+
+        return HistorySaveCommand(
+            sessionID: sessionID,
+            sessionName: sessionNameDraft,
+            sessionNotes: notesDraft,
+            shouldRecalculateSummary: hasPendingSummaryRebuild,
+            exerciseSnapshotsByID: snapshots
+        )
+    }
+
+    nonisolated private static func saveChanges(
+        command: HistorySaveCommand,
+        modelContext: ModelContext
+    ) throws -> Bool {
+        let sessionRepository = WorkoutSessionRepository(modelContext: modelContext)
+        guard let session = try sessionRepository.session(id: command.sessionID) else {
+            throw WorkoutSessionRepositoryError.sessionNotFound
+        }
+
+        let exercises = try sessionRepository.sessionExercises(sessionID: command.sessionID)
+        var didPersistChanges = command.shouldRecalculateSummary
+
+        let trimmedName = command.sessionName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedName.isEmpty, trimmedName != session.name {
+            try sessionRepository.updateSessionName(sessionID: command.sessionID, name: trimmedName)
+            didPersistChanges = true
+        }
+
+        if command.sessionNotes != session.notes {
+            try sessionRepository.updateSessionNotes(sessionID: command.sessionID, notes: command.sessionNotes)
+            didPersistChanges = true
+        }
+
+        for exercise in exercises {
+            guard let snapshot = command.exerciseSnapshotsByID[exercise.id] else { continue }
+
+            let persistedDrafts = Self.makeDrafts(from: exercise)
+            if snapshot.setDrafts != persistedDrafts {
+                try sessionRepository.saveSetDrafts(sessionExerciseID: exercise.id, drafts: snapshot.setDrafts)
+                didPersistChanges = true
+            }
+
+            if snapshot.restSeconds != exercise.restSeconds {
+                try sessionRepository.updateExerciseRest(
+                    sessionExerciseID: exercise.id,
+                    restSeconds: snapshot.restSeconds
+                )
+                didPersistChanges = true
+            }
+
+            if snapshot.notes != exercise.notes {
+                try sessionRepository.updateExerciseNotes(sessionExerciseID: exercise.id, notes: snapshot.notes)
+                didPersistChanges = true
+            }
+        }
+
+        if didPersistChanges {
+            try sessionRepository.recalculateSessionSummary(sessionID: command.sessionID)
+        }
+
+        return didPersistChanges
+    }
+
+    nonisolated private static func loadLocalExerciseState(
+        modelContext: ModelContext,
+        sessionID: UUID,
+        exerciseIDs: Set<UUID>
+    ) throws -> HistoryExerciseLocalStateResult {
+        guard !exerciseIDs.isEmpty else {
+            return HistoryExerciseLocalStateResult(
+                setDraftsByExerciseID: [:],
+                restByExerciseID: [:],
+                notesByExerciseID: [:]
+            )
+        }
+
+        let exercises = try WorkoutSessionRepository(modelContext: modelContext)
+            .sessionExercises(sessionID: sessionID)
+            .filter { exerciseIDs.contains($0.id) }
+
+        return HistoryExerciseLocalStateResult(
+            setDraftsByExerciseID: Dictionary(
+                uniqueKeysWithValues: exercises.map { ($0.id, Self.makeDrafts(from: $0)) }
+            ),
+            restByExerciseID: Dictionary(
+                uniqueKeysWithValues: exercises.map { ($0.id, $0.restSeconds) }
+            ),
+            notesByExerciseID: Dictionary(
+                uniqueKeysWithValues: exercises.map { ($0.id, $0.notes) }
+            )
+        )
+    }
+
     private func cardioDescriptor(category: String, muscleSummary: String) -> String? {
         let trimmedMuscleSummary = muscleSummary.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedMuscleSummary.isEmpty {
@@ -698,9 +833,29 @@ struct HistoryDetailView: View {
     }
 }
 
-private struct HistoryExerciseHydrationPayload: Equatable {
+private struct HistoryExerciseHydrationPayload: Equatable, Sendable {
     let previousPerformanceResolution: WorkoutPreviousPerformanceResolution
     let personalRecords: HistoryExercisePersonalRecordPresentation
+}
+
+private struct HistoryExerciseLocalStateResult: Sendable {
+    let setDraftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
+    let restByExerciseID: [UUID: Int]
+    let notesByExerciseID: [UUID: String]
+}
+
+private struct HistoryExerciseSaveSnapshot: Sendable {
+    let setDrafts: [WorkoutSessionSetDraft]
+    let restSeconds: Int
+    let notes: String
+}
+
+private struct HistorySaveCommand: Sendable {
+    let sessionID: UUID
+    let sessionName: String
+    let sessionNotes: String
+    let shouldRecalculateSummary: Bool
+    let exerciseSnapshotsByID: [UUID: HistoryExerciseSaveSnapshot]
 }
 
 private struct HistoryExerciseStateStamp: Hashable {
@@ -769,7 +924,7 @@ private struct HistoryExerciseStateStamp: Hashable {
     }
 }
 
-private struct HistoryExercisePersonalRecordPresentation: Equatable {
+private struct HistoryExercisePersonalRecordPresentation: Equatable, Sendable {
     let summaryKinds: [WorkoutPersonalRecordKind]
     let setKindsBySetID: [UUID: [WorkoutPersonalRecordKind]]
 

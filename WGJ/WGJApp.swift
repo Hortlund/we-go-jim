@@ -19,6 +19,12 @@ struct WGJApp: App {
             isEnabled: bootstrap.cloudSyncEnabled,
             errorDescription: bootstrap.cloudSyncErrorDescription
         )
+        AppRuntimeState.shared.updateUserDataSyncStatus(
+            UserDataSyncTrackerBridge.configureForLaunch(
+                isCloudEnabled: bootstrap.cloudSyncEnabled,
+                errorDescription: bootstrap.cloudSyncErrorDescription
+            )
+        )
     }
 
     var body: some Scene {
@@ -26,6 +32,7 @@ struct WGJApp: App {
             ContentView()
                 .environment(\.cloudSyncEnabled, bootstrap.cloudSyncEnabled)
                 .environment(\.cloudSyncErrorDescription, bootstrap.cloudSyncErrorDescription)
+                .environment(\.userDataSyncStatus, AppRuntimeState.shared.userDataSyncStatus)
                 .environment(\.appBackgroundStore, appBackgroundStore)
                 .environment(AppNotificationRouter.shared)
         }
@@ -51,6 +58,19 @@ struct WGJApp: App {
                     container: try makeLocalFallbackContainer(),
                     cloudSyncEnabled: false,
                     cloudSyncErrorDescription: "CloudKit is unavailable for this build. Using local-only mode for this session."
+                )
+            } catch {
+                fatalError("Could not create fallback ModelContainer without CloudKit sync: \(describe(error))")
+            }
+        }
+
+        let startupDecision = CloudStartupPreflight.makeDecision()
+        if startupDecision.shouldForceLocalFallbackStore {
+            do {
+                return ModelContainerBootstrap(
+                    container: try makeLocalFallbackContainer(),
+                    cloudSyncEnabled: false,
+                    cloudSyncErrorDescription: startupDecision.cloudSyncErrorDescription
                 )
             } catch {
                 fatalError("Could not create fallback ModelContainer without CloudKit sync: \(describe(error))")

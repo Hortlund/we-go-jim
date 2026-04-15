@@ -6,6 +6,7 @@ struct SettingsDiagnosticsSection: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
     @Environment(\.cloudSyncErrorDescription) private var cloudSyncErrorDescription
+    @Environment(\.userDataSyncStatus) private var userDataSyncStatus
 
     @Bindable var appRuntimeState: AppRuntimeState
     let onClose: () -> Void
@@ -40,11 +41,17 @@ struct SettingsDiagnosticsSection: View {
             infoRow("App environment", value: AppRuntimeConfig.appEnvironment.displayName)
             infoRow("Bundle ID", value: Bundle.main.bundleIdentifier ?? "Unknown")
             infoRow("Cloud mode", value: cloudSyncEnabled ? "CloudKit enabled" : "Local fallback")
+            infoRow("User data sync", value: userDataSyncStatus.title)
             infoRow("CloudKit environment", value: AppRuntimeConfig.cloudKitConsoleEnvironmentName)
             infoRow("iCloud account", value: cloudAccountStatusText)
             infoRow("Profiles", value: "\(profileCount)")
             infoRow("Templates", value: "\(templateCount)")
             infoRow("Workouts", value: "\(workoutCount)")
+
+            Text(userDataSyncStatus.detail)
+                .font(.caption)
+                .foregroundStyle(WGJTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             if let lastProfileUpdate {
                 infoRow(

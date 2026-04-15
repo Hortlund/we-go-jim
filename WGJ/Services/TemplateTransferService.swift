@@ -7,7 +7,7 @@ enum TemplateTransferFileFormat {
     static let filenameExtension = "wgjtemplate"
 }
 
-struct TemplateTransferEnvelope: Codable, Equatable {
+struct TemplateTransferEnvelope: Codable, Equatable, Sendable {
     static let currentFormatVersion = 4
 
     let formatVersion: Int
@@ -25,7 +25,7 @@ struct TemplateTransferEnvelope: Codable, Equatable {
     }
 }
 
-struct TemplateTransferTemplate: Codable, Equatable {
+struct TemplateTransferTemplate: Codable, Equatable, Sendable {
     let name: String
     let notes: String
     let preWorkoutCardio: TemplateTransferCardioBlock?
@@ -47,7 +47,7 @@ struct TemplateTransferTemplate: Codable, Equatable {
     }
 }
 
-struct TemplateTransferCardioBlock: Codable, Equatable {
+struct TemplateTransferCardioBlock: Codable, Equatable, Sendable {
     let catalogExerciseUUID: String
     let exerciseNameSnapshot: String
     let categorySnapshot: String
@@ -55,7 +55,7 @@ struct TemplateTransferCardioBlock: Codable, Equatable {
     let targetDurationSeconds: Int
 }
 
-struct TemplateTransferExercise: Codable, Equatable {
+struct TemplateTransferExercise: Codable, Equatable, Sendable {
     let catalogExerciseUUID: String
     let exerciseNameSnapshot: String
     let categorySnapshot: String
@@ -119,14 +119,14 @@ struct TemplateTransferExercise: Codable, Equatable {
     }
 }
 
-struct TemplateTransferExerciseComponent: Codable, Equatable {
+struct TemplateTransferExerciseComponent: Codable, Equatable, Sendable {
     let catalogExerciseUUID: String
     let exerciseNameSnapshot: String
     let categorySnapshot: String
     let muscleSummarySnapshot: String
 }
 
-struct TemplateTransferSet: Codable, Equatable {
+struct TemplateTransferSet: Codable, Equatable, Sendable {
     let targetReps: Int?
     let targetWeight: Double?
     let loadUnit: TemplateLoadUnit
@@ -135,7 +135,7 @@ struct TemplateTransferSet: Codable, Equatable {
     let isLocked: Bool
 }
 
-enum TemplateTransferError: LocalizedError, Equatable {
+enum TemplateTransferError: LocalizedError, Equatable, Sendable {
     case unreadableFile
     case malformedFile
     case unsupportedVersion(Int)
@@ -168,7 +168,6 @@ extension UTType {
     }
 }
 
-@MainActor
 final class TemplateTransferService {
     private let modelContext: ModelContext
     private let fileManager: FileManager
@@ -216,7 +215,7 @@ final class TemplateTransferService {
 
     func importTemplate(from data: Data) throws -> WorkoutTemplate {
         let envelope = try decodedEnvelope(from: data)
-        let repository = TemplateRepository(modelContext: modelContext)
+        let repository = TemplateRepository(modelContext: modelContext, autoSaveChanges: false)
         let catalogRepository = ExerciseCatalogRepository(modelContext: modelContext)
         try? catalogRepository.ensureSeedImportedIfNeeded()
         let importedName = try nextImportedTemplateName(
@@ -239,9 +238,9 @@ final class TemplateTransferService {
                 templateID: template.id,
                 drafts: try cardioDrafts(from: envelope.template, catalogRepository: catalogRepository)
             )
+            try repository.finalizeDeferredUserDataChangesIfNeeded()
             return template
         } catch {
-            try? repository.deleteTemplate(id: template.id)
             throw error
         }
     }

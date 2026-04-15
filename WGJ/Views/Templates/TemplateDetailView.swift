@@ -4,6 +4,7 @@ import SwiftUI
 
 struct TemplateDetailView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let templateID: UUID
@@ -148,7 +149,9 @@ struct TemplateDetailView: View {
             await loadCatalogMatches()
         }
         .onDisappear {
-            flushPendingSaves()
+            Task { @MainActor in
+                await flushPendingSaves()
+            }
         }
         .wgjMinimalKeyboardToolbar()
     }
@@ -477,7 +480,9 @@ struct TemplateDetailView: View {
             }
 
             do {
-                try repository.saveSetDrafts(templateExerciseID: templateExerciseID, drafts: latest)
+                try await persistTemplateRepositoryWrite("template-detail.set-drafts") { repository in
+                    try repository.saveSetDrafts(templateExerciseID: templateExerciseID, drafts: latest)
+                }
                 lastPersistedSetDraftsByExerciseID[templateExerciseID] = latest
                 pendingSetSaveTasks[templateExerciseID] = nil
             } catch {
@@ -505,11 +510,13 @@ struct TemplateDetailView: View {
             }
 
             do {
-                try repository.updateExerciseRepRange(
-                    templateExerciseID: templateExerciseID,
-                    minReps: latest.min,
-                    maxReps: latest.max
-                )
+                try await persistTemplateRepositoryWrite("template-detail.rep-range") { repository in
+                    try repository.updateExerciseRepRange(
+                        templateExerciseID: templateExerciseID,
+                        minReps: latest.min,
+                        maxReps: latest.max
+                    )
+                }
                 lastPersistedRepRangeByExerciseID[templateExerciseID] = latest
                 pendingRepRangeSaveTasks[templateExerciseID] = nil
             } catch {
@@ -537,10 +544,12 @@ struct TemplateDetailView: View {
             }
 
             do {
-                try repository.updateExerciseRestSeconds(
-                    templateExerciseID: templateExerciseID,
-                    restSeconds: latest
-                )
+                try await persistTemplateRepositoryWrite("template-detail.rest") { repository in
+                    try repository.updateExerciseRestSeconds(
+                        templateExerciseID: templateExerciseID,
+                        restSeconds: latest
+                    )
+                }
                 lastPersistedRestSecondsByExerciseID[templateExerciseID] = latest
                 pendingRestSaveTasks[templateExerciseID] = nil
             } catch {
@@ -567,7 +576,9 @@ struct TemplateDetailView: View {
             }
 
             do {
-                try repository.updateExerciseNotes(templateExerciseID: templateExerciseID, notes: latest)
+                try await persistTemplateRepositoryWrite("template-detail.notes") { repository in
+                    try repository.updateExerciseNotes(templateExerciseID: templateExerciseID, notes: latest)
+                }
                 lastPersistedNotesByExerciseID[templateExerciseID] = latest
                 pendingNotesSaveTasks[templateExerciseID] = nil
             } catch {
@@ -629,7 +640,7 @@ struct TemplateDetailView: View {
     }
 
     @MainActor
-    private func flushPendingSaves() {
+    private func flushPendingSaves() async {
         for task in pendingSetSaveTasks.values {
             task.cancel()
         }
@@ -655,7 +666,9 @@ struct TemplateDetailView: View {
                 continue
             }
             do {
-                try repository.saveSetDrafts(templateExerciseID: templateExerciseID, drafts: drafts)
+                try await persistTemplateRepositoryWrite("template-detail.flush-set-drafts") { repository in
+                    try repository.saveSetDrafts(templateExerciseID: templateExerciseID, drafts: drafts)
+                }
                 lastPersistedSetDraftsByExerciseID[templateExerciseID] = drafts
             } catch {
                 showError(error)
@@ -667,11 +680,13 @@ struct TemplateDetailView: View {
                 continue
             }
             do {
-                try repository.updateExerciseRepRange(
-                    templateExerciseID: templateExerciseID,
-                    minReps: range.min,
-                    maxReps: range.max
-                )
+                try await persistTemplateRepositoryWrite("template-detail.flush-rep-range") { repository in
+                    try repository.updateExerciseRepRange(
+                        templateExerciseID: templateExerciseID,
+                        minReps: range.min,
+                        maxReps: range.max
+                    )
+                }
                 lastPersistedRepRangeByExerciseID[templateExerciseID] = range
             } catch {
                 showError(error)
@@ -683,10 +698,12 @@ struct TemplateDetailView: View {
                 continue
             }
             do {
-                try repository.updateExerciseRestSeconds(
-                    templateExerciseID: templateExerciseID,
-                    restSeconds: restSeconds
-                )
+                try await persistTemplateRepositoryWrite("template-detail.flush-rest") { repository in
+                    try repository.updateExerciseRestSeconds(
+                        templateExerciseID: templateExerciseID,
+                        restSeconds: restSeconds
+                    )
+                }
                 lastPersistedRestSecondsByExerciseID[templateExerciseID] = restSeconds
             } catch {
                 showError(error)
@@ -698,12 +715,28 @@ struct TemplateDetailView: View {
                 continue
             }
             do {
-                try repository.updateExerciseNotes(templateExerciseID: templateExerciseID, notes: notes)
+                try await persistTemplateRepositoryWrite("template-detail.flush-notes") { repository in
+                    try repository.updateExerciseNotes(templateExerciseID: templateExerciseID, notes: notes)
+                }
                 lastPersistedNotesByExerciseID[templateExerciseID] = notes
             } catch {
                 showError(error)
             }
         }
+    }
+
+    private func persistTemplateRepositoryWrite(
+        _ operationName: StaticString,
+        _ mutation: @Sendable @escaping (TemplateRepository) throws -> Void
+    ) async throws {
+        if let appBackgroundStore {
+            try await appBackgroundStore.performWrite(operationName) { backgroundContext in
+                try mutation(TemplateRepository(modelContext: backgroundContext))
+            }
+            return
+        }
+
+        try mutation(repository)
     }
 
     private func destinationFolders(for template: WorkoutTemplate) -> [TemplateFolder] {

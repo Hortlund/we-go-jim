@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-struct TemplateExerciseComponentDraft: Identifiable, Equatable {
+struct TemplateExerciseComponentDraft: Identifiable, Equatable, Sendable {
     let id: UUID
     var catalogExerciseUUID: String
     var exerciseNameSnapshot: String
@@ -39,7 +39,7 @@ struct TemplateExerciseComponentDraft: Identifiable, Equatable {
     }
 }
 
-struct TemplateExerciseSetDraft: Identifiable, Equatable {
+struct TemplateExerciseSetDraft: Identifiable, Equatable, Sendable {
     let id: UUID
     var targetReps: Int?
     var targetWeight: Double?
@@ -89,7 +89,7 @@ struct TemplateExerciseSetDraft: Identifiable, Equatable {
     }
 }
 
-struct TemplateExerciseDraft: Identifiable, Equatable {
+struct TemplateExerciseDraft: Identifiable, Equatable, Sendable {
     let id: UUID
     var catalogExerciseUUID: String
     var exerciseNameSnapshot: String
@@ -249,14 +249,15 @@ enum TemplateRepositoryError: Error {
     case duplicateExerciseComponent
 }
 
-@MainActor
 final class TemplateRepository {
     nonisolated static let unfiledFolderID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
 
     private let modelContext: ModelContext
+    private let autoSaveChanges: Bool
 
-    init(modelContext: ModelContext) {
+    init(modelContext: ModelContext, autoSaveChanges: Bool = true) {
         self.modelContext = modelContext
+        self.autoSaveChanges = autoSaveChanges
     }
 
     private func preferredLoadUnit() -> TemplateLoadUnit {
@@ -266,6 +267,19 @@ final class TemplateRepository {
 
     private func normalizedTemplateNotes(_ notes: String) -> String {
         notes.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func saveUserDataChanges() throws {
+        guard autoSaveChanges else { return }
+        try modelContext.save()
+        UserDataSyncTrackerBridge.markLocalMutation()
+    }
+
+    func finalizeDeferredUserDataChangesIfNeeded() throws {
+        guard !autoSaveChanges else { return }
+        guard modelContext.hasChanges else { return }
+        try modelContext.save()
+        UserDataSyncTrackerBridge.markLocalMutation()
     }
 
     func folders() throws -> [TemplateFolder] {
@@ -284,7 +298,7 @@ final class TemplateRepository {
         let existing = try folders()
         let created = TemplateFolder(name: cleaned, sortOrder: (existing.last?.sortOrder ?? -1) + 1)
         modelContext.insert(created)
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func renameFolder(id: UUID, name: String) throws {
@@ -296,7 +310,7 @@ final class TemplateRepository {
 
         folder.name = cleaned
         folder.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func moveFolder(id: UUID, toIndex destinationIndex: Int) throws {
@@ -319,7 +333,7 @@ final class TemplateRepository {
             folder.updatedAt = .now
         }
 
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func deleteFolder(id: UUID) throws {
@@ -338,7 +352,7 @@ final class TemplateRepository {
         }
 
         modelContext.delete(folder)
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func templates(in folderID: UUID) throws -> [WorkoutTemplate] {
@@ -422,7 +436,7 @@ final class TemplateRepository {
         }
 
         modelContext.insert(template)
-        try modelContext.save()
+        try saveUserDataChanges()
         return template
     }
 
@@ -505,7 +519,7 @@ final class TemplateRepository {
         template.name = cleaned
         template.notes = normalizedNotes
         template.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func updateTemplateContents(
@@ -540,7 +554,7 @@ final class TemplateRepository {
         exercise.targetRepMin = normalized.min
         exercise.targetRepMax = normalized.max
         exercise.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func updateExerciseNotes(templateExerciseID: UUID, notes: String) throws {
@@ -554,7 +568,7 @@ final class TemplateRepository {
 
         exercise.notes = notes
         exercise.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func updateExerciseRestSeconds(templateExerciseID: UUID, restSeconds: Int) throws {
@@ -577,7 +591,7 @@ final class TemplateRepository {
         }
 
         exercise.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func applyRestSecondsToAllSets(templateExerciseID: UUID, restSeconds: Int) throws {
@@ -637,7 +651,7 @@ final class TemplateRepository {
             }
         }
 
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func deleteTemplate(id: UUID) throws {
@@ -654,7 +668,7 @@ final class TemplateRepository {
         }
 
         modelContext.delete(template)
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func exercises(in templateID: UUID) throws -> [TemplateExercise] {
@@ -670,7 +684,7 @@ final class TemplateRepository {
             didNormalize = ensureTemplateComponentStructure(for: exercise) || didNormalize
         }
         if didNormalize {
-            try modelContext.save()
+            try saveUserDataChanges()
         }
         return exercises
     }
@@ -729,7 +743,7 @@ final class TemplateRepository {
 
         syncTemplateCardioCollection(for: template)
         template.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func removeCardioBlock(templateID: UUID, phase: WorkoutCardioPhase) throws {
@@ -744,7 +758,7 @@ final class TemplateRepository {
         modelContext.delete(cardioBlock)
         syncTemplateCardioCollection(for: template)
         template.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func setCardioBlocks(templateID: UUID, drafts: [TemplateCardioBlockDraft]) throws {
@@ -757,7 +771,7 @@ final class TemplateRepository {
             desiredDrafts: drafts
         )
         template.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func setDrafts(for templateExerciseID: UUID) throws -> [TemplateExerciseSetDraft] {
@@ -774,7 +788,7 @@ final class TemplateRepository {
 
         let didNormalize = ensureTemplateComponentStructure(for: exercise)
         if didNormalize {
-            try modelContext.save()
+            try saveUserDataChanges()
         }
 
         return orderedComponents(for: exercise)
@@ -811,7 +825,7 @@ final class TemplateRepository {
         _ = syncPrimaryComponentSnapshot(for: exercise)
         exercise.updatedAt = .now
         template.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func removeComponent(templateExerciseID: UUID, componentID: UUID) throws {
@@ -840,7 +854,7 @@ final class TemplateRepository {
         _ = syncPrimaryComponentSnapshot(for: exercise)
         exercise.updatedAt = .now
         template.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func moveComponent(templateExerciseID: UUID, fromOffsets: IndexSet, toOffset: Int) throws {
@@ -872,7 +886,7 @@ final class TemplateRepository {
         _ = syncPrimaryComponentSnapshot(for: exercise)
         exercise.updatedAt = .now
         template.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func upsertSet(
@@ -915,7 +929,7 @@ final class TemplateRepository {
         set.updatedAt = .now
 
         exercise.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func addSet(templateExerciseID: UUID) throws {
@@ -937,7 +951,7 @@ final class TemplateRepository {
         sets.append(created)
         exercise.prescribedSets = sets
         exercise.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func removeSet(templateExerciseID: UUID, setID: UUID) throws {
@@ -958,7 +972,7 @@ final class TemplateRepository {
         reorderSets(for: exercise)
         normalizeWarmupSet(for: exercise)
         exercise.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func moveSet(templateExerciseID: UUID, fromOffsets: IndexSet, toOffset: Int) throws {
@@ -986,7 +1000,7 @@ final class TemplateRepository {
         exercise.prescribedSets = ordered
         normalizeWarmupSet(for: exercise)
         exercise.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func saveSetDrafts(templateExerciseID: UUID, drafts: [TemplateExerciseSetDraft]) throws {
@@ -1045,7 +1059,7 @@ final class TemplateRepository {
         exercise.prescribedSets = updatedSets
         normalizeWarmupSet(for: exercise)
         exercise.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func applyWorkoutTemplateSync(
@@ -1184,7 +1198,7 @@ final class TemplateRepository {
             }
         )
         template.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func ensureDefaultSetPlans(templateID: UUID, defaultCount: Int = 3) throws {
@@ -1234,7 +1248,7 @@ final class TemplateRepository {
 
         if didChange {
             template.updatedAt = .now
-            try modelContext.save()
+            try saveUserDataChanges()
         }
     }
 
@@ -1259,7 +1273,7 @@ final class TemplateRepository {
         template.exercises = updatedExercises
         reorder(template: template)
         template.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func moveExercise(templateID: UUID, fromOffsets: IndexSet, toOffset: Int) throws {
@@ -1286,7 +1300,7 @@ final class TemplateRepository {
 
         template.exercises = ordered
         template.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func setExercises(templateID: UUID, drafts: [TemplateExerciseDraft]) throws {
@@ -1360,7 +1374,7 @@ final class TemplateRepository {
         template.exercises = createdExercises
 
         template.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     private func addExercise(templateID: UUID, draft: TemplateExerciseDraft) throws {
@@ -1413,7 +1427,7 @@ final class TemplateRepository {
         updatedExercises.append(created)
         template.exercises = updatedExercises
         template.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     private func folder(id: UUID) throws -> TemplateFolder? {

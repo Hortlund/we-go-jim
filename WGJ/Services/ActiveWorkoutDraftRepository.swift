@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-struct ActiveWorkoutExercisePersistenceSnapshot: Equatable {
+struct ActiveWorkoutExercisePersistenceSnapshot: Equatable, Sendable {
     var setDrafts: [WorkoutSessionSetDraft]
     var restSeconds: Int
     var notes: String
@@ -17,7 +17,7 @@ struct ActiveWorkoutExercisePersistenceSnapshot: Equatable {
     }
 }
 
-struct ActiveWorkoutExercisePersistenceChangeSet: Equatable {
+struct ActiveWorkoutExercisePersistenceChangeSet: Equatable, Sendable {
     let persistDrafts: Bool
     let persistRest: Bool
     let persistNotes: Bool
@@ -36,13 +36,12 @@ struct ActiveWorkoutExercisePersistenceChangeSet: Equatable {
     }
 }
 
-struct ActiveWorkoutCheckpointPersistenceResult: Equatable {
+struct ActiveWorkoutCheckpointPersistenceResult: Equatable, Sendable {
     let didPersistSessionMeta: Bool
     let handledExerciseIDs: Set<UUID>
     let persistedExerciseIDs: Set<UUID>
 }
 
-@MainActor
 final class ActiveWorkoutDraftRepository {
     private let modelContext: ModelContext
 
@@ -640,7 +639,7 @@ final class ActiveWorkoutDraftRepository {
         completedSession.summaryMetricsVersion = WorkoutMetricsService.currentSummaryMetricsVersion
 
         modelContext.delete(draftSession)
-        try modelContext.save()
+        try saveUserDataMutation()
 
         HistoryAnalyticsCache.shared.invalidate(container: modelContext.container)
         HistoryProjectionBackgroundReconciler.shared.scheduleRebuild(
@@ -676,7 +675,7 @@ final class ActiveWorkoutDraftRepository {
         }
 
         modelContext.delete(legacySession)
-        try modelContext.save()
+        try saveUserDataMutation()
     }
 
     private func migrateLegacySession(_ legacySession: WorkoutSession) throws -> ActiveWorkoutDraftSession {
@@ -774,7 +773,7 @@ final class ActiveWorkoutDraftRepository {
         draftSession.cardioBlocks = draftCardioBlocks
         draftSession.exercises = draftExercises
         modelContext.delete(legacySession)
-        try modelContext.save()
+        try saveUserDataMutation()
         return draftSession
     }
 
@@ -879,6 +878,11 @@ final class ActiveWorkoutDraftRepository {
             template.id == id
         })
         return try modelContext.fetch(descriptor).first
+    }
+
+    private func saveUserDataMutation() throws {
+        try modelContext.save()
+        UserDataSyncTrackerBridge.markLocalMutation()
     }
 
     private func sessionExercise(id: UUID) throws -> ActiveWorkoutDraftExercise? {
