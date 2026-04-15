@@ -350,6 +350,46 @@ struct HistoryDetailView: View {
             currentStamp.exerciseIDs.contains($0.key)
         }
         syncExpandedExerciseState()
+
+        let eagerlyHydratedExerciseIDs = WorkoutExerciseHydrationPlanner.orderedExerciseIDsToHydrate(
+            orderedExerciseIDs: sessionExercises.map(\.id),
+            eligibleExerciseIDs: HistoryExerciseHydrationPlanner.pendingExerciseIDs(
+                orderedExerciseIDs: sessionExercises.map(\.id),
+                expandedExerciseIDs: expandedExerciseIDs,
+                hydratedExerciseIDs: Set(hydrationPayloadByExerciseID.keys)
+            ),
+            limit: 1
+        )
+
+        if !eagerlyHydratedExerciseIDs.isEmpty {
+            do {
+                let eagerPayloads: [UUID: HistoryExerciseHydrationPayload]
+                let eagerDraftsByExerciseID = setDraftsByExerciseID
+                if let appBackgroundStore {
+                    eagerPayloads = try await appBackgroundStore.perform("history-detail.hydrate.eager") { backgroundContext in
+                        try Self.loadHydrationPayloadByExerciseID(
+                            modelContext: backgroundContext,
+                            sessionID: sessionID,
+                            exerciseIDs: eagerlyHydratedExerciseIDs,
+                            draftsByExerciseID: eagerDraftsByExerciseID
+                        )
+                    }
+                } else {
+                    eagerPayloads = try Self.loadHydrationPayloadByExerciseID(
+                        modelContext: modelContext,
+                        sessionID: sessionID,
+                        exerciseIDs: eagerlyHydratedExerciseIDs,
+                        draftsByExerciseID: eagerDraftsByExerciseID
+                    )
+                }
+
+                hydrationPayloadByExerciseID.merge(eagerPayloads) { _, new in new }
+            } catch {
+                showError(error)
+                return
+            }
+        }
+
         loadedExerciseStateStamp = currentStamp
         scheduleDeferredHydration(
             for: currentStamp,

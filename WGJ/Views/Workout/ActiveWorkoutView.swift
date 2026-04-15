@@ -823,9 +823,9 @@ struct ActiveWorkoutView: View {
             notesByExerciseID.merge(result.notesByExerciseID) { _, new in new }
             lastPersistedExerciseStateByID.merge(result.persistenceStateByExerciseID) { _, new in new }
             catalogMatchesByUUID.merge(result.catalogMatchesByUUID) { _, new in new }
-            previousResolutionByExerciseID.merge(result.previousResolutionByExerciseID) { _, new in new }
 
             for exerciseID in changedExerciseIDs {
+                previousResolutionByExerciseID[exerciseID] = nil
                 componentResolutionByExerciseID[exerciseID] = nil
                 guidanceByExerciseID[exerciseID] = nil
             }
@@ -855,6 +855,53 @@ struct ActiveWorkoutView: View {
                 )
                 : nil
         )
+
+        let orderedExerciseIDs = sessionExercises.map(\.id)
+        let expandedExerciseIDs = Set(
+            orderedExerciseIDs.filter { cardStateController.isExpanded(for: $0) }
+        )
+        let exerciseIDsNeedingEagerHydration = Set(
+            expandedExerciseIDs.filter { exerciseID in
+                previousResolutionByExerciseID[exerciseID]?.isLoading != false
+                    || componentResolutionByExerciseID[exerciseID] == nil
+            }
+        )
+        let eagerlyHydratedExerciseIDs = WorkoutExerciseHydrationPlanner.orderedExerciseIDsToHydrate(
+            orderedExerciseIDs: orderedExerciseIDs,
+            eligibleExerciseIDs: exerciseIDsNeedingEagerHydration,
+            limit: 1
+        )
+
+        if !eagerlyHydratedExerciseIDs.isEmpty {
+            do {
+                let eagerHydration: ActiveWorkoutDeferredHydrationResult
+                let eagerDraftsByExerciseID = setDraftsByExerciseID
+                if let appBackgroundStore {
+                    eagerHydration = try await appBackgroundStore.perform("active-workout.hydrate.eager") { backgroundContext in
+                        try Self.loadDeferredHydrationResult(
+                            modelContext: backgroundContext,
+                            sessionID: sessionID,
+                            exerciseIDs: eagerlyHydratedExerciseIDs,
+                            draftsByExerciseID: eagerDraftsByExerciseID
+                        )
+                    }
+                } else {
+                    eagerHydration = try Self.loadDeferredHydrationResult(
+                        modelContext: modelContext,
+                        sessionID: sessionID,
+                        exerciseIDs: eagerlyHydratedExerciseIDs,
+                        draftsByExerciseID: eagerDraftsByExerciseID
+                    )
+                }
+
+                previousResolutionByExerciseID.merge(eagerHydration.previousResolutionByExerciseID) { _, new in new }
+                componentResolutionByExerciseID.merge(eagerHydration.componentResolutionByExerciseID) { _, new in new }
+            } catch {
+                showError(error)
+                return
+            }
+        }
+
         loadedExerciseStateStamp = currentStamp
         loadedExerciseEntryStampByID = currentEntryStampsByID
         seedOrRepairScrollTarget(
@@ -1857,7 +1904,6 @@ struct ActiveWorkoutView: View {
                 restsByExerciseID: [:],
                 notesByExerciseID: [:],
                 persistenceStateByExerciseID: [:],
-                previousResolutionByExerciseID: [:],
                 catalogMatchesByUUID: [:]
             )
         }
@@ -1897,9 +1943,6 @@ struct ActiveWorkoutView: View {
             restsByExerciseID: loadedRests,
             notesByExerciseID: loadedNotes,
             persistenceStateByExerciseID: loadedPersistenceState,
-            previousResolutionByExerciseID: Dictionary(
-                uniqueKeysWithValues: exercises.map { ($0.id, WorkoutPreviousPerformanceResolution.loading) }
-            ),
             catalogMatchesByUUID: catalogByUUID
         )
     }
@@ -2253,7 +2296,7 @@ struct ActiveWorkoutView: View {
     }
 
     private var checkpointWriteDelay: Duration {
-        .milliseconds(400)
+        .milliseconds(900)
     }
 
     @MainActor
@@ -2942,7 +2985,6 @@ private struct ActiveWorkoutHydrationResult: Sendable {
     let restsByExerciseID: [UUID: Int]
     let notesByExerciseID: [UUID: String]
     let persistenceStateByExerciseID: [UUID: ActiveWorkoutExercisePersistenceSnapshot]
-    let previousResolutionByExerciseID: [UUID: WorkoutPreviousPerformanceResolution]
     let catalogMatchesByUUID: [String: TrainingGuidanceCatalogSnapshot]
 }
 

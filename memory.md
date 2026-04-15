@@ -220,6 +220,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 - How to Verify Next Time: Open a completed workout with several exercises, scroll immediately after the screen appears, then expand a lower exercise and confirm its previous-performance/PR content still loads without the whole screen hitching.
 - Status: active
 
+## 2026-04-15 - First Visible Workout Rows Need Eager Previous-Performance Hydration
+
+- Date: 2026-04-15
+- Trigger/Problem: Active Workout and History Detail could stay scoped to expanded-card hydration overall, but the first visible expanded row still rendered a temporary `"0"` field placeholder before previous-performance data arrived, and the deferred-only path kept that visible long enough to feel laggy.
+- Root Cause: WGJ treated the initially visible expanded row the same as offscreen or newly expanded rows, so previous-performance hydration waited on the deferred queue even though the row was already on-screen. The shared workout grid also used `"0"` as the empty-field placeholder whenever no overlay data had resolved yet.
+- Durable Rule: Keep workout/history hydration scoped, but eagerly resolve previous-performance data for the first visible expanded exercise before relying on deferred hydration for the rest. While previous-performance state is still loading, never render `"0"` as a fake placeholder for empty metric fields.
+- How to Verify Next Time: Launch Active Workout and History Detail with seeded previous performance and an artificial hydration delay; confirm the first visible exercise either shows real ghost/previous data immediately or stays blank while loading, and never flashes `0` before the resolved values arrive.
+- Status: active
+
 ## 2026-04-13 - Bros Avatar Cache Keys Must Be Versioned When Inline Data Is Present
 
 - Date: 2026-04-13

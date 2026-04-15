@@ -114,4 +114,19 @@ struct AppPerformanceRuntimeTests {
 
         #expect(pendingExerciseIDs == Set([first]))
     }
+
+    @Test
+    func hydrationPlannerLimitsEagerWorkToFirstEligibleVisibleExercise() {
+        let first = UUID()
+        let second = UUID()
+        let third = UUID()
+
+        let eagerExerciseIDs = WorkoutExerciseHydrationPlanner.orderedExerciseIDsToHydrate(
+            orderedExerciseIDs: [first, second, third],
+            eligibleExerciseIDs: Set([second, third]),
+            limit: 1
+        )
+
+        #expect(eagerExerciseIDs == Set([second]))
+    }
 }

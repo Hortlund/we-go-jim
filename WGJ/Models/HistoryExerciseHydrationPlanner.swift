@@ -6,10 +6,15 @@ enum HistoryExerciseHydrationPlanner {
         expandedExerciseIDs: [UUID: Bool],
         hydratedExerciseIDs: Set<UUID>
     ) -> Set<UUID> {
-        Set(
+        let eligibleExerciseIDs = Set(
             orderedExerciseIDs.filter { exerciseID in
                 expandedExerciseIDs[exerciseID] == true && !hydratedExerciseIDs.contains(exerciseID)
             }
+        )
+
+        return WorkoutExerciseHydrationPlanner.orderedExerciseIDsToHydrate(
+            orderedExerciseIDs: orderedExerciseIDs,
+            eligibleExerciseIDs: eligibleExerciseIDs
         )
     }
 }

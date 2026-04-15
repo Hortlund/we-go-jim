@@ -805,7 +805,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                 metricDisplayText(overlayState)
             }
 
-            TextField(overlayState == nil ? "0" : "", text: repsTextBinding(for: index))
+            TextField(metricPlaceholderText(for: overlayState), text: repsTextBinding(for: index))
                 .keyboardType(.numberPad)
                 .submitLabel(.done)
                 .textInputAutocapitalization(.never)
@@ -831,7 +831,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                     metricDisplayText(overlayState)
                 }
 
-                TextField(overlayState == nil ? "0" : "", text: weightTextBinding(for: index))
+                TextField(metricPlaceholderText(for: overlayState), text: weightTextBinding(for: index))
                     .keyboardType(.decimalPad)
                     .submitLabel(.next)
                     .textInputAutocapitalization(.never)
@@ -869,6 +869,11 @@ struct WorkoutSessionExerciseGridEditor: View {
             .disabled(!isSetEditingEnabled || isLocked)
         }
         .metricInputShell(isFocused: isInputFocused(.weight, at: index))
+    }
+
+    private func metricPlaceholderText(for overlayState: MetricFieldDisplayState?) -> String {
+        guard overlayState == nil else { return "" }
+        return previousPerformanceResolution.isLoading ? "" : "0"
     }
 
     private func setBadge(for row: WorkoutSessionExerciseSetRowDisplaySnapshot) -> some View {
