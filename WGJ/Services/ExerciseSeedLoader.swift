@@ -1,10 +1,10 @@
 import Foundation
 
-protocol ExerciseSeedLoading {
+nonisolated protocol ExerciseSeedLoading {
     func loadSeed() throws -> ExerciseSeedPayload
 }
 
-struct BundleExerciseSeedLoader: ExerciseSeedLoading {
+nonisolated struct BundleExerciseSeedLoader: ExerciseSeedLoading {
     let bundle: Bundle
     let fileName: String
 
@@ -23,18 +23,18 @@ struct BundleExerciseSeedLoader: ExerciseSeedLoading {
     }
 }
 
-enum ExerciseSeedLoaderError: Error {
+nonisolated enum ExerciseSeedLoaderError: Error {
     case seedNotFound
 }
 
-struct ExerciseSeedPayload: Decodable, Sendable {
+nonisolated struct ExerciseSeedPayload: Decodable, Sendable {
     let version: Int
     let generatedAt: String?
     let muscles: [SeedMuscle]
     let exercises: [SeedExercise]
 }
 
-struct SeedMuscle: Decodable, Sendable {
+nonisolated struct SeedMuscle: Decodable, Sendable {
     let id: Int
     let name: String
     let nameEn: String?
@@ -46,7 +46,7 @@ struct SeedMuscle: Decodable, Sendable {
     }
 }
 
-struct SeedExercise: Decodable, Sendable {
+nonisolated struct SeedExercise: Decodable, Sendable {
     let remoteID: Int?
     let uuid: String
     let name: String

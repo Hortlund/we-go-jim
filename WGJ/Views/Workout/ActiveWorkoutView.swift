@@ -2965,11 +2965,11 @@ private struct ActiveWorkoutCheckpointCommand: Sendable {
     let persistedSnapshotsByExerciseID: [UUID: ActiveWorkoutExercisePersistenceSnapshot]
 }
 
-private struct ActiveWorkoutTemplateFolderSnapshot: Identifiable, Equatable, Sendable {
+nonisolated private struct ActiveWorkoutTemplateFolderSnapshot: Identifiable, Equatable, Sendable {
     let id: UUID
     let name: String
 
-    init(folder: TemplateFolder) {
+    nonisolated init(folder: TemplateFolder) {
         self.id = folder.id
         self.name = folder.name
     }

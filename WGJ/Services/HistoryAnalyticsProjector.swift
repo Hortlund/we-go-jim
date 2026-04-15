@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-enum HistoryProjectionSnapshotBuilder {
+nonisolated enum HistoryProjectionSnapshotBuilder {
     static func projectedFacts(from session: WorkoutSession) -> [CompletedSetFactDraft] {
         let completedAt = session.endedAt ?? session.startedAt
         let sourceSessionUpdatedAt = sourceSessionUpdatedAt(for: session)
@@ -117,7 +117,7 @@ enum HistoryProjectionSnapshotBuilder {
 
 }
 
-final class HistoryAnalyticsCache {
+nonisolated final class HistoryAnalyticsCache {
     static let shared = HistoryAnalyticsCache()
 
     private struct Entry {
@@ -176,7 +176,7 @@ final class HistoryAnalyticsCache {
     }
 }
 
-final class HistoryProjectionBackgroundReconciler {
+nonisolated final class HistoryProjectionBackgroundReconciler: @unchecked Sendable {
     static let shared = HistoryProjectionBackgroundReconciler()
 
     private let queue = DispatchQueue(label: "wgj.history-projection.background", qos: .utility)

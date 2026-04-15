@@ -1,7 +1,7 @@
 import Foundation
 import UIKit
 
-private final class BrosAvatarCacheEntry: NSObject {
+nonisolated private final class BrosAvatarCacheEntry: NSObject {
     let data: Data?
     let thumbnail: UIImage?
 
@@ -11,7 +11,7 @@ private final class BrosAvatarCacheEntry: NSObject {
     }
 }
 
-final class BrosAvatarCacheService {
+nonisolated final class BrosAvatarCacheService {
     static let shared = BrosAvatarCacheService()
 
     private let cache = NSCache<NSString, BrosAvatarCacheEntry>()

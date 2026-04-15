@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-struct WorkoutTemplateSyncPreview: Equatable, Identifiable, Sendable {
+nonisolated struct WorkoutTemplateSyncPreview: Equatable, Identifiable, Sendable {
     let templateID: UUID
     let templateName: String
     let editedWorkoutNotes: WorkoutTemplateSyncEditedWorkoutNotes?
@@ -70,11 +70,11 @@ struct WorkoutTemplateSyncPreview: Equatable, Identifiable, Sendable {
     }
 }
 
-struct WorkoutTemplateSyncEditedWorkoutNotes: Equatable, Sendable {
+nonisolated struct WorkoutTemplateSyncEditedWorkoutNotes: Equatable, Sendable {
     let changes: [String]
 }
 
-struct WorkoutTemplateSyncAddedCardioBlock: Identifiable, Equatable, Sendable {
+nonisolated struct WorkoutTemplateSyncAddedCardioBlock: Identifiable, Equatable, Sendable {
     let phase: WorkoutCardioPhase
     let exerciseName: String
     let summary: String
@@ -82,7 +82,7 @@ struct WorkoutTemplateSyncAddedCardioBlock: Identifiable, Equatable, Sendable {
     var id: String { phase.rawValue }
 }
 
-struct WorkoutTemplateSyncRemovedCardioBlock: Identifiable, Equatable, Sendable {
+nonisolated struct WorkoutTemplateSyncRemovedCardioBlock: Identifiable, Equatable, Sendable {
     let phase: WorkoutCardioPhase
     let exerciseName: String
     let summary: String
@@ -90,7 +90,7 @@ struct WorkoutTemplateSyncRemovedCardioBlock: Identifiable, Equatable, Sendable 
     var id: String { phase.rawValue }
 }
 
-struct WorkoutTemplateSyncEditedCardioBlock: Identifiable, Equatable, Sendable {
+nonisolated struct WorkoutTemplateSyncEditedCardioBlock: Identifiable, Equatable, Sendable {
     let phase: WorkoutCardioPhase
     let exerciseName: String
     let changes: [String]
@@ -98,7 +98,7 @@ struct WorkoutTemplateSyncEditedCardioBlock: Identifiable, Equatable, Sendable {
     var id: String { phase.rawValue }
 }
 
-struct WorkoutTemplateSyncAddedExercise: Identifiable, Equatable, Sendable {
+nonisolated struct WorkoutTemplateSyncAddedExercise: Identifiable, Equatable, Sendable {
     let catalogExerciseUUID: String
     let exerciseName: String
     let summary: String
@@ -106,7 +106,7 @@ struct WorkoutTemplateSyncAddedExercise: Identifiable, Equatable, Sendable {
     var id: String { catalogExerciseUUID }
 }
 
-struct WorkoutTemplateSyncRemovedExercise: Identifiable, Equatable, Sendable {
+nonisolated struct WorkoutTemplateSyncRemovedExercise: Identifiable, Equatable, Sendable {
     let catalogExerciseUUID: String
     let exerciseName: String
     let summary: String
@@ -114,7 +114,7 @@ struct WorkoutTemplateSyncRemovedExercise: Identifiable, Equatable, Sendable {
     var id: String { catalogExerciseUUID }
 }
 
-struct WorkoutTemplateSyncReorderedExercise: Identifiable, Equatable, Sendable {
+nonisolated struct WorkoutTemplateSyncReorderedExercise: Identifiable, Equatable, Sendable {
     let catalogExerciseUUID: String
     let exerciseName: String
     let fromPosition: Int
@@ -123,7 +123,7 @@ struct WorkoutTemplateSyncReorderedExercise: Identifiable, Equatable, Sendable {
     var id: String { catalogExerciseUUID }
 }
 
-struct WorkoutTemplateSyncEditedExercise: Identifiable, Equatable, Sendable {
+nonisolated struct WorkoutTemplateSyncEditedExercise: Identifiable, Equatable, Sendable {
     let catalogExerciseUUID: String
     let exerciseName: String
     let changes: [String]
@@ -131,13 +131,13 @@ struct WorkoutTemplateSyncEditedExercise: Identifiable, Equatable, Sendable {
     var id: String { catalogExerciseUUID }
 }
 
-struct WorkoutTemplateSyncMutation: Equatable, Sendable {
+nonisolated struct WorkoutTemplateSyncMutation: Equatable, Sendable {
     let templateNotes: String
     let cardioBlocks: [WorkoutTemplateSyncCardioMutation]
     let exercises: [WorkoutTemplateSyncExerciseMutation]
 }
 
-struct WorkoutTemplateSyncCardioMutation: Equatable, Sendable {
+nonisolated struct WorkoutTemplateSyncCardioMutation: Equatable, Sendable {
     let phase: WorkoutCardioPhase
     let catalogExerciseUUID: String
     let exerciseNameSnapshot: String
@@ -146,7 +146,7 @@ struct WorkoutTemplateSyncCardioMutation: Equatable, Sendable {
     let targetDurationSeconds: Int
 }
 
-struct WorkoutTemplateSyncExerciseMutation: Equatable, Sendable {
+nonisolated struct WorkoutTemplateSyncExerciseMutation: Equatable, Sendable {
     let templateExerciseID: UUID?
     let catalogExerciseUUID: String
     let exerciseNameSnapshot: String
@@ -186,7 +186,7 @@ struct WorkoutTemplateSyncExerciseMutation: Equatable, Sendable {
     }
 }
 
-final class WorkoutTemplateSyncService {
+nonisolated final class WorkoutTemplateSyncService {
     private let modelContext: ModelContext
 
     init(modelContext: ModelContext) {
@@ -560,20 +560,20 @@ final class WorkoutTemplateSyncService {
         notes.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func orderedSets(for exercise: TemplateExercise) -> [TemplateExerciseSet] {
+    nonisolated private func orderedSets(for exercise: TemplateExercise) -> [TemplateExerciseSet] {
         (exercise.prescribedSets ?? []).sorted { $0.sortOrder < $1.sortOrder }
     }
 
-    private func orderedSets(for exercise: WorkoutSessionExercise) -> [WorkoutSessionSet] {
+    nonisolated private func orderedSets(for exercise: WorkoutSessionExercise) -> [WorkoutSessionSet] {
         (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
     }
 
-    private func orderedCardioBlocks(for template: WorkoutTemplate) -> [TemplateCardioBlock] {
+    nonisolated private func orderedCardioBlocks(for template: WorkoutTemplate) -> [TemplateCardioBlock] {
         (template.cardioBlocks ?? [])
             .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
     }
 
-    private func orderedCardioBlocks(for session: WorkoutSession) -> [WorkoutSessionCardioBlock] {
+    nonisolated private func orderedCardioBlocks(for session: WorkoutSession) -> [WorkoutSessionCardioBlock] {
         (session.cardioBlocks ?? [])
             .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
     }
@@ -590,7 +590,7 @@ private struct TemplateOwnedSetSnapshot: Equatable {
     let isWarmup: Bool
     let isLocked: Bool
 
-    init(templateSet: TemplateExerciseSet) {
+    nonisolated init(templateSet: TemplateExerciseSet) {
         self.targetIdentity = TargetIdentity(
             targetReps: templateSet.targetReps,
             targetWeight: templateSet.targetWeight,
@@ -600,7 +600,7 @@ private struct TemplateOwnedSetSnapshot: Equatable {
         self.isLocked = templateSet.isLocked
     }
 
-    init(sessionSet: WorkoutSessionSet) {
+    nonisolated init(sessionSet: WorkoutSessionSet) {
         self.targetIdentity = TargetIdentity(
             targetReps: sessionSet.targetReps,
             targetWeight: sessionSet.targetWeight,

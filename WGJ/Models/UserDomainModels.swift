@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-enum TemplateLoadUnit: String, Codable, CaseIterable, Equatable, Identifiable, Sendable {
+nonisolated enum TemplateLoadUnit: String, Codable, CaseIterable, Equatable, Identifiable, Sendable {
     case kg
     case lb
     case bodyweight
@@ -30,7 +30,7 @@ enum TemplateLoadUnit: String, Codable, CaseIterable, Equatable, Identifiable, S
         }
     }
 
-    static func inferredDefault(fromEquipmentSummary equipmentSummary: String) -> TemplateLoadUnit? {
+    nonisolated static func inferredDefault(fromEquipmentSummary equipmentSummary: String) -> TemplateLoadUnit? {
         let normalized = equipmentSummary.folding(
             options: [.caseInsensitive, .diacriticInsensitive],
             locale: .current
@@ -44,7 +44,7 @@ enum TemplateLoadUnit: String, Codable, CaseIterable, Equatable, Identifiable, S
     }
 }
 
-enum PreferredWeightUnit: String, Codable, CaseIterable, Equatable, Identifiable, Sendable {
+nonisolated enum PreferredWeightUnit: String, Codable, CaseIterable, Equatable, Identifiable, Sendable {
     case kg
     case lb
 
@@ -304,13 +304,13 @@ enum ProfileAthleteType: String, Codable, CaseIterable, Equatable, Identifiable,
     }
 }
 
-enum WorkoutSessionStatus: String, Codable, CaseIterable, Equatable {
+nonisolated enum WorkoutSessionStatus: String, Codable, CaseIterable, Equatable {
     case active
     case completed
     case cancelled
 }
 
-enum WorkoutCardioPhase: String, Codable, CaseIterable, Equatable, Identifiable {
+nonisolated enum WorkoutCardioPhase: String, Codable, CaseIterable, Equatable, Identifiable {
     case preWorkout
     case postWorkout
 
@@ -362,7 +362,7 @@ enum WorkoutCardioPhase: String, Codable, CaseIterable, Equatable, Identifiable 
     }
 }
 
-struct TemplateCardioBlockDraft: Identifiable, Equatable {
+nonisolated struct TemplateCardioBlockDraft: Identifiable, Equatable {
     let id: UUID
     var phase: WorkoutCardioPhase
     var catalogExerciseUUID: String
@@ -389,7 +389,7 @@ struct TemplateCardioBlockDraft: Identifiable, Equatable {
         self.targetDurationSeconds = targetDurationSeconds
     }
 
-    init(model: TemplateCardioBlock) {
+    nonisolated init(model: TemplateCardioBlock) {
         self.id = model.id
         self.phase = model.phase
         self.catalogExerciseUUID = model.catalogExerciseUUID
@@ -400,7 +400,7 @@ struct TemplateCardioBlockDraft: Identifiable, Equatable {
     }
 }
 
-struct WorkoutCardioBlockDraft: Identifiable, Equatable {
+nonisolated struct WorkoutCardioBlockDraft: Identifiable, Equatable {
     let id: UUID
     var phase: WorkoutCardioPhase
     var catalogExerciseUUID: String
@@ -430,7 +430,7 @@ struct WorkoutCardioBlockDraft: Identifiable, Equatable {
         self.isCompleted = isCompleted
     }
 
-    init(model: ActiveWorkoutDraftCardioBlock) {
+    nonisolated init(model: ActiveWorkoutDraftCardioBlock) {
         self.id = model.id
         self.phase = model.phase
         self.catalogExerciseUUID = model.catalogExerciseUUID
@@ -441,7 +441,7 @@ struct WorkoutCardioBlockDraft: Identifiable, Equatable {
         self.isCompleted = model.isCompleted
     }
 
-    init(model: WorkoutSessionCardioBlock) {
+    nonisolated init(model: WorkoutSessionCardioBlock) {
         self.id = model.id
         self.phase = model.phase
         self.catalogExerciseUUID = model.catalogExerciseUUID
@@ -453,7 +453,7 @@ struct WorkoutCardioBlockDraft: Identifiable, Equatable {
     }
 }
 
-enum ProfileWidgetKind: String, Codable, CaseIterable, Equatable, Hashable, Identifiable, Sendable {
+nonisolated enum ProfileWidgetKind: String, Codable, CaseIterable, Equatable, Hashable, Identifiable, Sendable {
     case prs
     case weeklyGoals
     case exerciseOneRMTrend

@@ -716,7 +716,6 @@ struct HistoryDetailView: View {
 
     @MainActor
     private func makeSaveCommand() -> HistorySaveCommand {
-        let exercises = Dictionary(uniqueKeysWithValues: sessionExercises.map { ($0.id, $0) })
         let snapshots = Dictionary(
             uniqueKeysWithValues: sessionExercises.map { exercise in
                 (

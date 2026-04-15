@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-enum WorkoutTemplateSyncPreviewBuilder {
+nonisolated enum WorkoutTemplateSyncPreviewBuilder {
     static func buildPreview(
         template: WorkoutTemplate,
         session: WorkoutSession
@@ -202,7 +202,7 @@ enum WorkoutTemplateSyncPreviewBuilder {
         )
     }
 
-    private static func makeMutation(
+    nonisolated private static func makeMutation(
         from sessionExercise: WorkoutSessionExercise,
         templateExercise: TemplateExercise?
     ) -> WorkoutTemplateSyncExerciseMutation {
@@ -230,7 +230,7 @@ enum WorkoutTemplateSyncPreviewBuilder {
         )
     }
 
-    private static func makeMutation(from cardioBlock: WorkoutSessionCardioBlock) -> WorkoutTemplateSyncCardioMutation {
+    nonisolated private static func makeMutation(from cardioBlock: WorkoutSessionCardioBlock) -> WorkoutTemplateSyncCardioMutation {
         WorkoutTemplateSyncCardioMutation(
             phase: cardioBlock.phase,
             catalogExerciseUUID: cardioBlock.catalogExerciseUUID,
@@ -241,7 +241,7 @@ enum WorkoutTemplateSyncPreviewBuilder {
         )
     }
 
-    private static func mappedSetDrafts(from sessionExercise: WorkoutSessionExercise) -> [TemplateExerciseSetDraft] {
+    nonisolated private static func mappedSetDrafts(from sessionExercise: WorkoutSessionExercise) -> [TemplateExerciseSetDraft] {
         orderedSets(for: sessionExercise).map { sessionSet in
             TemplateExerciseSetDraft(
                 targetReps: sessionSet.targetReps,
@@ -254,7 +254,7 @@ enum WorkoutTemplateSyncPreviewBuilder {
         }
     }
 
-    private static func templateComponentDrafts(for templateExercise: TemplateExercise) -> [TemplateExerciseComponentDraft] {
+    nonisolated private static func templateComponentDrafts(for templateExercise: TemplateExercise) -> [TemplateExerciseComponentDraft] {
         let orderedComponents = (templateExercise.components ?? [])
             .sorted { $0.sortOrder < $1.sortOrder }
             .map(TemplateExerciseComponentDraft.init(model:))
@@ -517,38 +517,38 @@ enum WorkoutTemplateSyncPreviewBuilder {
         min(3600, max(0, seconds))
     }
 
-    private static func normalizedCardioDuration(_ seconds: Int) -> Int {
+    nonisolated private static func normalizedCardioDuration(_ seconds: Int) -> Int {
         min(24 * 60 * 60, max(0, seconds))
     }
 
-    private static func normalizedExerciseNotes(_ notes: String) -> String {
+    nonisolated private static func normalizedExerciseNotes(_ notes: String) -> String {
         notes.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func normalizedWorkoutNotes(_ notes: String) -> String {
+    nonisolated private static func normalizedWorkoutNotes(_ notes: String) -> String {
         notes.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func orderedSets(for exercise: TemplateExercise) -> [TemplateExerciseSet] {
+    nonisolated private static func orderedSets(for exercise: TemplateExercise) -> [TemplateExerciseSet] {
         (exercise.prescribedSets ?? []).sorted { $0.sortOrder < $1.sortOrder }
     }
 
-    private static func orderedSets(for exercise: WorkoutSessionExercise) -> [WorkoutSessionSet] {
+    nonisolated private static func orderedSets(for exercise: WorkoutSessionExercise) -> [WorkoutSessionSet] {
         (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
     }
 
-    private static func orderedCardioBlocks(for template: WorkoutTemplate) -> [TemplateCardioBlock] {
+    nonisolated private static func orderedCardioBlocks(for template: WorkoutTemplate) -> [TemplateCardioBlock] {
         (template.cardioBlocks ?? [])
             .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
     }
 
-    private static func orderedCardioBlocks(for session: WorkoutSession) -> [WorkoutSessionCardioBlock] {
+    nonisolated private static func orderedCardioBlocks(for session: WorkoutSession) -> [WorkoutSessionCardioBlock] {
         (session.cardioBlocks ?? [])
             .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
     }
 }
 
-private struct TemplateOwnedSetSnapshot: Equatable {
+nonisolated private struct TemplateOwnedSetSnapshot: Equatable {
     struct TargetIdentity: Equatable {
         let targetReps: Int?
         let targetWeight: Double?
@@ -559,7 +559,7 @@ private struct TemplateOwnedSetSnapshot: Equatable {
     let isWarmup: Bool
     let isLocked: Bool
 
-    init(templateSet: TemplateExerciseSet) {
+    nonisolated init(templateSet: TemplateExerciseSet) {
         self.targetIdentity = TargetIdentity(
             targetReps: templateSet.targetReps,
             targetWeight: templateSet.targetWeight,
@@ -569,7 +569,7 @@ private struct TemplateOwnedSetSnapshot: Equatable {
         self.isLocked = templateSet.isLocked
     }
 
-    init(sessionSet: WorkoutSessionSet) {
+    nonisolated init(sessionSet: WorkoutSessionSet) {
         self.targetIdentity = TargetIdentity(
             targetReps: sessionSet.targetReps,
             targetWeight: sessionSet.targetWeight,

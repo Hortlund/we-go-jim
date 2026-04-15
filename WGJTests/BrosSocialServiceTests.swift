@@ -1721,12 +1721,15 @@ private final class TestBrosCloudStore: BrosCloudStore {
     }
 
     func queryRecords(
-        recordType: String,
-        predicate: NSPredicate,
-        sortDescriptors: [NSSortDescriptor],
+        query: BrosCloudRecordQuery,
         request: BrosCloudKitRequestProfile
     ) async throws -> [CKRecord] {
-        try await queryRecordsHandler(recordType, predicate, sortDescriptors, request.resultsLimit)
+        try await queryRecordsHandler(
+            query.recordType,
+            query.makePredicate(),
+            query.makeSortDescriptors(),
+            request.resultsLimit
+        )
     }
 
     func fetchRecord(

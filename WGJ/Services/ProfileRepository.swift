@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-final class ProfileRepository {
+nonisolated final class ProfileRepository {
     private static var localDefaultDisplayName: String {
         ReviewModerationService.sanitizedForSharing("Athlete", kind: .displayName)
     }

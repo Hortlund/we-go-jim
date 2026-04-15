@@ -46,13 +46,13 @@ final class BrosViewModel {
     private(set) var lastSuccessfulSnapshotRefreshAt: Date?
     private let snapshotFreshnessInterval: TimeInterval = 60
     private let accountStatusProvider: @MainActor () async -> AccountStatus
-    private let serviceFactory: @MainActor (ModelContext) -> (any BrosSocialService)?
+    private let serviceFactory: @MainActor (ModelContext) -> (any BrosSocialService & BrosSocialMaintenanceService)?
 
     init(
         accountStatusProvider: @escaping @MainActor () async -> AccountStatus = {
             await AccountStatusService().fetchAccountStatus()
         },
-        serviceFactory: @escaping @MainActor (ModelContext) -> (any BrosSocialService)? = { modelContext in
+        serviceFactory: @escaping @MainActor (ModelContext) -> (any BrosSocialService & BrosSocialMaintenanceService)? = { modelContext in
             CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)
         }
     ) {
@@ -101,7 +101,7 @@ final class BrosViewModel {
             return
         }
 
-        guard let service = serviceFactory(modelContext) else {
+        guard serviceFactory(modelContext) != nil else {
             state = .unavailable(BrosSocialServiceError.unavailable.localizedDescription)
             return
         }
@@ -424,7 +424,7 @@ final class BrosViewModel {
         }
     }
 
-    private func service(modelContext: ModelContext) throws -> any BrosSocialService {
+    private func service(modelContext: ModelContext) throws -> any BrosSocialService & BrosSocialMaintenanceService {
         guard let service = serviceFactory(modelContext) else {
             throw BrosSocialServiceError.unavailable
         }

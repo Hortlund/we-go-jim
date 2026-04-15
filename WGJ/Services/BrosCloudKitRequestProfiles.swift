@@ -75,14 +75,14 @@ enum BrosCloudKitFieldSets {
 }
 
 extension BrosCloudKitRequestProfile {
-    static let empty = BrosCloudKitRequestProfile(
+    nonisolated static let empty = BrosCloudKitRequestProfile(
         desiredKeys: nil,
         resultsLimit: CKQueryOperation.maximumResults,
         qualityOfService: .userInitiated
     )
-    static let circleSummary = BrosCloudKitRequestProfile(desiredKeys: BrosCloudKitFieldSets.circleSummary)
-    static let membershipSummary = BrosCloudKitRequestProfile(desiredKeys: BrosCloudKitFieldSets.membershipSummary)
-    static let feedEventSummary = BrosCloudKitRequestProfile(desiredKeys: BrosCloudKitFieldSets.feedEventSummary)
-    static let reactionSummary = BrosCloudKitRequestProfile(desiredKeys: BrosCloudKitFieldSets.reactionSummary)
-    static let inviteLookup = BrosCloudKitRequestProfile(desiredKeys: ["circleID", "inviteCode", "createdAt", "updatedAt"])
+    nonisolated static let circleSummary = BrosCloudKitRequestProfile(desiredKeys: BrosCloudKitFieldSets.circleSummary)
+    nonisolated static let membershipSummary = BrosCloudKitRequestProfile(desiredKeys: BrosCloudKitFieldSets.membershipSummary)
+    nonisolated static let feedEventSummary = BrosCloudKitRequestProfile(desiredKeys: BrosCloudKitFieldSets.feedEventSummary)
+    nonisolated static let reactionSummary = BrosCloudKitRequestProfile(desiredKeys: BrosCloudKitFieldSets.reactionSummary)
+    nonisolated static let inviteLookup = BrosCloudKitRequestProfile(desiredKeys: ["circleID", "inviteCode", "createdAt", "updatedAt"])
 }

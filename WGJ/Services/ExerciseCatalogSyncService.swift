@@ -1,8 +1,7 @@
 import Foundation
 import SwiftData
 
-@MainActor
-final class ExerciseCatalogSyncService {
+nonisolated final class ExerciseCatalogSyncService {
     private let modelContext: ModelContext
     private let seedLoader: ExerciseSeedLoading
     private let nowProvider: () -> Date

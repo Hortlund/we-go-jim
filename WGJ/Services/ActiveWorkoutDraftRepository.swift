@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-struct ActiveWorkoutExercisePersistenceSnapshot: Equatable, Sendable {
+nonisolated struct ActiveWorkoutExercisePersistenceSnapshot: Equatable, Sendable {
     var setDrafts: [WorkoutSessionSetDraft]
     var restSeconds: Int
     var notes: String
@@ -17,7 +17,7 @@ struct ActiveWorkoutExercisePersistenceSnapshot: Equatable, Sendable {
     }
 }
 
-struct ActiveWorkoutExercisePersistenceChangeSet: Equatable, Sendable {
+nonisolated struct ActiveWorkoutExercisePersistenceChangeSet: Equatable, Sendable {
     let persistDrafts: Bool
     let persistRest: Bool
     let persistNotes: Bool
@@ -36,13 +36,13 @@ struct ActiveWorkoutExercisePersistenceChangeSet: Equatable, Sendable {
     }
 }
 
-struct ActiveWorkoutCheckpointPersistenceResult: Equatable, Sendable {
+nonisolated struct ActiveWorkoutCheckpointPersistenceResult: Equatable, Sendable {
     let didPersistSessionMeta: Bool
     let handledExerciseIDs: Set<UUID>
     let persistedExerciseIDs: Set<UUID>
 }
 
-final class ActiveWorkoutDraftRepository {
+nonisolated final class ActiveWorkoutDraftRepository {
     private let modelContext: ModelContext
 
     private var completedSessionRepository: WorkoutSessionRepository {
@@ -646,7 +646,7 @@ final class ActiveWorkoutDraftRepository {
             sessionID: completedSession.id,
             container: modelContext.container
         )
-        try? CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)?
+        try? CloudKitBrosSocialService.makeIfContainerAvailable(modelContext: modelContext)?
             .queueCompletedSessionPublish(sessionID: completedSession.id)
 
         return completedSession.id

@@ -6,12 +6,12 @@ import SwiftUI
 import UIKit
 import UserNotifications
 
-struct AppReviewPolicy {
+nonisolated struct AppReviewPolicy {
     let brosEnabled: Bool
     let syncBrosAvatars: Bool
 }
 
-enum CloudSyncEventType: Equatable, Sendable {
+nonisolated enum CloudSyncEventType: Equatable, Sendable {
     case setup
     case `import`
     case export
@@ -31,7 +31,7 @@ enum CloudSyncEventType: Equatable, Sendable {
     }
 }
 
-enum CloudSyncEventStatus: Equatable, Sendable {
+nonisolated enum CloudSyncEventStatus: Equatable, Sendable {
     case running
     case succeeded
     case failed
@@ -48,7 +48,7 @@ enum CloudSyncEventStatus: Equatable, Sendable {
     }
 }
 
-struct CloudSyncErrorSnapshot: Equatable, Sendable {
+nonisolated struct CloudSyncErrorSnapshot: Equatable, Sendable {
     let domain: String
     let code: Int
     let underlyingDomain: String?
@@ -56,7 +56,7 @@ struct CloudSyncErrorSnapshot: Equatable, Sendable {
     let description: String
 }
 
-struct CloudSyncEventSummary: Equatable, Sendable {
+nonisolated struct CloudSyncEventSummary: Equatable, Sendable {
     let type: CloudSyncEventType
     let status: CloudSyncEventStatus
     let storeIdentifier: String
@@ -69,11 +69,11 @@ struct CloudSyncEventSummary: Equatable, Sendable {
     var errorDescription: String? { error?.description }
 }
 
-enum CloudKitContainerAvailabilityError: Error, Sendable {
+nonisolated enum CloudKitContainerAvailabilityError: Error, Sendable {
     case unavailable
 }
 
-enum AppEnvironment: String {
+nonisolated enum AppEnvironment: String {
     case development
     case production
 
@@ -96,7 +96,7 @@ enum AppEnvironment: String {
     }
 }
 
-enum AppRuntimeConfig {
+nonisolated enum AppRuntimeConfig {
     private enum InfoKey {
         static let appEnvironment = "WGJAppEnvironment"
         static let cloudKitContainerIdentifier = "WGJCloudKitContainerIdentifier"
@@ -303,13 +303,13 @@ extension Notification.Name {
     static let wgjDidDeleteAllUserData = Notification.Name("wgj.didDeleteAllUserData")
 }
 
-enum AppPhase {
+nonisolated enum AppPhase {
     case splash
     case login
     case main
 }
 
-enum AppMainTab: Hashable {
+nonisolated enum AppMainTab: Hashable {
     case profile
     case history
     case startWorkout
@@ -317,7 +317,7 @@ enum AppMainTab: Hashable {
     case bros
 }
 
-struct PendingTemplateFileOpen: Equatable, Identifiable {
+nonisolated struct PendingTemplateFileOpen: Equatable, Identifiable {
     let requestID: UUID
     let fileURL: URL
 
@@ -889,7 +889,7 @@ final class RestTimerNotificationManager {
 final class AppNotificationManager {
     static let shared = AppNotificationManager()
 
-    static let brosReactionCategoryIdentifier = "wgj.bros.reaction"
+    nonisolated static let brosReactionCategoryIdentifier = "wgj.bros.reaction"
     static let restTimerIdentifierPrefix = "wgj.activeWorkout.restTimer"
 
     private init() { }

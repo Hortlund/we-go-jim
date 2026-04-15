@@ -1,13 +1,13 @@
 import SwiftData
 import SwiftUI
 
-enum AppMaintenanceTrigger: Equatable, Sendable {
+nonisolated enum AppMaintenanceTrigger: Equatable, Sendable {
     case enteredMain
     case sceneActivated
     case activeWorkoutEnded
 }
 
-struct AppDeferredMaintenanceWork: Equatable, Sendable {
+nonisolated struct AppDeferredMaintenanceWork: Equatable, Sendable {
     let shouldApplyCleanStart: Bool
     let shouldPrimeCatalog: Bool
     let shouldBackfillHistoryProjection: Bool
@@ -23,8 +23,8 @@ struct AppDeferredMaintenanceWork: Equatable, Sendable {
     }
 }
 
-enum AppDeferredMaintenancePlanner {
-    static func plan(
+nonisolated enum AppDeferredMaintenancePlanner {
+    nonisolated static func plan(
         hasAppliedCleanStart: Bool,
         hasPrimedCatalog: Bool,
         needsHistoryProjectionBackfill: Bool,
@@ -65,7 +65,7 @@ final class AppDeferredMaintenanceState {
     }
 }
 
-enum AppMaintenancePolicy {
+nonisolated enum AppMaintenancePolicy {
     static func shouldRunResumeCritical(appPhase: AppPhase, scenePhase: ScenePhase) -> Bool {
         appPhase == .main && scenePhase == .active
     }
@@ -82,7 +82,7 @@ enum AppMaintenancePolicy {
     }
 }
 
-enum SocialMaintenancePlanner {
+nonisolated enum SocialMaintenancePlanner {
     static func shouldRun(
         hasKnownMembership: Bool,
         hasPendingOutboxItems: Bool
@@ -91,15 +91,15 @@ enum SocialMaintenancePlanner {
     }
 }
 
-enum BrosCleanStartPolicy {
-    static let currentSchemaVersion = 1
-    static let defaultsKey = "bros.cleanStartSchemaVersion"
+nonisolated enum BrosCleanStartPolicy {
+    nonisolated static let currentSchemaVersion = 1
+    nonisolated static let defaultsKey = "bros.cleanStartSchemaVersion"
 
-    static func needsLocalReset(appliedVersion: Int) -> Bool {
+    nonisolated static func needsLocalReset(appliedVersion: Int) -> Bool {
         appliedVersion < currentSchemaVersion
     }
 
-    static func applyIfNeeded(
+    nonisolated static func applyIfNeeded(
         modelContext: ModelContext,
         defaults: UserDefaults = .standard
     ) {

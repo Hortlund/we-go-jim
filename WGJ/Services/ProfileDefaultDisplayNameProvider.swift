@@ -1,11 +1,11 @@
 import CloudKit
 import Foundation
 
-protocol ProfileDefaultDisplayNameProviding {
+nonisolated protocol ProfileDefaultDisplayNameProviding {
     func defaultDisplayName() async -> String?
 }
 
-struct ICloudProfileDefaultDisplayNameProvider: ProfileDefaultDisplayNameProviding {
+nonisolated struct ICloudProfileDefaultDisplayNameProvider: ProfileDefaultDisplayNameProviding {
     private let container: CKContainer?
 
     init(container: CKContainer? = nil) {

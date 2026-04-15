@@ -1,13 +1,13 @@
 import Foundation
 import SwiftData
 
-struct WorkoutPreviousSetSnapshot: Equatable, Sendable {
+nonisolated struct WorkoutPreviousSetSnapshot: Equatable, Sendable {
     var reps: Int?
     var weight: Double?
     var unit: TemplateLoadUnit
 }
 
-struct WorkoutSessionSetDraft: Identifiable, Equatable, Sendable {
+nonisolated struct WorkoutSessionSetDraft: Identifiable, Equatable, Sendable {
     let id: UUID
     var isWarmup: Bool
     var restSeconds: Int
@@ -46,7 +46,7 @@ struct WorkoutSessionSetDraft: Identifiable, Equatable, Sendable {
         self.isLocked = isLocked
     }
 
-    init(model: WorkoutSessionSet) {
+    nonisolated init(model: WorkoutSessionSet) {
         self.id = model.id
         self.isWarmup = model.isWarmup
         self.restSeconds = model.restSeconds
@@ -60,7 +60,7 @@ struct WorkoutSessionSetDraft: Identifiable, Equatable, Sendable {
         self.isLocked = model.isLocked
     }
 
-    init(model: ActiveWorkoutDraftSet) {
+    nonisolated init(model: ActiveWorkoutDraftSet) {
         self.id = model.id
         self.isWarmup = model.isWarmup
         self.restSeconds = model.restSeconds
@@ -75,7 +75,7 @@ struct WorkoutSessionSetDraft: Identifiable, Equatable, Sendable {
     }
 }
 
-enum WorkoutRestTimerContextBuilder {
+nonisolated enum WorkoutRestTimerContextBuilder {
     static func nextSetLabel(
         afterCompletingSetAt completedIndex: Int,
         in setDrafts: [WorkoutSessionSetDraft]
@@ -111,7 +111,7 @@ enum WorkoutRestTimerContextBuilder {
     }
 }
 
-enum WorkoutSessionRepositoryError: Error {
+nonisolated enum WorkoutSessionRepositoryError: Error {
     case sessionNotFound
     case sessionExerciseNotFound
     case sessionSetNotFound
@@ -119,7 +119,7 @@ enum WorkoutSessionRepositoryError: Error {
     case invalidSessionState
 }
 
-final class WorkoutSessionRepository {
+nonisolated final class WorkoutSessionRepository {
     private let modelContext: ModelContext
     private var historyProjectionRepository: HistoryProjectionRepository {
         HistoryProjectionRepository(modelContext: modelContext)
@@ -680,7 +680,7 @@ final class WorkoutSessionRepository {
         try saveUserDataChanges()
         invalidateAnalyticsCache()
         scheduleProjectionRebuild(for: sessionID)
-        try? CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)?.queueCompletedSessionPublish(sessionID: sessionID)
+        try? CloudKitBrosSocialService.makeIfContainerAvailable(modelContext: modelContext)?.queueCompletedSessionPublish(sessionID: sessionID)
     }
 
     func archiveSession(id: UUID) throws {
@@ -796,7 +796,7 @@ final class WorkoutSessionRepository {
             throw WorkoutSessionRepositoryError.sessionNotFound
         }
 
-        try? CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)?.queueDeletedSession(sessionID: id)
+        try? CloudKitBrosSocialService.makeIfContainerAvailable(modelContext: modelContext)?.queueDeletedSession(sessionID: id)
         try historyProjectionRepository.deleteFacts(forSessionID: id, persistChanges: false)
         modelContext.delete(session)
         try saveUserDataChanges()

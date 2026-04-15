@@ -314,7 +314,7 @@ struct ContentView: View {
         deferredMaintenanceState.markCompleted()
     }
 
-    private static func runSocialMaintenance(modelContext: ModelContext) async {
+    nonisolated private static func runSocialMaintenance(modelContext: ModelContext) async {
         guard shouldRunSocialMaintenance(modelContext: modelContext),
               let service = CloudKitBrosSocialService(modelContext: modelContext)
         else {
@@ -326,7 +326,7 @@ struct ContentView: View {
         await service.flushOutbox()
     }
 
-    private static func shouldRunSocialMaintenance(modelContext: ModelContext) -> Bool {
+    nonisolated private static func shouldRunSocialMaintenance(modelContext: ModelContext) -> Bool {
         let profile = try? ProfileRepository(modelContext: modelContext).currentProfile()
         let hasKnownBrosMembership =
             profile?.brosMembershipID != nil

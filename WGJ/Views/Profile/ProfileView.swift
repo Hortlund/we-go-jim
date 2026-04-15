@@ -681,12 +681,12 @@ struct ProfileView: View {
 @MainActor
 @Observable
 final class ProfileViewController {
-    private struct TrendSeriesCacheKey: Hashable, Sendable {
+    nonisolated private struct TrendSeriesCacheKey: Hashable, Sendable {
         let kind: ProfileWidgetKind
         let catalogExerciseUUID: String
     }
 
-    private struct TrendSeriesLoadResult: Sendable {
+    nonisolated private struct TrendSeriesLoadResult: Sendable {
         let trendSeriesByKind: [ProfileWidgetKind: ExerciseMetricSeries]
         let cache: [TrendSeriesCacheKey: ExerciseMetricSeries]
     }
@@ -864,7 +864,7 @@ final class ProfileViewController {
 }
 
 private extension ExerciseMetricSeries {
-    func withPreferredName(_ preferredName: String?) -> ExerciseMetricSeries {
+    nonisolated func withPreferredName(_ preferredName: String?) -> ExerciseMetricSeries {
         let trimmed = preferredName?.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let trimmed, !trimmed.isEmpty else { return self }
 
@@ -877,7 +877,7 @@ private extension ExerciseMetricSeries {
     }
 }
 
-struct ProfileDashboardContent: Sendable {
+nonisolated struct ProfileDashboardContent: Sendable {
     var enabledWidgets: [ProfileWidgetConfigSnapshot]
     var personalRecords: [WorkoutPRRecord]
     var weeklyProgress: [WeeklyWorkoutProgressPoint]
@@ -898,7 +898,7 @@ struct ProfileDashboardContent: Sendable {
         activityDays: []
     )
 
-    static func make(
+    nonisolated static func make(
         enabledWidgets: [ProfileWidgetConfigSnapshot],
         dashboard: ProfileDashboardSnapshot,
         trendSeriesByKind: [ProfileWidgetKind: ExerciseMetricSeries]

@@ -1,6 +1,6 @@
 import Foundation
 
-enum ReviewTextKind {
+nonisolated enum ReviewTextKind {
     case displayName
     case workoutName
     case exerciseName
@@ -47,7 +47,7 @@ enum ReviewTextKind {
     }
 }
 
-enum ReviewModerationError: LocalizedError, Equatable {
+nonisolated enum ReviewModerationError: LocalizedError, Equatable {
     case emptyField(String)
     case tooLong(String, Int)
     case disallowedContent(String)
@@ -64,7 +64,7 @@ enum ReviewModerationError: LocalizedError, Equatable {
     }
 }
 
-enum ReviewModerationService {
+nonisolated enum ReviewModerationService {
     private static let blockedTerms: [String] = [
         "asshole",
         "bastard",

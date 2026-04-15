@@ -1,12 +1,12 @@
 import Foundation
 
-enum TrainingGuidanceTone: Equatable, Sendable {
+nonisolated enum TrainingGuidanceTone: Equatable, Sendable {
     case accent
     case success
     case caution
 }
 
-enum TrainingExerciseClassification: Equatable, Sendable {
+nonisolated enum TrainingExerciseClassification: Equatable, Sendable {
     case lowerBodyCompound
     case upperBodyCompound
     case isolation
@@ -15,13 +15,13 @@ enum TrainingExerciseClassification: Equatable, Sendable {
     case unknown
 }
 
-enum ProgressiveOverloadDirection: Equatable, Sendable {
+nonisolated enum ProgressiveOverloadDirection: Equatable, Sendable {
     case increaseLoad
     case decreaseLoad
     case stayCourse
 }
 
-struct TemplateExerciseRecommendation: Equatable, Sendable {
+nonisolated struct TemplateExerciseRecommendation: Equatable, Sendable {
     let classification: TrainingExerciseClassification
     let tone: TrainingGuidanceTone
     let title: String
@@ -32,13 +32,13 @@ struct TemplateExerciseRecommendation: Equatable, Sendable {
     let suggestedRestSeconds: ClosedRange<Int>
 }
 
-struct ActiveWorkoutGuidanceBadgePresentation: Equatable, Sendable {
+nonisolated struct ActiveWorkoutGuidanceBadgePresentation: Equatable, Sendable {
     let title: String
     let subtitle: String?
     let systemImage: String
 }
 
-struct ProgressiveOverloadCue: Equatable, Sendable {
+nonisolated struct ProgressiveOverloadCue: Equatable, Sendable {
     let classification: TrainingExerciseClassification
     let tone: TrainingGuidanceTone
     let title: String
@@ -49,7 +49,7 @@ struct ProgressiveOverloadCue: Equatable, Sendable {
     let suggestedRepRange: ClosedRange<Int>?
 }
 
-struct ActiveWorkoutExerciseGuidancePresentation: Equatable, Sendable {
+nonisolated struct ActiveWorkoutExerciseGuidancePresentation: Equatable, Sendable {
     let title: String
     let summary: String
     let tone: TrainingGuidanceTone
@@ -98,7 +98,7 @@ struct ActiveWorkoutExerciseGuidancePresentation: Equatable, Sendable {
     }
 }
 
-private func trainingGuidanceLoadText(load: Double?, unit: TemplateLoadUnit?) -> String? {
+nonisolated private func trainingGuidanceLoadText(load: Double?, unit: TemplateLoadUnit?) -> String? {
     guard
         let load,
         let unit
@@ -109,7 +109,7 @@ private func trainingGuidanceLoadText(load: Double?, unit: TemplateLoadUnit?) ->
     return "\(WGJFormatters.decimalString(load)) \(unit.shortLabel)"
 }
 
-struct TrainingGuidanceCatalogSnapshot: Equatable, Sendable {
+nonisolated struct TrainingGuidanceCatalogSnapshot: Equatable, Sendable {
     let exerciseName: String
     let categoryName: String
     let equipmentSummary: String
@@ -122,7 +122,7 @@ struct TrainingGuidanceCatalogSnapshot: Equatable, Sendable {
         self.primaryMuscleNames = primaryMuscleNames
     }
 
-    init(exercise: ExerciseCatalogItem) {
+    nonisolated init(exercise: ExerciseCatalogItem) {
         self.init(
             exerciseName: exercise.displayName,
             categoryName: exercise.categoryName,
@@ -219,7 +219,7 @@ struct ActiveWorkoutExerciseCardStateController: Equatable {
     }
 }
 
-struct TrainingGuidanceService {
+nonisolated struct TrainingGuidanceService {
     private let lowerCompoundKeywords = [
         "hack squat",
         "hip thrust",

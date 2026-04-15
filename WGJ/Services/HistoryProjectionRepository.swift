@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-final class HistoryProjectionRepository {
+nonisolated final class HistoryProjectionRepository {
     private let modelContext: ModelContext
     private let sessionRepository: WorkoutSessionRepository
 
@@ -192,7 +192,7 @@ final class HistoryProjectionRepository {
 
 }
 
-struct CompletedSetFactDraft: Equatable {
+nonisolated struct CompletedSetFactDraft: Equatable, Sendable {
     let sessionSetID: UUID
     let sessionID: UUID
     let sessionExerciseID: UUID
@@ -210,7 +210,7 @@ struct CompletedSetFactDraft: Equatable {
     let volumeKg: Double?
     let sourceSessionUpdatedAt: Date
 
-    func makeModel() -> CompletedSetFact {
+    nonisolated func makeModel() -> CompletedSetFact {
         CompletedSetFact(
             sessionSetID: sessionSetID,
             sessionID: sessionID,
@@ -231,7 +231,7 @@ struct CompletedSetFactDraft: Equatable {
         )
     }
 
-    func matches(_ fact: CompletedSetFact) -> Bool {
+    nonisolated func matches(_ fact: CompletedSetFact) -> Bool {
         fact.sessionSetID == sessionSetID
             && fact.sessionID == sessionID
             && fact.sessionExerciseID == sessionExerciseID

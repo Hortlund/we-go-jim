@@ -175,7 +175,7 @@ final class ExerciseCatalogSyncState {
     }
 }
 
-struct ExerciseFilters: Equatable {
+nonisolated struct ExerciseFilters: Equatable {
     var primaryMuscleID: Int?
     var secondaryMuscleID: Int?
     var equipmentToken: String?
@@ -191,7 +191,7 @@ struct ExerciseFilters: Equatable {
     )
 }
 
-struct CustomExerciseDraft: Equatable {
+nonisolated struct CustomExerciseDraft: Equatable {
     var name: String
     var categoryName: String
     var equipmentSummary: String

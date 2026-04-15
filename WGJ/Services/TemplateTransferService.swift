@@ -2,12 +2,12 @@ import Foundation
 import SwiftData
 import UniformTypeIdentifiers
 
-enum TemplateTransferFileFormat {
+nonisolated enum TemplateTransferFileFormat {
     static let typeIdentifier = "com.hortlund.wgj.template"
     static let filenameExtension = "wgjtemplate"
 }
 
-struct TemplateTransferEnvelope: Codable, Equatable, Sendable {
+nonisolated struct TemplateTransferEnvelope: Codable, Equatable, Sendable {
     static let currentFormatVersion = 4
 
     let formatVersion: Int
@@ -25,7 +25,7 @@ struct TemplateTransferEnvelope: Codable, Equatable, Sendable {
     }
 }
 
-struct TemplateTransferTemplate: Codable, Equatable, Sendable {
+nonisolated struct TemplateTransferTemplate: Codable, Equatable, Sendable {
     let name: String
     let notes: String
     let preWorkoutCardio: TemplateTransferCardioBlock?
@@ -47,7 +47,7 @@ struct TemplateTransferTemplate: Codable, Equatable, Sendable {
     }
 }
 
-struct TemplateTransferCardioBlock: Codable, Equatable, Sendable {
+nonisolated struct TemplateTransferCardioBlock: Codable, Equatable, Sendable {
     let catalogExerciseUUID: String
     let exerciseNameSnapshot: String
     let categorySnapshot: String
@@ -55,7 +55,7 @@ struct TemplateTransferCardioBlock: Codable, Equatable, Sendable {
     let targetDurationSeconds: Int
 }
 
-struct TemplateTransferExercise: Codable, Equatable, Sendable {
+nonisolated struct TemplateTransferExercise: Codable, Equatable, Sendable {
     let catalogExerciseUUID: String
     let exerciseNameSnapshot: String
     let categorySnapshot: String
@@ -119,14 +119,14 @@ struct TemplateTransferExercise: Codable, Equatable, Sendable {
     }
 }
 
-struct TemplateTransferExerciseComponent: Codable, Equatable, Sendable {
+nonisolated struct TemplateTransferExerciseComponent: Codable, Equatable, Sendable {
     let catalogExerciseUUID: String
     let exerciseNameSnapshot: String
     let categorySnapshot: String
     let muscleSummarySnapshot: String
 }
 
-struct TemplateTransferSet: Codable, Equatable, Sendable {
+nonisolated struct TemplateTransferSet: Codable, Equatable, Sendable {
     let targetReps: Int?
     let targetWeight: Double?
     let loadUnit: TemplateLoadUnit
@@ -135,7 +135,7 @@ struct TemplateTransferSet: Codable, Equatable, Sendable {
     let isLocked: Bool
 }
 
-enum TemplateTransferError: LocalizedError, Equatable, Sendable {
+nonisolated enum TemplateTransferError: LocalizedError, Equatable, Sendable {
     case unreadableFile
     case malformedFile
     case unsupportedVersion(Int)
@@ -168,7 +168,7 @@ extension UTType {
     }
 }
 
-final class TemplateTransferService {
+nonisolated final class TemplateTransferService {
     private let modelContext: ModelContext
     private let fileManager: FileManager
 
@@ -534,7 +534,7 @@ final class TemplateTransferService {
     }
 }
 
-private struct ImportedExerciseResolution: Equatable {
+nonisolated private struct ImportedExerciseResolution: Equatable {
     let catalogExerciseUUID: String
     let exerciseNameSnapshot: String
     let categorySnapshot: String

@@ -1,13 +1,13 @@
 import Foundation
 
-enum UserDataSyncStateKind: String, Equatable, Sendable {
+nonisolated enum UserDataSyncStateKind: String, Equatable, Sendable {
     case localOnly
     case caughtUp
     case pendingExport
     case degraded
 }
 
-struct UserDataSyncStatusSnapshot: Equatable, Sendable {
+nonisolated struct UserDataSyncStatusSnapshot: Equatable, Sendable {
     let state: UserDataSyncStateKind
     let cloudSyncEnabled: Bool
     let latestLocalMutationAt: Date?
@@ -70,8 +70,8 @@ struct UserDataSyncStatusSnapshot: Equatable, Sendable {
     }
 }
 
-final class UserDataSyncTracker {
-    static let shared = UserDataSyncTracker()
+nonisolated final class UserDataSyncTracker {
+    nonisolated static let shared = UserDataSyncTracker()
 
     private let lock = NSLock()
 
@@ -184,7 +184,7 @@ final class UserDataSyncTracker {
     }
 }
 
-enum UserDataSyncTrackerBridge {
+nonisolated enum UserDataSyncTrackerBridge {
     static func configureForLaunch(
         isCloudEnabled: Bool,
         errorDescription: String?

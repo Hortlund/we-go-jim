@@ -2,12 +2,12 @@ import CloudKit
 import Dispatch
 import Foundation
 
-enum CloudStartupStoreMode: Equatable {
+nonisolated enum CloudStartupStoreMode: Equatable {
     case cloudBacked
     case localFallback
 }
 
-struct CloudStartupDecision: Equatable {
+nonisolated struct CloudStartupDecision: Equatable {
     let accountStatus: CloudStartupAccountStatus
     let storeMode: CloudStartupStoreMode
     let cloudSyncErrorDescription: String?
@@ -26,7 +26,7 @@ struct CloudStartupDecision: Equatable {
     }
 }
 
-enum CloudStartupAccountStatus: Equatable {
+nonisolated enum CloudStartupAccountStatus: Equatable {
     case available
     case noAccount
     case restricted
@@ -37,11 +37,11 @@ enum CloudStartupAccountStatus: Equatable {
     case error
 }
 
-protocol CloudStartupAccountStatusProviding {
+nonisolated protocol CloudStartupAccountStatusProviding {
     func currentStatus(timeout: TimeInterval) -> CloudStartupAccountStatus
 }
 
-struct CloudKitStartupAccountStatusProvider: CloudStartupAccountStatusProviding {
+nonisolated struct CloudKitStartupAccountStatusProvider: CloudStartupAccountStatusProviding {
     private let container: CKContainer?
 
     init(container: CKContainer? = AppRuntimeConfig.makeCloudKitContainer()) {
@@ -95,7 +95,7 @@ struct CloudKitStartupAccountStatusProvider: CloudStartupAccountStatusProviding 
     }
 }
 
-enum CloudStartupPreflight {
+nonisolated enum CloudStartupPreflight {
     static let defaultTimeout: TimeInterval = 1.0
 
     static func makeDecision(

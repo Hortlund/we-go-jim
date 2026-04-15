@@ -3,8 +3,7 @@ import ImageIO
 import SwiftData
 import UIKit
 
-@MainActor
-final class ExerciseImageCacheService {
+nonisolated final class ExerciseImageCacheService {
     private let modelContext: ModelContext
     private let fileManager: FileManager
     private let metadataFlushDelay: Duration = .seconds(6)

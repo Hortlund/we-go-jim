@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-struct TemplateExerciseComponentDraft: Identifiable, Equatable, Sendable {
+nonisolated struct TemplateExerciseComponentDraft: Identifiable, Equatable, Sendable {
     let id: UUID
     var catalogExerciseUUID: String
     var exerciseNameSnapshot: String
@@ -22,7 +22,7 @@ struct TemplateExerciseComponentDraft: Identifiable, Equatable, Sendable {
         self.muscleSummarySnapshot = muscleSummarySnapshot
     }
 
-    init(model: TemplateExerciseComponent) {
+    nonisolated init(model: TemplateExerciseComponent) {
         self.id = model.id
         self.catalogExerciseUUID = model.catalogExerciseUUID
         self.exerciseNameSnapshot = model.exerciseNameSnapshot
@@ -39,7 +39,7 @@ struct TemplateExerciseComponentDraft: Identifiable, Equatable, Sendable {
     }
 }
 
-struct TemplateExerciseSetDraft: Identifiable, Equatable, Sendable {
+nonisolated struct TemplateExerciseSetDraft: Identifiable, Equatable, Sendable {
     let id: UUID
     var targetReps: Int?
     var targetWeight: Double?
@@ -75,7 +75,7 @@ struct TemplateExerciseSetDraft: Identifiable, Equatable, Sendable {
         self.previousLoadUnit = previousLoadUnit
     }
 
-    init(model: TemplateExerciseSet) {
+    nonisolated init(model: TemplateExerciseSet) {
         self.id = model.id
         self.targetReps = model.targetReps
         self.targetWeight = model.targetWeight
@@ -89,7 +89,7 @@ struct TemplateExerciseSetDraft: Identifiable, Equatable, Sendable {
     }
 }
 
-struct TemplateExerciseDraft: Identifiable, Equatable, Sendable {
+nonisolated struct TemplateExerciseDraft: Identifiable, Equatable, Sendable {
     let id: UUID
     var catalogExerciseUUID: String
     var exerciseNameSnapshot: String
@@ -136,8 +136,7 @@ struct TemplateExerciseDraft: Identifiable, Equatable, Sendable {
         self.components = normalizedComponents
     }
 
-    @MainActor
-    init(model: TemplateExercise, preferredLoadUnit: TemplateLoadUnit = .kg) {
+    nonisolated init(model: TemplateExercise, preferredLoadUnit: TemplateLoadUnit = .kg) {
         let normalizedComponents = Self.normalizedComponents(
             from: (model.components ?? [])
                 .sorted { $0.sortOrder < $1.sortOrder }
@@ -239,7 +238,7 @@ struct TemplateExerciseDraft: Identifiable, Equatable, Sendable {
     }
 }
 
-enum TemplateRepositoryError: Error {
+nonisolated enum TemplateRepositoryError: Error {
     case invalidName
     case folderNotFound
     case templateNotFound
@@ -249,7 +248,7 @@ enum TemplateRepositoryError: Error {
     case duplicateExerciseComponent
 }
 
-final class TemplateRepository {
+nonisolated final class TemplateRepository {
     nonisolated static let unfiledFolderID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
 
     private let modelContext: ModelContext

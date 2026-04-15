@@ -28,16 +28,16 @@ enum WGJFormatters {
         return formatter
     }()
 
-    static func decimalString(_ value: Double) -> String {
-        decimalFormatter.string(from: NSNumber(value: value)) ?? "\(value)"
+    nonisolated static func decimalString(_ value: Double) -> String {
+        value.formatted(.number.precision(.fractionLength(0...2)))
     }
 
-    static func oneDecimalString(_ value: Double) -> String {
-        oneDecimalFormatter.string(from: NSNumber(value: value)) ?? "\(value)"
+    nonisolated static func oneDecimalString(_ value: Double) -> String {
+        value.formatted(.number.precision(.fractionLength(0...1)))
     }
 
-    static func integerString(_ value: Double) -> String {
-        integerFormatter.string(from: NSNumber(value: value)) ?? "\(Int(value))"
+    nonisolated static func integerString(_ value: Double) -> String {
+        value.formatted(.number.precision(.fractionLength(0)))
     }
 
     static func parseLocalizedDecimal(_ text: String) -> Double? {

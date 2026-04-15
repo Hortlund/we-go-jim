@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-struct WorkoutPRRecord: Identifiable, Equatable, Sendable {
+nonisolated struct WorkoutPRRecord: Identifiable, Equatable, Sendable {
     let id: String
     let catalogExerciseUUID: String
     let exerciseName: String
@@ -12,7 +12,7 @@ struct WorkoutPRRecord: Identifiable, Equatable, Sendable {
     let achievedAt: Date
 }
 
-struct SessionPRAchievement: Identifiable, Equatable, Sendable {
+nonisolated struct SessionPRAchievement: Identifiable, Equatable, Sendable {
     let id: String
     let catalogExerciseUUID: String
     let exerciseName: String
@@ -22,12 +22,12 @@ struct SessionPRAchievement: Identifiable, Equatable, Sendable {
     let loadUnit: TemplateLoadUnit
 }
 
-struct WorkoutSessionSummaryMetrics: Equatable, Sendable {
+nonisolated struct WorkoutSessionSummaryMetrics: Equatable, Sendable {
     let totalVolume: Double
     let prHitsCount: Int
 }
 
-enum WorkoutPersonalRecordKind: String, Identifiable, CaseIterable, Equatable, Hashable, Comparable, Sendable {
+nonisolated enum WorkoutPersonalRecordKind: String, Identifiable, CaseIterable, Equatable, Hashable, Comparable, Sendable {
     case strength
     case weight
     case reps
@@ -83,7 +83,7 @@ enum WorkoutPersonalRecordKind: String, Identifiable, CaseIterable, Equatable, H
     }
 }
 
-struct SessionSetPRAchievement: Identifiable, Equatable, Sendable {
+nonisolated struct SessionSetPRAchievement: Identifiable, Equatable, Sendable {
     let id: String
     let sessionExerciseID: UUID
     let setID: UUID
@@ -97,14 +97,14 @@ struct SessionSetPRAchievement: Identifiable, Equatable, Sendable {
     let loadUnit: TemplateLoadUnit
 }
 
-struct WeeklyWorkoutProgressPoint: Identifiable, Equatable, Sendable {
+nonisolated struct WeeklyWorkoutProgressPoint: Identifiable, Equatable, Sendable {
     let id: String
     let weekStart: Date
     let completedWorkouts: Int
     let goal: Int
 }
 
-struct ExerciseHistoryOption: Identifiable, Equatable, Sendable {
+nonisolated struct ExerciseHistoryOption: Identifiable, Equatable, Sendable {
     let catalogExerciseUUID: String
     let exerciseName: String
     let lastPerformedAt: Date
@@ -112,21 +112,21 @@ struct ExerciseHistoryOption: Identifiable, Equatable, Sendable {
     var id: String { catalogExerciseUUID }
 }
 
-struct ExerciseMetricPoint: Identifiable, Equatable, Sendable {
+nonisolated struct ExerciseMetricPoint: Identifiable, Equatable, Sendable {
     let id: String
     let completedAt: Date
     let value: Double
 }
 
-struct ExerciseMetricSeries: Equatable, Sendable {
+nonisolated struct ExerciseMetricSeries: Equatable, Sendable {
     let catalogExerciseUUID: String
     let exerciseName: String
     let loadUnit: TemplateLoadUnit
     let points: [ExerciseMetricPoint]
 }
 
-struct ExerciseDetailBestPerformance: Equatable, Sendable {
-    enum Kind: String, Equatable {
+nonisolated struct ExerciseDetailBestPerformance: Equatable, Sendable {
+    nonisolated enum Kind: String, Equatable {
         case weighted
         case bodyweight
     }
@@ -139,7 +139,7 @@ struct ExerciseDetailBestPerformance: Equatable, Sendable {
     let achievedAt: Date
 }
 
-struct ExerciseDetailStatsSnapshot: Equatable, Sendable {
+nonisolated struct ExerciseDetailStatsSnapshot: Equatable, Sendable {
     let catalogExerciseUUID: String
     let exerciseName: String
     let sessionCount: Int
@@ -149,7 +149,7 @@ struct ExerciseDetailStatsSnapshot: Equatable, Sendable {
     let volumeTrend: ExerciseMetricSeries?
 }
 
-struct ProfileOverviewStats: Equatable, Sendable {
+nonisolated struct ProfileOverviewStats: Equatable, Sendable {
     let totalWorkouts: Int
     let totalPRHits: Int
     let totalDurationSeconds: Int
@@ -169,7 +169,7 @@ struct ProfileOverviewStats: Equatable, Sendable {
     )
 }
 
-struct ProfileTopExerciseStat: Identifiable, Equatable, Sendable {
+nonisolated struct ProfileTopExerciseStat: Identifiable, Equatable, Sendable {
     let catalogExerciseUUID: String
     let exerciseName: String
     let sessionCount: Int
@@ -178,14 +178,14 @@ struct ProfileTopExerciseStat: Identifiable, Equatable, Sendable {
     var id: String { catalogExerciseUUID }
 }
 
-struct ProfileActivityDay: Identifiable, Equatable, Sendable {
+nonisolated struct ProfileActivityDay: Identifiable, Equatable, Sendable {
     let date: Date
     let workoutCount: Int
 
     var id: String { date.formatted(date: .numeric, time: .omitted) }
 }
 
-struct ProfileDashboardSnapshot: Equatable, Sendable {
+nonisolated struct ProfileDashboardSnapshot: Equatable, Sendable {
     let personalRecords: [WorkoutPRRecord]
     let weeklyProgress: [WeeklyWorkoutProgressPoint]
     let weeklyGoal: Int
@@ -194,7 +194,7 @@ struct ProfileDashboardSnapshot: Equatable, Sendable {
     let activityDays: [ProfileActivityDay]
 }
 
-private struct WeightedWorkingSetMetric: Equatable {
+nonisolated private struct WeightedWorkingSetMetric: Equatable {
     let setID: UUID
     let sortOrder: Int
     let weight: Double
@@ -202,13 +202,13 @@ private struct WeightedWorkingSetMetric: Equatable {
     let unit: TemplateLoadUnit
 }
 
-private struct BodyweightWorkingSetMetric: Equatable {
+nonisolated private struct BodyweightWorkingSetMetric: Equatable {
     let setID: UUID
     let sortOrder: Int
     let reps: Int
 }
 
-private enum CompletedWorkingSetMetric: Equatable {
+nonisolated private enum CompletedWorkingSetMetric: Equatable {
     case weighted(WeightedWorkingSetMetric)
     case bodyweight(BodyweightWorkingSetMetric)
 
@@ -249,12 +249,12 @@ private enum CompletedWorkingSetMetric: Equatable {
     }
 }
 
-private struct BestSetPresentation: Equatable {
+nonisolated private struct BestSetPresentation: Equatable {
     let displayText: String
 }
 
-private enum WorkoutMetricsPolicy {
-    static let summaryMetricsVersion = 1
+nonisolated private enum WorkoutMetricsPolicy {
+    nonisolated static let summaryMetricsVersion = 1
 
     nonisolated static func estimatedOneRepMax(weight: Double, reps: Int) -> Double {
         guard reps > 0 else { return weight }
@@ -420,7 +420,7 @@ private enum WorkoutMetricsPolicy {
     }
 }
 
-final class WorkoutMetricsService {
+nonisolated final class WorkoutMetricsService {
     static let currentSummaryMetricsVersion = WorkoutMetricsPolicy.summaryMetricsVersion
 
     private let modelContext: ModelContext
@@ -475,14 +475,14 @@ final class WorkoutMetricsService {
     func sessionPRAchievements(sessionID: UUID) throws -> [SessionPRAchievement] {
         guard let session = try session(id: sessionID) else { return [] }
 
-        let sessionFacts = try resolvedFacts(for: session)
+        let sessionFacts = resolvedFacts(for: session)
         return try sessionPRAchievements(session: session, sessionFacts: sessionFacts)
     }
 
     func sessionSetPRAchievements(sessionID: UUID) throws -> [SessionSetPRAchievement] {
         guard let session = try session(id: sessionID) else { return [] }
 
-        let sessionFacts = try resolvedFacts(for: session)
+        let sessionFacts = resolvedFacts(for: session)
         return try sessionSetPRAchievements(session: session, sessionFacts: sessionFacts)
     }
 
@@ -943,7 +943,6 @@ final class WorkoutMetricsService {
         var countsByWeek: [Date: Int] = [:]
         var countsByDay: [Date: Int] = [:]
         var exerciseFrequencyByUUID: [String: CollectedExerciseFrequency] = [:]
-        var exerciseHistoryByUUID: [String: [CompletedExerciseHistoryEntry]] = [:]
         var perSessionHistory: [SessionExerciseHistoryKey: WorkingExerciseHistoryEntry] = [:]
         var totalDurationSeconds = 0
         var totalPRHits = 0
@@ -1438,20 +1437,20 @@ final class WorkoutMetricsService {
     }
 }
 
-private struct CollectedExerciseMetricPoint {
+nonisolated private struct CollectedExerciseMetricPoint {
     let completedAt: Date
     let normalizedValue: Double
     let sourceUnit: TemplateLoadUnit
 }
 
-private struct PriorSetMetricPeaks {
+nonisolated private struct PriorSetMetricPeaks {
     var strength: Double = 0
     var weight: Double = 0
     var reps: Int = 0
     var volume: Double = 0
 }
 
-struct MetricsSnapshotCache {
+nonisolated struct MetricsSnapshotCache {
     let completedSessions: [WorkoutSession]
     let bestPRByExercise: [String: WorkoutPRRecord]
     let bestBodyweightByExercise: [String: BodyweightExerciseBestRecord]
@@ -1464,7 +1463,7 @@ struct MetricsSnapshotCache {
     let firstWorkoutDate: Date?
 }
 
-struct CompletedExerciseHistoryEntry {
+nonisolated struct CompletedExerciseHistoryEntry {
     let sessionID: UUID
     let completedAt: Date
     let exerciseName: String
@@ -1475,7 +1474,7 @@ struct CompletedExerciseHistoryEntry {
     let weightedVolumeUnit: TemplateLoadUnit
 }
 
-private struct WorkingExerciseHistoryEntry {
+nonisolated private struct WorkingExerciseHistoryEntry {
     var exerciseName: String
     var completedAt: Date
     var comparisonOneRepMax: Double?
@@ -1486,20 +1485,20 @@ private struct WorkingExerciseHistoryEntry {
     var hasWeightedMetrics = false
 }
 
-struct CollectedExerciseFrequency {
+nonisolated struct CollectedExerciseFrequency {
     let exerciseName: String
     let sessionCount: Int
     let lastPerformedAt: Date
 }
 
-struct BodyweightExerciseBestRecord {
+nonisolated struct BodyweightExerciseBestRecord {
     let catalogExerciseUUID: String
     let exerciseName: String
     let reps: Int
     let achievedAt: Date
 }
 
-private struct SessionExerciseHistoryKey: Hashable {
+nonisolated private struct SessionExerciseHistoryKey: Hashable, Sendable {
     let sessionID: UUID
     let catalogExerciseUUID: String
 }
@@ -1515,7 +1514,7 @@ private extension CompletedSetFact {
 }
 
 private extension String {
-    var nonEmpty: String? {
+    nonisolated var nonEmpty: String? {
         isEmpty ? nil : self
     }
 }

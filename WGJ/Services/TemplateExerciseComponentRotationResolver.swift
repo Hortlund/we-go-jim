@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-struct ExerciseComponentSnapshot: Identifiable, Equatable, Sendable {
+nonisolated struct ExerciseComponentSnapshot: Identifiable, Equatable, Sendable {
     let id: UUID
     let catalogExerciseUUID: String
     let exerciseNameSnapshot: String
@@ -22,7 +22,7 @@ struct ExerciseComponentSnapshot: Identifiable, Equatable, Sendable {
         self.muscleSummarySnapshot = muscleSummarySnapshot
     }
 
-    init(model: TemplateExerciseComponent) {
+    nonisolated init(model: TemplateExerciseComponent) {
         self.init(
             id: model.id,
             catalogExerciseUUID: model.catalogExerciseUUID,
@@ -32,7 +32,7 @@ struct ExerciseComponentSnapshot: Identifiable, Equatable, Sendable {
         )
     }
 
-    init(model: ActiveWorkoutDraftExerciseComponent) {
+    nonisolated init(model: ActiveWorkoutDraftExerciseComponent) {
         self.init(
             id: model.id,
             catalogExerciseUUID: model.catalogExerciseUUID,
@@ -43,7 +43,7 @@ struct ExerciseComponentSnapshot: Identifiable, Equatable, Sendable {
     }
 }
 
-struct ExerciseComponentRotationResolution: Equatable, Sendable {
+nonisolated struct ExerciseComponentRotationResolution: Equatable, Sendable {
     let availableComponents: [ExerciseComponentSnapshot]
     let selectedComponent: ExerciseComponentSnapshot
     let suggestedComponent: ExerciseComponentSnapshot
@@ -65,7 +65,7 @@ struct ExerciseComponentRotationResolution: Equatable, Sendable {
     }
 }
 
-final class TemplateExerciseComponentRotationResolver {
+nonisolated final class TemplateExerciseComponentRotationResolver {
     private let modelContext: ModelContext
 
     init(modelContext: ModelContext) {

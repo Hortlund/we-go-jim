@@ -14,7 +14,7 @@ struct ProfileIdentitySnapshot: Identifiable, Equatable, Sendable {
     let workoutNotificationStyle: WorkoutNotificationStyle
     let updatedAt: Date
 
-    init(profile: UserProfile) {
+    nonisolated init(profile: UserProfile) {
         id = profile.id
         displayName = profile.displayName
         athleteType = profile.athleteType
@@ -38,7 +38,7 @@ struct ProfileWidgetConfigSnapshot: Identifiable, Equatable, Sendable {
     let selectedExerciseNameSnapshot: String?
     let updatedAt: Date
 
-    init(config: ProfileWidgetConfig) {
+    nonisolated init(config: ProfileWidgetConfig) {
         id = config.id
         kind = config.kind
         isEnabled = config.isEnabled

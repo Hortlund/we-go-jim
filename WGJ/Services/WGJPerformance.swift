@@ -3,11 +3,11 @@ import OSLog
 
 enum WGJPerformance {
 #if DEBUG
-    private static let logger = Logger(
+    nonisolated private static let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "WGJ",
         category: "Performance"
     )
-    private static let signposter = OSSignposter(
+    nonisolated private static let signposter = OSSignposter(
         subsystem: Bundle.main.bundleIdentifier ?? "WGJ",
         category: "Performance"
     )
@@ -22,20 +22,20 @@ enum WGJPerformance {
     }
 
     @discardableResult
-    static func measure<T>(_ name: StaticString, _ operation: () throws -> T) rethrows -> T {
+    nonisolated static func measure<T>(_ name: StaticString, _ operation: () throws -> T) rethrows -> T {
         let token = begin(name)
         defer { end(token) }
         return try operation()
     }
 
     @discardableResult
-    static func measureAsync<T>(_ name: StaticString, _ operation: () async throws -> T) async rethrows -> T {
+    nonisolated static func measureAsync<T>(_ name: StaticString, _ operation: () async throws -> T) async rethrows -> T {
         let token = begin(name)
         defer { end(token) }
         return try await operation()
     }
 
-    static func begin(_ name: StaticString) -> TraceToken {
+    nonisolated static func begin(_ name: StaticString) -> TraceToken {
 #if DEBUG
         TraceToken(
             name: name,
@@ -47,7 +47,7 @@ enum WGJPerformance {
 #endif
     }
 
-    static func end(_ token: TraceToken) {
+    nonisolated static func end(_ token: TraceToken) {
 #if DEBUG
         signposter.endInterval(token.name, token.intervalState)
         let elapsed = token.startedAt.duration(to: ContinuousClock.now)

@@ -12,7 +12,7 @@ enum ProfileWidgetRepositoryError: LocalizedError {
     }
 }
 
-final class ProfileWidgetRepository {
+nonisolated final class ProfileWidgetRepository {
     private let modelContext: ModelContext
 
     init(modelContext: ModelContext) {
@@ -185,7 +185,7 @@ final class ProfileWidgetRepository {
 }
 
 private extension ProfileWidgetKind {
-    var defaultSortOrder: Int {
+    nonisolated var defaultSortOrder: Int {
         switch self {
         case .prs:
             return 0
@@ -204,7 +204,7 @@ private extension ProfileWidgetKind {
         }
     }
 
-    var defaultEnabled: Bool {
+    nonisolated var defaultEnabled: Bool {
         switch self {
         case .prs, .weeklyGoals:
             return true

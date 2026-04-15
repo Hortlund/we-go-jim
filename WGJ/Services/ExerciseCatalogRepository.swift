@@ -2,8 +2,7 @@ import Foundation
 import SwiftData
 import UIKit
 
-@MainActor
-protocol ExerciseCatalogRepositoryProtocol {
+nonisolated protocol ExerciseCatalogRepositoryProtocol {
     func ensureSeedImportedIfNeeded() throws
     func searchExercises(query: String, filters: ExerciseFilters) throws -> [ExerciseCatalogItem]
     func groupedByMuscle(primaryOnly: Bool) throws -> [ExerciseMuscleGroupSection]
@@ -39,8 +38,7 @@ enum ExerciseCatalogRepositoryError: LocalizedError {
     }
 }
 
-@MainActor
-final class ExerciseCatalogRepository: ExerciseCatalogRepositoryProtocol {
+nonisolated final class ExerciseCatalogRepository: ExerciseCatalogRepositoryProtocol {
     private let syncService: ExerciseCatalogSyncService
     private let searchService: ExerciseSearchService
     private let imageCacheService: ExerciseImageCacheService
@@ -346,7 +344,7 @@ final class ExerciseCatalogRepository: ExerciseCatalogRepositoryProtocol {
     }
 }
 
-private struct ValidatedCustomExerciseInput {
+nonisolated private struct ValidatedCustomExerciseInput {
     let name: String
     let categoryName: String
     let equipmentSummary: String

@@ -2,13 +2,13 @@ import CloudKit
 import CoreData
 import Foundation
 
-enum CloudSyncEventHealthResolution: Equatable {
+nonisolated enum CloudSyncEventHealthResolution: Equatable {
     case noChange
     case clearRuntimeError
     case setRuntimeError(String)
 }
 
-enum CloudSyncEventHealthClassifier {
+nonisolated enum CloudSyncEventHealthClassifier {
     private static let backgroundTaskSchedulerErrorDomain = "BGSystemTaskSchedulerErrorDomain"
     private static let ignoredBackgroundTaskSchedulerCodes: Set<Int> = [3, 8]
 

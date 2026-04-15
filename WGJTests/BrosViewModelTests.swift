@@ -313,8 +313,7 @@ struct BrosViewModelTests {
     }
 }
 
-@MainActor
-private final class StubBrosSocialService: BrosSocialService {
+nonisolated private final class StubBrosSocialService: BrosSocialService, BrosSocialMaintenanceService {
     var didRefreshLocalMembershipState = false
     var didFlushOutbox = false
     var snapshot: BrosFeedSnapshot?
@@ -330,29 +329,37 @@ private final class StubBrosSocialService: BrosSocialService {
         didRefreshLocalMembershipState = true
     }
 
+    @MainActor
     func fetchSnapshot() async throws -> BrosFeedSnapshot? {
         fetchSnapshotCallCount += 1
         return snapshot
     }
 
+    @MainActor
     func createCircle(memberLimit: Int) async throws -> BrosFeedSnapshot {
         throw BrosSocialServiceError.unavailable
     }
 
+    @MainActor
     func joinCircle(inviteCode: String) async throws -> BrosFeedSnapshot {
         throw BrosSocialServiceError.unavailable
     }
 
+    @MainActor
     func updateCircleMemberLimit(_ memberLimit: Int) async throws -> BrosFeedSnapshot {
         throw BrosSocialServiceError.unavailable
     }
 
+    @MainActor
     func leaveCircle() async throws { }
 
+    @MainActor
     func deleteCurrentUserData() async throws { }
 
+    @MainActor
     func removeMember(membershipID: String) async throws { }
 
+    @MainActor
     func setReaction(eventID: String, kind: BroReactionKind) async throws {
         setReactionEventIDs.append(eventID)
         setReactionKinds.append(kind)
@@ -380,6 +387,7 @@ private final class StubBrosSocialService: BrosSocialService {
         didFlushOutbox = true
     }
 
+    @MainActor
     func resumeReaction() {
         shouldSuspendReaction = false
         reactionContinuation?.resume()

@@ -1,8 +1,7 @@
 import Foundation
 import SwiftData
 
-@MainActor
-final class ExerciseSearchService {
+nonisolated final class ExerciseSearchService {
     private let modelContext: ModelContext
     private static var cachedCatalogIndex: CatalogSearchIndex?
 
@@ -203,18 +202,18 @@ final class ExerciseSearchService {
     }
 }
 
-private struct CatalogIndexStamp: Equatable {
+nonisolated private struct CatalogIndexStamp: Equatable {
     let contextID: ObjectIdentifier
     let latestExerciseUpdate: TimeInterval
     let syncMarker: TimeInterval
 }
 
-private struct CatalogSearchIndex {
+nonisolated private struct CatalogSearchIndex {
     let stamp: CatalogIndexStamp
     let rows: [CatalogSearchRow]
 }
 
-private struct CatalogSearchRow {
+nonisolated private struct CatalogSearchRow {
     let exercise: ExerciseCatalogItem
     let searchTerms: [String]
     let categoryName: String
