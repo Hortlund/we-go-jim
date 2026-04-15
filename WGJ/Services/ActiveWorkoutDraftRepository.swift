@@ -622,6 +622,37 @@ nonisolated final class ActiveWorkoutDraftRepository {
         )
     }
 
+    func previousPerformanceResolutionByExerciseID(
+        sessionID: UUID
+    ) throws -> [UUID: WorkoutPreviousPerformanceResolution] {
+        guard let session = try session(id: sessionID) else {
+            throw WorkoutSessionRepositoryError.sessionNotFound
+        }
+
+        let exercises = try sessionExercises(sessionID: sessionID)
+        guard !exercises.isEmpty else { return [:] }
+
+        let previousMaps = try previousSetMaps(
+            forExercises: Array(Set(exercises.map(\.catalogExerciseUUID))),
+            before: session.startedAt,
+            excludingSessionID: sessionID
+        )
+
+        return Dictionary(
+            uniqueKeysWithValues: exercises.map { exercise in
+                (
+                    exercise.id,
+                    .resolved(
+                        Self.resolvedPreviousMap(
+                            baseMap: previousMaps[exercise.catalogExerciseUUID] ?? [:],
+                            maxSetCount: orderedSessionSets(for: exercise).count
+                        )
+                    )
+                )
+            }
+        )
+    }
+
     @discardableResult
     func finishSession(sessionID: UUID, notes: String? = nil) throws -> UUID {
         guard let draftSession = try session(id: sessionID) else {
@@ -1029,6 +1060,27 @@ nonisolated final class ActiveWorkoutDraftRepository {
 
     private func orderedSessionSets(for exercise: ActiveWorkoutDraftExercise) -> [ActiveWorkoutDraftSet] {
         (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    private static func resolvedPreviousMap(
+        baseMap: [Int: WorkoutPreviousSetSnapshot],
+        maxSetCount: Int
+    ) -> [Int: WorkoutPreviousSetSnapshot] {
+        guard maxSetCount > 0, !baseMap.isEmpty else { return [:] }
+
+        let fallback = baseMap[(baseMap.keys.max() ?? 0)]
+        var resolved: [Int: WorkoutPreviousSetSnapshot] = [:]
+        resolved.reserveCapacity(maxSetCount)
+
+        for index in 0..<maxSetCount {
+            if let exact = baseMap[index] {
+                resolved[index] = exact
+            } else if let fallback {
+                resolved[index] = fallback
+            }
+        }
+
+        return resolved
     }
 
     private func orderedComponents(for exercise: ActiveWorkoutDraftExercise) -> [ActiveWorkoutDraftExerciseComponent] {

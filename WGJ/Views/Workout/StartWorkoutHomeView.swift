@@ -635,11 +635,13 @@ struct StartWorkoutHomeView: View {
     private func startEmptyWorkout() {
         do {
             if let activeSession = try activeWorkoutRepository.activeSession() {
+                stagePreparedPreviousPerformance(for: activeSession.id)
                 activeWorkoutPresentationState.present(sessionID: activeSession.id)
                 return
             }
 
             let session = try activeWorkoutRepository.createEmptySession()
+            stagePreparedPreviousPerformance(for: session.id)
             activeWorkoutPresentationState.present(sessionID: session.id)
         } catch {
             showError(error)
@@ -659,17 +661,32 @@ struct StartWorkoutHomeView: View {
     private func startFromTemplate(templateID: UUID) {
         do {
             if let activeSession = try activeWorkoutRepository.activeSession() {
+                stagePreparedPreviousPerformance(for: activeSession.id)
                 activeWorkoutPresentationState.present(sessionID: activeSession.id)
                 selectedTemplatePreview = nil
                 return
             }
 
             let session = try activeWorkoutRepository.createSessionFromTemplate(templateID: templateID)
+            stagePreparedPreviousPerformance(for: session.id)
             activeWorkoutPresentationState.present(sessionID: session.id)
             selectedTemplatePreview = nil
         } catch {
             showError(error)
         }
+    }
+
+    private func stagePreparedPreviousPerformance(for sessionID: UUID) {
+        guard let resolutionByExerciseID = try? activeWorkoutRepository.previousPerformanceResolutionByExerciseID(
+            sessionID: sessionID
+        ) else {
+            return
+        }
+
+        activeWorkoutPresentationState.stagePreparedPreviousPerformanceResolution(
+            resolutionByExerciseID,
+            for: sessionID
+        )
     }
 
     private func lastPerformedDate(for templateID: UUID) -> Date? {

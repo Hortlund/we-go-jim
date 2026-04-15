@@ -458,9 +458,13 @@ final class ActiveWorkoutPresentationState {
     var isActiveWorkoutPresented = false
     var isActiveWorkoutStripCollapsed = false
     var scrollTarget: ActiveWorkoutScrollTarget?
+    @ObservationIgnored private var preparedPreviousPerformanceResolutionBySessionID: [UUID: [UUID: WorkoutPreviousPerformanceResolution]] = [:]
 
     func present(sessionID: UUID) {
         if activeSessionID != sessionID {
+            if let activeSessionID {
+                preparedPreviousPerformanceResolutionBySessionID.removeValue(forKey: activeSessionID)
+            }
             scrollTarget = nil
         }
         guard
@@ -492,10 +496,37 @@ final class ActiveWorkoutPresentationState {
         guard activeSessionID != nil || isActiveWorkoutPresented || isActiveWorkoutStripCollapsed else {
             return
         }
+        if let activeSessionID {
+            preparedPreviousPerformanceResolutionBySessionID.removeValue(forKey: activeSessionID)
+        }
         activeSessionID = nil
         isActiveWorkoutPresented = false
         isActiveWorkoutStripCollapsed = false
         scrollTarget = nil
+    }
+
+    func stagePreparedPreviousPerformanceResolution(
+        _ resolutionByExerciseID: [UUID: WorkoutPreviousPerformanceResolution],
+        for sessionID: UUID
+    ) {
+        preparedPreviousPerformanceResolutionBySessionID[sessionID] = resolutionByExerciseID
+    }
+
+    func preparedPreviousPerformanceResolution(
+        for sessionID: UUID
+    ) -> [UUID: WorkoutPreviousPerformanceResolution] {
+        preparedPreviousPerformanceResolutionBySessionID[sessionID] ?? [:]
+    }
+
+    func preparedPreviousPerformanceResolution(
+        for sessionID: UUID,
+        exerciseID: UUID
+    ) -> WorkoutPreviousPerformanceResolution? {
+        preparedPreviousPerformanceResolutionBySessionID[sessionID]?[exerciseID]
+    }
+
+    func clearPreparedPreviousPerformanceResolution(for sessionID: UUID) {
+        preparedPreviousPerformanceResolutionBySessionID.removeValue(forKey: sessionID)
     }
 
     func clearActiveWorkout(restTimerState: RestTimerState? = nil) {

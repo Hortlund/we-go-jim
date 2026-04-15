@@ -129,4 +129,24 @@ struct AppPerformanceRuntimeTests {
 
         #expect(eagerExerciseIDs == Set([second]))
     }
+
+    @MainActor
+    @Test
+    func activeWorkoutPresentationStateStagesPreparedPreviousPerformanceBySession() {
+        let sessionID = UUID()
+        let exerciseID = UUID()
+        let state = ActiveWorkoutPresentationState()
+        let resolution = WorkoutPreviousPerformanceResolution.resolved([
+            0: WorkoutPreviousSetSnapshot(reps: 8, weight: 100, unit: .kg),
+        ])
+
+        state.stagePreparedPreviousPerformanceResolution([exerciseID: resolution], for: sessionID)
+
+        #expect(state.preparedPreviousPerformanceResolution(for: sessionID, exerciseID: exerciseID) == resolution)
+
+        state.present(sessionID: sessionID)
+        state.clearPresentation()
+
+        #expect(state.preparedPreviousPerformanceResolution(for: sessionID, exerciseID: exerciseID) == nil)
+    }
 }

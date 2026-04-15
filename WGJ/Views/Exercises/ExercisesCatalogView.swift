@@ -501,6 +501,7 @@ struct ExercisesCatalogView: View {
         do {
             if let activeSession = try activeWorkoutRepository.activeSession() {
                 try activeWorkoutRepository.addExercise(sessionID: activeSession.id, catalogItem: pendingExerciseForAdd)
+                stagePreparedPreviousPerformance(for: activeSession.id)
                 activeWorkoutPresentationState.present(sessionID: activeSession.id)
                 appTabState.selectedTab = .startWorkout
                 return
@@ -509,6 +510,7 @@ struct ExercisesCatalogView: View {
             let created = try activeWorkoutRepository.createEmptySession()
             createdSessionID = created.id
             try activeWorkoutRepository.addExercise(sessionID: created.id, catalogItem: pendingExerciseForAdd)
+            stagePreparedPreviousPerformance(for: created.id)
             activeWorkoutPresentationState.present(sessionID: created.id)
             appTabState.selectedTab = .startWorkout
         } catch {
@@ -525,6 +527,19 @@ struct ExercisesCatalogView: View {
         }
 
         return try? activeWorkoutRepository.activeSession()?.id
+    }
+
+    private func stagePreparedPreviousPerformance(for sessionID: UUID) {
+        guard let resolutionByExerciseID = try? activeWorkoutRepository.previousPerformanceResolutionByExerciseID(
+            sessionID: sessionID
+        ) else {
+            return
+        }
+
+        activeWorkoutPresentationState.stagePreparedPreviousPerformanceResolution(
+            resolutionByExerciseID,
+            for: sessionID
+        )
     }
 
     private func scrollToTop(using proxy: ScrollViewProxy) {

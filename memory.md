@@ -229,6 +229,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 - How to Verify Next Time: Launch Active Workout and History Detail with seeded previous performance and an artificial hydration delay; confirm the first visible exercise either shows real ghost/previous data immediately or stays blank while loading, and never flashes `0` before the resolved values arrive.
 - Status: active
 
+## 2026-04-15 - Session Start Must Stage Previous Performance Before Presenting Active Workout
+
+- Date: 2026-04-15
+- Trigger/Problem: Even after first-row eager hydration was added, the first exercise in a newly started workout could still render empty previous-performance fields until another exercise was opened or a later refresh invalidated the row.
+- Root Cause: WGJ was still presenting `ActiveWorkoutView` with a `.loading` previous-performance state and only fixing it from the view's post-presentation hydration task. That made the first frame depend on an async catch-up path instead of the session-start handoff.
+- Durable Rule: When a workout session is created or resumed from a start-workout entry point and previous-performance is already derivable from local history, stage that resolved data in presentation state before calling `present(sessionID:)`. Do not rely on post-presentation hydration alone for session-start previous-performance UI.
+- How to Verify Next Time: Seed previous performance, start a template-backed workout with an artificial deferred-hydration delay, and confirm the first exercise shows its ghost/previous data immediately on first presentation without needing another card expansion to refresh it.
+- Status: active
+
 ## 2026-04-13 - Bros Avatar Cache Keys Must Be Versioned When Inline Data Is Present
 
 - Date: 2026-04-13

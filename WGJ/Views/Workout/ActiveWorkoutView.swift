@@ -606,7 +606,7 @@ struct ActiveWorkoutView: View {
             exerciseIndexTitle: "Exercise \(index + 1)",
             targetRepMin: exercise.targetRepMin,
             targetRepMax: exercise.targetRepMax,
-            previousPerformanceResolution: previousResolutionByExerciseID[exerciseID] ?? .loading,
+            previousPerformanceResolution: resolvedPreviousPerformanceResolution(for: exerciseID),
             guidance: guidance,
             preferredLoadUnit: preferredLoadUnit,
             componentSummaryResolution: componentResolutionByExerciseID[exerciseID],
@@ -784,6 +784,13 @@ struct ActiveWorkoutView: View {
     private func loadExerciseStateIfNeeded(using scrollProxy: ScrollViewProxy) async {
         shouldTrackVisibleScrollTarget = false
         discardRemovedExerciseState(keeping: Set(sessionExercises.map(\.id)))
+        let preparedPreviousResolutionByExerciseID = activeWorkoutPresentationState.preparedPreviousPerformanceResolution(
+            for: sessionID
+        )
+        if !preparedPreviousResolutionByExerciseID.isEmpty {
+            previousResolutionByExerciseID.merge(preparedPreviousResolutionByExerciseID) { current, _ in current }
+            activeWorkoutPresentationState.clearPreparedPreviousPerformanceResolution(for: sessionID)
+        }
         let currentStamp = exerciseHydrationStamp
         let currentEntryStampsByID = exerciseEntryStampsByID
         let changedExerciseIDs = Set(
@@ -917,6 +924,22 @@ struct ActiveWorkoutView: View {
             for: currentStamp,
             draftsByExerciseID: setDraftsByExerciseID
         )
+    }
+
+    @MainActor
+    private func resolvedPreviousPerformanceResolution(for exerciseID: UUID) -> WorkoutPreviousPerformanceResolution {
+        if let resolution = previousResolutionByExerciseID[exerciseID] {
+            return resolution
+        }
+
+        if let preparedResolution = activeWorkoutPresentationState.preparedPreviousPerformanceResolution(
+            for: sessionID,
+            exerciseID: exerciseID
+        ) {
+            return preparedResolution
+        }
+
+        return .loading
     }
 
     @MainActor
