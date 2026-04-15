@@ -21,6 +21,8 @@ struct ContentView: View {
     @State private var socialMaintenanceScheduler = SocialMaintenanceScheduler()
     @State private var deferredMaintenanceState = AppDeferredMaintenanceState()
     @State private var isPreparingMainPhase = false
+    @State private var hasRunResumeCriticalMaintenanceThisForegroundCycle = false
+    @State private var isRunningResumeCriticalMaintenance = false
     @State private var hasInstalledUITestPendingTemplate = false
     @State private var hasScheduledInitialDeferredMaintenance = false
 
@@ -62,17 +64,21 @@ struct ContentView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
-                performResumeCriticalMaintenanceIfNeeded()
+                scheduleResumeCriticalMaintenanceIfNeeded()
                 if deferredMaintenanceState.isPending {
                     requestDeferredMaintenance(trigger: .sceneActivated)
                 }
                 appRuntimeState.refreshCloudAvailabilityIfNeeded()
+            } else {
+                resetResumeCriticalMaintenanceCycle()
             }
             updateIdleTimerState()
         }
         .onChange(of: appPhase) { _, newPhase in
             if newPhase == .main {
                 handleEnteredMainPhase()
+            } else {
+                resetResumeCriticalMaintenanceCycle()
             }
             updateIdleTimerState()
         }
@@ -191,7 +197,7 @@ struct ContentView: View {
             deferredMaintenanceState.requestRun()
         }
 
-        performResumeCriticalMaintenanceIfNeeded()
+        scheduleResumeCriticalMaintenanceIfNeeded()
         requestDeferredMaintenance(trigger: .enteredMain)
         routePendingTemplateFileIfNeeded()
         appRuntimeState.refreshCloudAvailabilityIfNeeded()
@@ -203,13 +209,41 @@ struct ContentView: View {
         }
     }
 
-    private func performResumeCriticalMaintenanceIfNeeded() {
+    private func scheduleResumeCriticalMaintenanceIfNeeded() {
         guard AppMaintenancePolicy.shouldRunResumeCritical(appPhase: appPhase, scenePhase: scenePhase) else {
+            resetResumeCriticalMaintenanceCycle()
             return
         }
 
+        guard !hasRunResumeCriticalMaintenanceThisForegroundCycle,
+              !isRunningResumeCriticalMaintenance
+        else {
+            return
+        }
+
+        hasRunResumeCriticalMaintenanceThisForegroundCycle = true
+        isRunningResumeCriticalMaintenance = true
+
+        Task { @MainActor in
+            await performResumeCriticalMaintenanceIfNeeded()
+        }
+    }
+
+    @MainActor
+    private func performResumeCriticalMaintenanceIfNeeded() async {
+        defer {
+            isRunningResumeCriticalMaintenance = false
+        }
+
         restTimerState.clearExpiredRestTimerIfNeeded()
-        activeWorkoutPresentationState.restoreActiveSessionIfMissing(modelContext: modelContext)
+        await activeWorkoutPresentationState.restoreActiveSessionIfMissing(
+            modelContext: modelContext,
+            backgroundStore: appBackgroundStore
+        )
+    }
+
+    private func resetResumeCriticalMaintenanceCycle() {
+        hasRunResumeCriticalMaintenanceThisForegroundCycle = false
     }
 
     @MainActor

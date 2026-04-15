@@ -558,6 +558,7 @@ struct ProfileView: View {
             trendSeriesLoadTask?.cancel()
             trendSeriesLoadTask = nil
             isLoadingTrendSeries = false
+            controller.invalidateTrendSeriesCache()
 
             let localProfile = try controller.loadLocalProfileIdentity(modelContext: modelContext)
             currentProfile = localProfile
@@ -692,6 +693,10 @@ final class ProfileViewController {
     }
 
     private var trendSeriesCache: [TrendSeriesCacheKey: ExerciseMetricSeries] = [:]
+
+    func invalidateTrendSeriesCache() {
+        trendSeriesCache.removeAll()
+    }
 
     func loadLocalProfileIdentity(
         modelContext: ModelContext,

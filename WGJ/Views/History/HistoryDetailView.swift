@@ -26,6 +26,7 @@ struct HistoryDetailView: View {
     @State private var deferredHydrationTask: Task<Void, Never>?
     @State private var expandedExerciseIDs: [UUID: Bool] = [:]
     @State private var hasPendingSummaryRebuild = false
+    @State private var isSavingChanges = false
 
     @State private var showingExercisePicker = false
     @State private var showingArchiveConfirmation = false
@@ -100,7 +101,7 @@ struct HistoryDetailView: View {
                     saveChanges()
                 }
                 .buttonStyle(WGJPrimaryButtonStyle())
-                .disabled(session == nil)
+                .disabled(session == nil || isSavingChanges)
             }
             .padding(WGJSpacing.page)
         }
@@ -134,7 +135,7 @@ struct HistoryDetailView: View {
             await bootstrapIfNeeded()
         }
         .task(id: historyExerciseStateStamp) {
-            await loadExerciseStateIfNeeded()
+            await loadExerciseStateIfNeeded(stamp: historyExerciseStateStamp)
         }
         .alert("History Error", isPresented: $showingError) {
             Button("OK", role: .cancel) { }
@@ -289,8 +290,7 @@ struct HistoryDetailView: View {
     }
 
     @MainActor
-    private func loadExerciseStateIfNeeded() async {
-        let currentStamp = HistoryExerciseStateStamp(exercises: sessionExercises)
+    private func loadExerciseStateIfNeeded(stamp currentStamp: HistoryExerciseStateStamp) async {
         let previousStamp = loadedExerciseStateStamp
         let changedExerciseIDs = currentStamp.changedExerciseIDs(comparedTo: previousStamp)
         let removedExerciseIDs = previousStamp.map {
@@ -545,7 +545,14 @@ struct HistoryDetailView: View {
     }
 
     private func saveChanges() {
+        guard !isSavingChanges else { return }
+        isSavingChanges = true
+
         Task { @MainActor in
+            defer {
+                isSavingChanges = false
+            }
+
             do {
                 let command = makeSaveCommand()
                 let didPersistChanges: Bool

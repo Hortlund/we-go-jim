@@ -1117,7 +1117,11 @@ nonisolated final class WorkoutMetricsService {
         }
 
         let sourceUpdatedAt = HistoryProjectionSnapshotBuilder.sourceSessionUpdatedAt(for: session)
-        guard persistedFacts.contains(where: { $0.sourceSessionUpdatedAt != sourceUpdatedAt }) else {
+        let completedAt = session.endedAt ?? session.startedAt
+        let hasStaleProjectionSource = persistedFacts.contains { fact in
+            fact.sourceSessionUpdatedAt != sourceUpdatedAt || fact.completedAt != completedAt
+        }
+        guard hasStaleProjectionSource else {
             return persistedFacts
         }
 

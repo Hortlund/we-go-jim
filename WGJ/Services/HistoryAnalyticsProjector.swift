@@ -203,6 +203,8 @@ nonisolated final class HistoryProjectionBackgroundReconciler: @unchecked Sendab
         let backgroundContext = ModelContext(container)
         let projectionRepository = HistoryProjectionRepository(modelContext: backgroundContext)
         var didMutate = false
+        var failedSessionIDs: Set<UUID> = []
+        var processedSessionIDs: Set<UUID> = []
 
         while true {
             let sessionIDs = drainPendingSessionIDs(for: containerID)
@@ -211,17 +213,30 @@ nonisolated final class HistoryProjectionBackgroundReconciler: @unchecked Sendab
             }
 
             for sessionID in sessionIDs {
-                let rebuiltCount = (try? projectionRepository.rebuildFacts(
-                    forSessionID: sessionID,
-                    persistChanges: false
-                )) ?? 0
-                didMutate = rebuiltCount > 0 || didMutate
+                processedSessionIDs.insert(sessionID)
+                do {
+                    let rebuiltCount = try projectionRepository.rebuildFacts(
+                        forSessionID: sessionID,
+                        persistChanges: false
+                    )
+                    didMutate = rebuiltCount > 0 || didMutate
+                } catch {
+                    failedSessionIDs.insert(sessionID)
+                }
             }
         }
 
         if didMutate {
-            try? backgroundContext.save()
-            HistoryAnalyticsCache.shared.invalidate(container: container)
+            do {
+                try backgroundContext.save()
+                HistoryAnalyticsCache.shared.invalidate(container: container)
+            } catch {
+                failedSessionIDs.formUnion(processedSessionIDs)
+            }
+        }
+
+        if !failedSessionIDs.isEmpty {
+            enqueuePendingSessionIDs(failedSessionIDs, for: containerID)
         }
 
         lock.lock()
@@ -243,5 +258,13 @@ nonisolated final class HistoryProjectionBackgroundReconciler: @unchecked Sendab
 
         let sessionIDs = pendingSessionIDsByContainerID.removeValue(forKey: containerID) ?? []
         return sessionIDs.sorted { $0.uuidString < $1.uuidString }
+    }
+
+    private func enqueuePendingSessionIDs(_ sessionIDs: Set<UUID>, for containerID: ObjectIdentifier) {
+        guard !sessionIDs.isEmpty else { return }
+
+        lock.lock()
+        pendingSessionIDsByContainerID[containerID, default: []].formUnion(sessionIDs)
+        lock.unlock()
     }
 }

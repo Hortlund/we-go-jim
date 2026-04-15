@@ -444,7 +444,8 @@ nonisolated final class TemplateRepository {
             throw TemplateRepositoryError.workoutSessionNotFound
         }
 
-        let template = try createTemplate(
+        let deferredRepository = TemplateRepository(modelContext: modelContext, autoSaveChanges: false)
+        let template = try deferredRepository.createTemplate(
             folderID: folderID,
             name: name,
             notes: normalizedTemplateNotes(session.notes)
@@ -498,9 +499,15 @@ nonisolated final class TemplateRepository {
             )
         }
 
-        try setExercises(templateID: template.id, drafts: drafts)
-        try setCardioBlocks(templateID: template.id, drafts: cardioDrafts)
-        return template
+        do {
+            try deferredRepository.setExercises(templateID: template.id, drafts: drafts)
+            try deferredRepository.setCardioBlocks(templateID: template.id, drafts: cardioDrafts)
+            try deferredRepository.finalizeDeferredUserDataChangesIfNeeded()
+            return template
+        } catch {
+            modelContext.delete(template)
+            throw error
+        }
     }
 
     func updateTemplate(id: UUID, name: String, notes: String) throws {

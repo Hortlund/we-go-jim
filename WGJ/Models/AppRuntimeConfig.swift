@@ -183,6 +183,12 @@ final class AppRuntimeState {
 
     private init() { }
 
+#if DEBUG
+    static func makeTestingInstance() -> AppRuntimeState {
+        AppRuntimeState()
+    }
+#endif
+
     func updateCloudState(isEnabled: Bool, errorDescription: String?) {
         cloudSyncEnabled = isEnabled
         cloudSyncErrorDescription = errorDescription
@@ -219,17 +225,23 @@ final class AppRuntimeState {
             guard let self else { return }
             defer {
                 self.isRefreshingRuntimeCloudAvailability = false
-                self.hasResolvedRuntimeCloudAvailability = true
             }
 
             let status = await (accountService ?? AccountStatusService()).fetchAccountStatus()
             switch status {
             case .checking:
-                break
+                self.hasResolvedRuntimeCloudAvailability = false
             case .available:
                 self.updateCloudRuntimeError(nil)
+                self.hasResolvedRuntimeCloudAvailability = true
             case .unavailable(let reason):
                 self.updateCloudRuntimeError(Self.runtimeErrorDescription(for: reason))
+                switch reason {
+                case .noAccount, .restricted:
+                    self.hasResolvedRuntimeCloudAvailability = true
+                case .temporarilyUnavailable, .unknown:
+                    self.hasResolvedRuntimeCloudAvailability = false
+                }
             }
         }
     }
@@ -492,23 +504,47 @@ final class ActiveWorkoutPresentationState {
         restTimerState?.dismissRestTimerPopup()
     }
 
-    func restoreActiveSessionIfMissing(modelContext: ModelContext) {
+    func restoreActiveSessionIfMissing(
+        modelContext: ModelContext,
+        backgroundStore: AppBackgroundStore? = nil
+    ) async {
         guard activeSessionID == nil else { return }
-        restoreActiveSessionIfNeeded(modelContext: modelContext)
+        await restoreActiveSessionIfNeeded(
+            modelContext: modelContext,
+            backgroundStore: backgroundStore
+        )
     }
 
-    func restoreActiveSessionIfNeeded(modelContext: ModelContext) {
-        let repository = ActiveWorkoutDraftRepository(modelContext: modelContext)
-        do {
-            if let active = try repository.activeSession() {
-                activeSessionID = active.id
-                isActiveWorkoutStripCollapsed = !isActiveWorkoutPresented
-            } else {
-                clearPresentation()
-            }
-        } catch {
+    func restoreActiveSessionIfNeeded(
+        modelContext: ModelContext,
+        backgroundStore: AppBackgroundStore? = nil
+    ) async {
+        let activeSessionID = await Self.fetchActiveSessionIDIfNeeded(
+            modelContext: modelContext,
+            backgroundStore: backgroundStore
+        )
+
+        if let activeSessionID {
+            self.activeSessionID = activeSessionID
+            isActiveWorkoutStripCollapsed = !isActiveWorkoutPresented
+        } else {
             clearPresentation()
         }
+    }
+
+    @MainActor
+    private static func fetchActiveSessionIDIfNeeded(
+        modelContext: ModelContext,
+        backgroundStore: AppBackgroundStore?
+    ) async -> UUID? {
+        if let backgroundStore {
+            return (try? await backgroundStore.perform("active-workout.restore.active-session") {
+                backgroundContext in
+                try ActiveWorkoutDraftRepository(modelContext: backgroundContext).activeSession()?.id
+            }) ?? nil
+        }
+
+        return (try? ActiveWorkoutDraftRepository(modelContext: modelContext).activeSession()?.id) ?? nil
     }
 }
 

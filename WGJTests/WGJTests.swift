@@ -976,6 +976,49 @@ struct WGJTests {
     }
 
     @Test
+    func runtimeCloudAvailabilityRetriesAfterTemporaryFailure() async {
+        let runtimeState = AppRuntimeState.makeTestingInstance()
+        runtimeState.updateCloudState(isEnabled: true, errorDescription: nil)
+        let accountService = MockRuntimeAccountStatusProvider(statuses: [
+            .unavailable(.temporarilyUnavailable),
+            .available,
+        ])
+
+        runtimeState.refreshCloudAvailabilityIfNeeded(accountService: accountService)
+        await waitForRuntimeRefresh(fetchCount: 1, accountService: accountService)
+
+        #expect(
+            runtimeState.cloudSyncErrorDescription?.contains("temporarily unavailable") == true
+        )
+        #expect(accountService.fetchCount == 1)
+
+        runtimeState.refreshCloudAvailabilityIfNeeded(accountService: accountService)
+        await waitForRuntimeRefresh(fetchCount: 2, accountService: accountService)
+
+        #expect(runtimeState.cloudSyncErrorDescription == nil)
+        #expect(accountService.fetchCount == 2)
+    }
+
+    @Test
+    func runtimeCloudAvailabilityStopsRetryingAfterDefinitiveAvailability() async {
+        let runtimeState = AppRuntimeState.makeTestingInstance()
+        runtimeState.updateCloudState(isEnabled: true, errorDescription: "temporary")
+        let accountService = MockRuntimeAccountStatusProvider(statuses: [
+            .available,
+            .unavailable(.unknown),
+        ])
+
+        runtimeState.refreshCloudAvailabilityIfNeeded(accountService: accountService)
+        await waitForRuntimeRefresh(fetchCount: 1, accountService: accountService)
+
+        runtimeState.refreshCloudAvailabilityIfNeeded(accountService: accountService)
+        await waitForRuntimeRefresh(fetchCount: 1, accountService: accountService)
+
+        #expect(runtimeState.cloudSyncErrorDescription == nil)
+        #expect(accountService.fetchCount == 1)
+    }
+
+    @Test
     func brosCloudAvailabilityTurnsOffWhenRuntimeErrorIsSet() {
         resetAppRuntimeState()
         defer { resetAppRuntimeState() }
@@ -1048,6 +1091,20 @@ struct WGJTests {
         AppRuntimeState.shared.updateLatestCloudSyncEvent(nil)
     }
 
+    private func waitForRuntimeRefresh(
+        fetchCount expectedFetchCount: Int,
+        accountService: MockRuntimeAccountStatusProvider
+    ) async {
+        for _ in 0..<20 {
+            if accountService.fetchCount >= expectedFetchCount {
+                break
+            }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        await Task.yield()
+    }
+
     private func makeInMemoryContext() throws -> ModelContext {
         let schema = Schema([
             ExerciseCatalogItem.self,
@@ -1113,5 +1170,23 @@ private struct MockCloudStartupAccountStatusProvider: CloudStartupAccountStatusP
     func currentStatus(timeout: TimeInterval) -> CloudStartupAccountStatus {
         _ = timeout
         return status
+    }
+}
+
+private final class MockRuntimeAccountStatusProvider: AccountStatusProviding {
+    private var statuses: [AccountStatus]
+    private(set) var fetchCount = 0
+
+    init(statuses: [AccountStatus]) {
+        self.statuses = statuses
+    }
+
+    func fetchAccountStatus() async -> AccountStatus {
+        fetchCount += 1
+        guard statuses.count > 1 else {
+            return statuses.first ?? .checking
+        }
+
+        return statuses.removeFirst()
     }
 }

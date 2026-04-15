@@ -138,7 +138,10 @@ final class BrosViewModel {
                 preservingPendingReactions: true
             )
         } catch {
-            state = .unavailable(error.localizedDescription)
+            errorMessage = error.localizedDescription
+            if !hasRenderableState {
+                state = .unavailable(error.localizedDescription)
+            }
         }
 
         if pendingOutboxHydration {

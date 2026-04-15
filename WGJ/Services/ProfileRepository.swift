@@ -195,11 +195,6 @@ nonisolated final class ProfileRepository {
     private func scheduleProfileSync() {
         let container = modelContext.container
         Task.detached(priority: .utility) {
-            let isBrosCloudAvailable = await MainActor.run {
-                AppRuntimeState.shared.isBrosCloudAvailable
-            }
-            guard isBrosCloudAvailable else { return }
-
             let backgroundContext = ModelContext(container)
             backgroundContext.autosaveEnabled = false
             try? CloudKitBrosSocialService(modelContext: backgroundContext)?
