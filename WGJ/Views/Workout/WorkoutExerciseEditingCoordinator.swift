@@ -2,7 +2,6 @@ import Foundation
 
 @MainActor
 final class WorkoutExerciseEditingCoordinator {
-    private let commitDebounce: Duration
     private let onDraftsCommitted: ([WorkoutSessionSetDraft]) -> Void
     private let onRestCommitted: (Int) -> Void
     private let onNotesCommitted: (String) -> Void
@@ -14,21 +13,23 @@ final class WorkoutExerciseEditingCoordinator {
     private var lastCommittedDrafts: [WorkoutSessionSetDraft]
     private var lastCommittedRestSeconds: Int
     private var lastCommittedNotes: String
-    private var pendingDraftCommitTask: Task<Void, Never>?
-    private var pendingRestCommitTask: Task<Void, Never>?
-    private var pendingNotesCommitTask: Task<Void, Never>?
+    private var hasDirtyDrafts = false
+    private var hasDirtyRestSeconds = false
+    private var hasDirtyNotes = false
+
+    var hasPendingChanges: Bool {
+        hasDirtyDrafts || hasDirtyRestSeconds || hasDirtyNotes
+    }
 
     init(
         setDrafts: [WorkoutSessionSetDraft],
         restSeconds: Int,
         notes: String,
-        commitDebounce: Duration = .milliseconds(120),
         onDraftsCommitted: @escaping ([WorkoutSessionSetDraft]) -> Void,
         onRestCommitted: @escaping (Int) -> Void,
         onNotesCommitted: @escaping (String) -> Void,
         onCompletionChanged: @escaping (UUID, String?, Int, Bool) -> Void
     ) {
-        self.commitDebounce = commitDebounce
         self.onDraftsCommitted = onDraftsCommitted
         self.onRestCommitted = onRestCommitted
         self.onNotesCommitted = onNotesCommitted
@@ -41,12 +42,6 @@ final class WorkoutExerciseEditingCoordinator {
         lastCommittedNotes = notes
     }
 
-    deinit {
-        pendingDraftCommitTask?.cancel()
-        pendingRestCommitTask?.cancel()
-        pendingNotesCommitTask?.cancel()
-    }
-
     func syncCommittedState(
         setDrafts: [WorkoutSessionSetDraft],
         restSeconds: Int,
@@ -55,48 +50,42 @@ final class WorkoutExerciseEditingCoordinator {
         lastCommittedDrafts = setDrafts
         lastCommittedRestSeconds = max(0, min(3600, restSeconds))
         lastCommittedNotes = notes
-        if pendingDraftCommitTask == nil {
+        if !hasDirtyDrafts {
             currentDrafts = setDrafts
         }
-        if pendingRestCommitTask == nil {
+        if !hasDirtyRestSeconds {
             currentRestSeconds = max(0, min(3600, restSeconds))
         }
-        if pendingNotesCommitTask == nil {
+        if !hasDirtyNotes {
             currentNotes = notes
         }
     }
 
-    func scheduleDraftCommit(_ drafts: [WorkoutSessionSetDraft]) {
+    func stageDrafts(_ drafts: [WorkoutSessionSetDraft]) {
         currentDrafts = drafts
-        pendingDraftCommitTask?.cancel()
-        pendingDraftCommitTask = Task { @MainActor in
-            try? await Task.sleep(for: commitDebounce)
-            guard !Task.isCancelled else { return }
-            pendingDraftCommitTask = nil
-            commitDraftsIfNeeded(currentDrafts)
-        }
+        hasDirtyDrafts = lastCommittedDrafts != drafts
+    }
+
+    func stageRestCommit(_ restSeconds: Int) {
+        currentRestSeconds = max(0, min(3600, restSeconds))
+        hasDirtyRestSeconds = lastCommittedRestSeconds != currentRestSeconds
+    }
+
+    func stageNotesCommit(_ notes: String) {
+        currentNotes = notes
+        hasDirtyNotes = lastCommittedNotes != notes
+    }
+
+    func scheduleDraftCommit(_ drafts: [WorkoutSessionSetDraft]) {
+        stageDrafts(drafts)
     }
 
     func scheduleRestCommit(_ restSeconds: Int) {
-        currentRestSeconds = max(0, min(3600, restSeconds))
-        pendingRestCommitTask?.cancel()
-        pendingRestCommitTask = Task { @MainActor in
-            try? await Task.sleep(for: commitDebounce)
-            guard !Task.isCancelled else { return }
-            pendingRestCommitTask = nil
-            commitRestIfNeeded(currentRestSeconds)
-        }
+        stageRestCommit(restSeconds)
     }
 
     func scheduleNotesCommit(_ notes: String) {
-        currentNotes = notes
-        pendingNotesCommitTask?.cancel()
-        pendingNotesCommitTask = Task { @MainActor in
-            try? await Task.sleep(for: commitDebounce)
-            guard !Task.isCancelled else { return }
-            pendingNotesCommitTask = nil
-            commitNotesIfNeeded(currentNotes)
-        }
+        stageNotesCommit(notes)
     }
 
     func requestImmediateCommit(
@@ -104,27 +93,19 @@ final class WorkoutExerciseEditingCoordinator {
         restSeconds: Int,
         notes: String
     ) {
-        if lastCommittedDrafts != setDrafts {
-            currentDrafts = setDrafts
+        if !hasDirtyDrafts || lastCommittedDrafts != setDrafts {
+            stageDrafts(setDrafts)
         }
-        let normalizedRestSeconds = max(0, min(3600, restSeconds))
-        if lastCommittedRestSeconds != normalizedRestSeconds {
-            currentRestSeconds = normalizedRestSeconds
+        if !hasDirtyRestSeconds || lastCommittedRestSeconds != max(0, min(3600, restSeconds)) {
+            stageRestCommit(restSeconds)
         }
-        if lastCommittedNotes != notes {
-            currentNotes = notes
+        if !hasDirtyNotes || lastCommittedNotes != notes {
+            stageNotesCommit(notes)
         }
         flushCommits()
     }
 
     func flushCommits() {
-        pendingDraftCommitTask?.cancel()
-        pendingDraftCommitTask = nil
-        pendingRestCommitTask?.cancel()
-        pendingRestCommitTask = nil
-        pendingNotesCommitTask?.cancel()
-        pendingNotesCommitTask = nil
-
         commitDraftsIfNeeded(currentDrafts)
         commitRestIfNeeded(currentRestSeconds)
         commitNotesIfNeeded(currentNotes)
@@ -140,27 +121,30 @@ final class WorkoutExerciseEditingCoordinator {
     }
 
     private func commitDraftsIfNeeded(_ drafts: [WorkoutSessionSetDraft]) {
-        guard lastCommittedDrafts != drafts else { return }
+        guard hasDirtyDrafts || lastCommittedDrafts != drafts else { return }
         WGJPerformance.measure("workout-row.commit.drafts") {
             onDraftsCommitted(drafts)
         }
         lastCommittedDrafts = drafts
+        hasDirtyDrafts = false
     }
 
     private func commitRestIfNeeded(_ restSeconds: Int) {
         let normalized = max(0, min(3600, restSeconds))
-        guard lastCommittedRestSeconds != normalized else { return }
+        guard hasDirtyRestSeconds || lastCommittedRestSeconds != normalized else { return }
         WGJPerformance.measure("workout-row.commit.rest") {
             onRestCommitted(normalized)
         }
         lastCommittedRestSeconds = normalized
+        hasDirtyRestSeconds = false
     }
 
     private func commitNotesIfNeeded(_ notes: String) {
-        guard lastCommittedNotes != notes else { return }
+        guard hasDirtyNotes || lastCommittedNotes != notes else { return }
         WGJPerformance.measure("workout-row.commit.notes") {
             onNotesCommitted(notes)
         }
         lastCommittedNotes = notes
+        hasDirtyNotes = false
     }
 }

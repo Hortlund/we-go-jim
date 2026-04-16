@@ -27,6 +27,7 @@ struct HistoryDetailView: View {
     @State private var expandedExerciseIDs: [UUID: Bool] = [:]
     @State private var hasPendingSummaryRebuild = false
     @State private var isSavingChanges = false
+    @State private var rowFlushCoordinator = WorkoutExerciseRowFlushCoordinator()
 
     @State private var showingExercisePicker = false
     @State private var showingArchiveConfirmation = false
@@ -455,7 +456,8 @@ struct HistoryDetailView: View {
                 onExpandedChanged: { handleExpandedChange($0, for: exercise.id) },
                 onExerciseDelete: {
                     removeExercise(exerciseID: exercise.id)
-                }
+                },
+                flushCoordinator: rowFlushCoordinator
             )
         } else {
             let collapsedSummary = HistoryExerciseCollapsedSummary(
@@ -594,6 +596,7 @@ struct HistoryDetailView: View {
             }
 
             do {
+                rowFlushCoordinator.flushAll()
                 let command = makeSaveCommand()
                 let didPersistChanges: Bool
                 if let appBackgroundStore {

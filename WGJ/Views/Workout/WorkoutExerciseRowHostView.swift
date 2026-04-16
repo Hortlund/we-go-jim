@@ -42,6 +42,7 @@ struct WorkoutExerciseRowHostView: View {
     let onExerciseMoveDown: (() -> Void)?
     let onExerciseMoveToPosition: (() -> Void)?
     let onExerciseDelete: (() -> Void)?
+    let flushCoordinator: WorkoutExerciseRowFlushCoordinator?
 
     @State private var localRestSeconds: Int
     @State private var localSetDrafts: [WorkoutSessionSetDraft]
@@ -89,7 +90,8 @@ struct WorkoutExerciseRowHostView: View {
         onExerciseMoveUp: (() -> Void)? = nil,
         onExerciseMoveDown: (() -> Void)? = nil,
         onExerciseMoveToPosition: (() -> Void)? = nil,
-        onExerciseDelete: (() -> Void)? = nil
+        onExerciseDelete: (() -> Void)? = nil,
+        flushCoordinator: WorkoutExerciseRowFlushCoordinator? = nil
     ) {
         self.exerciseID = exerciseID
         self.exerciseAccessibilityIdentifier = exerciseAccessibilityIdentifier
@@ -132,6 +134,7 @@ struct WorkoutExerciseRowHostView: View {
         self.onExerciseMoveDown = onExerciseMoveDown
         self.onExerciseMoveToPosition = onExerciseMoveToPosition
         self.onExerciseDelete = onExerciseDelete
+        self.flushCoordinator = flushCoordinator
         self._localRestSeconds = State(initialValue: restSeconds)
         self._localSetDrafts = State(initialValue: setDrafts)
         self._localExerciseNotes = State(initialValue: exerciseNotes)
@@ -168,21 +171,21 @@ struct WorkoutExerciseRowHostView: View {
                 get: { localExerciseNotes },
                 set: { updated in
                     localExerciseNotes = updated
-                    editingCoordinator.scheduleNotesCommit(updated)
+                    editingCoordinator.stageNotesCommit(updated)
                 }
             ),
             restSeconds: Binding(
                 get: { localRestSeconds },
                 set: { updated in
                     localRestSeconds = updated
-                    editingCoordinator.scheduleRestCommit(updated)
+                    editingCoordinator.stageRestCommit(updated)
                 }
             ),
             setDrafts: Binding(
                 get: { localSetDrafts },
                 set: { updated in
                     localSetDrafts = updated
-                    editingCoordinator.scheduleDraftCommit(updated)
+                    editingCoordinator.stageDrafts(updated)
                 }
             ),
             isExpanded: Binding(
@@ -251,21 +254,17 @@ struct WorkoutExerciseRowHostView: View {
         }
         .onDisappear {
             flushPendingEditsIfNeeded()
+            flushCoordinator?.unregister(exerciseID: exerciseID)
+        }
+        .onAppear {
+            flushCoordinator?.register(exerciseID: exerciseID) {
+                flushPendingEditsIfNeeded()
+            }
         }
     }
 
     private func flushPendingEditsIfNeeded() {
-        guard
-            localSetDrafts != setDrafts
-                || localRestSeconds != restSeconds
-                || localExerciseNotes != exerciseNotes
-        else {
-            return
-        }
-        editingCoordinator.requestImmediateCommit(
-            setDrafts: localSetDrafts,
-            restSeconds: localRestSeconds,
-            notes: localExerciseNotes
-        )
+        guard editingCoordinator.hasPendingChanges else { return }
+        editingCoordinator.flushCommits()
     }
 }

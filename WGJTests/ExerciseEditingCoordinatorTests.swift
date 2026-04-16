@@ -5,9 +5,9 @@ import Testing
 @MainActor
 struct ExerciseEditingCoordinatorTests {
     @Test
-    func workoutCoordinatorDebouncesDraftCommitsToLatestValue() async {
+    func workoutCoordinatorStagesDraftsLocallyUntilFlushed() {
         let initialDraft = WorkoutSessionSetDraft(targetReps: 8, targetWeight: 100, targetLoadUnit: .kg)
-        let updatedDraft = WorkoutSessionSetDraft(
+        let stagedDraft = WorkoutSessionSetDraft(
             id: initialDraft.id,
             targetReps: 8,
             targetWeight: 100,
@@ -16,38 +16,27 @@ struct ExerciseEditingCoordinatorTests {
             actualWeight: 120,
             actualLoadUnit: .kg
         )
-        let latestDraft = WorkoutSessionSetDraft(
-            id: initialDraft.id,
-            targetReps: 8,
-            targetWeight: 100,
-            targetLoadUnit: .kg,
-            actualReps: 5,
-            actualWeight: 125,
-            actualLoadUnit: .kg
-        )
 
         var committedDrafts: [[WorkoutSessionSetDraft]] = []
         let coordinator = WorkoutExerciseEditingCoordinator(
             setDrafts: [initialDraft],
             restSeconds: 120,
             notes: "",
-            commitDebounce: .milliseconds(10),
             onDraftsCommitted: { committedDrafts.append($0) },
             onRestCommitted: { _ in },
             onNotesCommitted: { _ in },
             onCompletionChanged: { _, _, _, _ in }
         )
 
-        coordinator.scheduleDraftCommit([updatedDraft])
-        coordinator.scheduleDraftCommit([latestDraft])
+        coordinator.stageDrafts([stagedDraft])
 
-        for _ in 0..<20 where committedDrafts.isEmpty {
-            try? await Task.sleep(for: .milliseconds(50))
-            await Task.yield()
-        }
+        #expect(coordinator.hasPendingChanges)
+        #expect(committedDrafts.isEmpty)
 
-        #expect(committedDrafts.count == 1)
-        #expect(committedDrafts.first == [latestDraft])
+        coordinator.flushCommits()
+
+        #expect(committedDrafts == [[stagedDraft]])
+        #expect(!coordinator.hasPendingChanges)
     }
 
     @Test
@@ -75,12 +64,13 @@ struct ExerciseEditingCoordinatorTests {
             onCompletionChanged: { _, _, _, _ in }
         )
 
-        coordinator.scheduleDraftCommit([updatedDraft])
-        coordinator.scheduleRestCommit(150)
+        coordinator.stageDrafts([updatedDraft])
+        coordinator.stageRestCommit(150)
         coordinator.requestImmediateCommit(setDrafts: [updatedDraft], restSeconds: 150, notes: "")
 
         #expect(committedDrafts == [[updatedDraft]])
         #expect(committedRests == [150])
+        #expect(!coordinator.hasPendingChanges)
     }
 
     @Test
@@ -108,10 +98,69 @@ struct ExerciseEditingCoordinatorTests {
             onCompletionChanged: { _, _, _, _ in }
         )
 
-        coordinator.scheduleDraftCommit([bozarResolvedDraft])
+        coordinator.stageDrafts([bozarResolvedDraft])
         coordinator.requestImmediateCommit(setDrafts: [initialDraft], restSeconds: 120, notes: "")
 
         #expect(committedDrafts == [[bozarResolvedDraft]])
+    }
+
+    @Test
+    func workoutCoordinatorFlushesNotesOnlyWhenRequested() {
+        var committedNotes: [String] = []
+        let coordinator = WorkoutExerciseEditingCoordinator(
+            setDrafts: [],
+            restSeconds: 120,
+            notes: "",
+            onDraftsCommitted: { _ in },
+            onRestCommitted: { _ in },
+            onNotesCommitted: { committedNotes.append($0) },
+            onCompletionChanged: { _, _, _, _ in }
+        )
+
+        coordinator.stageNotesCommit("Pause and squeeze.")
+
+        #expect(coordinator.hasPendingChanges)
+        #expect(committedNotes.isEmpty)
+
+        coordinator.flushCommits()
+
+        #expect(committedNotes == ["Pause and squeeze."])
+        #expect(!coordinator.hasPendingChanges)
+    }
+
+    @Test
+    func workoutCoordinatorOnlyMarksPendingWritesAfterFlush() {
+        let exerciseID = UUID()
+        let initialDraft = WorkoutSessionSetDraft(targetReps: 8, targetWeight: 100, targetLoadUnit: .kg)
+        let updatedDraft = WorkoutSessionSetDraft(
+            id: initialDraft.id,
+            targetReps: 8,
+            targetWeight: 100,
+            targetLoadUnit: .kg,
+            actualReps: 8,
+            actualWeight: 120,
+            actualLoadUnit: .kg
+        )
+
+        var pendingWrites = ActiveWorkoutPendingWrites()
+        let coordinator = WorkoutExerciseEditingCoordinator(
+            setDrafts: [initialDraft],
+            restSeconds: 120,
+            notes: "",
+            onDraftsCommitted: { _ in pendingWrites.markExerciseDirty(exerciseID) },
+            onRestCommitted: { _ in },
+            onNotesCommitted: { _ in },
+            onCompletionChanged: { _, _, _, _ in }
+        )
+
+        coordinator.stageDrafts([updatedDraft])
+
+        #expect(!pendingWrites.hasDirtyWrites)
+
+        coordinator.flushCommits()
+
+        #expect(pendingWrites.hasDirtyWrites)
+        #expect(pendingWrites.dirtyExerciseIDs(validIDs: Set([exerciseID])) == Set([exerciseID]))
     }
 
     @Test

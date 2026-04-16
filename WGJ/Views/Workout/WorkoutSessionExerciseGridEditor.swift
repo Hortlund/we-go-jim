@@ -1398,6 +1398,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                 repsInputTextBySetID[setID] = newValue
                 let cleaned = newValue.filter(\.isNumber)
                 let updatedReps = cleaned.isEmpty ? nil : Int(cleaned)
+                suppressNextSetDraftsDisplayRefresh = true
 
                 if setDrafts[index].actualReps != updatedReps {
                     setDrafts[index].actualReps = updatedReps
@@ -1434,6 +1435,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                 weightInputTextBySetID[setID] = newValue
                 let normalized = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
                 let updatedWeight: Double?
+                suppressNextSetDraftsDisplayRefresh = true
 
                 if normalized.isEmpty {
                     updatedWeight = nil
@@ -2137,7 +2139,11 @@ struct WorkoutSessionExerciseGridEditor: View {
             suppressNextFocusLossCommit = false
         }
         if newFocus == nil {
-            flushPendingDisplayRefresh()
+            pendingDisplayRefreshTask?.cancel()
+            pendingDisplayRefreshTask = nil
+            if isExpanded {
+                refreshDisplayRows()
+            }
         }
     }
 

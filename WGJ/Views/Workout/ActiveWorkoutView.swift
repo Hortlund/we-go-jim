@@ -26,6 +26,8 @@ struct ActiveWorkoutView: View {
     @State private var notesByExerciseID: [UUID: String] = [:]
     @State private var lastPersistedExerciseStateByID: [UUID: ActiveWorkoutExercisePersistenceSnapshot] = [:]
     @State private var pendingWrites = ActiveWorkoutPendingWrites()
+    @State private var rowFlushCoordinator = WorkoutExerciseRowFlushCoordinator()
+    @State private var suppressExerciseCheckpointScheduling = false
 
     @State private var previousResolutionByExerciseID: [UUID: WorkoutPreviousPerformanceResolution] = [:]
     @State private var componentResolutionByExerciseID: [UUID: ExerciseComponentRotationResolution] = [:]
@@ -669,7 +671,8 @@ struct ActiveWorkoutView: View {
             } : nil,
             onExerciseDelete: {
                 removeExercise(exerciseID: exerciseID)
-            }
+            },
+            flushCoordinator: rowFlushCoordinator
         )
         .id(ActiveWorkoutScrollTarget.exercise(exerciseID))
         .transition(exerciseCardTransition)
@@ -715,7 +718,7 @@ struct ActiveWorkoutView: View {
         guard setDraftsByExerciseID[exerciseID] != updated else { return }
         setDraftsByExerciseID[exerciseID] = updated
         pendingWrites.markExerciseDirty(exerciseID)
-        scheduleCheckpointFlush(checkpoint: .coalesced)
+        scheduleExerciseCheckpointFlushIfNeeded()
         refreshGuidance(for: exerciseID)
     }
 
@@ -725,7 +728,7 @@ struct ActiveWorkoutView: View {
         guard restByExerciseID[exerciseID] != normalized else { return }
         restByExerciseID[exerciseID] = normalized
         pendingWrites.markExerciseDirty(exerciseID)
-        scheduleCheckpointFlush(checkpoint: .coalesced)
+        scheduleExerciseCheckpointFlushIfNeeded()
     }
 
     @MainActor
@@ -733,6 +736,12 @@ struct ActiveWorkoutView: View {
         guard notesByExerciseID[exerciseID] != updated else { return }
         notesByExerciseID[exerciseID] = updated
         pendingWrites.markExerciseDirty(exerciseID)
+        scheduleExerciseCheckpointFlushIfNeeded()
+    }
+
+    @MainActor
+    private func scheduleExerciseCheckpointFlushIfNeeded() {
+        guard !suppressExerciseCheckpointScheduling else { return }
         scheduleCheckpointFlush(checkpoint: .coalesced)
     }
 
@@ -1711,8 +1720,14 @@ struct ActiveWorkoutView: View {
         exerciseSettingsDraft = nil
         exerciseComponentPickerDraft = nil
         pendingTemplateUpdatePreview = nil
-        workoutCompletionPresentationState.queueAfterActiveWorkoutDismiss(sessionID: completedSessionID ?? sessionID)
+        let completionSessionID = completedSessionID ?? sessionID
+        workoutCompletionPresentationState.queueAfterActiveWorkoutDismiss(sessionID: completionSessionID)
         activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
+        Task { @MainActor in
+            await Task.yield()
+            workoutCompletionPresentationState.presentQueuedIfNeeded()
+        }
+        dismiss()
     }
 
     private func minimizeWorkout() {
@@ -2175,6 +2190,10 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func makeCheckpointCommand(for checkpoint: ActiveWorkoutWriteCheckpoint) -> ActiveWorkoutCheckpointCommand? {
+        suppressExerciseCheckpointScheduling = true
+        rowFlushCoordinator.flushAll()
+        suppressExerciseCheckpointScheduling = false
+
         guard pendingWrites.hasDirtyWrites else { return nil }
         guard session != nil else {
             pendingWrites = ActiveWorkoutPendingWrites()
@@ -2966,11 +2985,13 @@ private struct ActiveWorkoutSaveTemplateSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Skip", action: onSkip)
+                        .accessibilityIdentifier("active-workout-template-skip-button")
                 }
 
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save", action: onSave)
                         .disabled(templateNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .accessibilityIdentifier("active-workout-template-save-button")
                 }
             }
         }

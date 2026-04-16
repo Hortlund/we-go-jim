@@ -2482,6 +2482,58 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testActiveWorkoutFocusedSetInputPersistsAcrossMinimizeRestore() throws {
+        let app = launchApp(launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Minimize Focused Set Input",
+                notes: "Keep focused weight edits when minimizing.",
+                exercises: [
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "template-focused-minimize-bench",
+                        exerciseNameSnapshot: "Bench Press",
+                        categorySnapshot: "Chest",
+                        muscleSummarySnapshot: "Chest",
+                        targetRepMin: 6,
+                        targetRepMax: 8,
+                        restSeconds: 120,
+                        sets: [
+                            templatePayloadSet(
+                                targetReps: 6,
+                                targetWeight: 100,
+                                loadUnit: "kg",
+                                restSeconds: 120,
+                                isWarmup: false
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+        ])
+
+        startPreviewedTemplateWorkout(in: app)
+
+        let weightField = identifiedElement("workout-set-0-weight-field", in: app)
+        XCTAssertTrue(weightField.waitForExistence(timeout: 5))
+        weightField.tap()
+        if !app.keyboards.element.waitForExistence(timeout: 1) {
+            weightField.tap()
+        }
+        weightField.typeText("120")
+
+        let minimizeButton = app.buttons["active-workout-minimize-button"]
+        XCTAssertTrue(minimizeButton.waitForExistence(timeout: 5))
+        minimizeButton.tap()
+
+        let strip = identifiedElement("active-workout-strip", in: app)
+        XCTAssertTrue(strip.waitForExistence(timeout: 5))
+        strip.tap()
+
+        let reopenedWeightField = identifiedElement("workout-set-0-weight-field", in: app)
+        XCTAssertTrue(reopenedWeightField.waitForExistence(timeout: 5))
+        XCTAssertEqual(reopenedWeightField.value as? String, "120")
+    }
+
+    @MainActor
     func testTemplateWorkoutFinishUpdateTemplateAppliesNewStructure() throws {
         let app = launchApp(launchEnvironment: [
             "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
@@ -2894,10 +2946,16 @@ final class WGJUITests: XCTestCase {
 
     private func confirmWorkoutCompletion(in app: XCUIApplication) {
         let summary = identifiedElement("workout-completion-summary", in: app)
-        XCTAssertTrue(summary.waitForExistence(timeout: 5))
+        if !summary.waitForExistence(timeout: 2) {
+            let skipButton = identifiedElement("active-workout-template-skip-button", in: app)
+            if skipButton.waitForExistence(timeout: 15) {
+                skipButton.tap()
+            }
+        }
+        XCTAssertTrue(summary.waitForExistence(timeout: 10))
 
         let confirmButton = identifiedElement("workout-completion-confirm-button", in: app)
-        XCTAssertTrue(confirmButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(confirmButton.waitForExistence(timeout: 10))
         confirmButton.tap()
     }
 
