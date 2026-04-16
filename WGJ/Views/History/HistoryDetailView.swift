@@ -22,6 +22,7 @@ struct HistoryDetailView: View {
     @State private var restByExerciseID: [UUID: Int] = [:]
     @State private var notesByExerciseID: [UUID: String] = [:]
     @State private var hydrationPayloadByExerciseID: [UUID: HistoryExerciseHydrationPayload] = [:]
+    @State private var personalRecordPresentationByExerciseID: [UUID: HistoryExercisePersonalRecordPresentation] = [:]
     @State private var loadedExerciseStateStamp: HistoryExerciseStateStamp?
     @State private var deferredHydrationTask: Task<Void, Never>?
     @State private var expandedExerciseIDs: [UUID: Bool] = [:]
@@ -347,6 +348,35 @@ struct HistoryDetailView: View {
             }
         }
 
+        let personalRecordPresentationByExerciseID: [UUID: HistoryExercisePersonalRecordPresentation]
+        let currentExerciseIDs = currentStamp.exerciseIDs
+        do {
+            if let appBackgroundStore {
+                personalRecordPresentationByExerciseID = try await appBackgroundStore.perform(
+                    "history-detail.hydrate.pr"
+                ) { backgroundContext in
+                    let achievements = try WorkoutMetricsService(modelContext: backgroundContext)
+                        .sessionSetPRAchievements(sessionID: sessionID)
+                    return HistoryExercisePersonalRecordPresentation.presentationsByExerciseID(
+                        from: achievements,
+                        exerciseIDs: currentExerciseIDs
+                    )
+                }
+            } else {
+                let achievements = try WorkoutMetricsService(modelContext: modelContext)
+                    .sessionSetPRAchievements(sessionID: sessionID)
+                personalRecordPresentationByExerciseID = HistoryExercisePersonalRecordPresentation
+                    .presentationsByExerciseID(
+                        from: achievements,
+                        exerciseIDs: currentExerciseIDs
+                    )
+            }
+        } catch {
+            showError(error)
+            return
+        }
+
+        self.personalRecordPresentationByExerciseID = personalRecordPresentationByExerciseID
         hydrationPayloadByExerciseID = hydrationPayloadByExerciseID.filter {
             currentStamp.exerciseIDs.contains($0.key)
         }
@@ -372,7 +402,8 @@ struct HistoryDetailView: View {
                             modelContext: backgroundContext,
                             sessionID: sessionID,
                             exerciseIDs: eagerlyHydratedExerciseIDs,
-                            draftsByExerciseID: eagerDraftsByExerciseID
+                            draftsByExerciseID: eagerDraftsByExerciseID,
+                            personalRecordPresentationByExerciseID: personalRecordPresentationByExerciseID
                         )
                     }
                 } else {
@@ -380,7 +411,8 @@ struct HistoryDetailView: View {
                         modelContext: modelContext,
                         sessionID: sessionID,
                         exerciseIDs: eagerlyHydratedExerciseIDs,
-                        draftsByExerciseID: eagerDraftsByExerciseID
+                        draftsByExerciseID: eagerDraftsByExerciseID,
+                        personalRecordPresentationByExerciseID: personalRecordPresentationByExerciseID
                     )
                 }
 
@@ -394,7 +426,8 @@ struct HistoryDetailView: View {
         loadedExerciseStateStamp = currentStamp
         scheduleDeferredHydration(
             for: currentStamp,
-            draftsByExerciseID: setDraftsByExerciseID
+            draftsByExerciseID: setDraftsByExerciseID,
+            personalRecordPresentationByExerciseID: personalRecordPresentationByExerciseID
         )
     }
 
@@ -490,7 +523,8 @@ struct HistoryDetailView: View {
     @MainActor
     private func scheduleDeferredHydration(
         for stamp: HistoryExerciseStateStamp,
-        draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
+        draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]],
+        personalRecordPresentationByExerciseID: [UUID: HistoryExercisePersonalRecordPresentation]
     ) {
         let exerciseIDsToHydrate = HistoryExerciseHydrationPlanner.pendingExerciseIDs(
             orderedExerciseIDs: sessionExercises.map(\.id),
@@ -517,7 +551,8 @@ struct HistoryDetailView: View {
                             modelContext: backgroundContext,
                             sessionID: sessionID,
                             exerciseIDs: exerciseIDsToHydrate,
-                            draftsByExerciseID: draftsByExerciseID
+                            draftsByExerciseID: draftsByExerciseID,
+                            personalRecordPresentationByExerciseID: personalRecordPresentationByExerciseID
                         )
                     }
                 } else {
@@ -525,7 +560,8 @@ struct HistoryDetailView: View {
                         modelContext: modelContext,
                         sessionID: sessionID,
                         exerciseIDs: exerciseIDsToHydrate,
-                        draftsByExerciseID: draftsByExerciseID
+                        draftsByExerciseID: draftsByExerciseID,
+                        personalRecordPresentationByExerciseID: personalRecordPresentationByExerciseID
                     )
                 }
             } catch {
@@ -544,7 +580,8 @@ struct HistoryDetailView: View {
         modelContext: ModelContext,
         sessionID: UUID,
         exerciseIDs: Set<UUID>,
-        draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
+        draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]],
+        personalRecordPresentationByExerciseID: [UUID: HistoryExercisePersonalRecordPresentation]
     ) throws -> [UUID: HistoryExerciseHydrationPayload] {
         guard !exerciseIDs.isEmpty else { return [:] }
 
@@ -562,12 +599,6 @@ struct HistoryDetailView: View {
             excludingSessionID: sessionID
         )
 
-        let personalRecordsByExerciseID = try Self.loadPersonalRecordPresentation(
-            modelContext: modelContext,
-            sessionID: sessionID,
-            for: exerciseIDs
-        )
-
         var payloadByExerciseID: [UUID: HistoryExerciseHydrationPayload] = [:]
         payloadByExerciseID.reserveCapacity(targetExercises.count)
 
@@ -578,7 +609,7 @@ struct HistoryDetailView: View {
                 previousPerformanceResolution: .resolved(
                     Self.resolvedPreviousMap(baseMap: base, maxSetCount: drafts.count)
                 ),
-                personalRecords: personalRecordsByExerciseID[exercise.id]
+                personalRecords: personalRecordPresentationByExerciseID[exercise.id]
                     ?? HistoryExercisePersonalRecordPresentation(summaryKinds: [], setKindsBySetID: [:])
             )
         }
@@ -692,35 +723,6 @@ struct HistoryDetailView: View {
         notesByExerciseID.removeValue(forKey: exerciseID)
     }
 
-    nonisolated private static func loadPersonalRecordPresentation(
-        modelContext: ModelContext,
-        sessionID: UUID,
-        for exerciseIDs: Set<UUID>
-    ) throws -> [UUID: HistoryExercisePersonalRecordPresentation] {
-        guard !exerciseIDs.isEmpty else { return [:] }
-        let achievements = try WorkoutMetricsService(modelContext: modelContext)
-            .sessionSetPRAchievements(sessionID: sessionID)
-
-        var groupedSetKindsByExerciseID: [UUID: [UUID: [WorkoutPersonalRecordKind]]] = [:]
-        var groupedSummaryKindsByExerciseID: [UUID: Set<WorkoutPersonalRecordKind>] = [:]
-
-        for achievement in achievements where exerciseIDs.contains(achievement.sessionExerciseID) {
-            groupedSetKindsByExerciseID[achievement.sessionExerciseID, default: [:]][achievement.setID] = achievement.kinds
-            groupedSummaryKindsByExerciseID[achievement.sessionExerciseID, default: []].formUnion(achievement.kinds)
-        }
-
-        var presentationByExerciseID: [UUID: HistoryExercisePersonalRecordPresentation] = [:]
-        presentationByExerciseID.reserveCapacity(exerciseIDs.count)
-        for exerciseID in exerciseIDs {
-            presentationByExerciseID[exerciseID] = HistoryExercisePersonalRecordPresentation(
-                summaryKinds: Array(groupedSummaryKindsByExerciseID[exerciseID, default: []]).sorted(),
-                setKindsBySetID: groupedSetKindsByExerciseID[exerciseID, default: [:]]
-            )
-        }
-
-        return presentationByExerciseID
-    }
-
     nonisolated private static func orderedSessionSets(for exercise: WorkoutSessionExercise) -> [WorkoutSessionSet] {
         (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
     }
@@ -760,7 +762,8 @@ struct HistoryDetailView: View {
         guard updated, let loadedExerciseStateStamp else { return }
         scheduleDeferredHydration(
             for: loadedExerciseStateStamp,
-            draftsByExerciseID: setDraftsByExerciseID
+            draftsByExerciseID: setDraftsByExerciseID,
+            personalRecordPresentationByExerciseID: personalRecordPresentationByExerciseID
         )
     }
 
@@ -973,12 +976,40 @@ private struct HistoryExerciseStateStamp: Hashable {
     }
 }
 
-private struct HistoryExercisePersonalRecordPresentation: Equatable, Sendable {
+nonisolated struct HistoryExercisePersonalRecordPresentation: Equatable, Sendable {
     let summaryKinds: [WorkoutPersonalRecordKind]
     let setKindsBySetID: [UUID: [WorkoutPersonalRecordKind]]
 
     var highlightedSetCount: Int {
         setKindsBySetID.count
+    }
+
+    static func presentationsByExerciseID(
+        from achievements: [SessionSetPRAchievement],
+        exerciseIDs: Set<UUID>
+    ) -> [UUID: HistoryExercisePersonalRecordPresentation] {
+        guard !exerciseIDs.isEmpty else { return [:] }
+
+        var groupedSetKindsByExerciseID: [UUID: [UUID: [WorkoutPersonalRecordKind]]] = [:]
+        var groupedSummaryKindsByExerciseID: [UUID: Set<WorkoutPersonalRecordKind>] = [:]
+
+        for achievement in achievements where exerciseIDs.contains(achievement.sessionExerciseID) {
+            var setKinds = groupedSetKindsByExerciseID[achievement.sessionExerciseID, default: [:]]
+            setKinds[achievement.setID] = achievement.kinds
+            groupedSetKindsByExerciseID[achievement.sessionExerciseID] = setKinds
+            groupedSummaryKindsByExerciseID[achievement.sessionExerciseID, default: []].formUnion(achievement.kinds)
+        }
+
+        var presentationByExerciseID: [UUID: HistoryExercisePersonalRecordPresentation] = [:]
+        presentationByExerciseID.reserveCapacity(exerciseIDs.count)
+        for exerciseID in exerciseIDs {
+            presentationByExerciseID[exerciseID] = HistoryExercisePersonalRecordPresentation(
+                summaryKinds: Array(groupedSummaryKindsByExerciseID[exerciseID, default: []]).sorted(),
+                setKindsBySetID: groupedSetKindsByExerciseID[exerciseID, default: [:]]
+            )
+        }
+
+        return presentationByExerciseID
     }
 }
 

@@ -44,13 +44,17 @@ nonisolated final class ProfileRepository {
         cloudSyncEnabled: Bool,
         defaultDisplayNameProvider: (any ProfileDefaultDisplayNameProviding)? = nil
     ) async throws -> UserProfile {
-        let defaultDisplayNameProvider = defaultDisplayNameProvider ?? ICloudProfileDefaultDisplayNameProvider()
-        let preferredDisplayName = await resolvedDefaultDisplayName(
-            cloudSyncEnabled: cloudSyncEnabled,
-            defaultDisplayNameProvider: defaultDisplayNameProvider
-        )
-
         if let existing = try currentProfile() {
+            guard shouldAttemptCloudDisplayNameUpgrade(for: existing, cloudSyncEnabled: cloudSyncEnabled) else {
+                return existing
+            }
+
+            let defaultDisplayNameProvider = defaultDisplayNameProvider ?? ICloudProfileDefaultDisplayNameProvider()
+            let preferredDisplayName = await resolvedDefaultDisplayName(
+                cloudSyncEnabled: cloudSyncEnabled,
+                defaultDisplayNameProvider: defaultDisplayNameProvider
+            )
+
             guard shouldReplaceDefaultDisplayName(for: existing, with: preferredDisplayName) else {
                 return existing
             }
@@ -62,6 +66,11 @@ nonisolated final class ProfileRepository {
             return existing
         }
 
+        let defaultDisplayNameProvider = defaultDisplayNameProvider ?? ICloudProfileDefaultDisplayNameProvider()
+        let preferredDisplayName = await resolvedDefaultDisplayName(
+            cloudSyncEnabled: cloudSyncEnabled,
+            defaultDisplayNameProvider: defaultDisplayNameProvider
+        )
         let profile = UserProfile(displayName: preferredDisplayName)
         modelContext.insert(profile)
         try saveUserDataChanges()
@@ -185,6 +194,18 @@ nonisolated final class ProfileRepository {
         }
 
         return currentName != preferredDisplayName
+    }
+
+    private func shouldAttemptCloudDisplayNameUpgrade(
+        for profile: UserProfile,
+        cloudSyncEnabled: Bool
+    ) -> Bool {
+        guard cloudSyncEnabled else {
+            return false
+        }
+
+        let currentName = profile.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return currentName.isEmpty || currentName == Self.localDefaultDisplayName
     }
 
     private func saveUserDataChanges() throws {

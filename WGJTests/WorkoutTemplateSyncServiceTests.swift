@@ -113,6 +113,61 @@ struct WorkoutTemplateSyncServiceTests {
     }
 
     @Test
+    func previewDoesNotMutateTemplateStructureBeforeApply() throws {
+        let context = try makeInMemoryContext()
+        let templateRepository = TemplateRepository(modelContext: context)
+        let sessionRepository = WorkoutSessionRepository(modelContext: context)
+        let syncService = WorkoutTemplateSyncService(modelContext: context)
+
+        let bench = catalogItem(
+            remoteUUID: "sync-keep-bench-structure",
+            displayName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell"
+        )
+        context.insert(bench)
+
+        let template = try makeTemplate(
+            name: "Keep Structure",
+            exercises: [
+                TemplateExerciseDraft(
+                    catalogExerciseUUID: bench.remoteUUID,
+                    exerciseNameSnapshot: bench.displayName,
+                    categorySnapshot: bench.categoryName,
+                    muscleSummarySnapshot: bench.primaryMuscleNames,
+                    targetRepMin: 6,
+                    targetRepMax: 8,
+                    restSeconds: 120,
+                    setDrafts: [
+                        TemplateExerciseSetDraft(
+                            targetReps: 6,
+                            targetWeight: 100,
+                            loadUnit: .kg,
+                            restSeconds: 120,
+                            isWarmup: true
+                        ),
+                    ]
+                ),
+            ],
+            repository: templateRepository
+        )
+
+        let session = try sessionRepository.createSessionFromTemplate(templateID: template.id)
+        let exercise = try #require(try sessionRepository.sessionExercises(sessionID: session.id).first)
+        try sessionRepository.addSet(sessionExerciseID: exercise.id)
+        try sessionRepository.finishSession(sessionID: session.id)
+
+        let preview = try #require(try syncService.previewTemplateUpdate(forSessionID: session.id))
+        let editedExercise = try #require(preview.editedExercises.first)
+        #expect(editedExercise.changes.contains(where: { $0.contains("Set count") }))
+        #expect(preview.mutation.exercises.first?.setDrafts.count == 2)
+
+        let templateExercise = try #require(try templateRepository.exercises(in: template.id).first)
+        let templateSetDrafts = try templateRepository.setDrafts(for: templateExercise.id)
+        #expect(templateSetDrafts.count == 1)
+    }
+
+    @Test
     func previewAndApplyTemplateUpdateHandleWorkoutNoteOnlyChanges() throws {
         let context = try makeInMemoryContext()
         let templateRepository = TemplateRepository(modelContext: context)

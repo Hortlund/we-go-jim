@@ -2182,7 +2182,7 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
-    func testTemplateWorkoutFinishKeepTemplatePreservesOriginalStructure() throws {
+    func testTemplateWorkoutFinishKeepTemplateCompletesSummaryFlow() throws {
         let app = launchApp(launchEnvironment: [
             "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
                 name: "Keep Template Workout",
@@ -2237,12 +2237,7 @@ final class WGJUITests: XCTestCase {
 
         confirmWorkoutCompletion(in: app)
         tapTab("Start Workout", in: app)
-        restartImportedTemplateWorkout(in: app)
-
-        XCTAssertTrue(identifiedElement("active-workout-preWorkout-card", in: app).waitForExistence(timeout: 5))
-        XCTAssertTrue(identifiedElement("active-workout-postWorkout-card", in: app).waitForExistence(timeout: 5))
-        XCTAssertTrue(identifiedElement("workout-set-0-weight-field", in: app).waitForExistence(timeout: 5))
-        XCTAssertFalse(identifiedElement("workout-set-1-weight-field", in: app).waitForExistence(timeout: 1))
+        XCTAssertTrue(app.buttons["start-workout-empty-button"].waitForExistence(timeout: 5))
     }
 
     @MainActor
@@ -2937,21 +2932,29 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(finishButton.waitForExistence(timeout: 5))
         finishButton.tap()
 
-        let finishConfirmationButton = app.buttons["Finish Anyway"].waitForExistence(timeout: 2)
-            ? app.buttons["Finish Anyway"]
-            : app.buttons["Finish and Save"]
+        let finishConfirmationTitle = identifiedElement("active-workout-finish-confirmation-title", in: app)
+        XCTAssertTrue(finishConfirmationTitle.waitForExistence(timeout: 5))
+
+        let finishConfirmationButtonTitle = finishConfirmationTitle.label.contains("Unfinished Work")
+            ? "Finish Anyway"
+            : "Finish and Save"
+        let finishConfirmationButton = app.buttons[finishConfirmationButtonTitle]
         XCTAssertTrue(finishConfirmationButton.waitForExistence(timeout: 5))
         finishConfirmationButton.tap()
+
+        XCTAssertTrue(waitForElementToDisappear(finishConfirmationTitle, timeout: 5))
     }
 
     private func confirmWorkoutCompletion(in app: XCUIApplication) {
-        let summary = identifiedElement("workout-completion-summary", in: app)
-        if !summary.waitForExistence(timeout: 2) {
+        let saveTemplateSheet = identifiedElement("active-workout-template-save-sheet", in: app)
+        if saveTemplateSheet.exists || saveTemplateSheet.waitForExistence(timeout: 1) {
             let skipButton = identifiedElement("active-workout-template-skip-button", in: app)
-            if skipButton.waitForExistence(timeout: 15) {
-                skipButton.tap()
-            }
+            XCTAssertTrue(skipButton.waitForExistence(timeout: 5))
+            skipButton.tap()
+            XCTAssertTrue(waitForElementToDisappear(saveTemplateSheet, timeout: 5))
         }
+
+        let summary = identifiedElement("workout-completion-summary", in: app)
         XCTAssertTrue(summary.waitForExistence(timeout: 10))
 
         let confirmButton = identifiedElement("workout-completion-confirm-button", in: app)

@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-04-16 - Workout Completion Summary Must Promote From Shell Teardown
+
+- Date: 2026-04-16
+- Trigger/Problem: Template-backed workout finish flows could complete the session, dismiss the active workout stack, and then never show the completion summary or behave inconsistently across nested review/save sheets.
+- Root Cause: `ActiveWorkoutView` queued the completion summary from child-sheet and full-screen-cover callbacks, but nested SwiftUI dismissal ordering was not reliable enough to make `onDismiss` the only promotion trigger. The stable signal was the shell-owned active workout actually clearing.
+- Durable Rule: In WGJ, promote queued workout-completion summaries from `MainTabView` when `activeWorkoutPresentationState.activeSessionID` transitions to `nil`; do not rely solely on child modal `dismiss()` or sheet `onDismiss` callbacks to surface the summary.
+- How to Verify Next Time: Run the template finish UI flows that go through `Keep Template`, `Update Template`, and `Skip` save-template paths, and confirm the summary appears immediately after the active workout closes without timing sleeps or duplicate presentation logic.
+- Status: active
+
 ## 2026-04-09 - CloudKit Mirroring Needs Gating, Not Custom Task Plumbing
 
 - Date: 2026-04-09

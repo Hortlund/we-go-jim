@@ -109,6 +109,10 @@ struct MainTabView: View {
             .onChange(of: activeWorkoutPresentationState.activeSessionID) { _, newValue in
                 if newValue == nil {
                     activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
+                    Task { @MainActor in
+                        await Task.yield()
+                        workoutCompletionPresentationState.presentQueuedIfNeeded()
+                    }
                 } else if !activeWorkoutPresentationState.isActiveWorkoutPresented {
                     activeWorkoutPresentationState.isActiveWorkoutStripCollapsed = true
                 }

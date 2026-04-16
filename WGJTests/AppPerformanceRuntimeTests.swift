@@ -130,6 +130,70 @@ struct AppPerformanceRuntimeTests {
         #expect(eagerExerciseIDs == Set([second]))
     }
 
+    @Test
+    func historyDetailPersonalRecordPresentationSlicesPrecomputedAchievementsByExercise() {
+        let firstExerciseID = UUID()
+        let secondExerciseID = UUID()
+        let ignoredExerciseID = UUID()
+        let firstSetID = UUID()
+        let secondSetID = UUID()
+        let ignoredSetID = UUID()
+
+        let achievements = [
+            SessionSetPRAchievement(
+                id: "session-first-1",
+                sessionExerciseID: firstExerciseID,
+                setID: firstSetID,
+                catalogExerciseUUID: "bench-press",
+                exerciseName: "Bench Press",
+                kinds: [.strength, .volume],
+                estimatedOneRepMax: 120,
+                weight: 100,
+                reps: 5,
+                volume: 500,
+                loadUnit: .kg
+            ),
+            SessionSetPRAchievement(
+                id: "session-first-2",
+                sessionExerciseID: firstExerciseID,
+                setID: secondSetID,
+                catalogExerciseUUID: "bench-press",
+                exerciseName: "Bench Press",
+                kinds: [.reps],
+                estimatedOneRepMax: nil,
+                weight: nil,
+                reps: 12,
+                volume: nil,
+                loadUnit: .kg
+            ),
+            SessionSetPRAchievement(
+                id: "session-ignored",
+                sessionExerciseID: ignoredExerciseID,
+                setID: ignoredSetID,
+                catalogExerciseUUID: "row",
+                exerciseName: "Barbell Row",
+                kinds: [.weight],
+                estimatedOneRepMax: 100,
+                weight: 80,
+                reps: 8,
+                volume: 640,
+                loadUnit: .kg
+            ),
+        ]
+
+        let presentations = HistoryExercisePersonalRecordPresentation.presentationsByExerciseID(
+            from: achievements,
+            exerciseIDs: Set([firstExerciseID, secondExerciseID])
+        )
+
+        #expect(presentations[firstExerciseID]?.summaryKinds == [.strength, .reps, .volume])
+        #expect(presentations[firstExerciseID]?.setKindsBySetID[firstSetID] == [.strength, .volume])
+        #expect(presentations[firstExerciseID]?.setKindsBySetID[secondSetID] == [.reps])
+        #expect(presentations[secondExerciseID]?.summaryKinds.isEmpty == true)
+        #expect(presentations[secondExerciseID]?.setKindsBySetID.isEmpty == true)
+        #expect(presentations[ignoredExerciseID] == nil)
+    }
+
     @MainActor
     @Test
     func activeWorkoutPresentationStateStagesPreparedPreviousPerformanceBySession() {

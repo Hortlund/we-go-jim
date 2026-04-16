@@ -577,30 +577,36 @@ struct WGJTests {
     func profileRepositoryBootstrapsProfileWithICloudNameWhenAvailable() async throws {
         let context = try makeInMemoryContext()
         let repository = ProfileRepository(modelContext: context)
+        let provider = CountingProfileDefaultDisplayNameProvider(displayName: "Cloud Bro")
 
         let profile = try await repository.bootstrapProfileIdentity(
             cloudSyncEnabled: true,
-            defaultDisplayNameProvider: MockProfileDefaultDisplayNameProvider(displayName: "Cloud Bro")
+            defaultDisplayNameProvider: provider
         )
 
         #expect(profile.displayName == "Cloud Bro")
+        let callCount = await provider.callCount
+        #expect(callCount == 1)
     }
 
     @Test
     func profileRepositoryUpgradesFallbackNameWhenCloudNameArrivesLater() async throws {
         let context = try makeInMemoryContext()
         let repository = ProfileRepository(modelContext: context)
+        let provider = CountingProfileDefaultDisplayNameProvider(displayName: "Cloud Bro")
 
         let created = try repository.loadOrCreateProfile()
         #expect(created.displayName == "Athlete")
 
         let updated = try await repository.bootstrapProfileIdentity(
             cloudSyncEnabled: true,
-            defaultDisplayNameProvider: MockProfileDefaultDisplayNameProvider(displayName: "Cloud Bro")
+            defaultDisplayNameProvider: provider
         )
 
         #expect(updated.id == created.id)
         #expect(updated.displayName == "Cloud Bro")
+        let callCount = await provider.callCount
+        #expect(callCount == 1)
     }
 
     @Test
@@ -633,6 +639,30 @@ struct WGJTests {
         )
 
         #expect(profile.displayName == "Local Bro")
+    }
+
+    @Test
+    func profileRepositorySkipsCloudLookupForCustomCanonicalProfile() async throws {
+        let context = try makeInMemoryContext()
+        let repository = ProfileRepository(modelContext: context)
+        let customProfile = UserProfile(
+            displayName: "Local Bro",
+            createdAt: Date(timeIntervalSince1970: 100),
+            updatedAt: Date(timeIntervalSince1970: 100)
+        )
+        context.insert(customProfile)
+        try context.save()
+
+        let provider = CountingProfileDefaultDisplayNameProvider(displayName: "Cloud Bro")
+        let profile = try await repository.bootstrapProfileIdentity(
+            cloudSyncEnabled: true,
+            defaultDisplayNameProvider: provider
+        )
+
+        #expect(profile.id == customProfile.id)
+        #expect(profile.displayName == "Local Bro")
+        let callCount = await provider.callCount
+        #expect(callCount == 0)
     }
 
     @Test
@@ -1149,6 +1179,20 @@ private struct MockProfileDefaultDisplayNameProvider: ProfileDefaultDisplayNameP
 
     func defaultDisplayName() async -> String? {
         displayName
+    }
+}
+
+private actor CountingProfileDefaultDisplayNameProvider: ProfileDefaultDisplayNameProviding {
+    private(set) var callCount = 0
+    let displayName: String?
+
+    init(displayName: String?) {
+        self.displayName = displayName
+    }
+
+    func defaultDisplayName() async -> String? {
+        callCount += 1
+        return displayName
     }
 }
 

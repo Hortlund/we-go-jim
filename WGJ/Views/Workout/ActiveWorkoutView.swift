@@ -49,12 +49,13 @@ struct ActiveWorkoutView: View {
     @State private var completedSessionID: UUID?
     @State private var showingSaveTemplateSheet = false
     @State private var pendingCompletionAfterSaveTemplateSheet = false
-    @State private var pendingCompletionTask: Task<Void, Never>?
+    @State private var pendingCompletionAfterTemplateReviewSheet = false
     @State private var exerciseSettingsDraft: ActiveWorkoutExerciseSettingsDraft?
     @State private var exerciseComponentPickerDraft: ActiveWorkoutExerciseComponentPickerDraft?
     @State private var cardioSettingsDraft: WorkoutCardioSettingsDraft?
     @State private var exerciseReorderRequest: ExerciseReorderRequest?
     @State private var pendingTemplateUpdatePreview: WorkoutTemplateSyncPreview?
+    @State private var pendingTemplateUpdateAfterReviewSheetDismissal: WorkoutTemplateSyncPreview?
     @State private var templateNameDraft = ""
     @State private var templateFolderID: UUID?
     @State private var saveTemplateFolders: [ActiveWorkoutTemplateFolderSnapshot] = []
@@ -305,15 +306,14 @@ struct ActiveWorkoutView: View {
                 )
                 .interactiveDismissDisabled()
             }
-            .sheet(item: $pendingTemplateUpdatePreview) { preview in
+            .sheet(item: $pendingTemplateUpdatePreview, onDismiss: handleTemplateReviewSheetDismissed) { preview in
                 ActiveWorkoutTemplateSyncReviewSheet(
                     preview: preview,
                     onKeepTemplate: {
-                        pendingTemplateUpdatePreview = nil
-                        presentWorkoutCompletionSummary()
+                        requestCompletionAfterTemplateReviewSheetDismissal()
                     },
                     onUpdateTemplate: {
-                        applyTemplateUpdate(preview)
+                        requestTemplateUpdateAfterReviewSheetDismissal(preview)
                     }
                 )
                 .interactiveDismissDisabled()
@@ -353,8 +353,9 @@ struct ActiveWorkoutView: View {
                 shouldTrackVisibleScrollTarget = false
                 isCancelArmed = false
                 pendingFinishAfterConfirmation = false
-                pendingCompletionTask?.cancel()
-                pendingCompletionTask = nil
+                pendingCompletionAfterSaveTemplateSheet = false
+                pendingCompletionAfterTemplateReviewSheet = false
+                pendingTemplateUpdateAfterReviewSheetDismissal = nil
                 deferredHydrationTask?.cancel()
                 deferredHydrationTask = nil
                 pendingCheckpointScheduleTask?.cancel()
@@ -1694,40 +1695,50 @@ struct ActiveWorkoutView: View {
 
     private func handleSaveTemplateSheetDismissed() {
         guard pendingCompletionAfterSaveTemplateSheet else { return }
-        pendingCompletionTask?.cancel()
-        pendingCompletionTask = nil
+        presentWorkoutCompletionSummary()
+    }
+
+    private func handleTemplateReviewSheetDismissed() {
+        if let preview = pendingTemplateUpdateAfterReviewSheetDismissal {
+            pendingTemplateUpdateAfterReviewSheetDismissal = nil
+            applyTemplateUpdate(preview)
+            return
+        }
+
+        guard pendingCompletionAfterTemplateReviewSheet else { return }
         presentWorkoutCompletionSummary()
     }
 
     private func requestCompletionAfterSaveTemplateSheetDismissal() {
         pendingCompletionAfterSaveTemplateSheet = true
         showingSaveTemplateSheet = false
-        pendingCompletionTask?.cancel()
-        pendingCompletionTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(180))
-            guard !Task.isCancelled, pendingCompletionAfterSaveTemplateSheet, !showingSaveTemplateSheet else { return }
-            presentWorkoutCompletionSummary()
-        }
+    }
+
+    private func requestCompletionAfterTemplateReviewSheetDismissal() {
+        pendingCompletionAfterTemplateReviewSheet = true
+        pendingTemplateUpdateAfterReviewSheetDismissal = nil
+        pendingTemplateUpdatePreview = nil
+    }
+
+    private func requestTemplateUpdateAfterReviewSheetDismissal(_ preview: WorkoutTemplateSyncPreview) {
+        pendingCompletionAfterTemplateReviewSheet = false
+        pendingTemplateUpdateAfterReviewSheetDismissal = preview
+        pendingTemplateUpdatePreview = nil
     }
 
     private func presentWorkoutCompletionSummary() {
-        pendingCompletionTask?.cancel()
-        pendingCompletionTask = nil
         dismissKeyboard()
         isCancelArmed = false
         showingSaveTemplateSheet = false
         pendingCompletionAfterSaveTemplateSheet = false
+        pendingCompletionAfterTemplateReviewSheet = false
+        pendingTemplateUpdateAfterReviewSheetDismissal = nil
         exerciseSettingsDraft = nil
         exerciseComponentPickerDraft = nil
         pendingTemplateUpdatePreview = nil
         let completionSessionID = completedSessionID ?? sessionID
         workoutCompletionPresentationState.queueAfterActiveWorkoutDismiss(sessionID: completionSessionID)
         activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
-        Task { @MainActor in
-            await Task.yield()
-            workoutCompletionPresentationState.presentQueuedIfNeeded()
-        }
-        dismiss()
     }
 
     private func minimizeWorkout() {
@@ -1800,7 +1811,6 @@ struct ActiveWorkoutView: View {
 
     private func applyTemplateUpdate(_ preview: WorkoutTemplateSyncPreview) {
         Task { @MainActor in
-            pendingTemplateUpdatePreview = nil
             do {
                 if let appBackgroundStore {
                     try await appBackgroundStore.performWrite("active-workout.template.apply-sync") { backgroundContext in
@@ -2997,6 +3007,7 @@ private struct ActiveWorkoutSaveTemplateSheet: View {
         }
         .presentationDetents([.medium])
         .presentationDragIndicator(.hidden)
+        .accessibilityIdentifier("active-workout-template-save-sheet")
     }
 }
 
