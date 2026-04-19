@@ -197,6 +197,8 @@ struct ProfileView: View {
                     prWidget
                 case .weeklyGoals:
                     weeklyGoalsWidget
+                case .coachBrief:
+                    EmptyView()
                 case .exerciseOneRMTrend:
                     exerciseTrendWidget(
                         title: "1RM Trend",
@@ -804,7 +806,7 @@ final class ProfileViewController {
                             preferredExerciseName: config.selectedExerciseNameSnapshot,
                             limit: 8
                         )
-                    case .prs, .weeklyGoals, .streaks, .topExercises, .consistencyCalendar:
+                    case .prs, .weeklyGoals, .coachBrief, .streaks, .topExercises, .consistencyCalendar:
                         continue
                     }
 
@@ -853,7 +855,7 @@ final class ProfileViewController {
                         preferredExerciseName: config.selectedExerciseNameSnapshot,
                         limit: 8
                     )
-                case .prs, .weeklyGoals, .streaks, .topExercises, .consistencyCalendar:
+                case .prs, .weeklyGoals, .coachBrief, .streaks, .topExercises, .consistencyCalendar:
                     continue
                 }
 

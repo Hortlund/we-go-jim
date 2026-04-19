@@ -456,6 +456,7 @@ nonisolated struct WorkoutCardioBlockDraft: Identifiable, Equatable {
 nonisolated enum ProfileWidgetKind: String, Codable, CaseIterable, Equatable, Hashable, Identifiable, Sendable {
     case prs
     case weeklyGoals
+    case coachBrief
     case exerciseOneRMTrend
     case exerciseVolumeTrend
     case streaks
@@ -470,6 +471,8 @@ nonisolated enum ProfileWidgetKind: String, Codable, CaseIterable, Equatable, Ha
             return "PRs"
         case .weeklyGoals:
             return "Weekly Goal"
+        case .coachBrief:
+            return "Coach Brief"
         case .exerciseOneRMTrend:
             return "1RM Trend"
         case .exerciseVolumeTrend:
@@ -487,7 +490,7 @@ nonisolated enum ProfileWidgetKind: String, Codable, CaseIterable, Equatable, Ha
         switch self {
         case .exerciseOneRMTrend, .exerciseVolumeTrend:
             return true
-        case .prs, .weeklyGoals, .streaks, .topExercises, .consistencyCalendar:
+        case .prs, .weeklyGoals, .coachBrief, .streaks, .topExercises, .consistencyCalendar:
             return false
         }
     }

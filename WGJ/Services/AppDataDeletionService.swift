@@ -62,6 +62,8 @@ final class AppDataDeletionService {
         try clearExerciseImageCache()
         try deleteCustomExercises()
         try deleteAll(ProfileWidgetConfig.self)
+        try deleteAll(CachedCoachFollowUpNarrative.self)
+        try deleteAll(CachedCoachNarrative.self)
         try deleteAll(ActiveWorkoutDraftSet.self)
         try deleteAll(ActiveWorkoutDraftExerciseComponent.self)
         try deleteAll(ActiveWorkoutDraftExercise.self)

@@ -145,6 +145,8 @@ struct WGJApp: App {
             ExerciseCatalogSyncState.self,
             UserProfile.self,
             ProfileWidgetConfig.self,
+            CachedCoachNarrative.self,
+            CachedCoachFollowUpNarrative.self,
             TemplateFolder.self,
             WorkoutTemplate.self,
             TemplateCardioBlock.self,
@@ -208,6 +210,8 @@ struct WGJApp: App {
 
         let historyProjectionSchema = Schema([
             CompletedSetFact.self,
+            CachedCoachNarrative.self,
+            CachedCoachFollowUpNarrative.self,
         ])
 
         return [

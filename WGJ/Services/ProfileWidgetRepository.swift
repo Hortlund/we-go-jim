@@ -191,22 +191,24 @@ private extension ProfileWidgetKind {
             return 0
         case .weeklyGoals:
             return 1
-        case .exerciseOneRMTrend:
+        case .coachBrief:
             return 2
-        case .exerciseVolumeTrend:
+        case .exerciseOneRMTrend:
             return 3
-        case .streaks:
+        case .exerciseVolumeTrend:
             return 4
-        case .topExercises:
+        case .streaks:
             return 5
-        case .consistencyCalendar:
+        case .topExercises:
             return 6
+        case .consistencyCalendar:
+            return 7
         }
     }
 
     nonisolated var defaultEnabled: Bool {
         switch self {
-        case .prs, .weeklyGoals:
+        case .prs, .weeklyGoals, .coachBrief:
             return true
         case .exerciseOneRMTrend, .exerciseVolumeTrend, .streaks, .topExercises, .consistencyCalendar:
             return false

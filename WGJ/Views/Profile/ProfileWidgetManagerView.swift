@@ -172,6 +172,8 @@ struct ProfileWidgetManagerView: View {
             return "trophy.fill"
         case .weeklyGoals:
             return "target"
+        case .coachBrief:
+            return "quote.bubble"
         case .exerciseOneRMTrend:
             return "chart.line.uptrend.xyaxis"
         case .exerciseVolumeTrend:
@@ -191,6 +193,8 @@ struct ProfileWidgetManagerView: View {
             return "Show your strongest logged PRs."
         case .weeklyGoals:
             return "Track progress toward your workout goal."
+        case .coachBrief:
+            return "Read a short coach summary of what changed."
         case .exerciseOneRMTrend:
             return "Chart your best estimated 1RM across recent workouts."
         case .exerciseVolumeTrend:
