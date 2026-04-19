@@ -367,6 +367,136 @@ struct AppleCoachNarrativeServiceTests {
     }
 
     @Test
+    func staleGeneratedRecapRefreshesWhenRequested() async throws {
+        let fixture = try makeFixture()
+        let snapshot = WeeklyCoachInsightSnapshot(
+            weekStart: fixture.weekStart,
+            revisionKey: "revision-stale-refresh",
+            baselineWeekCount: 6,
+            completedWorkoutCount: 3,
+            totalVolumeDelta: 8.4,
+            consistencyDelta: 1,
+            topRisingSignals: [],
+            topWatchSignals: [],
+            fallbackSummary: "",
+            followUpKinds: [.whatChanged]
+        )
+        let generatedAt = Date(timeIntervalSince1970: 1_750_000_000)
+        try fixture.cacheRepository.saveRecap(
+            CoachNarrativeSummary(
+                headline: "Cached Headline",
+                body: "Cached body",
+                availabilityMode: .generated
+            ),
+            weekStart: snapshot.weekStart,
+            revisionKey: snapshot.revisionKey,
+            now: generatedAt
+        )
+
+        let generator = GeneratorProbe()
+        let service = AppleCoachNarrativeService(
+            cacheRepository: fixture.cacheRepository,
+            availabilityProvider: { true },
+            recapGenerator: { input in
+                generator.recapInputs.append(input)
+                return CoachNarrativeSummary(
+                    headline: "Fresh Headline",
+                    body: "Fresh body for \(input.snapshot.revisionKey)",
+                    availabilityMode: .generated
+                )
+            }
+        )
+
+        let refreshed = try await service.refreshRecapIfNeeded(
+            for: snapshot,
+            now: generatedAt.addingTimeInterval(AppleCoachNarrativeService.recapRefreshMaxAge + 1),
+            maxAge: AppleCoachNarrativeService.recapRefreshMaxAge
+        )
+
+        #expect(refreshed.headline == "Fresh Headline")
+        #expect(refreshed.body == "Fresh body for revision-stale-refresh")
+        #expect(generator.recapInputs.count == 1)
+        #expect(
+            try fixture.cacheRepository.recap(
+                forWeekStart: snapshot.weekStart,
+                revisionKey: snapshot.revisionKey
+            )?.headline == "Fresh Headline"
+        )
+    }
+
+    @Test
+    func recapForDisplayReturnsCachedRecapWhileRefreshingStaleSummaryInBackground() async throws {
+        let fixture = try makeFixture()
+        let snapshot = WeeklyCoachInsightSnapshot(
+            weekStart: fixture.weekStart,
+            revisionKey: "revision-display-refresh",
+            baselineWeekCount: 6,
+            completedWorkoutCount: 3,
+            totalVolumeDelta: 8.4,
+            consistencyDelta: 1,
+            topRisingSignals: [],
+            topWatchSignals: [],
+            fallbackSummary: "",
+            followUpKinds: [.whatChanged]
+        )
+        let generatedAt = Date(timeIntervalSince1970: 1_750_000_000)
+        try fixture.cacheRepository.saveRecap(
+            CoachNarrativeSummary(
+                headline: "Cached Headline",
+                body: "Cached body",
+                availabilityMode: .generated
+            ),
+            weekStart: snapshot.weekStart,
+            revisionKey: snapshot.revisionKey,
+            now: generatedAt
+        )
+
+        let gate = AsyncGate()
+        let generator = GeneratorProbe()
+        let service = AppleCoachNarrativeService(
+            cacheRepository: fixture.cacheRepository,
+            availabilityProvider: { true },
+            recapGenerator: { input in
+                generator.recapInputs.append(input)
+                await gate.markEntered()
+                await gate.waitUntilReleased()
+                return CoachNarrativeSummary(
+                    headline: "Fresh Headline",
+                    body: "Fresh body for \(input.snapshot.revisionKey)",
+                    availabilityMode: .generated
+                )
+            }
+        )
+
+        let displayed = try await service.recapForDisplay(
+            for: snapshot,
+            now: generatedAt.addingTimeInterval(AppleCoachNarrativeService.recapRefreshMaxAge + 1),
+            maxAge: AppleCoachNarrativeService.recapRefreshMaxAge
+        )
+
+        #expect(displayed.headline == "Cached Headline")
+        #expect(displayed.body == "Cached body")
+
+        await gate.waitUntilEntered()
+        await gate.release()
+
+        var refreshedHeadline: String?
+        for _ in 0..<20 {
+            refreshedHeadline = try fixture.cacheRepository.recap(
+                forWeekStart: snapshot.weekStart,
+                revisionKey: snapshot.revisionKey
+            )?.headline
+            if refreshedHeadline == "Fresh Headline" {
+                break
+            }
+            await Task.yield()
+        }
+
+        #expect(refreshedHeadline == "Fresh Headline")
+        #expect(generator.recapInputs.count == 1)
+    }
+
+    @Test
     func unknownAvailabilityRawValuesDefaultToFallback() {
         let recap = CachedCoachNarrative(
             weekStart: .now,

@@ -6,6 +6,8 @@ import FoundationModels
 
 @MainActor
 final class AppleCoachNarrativeService {
+    nonisolated static let recapRefreshMaxAge: TimeInterval = 60 * 60
+
     nonisolated struct RecapGenerationInput: Equatable, Sendable {
         let snapshot: WeeklyCoachInsightSnapshot
     }
@@ -52,6 +54,63 @@ final class AppleCoachNarrativeService {
     }
 
     func recap(for snapshot: WeeklyCoachInsightSnapshot) async throws -> CoachNarrativeSummary {
+        try await resolveRecap(for: snapshot, forceRefresh: false)
+    }
+
+    func recapForDisplay(
+        for snapshot: WeeklyCoachInsightSnapshot,
+        now: Date = .now,
+        maxAge: TimeInterval = AppleCoachNarrativeService.recapRefreshMaxAge
+    ) async throws -> CoachNarrativeSummary {
+        let cached = try cacheRepository.recap(
+            forWeekStart: snapshot.weekStart,
+            revisionKey: snapshot.revisionKey
+        )
+        let shouldRefresh = try cacheRepository.needsRecapRefresh(
+            weekStart: snapshot.weekStart,
+            revisionKey: snapshot.revisionKey,
+            now: now,
+            maxAge: maxAge
+        )
+
+        if shouldRefresh, let cached {
+            scheduleRecapRefresh(for: snapshot)
+            return cached
+        }
+
+        return try await resolveRecap(for: snapshot, forceRefresh: shouldRefresh)
+    }
+
+    func refreshRecapIfNeeded(
+        for snapshot: WeeklyCoachInsightSnapshot,
+        now: Date = .now,
+        maxAge: TimeInterval = AppleCoachNarrativeService.recapRefreshMaxAge
+    ) async throws -> CoachNarrativeSummary {
+        let shouldRefresh = try cacheRepository.needsRecapRefresh(
+            weekStart: snapshot.weekStart,
+            revisionKey: snapshot.revisionKey,
+            now: now,
+            maxAge: maxAge
+        )
+        return try await resolveRecap(for: snapshot, forceRefresh: shouldRefresh)
+    }
+
+    private func scheduleRecapRefresh(for snapshot: WeeklyCoachInsightSnapshot) {
+        let cacheKey = CachedCoachNarrative.makeCacheKey(
+            weekStart: snapshot.weekStart,
+            revisionKey: snapshot.revisionKey
+        )
+        guard inFlightRequests[cacheKey] == nil else { return }
+
+        Task { @MainActor in
+            _ = try? await resolveRecap(for: snapshot, forceRefresh: true)
+        }
+    }
+
+    private func resolveRecap(
+        for snapshot: WeeklyCoachInsightSnapshot,
+        forceRefresh: Bool
+    ) async throws -> CoachNarrativeSummary {
         let cacheKey = CachedCoachNarrative.makeCacheKey(
             weekStart: snapshot.weekStart,
             revisionKey: snapshot.revisionKey
@@ -62,7 +121,7 @@ final class AppleCoachNarrativeService {
             forWeekStart: snapshot.weekStart,
             revisionKey: snapshot.revisionKey
         )
-        if let cached, cached.availabilityMode != .fallback {
+        if !forceRefresh, let cached, cached.availabilityMode != .fallback {
             return cached
         }
 

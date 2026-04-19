@@ -86,6 +86,9 @@ struct ContentView: View {
             guard oldValue != nil, newValue == nil else { return }
             deferredMaintenanceState.requestRun()
             requestDeferredMaintenance(trigger: .activeWorkoutEnded)
+            Task {
+                await warmCoachBriefIfNeeded()
+            }
         }
         .onOpenURL { url in
             handleIncomingTemplateFileURL(url)
@@ -452,6 +455,39 @@ struct ContentView: View {
         withAnimation(.easeInOut(duration: 0.2)) {
             appPhase = .splash
         }
+    }
+
+    private func warmCoachBriefIfNeeded() async {
+        do {
+            guard let snapshot = try await coachWarmupSnapshot() else { return }
+            _ = try await AppleCoachNarrativeService(modelContext: modelContext).refreshRecapIfNeeded(for: snapshot)
+        } catch is CancellationError {
+            return
+        } catch {
+            return
+        }
+    }
+
+    private func coachWarmupSnapshot() async throws -> WeeklyCoachInsightSnapshot? {
+        if let appBackgroundStore {
+            return try await appBackgroundStore.perform("profile.coach.warmup.snapshot") { backgroundContext in
+                let widgetRepository = ProfileWidgetRepository(modelContext: backgroundContext)
+                let enabledWidgets = try widgetRepository.enabledConfigurationSnapshots()
+                guard enabledWidgets.contains(where: { $0.kind == .coachBrief }) else {
+                    return nil
+                }
+
+                return try WeeklyCoachInsightService(modelContext: backgroundContext).weeklyInsightSnapshot()
+            }
+        }
+
+        let widgetRepository = ProfileWidgetRepository(modelContext: modelContext)
+        let enabledWidgets = try widgetRepository.enabledConfigurationSnapshots()
+        guard enabledWidgets.contains(where: { $0.kind == .coachBrief }) else {
+            return nil
+        }
+
+        return try WeeklyCoachInsightService(modelContext: modelContext).weeklyInsightSnapshot()
     }
 
     private func bootstrapProfileIdentityIfNeeded() async {

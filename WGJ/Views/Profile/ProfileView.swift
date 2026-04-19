@@ -206,6 +206,7 @@ struct ProfileView: View {
                     Label("Manage", systemImage: "slider.horizontal.3")
                 }
                 .buttonStyle(WGJCompactGhostButtonStyle())
+                .accessibilityIdentifier("profile-dashboard-manage-button")
             }
 
             if dashboardContent.enabledWidgets.isEmpty {
@@ -1100,7 +1101,7 @@ final class ProfileViewController {
             }
         }
 
-        let recap = try await AppleCoachNarrativeService(modelContext: modelContext).recap(for: snapshot)
+        let recap = try await AppleCoachNarrativeService(modelContext: modelContext).recapForDisplay(for: snapshot)
         return ProfileCoachPresentation(snapshot: snapshot, recap: recap)
     }
 }

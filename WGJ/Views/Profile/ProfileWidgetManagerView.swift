@@ -149,11 +149,13 @@ struct ProfileWidgetManagerView: View {
                             toggleConfig(config)
                         }
                         .buttonStyle(WGJCompactGhostButtonStyle())
+                        .accessibilityIdentifier("profile-widget-remove-\(config.kind.rawValue)")
                     } else {
                         Button("Add") {
                             enableConfig(config)
                         }
                         .buttonStyle(WGJCompactPrimaryButtonStyle())
+                        .accessibilityIdentifier("profile-widget-add-\(config.kind.rawValue)")
                     }
                 }
             }

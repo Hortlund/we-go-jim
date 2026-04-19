@@ -632,13 +632,38 @@ final class WGJUITests: XCTestCase {
         tapTab("Profile", in: app)
 
         let coachWidgetButton = identifiedElement("profile-coach-brief-widget-button", in: app)
-        revealLazyElement(coachWidgetButton, in: app)
-        XCTAssertTrue(coachWidgetButton.isHittable)
+        XCTAssertTrue(coachWidgetButton.waitForExistence(timeout: 10))
         coachWidgetButton.tap()
 
         let analysisSheet = identifiedElement("profile-coach-analysis-sheet", in: app)
         XCTAssertTrue(analysisSheet.waitForExistence(timeout: 5))
         XCTAssertTrue(identifiedElement("profile-coach-follow-up-whatChanged", in: app).waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testProfileCoachWidgetCanBeRemovedAndRestoredFromWidgetManager() throws {
+        let app = launchApp()
+
+        tapTab("Profile", in: app)
+
+        let manageButton = identifiedElement("profile-dashboard-manage-button", in: app)
+        XCTAssertTrue(manageButton.waitForExistence(timeout: 5))
+        manageButton.tap()
+
+        let removeButton = identifiedElement("profile-widget-remove-coachBrief", in: app)
+        revealLazyElement(removeButton, in: app)
+        XCTAssertTrue(removeButton.isHittable)
+        removeButton.tap()
+
+        let addButton = identifiedElement("profile-widget-add-coachBrief", in: app)
+        revealLazyElement(addButton, in: app)
+        XCTAssertTrue(addButton.isHittable)
+        addButton.tap()
+
+        app.buttons["Done"].tap()
+
+        let coachWidgetButton = identifiedElement("profile-coach-brief-widget-button", in: app)
+        XCTAssertTrue(coachWidgetButton.waitForExistence(timeout: 10))
     }
 
     @MainActor

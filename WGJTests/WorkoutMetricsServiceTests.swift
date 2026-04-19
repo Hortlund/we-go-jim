@@ -687,23 +687,25 @@ struct WorkoutMetricsServiceTests {
         let repository = ProfileWidgetRepository(modelContext: context)
 
         let allConfigs = try repository.configurations()
-        #expect(allConfigs.count == 7)
+        #expect(allConfigs.count == 8)
+        #expect(allConfigs.contains { $0.kind == .coachBrief })
         #expect(allConfigs.contains { $0.kind == .streaks })
         #expect(allConfigs.contains { $0.kind == .topExercises })
         #expect(allConfigs.contains { $0.kind == .consistencyCalendar })
 
         var enabled = try repository.enabledConfigurations()
-        #expect(enabled.count == 2)
+        #expect(enabled.count == 3)
 
         try repository.setEnabled(kind: .prs, isEnabled: false)
         enabled = try repository.enabledConfigurations()
-        #expect(enabled.count == 1)
-        #expect(enabled.first?.kind == .weeklyGoals)
+        #expect(enabled.count == 2)
+        #expect(enabled.map(\.kind) == [.weeklyGoals, .coachBrief])
 
         try repository.setEnabled(kind: .prs, isEnabled: true)
-        try repository.moveEnabledWidget(fromOffsets: IndexSet(integer: 0), toOffset: 1)
+        try repository.moveEnabledWidget(fromOffsets: IndexSet(integer: 0), toOffset: 3)
         enabled = try repository.enabledConfigurations()
-        #expect(enabled.count == 2)
+        #expect(enabled.count == 3)
+        #expect(enabled.map(\.kind) == [.weeklyGoals, .coachBrief, .prs])
     }
 
     @Test
