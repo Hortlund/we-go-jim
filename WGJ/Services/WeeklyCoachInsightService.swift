@@ -3,7 +3,6 @@ import SwiftData
 
 nonisolated final class WeeklyCoachInsightService {
     private static let baselineWindowCount = 6
-    private static let minimumActiveBaselineWeeks = 3
     private static let maxSignalCount = 3
 
     private let calendar: Calendar
@@ -201,10 +200,12 @@ nonisolated final class WeeklyCoachInsightService {
         baselineAverageVolume: Double,
         baselineAverageWorkouts: Double
     ) -> String? {
-        if baselineActiveWeekCount >= Self.minimumActiveBaselineWeeks {
-            if baselineAverageVolume > 0 || baselineAverageWorkouts > 0 {
-                return nil
-            }
+        guard baselineActiveWeekCount == Self.baselineWindowCount else {
+            return "Not enough recent training history to build a stable weekly baseline."
+        }
+
+        if baselineAverageVolume > 0 || baselineAverageWorkouts > 0 {
+            return nil
         }
 
         return "Not enough recent training history to build a stable weekly baseline."

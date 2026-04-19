@@ -123,6 +123,48 @@ struct WeeklyCoachInsightServiceTests {
         #expect(snapshot.followUpKinds == [.whatChanged])
     }
 
+    @Test
+    func weeklyInsightSnapshotFallsBackWithPartialBaselineHistory() throws {
+        let fixture = try makeFixture()
+
+        for weekOffset in 1...5 {
+            try seedWeeklySession(
+                context: fixture.context,
+                sessionRepository: fixture.sessionRepository,
+                projectionRepository: fixture.projectionRepository,
+                bench: fixture.bench,
+                squat: fixture.squat,
+                name: "Baseline \(weekOffset)",
+                startedAt: fixture.weekStart(weeksFromReference: -weekOffset),
+                benchWeight: 100,
+                squatWeight: 100
+            )
+        }
+
+        try seedWeeklySession(
+            context: fixture.context,
+            sessionRepository: fixture.sessionRepository,
+            projectionRepository: fixture.projectionRepository,
+            bench: fixture.bench,
+            squat: fixture.squat,
+            name: "Current",
+            startedAt: fixture.weekStart(weeksFromReference: 0),
+            benchWeight: 150,
+            squatWeight: 50
+        )
+
+        let snapshot = try fixture.service.weeklyInsightSnapshot(asOf: fixture.referenceDate)
+
+        #expect(snapshot.baselineWeekCount == 5)
+        #expect(snapshot.completedWorkoutCount == 1)
+        #expect(snapshot.totalVolumeDelta == 0)
+        #expect(snapshot.consistencyDelta == 0)
+        #expect(snapshot.topRisingSignals.isEmpty)
+        #expect(snapshot.topWatchSignals.isEmpty)
+        #expect(snapshot.fallbackSummary == "Not enough recent training history to build a stable weekly baseline.")
+        #expect(snapshot.followUpKinds == [.whatChanged])
+    }
+
     private struct Fixture {
         let context: ModelContext
         let sessionRepository: WorkoutSessionRepository
