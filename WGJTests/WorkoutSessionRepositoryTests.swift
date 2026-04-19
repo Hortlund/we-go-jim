@@ -479,6 +479,50 @@ struct WorkoutSessionRepositoryTests {
     }
 
     @Test
+    func previousSetMapKeepsCompletedBodyweightLogsSeparateFromWeightedTargets() throws {
+        let context = try makeInMemoryContext()
+        let repository = WorkoutSessionRepository(modelContext: context)
+
+        let pullUp = ExerciseCatalogItem(
+            remoteUUID: "previous-bodyweight-pullup",
+            displayName: "Pull Up",
+            categoryName: "Back",
+            equipmentSummary: "Bodyweight",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(pullUp)
+
+        let baseline = try repository.createEmptySession(name: "Baseline")
+        try repository.addExercise(sessionID: baseline.id, catalogItem: pullUp)
+        let baselineExercise = try #require(try repository.sessionExercises(sessionID: baseline.id).first)
+        var baselineDrafts = try repository.setDrafts(sessionExerciseID: baselineExercise.id)
+        baselineDrafts[1].targetWeight = 15
+        baselineDrafts[1].targetLoadUnit = .kg
+        baselineDrafts[1].actualWeight = nil
+        baselineDrafts[1].actualReps = 12
+        baselineDrafts[1].actualLoadUnit = .bodyweight
+        baselineDrafts[1].isCompleted = true
+        try repository.saveSetDrafts(sessionExerciseID: baselineExercise.id, drafts: baselineDrafts)
+        try repository.finishSession(sessionID: baseline.id)
+
+        let current = try repository.createEmptySession(name: "Current")
+        try repository.addExercise(sessionID: current.id, catalogItem: pullUp)
+
+        let previousSetMap = try repository.previousSetMap(
+            for: pullUp.remoteUUID,
+            before: current.startedAt,
+            excludingSessionID: current.id,
+            maxSetCount: 3
+        )
+        let previousSet = try #require(previousSetMap[1])
+
+        #expect(previousSet.reps == 12)
+        #expect(previousSet.weight == nil)
+        #expect(previousSet.unit == .bodyweight)
+    }
+
+    @Test
     func updateExerciseRestPersists() throws {
         let context = try makeInMemoryContext()
         let repository = WorkoutSessionRepository(modelContext: context)

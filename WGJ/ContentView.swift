@@ -20,9 +20,9 @@ struct ContentView: View {
     @State private var catalogSyncCoordinator = CatalogSyncCoordinator()
     @State private var socialMaintenanceScheduler = SocialMaintenanceScheduler()
     @State private var deferredMaintenanceState = AppDeferredMaintenanceState()
+    @State private var resumeCriticalMaintenanceTracker = ResumeCriticalMaintenanceTracker()
+    @State private var resumeCriticalMaintenanceTask: Task<Void, Never>?
     @State private var isPreparingMainPhase = false
-    @State private var hasRunResumeCriticalMaintenanceThisForegroundCycle = false
-    @State private var isRunningResumeCriticalMaintenance = false
     @State private var hasInstalledUITestPendingTemplate = false
     @State private var hasScheduledInitialDeferredMaintenance = false
 
@@ -215,35 +215,43 @@ struct ContentView: View {
             return
         }
 
-        guard !hasRunResumeCriticalMaintenanceThisForegroundCycle,
-              !isRunningResumeCriticalMaintenance
-        else {
+        guard let runID = resumeCriticalMaintenanceTracker.beginRunIfNeeded() else {
             return
         }
 
-        hasRunResumeCriticalMaintenanceThisForegroundCycle = true
-        isRunningResumeCriticalMaintenance = true
+        resumeCriticalMaintenanceTask?.cancel()
 
-        Task { @MainActor in
-            await performResumeCriticalMaintenanceIfNeeded()
+        resumeCriticalMaintenanceTask = Task { @MainActor [runID] in
+            await performResumeCriticalMaintenanceIfNeeded(runID: runID)
         }
     }
 
     @MainActor
-    private func performResumeCriticalMaintenanceIfNeeded() async {
+    private func performResumeCriticalMaintenanceIfNeeded(runID: Int) async {
         defer {
-            isRunningResumeCriticalMaintenance = false
+            resumeCriticalMaintenanceTracker.finishRun(runID)
+            if resumeCriticalMaintenanceTracker.isCurrent(runID) {
+                resumeCriticalMaintenanceTask = nil
+            }
         }
 
         restTimerState.clearExpiredRestTimerIfNeeded()
+        guard !Task.isCancelled, resumeCriticalMaintenanceTracker.isCurrent(runID) else {
+            return
+        }
         await activeWorkoutPresentationState.restoreActiveSessionIfMissing(
             modelContext: modelContext,
-            backgroundStore: appBackgroundStore
+            backgroundStore: appBackgroundStore,
+            shouldApplyRestoredSession: {
+                !Task.isCancelled && resumeCriticalMaintenanceTracker.isCurrent(runID)
+            }
         )
     }
 
     private func resetResumeCriticalMaintenanceCycle() {
-        hasRunResumeCriticalMaintenanceThisForegroundCycle = false
+        resumeCriticalMaintenanceTask?.cancel()
+        resumeCriticalMaintenanceTask = nil
+        resumeCriticalMaintenanceTracker.resetForegroundCycle()
     }
 
     @MainActor
@@ -435,6 +443,7 @@ struct ContentView: View {
 
     private func resetToStartupFlow() {
         socialMaintenanceScheduler.cancel()
+        resetResumeCriticalMaintenanceCycle()
         activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
         catalogSyncCoordinator = CatalogSyncCoordinator()
         deferredMaintenanceState.reset()

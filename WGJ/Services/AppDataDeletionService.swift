@@ -24,21 +24,26 @@ final class AppDataDeletionService {
     private let modelContext: ModelContext
     private let fileManager: FileManager
     private let socialDataDeleter: BrosCloudDataDeleting?
+    private let socialDataDeleterFactory: @MainActor (ModelContext) -> BrosCloudDataDeleting?
 
     init(
         modelContext: ModelContext,
         fileManager: FileManager = .default,
-        socialDataDeleter: BrosCloudDataDeleting? = nil
+        socialDataDeleter: BrosCloudDataDeleting? = nil,
+        socialDataDeleterFactory: @escaping @MainActor (ModelContext) -> BrosCloudDataDeleting? = { modelContext in
+            CloudKitBrosSocialService.makeIfContainerAvailable(modelContext: modelContext)
+        }
     ) {
         self.modelContext = modelContext
         self.fileManager = fileManager
         self.socialDataDeleter = socialDataDeleter
+        self.socialDataDeleterFactory = socialDataDeleterFactory
     }
 
     func deleteAllUserData() async throws {
         var cloudCleanupError: Error?
 
-        if let deleter = socialDataDeleter ?? CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext) {
+        if let deleter = socialDataDeleter ?? socialDataDeleterFactory(modelContext) {
             do {
                 try await deleter.deleteCurrentUserData()
             } catch {

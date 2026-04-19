@@ -82,6 +82,43 @@ nonisolated enum AppMaintenancePolicy {
     }
 }
 
+nonisolated struct ResumeCriticalMaintenanceTracker: Equatable, Sendable {
+    private(set) var hasRunThisForegroundCycle = false
+    private(set) var isRunning = false
+    private var generation = 0
+    private(set) var currentRunID: Int?
+
+    mutating func beginRunIfNeeded() -> Int? {
+        guard !hasRunThisForegroundCycle, !isRunning else { return nil }
+
+        generation += 1
+        hasRunThisForegroundCycle = true
+        isRunning = true
+        currentRunID = generation
+        return currentRunID
+    }
+
+    mutating func finishRun(_ runID: Int) {
+        guard currentRunID == runID else { return }
+        isRunning = false
+    }
+
+    mutating func resetForegroundCycle() {
+        invalidateInFlightRun()
+        hasRunThisForegroundCycle = false
+    }
+
+    func isCurrent(_ runID: Int) -> Bool {
+        currentRunID == runID
+    }
+
+    private mutating func invalidateInFlightRun() {
+        generation += 1
+        isRunning = false
+        currentRunID = nil
+    }
+}
+
 nonisolated enum SocialMaintenancePlanner {
     static func shouldRun(
         hasKnownMembership: Bool,

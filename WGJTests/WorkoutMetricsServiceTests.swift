@@ -231,6 +231,57 @@ struct WorkoutMetricsServiceTests {
     }
 
     @Test
+    func exerciseDetailStatsRebuildFactsWhenSessionMetricsVersionIsStale() throws {
+        let context = try makeInMemoryContext()
+        let sessionRepository = WorkoutSessionRepository(modelContext: context)
+        let projectionRepository = HistoryProjectionRepository(modelContext: context)
+        let metrics = WorkoutMetricsService(modelContext: context)
+
+        let bench = ExerciseCatalogItem(
+            remoteUUID: "projection-version-bench",
+            displayName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(bench)
+
+        let session = try sessionRepository.createEmptySession(name: "Projection Version")
+        try sessionRepository.addExercise(sessionID: session.id, catalogItem: bench)
+        let sessionExercise = try #require(try sessionRepository.sessionExercises(sessionID: session.id).first)
+        var drafts = try sessionRepository.setDrafts(sessionExerciseID: sessionExercise.id)
+        drafts[1].actualWeight = 100
+        drafts[1].actualReps = 5
+        drafts[1].actualLoadUnit = .kg
+        drafts[1].isCompleted = true
+        try sessionRepository.saveSetDrafts(sessionExerciseID: sessionExercise.id, drafts: drafts)
+        try sessionRepository.finishSession(sessionID: session.id)
+        _ = try projectionRepository.rebuildFacts(forSessionID: session.id)
+
+        let fact = try #require(try projectionRepository.facts(forSessionID: session.id).first)
+        fact.weight = 999
+        fact.normalizedWeightKg = 999
+        fact.estimatedOneRepMaxKg = metrics.estimatedOneRepMax(weight: 999, reps: 5)
+        fact.volumeKg = 999 * 5
+        let storedSession = try #require(try sessionRepository.session(id: session.id))
+        storedSession.summaryMetricsVersion = 0
+        try context.save()
+
+        let snapshot = try #require(
+            try metrics.exerciseDetailStats(
+                for: bench.remoteUUID,
+                preferredExerciseName: bench.displayName,
+                limit: 8
+            )
+        )
+
+        #expect(snapshot.bestPerformance?.kind == .weighted)
+        #expect(snapshot.bestPerformance?.weight == 100)
+        #expect(snapshot.bestPerformance?.reps == 5)
+    }
+
+    @Test
     func sessionSummaryExcludesWarmupsAndNormalizesMixedUnitsForVolume() throws {
         let context = try makeInMemoryContext()
         let sessionRepository = WorkoutSessionRepository(modelContext: context)

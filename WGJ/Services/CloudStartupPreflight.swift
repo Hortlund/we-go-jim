@@ -17,12 +17,7 @@ nonisolated struct CloudStartupDecision: Equatable {
     }
 
     var shouldForceLocalFallbackStore: Bool {
-        switch accountStatus {
-        case .noAccount, .restricted, .containerUnavailable:
-            return true
-        case .available, .temporarilyUnavailable, .couldNotDetermine, .timedOut, .error:
-            return false
-        }
+        storeMode == .localFallback
     }
 }
 

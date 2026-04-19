@@ -254,6 +254,7 @@ nonisolated private struct BestSetPresentation: Equatable {
 }
 
 nonisolated private enum WorkoutMetricsPolicy {
+    // Bump when session summary math or projected history facts change semantics.
     nonisolated static let summaryMetricsVersion = 1
 
     nonisolated static func estimatedOneRepMax(weight: Double, reps: Int) -> Double {
@@ -1116,12 +1117,13 @@ nonisolated final class WorkoutMetricsService {
             return HistoryProjectionSnapshotBuilder.projectedFacts(from: session).map { $0.makeModel() }
         }
 
+        let hasStaleProjectionVersion = session.summaryMetricsVersion < Self.currentSummaryMetricsVersion
         let sourceUpdatedAt = HistoryProjectionSnapshotBuilder.sourceSessionUpdatedAt(for: session)
         let completedAt = session.endedAt ?? session.startedAt
         let hasStaleProjectionSource = persistedFacts.contains { fact in
             fact.sourceSessionUpdatedAt != sourceUpdatedAt || fact.completedAt != completedAt
         }
-        guard hasStaleProjectionSource else {
+        guard hasStaleProjectionVersion || hasStaleProjectionSource else {
             return persistedFacts
         }
 

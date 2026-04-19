@@ -5,7 +5,7 @@ import Testing
 
 struct UserDataSyncTrackerTests {
     @Test
-    func cloudStartupPreflightOnlyForcesLocalFallbackForDefinitiveLocalOnlyStates() {
+    func cloudStartupPreflightForcesLocalFallbackWheneverLaunchDecisionUsesLocalStore() {
         let definitiveStatuses: [CloudStartupAccountStatus] = [
             .noAccount,
             .restricted,
@@ -32,7 +32,7 @@ struct UserDataSyncTrackerTests {
                 statusProvider: MockCloudStartupAccountStatusProvider(status: status)
             )
 
-            #expect(!decision.shouldForceLocalFallbackStore)
+            #expect(decision.shouldForceLocalFallbackStore)
             #expect(decision.storeMode == .localFallback)
         }
     }

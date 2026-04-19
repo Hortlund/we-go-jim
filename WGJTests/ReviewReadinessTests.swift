@@ -219,6 +219,38 @@ struct ReviewReadinessTests {
         #expect(remainingAsset.fileSizeBytes == 0)
     }
 
+    @Test
+    func deleteAllUserDataStillAttemptsFallbackCloudCleanupInLocalOnlySessions() async throws {
+        let context = try makeInMemoryContext()
+        context.insert(UserProfile(displayName: "Demo Lifter"))
+
+        let cleanupTracker = CloudCleanupTracker()
+        let service = AppDataDeletionService(
+            modelContext: context,
+            socialDataDeleterFactory: { _ in
+                cleanupTracker.factoryCallCount += 1
+                return FailingCloudDataDeleter(
+                    tracker: cleanupTracker,
+                    error: TestCloudCleanupError.remoteUnavailable
+                )
+            }
+        )
+
+        do {
+            try await service.deleteAllUserData()
+            Issue.record("Expected partial cloud cleanup error.")
+        } catch let error as AppDataDeletionError {
+            switch error {
+            case .partialCloudCleanup(let details):
+                #expect(details.contains("remote unavailable"))
+            }
+        }
+
+        #expect(cleanupTracker.factoryCallCount == 1)
+        #expect(cleanupTracker.deleteCallCount == 1)
+        #expect(try context.fetch(FetchDescriptor<UserProfile>()).isEmpty)
+    }
+
     private func makeInMemoryContext() throws -> ModelContext {
         let schema = Schema([
             ExerciseCatalogItem.self,
@@ -281,4 +313,32 @@ struct ReviewReadinessTests {
 @MainActor
 private struct NoopCloudDataDeleter: BrosCloudDataDeleting {
     func deleteCurrentUserData() async throws { }
+}
+
+@MainActor
+private final class CloudCleanupTracker {
+    var factoryCallCount = 0
+    var deleteCallCount = 0
+}
+
+@MainActor
+private struct FailingCloudDataDeleter: BrosCloudDataDeleting {
+    let tracker: CloudCleanupTracker
+    let error: any Error
+
+    func deleteCurrentUserData() async throws {
+        tracker.deleteCallCount += 1
+        throw error
+    }
+}
+
+private enum TestCloudCleanupError: LocalizedError {
+    case remoteUnavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .remoteUnavailable:
+            return "remote unavailable"
+        }
+    }
 }

@@ -537,23 +537,28 @@ final class ActiveWorkoutPresentationState {
 
     func restoreActiveSessionIfMissing(
         modelContext: ModelContext,
-        backgroundStore: AppBackgroundStore? = nil
+        backgroundStore: AppBackgroundStore? = nil,
+        shouldApplyRestoredSession: @escaping @MainActor () -> Bool = { true }
     ) async {
         guard activeSessionID == nil else { return }
         await restoreActiveSessionIfNeeded(
             modelContext: modelContext,
-            backgroundStore: backgroundStore
+            backgroundStore: backgroundStore,
+            shouldApplyRestoredSession: shouldApplyRestoredSession
         )
     }
 
     func restoreActiveSessionIfNeeded(
         modelContext: ModelContext,
-        backgroundStore: AppBackgroundStore? = nil
+        backgroundStore: AppBackgroundStore? = nil,
+        shouldApplyRestoredSession: @escaping @MainActor () -> Bool = { true }
     ) async {
         let activeSessionID = await Self.fetchActiveSessionIDIfNeeded(
             modelContext: modelContext,
             backgroundStore: backgroundStore
         )
+
+        guard shouldApplyRestoredSession() else { return }
 
         if let activeSessionID {
             self.activeSessionID = activeSessionID

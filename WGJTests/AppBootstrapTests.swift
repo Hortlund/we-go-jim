@@ -87,4 +87,32 @@ struct AppBootstrapTests {
             )
         )
     }
+
+    @Test
+    func resumeCriticalMaintenanceTrackerInvalidatesStaleRunsAcrossStartupResets() throws {
+        var tracker = ResumeCriticalMaintenanceTracker()
+        let firstRunCandidate = tracker.beginRunIfNeeded()
+        let firstRunID = try #require(firstRunCandidate)
+
+        #expect(tracker.hasRunThisForegroundCycle)
+        #expect(tracker.isRunning)
+        #expect(tracker.isCurrent(firstRunID))
+
+        tracker.resetForegroundCycle()
+
+        #expect(!tracker.hasRunThisForegroundCycle)
+        #expect(!tracker.isRunning)
+        #expect(!tracker.isCurrent(firstRunID))
+
+        let secondRunCandidate = tracker.beginRunIfNeeded()
+        let secondRunID = try #require(secondRunCandidate)
+        tracker.finishRun(firstRunID)
+
+        #expect(tracker.isRunning)
+        #expect(tracker.isCurrent(secondRunID))
+
+        tracker.finishRun(secondRunID)
+
+        #expect(!tracker.isRunning)
+    }
 }

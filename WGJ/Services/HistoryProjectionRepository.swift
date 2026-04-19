@@ -64,7 +64,8 @@ nonisolated final class HistoryProjectionRepository {
         for session in completedSessions {
             let drafts = HistoryProjectionSnapshotBuilder.projectedFacts(from: session)
             let existing = factsBySessionID[session.id] ?? []
-            guard !factsMatch(existing, drafts: drafts) else { continue }
+            let hasStaleProjectionVersion = session.summaryMetricsVersion < WorkoutMetricsService.currentSummaryMetricsVersion
+            guard hasStaleProjectionVersion || !factsMatch(existing, drafts: drafts) else { continue }
 
             if apply(drafts: drafts, to: existing, sessionID: session.id) {
                 rebuiltSessions += 1
@@ -95,7 +96,8 @@ nonisolated final class HistoryProjectionRepository {
         for session in completedSessions {
             let drafts = HistoryProjectionSnapshotBuilder.projectedFacts(from: session)
             let existing = factsBySessionID[session.id] ?? []
-            if factsMatch(existing, drafts: drafts) == false {
+            let hasStaleProjectionVersion = session.summaryMetricsVersion < WorkoutMetricsService.currentSummaryMetricsVersion
+            if hasStaleProjectionVersion || factsMatch(existing, drafts: drafts) == false {
                 return true
             }
         }

@@ -251,6 +251,45 @@ struct HistoryProjectionRepositoryTests {
         #expect(try projectionRepository.facts(forSessionID: session.id).count == 1)
     }
 
+    @Test
+    func staleSummaryMetricsVersionMarksProjectionFactsForBackfill() throws {
+        let context = try makeInMemoryContext()
+        let sessionRepository = WorkoutSessionRepository(modelContext: context)
+        let projectionRepository = HistoryProjectionRepository(modelContext: context)
+
+        let row = ExerciseCatalogItem(
+            remoteUUID: "projection-version-row",
+            displayName: "Barbell Row",
+            categoryName: "Back",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(row)
+
+        let session = try makeCompletedSession(
+            named: "Projection Version",
+            weight: 90,
+            reps: 6,
+            exercise: row,
+            sessionRepository: sessionRepository
+        )
+
+        try waitForProjectedFacts(
+            sessionID: session.id,
+            expectedCount: 1,
+            repository: projectionRepository
+        )
+        #expect((try projectionRepository.needsBackfill()) == false)
+
+        session.summaryMetricsVersion = 0
+        try context.save()
+
+        #expect(try projectionRepository.needsBackfill())
+        #expect(try sessionRepository.backfillCompletedSessionSummariesIfNeeded() == 1)
+        #expect((try projectionRepository.needsBackfill()) == false)
+    }
+
     private func makeInMemoryContext() throws -> ModelContext {
         let schema = Schema([
             ExerciseCatalogItem.self,

@@ -923,10 +923,12 @@ nonisolated final class WorkoutSessionRepository {
     }
 
     private func previousSnapshot(from set: WorkoutSessionSet) -> WorkoutPreviousSetSnapshot {
-        let chosenWeight = set.actualWeight ?? set.targetWeight
-        let chosenReps = set.actualReps ?? set.targetReps
-        let chosenUnit = set.actualWeight != nil ? set.actualLoadUnit : set.targetLoadUnit
-        return WorkoutPreviousSetSnapshot(reps: chosenReps, weight: chosenWeight, unit: chosenUnit)
+        let loggedUnit: TemplateLoadUnit = set.actualLoadUnit == .bodyweight ? .bodyweight : set.actualLoadUnit
+        return WorkoutPreviousSetSnapshot(
+            reps: set.actualReps,
+            weight: set.actualWeight,
+            unit: loggedUnit
+        )
     }
 
     private func latestPreviousExercises(
