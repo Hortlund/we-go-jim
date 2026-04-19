@@ -81,6 +81,36 @@ struct AppleCoachNarrativeServiceTests {
     }
 
     @Test
+    func recapCancellationPropagatesWithoutCachingFallback() async throws {
+        let fixture = try makeFixture()
+        let snapshot = WeeklyCoachInsightSnapshot(
+            weekStart: fixture.weekStart,
+            revisionKey: "revision-cancel",
+            baselineWeekCount: 0,
+            completedWorkoutCount: 1,
+            totalVolumeDelta: 0,
+            consistencyDelta: 0,
+            topRisingSignals: [],
+            topWatchSignals: [],
+            fallbackSummary: "Fallback should not be cached on cancellation.",
+            followUpKinds: [.whatChanged]
+        )
+        let service = AppleCoachNarrativeService(
+            cacheRepository: fixture.cacheRepository,
+            availabilityProvider: { true },
+            recapGenerator: { _ in
+                throw CancellationError()
+            }
+        )
+
+        await #expect(throws: CancellationError.self) {
+            try await service.recap(for: snapshot)
+        }
+
+        #expect(try fixture.context.fetch(FetchDescriptor<CachedCoachNarrative>()).isEmpty)
+    }
+
+    @Test
     func recapAndFollowUpUseSeparateCacheEntries() async throws {
         let fixture = try makeFixture()
         let snapshot = WeeklyCoachInsightSnapshot(

@@ -70,7 +70,7 @@ final class AppleCoachNarrativeService {
             cachedFallback: cached,
             fallback: fallbackSummary,
             generate: { [recapGenerator, availabilityProvider] in
-                await Self.generatedSummary(
+                try await Self.generatedSummary(
                     using: recapGenerator,
                     input: RecapGenerationInput(snapshot: snapshot),
                     isAvailable: availabilityProvider,
@@ -112,7 +112,7 @@ final class AppleCoachNarrativeService {
             cachedFallback: cached,
             fallback: fallbackSummary,
             generate: { [followUpGenerator, availabilityProvider] in
-                await Self.generatedSummary(
+                try await Self.generatedSummary(
                     using: followUpGenerator,
                     input: FollowUpGenerationInput(kind: kind, snapshot: snapshot),
                     isAvailable: availabilityProvider,
@@ -134,7 +134,7 @@ final class AppleCoachNarrativeService {
         cacheKey: String,
         cachedFallback: CoachNarrativeSummary?,
         fallback: @autoclosure @escaping () -> CoachNarrativeSummary,
-        generate: @escaping @Sendable () async -> CoachNarrativeSummary?,
+        generate: @escaping @Sendable () async throws -> CoachNarrativeSummary?,
         persist: @escaping @Sendable (CoachNarrativeSummary) throws -> Void
     ) async throws -> CoachNarrativeSummary {
         guard availabilityProvider() else {
@@ -154,9 +154,13 @@ final class AppleCoachNarrativeService {
         let task = Task<CoachNarrativeSummary, Error> { @MainActor in
             defer { inFlightRequests[cacheKey] = nil }
 
-            if let generated = await generate() {
-                try persist(generated)
-                return generated
+            do {
+                if let generated = try await generate() {
+                    try persist(generated)
+                    return generated
+                }
+            } catch let cancellation as CancellationError {
+                throw cancellation
             }
 
             if let cachedFallback {
@@ -176,7 +180,7 @@ final class AppleCoachNarrativeService {
         input: Input,
         isAvailable: @escaping @Sendable () -> Bool,
         fallback: CoachNarrativeSummary
-    ) async -> CoachNarrativeSummary? {
+    ) async throws -> CoachNarrativeSummary? {
         guard isAvailable() else {
             return nil
         }
@@ -184,6 +188,8 @@ final class AppleCoachNarrativeService {
         let summary: CoachNarrativeSummary?
         do {
             summary = try await generator(input)
+        } catch let cancellation as CancellationError {
+            throw cancellation
         } catch {
             return nil
         }
