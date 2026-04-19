@@ -5,7 +5,9 @@ import SwiftData
 final class CachedCoachNarrative {
     var id: UUID = UUID()
     @Attribute(.unique) var cacheKey: String = ""
-    var sessionID: UUID = UUID()
+    var weekStart: Date = Date()
+    var revisionKey: String = ""
+    var headline: String = ""
     var availabilityModeRaw: String = CoachNarrativeAvailabilityMode.generated.rawValue
     var body: String = ""
     var createdAt: Date = Date()
@@ -18,23 +20,30 @@ final class CachedCoachNarrative {
 
     init(
         id: UUID = UUID(),
-        sessionID: UUID,
+        weekStart: Date,
+        revisionKey: String,
+        headline: String,
         availabilityMode: CoachNarrativeAvailabilityMode = .generated,
         body: String,
         createdAt: Date = .now,
         updatedAt: Date = .now
     ) {
         self.id = id
-        self.cacheKey = Self.makeCacheKey(sessionID: sessionID)
-        self.sessionID = sessionID
+        self.cacheKey = Self.makeCacheKey(
+            weekStart: weekStart,
+            revisionKey: revisionKey
+        )
+        self.weekStart = weekStart
+        self.revisionKey = revisionKey
+        self.headline = headline
         self.availabilityModeRaw = availabilityMode.rawValue
         self.body = body
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
 
-    nonisolated static func makeCacheKey(sessionID: UUID) -> String {
-        sessionID.uuidString
+    nonisolated static func makeCacheKey(weekStart: Date, revisionKey: String) -> String {
+        "recap|\(normalizedWeekStartString(for: weekStart))|\(revisionKey)"
     }
 }
 
@@ -42,7 +51,9 @@ final class CachedCoachNarrative {
 final class CachedCoachFollowUpNarrative {
     var id: UUID = UUID()
     @Attribute(.unique) var cacheKey: String = ""
-    var sessionID: UUID = UUID()
+    var weekStart: Date = Date()
+    var revisionKey: String = ""
+    var headline: String = ""
     var followUpKindRaw: String = CoachFollowUpKind.whatImproved.rawValue
     var availabilityModeRaw: String = CoachNarrativeAvailabilityMode.generated.rawValue
     var body: String = ""
@@ -61,7 +72,9 @@ final class CachedCoachFollowUpNarrative {
 
     init(
         id: UUID = UUID(),
-        sessionID: UUID,
+        weekStart: Date,
+        revisionKey: String,
+        headline: String,
         followUpKind: CoachFollowUpKind,
         availabilityMode: CoachNarrativeAvailabilityMode = .generated,
         body: String,
@@ -69,8 +82,14 @@ final class CachedCoachFollowUpNarrative {
         updatedAt: Date = .now
     ) {
         self.id = id
-        self.cacheKey = Self.makeCacheKey(sessionID: sessionID, followUpKind: followUpKind)
-        self.sessionID = sessionID
+        self.cacheKey = Self.makeCacheKey(
+            weekStart: weekStart,
+            revisionKey: revisionKey,
+            followUpKind: followUpKind
+        )
+        self.weekStart = weekStart
+        self.revisionKey = revisionKey
+        self.headline = headline
         self.followUpKindRaw = followUpKind.rawValue
         self.availabilityModeRaw = availabilityMode.rawValue
         self.body = body
@@ -78,7 +97,18 @@ final class CachedCoachFollowUpNarrative {
         self.updatedAt = updatedAt
     }
 
-    nonisolated static func makeCacheKey(sessionID: UUID, followUpKind: CoachFollowUpKind) -> String {
-        "\(sessionID.uuidString)|\(followUpKind.rawValue)"
+    nonisolated static func makeCacheKey(
+        weekStart: Date,
+        revisionKey: String,
+        followUpKind: CoachFollowUpKind
+    ) -> String {
+        "followup|\(normalizedWeekStartString(for: weekStart))|\(revisionKey)|\(followUpKind.rawValue)"
     }
+}
+
+private nonisolated func normalizedWeekStartString(for date: Date) -> String {
+    let formatter = ISO8601DateFormatter()
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    formatter.formatOptions = [.withInternetDateTime]
+    return formatter.string(from: date)
 }

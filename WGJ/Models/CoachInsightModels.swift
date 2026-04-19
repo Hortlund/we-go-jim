@@ -12,6 +12,7 @@ nonisolated enum CoachNarrativeAvailabilityMode: String, Codable, CaseIterable, 
 }
 
 nonisolated struct CoachNarrativeSummary: Equatable, Sendable {
+    let headline: String
     let body: String
     let availabilityMode: CoachNarrativeAvailabilityMode
 }

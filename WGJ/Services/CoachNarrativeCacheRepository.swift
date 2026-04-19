@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 import SwiftData
 
@@ -10,11 +9,12 @@ nonisolated final class CoachNarrativeCacheRepository {
     }
 
     func recap(forWeekStart weekStart: Date, revisionKey: String) throws -> CoachNarrativeSummary? {
-        let semanticID = Self.semanticUUID(
-            for: Self.recapSemanticKey(weekStart: weekStart, revisionKey: revisionKey)
+        let cacheKey = CachedCoachNarrative.makeCacheKey(
+            weekStart: weekStart,
+            revisionKey: revisionKey
         )
         var descriptor = FetchDescriptor<CachedCoachNarrative>(
-            predicate: #Predicate { $0.sessionID == semanticID }
+            predicate: #Predicate { $0.cacheKey == cacheKey }
         )
         descriptor.fetchLimit = 1
 
@@ -23,6 +23,7 @@ nonisolated final class CoachNarrativeCacheRepository {
         }
 
         return CoachNarrativeSummary(
+            headline: cached.headline,
             body: cached.body,
             availabilityMode: cached.availabilityMode
         )
@@ -34,22 +35,29 @@ nonisolated final class CoachNarrativeCacheRepository {
         revisionKey: String,
         now: Date = .now
     ) throws {
-        let semanticID = Self.semanticUUID(
-            for: Self.recapSemanticKey(weekStart: weekStart, revisionKey: revisionKey)
+        let cacheKey = CachedCoachNarrative.makeCacheKey(
+            weekStart: weekStart,
+            revisionKey: revisionKey
         )
         var descriptor = FetchDescriptor<CachedCoachNarrative>(
-            predicate: #Predicate { $0.sessionID == semanticID }
+            predicate: #Predicate { $0.cacheKey == cacheKey }
         )
         descriptor.fetchLimit = 1
 
         if let cached = try modelContext.fetch(descriptor).first {
+            cached.cacheKey = cacheKey
+            cached.weekStart = weekStart
+            cached.revisionKey = revisionKey
+            cached.headline = summary.headline
             cached.body = summary.body
             cached.availabilityMode = summary.availabilityMode
             cached.updatedAt = now
         } else {
             modelContext.insert(
                 CachedCoachNarrative(
-                    sessionID: semanticID,
+                    weekStart: weekStart,
+                    revisionKey: revisionKey,
+                    headline: summary.headline,
                     availabilityMode: summary.availabilityMode,
                     body: summary.body,
                     createdAt: now,
@@ -66,17 +74,13 @@ nonisolated final class CoachNarrativeCacheRepository {
         weekStart: Date,
         revisionKey: String
     ) throws -> CoachNarrativeSummary? {
-        let semanticID = Self.semanticUUID(
-            for: Self.followUpSemanticKey(
-                kind: kind,
-                weekStart: weekStart,
-                revisionKey: revisionKey
-            )
+        let cacheKey = CachedCoachFollowUpNarrative.makeCacheKey(
+            weekStart: weekStart,
+            revisionKey: revisionKey,
+            followUpKind: kind
         )
         var descriptor = FetchDescriptor<CachedCoachFollowUpNarrative>(
-            predicate: #Predicate {
-                $0.sessionID == semanticID && $0.followUpKindRaw == kind.rawValue
-            }
+            predicate: #Predicate { $0.cacheKey == cacheKey }
         )
         descriptor.fetchLimit = 1
 
@@ -85,6 +89,7 @@ nonisolated final class CoachNarrativeCacheRepository {
         }
 
         return CoachNarrativeSummary(
+            headline: cached.headline,
             body: cached.body,
             availabilityMode: cached.availabilityMode
         )
@@ -97,28 +102,31 @@ nonisolated final class CoachNarrativeCacheRepository {
         revisionKey: String,
         now: Date = .now
     ) throws {
-        let semanticID = Self.semanticUUID(
-            for: Self.followUpSemanticKey(
-                kind: kind,
-                weekStart: weekStart,
-                revisionKey: revisionKey
-            )
+        let cacheKey = CachedCoachFollowUpNarrative.makeCacheKey(
+            weekStart: weekStart,
+            revisionKey: revisionKey,
+            followUpKind: kind
         )
         var descriptor = FetchDescriptor<CachedCoachFollowUpNarrative>(
-            predicate: #Predicate {
-                $0.sessionID == semanticID && $0.followUpKindRaw == kind.rawValue
-            }
+            predicate: #Predicate { $0.cacheKey == cacheKey }
         )
         descriptor.fetchLimit = 1
 
         if let cached = try modelContext.fetch(descriptor).first {
+            cached.cacheKey = cacheKey
+            cached.weekStart = weekStart
+            cached.revisionKey = revisionKey
+            cached.headline = summary.headline
+            cached.followUpKind = kind
             cached.body = summary.body
             cached.availabilityMode = summary.availabilityMode
             cached.updatedAt = now
         } else {
             modelContext.insert(
                 CachedCoachFollowUpNarrative(
-                    sessionID: semanticID,
+                    weekStart: weekStart,
+                    revisionKey: revisionKey,
+                    headline: summary.headline,
                     followUpKind: kind,
                     availabilityMode: summary.availabilityMode,
                     body: summary.body,
@@ -129,38 +137,5 @@ nonisolated final class CoachNarrativeCacheRepository {
         }
 
         try modelContext.save()
-    }
-
-    private static func recapSemanticKey(weekStart: Date, revisionKey: String) -> String {
-        "recap|\(normalizedWeekStartString(for: weekStart))|\(revisionKey)"
-    }
-
-    private static func followUpSemanticKey(
-        kind: CoachFollowUpKind,
-        weekStart: Date,
-        revisionKey: String
-    ) -> String {
-        "followup|\(kind.rawValue)|\(normalizedWeekStartString(for: weekStart))|\(revisionKey)"
-    }
-
-    private static func normalizedWeekStartString(for date: Date) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.string(from: date)
-    }
-
-    private static func semanticUUID(for key: String) -> UUID {
-        let digest = SHA256.hash(data: Data(key.utf8))
-        var bytes = Array(digest.prefix(16))
-        bytes[6] = (bytes[6] & 0x0F) | 0x50
-        bytes[8] = (bytes[8] & 0x3F) | 0x80
-
-        return UUID(uuid: (
-            bytes[0], bytes[1], bytes[2], bytes[3],
-            bytes[4], bytes[5], bytes[6], bytes[7],
-            bytes[8], bytes[9], bytes[10], bytes[11],
-            bytes[12], bytes[13], bytes[14], bytes[15]
-        ))
     }
 }

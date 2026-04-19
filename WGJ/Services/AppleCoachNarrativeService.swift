@@ -14,8 +14,8 @@ nonisolated final class AppleCoachNarrativeService {
         let snapshot: WeeklyCoachInsightSnapshot
     }
 
-    typealias RecapGenerator = @Sendable (RecapGenerationInput) throws -> CoachNarrativeSummary?
-    typealias FollowUpGenerator = @Sendable (FollowUpGenerationInput) throws -> CoachNarrativeSummary?
+    typealias RecapGenerator = @Sendable (RecapGenerationInput) async throws -> CoachNarrativeSummary?
+    typealias FollowUpGenerator = @Sendable (FollowUpGenerationInput) async throws -> CoachNarrativeSummary?
 
     private let cacheRepository: CoachNarrativeCacheRepository
     private let availabilityProvider: @Sendable () -> Bool
@@ -23,18 +23,32 @@ nonisolated final class AppleCoachNarrativeService {
     private let followUpGenerator: FollowUpGenerator
 
     init(
-        modelContext: ModelContext,
+        cacheRepository: CoachNarrativeCacheRepository,
         availabilityProvider: (@Sendable () -> Bool)? = nil,
         recapGenerator: RecapGenerator? = nil,
         followUpGenerator: FollowUpGenerator? = nil
     ) {
-        self.cacheRepository = CoachNarrativeCacheRepository(modelContext: modelContext)
+        self.cacheRepository = cacheRepository
         self.availabilityProvider = availabilityProvider ?? AppleCoachNarrativeService.foundationModelsAvailable
         self.recapGenerator = recapGenerator ?? AppleCoachNarrativeService.defaultRecapGenerator
         self.followUpGenerator = followUpGenerator ?? AppleCoachNarrativeService.defaultFollowUpGenerator
     }
 
-    func recapSummary(for snapshot: WeeklyCoachInsightSnapshot) throws -> CoachNarrativeSummary {
+    convenience init(
+        modelContext: ModelContext,
+        availabilityProvider: (@Sendable () -> Bool)? = nil,
+        recapGenerator: RecapGenerator? = nil,
+        followUpGenerator: FollowUpGenerator? = nil
+    ) {
+        self.init(
+            cacheRepository: CoachNarrativeCacheRepository(modelContext: modelContext),
+            availabilityProvider: availabilityProvider,
+            recapGenerator: recapGenerator,
+            followUpGenerator: followUpGenerator
+        )
+    }
+
+    func recap(for snapshot: WeeklyCoachInsightSnapshot) async throws -> CoachNarrativeSummary {
         if let cached = try cacheRepository.recap(
             forWeekStart: snapshot.weekStart,
             revisionKey: snapshot.revisionKey
@@ -42,7 +56,7 @@ nonisolated final class AppleCoachNarrativeService {
             return cached
         }
 
-        if let generated = try generatedRecap(for: snapshot) {
+        if let generated = await generatedRecap(for: snapshot) {
             try cacheRepository.saveRecap(
                 generated,
                 weekStart: snapshot.weekStart,
@@ -60,10 +74,10 @@ nonisolated final class AppleCoachNarrativeService {
         return fallback
     }
 
-    func followUpSummary(
+    func followUp(
         for kind: CoachFollowUpKind,
         snapshot: WeeklyCoachInsightSnapshot
-    ) throws -> CoachNarrativeSummary {
+    ) async throws -> CoachNarrativeSummary {
         if let cached = try cacheRepository.followUp(
             kind: kind,
             weekStart: snapshot.weekStart,
@@ -72,7 +86,7 @@ nonisolated final class AppleCoachNarrativeService {
             return cached
         }
 
-        if let generated = try generatedFollowUp(for: kind, snapshot: snapshot) {
+        if let generated = await generatedFollowUp(for: kind, snapshot: snapshot) {
             try cacheRepository.saveFollowUp(
                 generated,
                 kind: kind,
@@ -94,12 +108,19 @@ nonisolated final class AppleCoachNarrativeService {
 
     private func generatedRecap(
         for snapshot: WeeklyCoachInsightSnapshot
-    ) throws -> CoachNarrativeSummary? {
+    ) async -> CoachNarrativeSummary? {
         guard availabilityProvider() else {
             return nil
         }
 
-        guard let summary = try recapGenerator(RecapGenerationInput(snapshot: snapshot)) else {
+        let summary: CoachNarrativeSummary?
+        do {
+            summary = try await recapGenerator(RecapGenerationInput(snapshot: snapshot))
+        } catch {
+            return nil
+        }
+
+        guard let summary else {
             return nil
         }
 
@@ -109,14 +130,21 @@ nonisolated final class AppleCoachNarrativeService {
     private func generatedFollowUp(
         for kind: CoachFollowUpKind,
         snapshot: WeeklyCoachInsightSnapshot
-    ) throws -> CoachNarrativeSummary? {
+    ) async -> CoachNarrativeSummary? {
         guard availabilityProvider() else {
             return nil
         }
 
-        guard let summary = try followUpGenerator(
-            FollowUpGenerationInput(kind: kind, snapshot: snapshot)
-        ) else {
+        let summary: CoachNarrativeSummary?
+        do {
+            summary = try await followUpGenerator(
+                FollowUpGenerationInput(kind: kind, snapshot: snapshot)
+            )
+        } catch {
+            return nil
+        }
+
+        guard let summary else {
             return nil
         }
 
@@ -130,12 +158,14 @@ nonisolated final class AppleCoachNarrativeService {
         _ summary: CoachNarrativeSummary,
         fallback: CoachNarrativeSummary
     ) -> CoachNarrativeSummary {
+        let trimmedHeadline = summary.headline.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedBody = summary.body.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedBody.isEmpty else {
+        guard !trimmedHeadline.isEmpty, !trimmedBody.isEmpty else {
             return fallback
         }
 
         return CoachNarrativeSummary(
+            headline: trimmedHeadline,
             body: trimmedBody,
             availabilityMode: summary.availabilityMode
         )
@@ -144,6 +174,7 @@ nonisolated final class AppleCoachNarrativeService {
     private func fallbackRecap(for snapshot: WeeklyCoachInsightSnapshot) -> CoachNarrativeSummary {
         if !snapshot.fallbackSummary.isEmpty {
             return CoachNarrativeSummary(
+                headline: "Weekly Coach Recap",
                 body: snapshot.fallbackSummary,
                 availabilityMode: .fallback
             )
@@ -164,6 +195,7 @@ nonisolated final class AppleCoachNarrativeService {
         }
 
         return CoachNarrativeSummary(
+            headline: recapHeadline(for: snapshot),
             body: parts.joined(separator: " "),
             availabilityMode: .fallback
         )
@@ -215,9 +247,43 @@ nonisolated final class AppleCoachNarrativeService {
         }
 
         return CoachNarrativeSummary(
+            headline: followUpHeadline(for: kind, snapshot: snapshot),
             body: body,
             availabilityMode: .fallback
         )
+    }
+
+    private func recapHeadline(for snapshot: WeeklyCoachInsightSnapshot) -> String {
+        if !snapshot.fallbackSummary.isEmpty {
+            return "Weekly Coach Recap"
+        }
+        if let risingSignal = snapshot.topRisingSignals.first {
+            return "\(risingSignal.exerciseName) Led The Week"
+        }
+        if let watchSignal = snapshot.topWatchSignals.first {
+            return "\(watchSignal.exerciseName) Needs Attention"
+        }
+        if snapshot.totalVolumeDelta > 0 {
+            return "Volume Moved Up"
+        }
+        if snapshot.totalVolumeDelta < 0 {
+            return "Volume Moved Down"
+        }
+        return "Weekly Coach Recap"
+    }
+
+    private func followUpHeadline(
+        for kind: CoachFollowUpKind,
+        snapshot: WeeklyCoachInsightSnapshot
+    ) -> String {
+        switch kind {
+        case .whatImproved:
+            return snapshot.topRisingSignals.first.map { "\($0.exerciseName) Improved" } ?? "What Improved"
+        case .whatChanged:
+            return "What Changed"
+        case .whyFlat:
+            return snapshot.topWatchSignals.first.map { "\($0.exerciseName) To Watch" } ?? "Why It Felt Flat"
+        }
     }
 
     private func workoutCountSentence(_ count: Int) -> String {
@@ -251,29 +317,31 @@ nonisolated final class AppleCoachNarrativeService {
 
     private static func defaultRecapGenerator(
         _ input: RecapGenerationInput
-    ) throws -> CoachNarrativeSummary? {
-        try generateWithFoundationModels(
+    ) async throws -> CoachNarrativeSummary? {
+        try await generateWithFoundationModels(
+            instructions: "You are WGJ's coach. Return a short headline and a concise body grounded only in the supplied weekly training snapshot.",
             prompt: recapPrompt(for: input.snapshot)
         )
     }
 
     private static func defaultFollowUpGenerator(
         _ input: FollowUpGenerationInput
-    ) throws -> CoachNarrativeSummary? {
-        try generateWithFoundationModels(
+    ) async throws -> CoachNarrativeSummary? {
+        try await generateWithFoundationModels(
+            instructions: "You are WGJ's coach. Return a short headline and a concise body grounded only in the supplied weekly training snapshot and requested follow-up angle.",
             prompt: followUpPrompt(for: input.kind, snapshot: input.snapshot)
         )
     }
 
     private static func recapPrompt(for snapshot: WeeklyCoachInsightSnapshot) -> String {
         """
-        Write a short weekly training recap.
-        Completed workouts: \(snapshot.completedWorkoutCount)
-        Volume delta: \(snapshot.totalVolumeDelta)
-        Consistency delta: \(snapshot.consistencyDelta)
-        Rising signals: \(snapshot.topRisingSignals.map(\.summary).joined(separator: " | "))
-        Watch signals: \(snapshot.topWatchSignals.map(\.summary).joined(separator: " | "))
-        Fallback summary: \(snapshot.fallbackSummary)
+        recap
+        workouts=\(snapshot.completedWorkoutCount)
+        volumeDelta=\(WGJFormatters.oneDecimalString(snapshot.totalVolumeDelta))
+        consistencyDelta=\(snapshot.consistencyDelta)
+        rising=\(snapshot.topRisingSignals.map(\.summary).joined(separator: " | "))
+        watch=\(snapshot.topWatchSignals.map(\.summary).joined(separator: " | "))
+        fallback=\(snapshot.fallbackSummary)
         """
     }
 
@@ -282,20 +350,20 @@ nonisolated final class AppleCoachNarrativeService {
         snapshot: WeeklyCoachInsightSnapshot
     ) -> String {
         """
-        Write a short weekly follow-up about \(kind.rawValue).
-        Completed workouts: \(snapshot.completedWorkoutCount)
-        Volume delta: \(snapshot.totalVolumeDelta)
-        Consistency delta: \(snapshot.consistencyDelta)
-        Rising signals: \(snapshot.topRisingSignals.map(\.summary).joined(separator: " | "))
-        Watch signals: \(snapshot.topWatchSignals.map(\.summary).joined(separator: " | "))
-        Fallback summary: \(snapshot.fallbackSummary)
+        followUp=\(kind.rawValue)
+        workouts=\(snapshot.completedWorkoutCount)
+        volumeDelta=\(WGJFormatters.oneDecimalString(snapshot.totalVolumeDelta))
+        consistencyDelta=\(snapshot.consistencyDelta)
+        rising=\(snapshot.topRisingSignals.map(\.summary).joined(separator: " | "))
+        watch=\(snapshot.topWatchSignals.map(\.summary).joined(separator: " | "))
+        fallback=\(snapshot.fallbackSummary)
         """
     }
 
     private static func foundationModelsAvailable() -> Bool {
         #if canImport(FoundationModels)
         if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
-            return SystemLanguageModel.default.availability == .available
+            return foundationModelsAvailability()
         }
         #endif
 
@@ -303,8 +371,9 @@ nonisolated final class AppleCoachNarrativeService {
     }
 
     private static func generateWithFoundationModels(
+        instructions: String,
         prompt: String
-    ) throws -> CoachNarrativeSummary? {
+    ) async throws -> CoachNarrativeSummary? {
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedPrompt.isEmpty else {
             return nil
@@ -312,15 +381,39 @@ nonisolated final class AppleCoachNarrativeService {
 
         #if canImport(FoundationModels)
         if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
-            guard SystemLanguageModel.default.availability == .available else {
+            guard foundationModelsAvailability() else {
                 return nil
             }
 
-            // Real prompting stays additive and can be expanded later without changing cache/fallback behavior.
-            return nil
+            let session = LanguageModelSession(instructions: instructions)
+            let response = try await session.respond(
+                to: trimmedPrompt,
+                generating: GeneratedCoachNarrative.self
+            )
+
+            return CoachNarrativeSummary(
+                headline: response.content.headline,
+                body: response.content.body,
+                availabilityMode: .generated
+            )
         }
         #endif
 
         return nil
     }
+
+    #if canImport(FoundationModels)
+    @available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
+    private static func foundationModelsAvailability() -> Bool {
+        let model = SystemLanguageModel.default
+        return model.availability == .available && model.isAvailable
+    }
+
+    @available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
+    @Generable
+    struct GeneratedCoachNarrative {
+        let headline: String
+        let body: String
+    }
+    #endif
 }

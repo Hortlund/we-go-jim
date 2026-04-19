@@ -47,17 +47,22 @@ struct ProfileCoachScaffoldingTests {
     @Test
     func deleteAllUserDataClearsCoachNarrativeCaches() async throws {
         let context = try makeInMemoryContext()
+        let weekStart = Date(timeIntervalSinceReferenceDate: 1_234_567)
 
         context.insert(
             CachedCoachNarrative(
-                sessionID: UUID(),
+                weekStart: weekStart,
+                revisionKey: "revision-a",
+                headline: "Weekly Coach Recap",
                 availabilityMode: .generated,
                 body: "Generated coach summary"
             )
         )
         context.insert(
             CachedCoachFollowUpNarrative(
-                sessionID: UUID(),
+                weekStart: weekStart,
+                revisionKey: "revision-a",
+                headline: "What Improved",
                 followUpKind: .whatImproved,
                 availabilityMode: .fallback,
                 body: "Fallback coach follow-up"
@@ -78,43 +83,60 @@ struct ProfileCoachScaffoldingTests {
 
     @Test
     func coachCacheKeysAreDeterministicPerSemanticEntry() {
-        let sessionID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
-        let otherSessionID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        let weekStart = Date(timeIntervalSinceReferenceDate: 1_234_567)
+        let otherWeekStart = Date(timeIntervalSinceReferenceDate: 7_654_321)
 
         let generated = CachedCoachNarrative(
-            sessionID: sessionID,
+            weekStart: weekStart,
+            revisionKey: "revision-a",
+            headline: "Weekly Coach Recap",
             availabilityMode: .generated,
             body: "Coach summary"
         )
         let generatedClone = CachedCoachNarrative(
-            sessionID: sessionID,
+            weekStart: weekStart,
+            revisionKey: "revision-a",
+            headline: "Weekly Coach Recap",
             availabilityMode: .fallback,
             body: "Fallback summary"
         )
         let otherGenerated = CachedCoachNarrative(
-            sessionID: otherSessionID,
+            weekStart: otherWeekStart,
+            revisionKey: "revision-a",
+            headline: "Weekly Coach Recap",
             availabilityMode: .generated,
             body: "Other summary"
         )
 
         #expect(generated.cacheKey == generatedClone.cacheKey)
         #expect(generated.cacheKey != otherGenerated.cacheKey)
-        #expect(CachedCoachNarrative.makeCacheKey(sessionID: sessionID) == sessionID.uuidString)
+        #expect(
+            CachedCoachNarrative.makeCacheKey(
+                weekStart: weekStart,
+                revisionKey: "revision-a"
+            ) == generated.cacheKey
+        )
 
         let whatImproved = CachedCoachFollowUpNarrative(
-            sessionID: sessionID,
+            weekStart: weekStart,
+            revisionKey: "revision-a",
+            headline: "What Improved",
             followUpKind: .whatImproved,
             availabilityMode: .generated,
             body: "Improved"
         )
         let whatImprovedClone = CachedCoachFollowUpNarrative(
-            sessionID: sessionID,
+            weekStart: weekStart,
+            revisionKey: "revision-a",
+            headline: "What Improved",
             followUpKind: .whatImproved,
             availabilityMode: .fallback,
             body: "Improved fallback"
         )
         let whyFlat = CachedCoachFollowUpNarrative(
-            sessionID: sessionID,
+            weekStart: weekStart,
+            revisionKey: "revision-a",
+            headline: "Why It Felt Flat",
             followUpKind: .whyFlat,
             availabilityMode: .generated,
             body: "Flat"
@@ -124,9 +146,10 @@ struct ProfileCoachScaffoldingTests {
         #expect(whatImproved.cacheKey != whyFlat.cacheKey)
         #expect(
             CachedCoachFollowUpNarrative.makeCacheKey(
-                sessionID: sessionID,
+                weekStart: weekStart,
+                revisionKey: "revision-a",
                 followUpKind: .whatImproved
-            ) == "\(sessionID.uuidString)|whatImproved"
+            ) == whatImproved.cacheKey
         )
     }
 
