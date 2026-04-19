@@ -16,30 +16,25 @@ nonisolated final class WeeklyCoachInsightService {
     func weeklyInsightSnapshot(asOf referenceDate: Date = .now) throws -> WeeklyCoachInsightSnapshot {
         let currentWeekStart = weekStart(for: referenceDate)
         let currentWeekEnd = calendar.date(byAdding: .day, value: 7, to: currentWeekStart) ?? currentWeekStart
-        let baselineWeekStart = calendar.date(byAdding: .day, value: -42, to: currentWeekStart) ?? currentWeekStart
-        let baselineWeekStarts = baselineWindowStarts(from: baselineWeekStart)
 
         let facts = try projectedFacts()
         let buckets = try weeklyBuckets(
             from: facts,
             currentWeekStart: currentWeekStart,
-            currentWeekEnd: currentWeekEnd,
-            baselineWeekStarts: baselineWeekStarts
+            currentWeekEnd: currentWeekEnd
         )
 
-        let baselineWeeks = baselineWeekStarts.compactMap { buckets.baselineBuckets[$0] }
-        let baselineActiveWeekCount = baselineWeeks.filter { !$0.sessionIDs.isEmpty }.count
+        let baselineWeeks = recentBaselineWeeks(from: buckets.baselineBuckets)
+        let baselineWeekCount = baselineWeeks.count
         let currentWorkoutCount = buckets.current.sessionIDs.count
         let currentVolume = buckets.current.totalVolume
-        let baselineAverageVolume = baselineWeeks.map(\.totalVolume).reduce(0, +) / Double(Self.baselineWindowCount)
-        let baselineAverageWorkouts = baselineWeeks.map { Double($0.sessionIDs.count) }.reduce(0, +) / Double(Self.baselineWindowCount)
 
         let fallbackSummary = fallbackSummary(
-            baselineActiveWeekCount: baselineActiveWeekCount,
-            baselineAverageVolume: baselineAverageVolume,
-            baselineAverageWorkouts: baselineAverageWorkouts
+            baselineWeekCount: baselineWeekCount
         )
         let shouldFallback = fallbackSummary != nil
+        let baselineAverageVolume = baselineWeeks.isEmpty ? 0 : baselineWeeks.map(\.totalVolume).reduce(0, +) / Double(baselineWeeks.count)
+        let baselineAverageWorkouts = baselineWeeks.isEmpty ? 0 : baselineWeeks.map { Double($0.sessionIDs.count) }.reduce(0, +) / Double(baselineWeeks.count)
         let totalVolumeDelta = shouldFallback ? 0 : percentageChange(current: currentVolume, baseline: baselineAverageVolume)
         let consistencyDelta = shouldFallback ? 0 : percentageChange(current: Double(currentWorkoutCount), baseline: baselineAverageWorkouts)
 
@@ -76,7 +71,7 @@ nonisolated final class WeeklyCoachInsightService {
             weekStart: currentWeekStart,
             revisionKey: revisionKey(
                 weekStart: currentWeekStart,
-                baselineWeekCount: baselineActiveWeekCount,
+                baselineWeekCount: baselineWeekCount,
                 completedWorkoutCount: currentWorkoutCount,
                 totalVolumeDelta: totalVolumeDelta,
                 consistencyDelta: consistencyDelta,
@@ -84,7 +79,7 @@ nonisolated final class WeeklyCoachInsightService {
                 topWatchSignals: topWatchSignals,
                 fallbackSummary: fallbackSummary
             ),
-            baselineWeekCount: baselineActiveWeekCount,
+            baselineWeekCount: baselineWeekCount,
             completedWorkoutCount: currentWorkoutCount,
             totalVolumeDelta: totalVolumeDelta,
             consistencyDelta: consistencyDelta,
@@ -104,11 +99,10 @@ nonisolated final class WeeklyCoachInsightService {
     private func weeklyBuckets(
         from facts: [CompletedSetFact],
         currentWeekStart: Date,
-        currentWeekEnd: Date,
-        baselineWeekStarts: [Date]
+        currentWeekEnd: Date
     ) throws -> (current: WeeklyCoachWeekBucket, baselineBuckets: [Date: WeeklyCoachWeekBucket]) {
         var current = WeeklyCoachWeekBucket()
-        var baselineBuckets = Dictionary(uniqueKeysWithValues: baselineWeekStarts.map { ($0, WeeklyCoachWeekBucket()) })
+        var baselineBuckets: [Date: WeeklyCoachWeekBucket] = [:]
 
         for fact in facts where !fact.isWarmup {
             if fact.completedAt >= currentWeekStart && fact.completedAt < currentWeekEnd {
@@ -116,14 +110,26 @@ nonisolated final class WeeklyCoachInsightService {
                 continue
             }
 
+            guard fact.completedAt < currentWeekStart else { continue }
             let factWeekStart = weekStart(for: fact.completedAt)
-            guard baselineBuckets[factWeekStart] != nil else { continue }
             var bucket = baselineBuckets[factWeekStart] ?? WeeklyCoachWeekBucket()
             bucket.ingest(fact)
             baselineBuckets[factWeekStart] = bucket
         }
 
         return (current, baselineBuckets)
+    }
+
+    private func recentBaselineWeeks(from baselineBuckets: [Date: WeeklyCoachWeekBucket]) -> [WeeklyCoachWeekBucket] {
+        baselineBuckets
+            .sorted { lhs, rhs in
+                if lhs.key != rhs.key {
+                    return lhs.key > rhs.key
+                }
+                return lhs.value.sessionIDs.count > rhs.value.sessionIDs.count
+            }
+            .prefix(Self.baselineWindowCount)
+            .map(\.value)
     }
 
     private func buildSignals(
@@ -196,19 +202,12 @@ nonisolated final class WeeklyCoachInsightService {
     }
 
     private func fallbackSummary(
-        baselineActiveWeekCount: Int,
-        baselineAverageVolume: Double,
-        baselineAverageWorkouts: Double
+        baselineWeekCount: Int
     ) -> String? {
-        guard baselineActiveWeekCount == Self.baselineWindowCount else {
+        guard baselineWeekCount == Self.baselineWindowCount else {
             return "Not enough recent training history to build a stable weekly baseline."
         }
-
-        if baselineAverageVolume > 0 || baselineAverageWorkouts > 0 {
-            return nil
-        }
-
-        return "Not enough recent training history to build a stable weekly baseline."
+        return nil
     }
 
     private func followUpKinds(
@@ -261,12 +260,6 @@ nonisolated final class WeeklyCoachInsightService {
             "signals=\(signalKey)",
             "fallback=\(fallbackKey)",
         ].joined(separator: "|")
-    }
-
-    private func baselineWindowStarts(from start: Date) -> [Date] {
-        (0..<Self.baselineWindowCount).compactMap { offset in
-            calendar.date(byAdding: .day, value: offset * 7, to: start)
-        }
     }
 
     private func percentageChange(current: Double, baseline: Double) -> Double {

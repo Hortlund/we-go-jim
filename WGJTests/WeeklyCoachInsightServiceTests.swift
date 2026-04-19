@@ -96,6 +96,49 @@ struct WeeklyCoachInsightServiceTests {
     }
 
     @Test
+    func weeklyInsightSnapshotUsesSixCompletedPriorWeeksAcrossCalendarGaps() throws {
+        let fixture = try makeFixture()
+
+        for weekOffset in [1, 3, 4, 6, 7, 9] {
+            try seedWeeklySession(
+                context: fixture.context,
+                sessionRepository: fixture.sessionRepository,
+                projectionRepository: fixture.projectionRepository,
+                bench: fixture.bench,
+                squat: fixture.squat,
+                name: "Baseline \(weekOffset)",
+                startedAt: fixture.weekStart(weeksFromReference: -weekOffset),
+                benchWeight: 100,
+                squatWeight: 100
+            )
+        }
+
+        try seedWeeklySession(
+            context: fixture.context,
+            sessionRepository: fixture.sessionRepository,
+            projectionRepository: fixture.projectionRepository,
+            bench: fixture.bench,
+            squat: fixture.squat,
+            name: "Current",
+            startedAt: fixture.weekStart(weeksFromReference: 0),
+            benchWeight: 150,
+            squatWeight: 50
+        )
+
+        let snapshot = try fixture.service.weeklyInsightSnapshot(asOf: fixture.referenceDate)
+
+        #expect(snapshot.baselineWeekCount == 6)
+        #expect(snapshot.fallbackSummary == nil)
+        #expect(snapshot.topRisingSignals.first?.catalogExerciseUUID == fixture.bench.remoteUUID)
+        #expect(snapshot.topWatchSignals.first?.catalogExerciseUUID == fixture.squat.remoteUUID)
+        #expect(snapshot.topRisingSignals.first?.deltaPercentage == 50)
+        #expect(snapshot.topWatchSignals.first?.deltaPercentage == -50)
+        #expect(snapshot.followUpKinds.contains(.whatImproved))
+        #expect(snapshot.followUpKinds.contains(.whyFlat))
+        #expect(snapshot.followUpKinds.contains(.whatChanged))
+    }
+
+    @Test
     func weeklyInsightSnapshotFallsBackWhenBaselineIsTooThin() throws {
         let fixture = try makeFixture()
 
