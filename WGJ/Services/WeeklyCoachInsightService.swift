@@ -77,7 +77,8 @@ nonisolated final class WeeklyCoachInsightService {
                 consistencyDelta: consistencyDelta,
                 topRisingSignals: topRisingSignals,
                 topWatchSignals: topWatchSignals,
-                fallbackSummary: fallbackSummary
+                fallbackSummary: fallbackSummary,
+                followUpKinds: followUpKinds
             ),
             baselineWeekCount: baselineWeekCount,
             completedWorkoutCount: currentWorkoutCount,
@@ -244,21 +245,27 @@ nonisolated final class WeeklyCoachInsightService {
         consistencyDelta: Int,
         topRisingSignals: [WeeklyCoachSignal],
         topWatchSignals: [WeeklyCoachSignal],
-        fallbackSummary: String
+        fallbackSummary: String,
+        followUpKinds: [CoachFollowUpKind]
     ) -> String {
-        let signalKey = (topRisingSignals + topWatchSignals).map { signal in
-            "\(signal.id):\(stablePercentageString(signal.deltaPercentage))"
+        let risingKey = topRisingSignals.map { signal in
+            signalFingerprint(signal)
         }.joined(separator: ",")
+        let watchKey = topWatchSignals.map { signal in
+            signalFingerprint(signal)
+        }.joined(separator: ",")
+        let followUpKey = followUpKinds.map(\.rawValue).joined(separator: ",")
 
-        let fallbackKey = fallbackSummary.isEmpty ? "none" : fallbackSummary
         return [
             "week=\(Int(weekStart.timeIntervalSinceReferenceDate))",
             "baseline=\(baselineWeekCount)",
             "workouts=\(completedWorkoutCount)",
             "volume=\(stablePercentageString(totalVolumeDelta))",
             "consistency=\(consistencyDelta)",
-            "signals=\(signalKey)",
-            "fallback=\(fallbackKey)",
+            "rising=\(risingKey)",
+            "watch=\(watchKey)",
+            "fallback=\(fallbackSummary)",
+            "followups=\(followUpKey)",
         ].joined(separator: "|")
     }
 
@@ -282,13 +289,22 @@ nonisolated final class WeeklyCoachInsightService {
         String(format: "%.1f", locale: Locale(identifier: "en_US_POSIX"), roundedPercentage(value))
     }
 
+    private func signalFingerprint(_ signal: WeeklyCoachSignal) -> String {
+        [
+            "id=\(signal.id)",
+            "name=\(signal.exerciseName)",
+            "delta=\(stablePercentageString(signal.deltaPercentage))",
+            "summary=\(signal.summary)",
+        ].joined(separator: ";")
+    }
+
     private func weekStart(for date: Date) -> Date {
         let components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
         return calendar.date(from: components) ?? date
     }
 }
 
-private struct WeeklyCoachWeekBucket {
+private nonisolated struct WeeklyCoachWeekBucket: Equatable, Sendable {
     var sessionIDs: Set<UUID> = []
     var totalVolume: Double = 0
     var effortByExercise: [String: Double] = [:]
