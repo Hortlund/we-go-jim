@@ -178,6 +178,7 @@ struct ScreenSnapshotTests {
         let widgetConfigs: [ProfileWidgetConfigSnapshot] = [
             ProfileWidgetConfigSnapshot(config: ProfileWidgetConfig(kind: .prs, sortOrder: 0)),
             ProfileWidgetConfigSnapshot(config: ProfileWidgetConfig(kind: .weeklyGoals, sortOrder: 1)),
+            ProfileWidgetConfigSnapshot(config: ProfileWidgetConfig(kind: .coachBrief, sortOrder: 2)),
         ]
         let dashboard = ProfileDashboardSnapshot(
             personalRecords: [
@@ -225,6 +226,42 @@ struct ScreenSnapshotTests {
                 ),
             ]
         )
+        let coachSnapshot = WeeklyCoachInsightSnapshot(
+            weekStart: Date(timeIntervalSince1970: 1_736_035_200),
+            revisionKey: "coach-week-1",
+            baselineWeekCount: 6,
+            completedWorkoutCount: 3,
+            totalVolumeDelta: 14.2,
+            consistencyDelta: 1,
+            topRisingSignals: [
+                WeeklyCoachSignal(
+                    id: "bench",
+                    catalogExerciseUUID: "bench",
+                    exerciseName: "Bench Press",
+                    deltaPercentage: 12.4,
+                    summary: "Bench Press is up 12.4% vs the six-week baseline."
+                ),
+            ],
+            topWatchSignals: [
+                WeeklyCoachSignal(
+                    id: "squat",
+                    catalogExerciseUUID: "squat",
+                    exerciseName: "Back Squat",
+                    deltaPercentage: -5.8,
+                    summary: "Back Squat is down 5.8% vs the six-week baseline."
+                ),
+            ],
+            fallbackSummary: "",
+            followUpKinds: [.whatImproved, .whatChanged, .whyFlat]
+        )
+        let coachBrief = ProfileCoachPresentation(
+            snapshot: coachSnapshot,
+            recap: CoachNarrativeSummary(
+                headline: "Bench Press Led The Week",
+                body: "You logged 3 workouts this week. Bench Press is up 12.4% vs the six-week baseline.",
+                availabilityMode: .fallback
+            )
+        )
 
         let trendSeries: [ProfileWidgetKind: ExerciseMetricSeries] = [
             ProfileWidgetKind.exerciseOneRMTrend: ExerciseMetricSeries(
@@ -244,10 +281,11 @@ struct ScreenSnapshotTests {
         let content = ProfileDashboardContent.make(
             enabledWidgets: widgetConfigs,
             dashboard: dashboard,
-            trendSeriesByKind: trendSeries
+            trendSeriesByKind: trendSeries,
+            coachBrief: coachBrief
         )
 
-        #expect(content.enabledWidgets.count == 2)
+        #expect(content.enabledWidgets.count == 3)
         #expect(content.personalRecords.map(\.exerciseName) == ["Bench Press"])
         #expect(content.weeklyProgress.first?.completedWorkouts == 3)
         #expect(content.weeklyGoal == 1)
@@ -255,5 +293,8 @@ struct ScreenSnapshotTests {
         #expect(content.topExercises.first?.sessionCount == 4)
         #expect(content.activityDays.first?.workoutCount == 1)
         #expect(content.trendSeriesByKind[.exerciseOneRMTrend]?.points.first?.value == 105)
+        #expect(content.coachBrief?.recap.headline == "Bench Press Led The Week")
+        #expect(content.coachBrief?.snapshot.topRisingSignals.map(\.exerciseName) == ["Bench Press"])
+        #expect(content.coachBrief?.snapshot.followUpKinds == [.whatImproved, .whatChanged, .whyFlat])
     }
 }

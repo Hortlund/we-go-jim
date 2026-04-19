@@ -3,6 +3,12 @@ import SwiftData
 import SwiftUI
 
 struct ProfileView: View {
+    private enum CoachBriefLoadState {
+        case idle
+        case loading
+        case failed
+    }
+
     @Environment(\.modelContext) private var modelContext
     @Environment(\.isTabActive) private var isTabActive
     @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
@@ -12,9 +18,19 @@ struct ProfileView: View {
     @State private var dashboardContent = ProfileDashboardContent.empty
     @State private var controller = ProfileViewController()
     @State private var trendSeriesLoadTask: Task<Void, Never>?
+    @State private var trendSeriesLoadToken: UUID?
+    @State private var coachBriefLoadTask: Task<Void, Never>?
+    @State private var coachBriefLoadToken: UUID?
+    @State private var profileReloadToken: UUID?
     @State private var isLoadingTrendSeries = false
     @State private var showingWidgetManager = false
     @State private var showingProfileManagement = false
+    @State private var showingCoachAnalysis = false
+    @State private var coachBriefLoadState: CoachBriefLoadState = .idle
+    @State private var coachFollowUpSummaries: [CoachFollowUpKind: CoachNarrativeSummary] = [:]
+    @State private var loadingCoachFollowUps: Set<CoachFollowUpKind> = []
+    @State private var coachFollowUpTasks: [CoachFollowUpKind: Task<Void, Never>] = [:]
+    @State private var coachFollowUpTokens: [CoachFollowUpKind: UUID] = [:]
 
     @State private var errorMessage = ""
     @State private var showingError = false
@@ -39,9 +55,9 @@ struct ProfileView: View {
             await reloadProfile()
         }
         .onDisappear {
-            trendSeriesLoadTask?.cancel()
-            trendSeriesLoadTask = nil
-            isLoadingTrendSeries = false
+            cancelTrendSeriesLoad()
+            cancelCoachBriefLoad()
+            cancelCoachFollowUpLoads()
         }
         .sheet(isPresented: $showingWidgetManager) {
             NavigationStack {
@@ -59,6 +75,20 @@ struct ProfileView: View {
             .wgjSheetSurface()
             .onDisappear {
                 reloadProfileIfActive()
+            }
+        }
+        .sheet(isPresented: $showingCoachAnalysis) {
+            if let coachBrief = dashboardContent.coachBrief {
+                ProfileCoachAnalysisSheet(
+                    presentation: coachBrief,
+                    followUpSummaries: coachFollowUpSummaries,
+                    loadingKinds: loadingCoachFollowUps,
+                    runFollowUp: loadCoachFollowUp
+                )
+                .wgjSheetSurface()
+                .onDisappear {
+                    cancelCoachFollowUpLoads()
+                }
             }
         }
         .alert("Profile Error", isPresented: $showingError) {
@@ -198,7 +228,7 @@ struct ProfileView: View {
                 case .weeklyGoals:
                     weeklyGoalsWidget
                 case .coachBrief:
-                    coachBriefStubWidget
+                    coachBriefWidget
                 case .exerciseOneRMTrend:
                     exerciseTrendWidget(
                         title: "1RM Trend",
@@ -293,18 +323,37 @@ struct ProfileView: View {
         .wgjCardContainer()
     }
 
-    private var coachBriefStubWidget: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            WGJSectionHeader("Coach Brief", subtitle: "A short training summary will appear here")
+    private var coachBriefWidget: some View {
+        Group {
+            if let coachBrief = dashboardContent.coachBrief {
+                ProfileCoachBriefWidgetView(presentation: coachBrief) {
+                    showingCoachAnalysis = true
+                }
+            } else if coachBriefLoadState == .loading {
+                VStack(alignment: .leading, spacing: 10) {
+                    WGJSectionHeader("Coach Brief", subtitle: "Preparing your weekly training recap")
 
-            WGJEmptyStateCard(
-                title: "Coach Brief",
-                message: "This is a placeholder for the coach summary scaffold.",
-                icon: "quote.bubble.fill"
-            )
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("Reviewing your recent sessions…")
+                            .font(.subheadline)
+                            .foregroundStyle(WGJTheme.textSecondary)
+                    }
+                }
+                .padding(14)
+                .wgjCardContainer()
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    WGJSectionHeader("Coach Brief", subtitle: "Weekly recap unavailable right now")
+
+                    Text("Your dashboard stats are still local and up to date. Pull to refresh or finish another workout to try again.")
+                        .font(.subheadline)
+                        .foregroundStyle(WGJTheme.textSecondary)
+                }
+                .padding(14)
+                .wgjCardContainer()
+            }
         }
-        .padding(14)
-        .wgjCardContainer()
     }
 
     private var streaksWidget: some View {
@@ -570,13 +619,20 @@ struct ProfileView: View {
 
     @MainActor
     private func reloadProfile() async {
+        let reloadToken = UUID()
+        profileReloadToken = reloadToken
+
         do {
-            trendSeriesLoadTask?.cancel()
-            trendSeriesLoadTask = nil
-            isLoadingTrendSeries = false
+            cancelTrendSeriesLoad()
+            cancelCoachBriefLoad()
+            coachBriefLoadState = .idle
+            showingCoachAnalysis = false
+            coachFollowUpSummaries = [:]
+            cancelCoachFollowUpLoads()
             controller.invalidateTrendSeriesCache()
 
             let localProfile = try controller.loadLocalProfileIdentity(modelContext: modelContext)
+            guard profileReloadToken == reloadToken else { return }
             currentProfile = localProfile
             dashboardContent.weeklyGoal = localProfile.weeklyWorkoutGoal
 
@@ -585,17 +641,119 @@ struct ProfileView: View {
                 cloudSyncEnabled: cloudSyncEnabled,
                 backgroundStore: appBackgroundStore
             )) ?? localProfile
+            guard profileReloadToken == reloadToken else { return }
             currentProfile = profile
             dashboardContent.weeklyGoal = profile.weeklyWorkoutGoal
-            dashboardContent = try await controller.loadDashboardContent(
+            let dashboardContent = try await controller.loadDashboardContent(
                 modelContext: modelContext,
                 profile: profile,
                 backgroundStore: appBackgroundStore
             )
+            guard profileReloadToken == reloadToken else { return }
+            self.dashboardContent = dashboardContent
+            scheduleCoachBriefLoad(enabledWidgets: dashboardContent.enabledWidgets)
             scheduleTrendSeriesLoad()
         } catch {
+            guard profileReloadToken == reloadToken else { return }
             showError(error)
         }
+    }
+
+    private func scheduleCoachBriefLoad(enabledWidgets: [ProfileWidgetConfigSnapshot]) {
+        cancelCoachBriefLoad()
+        guard enabledWidgets.contains(where: { $0.kind == .coachBrief }) else {
+            coachBriefLoadState = .idle
+            return
+        }
+
+        coachBriefLoadState = .loading
+        let token = UUID()
+        coachBriefLoadToken = token
+        coachBriefLoadTask = Task {
+            do {
+                let coachBrief = try await controller.loadCoachBriefPresentation(
+                    modelContext: modelContext,
+                    enabledWidgets: enabledWidgets,
+                    backgroundStore: appBackgroundStore
+                )
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    guard coachBriefLoadToken == token else { return }
+                    dashboardContent.coachBrief = coachBrief
+                    coachBriefLoadState = coachBrief == nil ? .failed : .idle
+                    coachBriefLoadTask = nil
+                    coachBriefLoadToken = nil
+                }
+            } catch is CancellationError {
+                await MainActor.run {
+                    guard coachBriefLoadToken == token else { return }
+                    coachBriefLoadTask = nil
+                    coachBriefLoadToken = nil
+                }
+            } catch {
+                await MainActor.run {
+                    guard coachBriefLoadToken == token else { return }
+                    dashboardContent.coachBrief = nil
+                    coachBriefLoadState = .failed
+                    coachBriefLoadTask = nil
+                    coachBriefLoadToken = nil
+                }
+            }
+        }
+    }
+
+    private func cancelCoachBriefLoad() {
+        coachBriefLoadTask?.cancel()
+        coachBriefLoadTask = nil
+        coachBriefLoadToken = nil
+    }
+
+    private func loadCoachFollowUp(_ kind: CoachFollowUpKind) {
+        guard let coachBrief = dashboardContent.coachBrief else { return }
+        guard coachFollowUpSummaries[kind] == nil else { return }
+        guard !loadingCoachFollowUps.contains(kind) else { return }
+        guard coachFollowUpTasks[kind] == nil else { return }
+
+        let revisionKey = coachBrief.snapshot.revisionKey
+        let token = UUID()
+        loadingCoachFollowUps.insert(kind)
+        coachFollowUpTokens[kind] = token
+        coachFollowUpTasks[kind] = Task {
+            defer {
+                Task { @MainActor in
+                    guard coachFollowUpTokens[kind] == token else { return }
+                    loadingCoachFollowUps.remove(kind)
+                    coachFollowUpTasks[kind] = nil
+                    coachFollowUpTokens[kind] = nil
+                }
+            }
+
+            do {
+                let summary = try await AppleCoachNarrativeService(modelContext: modelContext).followUp(
+                    for: kind,
+                    snapshot: coachBrief.snapshot
+                )
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    guard coachFollowUpTokens[kind] == token else { return }
+                    guard dashboardContent.coachBrief?.snapshot.revisionKey == revisionKey else { return }
+                    coachFollowUpSummaries[kind] = summary
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
+        }
+    }
+
+    private func cancelCoachFollowUpLoads() {
+        for task in coachFollowUpTasks.values {
+            task.cancel()
+        }
+        coachFollowUpTasks = [:]
+        coachFollowUpTokens = [:]
+        loadingCoachFollowUps = []
     }
 
     private func reloadProfileIfActive() {
@@ -605,38 +763,59 @@ struct ProfileView: View {
         }
     }
 
+    private func cancelTrendSeriesLoad() {
+        trendSeriesLoadTask?.cancel()
+        trendSeriesLoadTask = nil
+        trendSeriesLoadToken = nil
+        controller.setTrendSeriesCacheOwner(nil)
+        isLoadingTrendSeries = false
+    }
+
     private func scheduleTrendSeriesLoad() {
         let enabledWidgets = dashboardContent.enabledWidgets
         guard enabledWidgets.contains(where: { $0.kind.requiresExerciseSelection }) else { return }
 
-        trendSeriesLoadTask?.cancel()
+        let reloadToken = profileReloadToken
+        cancelTrendSeriesLoad()
         isLoadingTrendSeries = true
+        let loadToken = UUID()
+        trendSeriesLoadToken = loadToken
+        controller.setTrendSeriesCacheOwner(loadToken)
         trendSeriesLoadTask = Task {
             try? await Task.sleep(for: .milliseconds(180))
             guard !Task.isCancelled else { return }
-            let isTabStillActive = await MainActor.run { isTabActive }
+            let isTabStillActive = await MainActor.run {
+                isTabActive && profileReloadToken == reloadToken && trendSeriesLoadToken == loadToken
+            }
             guard isTabStillActive else { return }
 
             do {
                 let trendSeriesByKind = try await controller.loadTrendSeries(
                     modelContext: modelContext,
                     enabledWidgets: enabledWidgets,
+                    cacheOwner: loadToken,
                     backgroundStore: appBackgroundStore
                 )
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
+                    guard profileReloadToken == reloadToken else { return }
+                    guard trendSeriesLoadToken == loadToken else { return }
                     dashboardContent.trendSeriesByKind = trendSeriesByKind
                 }
             } catch {
                 await MainActor.run {
+                    guard profileReloadToken == reloadToken else { return }
+                    guard trendSeriesLoadToken == loadToken else { return }
                     showError(error)
                 }
             }
 
             if !Task.isCancelled {
                 await MainActor.run {
+                    guard trendSeriesLoadToken == loadToken else { return }
                     isLoadingTrendSeries = false
                     trendSeriesLoadTask = nil
+                    trendSeriesLoadToken = nil
                 }
             }
         }
@@ -709,9 +888,15 @@ final class ProfileViewController {
     }
 
     private var trendSeriesCache: [TrendSeriesCacheKey: ExerciseMetricSeries] = [:]
+    private var trendSeriesCacheOwner: UUID?
 
     func invalidateTrendSeriesCache() {
         trendSeriesCache.removeAll()
+        trendSeriesCacheOwner = nil
+    }
+
+    func setTrendSeriesCacheOwner(_ owner: UUID?) {
+        trendSeriesCacheOwner = owner
     }
 
     func loadLocalProfileIdentity(
@@ -763,8 +948,8 @@ final class ProfileViewController {
             }
         }
 
-        let widgetRepository = ProfileWidgetRepository(modelContext: modelContext)
         return try WGJPerformance.measure("profile.dashboard") {
+            let widgetRepository = ProfileWidgetRepository(modelContext: modelContext)
             let metricsService = WorkoutMetricsService(modelContext: modelContext)
             let enabled = try widgetRepository.enabledConfigurationSnapshots()
             let dashboard = try metricsService.profileDashboardSnapshot(prLimit: 5, weeks: 8)
@@ -781,6 +966,7 @@ final class ProfileViewController {
     func loadTrendSeries(
         modelContext: ModelContext,
         enabledWidgets: [ProfileWidgetConfigSnapshot],
+        cacheOwner: UUID,
         backgroundStore: AppBackgroundStore?
     ) async throws -> [ProfileWidgetKind: ExerciseMetricSeries] {
         if let backgroundStore {
@@ -834,13 +1020,17 @@ final class ProfileViewController {
                     cache: nextCache
                 )
             }
-            trendSeriesCache = result.cache
+            if trendSeriesCacheOwner == cacheOwner {
+                trendSeriesCache = result.cache
+            }
             return result.trendSeriesByKind
         }
 
-        return try WGJPerformance.measure("profile.trends") {
+        let cachedSeries = trendSeriesCache
+        let result = try WGJPerformance.measure("profile.trends") {
             let metricsService = WorkoutMetricsService(modelContext: modelContext)
             var trendSeriesByKind: [ProfileWidgetKind: ExerciseMetricSeries] = [:]
+            var nextCache = cachedSeries
             var currentCacheKeys: Set<TrendSeriesCacheKey> = []
 
             for config in enabledWidgets {
@@ -848,7 +1038,7 @@ final class ProfileViewController {
                 let cacheKey = TrendSeriesCacheKey(kind: config.kind, catalogExerciseUUID: selectedExerciseUUID)
                 currentCacheKeys.insert(cacheKey)
 
-                if let cachedSeries = trendSeriesCache[cacheKey] {
+                if let cachedSeries = nextCache[cacheKey] {
                     trendSeriesByKind[config.kind] = cachedSeries.withPreferredName(
                         config.selectedExerciseNameSnapshot
                     )
@@ -873,14 +1063,45 @@ final class ProfileViewController {
                     continue
                 }
 
-                trendSeriesCache[cacheKey] = series
+                nextCache[cacheKey] = series
                 trendSeriesByKind[config.kind] = series
             }
 
-            trendSeriesCache = trendSeriesCache.filter { currentCacheKeys.contains($0.key) }
+            nextCache = nextCache.filter { currentCacheKeys.contains($0.key) }
 
-            return trendSeriesByKind
+            return TrendSeriesLoadResult(
+                trendSeriesByKind: trendSeriesByKind,
+                cache: nextCache
+            )
         }
+        if trendSeriesCacheOwner == cacheOwner {
+            trendSeriesCache = result.cache
+        }
+        return result.trendSeriesByKind
+    }
+
+    func loadCoachBriefPresentation(
+        modelContext: ModelContext,
+        enabledWidgets: [ProfileWidgetConfigSnapshot],
+        backgroundStore: AppBackgroundStore?
+    ) async throws -> ProfileCoachPresentation? {
+        guard enabledWidgets.contains(where: { $0.kind == .coachBrief }) else {
+            return nil
+        }
+
+        let snapshot: WeeklyCoachInsightSnapshot
+        if let backgroundStore {
+            snapshot = try await backgroundStore.perform("profile.coach.snapshot") { backgroundContext in
+                try WeeklyCoachInsightService(modelContext: backgroundContext).weeklyInsightSnapshot()
+            }
+        } else {
+            snapshot = try WGJPerformance.measure("profile.coach.snapshot") {
+                try WeeklyCoachInsightService(modelContext: modelContext).weeklyInsightSnapshot()
+            }
+        }
+
+        let recap = try await AppleCoachNarrativeService(modelContext: modelContext).recap(for: snapshot)
+        return ProfileCoachPresentation(snapshot: snapshot, recap: recap)
     }
 }
 
@@ -903,6 +1124,7 @@ nonisolated struct ProfileDashboardContent: Sendable {
     var personalRecords: [WorkoutPRRecord]
     var weeklyProgress: [WeeklyWorkoutProgressPoint]
     var trendSeriesByKind: [ProfileWidgetKind: ExerciseMetricSeries]
+    var coachBrief: ProfileCoachPresentation?
     var weeklyGoal: Int
     var overviewStats: ProfileOverviewStats
     var topExercises: [ProfileTopExerciseStat]
@@ -913,6 +1135,7 @@ nonisolated struct ProfileDashboardContent: Sendable {
         personalRecords: [],
         weeklyProgress: [],
         trendSeriesByKind: [:],
+        coachBrief: nil,
         weeklyGoal: 4,
         overviewStats: .empty,
         topExercises: [],
@@ -922,13 +1145,15 @@ nonisolated struct ProfileDashboardContent: Sendable {
     nonisolated static func make(
         enabledWidgets: [ProfileWidgetConfigSnapshot],
         dashboard: ProfileDashboardSnapshot,
-        trendSeriesByKind: [ProfileWidgetKind: ExerciseMetricSeries]
+        trendSeriesByKind: [ProfileWidgetKind: ExerciseMetricSeries],
+        coachBrief: ProfileCoachPresentation? = nil
     ) -> ProfileDashboardContent {
         ProfileDashboardContent(
             enabledWidgets: enabledWidgets,
             personalRecords: Array(dashboard.personalRecords.prefix(5)),
             weeklyProgress: dashboard.weeklyProgress,
             trendSeriesByKind: trendSeriesByKind,
+            coachBrief: coachBrief,
             weeklyGoal: max(1, dashboard.weeklyGoal),
             overviewStats: dashboard.overviewStats,
             topExercises: Array(dashboard.topExercises.prefix(3)),

@@ -626,6 +626,22 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testProfileCoachBriefOpensAnalysisSheet() throws {
+        let app = launchApp()
+
+        tapTab("Profile", in: app)
+
+        let coachWidgetButton = identifiedElement("profile-coach-brief-widget-button", in: app)
+        revealLazyElement(coachWidgetButton, in: app)
+        XCTAssertTrue(coachWidgetButton.isHittable)
+        coachWidgetButton.tap()
+
+        let analysisSheet = identifiedElement("profile-coach-analysis-sheet", in: app)
+        XCTAssertTrue(analysisSheet.waitForExistence(timeout: 5))
+        XCTAssertTrue(identifiedElement("profile-coach-follow-up-whatChanged", in: app).waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testActiveWorkoutStartMinimizeRestoreFlow() throws {
         let app = launchApp()
 
