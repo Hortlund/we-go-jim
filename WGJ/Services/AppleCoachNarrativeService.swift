@@ -70,7 +70,7 @@ final class AppleCoachNarrativeService {
             cachedFallback: cached,
             fallback: fallbackSummary,
             generate: { [recapGenerator, availabilityProvider] in
-                try await Self.generatedSummary(
+                await Self.generatedSummary(
                     using: recapGenerator,
                     input: RecapGenerationInput(snapshot: snapshot),
                     isAvailable: availabilityProvider,
@@ -112,7 +112,7 @@ final class AppleCoachNarrativeService {
             cachedFallback: cached,
             fallback: fallbackSummary,
             generate: { [followUpGenerator, availabilityProvider] in
-                try await Self.generatedSummary(
+                await Self.generatedSummary(
                     using: followUpGenerator,
                     input: FollowUpGenerationInput(kind: kind, snapshot: snapshot),
                     isAvailable: availabilityProvider,
@@ -134,7 +134,7 @@ final class AppleCoachNarrativeService {
         cacheKey: String,
         cachedFallback: CoachNarrativeSummary?,
         fallback: @autoclosure @escaping () -> CoachNarrativeSummary,
-        generate: @escaping @Sendable () async throws -> CoachNarrativeSummary?,
+        generate: @escaping @Sendable () async -> CoachNarrativeSummary?,
         persist: @escaping @Sendable (CoachNarrativeSummary) throws -> Void
     ) async throws -> CoachNarrativeSummary {
         guard availabilityProvider() else {
@@ -154,7 +154,7 @@ final class AppleCoachNarrativeService {
         let task = Task<CoachNarrativeSummary, Error> { @MainActor in
             defer { inFlightRequests[cacheKey] = nil }
 
-            if let generated = try await generate() {
+            if let generated = await generate() {
                 try persist(generated)
                 return generated
             }
@@ -176,12 +176,19 @@ final class AppleCoachNarrativeService {
         input: Input,
         isAvailable: @escaping @Sendable () -> Bool,
         fallback: CoachNarrativeSummary
-    ) async throws -> CoachNarrativeSummary? {
+    ) async -> CoachNarrativeSummary? {
         guard isAvailable() else {
             return nil
         }
 
-        guard let summary = try await generator(input) else {
+        let summary: CoachNarrativeSummary?
+        do {
+            summary = try await generator(input)
+        } catch {
+            return nil
+        }
+
+        guard let summary else {
             return nil
         }
 

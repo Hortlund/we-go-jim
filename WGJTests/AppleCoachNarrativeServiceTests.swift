@@ -51,6 +51,36 @@ struct AppleCoachNarrativeServiceTests {
     }
 
     @Test
+    func recapFallsBackWhenGeneratorThrows() async throws {
+        let fixture = try makeFixture()
+        let snapshot = WeeklyCoachInsightSnapshot(
+            weekStart: fixture.weekStart,
+            revisionKey: "revision-throw",
+            baselineWeekCount: 0,
+            completedWorkoutCount: 1,
+            totalVolumeDelta: 0,
+            consistencyDelta: 0,
+            topRisingSignals: [],
+            topWatchSignals: [],
+            fallbackSummary: "Deterministic fallback after generator failure.",
+            followUpKinds: [.whatChanged]
+        )
+        let service = AppleCoachNarrativeService(
+            cacheRepository: fixture.cacheRepository,
+            availabilityProvider: { true },
+            recapGenerator: { _ in
+                throw GeneratorFailure.failed
+            }
+        )
+
+        let summary = try await service.recap(for: snapshot)
+
+        #expect(summary.availabilityMode == .fallback)
+        #expect(summary.headline == "Weekly Coach Recap")
+        #expect(summary.body == "Deterministic fallback after generator failure.")
+    }
+
+    @Test
     func recapAndFollowUpUseSeparateCacheEntries() async throws {
         let fixture = try makeFixture()
         let snapshot = WeeklyCoachInsightSnapshot(
@@ -403,6 +433,10 @@ struct AppleCoachNarrativeServiceTests {
     private final class GeneratorProbe {
         var recapInputs: [AppleCoachNarrativeService.RecapGenerationInput] = []
         var followUpInputs: [AppleCoachNarrativeService.FollowUpGenerationInput] = []
+    }
+
+    private enum GeneratorFailure: Error {
+        case failed
     }
 
     private final class LockedValue<Value>: @unchecked Sendable {

@@ -5,6 +5,7 @@ import SwiftData
 final class CachedCoachNarrative {
     var id: UUID = UUID()
     @Attribute(.unique) var cacheKey: String = ""
+    var sessionID: UUID = UUID()
     var weekStart: Date = Date()
     var revisionKey: String = ""
     var headline: String = ""
@@ -33,6 +34,7 @@ final class CachedCoachNarrative {
             weekStart: weekStart,
             revisionKey: revisionKey
         )
+        self.sessionID = UUID()
         self.weekStart = weekStart
         self.revisionKey = revisionKey
         self.headline = headline
@@ -51,6 +53,7 @@ final class CachedCoachNarrative {
 final class CachedCoachFollowUpNarrative {
     var id: UUID = UUID()
     @Attribute(.unique) var cacheKey: String = ""
+    var sessionID: UUID = UUID()
     var weekStart: Date = Date()
     var revisionKey: String = ""
     var headline: String = ""
@@ -87,6 +90,7 @@ final class CachedCoachFollowUpNarrative {
             revisionKey: revisionKey,
             followUpKind: followUpKind
         )
+        self.sessionID = UUID()
         self.weekStart = weekStart
         self.revisionKey = revisionKey
         self.headline = headline
