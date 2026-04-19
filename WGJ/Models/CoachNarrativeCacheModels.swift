@@ -4,6 +4,7 @@ import SwiftData
 @Model
 final class CachedCoachNarrative {
     var id: UUID = UUID()
+    @Attribute(.unique) var cacheKey: String = ""
     var sessionID: UUID = UUID()
     var availabilityModeRaw: String = CoachNarrativeAvailabilityMode.generated.rawValue
     var body: String = ""
@@ -24,17 +25,23 @@ final class CachedCoachNarrative {
         updatedAt: Date = .now
     ) {
         self.id = id
+        self.cacheKey = Self.makeCacheKey(sessionID: sessionID)
         self.sessionID = sessionID
         self.availabilityModeRaw = availabilityMode.rawValue
         self.body = body
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
+
+    nonisolated static func makeCacheKey(sessionID: UUID) -> String {
+        sessionID.uuidString
+    }
 }
 
 @Model
 final class CachedCoachFollowUpNarrative {
     var id: UUID = UUID()
+    @Attribute(.unique) var cacheKey: String = ""
     var sessionID: UUID = UUID()
     var followUpKindRaw: String = CoachFollowUpKind.whatImproved.rawValue
     var availabilityModeRaw: String = CoachNarrativeAvailabilityMode.generated.rawValue
@@ -62,11 +69,16 @@ final class CachedCoachFollowUpNarrative {
         updatedAt: Date = .now
     ) {
         self.id = id
+        self.cacheKey = Self.makeCacheKey(sessionID: sessionID, followUpKind: followUpKind)
         self.sessionID = sessionID
         self.followUpKindRaw = followUpKind.rawValue
         self.availabilityModeRaw = availabilityMode.rawValue
         self.body = body
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+    }
+
+    nonisolated static func makeCacheKey(sessionID: UUID, followUpKind: CoachFollowUpKind) -> String {
+        "\(sessionID.uuidString)|\(followUpKind.rawValue)"
     }
 }

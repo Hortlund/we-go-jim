@@ -198,7 +198,7 @@ struct ProfileView: View {
                 case .weeklyGoals:
                     weeklyGoalsWidget
                 case .coachBrief:
-                    EmptyView()
+                    coachBriefStubWidget
                 case .exerciseOneRMTrend:
                     exerciseTrendWidget(
                         title: "1RM Trend",
@@ -288,6 +288,20 @@ struct ProfileView: View {
                 .drawingGroup()
                 .allowsHitTesting(false)
             }
+        }
+        .padding(14)
+        .wgjCardContainer()
+    }
+
+    private var coachBriefStubWidget: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            WGJSectionHeader("Coach Brief", subtitle: "A short training summary will appear here")
+
+            WGJEmptyStateCard(
+                title: "Coach Brief",
+                message: "This is a placeholder for the coach summary scaffold.",
+                icon: "quote.bubble.fill"
+            )
         }
         .padding(14)
         .wgjCardContainer()

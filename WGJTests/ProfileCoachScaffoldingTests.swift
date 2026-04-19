@@ -76,6 +76,60 @@ struct ProfileCoachScaffoldingTests {
         #expect(try context.fetch(FetchDescriptor<CachedCoachFollowUpNarrative>()).isEmpty)
     }
 
+    @Test
+    func coachCacheKeysAreDeterministicPerSemanticEntry() {
+        let sessionID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let otherSessionID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+
+        let generated = CachedCoachNarrative(
+            sessionID: sessionID,
+            availabilityMode: .generated,
+            body: "Coach summary"
+        )
+        let generatedClone = CachedCoachNarrative(
+            sessionID: sessionID,
+            availabilityMode: .fallback,
+            body: "Fallback summary"
+        )
+        let otherGenerated = CachedCoachNarrative(
+            sessionID: otherSessionID,
+            availabilityMode: .generated,
+            body: "Other summary"
+        )
+
+        #expect(generated.cacheKey == generatedClone.cacheKey)
+        #expect(generated.cacheKey != otherGenerated.cacheKey)
+        #expect(CachedCoachNarrative.makeCacheKey(sessionID: sessionID) == sessionID.uuidString)
+
+        let whatImproved = CachedCoachFollowUpNarrative(
+            sessionID: sessionID,
+            followUpKind: .whatImproved,
+            availabilityMode: .generated,
+            body: "Improved"
+        )
+        let whatImprovedClone = CachedCoachFollowUpNarrative(
+            sessionID: sessionID,
+            followUpKind: .whatImproved,
+            availabilityMode: .fallback,
+            body: "Improved fallback"
+        )
+        let whyFlat = CachedCoachFollowUpNarrative(
+            sessionID: sessionID,
+            followUpKind: .whyFlat,
+            availabilityMode: .generated,
+            body: "Flat"
+        )
+
+        #expect(whatImproved.cacheKey == whatImprovedClone.cacheKey)
+        #expect(whatImproved.cacheKey != whyFlat.cacheKey)
+        #expect(
+            CachedCoachFollowUpNarrative.makeCacheKey(
+                sessionID: sessionID,
+                followUpKind: .whatImproved
+            ) == "\(sessionID.uuidString)|whatImproved"
+        )
+    }
+
     private func makeInMemoryContext() throws -> ModelContext {
         let schema = Schema([
             ExerciseCatalogItem.self,
@@ -132,7 +186,7 @@ struct ProfileCoachScaffoldingTests {
             context.insert(
                 ProfileWidgetConfig(
                     kind: kind,
-                    isEnabled: kind.defaultSeedEnabled,
+                    isEnabled: kind == .prs || kind == .weeklyGoals,
                     sortOrder: index
                 )
             )
@@ -143,15 +197,4 @@ struct ProfileCoachScaffoldingTests {
 @MainActor
 private struct NoopCloudDataDeleter: BrosCloudDataDeleting {
     func deleteCurrentUserData() async throws { }
-}
-
-private extension ProfileWidgetKind {
-    var defaultSeedEnabled: Bool {
-        switch self {
-        case .prs, .weeklyGoals:
-            return true
-        case .exerciseOneRMTrend, .exerciseVolumeTrend, .streaks, .topExercises, .consistencyCalendar, .coachBrief:
-            return false
-        }
-    }
 }
