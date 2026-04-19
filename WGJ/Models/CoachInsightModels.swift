@@ -11,6 +11,11 @@ nonisolated enum CoachNarrativeAvailabilityMode: String, Codable, CaseIterable, 
     case fallback
 }
 
+nonisolated struct CoachNarrativeSummary: Equatable, Sendable {
+    let body: String
+    let availabilityMode: CoachNarrativeAvailabilityMode
+}
+
 nonisolated struct WeeklyCoachSignal: Identifiable, Equatable, Sendable {
     let id: String
     let catalogExerciseUUID: String
