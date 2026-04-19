@@ -139,19 +139,25 @@ nonisolated final class ProfileWidgetRepository {
         }
 
         var didInsert = false
-        var nextSortOrder = (normalizedConfigs.map(\.sortOrder).max() ?? -1) + 1
         for kind in ProfileWidgetKind.allCases {
             if normalizedConfigs.contains(where: { $0.kind == kind }) {
                 continue
             }
 
+            let insertSortOrder = kind.defaultSortOrder
+            for config in normalizedConfigs where config.sortOrder >= insertSortOrder {
+                config.sortOrder += 1
+                config.updatedAt = .now
+                didChange = true
+            }
+
             let created = ProfileWidgetConfig(
                 kind: kind,
                 isEnabled: kind.defaultEnabled,
-                sortOrder: nextSortOrder
+                sortOrder: insertSortOrder
             )
             modelContext.insert(created)
-            nextSortOrder += 1
+            normalizedConfigs.append(created)
             didInsert = true
         }
 

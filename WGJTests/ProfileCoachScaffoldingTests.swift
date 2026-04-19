@@ -22,6 +22,29 @@ struct ProfileCoachScaffoldingTests {
     }
 
     @Test
+    func coachBriefWidgetIsInsertedAfterWeeklyGoalsInExistingConfigSets() throws {
+        let context = try makeInMemoryContext()
+        seedLegacySevenWidgetConfigs(in: context)
+
+        let repository = ProfileWidgetRepository(modelContext: context)
+        let configurations = try repository.configurations()
+
+        #expect(configurations.count == 8)
+        #expect(configurations.map(\.kind) == [
+            .prs,
+            .weeklyGoals,
+            .coachBrief,
+            .exerciseOneRMTrend,
+            .exerciseVolumeTrend,
+            .streaks,
+            .topExercises,
+            .consistencyCalendar,
+        ])
+        #expect(configurations.first(where: { $0.kind == .coachBrief })?.sortOrder == 2)
+        #expect(configurations.first(where: { $0.kind == .exerciseOneRMTrend })?.sortOrder == 3)
+    }
+
+    @Test
     func deleteAllUserDataClearsCoachNarrativeCaches() async throws {
         let context = try makeInMemoryContext()
 
@@ -93,9 +116,42 @@ struct ProfileCoachScaffoldingTests {
         let container = try ModelContainer(for: schema, configurations: [configuration])
         return ModelContext(container)
     }
+
+    private func seedLegacySevenWidgetConfigs(in context: ModelContext) {
+        let kinds: [ProfileWidgetKind] = [
+            .prs,
+            .weeklyGoals,
+            .exerciseOneRMTrend,
+            .exerciseVolumeTrend,
+            .streaks,
+            .topExercises,
+            .consistencyCalendar,
+        ]
+
+        for (index, kind) in kinds.enumerated() {
+            context.insert(
+                ProfileWidgetConfig(
+                    kind: kind,
+                    isEnabled: kind.defaultSeedEnabled,
+                    sortOrder: index
+                )
+            )
+        }
+    }
 }
 
 @MainActor
 private struct NoopCloudDataDeleter: BrosCloudDataDeleting {
     func deleteCurrentUserData() async throws { }
+}
+
+private extension ProfileWidgetKind {
+    var defaultSeedEnabled: Bool {
+        switch self {
+        case .prs, .weeklyGoals:
+            return true
+        case .exerciseOneRMTrend, .exerciseVolumeTrend, .streaks, .topExercises, .consistencyCalendar, .coachBrief:
+            return false
+        }
+    }
 }
