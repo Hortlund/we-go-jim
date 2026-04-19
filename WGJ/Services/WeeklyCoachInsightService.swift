@@ -1,0 +1,342 @@
+import Foundation
+import SwiftData
+
+nonisolated final class WeeklyCoachInsightService {
+    private static let baselineWindowCount = 6
+    private static let minimumActiveBaselineWeeks = 3
+    private static let maxSignalCount = 3
+
+    private let calendar: Calendar
+    private let historyProjectionRepository: HistoryProjectionRepository
+
+    init(modelContext: ModelContext, calendar: Calendar = .current) {
+        self.calendar = calendar
+        self.historyProjectionRepository = HistoryProjectionRepository(modelContext: modelContext)
+    }
+
+    func weeklyInsightSnapshot(asOf referenceDate: Date = .now) throws -> WeeklyCoachInsightSnapshot {
+        let currentWeekStart = weekStart(for: referenceDate)
+        let currentWeekEnd = calendar.date(byAdding: .day, value: 7, to: currentWeekStart) ?? currentWeekStart
+        let baselineWeekStart = calendar.date(byAdding: .day, value: -42, to: currentWeekStart) ?? currentWeekStart
+        let baselineWeekStarts = baselineWindowStarts(from: baselineWeekStart)
+
+        let facts = try projectedFacts()
+        let buckets = try weeklyBuckets(
+            from: facts,
+            currentWeekStart: currentWeekStart,
+            currentWeekEnd: currentWeekEnd,
+            baselineWeekStarts: baselineWeekStarts
+        )
+
+        let baselineWeeks = baselineWeekStarts.compactMap { buckets.baselineBuckets[$0] }
+        let baselineActiveWeekCount = baselineWeeks.filter { !$0.sessionIDs.isEmpty }.count
+        let currentWorkoutCount = buckets.current.sessionIDs.count
+        let currentVolume = buckets.current.totalVolume
+        let baselineAverageVolume = baselineWeeks.map(\.totalVolume).reduce(0, +) / Double(Self.baselineWindowCount)
+        let baselineAverageWorkouts = baselineWeeks.map { Double($0.sessionIDs.count) }.reduce(0, +) / Double(Self.baselineWindowCount)
+
+        let fallbackSummary = fallbackSummary(
+            baselineActiveWeekCount: baselineActiveWeekCount,
+            baselineAverageVolume: baselineAverageVolume,
+            baselineAverageWorkouts: baselineAverageWorkouts
+        )
+        let shouldFallback = fallbackSummary != nil
+        let totalVolumeDelta = shouldFallback ? 0 : percentageChange(current: currentVolume, baseline: baselineAverageVolume)
+        let consistencyDelta = shouldFallback ? 0 : percentageChange(current: Double(currentWorkoutCount), baseline: baselineAverageWorkouts)
+
+        let signals = shouldFallback
+            ? []
+            : buildSignals(
+                current: buckets.current,
+                baselineWeeks: baselineWeeks
+            )
+        let topRisingSignals = Array(signals.filter { $0.deltaPercentage > 0 }.prefix(Self.maxSignalCount))
+        let topWatchSignals = Array(
+            signals
+                .filter { $0.deltaPercentage < 0 }
+                .sorted { lhs, rhs in
+                    if lhs.deltaPercentage != rhs.deltaPercentage {
+                        return lhs.deltaPercentage < rhs.deltaPercentage
+                    }
+                    if lhs.exerciseName != rhs.exerciseName {
+                        return lhs.exerciseName.localizedStandardCompare(rhs.exerciseName) == .orderedAscending
+                    }
+                    return lhs.id < rhs.id
+                }
+                .prefix(Self.maxSignalCount)
+        )
+        let followUpKinds = followUpKinds(
+            fallbackSummary: fallbackSummary,
+            totalVolumeDelta: totalVolumeDelta,
+            consistencyDelta: consistencyDelta,
+            topRisingSignals: topRisingSignals,
+            topWatchSignals: topWatchSignals
+        )
+
+        let snapshot = WeeklyCoachInsightSnapshot(
+            weekStart: currentWeekStart,
+            revisionKey: revisionKey(
+                weekStart: currentWeekStart,
+                baselineWeekCount: baselineActiveWeekCount,
+                completedWorkoutCount: currentWorkoutCount,
+                totalVolumeDelta: totalVolumeDelta,
+                consistencyDelta: consistencyDelta,
+                topRisingSignals: topRisingSignals,
+                topWatchSignals: topWatchSignals,
+                fallbackSummary: fallbackSummary
+            ),
+            baselineWeekCount: baselineActiveWeekCount,
+            completedWorkoutCount: currentWorkoutCount,
+            totalVolumeDelta: totalVolumeDelta,
+            consistencyDelta: consistencyDelta,
+            topRisingSignals: topRisingSignals,
+            topWatchSignals: topWatchSignals,
+            fallbackSummary: fallbackSummary,
+            followUpKinds: followUpKinds
+        )
+
+        return snapshot
+    }
+
+    private func projectedFacts() throws -> [CompletedSetFact] {
+        try historyProjectionRepository.allFacts()
+    }
+
+    private func weeklyBuckets(
+        from facts: [CompletedSetFact],
+        currentWeekStart: Date,
+        currentWeekEnd: Date,
+        baselineWeekStarts: [Date]
+    ) throws -> (current: WeeklyCoachWeekBucket, baselineBuckets: [Date: WeeklyCoachWeekBucket]) {
+        var current = WeeklyCoachWeekBucket()
+        var baselineBuckets = Dictionary(uniqueKeysWithValues: baselineWeekStarts.map { ($0, WeeklyCoachWeekBucket()) })
+
+        for fact in facts where !fact.isWarmup {
+            if fact.completedAt >= currentWeekStart && fact.completedAt < currentWeekEnd {
+                current.ingest(fact)
+                continue
+            }
+
+            let factWeekStart = weekStart(for: fact.completedAt)
+            guard baselineBuckets[factWeekStart] != nil else { continue }
+            var bucket = baselineBuckets[factWeekStart] ?? WeeklyCoachWeekBucket()
+            bucket.ingest(fact)
+            baselineBuckets[factWeekStart] = bucket
+        }
+
+        return (current, baselineBuckets)
+    }
+
+    private func buildSignals(
+        current: WeeklyCoachWeekBucket,
+        baselineWeeks: [WeeklyCoachWeekBucket]
+    ) -> [WeeklyCoachSignal] {
+        let exerciseUUIDs = Set(current.effortByExercise.keys).union(
+            baselineWeeks.flatMap { $0.effortByExercise.keys }
+        )
+
+        var signals: [WeeklyCoachSignal] = []
+        signals.reserveCapacity(exerciseUUIDs.count)
+
+        for catalogExerciseUUID in exerciseUUIDs.sorted() {
+            let currentEffort = current.effortByExercise[catalogExerciseUUID, default: 0]
+            let baselineEffort = baselineWeeks
+                .map { $0.effortByExercise[catalogExerciseUUID, default: 0] }
+                .reduce(0, +) / Double(Self.baselineWindowCount)
+
+            let deltaPercentage = percentageChange(current: currentEffort, baseline: baselineEffort)
+            guard deltaPercentage != 0 else { continue }
+
+            let exerciseName = current.exerciseName(for: catalogExerciseUUID)
+                ?? latestExerciseName(for: catalogExerciseUUID, in: baselineWeeks)
+                ?? "Exercise"
+
+            let direction = deltaPercentage > 0 ? "up" : "down"
+            let summary = "\(exerciseName) is \(direction) \(WGJFormatters.oneDecimalString(abs(deltaPercentage)))% vs the six-week baseline."
+
+            signals.append(
+                WeeklyCoachSignal(
+                    id: catalogExerciseUUID,
+                    catalogExerciseUUID: catalogExerciseUUID,
+                    exerciseName: exerciseName,
+                    deltaPercentage: deltaPercentage,
+                    summary: summary
+                )
+            )
+        }
+
+        return signals.sorted { lhs, rhs in
+            if lhs.deltaPercentage != rhs.deltaPercentage {
+                return lhs.deltaPercentage > rhs.deltaPercentage
+            }
+            if lhs.exerciseName != rhs.exerciseName {
+                return lhs.exerciseName.localizedStandardCompare(rhs.exerciseName) == .orderedAscending
+            }
+            return lhs.id < rhs.id
+        }
+    }
+
+    private func latestExerciseName(for catalogExerciseUUID: String, in buckets: [WeeklyCoachWeekBucket]) -> String? {
+        var latest: (date: Date, name: String)?
+
+        for bucket in buckets {
+            guard let name = bucket.exerciseName(for: catalogExerciseUUID),
+                  let completedAt = bucket.exerciseCompletionDate(for: catalogExerciseUUID)
+            else { continue }
+
+            if let currentLatest = latest {
+                if completedAt > currentLatest.date {
+                    latest = (completedAt, name)
+                }
+            } else {
+                latest = (completedAt, name)
+            }
+        }
+
+        return latest?.name
+    }
+
+    private func fallbackSummary(
+        baselineActiveWeekCount: Int,
+        baselineAverageVolume: Double,
+        baselineAverageWorkouts: Double
+    ) -> String? {
+        if baselineActiveWeekCount >= Self.minimumActiveBaselineWeeks {
+            if baselineAverageVolume > 0 || baselineAverageWorkouts > 0 {
+                return nil
+            }
+        }
+
+        return "Not enough recent training history to build a stable weekly baseline."
+    }
+
+    private func followUpKinds(
+        fallbackSummary: String?,
+        totalVolumeDelta: Double,
+        consistencyDelta: Double,
+        topRisingSignals: [WeeklyCoachSignal],
+        topWatchSignals: [WeeklyCoachSignal]
+    ) -> [CoachFollowUpKind] {
+        guard fallbackSummary == nil else {
+            return [.whatChanged]
+        }
+
+        var kinds: [CoachFollowUpKind] = [.whatChanged]
+
+        if totalVolumeDelta > 0 || !topRisingSignals.isEmpty {
+            kinds.insert(.whatImproved, at: 0)
+        }
+
+        if totalVolumeDelta < 0 || consistencyDelta < 0 || !topWatchSignals.isEmpty {
+            if !kinds.contains(.whyFlat) {
+                kinds.append(.whyFlat)
+            }
+        }
+
+        return kinds
+    }
+
+    private func revisionKey(
+        weekStart: Date,
+        baselineWeekCount: Int,
+        completedWorkoutCount: Int,
+        totalVolumeDelta: Double,
+        consistencyDelta: Double,
+        topRisingSignals: [WeeklyCoachSignal],
+        topWatchSignals: [WeeklyCoachSignal],
+        fallbackSummary: String?
+    ) -> String {
+        let signalKey = (topRisingSignals + topWatchSignals).map { signal in
+            "\(signal.id):\(stablePercentageString(signal.deltaPercentage))"
+        }.joined(separator: ",")
+
+        let fallbackKey = fallbackSummary ?? "none"
+        return [
+            "week=\(Int(weekStart.timeIntervalSinceReferenceDate))",
+            "baseline=\(baselineWeekCount)",
+            "workouts=\(completedWorkoutCount)",
+            "volume=\(stablePercentageString(totalVolumeDelta))",
+            "consistency=\(stablePercentageString(consistencyDelta))",
+            "signals=\(signalKey)",
+            "fallback=\(fallbackKey)",
+        ].joined(separator: "|")
+    }
+
+    private func baselineWindowStarts(from start: Date) -> [Date] {
+        (0..<Self.baselineWindowCount).compactMap { offset in
+            calendar.date(byAdding: .day, value: offset * 7, to: start)
+        }
+    }
+
+    private func percentageChange(current: Double, baseline: Double) -> Double {
+        guard baseline > 0 else {
+            return current > 0 ? 100 : 0
+        }
+
+        return roundedPercentage(((current - baseline) / baseline) * 100)
+    }
+
+    private func roundedPercentage(_ value: Double) -> Double {
+        (value * 10).rounded() / 10
+    }
+
+    private func stablePercentageString(_ value: Double) -> String {
+        String(format: "%.1f", locale: Locale(identifier: "en_US_POSIX"), roundedPercentage(value))
+    }
+
+    private func weekStart(for date: Date) -> Date {
+        let components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
+        return calendar.date(from: components) ?? date
+    }
+}
+
+private struct WeeklyCoachWeekBucket {
+    var sessionIDs: Set<UUID> = []
+    var totalVolume: Double = 0
+    var effortByExercise: [String: Double] = [:]
+    var exerciseNamesByUUID: [String: String] = [:]
+    var exerciseDatesByUUID: [String: Date] = [:]
+
+    mutating func ingest(_ fact: CompletedSetFact) {
+        sessionIDs.insert(fact.sessionID)
+
+        if let volumeKg = fact.volumeKg {
+            totalVolume += volumeKg
+        }
+
+        let effort = effort(for: fact)
+        if effort > 0 {
+            effortByExercise[fact.catalogExerciseUUID, default: 0] += effort
+        }
+
+        if let existingDate = exerciseDatesByUUID[fact.catalogExerciseUUID] {
+            if fact.completedAt >= existingDate {
+                exerciseDatesByUUID[fact.catalogExerciseUUID] = fact.completedAt
+                exerciseNamesByUUID[fact.catalogExerciseUUID] = fact.exerciseNameSnapshot
+            }
+        } else {
+            exerciseDatesByUUID[fact.catalogExerciseUUID] = fact.completedAt
+            exerciseNamesByUUID[fact.catalogExerciseUUID] = fact.exerciseNameSnapshot
+        }
+    }
+
+    func exerciseName(for catalogExerciseUUID: String) -> String? {
+        exerciseNamesByUUID[catalogExerciseUUID]
+    }
+
+    func exerciseCompletionDate(for catalogExerciseUUID: String) -> Date? {
+        exerciseDatesByUUID[catalogExerciseUUID]
+    }
+
+    private func effort(for fact: CompletedSetFact) -> Double {
+        if let volumeKg = fact.volumeKg {
+            return volumeKg
+        }
+
+        guard fact.loadUnit == .bodyweight, fact.reps > 0 else {
+            return 0
+        }
+
+        return Double(fact.reps)
+    }
+}
