@@ -8,7 +8,7 @@ nonisolated final class CoachNarrativeCacheRepository {
         self.modelContext = modelContext
     }
 
-    func recap(forWeekStart weekStart: Date, revisionKey: String) throws -> CoachNarrativeSummary? {
+    func cachedRecap(weekStart: Date, revisionKey: String) throws -> CachedCoachNarrative? {
         let cacheKey = CachedCoachNarrative.makeCacheKey(
             weekStart: weekStart,
             revisionKey: revisionKey
@@ -17,8 +17,11 @@ nonisolated final class CoachNarrativeCacheRepository {
             predicate: #Predicate { $0.cacheKey == cacheKey }
         )
         descriptor.fetchLimit = 1
+        return try modelContext.fetch(descriptor).first
+    }
 
-        guard let cached = try modelContext.fetch(descriptor).first else {
+    func recap(forWeekStart weekStart: Date, revisionKey: String) throws -> CoachNarrativeSummary? {
+        guard let cached = try cachedRecap(weekStart: weekStart, revisionKey: revisionKey) else {
             return nil
         }
 
@@ -39,19 +42,15 @@ nonisolated final class CoachNarrativeCacheRepository {
             weekStart: weekStart,
             revisionKey: revisionKey
         )
-        var descriptor = FetchDescriptor<CachedCoachNarrative>(
-            predicate: #Predicate { $0.cacheKey == cacheKey }
-        )
-        descriptor.fetchLimit = 1
 
-        if let cached = try modelContext.fetch(descriptor).first {
+        if let cached = try cachedRecap(weekStart: weekStart, revisionKey: revisionKey) {
             cached.cacheKey = cacheKey
             cached.weekStart = weekStart
             cached.revisionKey = revisionKey
             cached.headline = summary.headline
             cached.body = summary.body
             cached.availabilityMode = summary.availabilityMode
-            cached.updatedAt = now
+            cached.generatedAt = now
         } else {
             modelContext.insert(
                 CachedCoachNarrative(
@@ -69,11 +68,28 @@ nonisolated final class CoachNarrativeCacheRepository {
         try modelContext.save()
     }
 
-    func followUp(
-        kind: CoachFollowUpKind,
+    func needsRecapRefresh(
+        weekStart: Date,
+        revisionKey: String,
+        now: Date,
+        maxAge: TimeInterval
+    ) throws -> Bool {
+        guard let cached = try cachedRecap(weekStart: weekStart, revisionKey: revisionKey) else {
+            return true
+        }
+
+        if cached.availabilityMode == .fallback {
+            return true
+        }
+
+        return now.timeIntervalSince(cached.generatedAt) > maxAge
+    }
+
+    func cachedFollowUp(
+        for kind: CoachFollowUpKind,
         weekStart: Date,
         revisionKey: String
-    ) throws -> CoachNarrativeSummary? {
+    ) throws -> CachedCoachFollowUpNarrative? {
         let cacheKey = CachedCoachFollowUpNarrative.makeCacheKey(
             weekStart: weekStart,
             revisionKey: revisionKey,
@@ -83,8 +99,19 @@ nonisolated final class CoachNarrativeCacheRepository {
             predicate: #Predicate { $0.cacheKey == cacheKey }
         )
         descriptor.fetchLimit = 1
+        return try modelContext.fetch(descriptor).first
+    }
 
-        guard let cached = try modelContext.fetch(descriptor).first else {
+    func followUp(
+        kind: CoachFollowUpKind,
+        weekStart: Date,
+        revisionKey: String
+    ) throws -> CoachNarrativeSummary? {
+        guard let cached = try cachedFollowUp(
+            for: kind,
+            weekStart: weekStart,
+            revisionKey: revisionKey
+        ) else {
             return nil
         }
 
@@ -107,12 +134,12 @@ nonisolated final class CoachNarrativeCacheRepository {
             revisionKey: revisionKey,
             followUpKind: kind
         )
-        var descriptor = FetchDescriptor<CachedCoachFollowUpNarrative>(
-            predicate: #Predicate { $0.cacheKey == cacheKey }
-        )
-        descriptor.fetchLimit = 1
 
-        if let cached = try modelContext.fetch(descriptor).first {
+        if let cached = try cachedFollowUp(
+            for: kind,
+            weekStart: weekStart,
+            revisionKey: revisionKey
+        ) {
             cached.cacheKey = cacheKey
             cached.weekStart = weekStart
             cached.revisionKey = revisionKey
@@ -120,7 +147,7 @@ nonisolated final class CoachNarrativeCacheRepository {
             cached.followUpKind = kind
             cached.body = summary.body
             cached.availabilityMode = summary.availabilityMode
-            cached.updatedAt = now
+            cached.generatedAt = now
         } else {
             modelContext.insert(
                 CachedCoachFollowUpNarrative(

@@ -295,6 +295,193 @@ struct AppleCoachNarrativeServiceTests {
     }
 
     @Test
+    func recapRefreshUsesGeneratedTimestampForSemanticEntry() throws {
+        let fixture = try makeFixture()
+        let cache = fixture.cacheRepository
+        let weekStart = fixture.weekStart
+        let generatedAt = Date(timeIntervalSince1970: 1_750_000_000)
+
+        try cache.saveRecap(
+            CoachNarrativeSummary(
+                headline: "Fresh",
+                body: "Fresh enough",
+                availabilityMode: .generated
+            ),
+            weekStart: weekStart,
+            revisionKey: "revision-refresh",
+            now: generatedAt
+        )
+
+        #expect(
+            try cache.needsRecapRefresh(
+                weekStart: weekStart,
+                revisionKey: "revision-refresh",
+                now: generatedAt.addingTimeInterval(299),
+                maxAge: 300
+            ) == false
+        )
+        #expect(
+            try cache.needsRecapRefresh(
+                weekStart: weekStart,
+                revisionKey: "revision-refresh",
+                now: generatedAt.addingTimeInterval(301),
+                maxAge: 300
+            ) == true
+        )
+
+        let cached = try #require(
+            try cache.cachedRecap(
+                weekStart: weekStart,
+                revisionKey: "revision-refresh"
+            )
+        )
+        #expect(cached.generatedAt == generatedAt)
+    }
+
+    @Test
+    func fallbackRecapIsAlwaysMarkedForRefresh() throws {
+        let fixture = try makeFixture()
+        let cache = fixture.cacheRepository
+        let weekStart = fixture.weekStart
+        let generatedAt = Date(timeIntervalSince1970: 1_750_000_000)
+
+        try cache.saveRecap(
+            CoachNarrativeSummary(
+                headline: "Fallback",
+                body: "Deterministic fallback",
+                availabilityMode: .fallback
+            ),
+            weekStart: weekStart,
+            revisionKey: "revision-fallback-refresh",
+            now: generatedAt
+        )
+
+        #expect(
+            try cache.needsRecapRefresh(
+                weekStart: weekStart,
+                revisionKey: "revision-fallback-refresh",
+                now: generatedAt.addingTimeInterval(10),
+                maxAge: 300
+            ) == true
+        )
+    }
+
+    @Test
+    func unknownAvailabilityRawValuesDefaultToFallback() {
+        let recap = CachedCoachNarrative(
+            weekStart: .now,
+            revisionKey: "revision-raw",
+            headline: "Headline",
+            body: "Body"
+        )
+        recap.availabilityModeRaw = "future-recap-mode"
+
+        let followUp = CachedCoachFollowUpNarrative(
+            weekStart: .now,
+            revisionKey: "revision-raw",
+            headline: "Headline",
+            followUpKind: .whatChanged,
+            body: "Body"
+        )
+        followUp.availabilityModeRaw = "future-follow-up-mode"
+
+        #expect(recap.availabilityMode == .fallback)
+        #expect(followUp.availabilityMode == .fallback)
+    }
+
+    @Test
+    func sameKeyRecapReusesInFlightGenerationAcrossAvailabilityFlips() async throws {
+        let fixture = try makeFixture()
+        let snapshot = WeeklyCoachInsightSnapshot(
+            weekStart: fixture.weekStart,
+            revisionKey: "revision-flap",
+            baselineWeekCount: 6,
+            completedWorkoutCount: 3,
+            totalVolumeDelta: 6.4,
+            consistencyDelta: 1,
+            topRisingSignals: [],
+            topWatchSignals: [],
+            fallbackSummary: "Fallback should not win while a generated recap is already in flight.",
+            followUpKinds: [.whatChanged]
+        )
+        let availability = LockedValue(true)
+        let counter = AsyncCounter()
+        let gate = AsyncGate()
+        let service = AppleCoachNarrativeService(
+            cacheRepository: fixture.cacheRepository,
+            availabilityProvider: { availability.get() },
+            recapGenerator: { _ in
+                await counter.increment()
+                await gate.markEntered()
+                await gate.waitUntilReleased()
+                return CoachNarrativeSummary(
+                    headline: "Generated Flap",
+                    body: "In-flight generation should be reused even after availability flips.",
+                    availabilityMode: .generated
+                )
+            }
+        )
+
+        async let first = service.recap(for: snapshot)
+        await gate.waitUntilEntered()
+        availability.set(false)
+        async let second = service.recap(for: snapshot)
+        await gate.release()
+
+        let firstResult = try await first
+        let secondResult = try await second
+
+        #expect(firstResult == secondResult)
+        #expect(firstResult.availabilityMode == .generated)
+        #expect(await counter.value() == 1)
+    }
+
+    @Test
+    func cancelingOnlyWaiterCancelsSharedGenerationAndPreventsPersistence() async throws {
+        let fixture = try makeFixture()
+        let snapshot = WeeklyCoachInsightSnapshot(
+            weekStart: fixture.weekStart,
+            revisionKey: "revision-shared-cancel",
+            baselineWeekCount: 6,
+            completedWorkoutCount: 3,
+            totalVolumeDelta: 5.1,
+            consistencyDelta: 1,
+            topRisingSignals: [],
+            topWatchSignals: [],
+            fallbackSummary: "Cancellation should prevent persistence.",
+            followUpKinds: [.whatChanged]
+        )
+        let gate = AsyncGate()
+        let service = AppleCoachNarrativeService(
+            cacheRepository: fixture.cacheRepository,
+            availabilityProvider: { true },
+            recapGenerator: { _ in
+                await gate.markEntered()
+                try await Task.sleep(nanoseconds: 200_000_000)
+                return CoachNarrativeSummary(
+                    headline: "Generated",
+                    body: "This should never be cached after caller cancellation.",
+                    availabilityMode: .generated
+                )
+            }
+        )
+
+        let task = Task {
+            try await service.recap(for: snapshot)
+        }
+
+        await gate.waitUntilEntered()
+        task.cancel()
+
+        await #expect(throws: CancellationError.self) {
+            try await task.value
+        }
+
+        try? await Task.sleep(nanoseconds: 250_000_000)
+        #expect(try fixture.context.fetch(FetchDescriptor<CachedCoachNarrative>()).isEmpty)
+    }
+
+    @Test
     func cachedFallbackRecapCanUpgradeToGeneratedWhenAvailabilityTurnsOn() async throws {
         let fixture = try makeFixture()
         let snapshot = WeeklyCoachInsightSnapshot(
@@ -499,6 +686,47 @@ struct AppleCoachNarrativeServiceTests {
 
         func value() -> Int {
             count
+        }
+    }
+
+    private actor AsyncGate {
+        private var entered = false
+        private var released = false
+        private var enterContinuations: [CheckedContinuation<Void, Never>] = []
+        private var releaseContinuations: [CheckedContinuation<Void, Never>] = []
+
+        func markEntered() {
+            entered = true
+            let continuations = enterContinuations
+            enterContinuations.removeAll()
+            continuations.forEach { $0.resume() }
+        }
+
+        func waitUntilEntered() async {
+            guard !entered else {
+                return
+            }
+
+            await withCheckedContinuation { continuation in
+                enterContinuations.append(continuation)
+            }
+        }
+
+        func release() {
+            released = true
+            let continuations = releaseContinuations
+            releaseContinuations.removeAll()
+            continuations.forEach { $0.resume() }
+        }
+
+        func waitUntilReleased() async {
+            guard !released else {
+                return
+            }
+
+            await withCheckedContinuation { continuation in
+                releaseContinuations.append(continuation)
+            }
         }
     }
 

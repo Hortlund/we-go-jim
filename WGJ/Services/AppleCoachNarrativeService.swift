@@ -23,6 +23,7 @@ final class AppleCoachNarrativeService {
     private let recapGenerator: RecapGenerator
     private let followUpGenerator: FollowUpGenerator
     private var inFlightRequests: [String: Task<CoachNarrativeSummary, Error>] = [:]
+    private var inFlightWaiters: [String: Set<UUID>] = [:]
 
     init(
         cacheRepository: CoachNarrativeCacheRepository,
@@ -137,6 +138,10 @@ final class AppleCoachNarrativeService {
         generate: @escaping @Sendable () async throws -> CoachNarrativeSummary?,
         persist: @escaping @Sendable (CoachNarrativeSummary) throws -> Void
     ) async throws -> CoachNarrativeSummary {
+        if let task = inFlightRequests[cacheKey] {
+            return try await awaitSharedTask(task, cacheKey: cacheKey)
+        }
+
         guard availabilityProvider() else {
             if let cachedFallback {
                 return cachedFallback
@@ -147,12 +152,11 @@ final class AppleCoachNarrativeService {
             return fallbackSummary
         }
 
-        if let task = inFlightRequests[cacheKey] {
-            return try await task.value
-        }
-
         let task = Task<CoachNarrativeSummary, Error> { @MainActor in
-            defer { inFlightRequests[cacheKey] = nil }
+            defer {
+                inFlightRequests[cacheKey] = nil
+                inFlightWaiters[cacheKey] = nil
+            }
 
             do {
                 if let generated = try await generate() {
@@ -172,7 +176,55 @@ final class AppleCoachNarrativeService {
             return fallbackSummary
         }
         inFlightRequests[cacheKey] = task
-        return try await task.value
+        return try await awaitSharedTask(task, cacheKey: cacheKey)
+    }
+
+    private func awaitSharedTask(
+        _ task: Task<CoachNarrativeSummary, Error>,
+        cacheKey: String
+    ) async throws -> CoachNarrativeSummary {
+        let waiterID = UUID()
+        inFlightWaiters[cacheKey, default: []].insert(waiterID)
+
+        return try await withTaskCancellationHandler {
+            defer {
+                releaseWaiter(
+                    waiterID,
+                    for: cacheKey,
+                    cancelTaskIfUnobserved: false
+                )
+            }
+            return try await task.value
+        } onCancel: { [cacheKey] in
+            Task { @MainActor in
+                releaseWaiter(
+                    waiterID,
+                    for: cacheKey,
+                    cancelTaskIfUnobserved: true
+                )
+            }
+        }
+    }
+
+    private func releaseWaiter(
+        _ waiterID: UUID,
+        for cacheKey: String,
+        cancelTaskIfUnobserved: Bool
+    ) {
+        guard var waiters = inFlightWaiters[cacheKey] else {
+            return
+        }
+
+        let removed = waiters.remove(waiterID) != nil
+        if waiters.isEmpty {
+            inFlightWaiters[cacheKey] = nil
+            if removed, cancelTaskIfUnobserved {
+                inFlightRequests[cacheKey]?.cancel()
+            }
+            return
+        }
+
+        inFlightWaiters[cacheKey] = waiters
     }
 
     private static nonisolated func generatedSummary<Input>(

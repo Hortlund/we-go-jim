@@ -9,13 +9,17 @@ final class CachedCoachNarrative {
     var weekStart: Date = Date()
     var revisionKey: String = ""
     var headline: String = ""
-    var availabilityModeRaw: String = CoachNarrativeAvailabilityMode.generated.rawValue
+    var availabilityModeRaw: String = CoachNarrativeAvailabilityMode.fallback.rawValue
     var body: String = ""
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
+    var generatedAt: Date {
+        get { updatedAt }
+        set { updatedAt = newValue }
+    }
 
     var availabilityMode: CoachNarrativeAvailabilityMode {
-        get { CoachNarrativeAvailabilityMode(rawValue: availabilityModeRaw) ?? .generated }
+        get { CoachNarrativeAvailabilityMode(rawValue: availabilityModeRaw) ?? .fallback }
         set { availabilityModeRaw = newValue.rawValue }
     }
 
@@ -58,10 +62,14 @@ final class CachedCoachFollowUpNarrative {
     var revisionKey: String = ""
     var headline: String = ""
     var followUpKindRaw: String = CoachFollowUpKind.whatImproved.rawValue
-    var availabilityModeRaw: String = CoachNarrativeAvailabilityMode.generated.rawValue
+    var availabilityModeRaw: String = CoachNarrativeAvailabilityMode.fallback.rawValue
     var body: String = ""
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
+    var generatedAt: Date {
+        get { updatedAt }
+        set { updatedAt = newValue }
+    }
 
     var followUpKind: CoachFollowUpKind {
         get { CoachFollowUpKind(rawValue: followUpKindRaw) ?? .whatImproved }
@@ -69,7 +77,7 @@ final class CachedCoachFollowUpNarrative {
     }
 
     var availabilityMode: CoachNarrativeAvailabilityMode {
-        get { CoachNarrativeAvailabilityMode(rawValue: availabilityModeRaw) ?? .generated }
+        get { CoachNarrativeAvailabilityMode(rawValue: availabilityModeRaw) ?? .fallback }
         set { availabilityModeRaw = newValue.rawValue }
     }
 
