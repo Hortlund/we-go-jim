@@ -248,25 +248,29 @@ nonisolated final class WeeklyCoachInsightService {
         fallbackSummary: String,
         followUpKinds: [CoachFollowUpKind]
     ) -> String {
-        let risingKey = topRisingSignals.map { signal in
-            signalFingerprint(signal)
-        }.joined(separator: ",")
-        let watchKey = topWatchSignals.map { signal in
-            signalFingerprint(signal)
-        }.joined(separator: ",")
-        let followUpKey = followUpKinds.map(\.rawValue).joined(separator: ",")
+        let payload = WeeklyCoachInsightRevisionPayload(
+            weekStartReferenceDate: weekStart.timeIntervalSinceReferenceDate,
+            baselineWeekCount: baselineWeekCount,
+            completedWorkoutCount: completedWorkoutCount,
+            totalVolumeDelta: totalVolumeDelta,
+            consistencyDelta: consistencyDelta,
+            risingSignals: topRisingSignals.map { WeeklyCoachInsightRevisionSignalPayload(signal: $0) },
+            watchSignals: topWatchSignals.map { WeeklyCoachInsightRevisionSignalPayload(signal: $0) },
+            fallbackSummary: fallbackSummary,
+            followUpKinds: followUpKinds.map(\.rawValue)
+        )
 
-        return [
-            "week=\(Int(weekStart.timeIntervalSinceReferenceDate))",
-            "baseline=\(baselineWeekCount)",
-            "workouts=\(completedWorkoutCount)",
-            "volume=\(stablePercentageString(totalVolumeDelta))",
-            "consistency=\(consistencyDelta)",
-            "rising=\(risingKey)",
-            "watch=\(watchKey)",
-            "fallback=\(fallbackSummary)",
-            "followups=\(followUpKey)",
-        ].joined(separator: "|")
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+
+        guard let data = try? encoder.encode(payload),
+              let encoded = String(data: data, encoding: .utf8)
+        else {
+            return UUID().uuidString
+        }
+
+        return encoded
     }
 
     private func percentageChange(current: Double, baseline: Double) -> Double {
@@ -289,18 +293,37 @@ nonisolated final class WeeklyCoachInsightService {
         String(format: "%.1f", locale: Locale(identifier: "en_US_POSIX"), roundedPercentage(value))
     }
 
-    private func signalFingerprint(_ signal: WeeklyCoachSignal) -> String {
-        [
-            "id=\(signal.id)",
-            "name=\(signal.exerciseName)",
-            "delta=\(stablePercentageString(signal.deltaPercentage))",
-            "summary=\(signal.summary)",
-        ].joined(separator: ";")
-    }
-
     private func weekStart(for date: Date) -> Date {
         let components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
         return calendar.date(from: components) ?? date
+    }
+}
+
+nonisolated struct WeeklyCoachInsightRevisionPayload: Codable, Equatable, Sendable {
+    let weekStartReferenceDate: Double
+    let baselineWeekCount: Int
+    let completedWorkoutCount: Int
+    let totalVolumeDelta: Double
+    let consistencyDelta: Int
+    let risingSignals: [WeeklyCoachInsightRevisionSignalPayload]
+    let watchSignals: [WeeklyCoachInsightRevisionSignalPayload]
+    let fallbackSummary: String
+    let followUpKinds: [String]
+}
+
+nonisolated struct WeeklyCoachInsightRevisionSignalPayload: Codable, Equatable, Sendable {
+    let id: String
+    let catalogExerciseUUID: String
+    let exerciseName: String
+    let deltaPercentage: Double
+    let summary: String
+
+    init(signal: WeeklyCoachSignal) {
+        self.id = signal.id
+        self.catalogExerciseUUID = signal.catalogExerciseUUID
+        self.exerciseName = signal.exerciseName
+        self.deltaPercentage = signal.deltaPercentage
+        self.summary = signal.summary
     }
 }
 

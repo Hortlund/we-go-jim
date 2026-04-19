@@ -90,9 +90,9 @@ struct WeeklyCoachInsightServiceTests {
         #expect(snapshot.topWatchSignals.first?.catalogExerciseUUID == fixture.squat.remoteUUID)
         #expect(snapshot.topWatchSignals.first?.deltaPercentage == -50)
         #expect(snapshot.topWatchSignals.first?.summary == "Back Squat is down 50% vs the six-week baseline.")
-        #expect(snapshot.revisionKey.contains("name=Bench Press"))
-        #expect(snapshot.revisionKey.contains("summary=Bench Press is up 50% vs the six-week baseline."))
-        #expect(snapshot.revisionKey.contains("followups=whatImproved,whatChanged,whyFlat"))
+        #expect(snapshot.revisionKey.contains("\"exerciseName\":\"Bench Press\""))
+        #expect(snapshot.revisionKey.contains("\"summary\":\"Bench Press is up 50% vs the six-week baseline.\""))
+        #expect(snapshot.revisionKey.contains("\"followUpKinds\":[\"whatImproved\",\"whatChanged\",\"whyFlat\"]"))
         #expect(snapshot.followUpKinds.contains(.whatImproved))
         #expect(snapshot.followUpKinds.contains(.whyFlat))
         #expect(snapshot.followUpKinds.contains(.whatChanged))
@@ -139,6 +139,50 @@ struct WeeklyCoachInsightServiceTests {
         #expect(snapshot.followUpKinds.contains(.whatImproved))
         #expect(snapshot.followUpKinds.contains(.whyFlat))
         #expect(snapshot.followUpKinds.contains(.whatChanged))
+    }
+
+    @Test
+    func weeklyInsightRevisionKeyRoundTripsDelimiterHeavySignalText() throws {
+        let fixture = try makeFixture(
+            benchName: "Bench | Press, \"Deluxe\"",
+            squatName: "Back Squat; v2 / test"
+        )
+
+        for weekOffset in 1...6 {
+            try seedWeeklySession(
+                context: fixture.context,
+                sessionRepository: fixture.sessionRepository,
+                projectionRepository: fixture.projectionRepository,
+                bench: fixture.bench,
+                squat: fixture.squat,
+                name: "Baseline \(weekOffset)",
+                startedAt: fixture.weekStart(weeksFromReference: -weekOffset),
+                benchWeight: 100,
+                squatWeight: 100
+            )
+        }
+
+        try seedWeeklySession(
+            context: fixture.context,
+            sessionRepository: fixture.sessionRepository,
+            projectionRepository: fixture.projectionRepository,
+            bench: fixture.bench,
+            squat: fixture.squat,
+            name: "Current",
+            startedAt: fixture.weekStart(weeksFromReference: 0),
+            benchWeight: 150,
+            squatWeight: 50
+        )
+
+        let snapshot = try fixture.service.weeklyInsightSnapshot(asOf: fixture.referenceDate)
+        let payload = try decodeRevisionPayload(snapshot.revisionKey)
+
+        #expect(payload.risingSignals.first?.exerciseName == "Bench | Press, \"Deluxe\"")
+        #expect(payload.risingSignals.first?.summary == "Bench | Press, \"Deluxe\" is up 50% vs the six-week baseline.")
+        #expect(payload.watchSignals.first?.exerciseName == "Back Squat; v2 / test")
+        #expect(payload.watchSignals.first?.summary == "Back Squat; v2 / test is down 50% vs the six-week baseline.")
+        #expect(payload.fallbackSummary.isEmpty)
+        #expect(payload.followUpKinds == ["whatImproved", "whatChanged", "whyFlat"])
     }
 
     @Test
@@ -232,7 +276,10 @@ struct WeeklyCoachInsightServiceTests {
         }
     }
 
-    private func makeFixture() throws -> Fixture {
+    private func makeFixture(
+        benchName: String = "Bench Press",
+        squatName: String = "Back Squat"
+    ) throws -> Fixture {
         let calendar = makeTestCalendar()
         let context = try makeInMemoryContext()
         let sessionRepository = WorkoutSessionRepository(modelContext: context)
@@ -242,7 +289,7 @@ struct WeeklyCoachInsightServiceTests {
 
         let bench = ExerciseCatalogItem(
             remoteUUID: "weekly-insight-bench",
-            displayName: "Bench Press",
+            displayName: benchName,
             categoryName: "Chest",
             equipmentSummary: "Barbell",
             isCurated: true,
@@ -250,7 +297,7 @@ struct WeeklyCoachInsightServiceTests {
         )
         let squat = ExerciseCatalogItem(
             remoteUUID: "weekly-insight-squat",
-            displayName: "Back Squat",
+            displayName: squatName,
             categoryName: "Legs",
             equipmentSummary: "Barbell",
             isCurated: true,
@@ -269,6 +316,11 @@ struct WeeklyCoachInsightServiceTests {
             bench: bench,
             squat: squat
         )
+    }
+
+    private func decodeRevisionPayload(_ revisionKey: String) throws -> WeeklyCoachInsightRevisionPayload {
+        let data = Data(revisionKey.utf8)
+        return try JSONDecoder().decode(WeeklyCoachInsightRevisionPayload.self, from: data)
     }
 
     private func seedWeeklySession(
