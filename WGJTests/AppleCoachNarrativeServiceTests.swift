@@ -235,6 +235,56 @@ struct AppleCoachNarrativeServiceTests {
     }
 
     @Test
+    func cachedFallbackRecapCanUpgradeToGeneratedWhenAvailabilityTurnsOn() async throws {
+        let fixture = try makeFixture()
+        let snapshot = WeeklyCoachInsightSnapshot(
+            weekStart: fixture.weekStart,
+            revisionKey: "revision-upgrade",
+            baselineWeekCount: 2,
+            completedWorkoutCount: 2,
+            totalVolumeDelta: 3.2,
+            consistencyDelta: 0,
+            topRisingSignals: [],
+            topWatchSignals: [],
+            fallbackSummary: "Baseline is still warming up, so this recap is deterministic for now.",
+            followUpKinds: [.whatChanged]
+        )
+        let availability = LockedValue(false)
+        let generator = GeneratorProbe()
+        let service = AppleCoachNarrativeService(
+            cacheRepository: fixture.cacheRepository,
+            availabilityProvider: { availability.get() },
+            recapGenerator: { input in
+                generator.recapInputs.append(input)
+                return CoachNarrativeSummary(
+                    headline: "Generated Upgrade",
+                    body: "A model-generated recap replaced the deterministic fallback.",
+                    availabilityMode: .generated
+                )
+            }
+        )
+
+        let fallback = try await service.recap(for: snapshot)
+        availability.set(true)
+        let upgraded = try await service.recap(for: snapshot)
+        let cached = try await service.recap(for: snapshot)
+
+        #expect(fallback.availabilityMode == .fallback)
+        #expect(upgraded.availabilityMode == .generated)
+        #expect(upgraded.headline == "Generated Upgrade")
+        #expect(upgraded.body == "A model-generated recap replaced the deterministic fallback.")
+        #expect(cached.availabilityMode == .generated)
+        #expect(cached.body == upgraded.body)
+        #expect(generator.recapInputs.count == 1)
+
+        let recapRows = try fixture.context.fetch(FetchDescriptor<CachedCoachNarrative>())
+        #expect(recapRows.count == 1)
+        #expect(recapRows.first?.availabilityMode == .generated)
+        #expect(recapRows.first?.headline == upgraded.headline)
+        #expect(recapRows.first?.body == upgraded.body)
+    }
+
+    @Test
     func followUpCacheIsSeparatedByKindForSameWeekAndRevision() async throws {
         let fixture = try makeFixture()
         let snapshot = WeeklyCoachInsightSnapshot(
@@ -297,6 +347,53 @@ struct AppleCoachNarrativeServiceTests {
         #expect(Set(cachedRows.map(\.weekStart)) == Set([snapshot.weekStart]))
     }
 
+    @Test
+    func concurrentSameKeyRecapRequestsGenerateOnceAndPersistOneResult() async throws {
+        let fixture = try makeFixture()
+        let snapshot = WeeklyCoachInsightSnapshot(
+            weekStart: fixture.weekStart,
+            revisionKey: "revision-concurrent",
+            baselineWeekCount: 8,
+            completedWorkoutCount: 4,
+            totalVolumeDelta: 7.8,
+            consistencyDelta: 1,
+            topRisingSignals: [],
+            topWatchSignals: [],
+            fallbackSummary: "",
+            followUpKinds: [.whatChanged]
+        )
+        let counter = AsyncCounter()
+        let service = AppleCoachNarrativeService(
+            cacheRepository: fixture.cacheRepository,
+            availabilityProvider: { true },
+            recapGenerator: { _ in
+                await counter.increment()
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                return CoachNarrativeSummary(
+                    headline: "Concurrent Recap",
+                    body: "Only one generated recap should win for this semantic key.",
+                    availabilityMode: .generated
+                )
+            }
+        )
+
+        async let first = service.recap(for: snapshot)
+        async let second = service.recap(for: snapshot)
+        let firstResult = try await first
+        let secondResult = try await second
+        let cached = try await service.recap(for: snapshot)
+
+        #expect(firstResult == secondResult)
+        #expect(cached == firstResult)
+        #expect(await counter.value() == 1)
+
+        let recapRows = try fixture.context.fetch(FetchDescriptor<CachedCoachNarrative>())
+        #expect(recapRows.count == 1)
+        #expect(recapRows.first?.availabilityMode == .generated)
+        #expect(recapRows.first?.headline == firstResult.headline)
+        #expect(recapRows.first?.body == firstResult.body)
+    }
+
     private struct Fixture {
         let context: ModelContext
         let weekStart: Date
@@ -306,6 +403,39 @@ struct AppleCoachNarrativeServiceTests {
     private final class GeneratorProbe {
         var recapInputs: [AppleCoachNarrativeService.RecapGenerationInput] = []
         var followUpInputs: [AppleCoachNarrativeService.FollowUpGenerationInput] = []
+    }
+
+    private final class LockedValue<Value>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: Value
+
+        init(_ value: Value) {
+            self.value = value
+        }
+
+        func get() -> Value {
+            lock.lock()
+            defer { lock.unlock() }
+            return value
+        }
+
+        func set(_ newValue: Value) {
+            lock.lock()
+            value = newValue
+            lock.unlock()
+        }
+    }
+
+    private actor AsyncCounter {
+        private var count = 0
+
+        func increment() {
+            count += 1
+        }
+
+        func value() -> Int {
+            count
+        }
     }
 
     private func makeFixture() throws -> Fixture {
