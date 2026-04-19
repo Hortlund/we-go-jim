@@ -1012,6 +1012,73 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testWorkoutCompletionSummaryHeroCardRetriggersCelebration() throws {
+        let app = launchApp()
+
+        tapTab("Start Workout", in: app)
+
+        let startButton = app.buttons["start-workout-empty-button"]
+        XCTAssertTrue(startButton.waitForExistence(timeout: 5))
+        startButton.tap()
+
+        let addExerciseButton = app.buttons["active-workout-empty-add-exercise-button"]
+        XCTAssertTrue(addExerciseButton.waitForExistence(timeout: 5))
+        addExerciseButton.tap()
+
+        let searchField = app.textFields["exercises-search-field"]
+        XCTAssertTrue(searchField.waitForExistence(timeout: 5))
+        searchField.tap()
+        searchField.typeText("bench")
+
+        let selectExerciseButton = identifiedElement("exercise-picker-select-button", in: app)
+        XCTAssertTrue(selectExerciseButton.waitForExistence(timeout: 15))
+        selectExerciseButton.tap()
+
+        let completeSetButton = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
+        ).firstMatch
+        XCTAssertTrue(completeSetButton.waitForExistence(timeout: 5))
+        completeSetButton.tap()
+
+        let finishButton = app.buttons["active-workout-finish-button"]
+        XCTAssertTrue(finishButton.waitForExistence(timeout: 5))
+        finishButton.tap()
+
+        let finishConfirmationButton = app.buttons["Finish Anyway"].waitForExistence(timeout: 2)
+            ? app.buttons["Finish Anyway"]
+            : app.buttons["Finish and Save"]
+        XCTAssertTrue(finishConfirmationButton.waitForExistence(timeout: 5))
+        finishConfirmationButton.tap()
+
+        let skipButton = app.buttons["Skip"]
+        if skipButton.waitForExistence(timeout: 10) {
+            skipButton.tap()
+        }
+
+        let summary = identifiedElement("workout-completion-summary", in: app)
+        XCTAssertTrue(summary.waitForExistence(timeout: 10))
+
+        let heroCard = identifiedElement("workout-completion-hero-card", in: app)
+        XCTAssertTrue(heroCard.waitForExistence(timeout: 5))
+        XCTAssertEqual(heroCard.value as? String, "Celebration burst 1")
+
+        heroCard.tap()
+
+        let celebrationValuePredicate = NSPredicate(
+            format: "value == %@",
+            "Celebration burst 2"
+        )
+        let expectation = XCTNSPredicateExpectation(predicate: celebrationValuePredicate, object: heroCard)
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 5), .completed)
+
+        let confirmButton = identifiedElement("workout-completion-confirm-button", in: app)
+        XCTAssertTrue(confirmButton.waitForExistence(timeout: 5))
+        confirmButton.tap()
+
+        XCTAssertTrue(app.buttons["history-calendar-button"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testCompletedWorkoutDetailEditAndSaveSmoke() throws {
         let app = launchApp()
 

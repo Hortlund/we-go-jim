@@ -12,7 +12,10 @@ struct WorkoutCompletionSummaryView: View {
 
     @State private var snapshot: WorkoutCompletionSnapshot?
     @State private var hasTriggeredCelebration = false
+    @State private var celebrationBurstCount = 0
     @State private var showsConfetti = false
+    @State private var confettiPresentationID = UUID()
+    @State private var confettiDismissTask: Task<Void, Never>?
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -36,9 +39,11 @@ struct WorkoutCompletionSummaryView: View {
 
             if showsConfetti && !reduceMotion {
                 WorkoutCompletionConfettiOverlay()
+                    .id(confettiPresentationID)
                     .frame(height: 280)
                     .ignoresSafeArea(edges: .top)
                     .transition(.opacity)
+                    .accessibilityIdentifier("workout-completion-confetti-overlay")
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -46,6 +51,10 @@ struct WorkoutCompletionSummaryView: View {
         }
         .task {
             await loadSnapshotIfNeeded()
+        }
+        .onDisappear {
+            confettiDismissTask?.cancel()
+            confettiDismissTask = nil
         }
         .accessibilityIdentifier("workout-completion-summary")
     }
@@ -88,98 +97,118 @@ struct WorkoutCompletionSummaryView: View {
     }
 
     private func heroCard(_ snapshot: WorkoutCompletionSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .top, spacing: 16) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(snapshot.celebrationTitle.uppercased())
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(snapshot.personalRecords.isEmpty ? WGJTheme.accentCyan : WGJTheme.accentGold)
+        Button {
+            triggerCelebration()
+        } label: {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .top, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(snapshot.celebrationTitle.uppercased())
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(snapshot.personalRecords.isEmpty ? WGJTheme.accentCyan : WGJTheme.accentGold)
 
-                    Text(snapshot.sessionName)
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                        .foregroundStyle(WGJTheme.textPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
+                        Text(snapshot.sessionName)
+                            .font(.system(size: 34, weight: .bold, design: .rounded))
+                            .foregroundStyle(WGJTheme.textPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
 
-                    Text(snapshot.celebrationSubtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(WGJTheme.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                        Text(snapshot.celebrationSubtitle)
+                            .font(.subheadline)
+                            .foregroundStyle(WGJTheme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
 
-                Spacer(minLength: 12)
+                    Spacer(minLength: 12)
 
-                ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    WGJTheme.accentBlue.opacity(0.92),
-                                    snapshot.personalRecords.isEmpty ? WGJTheme.accentCyan.opacity(0.80) : WGJTheme.accentGold.opacity(0.86),
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        WGJTheme.accentBlue.opacity(0.92),
+                                        snapshot.personalRecords.isEmpty ? WGJTheme.accentCyan.opacity(0.80) : WGJTheme.accentGold.opacity(0.86),
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
                             )
+                            .frame(width: 74, height: 74)
+
+                        Image(systemName: snapshot.personalRecords.isEmpty ? "checkmark.seal.fill" : "trophy.fill")
+                            .font(.title.weight(.bold))
+                            .foregroundStyle(WGJTheme.textInverse)
+                    }
+                }
+
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) {
+                        WGJMetricPill(
+                            systemImage: "calendar",
+                            value: snapshot.completedAtText,
+                            tint: WGJTheme.accentCyan
                         )
-                        .frame(width: 74, height: 74)
+                        WGJMetricPill(
+                            systemImage: snapshot.personalRecords.isEmpty ? "sparkles" : "trophy.fill",
+                            value: snapshot.prHeadline,
+                            tint: snapshot.personalRecords.isEmpty ? WGJTheme.accentBlue : WGJTheme.accentGold
+                        )
+                    }
 
-                    Image(systemName: snapshot.personalRecords.isEmpty ? "checkmark.seal.fill" : "trophy.fill")
-                        .font(.title.weight(.bold))
-                        .foregroundStyle(WGJTheme.textInverse)
+                    VStack(alignment: .leading, spacing: 10) {
+                        WGJMetricPill(
+                            systemImage: "calendar",
+                            value: snapshot.completedAtText,
+                            tint: WGJTheme.accentCyan
+                        )
+                        WGJMetricPill(
+                            systemImage: snapshot.personalRecords.isEmpty ? "sparkles" : "trophy.fill",
+                            value: snapshot.prHeadline,
+                            tint: snapshot.personalRecords.isEmpty ? WGJTheme.accentBlue : WGJTheme.accentGold
+                        )
+                    }
                 }
+
+                Label(
+                    reduceMotion ? "Tap to celebrate again" : "Tap for more confetti",
+                    systemImage: "sparkles"
+                )
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(WGJTheme.accentCyan)
             }
-
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 10) {
-                    WGJMetricPill(
-                        systemImage: "calendar",
-                        value: snapshot.completedAtText,
-                        tint: WGJTheme.accentCyan
-                    )
-                    WGJMetricPill(
-                        systemImage: snapshot.personalRecords.isEmpty ? "sparkles" : "trophy.fill",
-                        value: snapshot.prHeadline,
-                        tint: snapshot.personalRecords.isEmpty ? WGJTheme.accentBlue : WGJTheme.accentGold
-                    )
-                }
-
-                VStack(alignment: .leading, spacing: 10) {
-                    WGJMetricPill(
-                        systemImage: "calendar",
-                        value: snapshot.completedAtText,
-                        tint: WGJTheme.accentCyan
-                    )
-                    WGJMetricPill(
-                        systemImage: snapshot.personalRecords.isEmpty ? "sparkles" : "trophy.fill",
-                        value: snapshot.prHeadline,
-                        tint: snapshot.personalRecords.isEmpty ? WGJTheme.accentBlue : WGJTheme.accentGold
-                    )
-                }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
+                    .fill(WGJTheme.cardStrong.opacity(0.98))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        WGJTheme.accentBlue.opacity(0.18),
+                                        WGJTheme.accentCyan.opacity(0.10),
+                                        Color.clear,
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                    }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
+                            .stroke(WGJTheme.accentBlue.opacity(0.18), lineWidth: 1)
+                    }
             }
         }
-        .padding(20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
-                .fill(WGJTheme.cardStrong.opacity(0.98))
-                .overlay {
-                    RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    WGJTheme.accentBlue.opacity(0.18),
-                                    WGJTheme.accentCyan.opacity(0.10),
-                                    Color.clear,
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                }
-                .overlay {
-                    RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
-                        .stroke(WGJTheme.accentBlue.opacity(0.18), lineWidth: 1)
-                }
-        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("workout-completion-hero-card")
+        .accessibilityLabel("Workout completion celebration")
+        .accessibilityValue("Celebration burst \(celebrationBurstCount)")
+        .accessibilityHint(
+            reduceMotion
+            ? "Double tap to replay the celebration feedback."
+            : "Double tap to launch more confetti."
+        )
     }
 
     private func statGrid(_ snapshot: WorkoutCompletionSnapshot) -> some View {
@@ -286,18 +315,29 @@ struct WorkoutCompletionSummaryView: View {
     private func triggerCelebrationIfNeeded() {
         guard !hasTriggeredCelebration else { return }
         hasTriggeredCelebration = true
+        triggerCelebration()
+    }
+
+    private func triggerCelebration() {
+        celebrationBurstCount += 1
 
         WorkoutFeedbackCenter.shared.workoutCompleted()
 
         guard !reduceMotion else { return }
-        showsConfetti = true
+        confettiDismissTask?.cancel()
 
-        Task { @MainActor in
+        confettiPresentationID = UUID()
+        showsConfetti = true
+        let burstCount = celebrationBurstCount
+
+        confettiDismissTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(2.8))
             guard !Task.isCancelled else { return }
+            guard burstCount == celebrationBurstCount else { return }
             withAnimation(.easeOut(duration: 0.25)) {
                 showsConfetti = false
             }
+            confettiDismissTask = nil
         }
     }
 
