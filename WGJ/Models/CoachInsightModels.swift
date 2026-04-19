@@ -25,9 +25,9 @@ nonisolated struct WeeklyCoachInsightSnapshot: Equatable, Sendable {
     let baselineWeekCount: Int
     let completedWorkoutCount: Int
     let totalVolumeDelta: Double
-    let consistencyDelta: Double
+    let consistencyDelta: Int
     let topRisingSignals: [WeeklyCoachSignal]
     let topWatchSignals: [WeeklyCoachSignal]
-    let fallbackSummary: String?
+    let fallbackSummary: String
     let followUpKinds: [CoachFollowUpKind]
 }

@@ -32,11 +32,11 @@ nonisolated final class WeeklyCoachInsightService {
         let fallbackSummary = fallbackSummary(
             baselineWeekCount: baselineWeekCount
         )
-        let shouldFallback = fallbackSummary != nil
+        let shouldFallback = !fallbackSummary.isEmpty
         let baselineAverageVolume = baselineWeeks.isEmpty ? 0 : baselineWeeks.map(\.totalVolume).reduce(0, +) / Double(baselineWeeks.count)
         let baselineAverageWorkouts = baselineWeeks.isEmpty ? 0 : baselineWeeks.map { Double($0.sessionIDs.count) }.reduce(0, +) / Double(baselineWeeks.count)
         let totalVolumeDelta = shouldFallback ? 0 : percentageChange(current: currentVolume, baseline: baselineAverageVolume)
-        let consistencyDelta = shouldFallback ? 0 : percentageChange(current: Double(currentWorkoutCount), baseline: baselineAverageWorkouts)
+        let consistencyDelta = shouldFallback ? 0 : consistencyChange(currentWorkoutCount: currentWorkoutCount, baselineAverageWorkouts: baselineAverageWorkouts)
 
         let signals = shouldFallback
             ? []
@@ -203,21 +203,21 @@ nonisolated final class WeeklyCoachInsightService {
 
     private func fallbackSummary(
         baselineWeekCount: Int
-    ) -> String? {
+    ) -> String {
         guard baselineWeekCount == Self.baselineWindowCount else {
             return "Not enough recent training history to build a stable weekly baseline."
         }
-        return nil
+        return ""
     }
 
     private func followUpKinds(
-        fallbackSummary: String?,
+        fallbackSummary: String,
         totalVolumeDelta: Double,
-        consistencyDelta: Double,
+        consistencyDelta: Int,
         topRisingSignals: [WeeklyCoachSignal],
         topWatchSignals: [WeeklyCoachSignal]
     ) -> [CoachFollowUpKind] {
-        guard fallbackSummary == nil else {
+        guard fallbackSummary.isEmpty else {
             return [.whatChanged]
         }
 
@@ -241,22 +241,22 @@ nonisolated final class WeeklyCoachInsightService {
         baselineWeekCount: Int,
         completedWorkoutCount: Int,
         totalVolumeDelta: Double,
-        consistencyDelta: Double,
+        consistencyDelta: Int,
         topRisingSignals: [WeeklyCoachSignal],
         topWatchSignals: [WeeklyCoachSignal],
-        fallbackSummary: String?
+        fallbackSummary: String
     ) -> String {
         let signalKey = (topRisingSignals + topWatchSignals).map { signal in
             "\(signal.id):\(stablePercentageString(signal.deltaPercentage))"
         }.joined(separator: ",")
 
-        let fallbackKey = fallbackSummary ?? "none"
+        let fallbackKey = fallbackSummary.isEmpty ? "none" : fallbackSummary
         return [
             "week=\(Int(weekStart.timeIntervalSinceReferenceDate))",
             "baseline=\(baselineWeekCount)",
             "workouts=\(completedWorkoutCount)",
             "volume=\(stablePercentageString(totalVolumeDelta))",
-            "consistency=\(stablePercentageString(consistencyDelta))",
+            "consistency=\(consistencyDelta)",
             "signals=\(signalKey)",
             "fallback=\(fallbackKey)",
         ].joined(separator: "|")
@@ -268,6 +268,10 @@ nonisolated final class WeeklyCoachInsightService {
         }
 
         return roundedPercentage(((current - baseline) / baseline) * 100)
+    }
+
+    private func consistencyChange(currentWorkoutCount: Int, baselineAverageWorkouts: Double) -> Int {
+        Int((Double(currentWorkoutCount) - baselineAverageWorkouts).rounded())
     }
 
     private func roundedPercentage(_ value: Double) -> Double {
