@@ -207,6 +207,8 @@ final class AppRuntimeState {
     @ObservationIgnored private var hasResolvedRuntimeCloudAvailability = false
     @ObservationIgnored private var isRefreshingRuntimeCloudAvailability = false
     @ObservationIgnored private var lastRuntimeCloudAvailabilityRefreshAt: Date?
+    @ObservationIgnored private var runtimeCloudAvailabilityRefreshGeneration = 0
+    @ObservationIgnored private var runtimeCloudAvailabilityRefreshTask: Task<Void, Never>?
 
     private init() { }
 
@@ -217,6 +219,7 @@ final class AppRuntimeState {
 #endif
 
     func updateCloudState(isEnabled: Bool, errorDescription: String?) {
+        cancelRuntimeCloudAvailabilityRefresh()
         cloudSyncEnabled = isEnabled
         cloudSyncErrorDescription = errorDescription
         hasResolvedRuntimeCloudAvailability = false
@@ -244,48 +247,41 @@ final class AppRuntimeState {
         accountService: (any AccountStatusProviding)? = nil,
         now: Date = .now
     ) {
-        guard RuntimeCloudAvailabilityRefreshPolicy.shouldRefresh(
-            cloudSyncEnabled: cloudSyncEnabled,
-            force: force,
-            hasResolvedRuntimeCloudAvailability: hasResolvedRuntimeCloudAvailability,
-            isRefreshingRuntimeCloudAvailability: isRefreshingRuntimeCloudAvailability,
-            lastRefreshAt: lastRuntimeCloudAvailabilityRefreshAt,
-            now: now
-        ) else {
-            return
+        guard cloudSyncEnabled else { return }
+
+        if force {
+            cancelRuntimeCloudAvailabilityRefresh()
+        } else {
+            guard RuntimeCloudAvailabilityRefreshPolicy.shouldRefresh(
+                cloudSyncEnabled: cloudSyncEnabled,
+                force: force,
+                hasResolvedRuntimeCloudAvailability: hasResolvedRuntimeCloudAvailability,
+                isRefreshingRuntimeCloudAvailability: isRefreshingRuntimeCloudAvailability,
+                lastRefreshAt: lastRuntimeCloudAvailabilityRefreshAt,
+                now: now
+            ) else {
+                return
+            }
         }
 
-        isRefreshingRuntimeCloudAvailability = true
-        lastRuntimeCloudAvailabilityRefreshAt = now
+        let refreshGeneration = beginRuntimeCloudAvailabilityRefresh(now: now)
 
         let statusProvider = accountService ?? AccountStatusService()
 
-        Task(priority: .utility) { [weak self] in
+        let refreshTask = Task.detached(priority: .utility) { [weak self] in
             let status = await statusProvider.fetchAccountStatus()
 
             await MainActor.run {
                 guard let self else { return }
-                defer {
-                    self.isRefreshingRuntimeCloudAvailability = false
-                }
-
-                switch status {
-                case .checking:
-                    self.hasResolvedRuntimeCloudAvailability = false
-                case .available:
-                    self.updateCloudRuntimeError(nil)
-                    self.hasResolvedRuntimeCloudAvailability = true
-                case .unavailable(let reason):
-                    self.updateCloudRuntimeError(Self.runtimeErrorDescription(for: reason))
-                    switch reason {
-                    case .noAccount, .restricted:
-                        self.hasResolvedRuntimeCloudAvailability = true
-                    case .temporarilyUnavailable, .unknown:
-                        self.hasResolvedRuntimeCloudAvailability = false
-                    }
-                }
+                self.finishRuntimeCloudAvailabilityRefresh(
+                    refreshGeneration: refreshGeneration,
+                    status: status,
+                    taskWasCancelled: Task.isCancelled
+                )
             }
         }
+
+        runtimeCloudAvailabilityRefreshTask = refreshTask
     }
 
     func isBrosCloudAvailable(cloudContainerAvailable: Bool) -> Bool {
@@ -309,6 +305,49 @@ final class AppRuntimeState {
             return "iCloud is temporarily unavailable on this device. Cloud features are temporarily unavailable."
         case .unknown:
             return "WGJ could not verify iCloud availability right now. Cloud features are temporarily unavailable."
+        }
+    }
+
+    private func beginRuntimeCloudAvailabilityRefresh(now: Date) -> Int {
+        runtimeCloudAvailabilityRefreshGeneration += 1
+        isRefreshingRuntimeCloudAvailability = true
+        lastRuntimeCloudAvailabilityRefreshAt = now
+        return runtimeCloudAvailabilityRefreshGeneration
+    }
+
+    private func cancelRuntimeCloudAvailabilityRefresh() {
+        runtimeCloudAvailabilityRefreshGeneration += 1
+        runtimeCloudAvailabilityRefreshTask?.cancel()
+        runtimeCloudAvailabilityRefreshTask = nil
+        isRefreshingRuntimeCloudAvailability = false
+    }
+
+    private func finishRuntimeCloudAvailabilityRefresh(
+        refreshGeneration: Int,
+        status: AccountStatus,
+        taskWasCancelled: Bool
+    ) {
+        guard runtimeCloudAvailabilityRefreshGeneration == refreshGeneration else { return }
+
+        runtimeCloudAvailabilityRefreshTask = nil
+        isRefreshingRuntimeCloudAvailability = false
+
+        guard !taskWasCancelled else { return }
+
+        switch status {
+        case .checking:
+            hasResolvedRuntimeCloudAvailability = false
+        case .available:
+            updateCloudRuntimeError(nil)
+            hasResolvedRuntimeCloudAvailability = true
+        case .unavailable(let reason):
+            updateCloudRuntimeError(Self.runtimeErrorDescription(for: reason))
+            switch reason {
+            case .noAccount, .restricted:
+                hasResolvedRuntimeCloudAvailability = true
+            case .temporarilyUnavailable, .unknown:
+                hasResolvedRuntimeCloudAvailability = false
+            }
         }
     }
 }

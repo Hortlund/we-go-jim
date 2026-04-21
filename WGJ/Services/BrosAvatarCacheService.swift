@@ -4,10 +4,12 @@ import UIKit
 nonisolated private final class BrosAvatarCacheEntry: NSObject {
     let data: Data?
     let thumbnail: UIImage?
+    let maxPixelSize: CGFloat
 
-    init(data: Data?, thumbnail: UIImage?) {
+    init(data: Data?, thumbnail: UIImage?, maxPixelSize: CGFloat) {
         self.data = data
         self.thumbnail = thumbnail
+        self.maxPixelSize = maxPixelSize
     }
 }
 
@@ -16,7 +18,7 @@ nonisolated final class BrosAvatarCacheService {
 
     private let cache = NSCache<NSString, BrosAvatarCacheEntry>()
     private let lock = NSLock()
-    private var inFlightKeys: Set<String> = []
+    private var inFlightFingerprintsByKey: [String: Int] = [:]
 
     private init() {
         cache.countLimit = 256
@@ -46,17 +48,26 @@ nonisolated final class BrosAvatarCacheService {
 
         if let existing = cache.object(forKey: key as NSString),
            existing.data == data,
-           existing.thumbnail != nil
+           existing.thumbnail != nil,
+           existing.maxPixelSize >= maxPixelSize
         {
             return
         }
 
-        guard beginPriming(key: key) else { return }
-        defer { endPriming(key: key) }
+        let dataFingerprint = data.hashValue
+        guard beginPriming(key: key, dataFingerprint: dataFingerprint) else { return }
+        defer { endPriming(key: key, dataFingerprint: dataFingerprint) }
 
         let thumbnail = await AvatarImageCodec.thumbnail(from: data, maxPixelSize: maxPixelSize)
-        if cache.object(forKey: key as NSString)?.data == data {
-            cache.setObject(BrosAvatarCacheEntry(data: data, thumbnail: thumbnail), forKey: key as NSString)
+        if shouldStorePrimedThumbnail(for: key, dataFingerprint: dataFingerprint) {
+            cache.setObject(
+                BrosAvatarCacheEntry(
+                    data: data,
+                    thumbnail: thumbnail,
+                    maxPixelSize: maxPixelSize
+                ),
+                forKey: key as NSString
+            )
         }
     }
 
@@ -66,9 +77,15 @@ nonisolated final class BrosAvatarCacheService {
             return
         }
 
-        let existingThumbnail = cache.object(forKey: key as NSString)?.thumbnail
+        let existingEntry = cache.object(forKey: key as NSString)
+        let existingThumbnail = existingEntry?.data == data ? existingEntry?.thumbnail : nil
+        let existingMaxPixelSize = existingEntry?.data == data ? existingEntry?.maxPixelSize ?? 0 : 0
         cache.setObject(
-            BrosAvatarCacheEntry(data: data, thumbnail: existingThumbnail),
+            BrosAvatarCacheEntry(
+                data: data,
+                thumbnail: existingThumbnail,
+                maxPixelSize: existingMaxPixelSize
+            ),
             forKey: key as NSString
         )
     }
@@ -81,18 +98,26 @@ nonisolated final class BrosAvatarCacheService {
         cache.removeAllObjects()
     }
 
-    private func beginPriming(key: String) -> Bool {
+    private func beginPriming(key: String, dataFingerprint: Int) -> Bool {
         lock.lock()
         defer { lock.unlock() }
 
-        guard !inFlightKeys.contains(key) else { return false }
-        inFlightKeys.insert(key)
+        guard inFlightFingerprintsByKey[key] != dataFingerprint else { return false }
+        inFlightFingerprintsByKey[key] = dataFingerprint
         return true
     }
 
-    private func endPriming(key: String) {
+    private func endPriming(key: String, dataFingerprint: Int) {
         lock.lock()
-        inFlightKeys.remove(key)
+        if inFlightFingerprintsByKey[key] == dataFingerprint {
+            inFlightFingerprintsByKey.removeValue(forKey: key)
+        }
         lock.unlock()
+    }
+
+    private func shouldStorePrimedThumbnail(for key: String, dataFingerprint: Int) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return inFlightFingerprintsByKey[key] == dataFingerprint
     }
 }

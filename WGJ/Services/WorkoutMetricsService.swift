@@ -552,13 +552,15 @@ nonisolated final class WorkoutMetricsService {
         sessionFacts: [CompletedSetFact]
     ) throws -> [SessionSetPRAchievement] {
         var achievements: [SessionSetPRAchievement] = []
+        let exercises = orderedSessionExercises(session)
+        let priorPeaksByExerciseUUID = try priorSetMetricPeaksByExerciseUUID(
+            for: Set(exercises.map(\.catalogExerciseUUID)),
+            before: session.startedAt,
+            excludingSessionID: session.id
+        )
 
-        for exercise in orderedSessionExercises(session) {
-            var runningBest = try priorSetMetricPeaks(
-                for: exercise.catalogExerciseUUID,
-                before: session.startedAt,
-                excludingSessionID: session.id
-            )
+        for exercise in exercises {
+            var runningBest = priorPeaksByExerciseUUID[exercise.catalogExerciseUUID] ?? PriorSetMetricPeaks()
 
             let exerciseFacts = sessionFacts
                 .filter { $0.sessionExerciseID == exercise.id && !$0.isWarmup }
@@ -1180,11 +1182,25 @@ nonisolated final class WorkoutMetricsService {
         before date: Date? = nil,
         excludingSessionID: UUID? = nil
     ) throws -> PriorSetMetricPeaks {
+        try priorSetMetricPeaksByExerciseUUID(
+            for: Set([catalogExerciseUUID]),
+            before: date,
+            excludingSessionID: excludingSessionID
+        )[catalogExerciseUUID] ?? PriorSetMetricPeaks()
+    }
+
+    private func priorSetMetricPeaksByExerciseUUID(
+        for catalogExerciseUUIDs: Set<String>,
+        before date: Date? = nil,
+        excludingSessionID: UUID? = nil
+    ) throws -> [String: PriorSetMetricPeaks] {
+        guard !catalogExerciseUUIDs.isEmpty else { return [:] }
+
         let facts = try historyProjectionRepository.allFacts()
         let visibleSessionIDs = try visibleCompletedSessionIDs()
-        var peaks = PriorSetMetricPeaks()
+        var peaksByExerciseUUID: [String: PriorSetMetricPeaks] = [:]
 
-        for fact in facts where !fact.isWarmup && fact.catalogExerciseUUID == catalogExerciseUUID {
+        for fact in facts where !fact.isWarmup && catalogExerciseUUIDs.contains(fact.catalogExerciseUUID) {
             guard visibleSessionIDs.contains(fact.sessionID) else { continue }
             if let excludingSessionID, fact.sessionID == excludingSessionID {
                 continue
@@ -1194,6 +1210,7 @@ nonisolated final class WorkoutMetricsService {
                 continue
             }
 
+            var peaks = peaksByExerciseUUID[fact.catalogExerciseUUID] ?? PriorSetMetricPeaks()
             if fact.isWeightedMetric,
                let weightedOneRepMax = fact.estimatedOneRepMaxKg,
                let normalizedWeight = fact.normalizedWeightKg,
@@ -1205,9 +1222,10 @@ nonisolated final class WorkoutMetricsService {
             }
 
             peaks.reps = max(peaks.reps, fact.reps)
+            peaksByExerciseUUID[fact.catalogExerciseUUID] = peaks
         }
 
-        return peaks
+        return peaksByExerciseUUID
     }
 
     private func weekStart(for date: Date) -> Date {

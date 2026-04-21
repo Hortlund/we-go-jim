@@ -850,47 +850,83 @@ nonisolated final class WorkoutSessionRepository {
         let completedStatus = WorkoutSessionStatus.completed.rawValue
 
         let descriptor: FetchDescriptor<WorkoutSession>
-        switch (date, excludingSessionID) {
-        case let (date?, excludingSessionID?):
-            descriptor = FetchDescriptor<WorkoutSession>(
-                predicate: #Predicate { session in
-                    session.statusRaw == completedStatus
-                        && session.startedAt < date
-                        && session.id != excludingSessionID
-                },
-                sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
-            )
-        case let (date?, nil):
-            descriptor = FetchDescriptor<WorkoutSession>(
-                predicate: #Predicate { session in
-                    session.statusRaw == completedStatus
-                        && session.startedAt < date
-                },
-                sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
-            )
-        case let (nil, excludingSessionID?):
-            descriptor = FetchDescriptor<WorkoutSession>(
-                predicate: #Predicate { session in
-                    session.statusRaw == completedStatus
-                        && session.id != excludingSessionID
-                },
-                sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
-            )
-        case (nil, nil):
-            descriptor = FetchDescriptor<WorkoutSession>(
-                predicate: #Predicate { session in
-                    session.statusRaw == completedStatus
-                },
-                sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
-            )
-        }
-
-        let sessions = try modelContext.fetch(descriptor)
         if includeArchived {
-            return sessions
+            switch (date, excludingSessionID) {
+            case let (date?, excludingSessionID?):
+                descriptor = FetchDescriptor<WorkoutSession>(
+                    predicate: #Predicate { session in
+                        session.statusRaw == completedStatus
+                            && session.startedAt < date
+                            && session.id != excludingSessionID
+                    },
+                    sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+                )
+            case let (date?, nil):
+                descriptor = FetchDescriptor<WorkoutSession>(
+                    predicate: #Predicate { session in
+                        session.statusRaw == completedStatus
+                            && session.startedAt < date
+                    },
+                    sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+                )
+            case let (nil, excludingSessionID?):
+                descriptor = FetchDescriptor<WorkoutSession>(
+                    predicate: #Predicate { session in
+                        session.statusRaw == completedStatus
+                            && session.id != excludingSessionID
+                    },
+                    sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+                )
+            case (nil, nil):
+                descriptor = FetchDescriptor<WorkoutSession>(
+                    predicate: #Predicate { session in
+                        session.statusRaw == completedStatus
+                    },
+                    sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+                )
+            }
+        } else {
+            switch (date, excludingSessionID) {
+            case let (date?, excludingSessionID?):
+                descriptor = FetchDescriptor<WorkoutSession>(
+                    predicate: #Predicate { session in
+                        session.statusRaw == completedStatus
+                            && session.archivedAt == nil
+                            && session.startedAt < date
+                            && session.id != excludingSessionID
+                    },
+                    sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+                )
+            case let (date?, nil):
+                descriptor = FetchDescriptor<WorkoutSession>(
+                    predicate: #Predicate { session in
+                        session.statusRaw == completedStatus
+                            && session.archivedAt == nil
+                            && session.startedAt < date
+                    },
+                    sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+                )
+            case let (nil, excludingSessionID?):
+                descriptor = FetchDescriptor<WorkoutSession>(
+                    predicate: #Predicate { session in
+                        session.statusRaw == completedStatus
+                            && session.archivedAt == nil
+                            && session.id != excludingSessionID
+                    },
+                    sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+                )
+            case (nil, nil):
+                descriptor = FetchDescriptor<WorkoutSession>(
+                    predicate: #Predicate { session in
+                        session.statusRaw == completedStatus
+                            && session.archivedAt == nil
+                    },
+                    sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+                )
+            }
         }
 
-        return sessions.filter { $0.archivedAt == nil }
+        return try modelContext.fetch(descriptor)
     }
 
     private func defaultSessionSets(

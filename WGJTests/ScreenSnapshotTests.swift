@@ -162,6 +162,14 @@ struct ScreenSnapshotTests {
         #expect(
             snapshot.workoutCountsByDay[calendar.startOfDay(for: januarySession.endedAt ?? januarySession.startedAt)] == 1
         )
+        #expect(snapshot.sections.first?.cards.first?.summaryRows.isEmpty == true)
+        #expect(snapshot.sections.last?.cards.first?.summaryRows == [
+            HistorySessionSummaryRow(
+                id: 0,
+                exercise: "1 x Bench Press",
+                bestSet: "100 kg x 8"
+            ),
+        ])
 
         let filtered = HistoryOverviewSnapshotBuilder.build(
             sessions: [januarySession, februarySession],

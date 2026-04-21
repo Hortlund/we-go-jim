@@ -627,7 +627,7 @@ struct ProfileView: View {
     private func reloadProfileIfNeeded(force: Bool) async {
         applyWarmProfileSnapshotIfAvailable()
 
-        let currentProfileUpdatedAt = appWarmupState.latestProfile?.profile.updatedAt ?? currentProfile?.updatedAt
+        let currentProfileUpdatedAt = appWarmupState.freshProfile()?.profile.updatedAt ?? currentProfile?.updatedAt
         guard force || ProfileReloadPolicy.shouldReload(
             hasLoadedProfile: hasLoadedProfile,
             needsExplicitRefresh: needsExplicitRefresh,
@@ -674,13 +674,7 @@ struct ProfileView: View {
             )
             guard profileReloadToken == reloadToken else { return }
             self.dashboardContent = dashboardContent
-            appWarmupState.storeProfile(
-                ProfileWarmSnapshot(
-                    profile: profile,
-                    dashboard: dashboardContent,
-                    warmedAt: .now
-                )
-            )
+            persistWarmProfileSnapshotIfNeeded()
             hasLoadedProfile = true
             needsExplicitRefresh = false
             lastLoadedProfileUpdatedAt = profile.updatedAt
@@ -695,9 +689,22 @@ struct ProfileView: View {
 
     @MainActor
     private func applyWarmProfileSnapshotIfAvailable() {
-        guard let warmSnapshot = appWarmupState.latestProfile else { return }
+        guard !hasLoadedProfile, currentProfile == nil else { return }
+        guard let warmSnapshot = appWarmupState.freshProfile() else { return }
         currentProfile = warmSnapshot.profile
         dashboardContent = warmSnapshot.dashboard
+    }
+
+    @MainActor
+    private func persistWarmProfileSnapshotIfNeeded() {
+        guard let currentProfile else { return }
+        appWarmupState.storeProfile(
+            ProfileWarmSnapshot(
+                profile: currentProfile,
+                dashboard: dashboardContent,
+                warmedAt: .now
+            )
+        )
     }
 
     private func scheduleCoachBriefLoad(enabledWidgets: [ProfileWidgetConfigSnapshot]) {
@@ -722,6 +729,7 @@ struct ProfileView: View {
                     guard coachBriefLoadToken == token else { return }
                     dashboardContent.coachBrief = coachBrief
                     coachBriefLoadState = coachBrief == nil ? .failed : .idle
+                    persistWarmProfileSnapshotIfNeeded()
                     coachBriefLoadTask = nil
                     coachBriefLoadToken = nil
                 }
@@ -844,6 +852,7 @@ struct ProfileView: View {
                     guard profileReloadToken == reloadToken else { return }
                     guard trendSeriesLoadToken == loadToken else { return }
                     dashboardContent.trendSeriesByKind = trendSeriesByKind
+                    persistWarmProfileSnapshotIfNeeded()
                 }
             } catch {
                 await MainActor.run {

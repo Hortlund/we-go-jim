@@ -189,24 +189,24 @@ nonisolated enum CloudStartupPreflight {
                 "CloudKit is unavailable for this build. Using local-only mode for this session."
             )
         case .temporarilyUnavailable:
-            return localFallbackDecision(
+            return cloudBackedRetryDecision(
                 .temporarilyUnavailable,
-                "iCloud is temporarily unavailable on this device. Using local-only mode for this session."
+                "iCloud is temporarily unavailable on this device. Retrying cloud availability in the background."
             )
         case .couldNotDetermine:
-            return localFallbackDecision(
+            return cloudBackedRetryDecision(
                 .couldNotDetermine,
-                "WGJ could not verify iCloud availability at launch. Using local-only mode for this session."
+                "WGJ could not verify iCloud availability at launch. Retrying cloud availability in the background."
             )
         case .timedOut:
-            return localFallbackDecision(
+            return cloudBackedRetryDecision(
                 .timedOut,
-                "The iCloud account check timed out during launch. Using local-only mode for this session."
+                "The iCloud account check timed out during launch. Retrying cloud availability in the background."
             )
         case .error:
-            return localFallbackDecision(
+            return cloudBackedRetryDecision(
                 .error,
-                "WGJ hit a CloudKit startup error during launch. Using local-only mode for this session."
+                "WGJ hit a CloudKit startup error during launch. Retrying cloud availability in the background."
             )
         }
     }
@@ -218,6 +218,17 @@ nonisolated enum CloudStartupPreflight {
         CloudStartupDecision(
             accountStatus: accountStatus,
             storeMode: .localFallback,
+            cloudSyncErrorDescription: description
+        )
+    }
+
+    private static func cloudBackedRetryDecision(
+        _ accountStatus: CloudStartupAccountStatus,
+        _ description: String
+    ) -> CloudStartupDecision {
+        CloudStartupDecision(
+            accountStatus: accountStatus,
+            storeMode: .cloudBacked,
             cloudSyncErrorDescription: description
         )
     }

@@ -29,6 +29,41 @@ nonisolated enum AppWarmupPolicy {
     }
 }
 
+nonisolated struct DeferredMaintenanceRunTracker: Equatable, Sendable {
+    private(set) var requestedRunID: Int
+    private(set) var completedRunID: Int
+
+    init(initiallyPending: Bool = true) {
+        requestedRunID = initiallyPending ? 1 : 0
+        completedRunID = 0
+    }
+
+    var isPending: Bool {
+        requestedRunID > completedRunID
+    }
+
+    var pendingRunID: Int? {
+        isPending ? requestedRunID : nil
+    }
+
+    @discardableResult
+    mutating func requestRun() -> Int {
+        requestedRunID += 1
+        return requestedRunID
+    }
+
+    @discardableResult
+    mutating func markCompleted(runID: Int) -> Bool {
+        guard runID == requestedRunID else { return false }
+        completedRunID = runID
+        return true
+    }
+
+    mutating func reset(initiallyPending: Bool = true) {
+        self = DeferredMaintenanceRunTracker(initiallyPending: initiallyPending)
+    }
+}
+
 struct ProfileWarmSnapshot: Sendable {
     let profile: ProfileIdentitySnapshot
     let dashboard: ProfileDashboardContent

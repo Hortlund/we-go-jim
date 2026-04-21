@@ -3,10 +3,23 @@ import SwiftData
 
 nonisolated final class ExerciseSearchService {
     private let modelContext: ModelContext
-    private static var cachedCatalogIndex: CatalogSearchIndex?
+    private static let cacheLock = NSLock()
+    private static var cachedCatalogIndexByContextID: [ObjectIdentifier: CatalogSearchCacheEntry] = [:]
+    private static var catalogGenerationByContainerID: [ObjectIdentifier: Int] = [:]
 
     init(modelContext: ModelContext) {
         self.modelContext = modelContext
+    }
+
+    static func invalidateCatalogIndex(for modelContext: ModelContext) {
+        let containerID = ObjectIdentifier(modelContext.container)
+
+        cacheLock.lock()
+        catalogGenerationByContainerID[containerID, default: 0] += 1
+        cachedCatalogIndexByContextID = cachedCatalogIndexByContextID.filter { _, entry in
+            entry.containerID != containerID
+        }
+        cacheLock.unlock()
     }
 
     func searchExercises(query: String, filters: ExerciseFilters) throws -> [ExerciseCatalogItem] {
@@ -90,9 +103,13 @@ nonisolated final class ExerciseSearchService {
     }
 
     private func catalogIndex() throws -> CatalogSearchIndex {
-        let stamp = try makeCatalogIndexStamp()
-        if let cachedCatalogIndex = Self.cachedCatalogIndex, cachedCatalogIndex.stamp == stamp {
-            return cachedCatalogIndex
+        let contextID = ObjectIdentifier(modelContext)
+        let containerID = ObjectIdentifier(modelContext.container)
+        let generation = Self.catalogGeneration(for: containerID)
+        if let cachedEntry = Self.cachedCatalogIndex(for: contextID),
+           cachedEntry.containerID == containerID,
+           cachedEntry.generation == generation {
+            return cachedEntry.index
         }
 
         let descriptor = FetchDescriptor<ExerciseCatalogItem>(
@@ -100,37 +117,33 @@ nonisolated final class ExerciseSearchService {
         )
         let exercises = try modelContext.fetch(descriptor)
         let index = CatalogSearchIndex(
-            stamp: stamp,
             rows: exercises.map(CatalogSearchRow.init(exercise:))
         )
-        Self.cachedCatalogIndex = index
+        let cacheEntry = CatalogSearchCacheEntry(
+            containerID: containerID,
+            generation: generation,
+            index: index
+        )
+        Self.setCachedCatalogIndex(cacheEntry, for: contextID)
         return index
     }
 
-    private func makeCatalogIndexStamp() throws -> CatalogIndexStamp {
-        var latestExerciseDescriptor = FetchDescriptor<ExerciseCatalogItem>(
-            sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
-        )
-        latestExerciseDescriptor.fetchLimit = 1
-        let latestExerciseUpdate = try modelContext.fetch(latestExerciseDescriptor)
-            .first?.updatedAt.timeIntervalSinceReferenceDate ?? 0
+    private static func catalogGeneration(for containerID: ObjectIdentifier) -> Int {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        return catalogGenerationByContainerID[containerID, default: 0]
+    }
 
-        var syncStateDescriptor = FetchDescriptor<ExerciseCatalogSyncState>(
-            predicate: #Predicate { $0.key == "global" }
-        )
-        syncStateDescriptor.fetchLimit = 1
-        let syncState = try modelContext.fetch(syncStateDescriptor).first
-        let syncMarker = [
-            syncState?.lastSuccessfulSyncAt?.timeIntervalSinceReferenceDate ?? 0,
-            syncState?.seedImportedAt?.timeIntervalSinceReferenceDate ?? 0,
-            syncState?.lastUpdateCursor?.timeIntervalSinceReferenceDate ?? 0,
-        ].max() ?? 0
+    private static func cachedCatalogIndex(for contextID: ObjectIdentifier) -> CatalogSearchCacheEntry? {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        return cachedCatalogIndexByContextID[contextID]
+    }
 
-        return CatalogIndexStamp(
-            contextID: ObjectIdentifier(modelContext),
-            latestExerciseUpdate: latestExerciseUpdate,
-            syncMarker: syncMarker
-        )
+    private static func setCachedCatalogIndex(_ entry: CatalogSearchCacheEntry, for contextID: ObjectIdentifier) {
+        cacheLock.lock()
+        cachedCatalogIndexByContextID[contextID] = entry
+        cacheLock.unlock()
     }
 
     private func matchesVisibility(row: CatalogSearchRow, filters: ExerciseFilters) -> Bool {
@@ -202,14 +215,13 @@ nonisolated final class ExerciseSearchService {
     }
 }
 
-nonisolated private struct CatalogIndexStamp: Equatable {
-    let contextID: ObjectIdentifier
-    let latestExerciseUpdate: TimeInterval
-    let syncMarker: TimeInterval
+nonisolated private struct CatalogSearchCacheEntry {
+    let containerID: ObjectIdentifier
+    let generation: Int
+    let index: CatalogSearchIndex
 }
 
 nonisolated private struct CatalogSearchIndex {
-    let stamp: CatalogIndexStamp
     let rows: [CatalogSearchRow]
 }
 

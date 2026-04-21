@@ -1,5 +1,15 @@
 import Foundation
 
+nonisolated enum ActiveWorkoutEditorCommitDisposition: Equatable, Sendable {
+    case none
+    case debounced
+    case immediate
+
+    static func fieldChange<Value: Equatable>(previous: Value, current: Value) -> Self {
+        previous == current ? .none : .debounced
+    }
+}
+
 struct ActiveWorkoutPendingWrites: Equatable {
     private(set) var dirtyExerciseIDs: Set<UUID> = []
     private(set) var isSessionMetaDirty = false
@@ -32,9 +42,18 @@ struct ActiveWorkoutPendingWrites: Equatable {
 nonisolated struct ActiveWorkoutSetDraftChangeSummary: Equatable, Sendable {
     let hasStructuralChange: Bool
     let hasCompletionChange: Bool
+    let hasValueChange: Bool
 
     var hasMeaningfulChange: Bool {
         hasStructuralChange || hasCompletionChange
+    }
+
+    var commitDisposition: ActiveWorkoutEditorCommitDisposition {
+        if hasMeaningfulChange {
+            return .immediate
+        }
+
+        return hasValueChange ? .debounced : .none
     }
 
     static func compare(
@@ -44,12 +63,14 @@ nonisolated struct ActiveWorkoutSetDraftChangeSummary: Equatable, Sendable {
         if previous.count != current.count {
             return ActiveWorkoutSetDraftChangeSummary(
                 hasStructuralChange: true,
-                hasCompletionChange: completionChanged(previous: previous, current: current)
+                hasCompletionChange: completionChanged(previous: previous, current: current),
+                hasValueChange: false
             )
         }
 
         var hasStructuralChange = false
         var hasCompletionChange = false
+        var hasValueChange = false
 
         for (previousDraft, currentDraft) in zip(previous, current) {
             if previousDraft.id != currentDraft.id {
@@ -58,15 +79,19 @@ nonisolated struct ActiveWorkoutSetDraftChangeSummary: Equatable, Sendable {
             if previousDraft.isCompleted != currentDraft.isCompleted {
                 hasCompletionChange = true
             }
+            if valueChanged(previous: previousDraft, current: currentDraft) {
+                hasValueChange = true
+            }
 
-            if hasStructuralChange && hasCompletionChange {
+            if hasStructuralChange && hasCompletionChange && hasValueChange {
                 break
             }
         }
 
         return ActiveWorkoutSetDraftChangeSummary(
             hasStructuralChange: hasStructuralChange,
-            hasCompletionChange: hasCompletionChange
+            hasCompletionChange: hasCompletionChange,
+            hasValueChange: hasValueChange
         )
     }
 
@@ -80,5 +105,20 @@ nonisolated struct ActiveWorkoutSetDraftChangeSummary: Equatable, Sendable {
             }
         }
         return false
+    }
+
+    private static func valueChanged(
+        previous: WorkoutSessionSetDraft,
+        current: WorkoutSessionSetDraft
+    ) -> Bool {
+        previous.isWarmup != current.isWarmup
+            || previous.restSeconds != current.restSeconds
+            || previous.targetReps != current.targetReps
+            || previous.targetWeight != current.targetWeight
+            || previous.targetLoadUnit != current.targetLoadUnit
+            || previous.actualReps != current.actualReps
+            || previous.actualWeight != current.actualWeight
+            || previous.actualLoadUnit != current.actualLoadUnit
+            || previous.isLocked != current.isLocked
     }
 }

@@ -175,7 +175,92 @@ struct AppPerformanceRuntimeTests {
 
         #expect(!summary.hasStructuralChange)
         #expect(!summary.hasCompletionChange)
+        #expect(summary.hasValueChange)
         #expect(!summary.hasMeaningfulChange)
+        #expect(summary.commitDisposition == .debounced)
+    }
+
+    @Test
+    func activeWorkoutSetDraftChangeSummaryImmediatelyCommitsCompletionChanges() {
+        let setID = UUID()
+        let previous = [
+            WorkoutSessionSetDraft(
+                id: setID,
+                targetReps: 8,
+                targetWeight: 100,
+                targetLoadUnit: .kg,
+                actualReps: 8,
+                actualWeight: 100,
+                actualLoadUnit: .kg,
+                isCompleted: false
+            ),
+        ]
+        let current = [
+            WorkoutSessionSetDraft(
+                id: setID,
+                targetReps: 8,
+                targetWeight: 100,
+                targetLoadUnit: .kg,
+                actualReps: 8,
+                actualWeight: 100,
+                actualLoadUnit: .kg,
+                isCompleted: true
+            ),
+        ]
+
+        let summary = ActiveWorkoutSetDraftChangeSummary.compare(
+            previous: previous,
+            current: current
+        )
+
+        #expect(!summary.hasStructuralChange)
+        #expect(summary.hasCompletionChange)
+        #expect(!summary.hasValueChange)
+        #expect(summary.hasMeaningfulChange)
+        #expect(summary.commitDisposition == .immediate)
+    }
+
+    @Test
+    func activeWorkoutSetDraftChangeSummaryImmediatelyCommitsStructuralChanges() {
+        let previous = [
+            WorkoutSessionSetDraft(
+                targetReps: 8,
+                targetWeight: 100,
+                targetLoadUnit: .kg
+            ),
+        ]
+        let current = previous + [
+            WorkoutSessionSetDraft(
+                targetReps: 10,
+                targetWeight: 110,
+                targetLoadUnit: .kg
+            ),
+        ]
+
+        let summary = ActiveWorkoutSetDraftChangeSummary.compare(
+            previous: previous,
+            current: current
+        )
+
+        #expect(summary.hasStructuralChange)
+        #expect(summary.hasMeaningfulChange)
+        #expect(summary.commitDisposition == .immediate)
+    }
+
+    @Test
+    func activeWorkoutEditorCommitDispositionDebouncesFieldEditsOnlyWhenValueChanges() {
+        #expect(
+            ActiveWorkoutEditorCommitDisposition.fieldChange(
+                previous: "Keep elbows tucked.",
+                current: "Keep elbows tucked."
+            ) == .none
+        )
+        #expect(
+            ActiveWorkoutEditorCommitDisposition.fieldChange(
+                previous: "Keep elbows tucked.",
+                current: "Keep elbows stacked."
+            ) == .debounced
+        )
     }
 
     @Test

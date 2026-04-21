@@ -66,12 +66,6 @@ struct HistoryOverviewView: View {
         }
         .wgjScreenBackground()
         .toolbar(.hidden, for: .navigationBar)
-        .onAppear {
-            guard isTabActive else { return }
-            Task {
-                await reloadSnapshotIfNeeded(force: false)
-            }
-        }
         .sheet(isPresented: $showingWorkoutCalendar) {
             workoutCalendarSheet
         }
@@ -113,10 +107,7 @@ struct HistoryOverviewView: View {
     }
 
     private func historyCard(_ card: HistorySessionCardData) -> some View {
-        HistorySessionCardView(
-            card: card,
-            session: controller.sessionsByID[card.sessionID]
-        ) {
+        HistorySessionCardView(card: card) {
             archiveSession(card.sessionID)
         }
         .equatable()
@@ -205,8 +196,10 @@ struct HistoryOverviewView: View {
     @MainActor
     private func reloadSnapshot(contentUpdatedAt: Date?) async {
         do {
-            try controller.reload(modelContext: modelContext)
-            recomputeSnapshot()
+            try controller.reload(
+                modelContext: modelContext,
+                selectedDayFilter: selectedDayFilter
+            )
             hasLoadedSnapshot = true
             needsExplicitRefresh = false
             lastLoadedContentUpdatedAt = contentUpdatedAt
@@ -238,6 +231,7 @@ struct HistorySessionCardData: Identifiable, Equatable {
     let durationText: String
     let volumeText: String
     let prsText: String
+    let summaryRows: [HistorySessionSummaryRow]
 }
 
 struct HistoryOverviewSnapshot {
@@ -254,15 +248,16 @@ struct HistoryOverviewSnapshot {
 @Observable
 final class HistoryOverviewController {
     var completedSessions: [WorkoutSession] = []
-    var sessionsByID: [UUID: WorkoutSession] = [:]
     var snapshot = HistoryOverviewSnapshot.empty
 
-    func reload(modelContext: ModelContext) throws {
+    func reload(
+        modelContext: ModelContext,
+        selectedDayFilter: Date?
+    ) throws {
         completedSessions = try WorkoutSessionRepository(modelContext: modelContext).completedSessions()
-        sessionsByID = Dictionary(uniqueKeysWithValues: completedSessions.map { ($0.id, $0) })
         snapshot = HistoryOverviewSnapshotBuilder.build(
             sessions: completedSessions,
-            selectedDayFilter: nil
+            selectedDayFilter: selectedDayFilter
         )
     }
 }
@@ -311,7 +306,7 @@ enum HistoryOverviewSnapshotBuilder {
     }
 
     private static func makeCardData(_ session: WorkoutSession) -> HistorySessionCardData {
-        return HistorySessionCardData(
+        HistorySessionCardData(
             id: session.id.uuidString,
             sessionID: session.id,
             updatedAtStamp: session.updatedAt.timeIntervalSinceReferenceDate,
@@ -319,7 +314,8 @@ enum HistoryOverviewSnapshotBuilder {
             dateText: formattedSessionDate(session),
             durationText: formattedDuration(session.durationSeconds),
             volumeText: formattedVolume(session.totalVolume),
-            prsText: "\(session.prHitsCount) PRs"
+            prsText: "\(session.prHitsCount) PR\(session.prHitsCount == 1 ? "" : "s")",
+            summaryRows: HistorySessionSummaryBuilder.rows(for: session)
         )
     }
 
@@ -357,7 +353,6 @@ enum HistoryOverviewSnapshotBuilder {
 
 private struct HistorySessionCardView: View, Equatable {
     let card: HistorySessionCardData
-    let session: WorkoutSession?
     let onArchive: () -> Void
 
     static func == (lhs: HistorySessionCardView, rhs: HistorySessionCardView) -> Bool {
@@ -420,11 +415,6 @@ private struct HistorySessionCardView: View, Equatable {
         .accessibilityIdentifier("history-session-card")
     }
 
-    private var summaryRows: [HistorySessionSummaryRow] {
-        guard let session else { return [] }
-        return HistorySessionSummaryBuilder.rows(for: session)
-    }
-
     private var summarySection: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -432,7 +422,7 @@ private struct HistorySessionCardView: View, Equatable {
                 summaryBestSetHeader
             }
 
-            ForEach(summaryRows) { row in
+            ForEach(card.summaryRows) { row in
                 HStack(alignment: .top, spacing: 10) {
                     summaryExerciseValue(row.exercise)
                     summaryBestSetValue(row.bestSet)

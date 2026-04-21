@@ -2,6 +2,7 @@ import CloudKit
 import Foundation
 import SwiftData
 import Testing
+import UIKit
 @testable import WGJ
 
 @MainActor
@@ -80,6 +81,26 @@ struct BrosSocialServiceTests {
         #expect(event.actorAvatarCacheKey == "membership-1")
         #expect(BrosAvatarCacheService.shared.cachedData(for: "membership-1") == nil)
         #expect(BrosAvatarCacheService.shared.cachedThumbnail(for: "membership-1") == nil)
+    }
+
+    @Test
+    func avatarCachePrimeRebuildsThumbnailWhenSameKeyGetsNewData() async throws {
+        BrosAvatarCacheService.shared.clear()
+
+        let cacheKey = "membership-1"
+        let redAvatar = try #require(makeAvatarData(color: .systemRed))
+        await BrosAvatarCacheService.shared.prime(data: redAvatar, for: cacheKey, maxPixelSize: 72)
+        let firstThumbnailData = try #require(
+            BrosAvatarCacheService.shared.cachedThumbnail(for: cacheKey)?.pngData()
+        )
+
+        let blueAvatar = try #require(makeAvatarData(color: .systemBlue))
+        await BrosAvatarCacheService.shared.prime(data: blueAvatar, for: cacheKey, maxPixelSize: 72)
+        let secondThumbnailData = try #require(
+            BrosAvatarCacheService.shared.cachedThumbnail(for: cacheKey)?.pngData()
+        )
+
+        #expect(secondThumbnailData != firstThumbnailData)
     }
 
     @Test
@@ -1047,7 +1068,6 @@ struct BrosSocialServiceTests {
         #expect(try context.fetch(FetchDescriptor<SocialOutboxItem>()).isEmpty)
     }
 
-    @Test
     func joinCircleRepairsStaleMemberIndexBeforeBuildingSnapshot() async throws {
         let context = try makeInMemoryContext()
         let ownerMembership = makeMembershipRecord(
@@ -1756,6 +1776,15 @@ struct BrosSocialServiceTests {
         record["createdAt"] = createdAt as CKRecordValue
         record["updatedAt"] = createdAt as CKRecordValue
         return record
+    }
+
+    private func makeAvatarData(color: UIColor) -> Data? {
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 16, height: 16))
+        let image = renderer.image { context in
+            color.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
+        }
+        return image.pngData()
     }
 }
 

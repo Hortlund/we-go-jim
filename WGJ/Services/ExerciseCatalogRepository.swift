@@ -90,6 +90,7 @@ nonisolated final class ExerciseCatalogRepository: ExerciseCatalogRepositoryProt
         replaceAliases(on: exercise, aliases: validated.aliases)
 
         try modelContext.save()
+        ExerciseSearchService.invalidateCatalogIndex(for: modelContext)
         return exercise
     }
 
@@ -111,6 +112,7 @@ nonisolated final class ExerciseCatalogRepository: ExerciseCatalogRepositoryProt
         try refreshTemplateSnapshots(for: exercise)
 
         try modelContext.save()
+        ExerciseSearchService.invalidateCatalogIndex(for: modelContext)
     }
 
     func searchExercises(query: String, filters: ExerciseFilters) throws -> [ExerciseCatalogItem] {

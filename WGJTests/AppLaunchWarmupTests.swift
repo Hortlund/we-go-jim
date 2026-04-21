@@ -281,6 +281,17 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
+    func asyncCloudStartupPreflightKeepsCloudBackedStoreForTimedOutStatus() async {
+        let decision = await CloudStartupPreflight.makeDecisionAsync(
+            statusProvider: MockAsyncCloudStartupAccountStatusProvider(status: .timedOut)
+        )
+
+        #expect(decision.storeMode == .cloudBacked)
+        #expect(decision.cloudSyncEnabled)
+        #expect(decision.cloudSyncErrorDescription?.contains("timed out") == true)
+    }
+
+    @Test
     func appLaunchBootstrapResolverBuildsLocalFallbackWhenStartupDecisionRejectsCloud() async throws {
         let container = try makeContainer()
         var didRequestCloudContainer = false
@@ -318,6 +329,43 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
+    func appLaunchBootstrapResolverKeepsCloudBackedContainerForRetryableStartupStatus() async throws {
+        let container = try makeContainer()
+        var didRequestCloudContainer = false
+        var didRequestLocalFallback = false
+
+        let bootstrap = try await AppLaunchBootstrapResolver.resolve(
+            processInfo: MockProcessInfo(arguments: []),
+            canUseConfiguredCloudKitContainer: true,
+            startupDecisionProvider: {
+                CloudStartupDecision(
+                    accountStatus: .timedOut,
+                    storeMode: .cloudBacked,
+                    cloudSyncErrorDescription: "The iCloud account check timed out during launch. Retrying cloud availability in the background."
+                )
+            },
+            makeUITestContainer: {
+                Issue.record("UI test container should not be requested.")
+                return container
+            },
+            makeCloudBackedContainer: {
+                didRequestCloudContainer = true
+                return container
+            },
+            makeLocalFallbackContainer: {
+                didRequestLocalFallback = true
+                return container
+            },
+            describeError: { _ in "unreachable" }
+        )
+
+        #expect(bootstrap.cloudSyncEnabled)
+        #expect(bootstrap.cloudSyncErrorDescription?.contains("timed out") == true)
+        #expect(didRequestCloudContainer)
+        #expect(!didRequestLocalFallback)
+    }
+
+    @Test
     func appLaunchBootstrapResolverFallsBackToLocalWhenCloudContainerCreationFails() async throws {
         let localFallbackContainer = try makeContainer()
         enum TestError: Error { case boom }
@@ -349,6 +397,115 @@ struct AppLaunchWarmupTests {
 
         #expect(bootstrap.cloudSyncEnabled == false)
         #expect(bootstrap.cloudSyncErrorDescription?.contains("boom") == true)
+    }
+
+    @Test
+    func runtimeCloudAvailabilityForceRefreshSupersedesStaleInFlightResults() async {
+        let runtimeState = AppRuntimeState.makeTestingInstance()
+        runtimeState.updateCloudState(isEnabled: true, errorDescription: nil)
+
+        let accountService = ControlledRuntimeAccountStatusProvider()
+        defer {
+            Task {
+                await accountService.resumeAll(with: .available)
+            }
+        }
+
+        runtimeState.refreshCloudAvailabilityIfNeeded(accountService: accountService)
+        await waitUntil("first runtime refresh starts") {
+            await accountService.currentFetchCount() == 1
+        }
+
+        runtimeState.refreshCloudAvailabilityIfNeeded(force: true, accountService: accountService)
+        await waitUntil("forced runtime refresh starts a second fetch") {
+            await accountService.currentFetchCount() == 2
+        }
+
+        let fetchCount = await accountService.currentFetchCount()
+        #expect(fetchCount == 2)
+
+        await accountService.resumeNext(with: .unavailable(.temporarilyUnavailable))
+        await Task.yield()
+        #expect(runtimeState.cloudSyncErrorDescription == nil)
+
+        await accountService.resumeNext(with: .available)
+        await waitUntil("replacement runtime refresh clears the cloud error") {
+            await MainActor.run {
+                runtimeState.cloudSyncErrorDescription == nil
+            }
+        }
+
+        #expect(runtimeState.cloudSyncErrorDescription == nil)
+    }
+
+    @Test
+    func appLaunchBootstrapResolverHonorsTaskCancellationBeforeBuildingStores() async throws {
+        let recorder = LockedBootstrapBuildRecorder()
+        let container = try makeContainer()
+
+        let task = Task {
+            try await AppLaunchBootstrapResolver.resolve(
+                processInfo: MockProcessInfo(arguments: []),
+                canUseConfiguredCloudKitContainer: true,
+                startupDecisionProvider: {
+                    try? await Task.sleep(for: .milliseconds(200))
+                    return CloudStartupDecision(
+                        accountStatus: .available,
+                        storeMode: .cloudBacked,
+                        cloudSyncErrorDescription: nil
+                    )
+                },
+                makeUITestContainer: {
+                    recorder.recordUITestRequest()
+                    return container
+                },
+                makeCloudBackedContainer: {
+                    recorder.recordCloudRequest()
+                    return container
+                },
+                makeLocalFallbackContainer: {
+                    recorder.recordLocalFallbackRequest()
+                    return container
+                },
+                describeError: { error in
+                    String(describing: error)
+                }
+            )
+        }
+
+        await Task.yield()
+        task.cancel()
+
+        do {
+            _ = try await task.value
+            Issue.record("Expected bootstrap resolution to stop when the task is cancelled.")
+        } catch is CancellationError {
+        } catch {
+            Issue.record("Expected cancellation, got \(error).")
+        }
+
+        let counts = recorder.snapshot()
+        #expect(counts.cloud == 0)
+        #expect(counts.local == 0)
+        #expect(counts.uiTest == 0)
+    }
+
+    @Test
+    func deferredMaintenanceRunTrackerKeepsLaterRequestsPendingUntilNewestRunCompletes() throws {
+        var tracker = DeferredMaintenanceRunTracker()
+        let firstRunID = try #require(tracker.pendingRunID)
+
+        tracker.requestRun()
+
+        #expect(tracker.isPending)
+        let completedStaleRun = tracker.markCompleted(runID: firstRunID)
+        #expect(!completedStaleRun)
+
+        let secondRunID = try #require(tracker.pendingRunID)
+        #expect(secondRunID != firstRunID)
+        let completedLatestRun = tracker.markCompleted(runID: secondRunID)
+        #expect(completedLatestRun)
+        #expect(!tracker.isPending)
     }
 
     private func makeProfileSnapshot(updatedAt: Date) -> ProfileIdentitySnapshot {
@@ -401,6 +558,21 @@ struct AppLaunchWarmupTests {
             ]
         )
     }
+
+    private func waitUntil(
+        _ description: String,
+        timeoutIterations: Int = 200,
+        condition: @escaping @Sendable () async -> Bool
+    ) async {
+        for _ in 0..<timeoutIterations {
+            if await condition() {
+                return
+            }
+            await Task.yield()
+        }
+
+        Issue.record("Timed out waiting for \(description).")
+    }
 }
 
 private struct MockAsyncCloudStartupAccountStatusProvider: AsyncCloudStartupAccountStatusProviding {
@@ -413,4 +585,66 @@ private struct MockAsyncCloudStartupAccountStatusProvider: AsyncCloudStartupAcco
 
 private struct MockProcessInfo: ProcessInfoProviding {
     let arguments: [String]
+}
+
+private actor ControlledRuntimeAccountStatusProvider: AccountStatusProviding {
+    private var fetchCount = 0
+    private var continuations: [CheckedContinuation<AccountStatus, Never>] = []
+
+    func fetchAccountStatus() async -> AccountStatus {
+        fetchCount += 1
+        return await withCheckedContinuation { continuation in
+            continuations.append(continuation)
+        }
+    }
+
+    func currentFetchCount() -> Int {
+        fetchCount
+    }
+
+    func resumeNext(with status: AccountStatus) {
+        guard !continuations.isEmpty else { return }
+        continuations.removeFirst().resume(returning: status)
+    }
+
+    func resumeAll(with status: AccountStatus) {
+        let pendingContinuations = continuations
+        continuations.removeAll()
+        for continuation in pendingContinuations {
+            continuation.resume(returning: status)
+        }
+    }
+}
+
+private final class LockedBootstrapBuildRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+
+    private(set) var cloudRequests = 0
+    private(set) var localFallbackRequests = 0
+    private(set) var uiTestRequests = 0
+
+    func recordCloudRequest() {
+        lock.lock()
+        cloudRequests += 1
+        lock.unlock()
+    }
+
+    func recordLocalFallbackRequest() {
+        lock.lock()
+        localFallbackRequests += 1
+        lock.unlock()
+    }
+
+    func recordUITestRequest() {
+        lock.lock()
+        uiTestRequests += 1
+        lock.unlock()
+    }
+
+    func snapshot() -> (cloud: Int, local: Int, uiTest: Int) {
+        lock.lock()
+        let snapshot = (cloud: cloudRequests, local: localFallbackRequests, uiTest: uiTestRequests)
+        lock.unlock()
+        return snapshot
+    }
 }

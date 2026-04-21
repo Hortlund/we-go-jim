@@ -193,6 +193,28 @@ struct BrosViewModelTests {
     }
 
     @Test
+    func updateCircleMemberLimitMarksReturnedSnapshotAuthoritative() async throws {
+        let context = try makeInMemoryContext()
+        let service = StubBrosSocialService()
+        let initialSnapshot = makeSnapshot(displayName: "Atlas", memberLimit: 4)
+        let updatedSnapshot = makeSnapshot(displayName: "Atlas", memberLimit: 6)
+        service.snapshot = updatedSnapshot
+
+        let viewModel = BrosViewModel(
+            accountStatusProvider: { .available },
+            serviceFactory: { _ in service }
+        )
+        viewModel.state = .active(initialSnapshot)
+
+        await viewModel.updateCircleMemberLimit(6, modelContext: context)
+        #expect(viewModel.state == .active(updatedSnapshot))
+
+        await viewModel.refreshActiveSnapshotIfNeeded(modelContext: context)
+
+        #expect(service.fetchSnapshotCallCount == 0)
+    }
+
+    @Test
     func removeMemberMarksLocalMutationAuthoritative() async throws {
         let context = try makeInMemoryContext()
         let service = StubBrosSocialService()
@@ -365,6 +387,7 @@ struct BrosViewModelTests {
     private func makeSnapshot(
         displayName: String,
         role: BroMembershipRole = .owner,
+        memberLimit: Int = 4,
         feedEvents: [BroFeedEvent] = []
     ) -> BrosFeedSnapshot {
         let currentMember = BroMemberSummary(
@@ -396,7 +419,7 @@ struct BrosViewModelTests {
                 circleID: "circle-1",
                 ownerUserRecordName: ownerMember.userRecordName,
                 inviteCode: "ABC123",
-                memberLimit: 4,
+                memberLimit: memberLimit,
                 createdAt: Date(timeIntervalSince1970: 100),
                 updatedAt: Date(timeIntervalSince1970: 100)
             ),
@@ -466,7 +489,7 @@ nonisolated private final class StubBrosSocialService: BrosSocialService, BrosSo
 
     @MainActor
     func updateCircleMemberLimit(_ memberLimit: Int) async throws -> BrosFeedSnapshot {
-        throw BrosSocialServiceError.unavailable
+        return try #require(snapshot)
     }
 
     @MainActor

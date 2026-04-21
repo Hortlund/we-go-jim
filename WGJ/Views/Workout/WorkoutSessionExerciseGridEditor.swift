@@ -54,12 +54,14 @@ struct WorkoutSessionExerciseGridEditor: View {
     @State private var pendingBozarCompletionSetIDs: Set<UUID> = []
     @State private var revealedCompletionGateSetIDs: Set<UUID> = []
     @State private var pendingDisplayRefreshTask: Task<Void, Never>?
+    @State private var pendingCommitTask: Task<Void, Never>?
     @State private var suppressNextSetDraftsDisplayRefresh = false
     @State private var suppressNextFocusLossCommit = false
     @FocusState private var focusedInput: SetInputFocus?
 
     private let restPresets = [10, 15, 20, 30, 45, 60, 75, 90, 105, 120, 150, 180, 210, 240]
     private let displayRefreshDebounce = Duration.milliseconds(90)
+    private let commitDebounce = Duration.milliseconds(400)
 
     private struct SetInputFocus: Hashable {
         let setID: UUID
@@ -204,6 +206,14 @@ struct WorkoutSessionExerciseGridEditor: View {
         }
         .onChange(of: previousPerformanceResolution) { _, _ in
             handlePreviousPerformanceResolutionChange()
+        }
+        .onChange(of: exerciseNotes) { previousValue, currentValue in
+            scheduleCommitRequest(
+                ActiveWorkoutEditorCommitDisposition.fieldChange(
+                    previous: previousValue,
+                    current: currentValue
+                )
+            )
         }
         .onChange(of: restSeconds) { _, _ in
             refreshDisplayRows()
@@ -1394,6 +1404,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             },
             set: { newValue in
                 guard setDrafts.indices.contains(index) else { return }
+                let previousDrafts = setDrafts
                 let setID = setDrafts[index].id
                 repsInputTextBySetID[setID] = newValue
                 let cleaned = newValue.filter(\.isNumber)
@@ -1410,6 +1421,8 @@ struct WorkoutSessionExerciseGridEditor: View {
                         setDrafts[index].isCompleted = isCompleted
                     }
                 }
+
+                handleDraftValueMutation(previousDrafts: previousDrafts)
             }
         )
     }
@@ -1431,6 +1444,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             },
             set: { newValue in
                 guard setDrafts.indices.contains(index) else { return }
+                let previousDrafts = setDrafts
                 let setID = setDrafts[index].id
                 weightInputTextBySetID[setID] = newValue
                 let normalized = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1467,6 +1481,8 @@ struct WorkoutSessionExerciseGridEditor: View {
                         setDrafts[index].isCompleted = isCompleted
                     }
                 }
+
+                handleDraftValueMutation(previousDrafts: previousDrafts)
             }
         )
     }
@@ -1635,7 +1651,25 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func flushPendingEditorState() {
         pendingBozarCompletionSetIDs.removeAll()
+        pendingCommitTask?.cancel()
+        pendingCommitTask = nil
         flushPendingDisplayRefresh()
+    }
+
+    private func handleDraftValueMutation(previousDrafts: [WorkoutSessionSetDraft]) {
+        let changeSummary = ActiveWorkoutSetDraftChangeSummary.compare(
+            previous: previousDrafts,
+            current: setDrafts
+        )
+
+        switch changeSummary.commitDisposition {
+        case .none:
+            return
+        case .debounced:
+            scheduleCommitRequest(.debounced)
+        case .immediate:
+            notifyChanged()
+        }
     }
 
     private func handlePreviousPerformanceResolutionChange() {
@@ -2115,6 +2149,8 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func notifyChanged(drafts: [WorkoutSessionSetDraft]? = nil) {
+        pendingCommitTask?.cancel()
+        pendingCommitTask = nil
         pendingDisplayRefreshTask?.cancel()
         pendingDisplayRefreshTask = nil
         let currentDrafts = drafts ?? setDrafts
@@ -2123,7 +2159,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         if isExpanded {
             rebuildDisplayRows(using: currentDrafts, restSeconds: restSeconds)
         }
-        requestCommitForCurrentState(drafts: currentDrafts)
+        requestImmediateCommitForCurrentState(drafts: currentDrafts)
     }
 
     private func handleFocusedInputChange(_ previousFocus: SetInputFocus?, _ newFocus: SetInputFocus?) {
@@ -2133,7 +2169,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                 suppressNextFocusLossCommit = false
             } else {
                 clearInputDraft(for: previousFocus)
-                requestCommitForCurrentState()
+                requestImmediateCommitForCurrentState()
             }
         } else {
             suppressNextFocusLossCommit = false
@@ -2182,6 +2218,32 @@ struct WorkoutSessionExerciseGridEditor: View {
         let currentDrafts = drafts ?? setDrafts
         let currentRestSeconds = overrideRestSeconds ?? restSeconds
         onCommitRequest?(currentDrafts, currentRestSeconds)
+    }
+
+    private func requestImmediateCommitForCurrentState(
+        drafts: [WorkoutSessionSetDraft]? = nil,
+        restSeconds overrideRestSeconds: Int? = nil
+    ) {
+        pendingCommitTask?.cancel()
+        pendingCommitTask = nil
+        requestCommitForCurrentState(drafts: drafts, restSeconds: overrideRestSeconds)
+    }
+
+    private func scheduleCommitRequest(_ disposition: ActiveWorkoutEditorCommitDisposition) {
+        switch disposition {
+        case .none:
+            return
+        case .immediate:
+            requestImmediateCommitForCurrentState()
+        case .debounced:
+            pendingCommitTask?.cancel()
+            pendingCommitTask = Task { @MainActor in
+                try? await Task.sleep(for: commitDebounce)
+                guard !Task.isCancelled else { return }
+                pendingCommitTask = nil
+                requestCommitForCurrentState()
+            }
+        }
     }
 
     private func formatWeight(_ value: Double) -> String {

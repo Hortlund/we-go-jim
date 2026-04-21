@@ -224,6 +224,7 @@ struct WGJApp: App {
         )
         context.insert(bench)
         try context.save()
+        ExerciseSearchService.invalidateCatalogIndex(for: context)
     }
 
     private static func configureNavigationTitleAppearance() {

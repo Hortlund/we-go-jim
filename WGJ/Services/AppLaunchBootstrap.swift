@@ -25,11 +25,15 @@ final class AppLaunchBootstrapState {
     private(set) var resolvedBootstrap: ResolvedAppLaunchBootstrap?
 
     @ObservationIgnored private var resolutionTask: Task<Void, Never>?
+    @ObservationIgnored private var resolutionGeneration = 0
 
     func resolveIfNeeded(
         resolver: @escaping @Sendable () async throws -> ModelContainerBootstrap
     ) {
         guard resolvedBootstrap == nil, resolutionTask == nil else { return }
+
+        resolutionGeneration += 1
+        let currentGeneration = resolutionGeneration
 
         let task = Task.detached(priority: .userInitiated) { [weak self] in
             do {
@@ -43,6 +47,7 @@ final class AppLaunchBootstrapState {
 
                 await MainActor.run {
                     guard let self else { return }
+                    guard self.resolutionGeneration == currentGeneration else { return }
                     guard self.resolutionTask != nil else { return }
 
                     AppRuntimeState.shared.updateCloudState(
@@ -58,9 +63,17 @@ final class AppLaunchBootstrapState {
                     self.resolvedBootstrap = resolved
                     self.resolutionTask = nil
                 }
+            } catch is CancellationError {
+                await MainActor.run {
+                    guard let self else { return }
+                    guard self.resolutionGeneration == currentGeneration else { return }
+                    self.resolutionTask = nil
+                }
             } catch {
                 await MainActor.run {
-                    self?.resolutionTask = nil
+                    guard let self else { return }
+                    guard self.resolutionGeneration == currentGeneration else { return }
+                    self.resolutionTask = nil
                 }
                 preconditionFailure("Could not create ModelContainer bootstrap: \(error)")
             }
@@ -70,6 +83,7 @@ final class AppLaunchBootstrapState {
     }
 
     func reset() {
+        resolutionGeneration += 1
         resolutionTask?.cancel()
         resolutionTask = nil
         resolvedBootstrap = nil
@@ -104,7 +118,9 @@ enum AppLaunchBootstrapResolver {
             )
         }
 
+        try Task.checkCancellation()
         let startupDecision = await startupDecisionProvider()
+        try Task.checkCancellation()
         if startupDecision.shouldForceLocalFallbackStore {
             return ModelContainerBootstrap(
                 container: try makeLocalFallbackContainer(),
@@ -114,10 +130,11 @@ enum AppLaunchBootstrapResolver {
         }
 
         do {
+            try Task.checkCancellation()
             return ModelContainerBootstrap(
                 container: try makeCloudBackedContainer(),
                 cloudSyncEnabled: true,
-                cloudSyncErrorDescription: nil
+                cloudSyncErrorDescription: startupDecision.cloudSyncErrorDescription
             )
         } catch {
             let fallbackContainer = try makeLocalFallbackContainer()

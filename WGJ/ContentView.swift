@@ -21,6 +21,7 @@ struct ContentView: View {
     @State private var socialMaintenanceScheduler = SocialMaintenanceScheduler()
     @State private var deferredMaintenanceState = AppDeferredMaintenanceState()
     @State private var appWarmupState = AppWarmupState()
+    @State private var deferredMaintenanceRunTracker = DeferredMaintenanceRunTracker()
     @State private var resumeCriticalMaintenanceTracker = ResumeCriticalMaintenanceTracker()
     @State private var resumeCriticalMaintenanceTask: Task<Void, Never>?
     @State private var isPreparingMainPhase = false
@@ -91,7 +92,7 @@ struct ContentView: View {
             guard oldValue != nil, newValue == nil else { return }
             appWarmupState.invalidateProfile()
             appWarmupState.invalidateBros()
-            deferredMaintenanceState.requestRun()
+            requestNewDeferredMaintenanceRun()
             requestDeferredMaintenance(trigger: .activeWorkoutEnded)
         }
         .onOpenURL { url in
@@ -201,7 +202,6 @@ struct ContentView: View {
     private func handleEnteredMainPhase() {
         if !hasScheduledInitialDeferredMaintenance {
             hasScheduledInitialDeferredMaintenance = true
-            deferredMaintenanceState.requestRun()
         }
 
         scheduleResumeCriticalMaintenanceIfNeeded()
@@ -277,7 +277,11 @@ struct ContentView: View {
 
     @MainActor
     private func performDeferredMaintenanceIfNeeded(trigger: AppMaintenanceTrigger) async {
-        guard deferredMaintenanceState.isPending else { return }
+        guard deferredMaintenanceState.isPending,
+              let runID = deferredMaintenanceRunTracker.pendingRunID
+        else {
+            return
+        }
         guard AppMaintenancePolicy.shouldScheduleDeferred(
             appPhase: appPhase,
             scenePhase: scenePhase,
@@ -289,8 +293,10 @@ struct ContentView: View {
 
         let work = await currentDeferredMaintenanceWork()
         guard work.hasWork else {
-            deferredMaintenanceState.markCompleted()
-            await scheduleWarmupsIfNeeded(trigger: AppWarmupTrigger(maintenanceTrigger: trigger))
+            if deferredMaintenanceRunTracker.markCompleted(runID: runID) {
+                deferredMaintenanceState.markCompleted()
+                await scheduleWarmupsIfNeeded(trigger: AppWarmupTrigger(maintenanceTrigger: trigger))
+            }
             return
         }
 
@@ -367,8 +373,10 @@ struct ContentView: View {
             scheduleSocialMaintenanceIfNeeded()
         }
 
-        deferredMaintenanceState.markCompleted()
-        await scheduleWarmupsIfNeeded(trigger: AppWarmupTrigger(maintenanceTrigger: trigger))
+        if deferredMaintenanceRunTracker.markCompleted(runID: runID) {
+            deferredMaintenanceState.markCompleted()
+            await scheduleWarmupsIfNeeded(trigger: AppWarmupTrigger(maintenanceTrigger: trigger))
+        }
     }
 
     nonisolated private static func runSocialMaintenance(modelContext: ModelContext) async {
@@ -487,12 +495,18 @@ struct ContentView: View {
         activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
         catalogSyncCoordinator = CatalogSyncCoordinator()
         deferredMaintenanceState.reset()
+        deferredMaintenanceRunTracker.reset()
         appWarmupState.reset()
         hasScheduledInitialDeferredMaintenance = false
         updateIdleTimerState()
         withAnimation(.easeInOut(duration: 0.2)) {
             appPhase = .splash
         }
+    }
+
+    private func requestNewDeferredMaintenanceRun() {
+        deferredMaintenanceRunTracker.requestRun()
+        deferredMaintenanceState.requestRun()
     }
 
     private func requestWarmups(trigger: AppWarmupTrigger) {

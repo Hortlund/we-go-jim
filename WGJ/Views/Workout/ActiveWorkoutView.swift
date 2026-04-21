@@ -2142,8 +2142,8 @@ struct ActiveWorkoutView: View {
                     operationName: "active-workout.persist.checkpoint",
                     priority: .utility,
                     cancelExisting: true
-                ) { _ in
-                    await performCheckpointCommand(command)
+                ) { backgroundContext in
+                    await performCheckpointCommand(command, in: backgroundContext)
                 }
             }
             return
@@ -2288,6 +2288,22 @@ struct ActiveWorkoutView: View {
                 result = try Self.runCheckpointCommand(command, in: modelContext)
             }
 
+            await MainActor.run {
+                applyCheckpointResult(result, command: command)
+            }
+        } catch {
+            await MainActor.run {
+                showError(error)
+            }
+        }
+    }
+
+    private func performCheckpointCommand(
+        _ command: ActiveWorkoutCheckpointCommand,
+        in modelContext: ModelContext
+    ) async {
+        do {
+            let result = try Self.runCheckpointCommand(command, in: modelContext)
             await MainActor.run {
                 applyCheckpointResult(result, command: command)
             }

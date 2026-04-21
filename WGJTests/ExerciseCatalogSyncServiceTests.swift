@@ -160,6 +160,39 @@ struct ExerciseCatalogSyncServiceTests {
     }
 
     @Test
+    func searchResultsRefreshAfterCustomExerciseMutation() throws {
+        let context = try makeInMemoryContext()
+        let service = ExerciseCatalogSyncService(
+            modelContext: context,
+            seedLoader: StaticSeedLoader(payload: SeedFixtures.initialPayload)
+        )
+        try service.ensureSeedImportedIfNeeded()
+
+        let repository = ExerciseCatalogRepository(
+            modelContext: context,
+            seedLoader: StaticSeedLoader(payload: SeedFixtures.initialPayload)
+        )
+
+        let initialCatalog = try repository.searchExercises(query: "")
+        #expect(initialCatalog.map(\.displayName) == ["Back Squat", "Bench Press"])
+
+        _ = try repository.createCustomExercise(
+            draft: CustomExerciseDraft(
+                name: "Standing Cable Fly",
+                categoryName: "Chest",
+                equipmentSummary: "Cable",
+                aliases: ["Cable Fly Variation"],
+                primaryMuscleIDs: [1],
+                secondaryMuscleIDs: [3],
+                instructionText: "Keep a soft bend in the elbows and bring the handles together under full control."
+            )
+        )
+
+        let refreshedCatalog = try repository.searchExercises(query: "standing cable")
+        #expect(refreshedCatalog.map(\.displayName) == ["Standing Cable Fly"])
+    }
+
+    @Test
     func customExerciseUpdatePersistsChangesAndRefreshesTemplateSnapshots() throws {
         let context = try makeInMemoryContext()
         let service = ExerciseCatalogSyncService(
@@ -228,6 +261,36 @@ struct ExerciseCatalogSyncServiceTests {
         #expect(refreshedTemplate.exerciseNameSnapshot == "Standing Cable Fly")
         #expect(refreshedTemplate.categorySnapshot == "Upper Chest")
         #expect(refreshedTemplate.muscleSummarySnapshot == "Back")
+    }
+
+    @Test
+    func searchResultsRefreshAfterSeedReloadMutatesCatalog() throws {
+        let context = try makeInMemoryContext()
+        let initialService = ExerciseCatalogSyncService(
+            modelContext: context,
+            seedLoader: StaticSeedLoader(payload: SeedFixtures.initialPayload),
+            nowProvider: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+        try initialService.ensureSeedImportedIfNeeded()
+
+        let repository = ExerciseCatalogRepository(
+            modelContext: context,
+            seedLoader: StaticSeedLoader(payload: SeedFixtures.initialPayload)
+        )
+
+        let initialBench = try repository.searchExercises(query: "bench")
+        #expect(initialBench.map(\.displayName) == ["Bench Press"])
+
+        let refreshService = ExerciseCatalogSyncService(
+            modelContext: context,
+            seedLoader: StaticSeedLoader(payload: SeedFixtures.updatedPayload),
+            nowProvider: { Date(timeIntervalSince1970: 1_700_000_100) }
+        )
+        try refreshService.reloadSeedCatalog()
+
+        let refreshedBench = try repository.searchExercises(query: "updated")
+        #expect(refreshedBench.map(\.displayName) == ["Bench Press Updated"])
+        #expect(try repository.searchExercises(query: "back squat").isEmpty)
     }
 
     @Test

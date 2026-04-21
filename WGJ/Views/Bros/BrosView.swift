@@ -36,6 +36,15 @@ final class BrosViewModel {
     var isBusy: Bool { pendingAction != nil }
     var isCreatingCircle: Bool { pendingAction == .createCircle }
     var isJoiningCircle: Bool { pendingAction == .joinCircle }
+    var shouldApplyWarmState: Bool {
+        guard !hasLoaded else { return false }
+        switch state {
+        case .loading, .unavailable:
+            return true
+        case .onboarding, .active:
+            return false
+        }
+    }
 
     private var hasLoaded = false
     private var isSnapshotRefreshInFlight = false
@@ -200,6 +209,7 @@ final class BrosViewModel {
             let service = try service(modelContext: modelContext)
             let snapshot = try await service.updateCircleMemberLimit(memberLimit)
             self.state = .active(snapshot)
+            self.markCurrentSnapshotAuthoritative()
         }
 
         guard didUpdate else {
@@ -1010,7 +1020,8 @@ struct BrosView: View {
     }
 
     private func applyWarmSnapshotIfAvailable() {
-        guard let warmSnapshot = appWarmupState.latestBros else { return }
+        guard viewModel.shouldApplyWarmState else { return }
+        guard let warmSnapshot = appWarmupState.freshBros() else { return }
         blockedUserRecordNames = warmSnapshot.blockedUserRecordNames
         viewModel.applyWarmState(warmSnapshot)
         rebuildFilteredSnapshot()
@@ -2092,6 +2103,12 @@ private struct BroReactionDetailSheet: View {
 }
 
 private struct BroAvatarView: View {
+    private struct LoadKey: Hashable {
+        let cacheKey: String?
+        let dataFingerprint: Int?
+        let pixelSize: Int
+    }
+
     let avatarCacheKey: String?
     let avatarImageData: Data?
     let name: String
@@ -2127,7 +2144,7 @@ private struct BroAvatarView: View {
             Circle()
                 .stroke(WGJTheme.outlineStrong, lineWidth: 1)
         }
-        .task(id: avatarCacheKey) {
+        .task(id: loadKey) {
             await loadImage()
         }
     }
@@ -2141,16 +2158,19 @@ private struct BroAvatarView: View {
         return text.isEmpty ? "B" : text.uppercased()
     }
 
-    private func loadImage() async {
-        if let avatarCacheKey,
-           let cachedImage = BrosAvatarCacheService.shared.cachedThumbnail(for: avatarCacheKey) {
-            await MainActor.run {
-                image = cachedImage
-            }
-            return
-        }
+    private var loadKey: LoadKey {
+        LoadKey(
+            cacheKey: avatarCacheKey,
+            dataFingerprint: avatarImageData?.hashValue,
+            pixelSize: Int(min(size * 2, 256).rounded())
+        )
+    }
 
+    private func loadImage() async {
         guard let avatarImageData else {
+            if let avatarCacheKey {
+                BrosAvatarCacheService.shared.remove(for: avatarCacheKey)
+            }
             await MainActor.run {
                 image = nil
             }
@@ -2158,6 +2178,13 @@ private struct BroAvatarView: View {
         }
 
         if let avatarCacheKey {
+            if BrosAvatarCacheService.shared.cachedData(for: avatarCacheKey) == avatarImageData,
+               let cachedImage = BrosAvatarCacheService.shared.cachedThumbnail(for: avatarCacheKey) {
+                await MainActor.run {
+                    image = cachedImage
+                }
+            }
+
             await BrosAvatarCacheService.shared.prime(
                 data: avatarImageData,
                 for: avatarCacheKey,
