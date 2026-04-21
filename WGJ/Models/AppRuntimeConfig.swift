@@ -167,6 +167,32 @@ nonisolated enum AppRuntimeConfig {
     }
 }
 
+nonisolated enum RuntimeCloudAvailabilityRefreshPolicy {
+    nonisolated static let unresolvedRetryInterval: TimeInterval = 15
+    nonisolated static let resolvedRefreshInterval: TimeInterval = 300
+
+    static func shouldRefresh(
+        cloudSyncEnabled: Bool,
+        force: Bool,
+        hasResolvedRuntimeCloudAvailability: Bool,
+        isRefreshingRuntimeCloudAvailability: Bool,
+        lastRefreshAt: Date?,
+        now: Date = .now,
+        unresolvedRetryInterval: TimeInterval = unresolvedRetryInterval,
+        resolvedRefreshInterval: TimeInterval = resolvedRefreshInterval
+    ) -> Bool {
+        guard cloudSyncEnabled else { return false }
+        guard !isRefreshingRuntimeCloudAvailability else { return false }
+        guard !force else { return true }
+        guard let lastRefreshAt else { return true }
+
+        let interval = hasResolvedRuntimeCloudAvailability
+            ? resolvedRefreshInterval
+            : unresolvedRetryInterval
+        return now.timeIntervalSince(lastRefreshAt) >= interval
+    }
+}
+
 @MainActor
 @Observable
 final class AppRuntimeState {
@@ -180,6 +206,7 @@ final class AppRuntimeState {
 
     @ObservationIgnored private var hasResolvedRuntimeCloudAvailability = false
     @ObservationIgnored private var isRefreshingRuntimeCloudAvailability = false
+    @ObservationIgnored private var lastRuntimeCloudAvailabilityRefreshAt: Date?
 
     private init() { }
 
@@ -193,6 +220,7 @@ final class AppRuntimeState {
         cloudSyncEnabled = isEnabled
         cloudSyncErrorDescription = errorDescription
         hasResolvedRuntimeCloudAvailability = false
+        lastRuntimeCloudAvailabilityRefreshAt = nil
     }
 
     func updateCloudRuntimeError(_ errorDescription: String?) {
@@ -213,34 +241,48 @@ final class AppRuntimeState {
 
     func refreshCloudAvailabilityIfNeeded(
         force: Bool = false,
-        accountService: (any AccountStatusProviding)? = nil
+        accountService: (any AccountStatusProviding)? = nil,
+        now: Date = .now
     ) {
-        guard cloudSyncEnabled else { return }
-        guard force || !hasResolvedRuntimeCloudAvailability else { return }
-        guard !isRefreshingRuntimeCloudAvailability else { return }
+        guard RuntimeCloudAvailabilityRefreshPolicy.shouldRefresh(
+            cloudSyncEnabled: cloudSyncEnabled,
+            force: force,
+            hasResolvedRuntimeCloudAvailability: hasResolvedRuntimeCloudAvailability,
+            isRefreshingRuntimeCloudAvailability: isRefreshingRuntimeCloudAvailability,
+            lastRefreshAt: lastRuntimeCloudAvailabilityRefreshAt,
+            now: now
+        ) else {
+            return
+        }
 
         isRefreshingRuntimeCloudAvailability = true
+        lastRuntimeCloudAvailabilityRefreshAt = now
 
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            defer {
-                self.isRefreshingRuntimeCloudAvailability = false
-            }
+        let statusProvider = accountService ?? AccountStatusService()
 
-            let status = await (accountService ?? AccountStatusService()).fetchAccountStatus()
-            switch status {
-            case .checking:
-                self.hasResolvedRuntimeCloudAvailability = false
-            case .available:
-                self.updateCloudRuntimeError(nil)
-                self.hasResolvedRuntimeCloudAvailability = true
-            case .unavailable(let reason):
-                self.updateCloudRuntimeError(Self.runtimeErrorDescription(for: reason))
-                switch reason {
-                case .noAccount, .restricted:
-                    self.hasResolvedRuntimeCloudAvailability = true
-                case .temporarilyUnavailable, .unknown:
+        Task(priority: .utility) { [weak self] in
+            let status = await statusProvider.fetchAccountStatus()
+
+            await MainActor.run {
+                guard let self else { return }
+                defer {
+                    self.isRefreshingRuntimeCloudAvailability = false
+                }
+
+                switch status {
+                case .checking:
                     self.hasResolvedRuntimeCloudAvailability = false
+                case .available:
+                    self.updateCloudRuntimeError(nil)
+                    self.hasResolvedRuntimeCloudAvailability = true
+                case .unavailable(let reason):
+                    self.updateCloudRuntimeError(Self.runtimeErrorDescription(for: reason))
+                    switch reason {
+                    case .noAccount, .restricted:
+                        self.hasResolvedRuntimeCloudAvailability = true
+                    case .temporarilyUnavailable, .unknown:
+                        self.hasResolvedRuntimeCloudAvailability = false
+                    }
                 }
             }
         }

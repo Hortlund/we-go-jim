@@ -25,6 +25,10 @@ struct StartWorkoutHomeView: View {
     @State private var showingTemplateImporter = false
     @State private var templateShareSheet: StartWorkoutTemplateShareSheet?
     @State private var directOpenImportRequestID: UUID?
+    @State private var hasLoadedSnapshot = false
+    @State private var needsExplicitRefresh = true
+    @State private var lastLoadedContentUpdatedAt: Date?
+    @State private var lastRefreshAt: Date?
 
     @State private var errorMessage = ""
     @State private var showingError = false
@@ -91,10 +95,10 @@ struct StartWorkoutHomeView: View {
                 cleanupExportedFile(at: sheet.fileURL)
             }
         }
-        .sheet(item: $templateEditorContext, onDismiss: reloadHomeSnapshotIfActive) { context in
+        .sheet(item: $templateEditorContext, onDismiss: markHomeDirtyAndReloadIfActive) { context in
             TemplateEditorView(folderID: context.folderID, templateID: context.templateID)
         }
-        .sheet(isPresented: $showingFolderEditor, onDismiss: reloadHomeSnapshotIfActive) {
+        .sheet(isPresented: $showingFolderEditor, onDismiss: markHomeDirtyAndReloadIfActive) {
             TemplateFolderEditorSheet(
                 isEditing: editingFolderID != nil,
                 folderNameDraft: $folderNameDraft,
@@ -149,7 +153,7 @@ struct StartWorkoutHomeView: View {
         }
         .task(id: isTabActive) {
             guard isTabActive else { return }
-            await reloadHomeSnapshot()
+            await reloadHomeSnapshotIfNeeded(force: false)
         }
         .task(id: pendingTemplateFileTaskKey) {
             importPendingTemplateFileIfNeeded()
@@ -720,7 +724,7 @@ struct StartWorkoutHomeView: View {
                 try templateRepository.createFolder(name: folderNameDraft)
             }
             showingFolderEditor = false
-            reloadHomeSnapshotIfActive()
+            markHomeDirtyAndReloadIfActive()
         } catch {
             showError(error)
         }
@@ -733,7 +737,7 @@ struct StartWorkoutHomeView: View {
 
         do {
             try templateRepository.moveFolder(id: folderID, toIndex: currentIndex + delta)
-            reloadHomeSnapshotIfActive()
+            markHomeDirtyAndReloadIfActive()
         } catch {
             showError(error)
         }
@@ -751,7 +755,7 @@ struct StartWorkoutHomeView: View {
         do {
             try templateRepository.deleteFolder(id: folderID)
             pendingFolderDeletion = nil
-            reloadHomeSnapshotIfActive()
+            markHomeDirtyAndReloadIfActive()
         } catch {
             showError(error)
         }
@@ -760,7 +764,7 @@ struct StartWorkoutHomeView: View {
     private func moveTemplate(templateID: UUID, toFolderID folderID: UUID?) {
         do {
             try templateRepository.moveTemplate(id: templateID, toFolderID: folderID)
-            reloadHomeSnapshotIfActive()
+            markHomeDirtyAndReloadIfActive()
         } catch {
             showError(error)
         }
@@ -769,7 +773,7 @@ struct StartWorkoutHomeView: View {
     private func deleteTemplate(_ templateID: UUID) {
         do {
             try templateRepository.deleteTemplate(id: templateID)
-            reloadHomeSnapshotIfActive()
+            markHomeDirtyAndReloadIfActive()
         } catch {
             showError(error)
         }
@@ -803,20 +807,53 @@ struct StartWorkoutHomeView: View {
         showingActiveWorkoutConflict = false
     }
 
-    private func reloadHomeSnapshotIfActive() {
+    private func markHomeDirtyAndReloadIfActive() {
+        needsExplicitRefresh = true
         guard isTabActive else { return }
         Task {
-            await reloadHomeSnapshot()
+            await reloadHomeSnapshotIfNeeded(force: true)
         }
     }
 
     @MainActor
-    private func reloadHomeSnapshot() async {
+    private func reloadHomeSnapshotIfNeeded(force: Bool) async {
+        let currentContentUpdatedAt = currentHomeContentUpdatedAt()
+        guard force || TimestampedReloadPolicy.shouldReload(
+            hasLoaded: hasLoadedSnapshot,
+            needsExplicitRefresh: needsExplicitRefresh,
+            currentContentUpdatedAt: currentContentUpdatedAt,
+            lastLoadedContentUpdatedAt: lastLoadedContentUpdatedAt,
+            lastRefreshAt: lastRefreshAt
+        ) else {
+            return
+        }
+
+        await reloadHomeSnapshot(contentUpdatedAt: currentContentUpdatedAt)
+    }
+
+    @MainActor
+    private func reloadHomeSnapshot(contentUpdatedAt: Date?) async {
         do {
             try controller.reload(modelContext: modelContext)
+            hasLoadedSnapshot = true
+            needsExplicitRefresh = false
+            lastLoadedContentUpdatedAt = contentUpdatedAt
+            lastRefreshAt = .now
         } catch {
             showError(error)
         }
+    }
+
+    @MainActor
+    private func currentHomeContentUpdatedAt() -> Date? {
+        let latestFolderUpdate = try? templateRepository.latestFolderUpdatedAt()
+        let latestTemplateUpdate = try? templateRepository.latestTemplateUpdatedAt()
+        let latestCompletedSessionUpdate = try? WorkoutSessionRepository(modelContext: modelContext)
+            .latestCompletedSessionUpdatedAt()
+
+        return [latestFolderUpdate, latestTemplateUpdate, latestCompletedSessionUpdate]
+            .compactMap { $0 }
+            .max()
     }
 
     private func showError(_ error: Error) {
@@ -878,6 +915,10 @@ struct StartWorkoutHomeView: View {
                 expandedFolderIDs[TemplateRepository.unfiledFolderID] = true
                 persistExpandedFolderState()
                 try controller.reload(modelContext: modelContext)
+                hasLoadedSnapshot = true
+                needsExplicitRefresh = false
+                lastLoadedContentUpdatedAt = currentHomeContentUpdatedAt()
+                lastRefreshAt = .now
                 selectImportedTemplatePreview(templateID: importedTemplateID)
             } catch {
                 showError(error)

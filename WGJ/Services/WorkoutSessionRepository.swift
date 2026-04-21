@@ -296,6 +296,31 @@ nonisolated final class WorkoutSessionRepository {
             }
     }
 
+    func latestCompletedSessionUpdatedAt(includeArchived: Bool = false) throws -> Date? {
+        let completedStatus = WorkoutSessionStatus.completed.rawValue
+        let descriptor: FetchDescriptor<WorkoutSession>
+
+        if includeArchived {
+            descriptor = FetchDescriptor<WorkoutSession>(
+                predicate: #Predicate { session in
+                    session.statusRaw == completedStatus
+                },
+                sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
+            )
+        } else {
+            descriptor = FetchDescriptor<WorkoutSession>(
+                predicate: #Predicate { session in
+                    session.statusRaw == completedStatus && session.archivedAt == nil
+                },
+                sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
+            )
+        }
+
+        var limitedDescriptor = descriptor
+        limitedDescriptor.fetchLimit = 1
+        return try modelContext.fetch(limitedDescriptor).first?.updatedAt
+    }
+
     func sessionExercises(sessionID: UUID) throws -> [WorkoutSessionExercise] {
         let descriptor = FetchDescriptor<WorkoutSessionExercise>(
             predicate: #Predicate { exercise in

@@ -1102,6 +1102,7 @@ struct BrosView: View {
             HStack(alignment: .top, spacing: 10) {
                 BroAvatarView(
                     avatarCacheKey: member.avatarCacheKey,
+                    avatarImageData: member.avatarImageData,
                     name: resolvedDisplayName(member.displayName),
                     size: 44
                 )
@@ -1226,6 +1227,7 @@ struct BrosView: View {
             HStack(spacing: 12) {
                 BroAvatarView(
                     avatarCacheKey: event.actorAvatarCacheKey,
+                    avatarImageData: event.actorAvatarImageData,
                     name: resolvedDisplayName(event.actorDisplayName),
                     size: 46
                 )
@@ -1932,6 +1934,7 @@ private struct BroCircleManagementView: View {
         HStack(alignment: .center, spacing: 12) {
             BroAvatarView(
                 avatarCacheKey: member.avatarCacheKey,
+                avatarImageData: member.avatarImageData,
                 name: resolvedDisplayName(member.displayName),
                 size: 46
             )
@@ -2090,6 +2093,7 @@ private struct BroReactionDetailSheet: View {
 
 private struct BroAvatarView: View {
     let avatarCacheKey: String?
+    let avatarImageData: Data?
     let name: String
     let size: CGFloat
     @State private var image: UIImage?
@@ -2137,30 +2141,43 @@ private struct BroAvatarView: View {
         return text.isEmpty ? "B" : text.uppercased()
     }
 
-    @MainActor
     private func loadImage() async {
-        guard let avatarCacheKey else {
-            image = nil
+        if let avatarCacheKey,
+           let cachedImage = BrosAvatarCacheService.shared.cachedThumbnail(for: avatarCacheKey) {
+            await MainActor.run {
+                image = cachedImage
+            }
             return
         }
 
-        if let cachedImage = BrosAvatarCacheService.shared.cachedThumbnail(for: avatarCacheKey) {
-            image = cachedImage
+        guard let avatarImageData else {
+            await MainActor.run {
+                image = nil
+            }
             return
         }
 
-        if let cachedData = BrosAvatarCacheService.shared.cachedData(for: avatarCacheKey) {
+        if let avatarCacheKey {
             await BrosAvatarCacheService.shared.prime(
-                data: cachedData,
+                data: avatarImageData,
                 for: avatarCacheKey,
                 maxPixelSize: min(size * 2, 256)
             )
             guard !Task.isCancelled else { return }
-            image = BrosAvatarCacheService.shared.cachedThumbnail(for: avatarCacheKey)
-            return
+            let cachedThumbnail = BrosAvatarCacheService.shared.cachedThumbnail(for: avatarCacheKey)
+            await MainActor.run {
+                image = cachedThumbnail
+            }
+        } else {
+            let decodedImage = await AvatarImageCodec.thumbnail(
+                from: avatarImageData,
+                maxPixelSize: min(size * 2, 256)
+            )
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                image = decodedImage
+            }
         }
-
-        image = nil
     }
 }
 

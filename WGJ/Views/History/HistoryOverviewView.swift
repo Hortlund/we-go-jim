@@ -13,6 +13,10 @@ struct HistoryOverviewView: View {
         from: Calendar.current.dateComponents([.year, .month], from: Date())
     ) ?? Date()
     @State private var controller = HistoryOverviewController()
+    @State private var hasLoadedSnapshot = false
+    @State private var needsExplicitRefresh = true
+    @State private var lastLoadedContentUpdatedAt: Date?
+    @State private var lastRefreshAt: Date?
     @State private var errorMessage = ""
     @State private var showingError = false
 
@@ -62,12 +66,18 @@ struct HistoryOverviewView: View {
         }
         .wgjScreenBackground()
         .toolbar(.hidden, for: .navigationBar)
+        .onAppear {
+            guard isTabActive else { return }
+            Task {
+                await reloadSnapshotIfNeeded(force: false)
+            }
+        }
         .sheet(isPresented: $showingWorkoutCalendar) {
             workoutCalendarSheet
         }
         .sheet(isPresented: $showingArchivedWorkouts, onDismiss: {
             Task {
-                await reloadSnapshot()
+                await reloadSnapshotIfNeeded(force: true)
             }
         }) {
             NavigationStack {
@@ -78,7 +88,7 @@ struct HistoryOverviewView: View {
         }
         .task(id: isTabActive) {
             guard isTabActive else { return }
-            await reloadSnapshot()
+            await reloadSnapshotIfNeeded(force: false)
         }
         .onChange(of: selectedDayFilter) { _, _ in
             recomputeSnapshot()
@@ -166,8 +176,9 @@ struct HistoryOverviewView: View {
     private func archiveSession(_ id: UUID) {
         do {
             try WorkoutSessionRepository(modelContext: modelContext).archiveSession(id: id)
+            needsExplicitRefresh = true
             Task {
-                await reloadSnapshot()
+                await reloadSnapshotIfNeeded(force: true)
             }
         } catch {
             errorMessage = String(describing: error)
@@ -176,14 +187,39 @@ struct HistoryOverviewView: View {
     }
 
     @MainActor
-    private func reloadSnapshot() async {
+    private func reloadSnapshotIfNeeded(force: Bool) async {
+        let currentContentUpdatedAt = currentHistoryContentUpdatedAt()
+        guard force || TimestampedReloadPolicy.shouldReload(
+            hasLoaded: hasLoadedSnapshot,
+            needsExplicitRefresh: needsExplicitRefresh,
+            currentContentUpdatedAt: currentContentUpdatedAt,
+            lastLoadedContentUpdatedAt: lastLoadedContentUpdatedAt,
+            lastRefreshAt: lastRefreshAt
+        ) else {
+            return
+        }
+
+        await reloadSnapshot(contentUpdatedAt: currentContentUpdatedAt)
+    }
+
+    @MainActor
+    private func reloadSnapshot(contentUpdatedAt: Date?) async {
         do {
             try controller.reload(modelContext: modelContext)
             recomputeSnapshot()
+            hasLoadedSnapshot = true
+            needsExplicitRefresh = false
+            lastLoadedContentUpdatedAt = contentUpdatedAt
+            lastRefreshAt = .now
         } catch {
             errorMessage = String(describing: error)
             showingError = true
         }
+    }
+
+    @MainActor
+    private func currentHistoryContentUpdatedAt() -> Date? {
+        try? WorkoutSessionRepository(modelContext: modelContext).latestCompletedSessionUpdatedAt()
     }
 }
 

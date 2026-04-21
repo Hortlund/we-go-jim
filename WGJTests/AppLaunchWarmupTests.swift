@@ -76,6 +76,41 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
+    func appWarmupStateIgnoresLateWarmupResultsAfterInvalidationOrNewerRun() throws {
+        let state = AppWarmupState()
+        let firstRunID = try #require(state.beginProfileWarmup())
+        let newerRunID = try #require(state.beginProfileWarmup(force: true))
+        let staleSnapshot = ProfileWarmSnapshot(
+            profile: makeProfileSnapshot(updatedAt: Date(timeIntervalSince1970: 100)),
+            dashboard: .empty,
+            warmedAt: Date(timeIntervalSince1970: 100)
+        )
+        let currentSnapshot = ProfileWarmSnapshot(
+            profile: makeProfileSnapshot(updatedAt: Date(timeIntervalSince1970: 200)),
+            dashboard: .empty,
+            warmedAt: Date(timeIntervalSince1970: 200)
+        )
+
+        state.finishProfileWarmup(runID: firstRunID, snapshot: staleSnapshot)
+        #expect(state.latestProfile == nil)
+
+        state.finishProfileWarmup(runID: newerRunID, snapshot: currentSnapshot)
+        #expect(state.latestProfile?.warmedAt == currentSnapshot.warmedAt)
+
+        let brosRunID = try #require(state.beginBrosWarmup())
+        state.invalidateBros()
+        state.finishBrosWarmup(
+            runID: brosRunID,
+            snapshot: BrosWarmSnapshot(
+                state: .active(makeBrosSnapshot()),
+                blockedUserRecordNames: [],
+                warmedAt: Date(timeIntervalSince1970: 300)
+            )
+        )
+        #expect(state.latestBros == nil)
+    }
+
+    @Test
     func profileReloadPolicySkipsFreshReloadWhenNothingChanged() {
         let updatedAt = Date(timeIntervalSince1970: 1_000)
         let refreshedAt = Date(timeIntervalSince1970: 1_040)
@@ -90,6 +125,106 @@ struct AppLaunchWarmupTests {
             freshnessInterval: 60
         ))
     }
+
+    @Test
+    func timestampedReloadPolicyReloadsOnlyForDirtyChangedOrStaleContent() {
+        let updatedAt = Date(timeIntervalSince1970: 1_000)
+        let refreshedAt = Date(timeIntervalSince1970: 1_040)
+
+        #expect(!TimestampedReloadPolicy.shouldReload(
+            hasLoaded: true,
+            needsExplicitRefresh: false,
+            currentContentUpdatedAt: updatedAt,
+            lastLoadedContentUpdatedAt: updatedAt,
+            lastRefreshAt: refreshedAt,
+            now: Date(timeIntervalSince1970: 1_060),
+            freshnessInterval: 60
+        ))
+        #expect(TimestampedReloadPolicy.shouldReload(
+            hasLoaded: false,
+            needsExplicitRefresh: false,
+            currentContentUpdatedAt: updatedAt,
+            lastLoadedContentUpdatedAt: updatedAt,
+            lastRefreshAt: refreshedAt,
+            now: Date(timeIntervalSince1970: 1_060),
+            freshnessInterval: 60
+        ))
+        #expect(TimestampedReloadPolicy.shouldReload(
+            hasLoaded: true,
+            needsExplicitRefresh: true,
+            currentContentUpdatedAt: updatedAt,
+            lastLoadedContentUpdatedAt: updatedAt,
+            lastRefreshAt: refreshedAt,
+            now: Date(timeIntervalSince1970: 1_060),
+            freshnessInterval: 60
+        ))
+        #expect(TimestampedReloadPolicy.shouldReload(
+            hasLoaded: true,
+            needsExplicitRefresh: false,
+            currentContentUpdatedAt: Date(timeIntervalSince1970: 1_120),
+            lastLoadedContentUpdatedAt: updatedAt,
+            lastRefreshAt: refreshedAt,
+            now: Date(timeIntervalSince1970: 1_060),
+            freshnessInterval: 60
+        ))
+        #expect(TimestampedReloadPolicy.shouldReload(
+            hasLoaded: true,
+            needsExplicitRefresh: false,
+            currentContentUpdatedAt: updatedAt,
+            lastLoadedContentUpdatedAt: updatedAt,
+            lastRefreshAt: refreshedAt,
+            now: Date(timeIntervalSince1970: 1_120),
+            freshnessInterval: 60
+        ))
+    }
+
+    @Test
+    func runtimeCloudAvailabilityRefreshPolicyThrottlesUnresolvedAndResolvedRefreshes() {
+        #expect(RuntimeCloudAvailabilityRefreshPolicy.shouldRefresh(
+            cloudSyncEnabled: true,
+            force: false,
+            hasResolvedRuntimeCloudAvailability: false,
+            isRefreshingRuntimeCloudAvailability: false,
+            lastRefreshAt: Date(timeIntervalSince1970: 100),
+            now: Date(timeIntervalSince1970: 110),
+            unresolvedRetryInterval: 15,
+            resolvedRefreshInterval: 300
+        ) == false)
+
+        #expect(RuntimeCloudAvailabilityRefreshPolicy.shouldRefresh(
+            cloudSyncEnabled: true,
+            force: false,
+            hasResolvedRuntimeCloudAvailability: false,
+            isRefreshingRuntimeCloudAvailability: false,
+            lastRefreshAt: Date(timeIntervalSince1970: 100),
+            now: Date(timeIntervalSince1970: 116),
+            unresolvedRetryInterval: 15,
+            resolvedRefreshInterval: 300
+        ))
+
+        #expect(RuntimeCloudAvailabilityRefreshPolicy.shouldRefresh(
+            cloudSyncEnabled: true,
+            force: false,
+            hasResolvedRuntimeCloudAvailability: true,
+            isRefreshingRuntimeCloudAvailability: false,
+            lastRefreshAt: Date(timeIntervalSince1970: 100),
+            now: Date(timeIntervalSince1970: 350),
+            unresolvedRetryInterval: 15,
+            resolvedRefreshInterval: 300
+        ) == false)
+
+        #expect(RuntimeCloudAvailabilityRefreshPolicy.shouldRefresh(
+            cloudSyncEnabled: true,
+            force: false,
+            hasResolvedRuntimeCloudAvailability: true,
+            isRefreshingRuntimeCloudAvailability: false,
+            lastRefreshAt: Date(timeIntervalSince1970: 100),
+            now: Date(timeIntervalSince1970: 401),
+            unresolvedRetryInterval: 15,
+            resolvedRefreshInterval: 300
+        ))
+    }
+
 
     @Test
     func profileReloadPolicyReloadsForExplicitRefreshProfileMutationOrStaleData() {

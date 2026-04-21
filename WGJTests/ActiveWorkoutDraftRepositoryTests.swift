@@ -362,6 +362,73 @@ struct ActiveWorkoutDraftRepositoryTests {
     }
 
     @Test
+    func persistCheckpointOnlyTouchesDirtyExercises() throws {
+        let context = try makeInMemoryContext()
+        let repository = ActiveWorkoutDraftRepository(modelContext: context)
+
+        let bench = makeCatalogItem(
+            remoteUUID: "checkpoint-bench-1",
+            displayName: "Bench Press",
+            equipmentSummary: "Barbell",
+            context: context
+        )
+        let row = makeCatalogItem(
+            remoteUUID: "checkpoint-row-1",
+            displayName: "Barbell Row",
+            equipmentSummary: "Barbell",
+            context: context
+        )
+
+        let session = try repository.createEmptySession(name: "Push Day")
+        try repository.addExercise(sessionID: session.id, catalogItem: bench)
+        try repository.addExercise(sessionID: session.id, catalogItem: row)
+
+        let exercises = try repository.sessionExercises(sessionID: session.id)
+        let dirtyExercise = try #require(exercises.first(where: { $0.catalogExerciseUUID == bench.remoteUUID }))
+        let untouchedExercise = try #require(exercises.first(where: { $0.catalogExerciseUUID == row.remoteUUID }))
+        let untouchedUpdatedAt = untouchedExercise.updatedAt
+        let originalDirtyRestSeconds = dirtyExercise.restSeconds
+
+        var drafts = try repository.setDrafts(sessionExerciseID: dirtyExercise.id)
+        drafts[0].actualWeight = 105
+        drafts[0].actualReps = 5
+        drafts[0].actualLoadUnit = .kg
+        drafts[0].isCompleted = true
+
+        let updatedSnapshot = ActiveWorkoutExercisePersistenceSnapshot(
+            setDrafts: drafts,
+            restSeconds: dirtyExercise.restSeconds + 30,
+            notes: "Finish strong."
+        )
+        let persistedSnapshot = ActiveWorkoutExercisePersistenceSnapshot(
+            setDrafts: try repository.setDrafts(sessionExerciseID: dirtyExercise.id),
+            restSeconds: dirtyExercise.restSeconds,
+            notes: dirtyExercise.notes
+        )
+
+        let result = try repository.persistCheckpoint(
+            sessionID: session.id,
+            sessionName: session.name,
+            sessionNotes: session.notes,
+            dirtyExerciseIDs: [dirtyExercise.id],
+            snapshotsByExerciseID: [dirtyExercise.id: updatedSnapshot],
+            persistedSnapshotsByExerciseID: [dirtyExercise.id: persistedSnapshot]
+        )
+
+        let refreshedExercises = try repository.sessionExercises(sessionID: session.id)
+        let refreshedDirtyExercise = try #require(refreshedExercises.first(where: { $0.id == dirtyExercise.id }))
+        let refreshedUntouchedExercise = try #require(refreshedExercises.first(where: { $0.id == untouchedExercise.id }))
+
+        #expect(result.didPersistSessionMeta == false)
+        #expect(result.handledExerciseIDs == [dirtyExercise.id])
+        #expect(result.persistedExerciseIDs == [dirtyExercise.id])
+        #expect(refreshedDirtyExercise.restSeconds == originalDirtyRestSeconds + 30)
+        #expect(refreshedDirtyExercise.notes == "Finish strong.")
+        #expect(refreshedUntouchedExercise.updatedAt == untouchedUpdatedAt)
+        #expect(refreshedUntouchedExercise.restSeconds == untouchedExercise.restSeconds)
+    }
+
+    @Test
     func cancelSessionRemovesDraftRows() throws {
         let context = try makeInMemoryContext()
         let repository = ActiveWorkoutDraftRepository(modelContext: context)

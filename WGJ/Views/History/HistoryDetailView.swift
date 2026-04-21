@@ -348,35 +348,9 @@ struct HistoryDetailView: View {
             }
         }
 
-        let personalRecordPresentationByExerciseID: [UUID: HistoryExercisePersonalRecordPresentation]
-        let currentExerciseIDs = currentStamp.exerciseIDs
-        do {
-            if let appBackgroundStore {
-                personalRecordPresentationByExerciseID = try await appBackgroundStore.perform(
-                    "history-detail.hydrate.pr"
-                ) { backgroundContext in
-                    let achievements = try WorkoutMetricsService(modelContext: backgroundContext)
-                        .sessionSetPRAchievements(sessionID: sessionID)
-                    return HistoryExercisePersonalRecordPresentation.presentationsByExerciseID(
-                        from: achievements,
-                        exerciseIDs: currentExerciseIDs
-                    )
-                }
-            } else {
-                let achievements = try WorkoutMetricsService(modelContext: modelContext)
-                    .sessionSetPRAchievements(sessionID: sessionID)
-                personalRecordPresentationByExerciseID = HistoryExercisePersonalRecordPresentation
-                    .presentationsByExerciseID(
-                        from: achievements,
-                        exerciseIDs: currentExerciseIDs
-                    )
-            }
-        } catch {
-            showError(error)
-            return
+        personalRecordPresentationByExerciseID = personalRecordPresentationByExerciseID.filter {
+            currentStamp.exerciseIDs.contains($0.key)
         }
-
-        self.personalRecordPresentationByExerciseID = personalRecordPresentationByExerciseID
         hydrationPayloadByExerciseID = hydrationPayloadByExerciseID.filter {
             currentStamp.exerciseIDs.contains($0.key)
         }
@@ -394,8 +368,30 @@ struct HistoryDetailView: View {
 
         if !eagerlyHydratedExerciseIDs.isEmpty {
             do {
+                let eagerPersonalRecordPresentations: [UUID: HistoryExercisePersonalRecordPresentation]
+                if let appBackgroundStore {
+                    eagerPersonalRecordPresentations = try await appBackgroundStore.perform(
+                        "history-detail.hydrate.pr.eager"
+                    ) { backgroundContext in
+                        try Self.loadPersonalRecordPresentationByExerciseID(
+                            modelContext: backgroundContext,
+                            sessionID: sessionID,
+                            exerciseIDs: eagerlyHydratedExerciseIDs
+                        )
+                    }
+                } else {
+                    eagerPersonalRecordPresentations = try Self.loadPersonalRecordPresentationByExerciseID(
+                        modelContext: modelContext,
+                        sessionID: sessionID,
+                        exerciseIDs: eagerlyHydratedExerciseIDs
+                    )
+                }
+
                 let eagerPayloads: [UUID: HistoryExerciseHydrationPayload]
                 let eagerDraftsByExerciseID = setDraftsByExerciseID
+                let mergedPersonalRecords = personalRecordPresentationByExerciseID.merging(
+                    eagerPersonalRecordPresentations
+                ) { _, new in new }
                 if let appBackgroundStore {
                     eagerPayloads = try await appBackgroundStore.perform("history-detail.hydrate.eager") { backgroundContext in
                         try Self.loadHydrationPayloadByExerciseID(
@@ -403,7 +399,7 @@ struct HistoryDetailView: View {
                             sessionID: sessionID,
                             exerciseIDs: eagerlyHydratedExerciseIDs,
                             draftsByExerciseID: eagerDraftsByExerciseID,
-                            personalRecordPresentationByExerciseID: personalRecordPresentationByExerciseID
+                            personalRecordPresentationByExerciseID: mergedPersonalRecords
                         )
                     }
                 } else {
@@ -412,10 +408,11 @@ struct HistoryDetailView: View {
                         sessionID: sessionID,
                         exerciseIDs: eagerlyHydratedExerciseIDs,
                         draftsByExerciseID: eagerDraftsByExerciseID,
-                        personalRecordPresentationByExerciseID: personalRecordPresentationByExerciseID
+                        personalRecordPresentationByExerciseID: mergedPersonalRecords
                     )
                 }
 
+                personalRecordPresentationByExerciseID.merge(eagerPersonalRecordPresentations) { _, new in new }
                 hydrationPayloadByExerciseID.merge(eagerPayloads) { _, new in new }
             } catch {
                 showError(error)
@@ -426,8 +423,7 @@ struct HistoryDetailView: View {
         loadedExerciseStateStamp = currentStamp
         scheduleDeferredHydration(
             for: currentStamp,
-            draftsByExerciseID: setDraftsByExerciseID,
-            personalRecordPresentationByExerciseID: personalRecordPresentationByExerciseID
+            draftsByExerciseID: setDraftsByExerciseID
         )
     }
 
@@ -523,8 +519,7 @@ struct HistoryDetailView: View {
     @MainActor
     private func scheduleDeferredHydration(
         for stamp: HistoryExerciseStateStamp,
-        draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]],
-        personalRecordPresentationByExerciseID: [UUID: HistoryExercisePersonalRecordPresentation]
+        draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
     ) {
         let exerciseIDsToHydrate = HistoryExerciseHydrationPlanner.pendingExerciseIDs(
             orderedExerciseIDs: sessionExercises.map(\.id),
@@ -543,6 +538,36 @@ struct HistoryDetailView: View {
             try? await Task.sleep(for: .milliseconds(60))
             guard !Task.isCancelled, loadedExerciseStateStamp == stamp else { return }
 
+            let loadedPersonalRecords: [UUID: HistoryExercisePersonalRecordPresentation]
+            do {
+                if let appBackgroundStore {
+                    loadedPersonalRecords = try await appBackgroundStore.perform(
+                        "history-detail.hydrate.pr.rows"
+                    ) { backgroundContext in
+                        try Self.loadPersonalRecordPresentationByExerciseID(
+                            modelContext: backgroundContext,
+                            sessionID: sessionID,
+                            exerciseIDs: exerciseIDsToHydrate
+                        )
+                    }
+                } else {
+                    loadedPersonalRecords = try Self.loadPersonalRecordPresentationByExerciseID(
+                        modelContext: modelContext,
+                        sessionID: sessionID,
+                        exerciseIDs: exerciseIDsToHydrate
+                    )
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                showError(error)
+                deferredHydrationTask = nil
+                return
+            }
+
+            let mergedPersonalRecords = personalRecordPresentationByExerciseID.merging(
+                loadedPersonalRecords
+            ) { _, new in new }
+
             let loadedPayloads: [UUID: HistoryExerciseHydrationPayload]
             do {
                 if let appBackgroundStore {
@@ -552,7 +577,7 @@ struct HistoryDetailView: View {
                             sessionID: sessionID,
                             exerciseIDs: exerciseIDsToHydrate,
                             draftsByExerciseID: draftsByExerciseID,
-                            personalRecordPresentationByExerciseID: personalRecordPresentationByExerciseID
+                            personalRecordPresentationByExerciseID: mergedPersonalRecords
                         )
                     }
                 } else {
@@ -561,7 +586,7 @@ struct HistoryDetailView: View {
                         sessionID: sessionID,
                         exerciseIDs: exerciseIDsToHydrate,
                         draftsByExerciseID: draftsByExerciseID,
-                        personalRecordPresentationByExerciseID: personalRecordPresentationByExerciseID
+                        personalRecordPresentationByExerciseID: mergedPersonalRecords
                     )
                 }
             } catch {
@@ -570,7 +595,9 @@ struct HistoryDetailView: View {
                 deferredHydrationTask = nil
                 return
             }
+
             guard !Task.isCancelled, loadedExerciseStateStamp == stamp else { return }
+            personalRecordPresentationByExerciseID.merge(loadedPersonalRecords) { _, new in new }
             hydrationPayloadByExerciseID.merge(loadedPayloads) { _, new in new }
             deferredHydrationTask = nil
         }
@@ -615,6 +642,21 @@ struct HistoryDetailView: View {
         }
 
         return payloadByExerciseID
+    }
+
+    nonisolated private static func loadPersonalRecordPresentationByExerciseID(
+        modelContext: ModelContext,
+        sessionID: UUID,
+        exerciseIDs: Set<UUID>
+    ) throws -> [UUID: HistoryExercisePersonalRecordPresentation] {
+        guard !exerciseIDs.isEmpty else { return [:] }
+
+        let achievements = try WorkoutMetricsService(modelContext: modelContext)
+            .sessionSetPRAchievements(sessionID: sessionID)
+        return HistoryExercisePersonalRecordPresentation.presentationsByExerciseID(
+            from: achievements,
+            exerciseIDs: exerciseIDs
+        )
     }
 
     private func saveChanges() {
@@ -762,8 +804,7 @@ struct HistoryDetailView: View {
         guard updated, let loadedExerciseStateStamp else { return }
         scheduleDeferredHydration(
             for: loadedExerciseStateStamp,
-            draftsByExerciseID: setDraftsByExerciseID,
-            personalRecordPresentationByExerciseID: personalRecordPresentationByExerciseID
+            draftsByExerciseID: setDraftsByExerciseID
         )
     }
 

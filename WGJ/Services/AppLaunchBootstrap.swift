@@ -31,30 +31,42 @@ final class AppLaunchBootstrapState {
     ) {
         guard resolvedBootstrap == nil, resolutionTask == nil else { return }
 
-        resolutionTask = Task { @MainActor [weak self] in
-            defer { self?.resolutionTask = nil }
-
+        let task = Task.detached(priority: .userInitiated) { [weak self] in
             do {
                 let bootstrap = try await resolver()
+                guard !Task.isCancelled else { return }
+
                 let resolved = ResolvedAppLaunchBootstrap(
                     bootstrap: bootstrap,
                     backgroundStore: AppBackgroundStore(container: bootstrap.container)
                 )
-                AppRuntimeState.shared.updateCloudState(
-                    isEnabled: bootstrap.cloudSyncEnabled,
-                    errorDescription: bootstrap.cloudSyncErrorDescription
-                )
-                AppRuntimeState.shared.updateUserDataSyncStatus(
-                    UserDataSyncTrackerBridge.configureForLaunch(
-                        isCloudEnabled: bootstrap.cloudSyncEnabled,
+
+                await MainActor.run {
+                    guard let self else { return }
+                    guard self.resolutionTask != nil else { return }
+
+                    AppRuntimeState.shared.updateCloudState(
+                        isEnabled: bootstrap.cloudSyncEnabled,
                         errorDescription: bootstrap.cloudSyncErrorDescription
                     )
-                )
-                self?.resolvedBootstrap = resolved
+                    AppRuntimeState.shared.updateUserDataSyncStatus(
+                        UserDataSyncTrackerBridge.configureForLaunch(
+                            isCloudEnabled: bootstrap.cloudSyncEnabled,
+                            errorDescription: bootstrap.cloudSyncErrorDescription
+                        )
+                    )
+                    self.resolvedBootstrap = resolved
+                    self.resolutionTask = nil
+                }
             } catch {
+                await MainActor.run {
+                    self?.resolutionTask = nil
+                }
                 preconditionFailure("Could not create ModelContainer bootstrap: \(error)")
             }
         }
+
+        resolutionTask = task
     }
 
     func reset() {

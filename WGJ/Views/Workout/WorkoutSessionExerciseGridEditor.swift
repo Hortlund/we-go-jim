@@ -199,8 +199,8 @@ struct WorkoutSessionExerciseGridEditor: View {
         .onDisappear {
             flushPendingEditorState()
         }
-        .onChange(of: setDrafts) { _, _ in
-            handleSetDraftsChange()
+        .onChange(of: setDrafts) { previousValue, newValue in
+            handleSetDraftsChange(previousValue: previousValue, currentValue: newValue)
         }
         .onChange(of: previousPerformanceResolution) { _, _ in
             handlePreviousPerformanceResolutionChange()
@@ -2147,15 +2147,32 @@ struct WorkoutSessionExerciseGridEditor: View {
         }
     }
 
-    private func handleSetDraftsChange() {
-        prunePendingBozarCompletions()
-        syncCompletedSetCount()
+    private func handleSetDraftsChange(
+        previousValue: [WorkoutSessionSetDraft],
+        currentValue: [WorkoutSessionSetDraft]
+    ) {
         if suppressNextSetDraftsDisplayRefresh {
             suppressNextSetDraftsDisplayRefresh = false
-        } else if isExpanded {
+            return
+        }
+
+        let changeSummary = ActiveWorkoutSetDraftChangeSummary.compare(
+            previous: previousValue,
+            current: currentValue
+        )
+
+        if changeSummary.hasMeaningfulChange {
+            prunePendingBozarCompletions()
+        }
+        if changeSummary.hasCompletionChange {
+            syncCompletedSetCount(using: currentValue)
+        }
+        if changeSummary.hasStructuralChange {
+            pruneInputDrafts()
+        }
+        if isExpanded {
             scheduleDisplayRefresh()
         }
-        pruneInputDrafts()
     }
 
     private func requestCommitForCurrentState(

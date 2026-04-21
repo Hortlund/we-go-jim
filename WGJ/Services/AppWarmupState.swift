@@ -57,6 +57,11 @@ final class AppWarmupState {
     private(set) var latestProfile: ProfileWarmSnapshot?
     private(set) var latestBros: BrosWarmSnapshot?
 
+    @ObservationIgnored private var profileWarmupGeneration = 0
+    @ObservationIgnored private var brosWarmupGeneration = 0
+    @ObservationIgnored private var activeProfileWarmupRunID: Int?
+    @ObservationIgnored private var activeBrosWarmupRunID: Int?
+
     func storeProfile(_ snapshot: ProfileWarmSnapshot) {
         latestProfile = snapshot
     }
@@ -86,7 +91,7 @@ final class AppWarmupState {
         now: Date = .now,
         maxAge: TimeInterval = defaultProfileFreshnessInterval
     ) -> Bool {
-        force || freshProfile(now: now, maxAge: maxAge) == nil
+        force || (activeProfileWarmupRunID == nil && freshProfile(now: now, maxAge: maxAge) == nil)
     }
 
     func shouldWarmBros(
@@ -94,20 +99,90 @@ final class AppWarmupState {
         now: Date = .now,
         maxAge: TimeInterval = defaultBrosFreshnessInterval
     ) -> Bool {
-        force || freshBros(now: now, maxAge: maxAge) == nil
+        force || (activeBrosWarmupRunID == nil && freshBros(now: now, maxAge: maxAge) == nil)
+    }
+
+    func beginProfileWarmup(
+        force: Bool = false,
+        now: Date = .now,
+        maxAge: TimeInterval = defaultProfileFreshnessInterval
+    ) -> Int? {
+        guard shouldWarmProfile(force: force, now: now, maxAge: maxAge) else {
+            return nil
+        }
+
+        profileWarmupGeneration += 1
+        activeProfileWarmupRunID = profileWarmupGeneration
+        return activeProfileWarmupRunID
+    }
+
+    func finishProfileWarmup(runID: Int, snapshot: ProfileWarmSnapshot?) {
+        guard activeProfileWarmupRunID == runID else { return }
+        if let snapshot {
+            latestProfile = snapshot
+        }
+        activeProfileWarmupRunID = nil
+    }
+
+    func beginBrosWarmup(
+        force: Bool = false,
+        now: Date = .now,
+        maxAge: TimeInterval = defaultBrosFreshnessInterval
+    ) -> Int? {
+        guard shouldWarmBros(force: force, now: now, maxAge: maxAge) else {
+            return nil
+        }
+
+        brosWarmupGeneration += 1
+        activeBrosWarmupRunID = brosWarmupGeneration
+        return activeBrosWarmupRunID
+    }
+
+    func finishBrosWarmup(runID: Int, snapshot: BrosWarmSnapshot?) {
+        guard activeBrosWarmupRunID == runID else { return }
+        if let snapshot {
+            latestBros = snapshot
+        }
+        activeBrosWarmupRunID = nil
     }
 
     func invalidateProfile() {
         latestProfile = nil
+        activeProfileWarmupRunID = nil
+        profileWarmupGeneration += 1
     }
 
     func invalidateBros() {
         latestBros = nil
+        activeBrosWarmupRunID = nil
+        brosWarmupGeneration += 1
     }
 
     func reset() {
         latestProfile = nil
         latestBros = nil
+        activeProfileWarmupRunID = nil
+        activeBrosWarmupRunID = nil
+        profileWarmupGeneration = 0
+        brosWarmupGeneration = 0
+    }
+}
+
+nonisolated enum TimestampedReloadPolicy {
+    static func shouldReload(
+        hasLoaded: Bool,
+        needsExplicitRefresh: Bool,
+        currentContentUpdatedAt: Date?,
+        lastLoadedContentUpdatedAt: Date?,
+        lastRefreshAt: Date?,
+        now: Date = .now,
+        freshnessInterval: TimeInterval = AppWarmupState.defaultProfileFreshnessInterval
+    ) -> Bool {
+        guard hasLoaded else { return true }
+        guard !needsExplicitRefresh else { return true }
+        guard currentContentUpdatedAt == lastLoadedContentUpdatedAt else { return true }
+        guard let lastRefreshAt else { return true }
+        return now.timeIntervalSince(lastRefreshAt) > freshnessInterval
     }
 }
 
@@ -121,10 +196,14 @@ nonisolated enum ProfileReloadPolicy {
         now: Date = .now,
         freshnessInterval: TimeInterval = AppWarmupState.defaultProfileFreshnessInterval
     ) -> Bool {
-        guard hasLoadedProfile else { return true }
-        guard !needsExplicitRefresh else { return true }
-        guard currentProfileUpdatedAt == lastLoadedProfileUpdatedAt else { return true }
-        guard let lastRefreshAt else { return true }
-        return now.timeIntervalSince(lastRefreshAt) > freshnessInterval
+        TimestampedReloadPolicy.shouldReload(
+            hasLoaded: hasLoadedProfile,
+            needsExplicitRefresh: needsExplicitRefresh,
+            currentContentUpdatedAt: currentProfileUpdatedAt,
+            lastLoadedContentUpdatedAt: lastLoadedProfileUpdatedAt,
+            lastRefreshAt: lastRefreshAt,
+            now: now,
+            freshnessInterval: freshnessInterval
+        )
     }
 }

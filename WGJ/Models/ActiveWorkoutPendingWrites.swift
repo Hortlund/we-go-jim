@@ -28,3 +28,57 @@ struct ActiveWorkoutPendingWrites: Equatable {
         isSessionMetaDirty = false
     }
 }
+
+nonisolated struct ActiveWorkoutSetDraftChangeSummary: Equatable, Sendable {
+    let hasStructuralChange: Bool
+    let hasCompletionChange: Bool
+
+    var hasMeaningfulChange: Bool {
+        hasStructuralChange || hasCompletionChange
+    }
+
+    static func compare(
+        previous: [WorkoutSessionSetDraft],
+        current: [WorkoutSessionSetDraft]
+    ) -> ActiveWorkoutSetDraftChangeSummary {
+        if previous.count != current.count {
+            return ActiveWorkoutSetDraftChangeSummary(
+                hasStructuralChange: true,
+                hasCompletionChange: completionChanged(previous: previous, current: current)
+            )
+        }
+
+        var hasStructuralChange = false
+        var hasCompletionChange = false
+
+        for (previousDraft, currentDraft) in zip(previous, current) {
+            if previousDraft.id != currentDraft.id {
+                hasStructuralChange = true
+            }
+            if previousDraft.isCompleted != currentDraft.isCompleted {
+                hasCompletionChange = true
+            }
+
+            if hasStructuralChange && hasCompletionChange {
+                break
+            }
+        }
+
+        return ActiveWorkoutSetDraftChangeSummary(
+            hasStructuralChange: hasStructuralChange,
+            hasCompletionChange: hasCompletionChange
+        )
+    }
+
+    private static func completionChanged(
+        previous: [WorkoutSessionSetDraft],
+        current: [WorkoutSessionSetDraft]
+    ) -> Bool {
+        for (previousDraft, currentDraft) in zip(previous, current) {
+            if previousDraft.isCompleted != currentDraft.isCompleted {
+                return true
+            }
+        }
+        return false
+    }
+}

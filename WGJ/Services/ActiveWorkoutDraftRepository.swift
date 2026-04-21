@@ -577,7 +577,18 @@ nonisolated final class ActiveWorkoutDraftRepository {
             didPersistSessionMeta = true
         }
 
-        let exerciseByID = Dictionary(uniqueKeysWithValues: try sessionExercises(sessionID: sessionID).map { ($0.id, $0) })
+        let exerciseByID: [UUID: ActiveWorkoutDraftExercise]
+        if dirtyExerciseIDs.isEmpty {
+            exerciseByID = [:]
+        } else {
+            let requestedExerciseIDs = Array(dirtyExerciseIDs)
+            let descriptor = FetchDescriptor<ActiveWorkoutDraftExercise>(
+                predicate: #Predicate { exercise in
+                    exercise.sessionID == sessionID && requestedExerciseIDs.contains(exercise.id)
+                }
+            )
+            exerciseByID = Dictionary(uniqueKeysWithValues: try modelContext.fetch(descriptor).map { ($0.id, $0) })
+        }
 
         for exerciseID in dirtyExerciseIDs {
             handledExerciseIDs.insert(exerciseID)

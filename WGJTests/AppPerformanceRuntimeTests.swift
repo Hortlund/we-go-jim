@@ -141,6 +141,44 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
+    func activeWorkoutSetDraftChangeSummaryIgnoresValueOnlyTypingChanges() {
+        let setID = UUID()
+        let previous = [
+            WorkoutSessionSetDraft(
+                id: setID,
+                targetReps: 8,
+                targetWeight: 100,
+                targetLoadUnit: .kg,
+                actualReps: nil,
+                actualWeight: nil,
+                actualLoadUnit: .kg,
+                isCompleted: false
+            ),
+        ]
+        let current = [
+            WorkoutSessionSetDraft(
+                id: setID,
+                targetReps: 8,
+                targetWeight: 100,
+                targetLoadUnit: .kg,
+                actualReps: nil,
+                actualWeight: 105,
+                actualLoadUnit: .kg,
+                isCompleted: false
+            ),
+        ]
+
+        let summary = ActiveWorkoutSetDraftChangeSummary.compare(
+            previous: previous,
+            current: current
+        )
+
+        #expect(!summary.hasStructuralChange)
+        #expect(!summary.hasCompletionChange)
+        #expect(!summary.hasMeaningfulChange)
+    }
+
+    @Test
     func historyHydrationPlannerOnlyRequestsExpandedRowsThatStillNeedPayloads() {
         let first = UUID()
         let second = UUID()

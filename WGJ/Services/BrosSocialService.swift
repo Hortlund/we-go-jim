@@ -33,15 +33,12 @@ nonisolated struct BroMemberSummary: Identifiable, Equatable {
     let userRecordName: String
     let displayName: String
     let athleteType: ProfileAthleteType?
+    let avatarImageData: Data?
     let avatarCacheKey: String?
     let joinedAt: Date
     let role: BroMembershipRole
 
     var isOwner: Bool { role == .owner }
-
-    var avatarImageData: Data? {
-        BrosAvatarCacheService.shared.cachedData(for: avatarCacheKey)
-    }
 
     init(
         id: String,
@@ -59,6 +56,7 @@ nonisolated struct BroMemberSummary: Identifiable, Equatable {
         self.userRecordName = userRecordName
         self.displayName = displayName
         self.athleteType = athleteType
+        self.avatarImageData = avatarImageData
         self.avatarCacheKey = resolvedAvatarCacheKey(
             explicitKey: avatarCacheKey,
             fallbackKey: id,
@@ -98,16 +96,13 @@ nonisolated struct BroFeedEvent: Identifiable, Equatable {
     let actorUserRecordName: String
     let actorMembershipID: String
     let actorDisplayName: String
+    let actorAvatarImageData: Data?
     let actorAvatarCacheKey: String?
     let createdAt: Date
     let kind: BroFeedEventKind
     let workout: BroWorkoutFeedSnapshot?
     let pr: BroPRFeedSnapshot?
     let reactions: [BroReactionSummary]
-
-    var actorAvatarImageData: Data? {
-        BrosAvatarCacheService.shared.cachedData(for: actorAvatarCacheKey)
-    }
 
     init(
         id: String,
@@ -128,6 +123,7 @@ nonisolated struct BroFeedEvent: Identifiable, Equatable {
         self.actorUserRecordName = actorUserRecordName
         self.actorMembershipID = actorMembershipID
         self.actorDisplayName = actorDisplayName
+        self.actorAvatarImageData = actorAvatarImageData
         self.actorAvatarCacheKey = resolvedAvatarCacheKey(
             explicitKey: actorAvatarCacheKey,
             fallbackKey: actorMembershipID,
@@ -2187,6 +2183,7 @@ nonisolated final class CloudKitBrosSocialService: BrosSocialService, BrosSocial
                 kind: .displayName
             ),
             athleteType: ProfileAthleteType(rawValue: record[Field.athleteType] as? String ?? ""),
+            avatarImageData: avatarImageData(from: record),
             avatarCacheKey: membershipID,
             joinedAt: record[Field.joinedAt] as? Date ?? .now,
             role: BroMembershipRole(rawValue: record[Field.role] as? String ?? "") ?? .member
@@ -2312,6 +2309,7 @@ nonisolated final class CloudKitBrosSocialService: BrosSocialService, BrosSocial
         )
 
         let actorAvatarCacheKey = member?.avatarCacheKey ?? actorMembershipID
+        let actorAvatarImageData = member?.avatarImageData ?? avatarImageData(from: record)
 
         let workout: BroWorkoutFeedSnapshot?
         let pr: BroPRFeedSnapshot?
@@ -2355,6 +2353,7 @@ nonisolated final class CloudKitBrosSocialService: BrosSocialService, BrosSocial
             actorUserRecordName: actorUserRecordName,
             actorMembershipID: actorMembershipID,
             actorDisplayName: actorDisplayName,
+            actorAvatarImageData: actorAvatarImageData,
             actorAvatarCacheKey: actorAvatarCacheKey,
             createdAt: createdAt,
             kind: kind,
@@ -2619,6 +2618,16 @@ nonisolated final class CloudKitBrosSocialService: BrosSocialService, BrosSocial
         let url = directory.appendingPathComponent(UUID().uuidString).appendingPathExtension(fileExtension)
         try data.write(to: url, options: .atomic)
         return CKAsset(fileURL: url)
+    }
+
+    private func avatarImageData(from record: CKRecord) -> Data? {
+        guard let asset = record[Field.avatarAsset] as? CKAsset,
+              let fileURL = asset.fileURL
+        else {
+            return nil
+        }
+
+        return try? Data(contentsOf: fileURL)
     }
 
     private func displayName(from profile: UserProfile?) -> String {

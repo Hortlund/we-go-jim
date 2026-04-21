@@ -378,6 +378,22 @@ nonisolated final class TemplateRepository {
         return try modelContext.fetch(descriptor)
     }
 
+    func latestFolderUpdatedAt() throws -> Date? {
+        var descriptor = FetchDescriptor<TemplateFolder>(
+            sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
+        )
+        descriptor.fetchLimit = 1
+        return try modelContext.fetch(descriptor).first?.updatedAt
+    }
+
+    func latestTemplateUpdatedAt() throws -> Date? {
+        var descriptor = FetchDescriptor<WorkoutTemplate>(
+            sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
+        )
+        descriptor.fetchLimit = 1
+        return try modelContext.fetch(descriptor).first?.updatedAt
+    }
+
     func templatesWithoutFolder() throws -> [WorkoutTemplate] {
         let rootID = Self.unfiledFolderID
         let descriptor = FetchDescriptor<WorkoutTemplate>(
