@@ -30,6 +30,59 @@ struct BrosSocialServiceTests {
     }
 
     @Test
+    func memberSummaryConstructionDoesNotPrimeAvatarCache() {
+        BrosAvatarCacheService.shared.clear()
+
+        let avatarData = Data([0x01, 0x02, 0x03])
+        let member = BroMemberSummary(
+            id: "membership-1",
+            circleID: "circle-1",
+            userRecordName: "user-1",
+            displayName: "Atlas",
+            athleteType: nil,
+            avatarImageData: avatarData,
+            avatarCacheKey: "membership-1",
+            joinedAt: Date(timeIntervalSince1970: 100),
+            role: .owner
+        )
+
+        #expect(member.avatarCacheKey == "membership-1")
+        #expect(BrosAvatarCacheService.shared.cachedData(for: "membership-1") == nil)
+        #expect(BrosAvatarCacheService.shared.cachedThumbnail(for: "membership-1") == nil)
+    }
+
+    @Test
+    func feedEventConstructionDoesNotPrimeAvatarCache() {
+        BrosAvatarCacheService.shared.clear()
+
+        let avatarData = Data([0x04, 0x05, 0x06])
+        let event = BroFeedEvent(
+            id: "event-1",
+            circleID: "circle-1",
+            actorUserRecordName: "user-1",
+            actorMembershipID: "membership-1",
+            actorDisplayName: "Atlas",
+            actorAvatarImageData: avatarData,
+            actorAvatarCacheKey: "membership-1",
+            createdAt: Date(timeIntervalSince1970: 200),
+            kind: .workoutCompleted,
+            workout: BroWorkoutFeedSnapshot(
+                workoutName: "Push",
+                durationSeconds: 3600,
+                totalVolume: 1000,
+                prCount: 1,
+                exercisePreview: ["Bench Press"]
+            ),
+            pr: nil,
+            reactions: []
+        )
+
+        #expect(event.actorAvatarCacheKey == "membership-1")
+        #expect(BrosAvatarCacheService.shared.cachedData(for: "membership-1") == nil)
+        #expect(BrosAvatarCacheService.shared.cachedThumbnail(for: "membership-1") == nil)
+    }
+
+    @Test
     func reactionResolutionTogglesOrReplaces() {
         #expect(BrosSocialRules.resolvedReaction(existing: nil, tapped: .flex) == .flex)
         #expect(BrosSocialRules.resolvedReaction(existing: .flex, tapped: .flex) == nil)
@@ -563,10 +616,10 @@ struct BrosSocialServiceTests {
 
         #expect(snapshot.currentMember.displayName == "Local Atlas")
         #expect(snapshot.currentMember.athleteType == .garageGymRat)
-        #expect(snapshot.currentMember.avatarImageData == avatarData)
+        #expect(snapshot.currentMember.avatarCacheKey?.contains("membership-circle-1-user-1") == true)
         #expect(snapshot.members.map(\.displayName) == ["Local Atlas"])
         #expect(snapshot.feedEvents.first?.actorDisplayName == "Local Atlas")
-        #expect(snapshot.feedEvents.first?.actorAvatarImageData == avatarData)
+        #expect(snapshot.feedEvents.first?.actorAvatarCacheKey?.contains("membership-circle-1-user-1") == true)
     }
 
     @Test

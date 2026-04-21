@@ -20,6 +20,7 @@ struct ContentView: View {
     @State private var catalogSyncCoordinator = CatalogSyncCoordinator()
     @State private var socialMaintenanceScheduler = SocialMaintenanceScheduler()
     @State private var deferredMaintenanceState = AppDeferredMaintenanceState()
+    @State private var appWarmupState = AppWarmupState()
     @State private var resumeCriticalMaintenanceTracker = ResumeCriticalMaintenanceTracker()
     @State private var resumeCriticalMaintenanceTask: Task<Void, Never>?
     @State private var isPreparingMainPhase = false
@@ -55,6 +56,7 @@ struct ContentView: View {
         .environment(activeWorkoutPresentationState)
         .environment(restTimerState)
         .environment(catalogSyncCoordinator)
+        .environment(appWarmupState)
         .tint(WGJTheme.accent)
         .preferredColorScheme(.dark)
         .task {
@@ -67,6 +69,8 @@ struct ContentView: View {
                 scheduleResumeCriticalMaintenanceIfNeeded()
                 if deferredMaintenanceState.isPending {
                     requestDeferredMaintenance(trigger: .sceneActivated)
+                } else {
+                    requestWarmups(trigger: .sceneActivated)
                 }
                 appRuntimeState.refreshCloudAvailabilityIfNeeded()
             } else {
@@ -84,11 +88,10 @@ struct ContentView: View {
         }
         .onChange(of: activeWorkoutPresentationState.activeSessionID) { oldValue, newValue in
             guard oldValue != nil, newValue == nil else { return }
+            appWarmupState.invalidateProfile()
+            appWarmupState.invalidateBros()
             deferredMaintenanceState.requestRun()
             requestDeferredMaintenance(trigger: .activeWorkoutEnded)
-            Task {
-                await warmCoachBriefIfNeeded()
-            }
         }
         .onOpenURL { url in
             handleIncomingTemplateFileURL(url)
@@ -134,7 +137,7 @@ struct ContentView: View {
         isPreparingMainPhase = true
         defer { isPreparingMainPhase = false }
 
-        await bootstrapProfileIdentityIfNeeded()
+        await prepareLocalProfileIdentityIfNeeded()
 
         guard appPhase != .main else { return }
         withAnimation(.easeInOut(duration: 0.2)) {
@@ -286,6 +289,7 @@ struct ContentView: View {
         let work = await currentDeferredMaintenanceWork()
         guard work.hasWork else {
             deferredMaintenanceState.markCompleted()
+            await scheduleWarmupsIfNeeded(trigger: AppWarmupTrigger(maintenanceTrigger: trigger))
             return
         }
 
@@ -357,6 +361,7 @@ struct ContentView: View {
         }
 
         deferredMaintenanceState.markCompleted()
+        await scheduleWarmupsIfNeeded(trigger: AppWarmupTrigger(maintenanceTrigger: trigger))
     }
 
     nonisolated private static func runSocialMaintenance(modelContext: ModelContext) async {
@@ -450,10 +455,126 @@ struct ContentView: View {
         activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
         catalogSyncCoordinator = CatalogSyncCoordinator()
         deferredMaintenanceState.reset()
+        appWarmupState.reset()
         hasScheduledInitialDeferredMaintenance = false
         updateIdleTimerState()
         withAnimation(.easeInOut(duration: 0.2)) {
             appPhase = .splash
+        }
+    }
+
+    private func requestWarmups(trigger: AppWarmupTrigger) {
+        Task { @MainActor in
+            await scheduleWarmupsIfNeeded(trigger: trigger)
+        }
+    }
+
+    @MainActor
+    private func scheduleWarmupsIfNeeded(trigger: AppWarmupTrigger) async {
+        guard AppWarmupPolicy.shouldWarm(
+            appPhase: appPhase,
+            scenePhase: scenePhase,
+            activeSessionID: activeWorkoutPresentationState.activeSessionID
+        ) else {
+            return
+        }
+
+        let forceWarmup = trigger == .activeWorkoutEnded
+        scheduleProfileWarmupIfNeeded(force: forceWarmup)
+        scheduleBrosWarmupIfNeeded(force: forceWarmup)
+        if trigger != .sceneActivated {
+            scheduleCoachWarmupIfNeeded()
+        }
+    }
+
+    private func scheduleProfileWarmupIfNeeded(force: Bool) {
+        guard appWarmupState.shouldWarmProfile(force: force) else { return }
+
+        let cloudSyncEnabled = appRuntimeState.cloudSyncEnabled
+
+        if let appBackgroundStore {
+            Task {
+                await appBackgroundStore.scheduleCoalesced(
+                    key: .feature("profile.warmup"),
+                    operationName: "profile.warmup",
+                    priority: .utility,
+                    cancelExisting: force
+                ) { backgroundContext in
+                    guard !Task.isCancelled else { return }
+                    guard let snapshot = try? await Self.buildProfileWarmSnapshot(
+                        modelContext: backgroundContext,
+                        cloudSyncEnabled: cloudSyncEnabled
+                    ) else {
+                        return
+                    }
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        appWarmupState.storeProfile(snapshot)
+                        AppRuntimeState.shared.updateWorkoutNotificationStyle(snapshot.profile.workoutNotificationStyle)
+                    }
+                }
+            }
+            return
+        }
+
+        Task { @MainActor in
+            guard let snapshot = try? await Self.buildProfileWarmSnapshot(
+                modelContext: modelContext,
+                cloudSyncEnabled: cloudSyncEnabled
+            ) else {
+                return
+            }
+            appWarmupState.storeProfile(snapshot)
+            AppRuntimeState.shared.updateWorkoutNotificationStyle(snapshot.profile.workoutNotificationStyle)
+        }
+    }
+
+    private func scheduleBrosWarmupIfNeeded(force: Bool) {
+        guard appWarmupState.shouldWarmBros(force: force) else { return }
+
+        let cloudSyncEnabled = appRuntimeState.cloudSyncEnabled
+        let cloudSyncErrorDescription = appRuntimeState.cloudSyncErrorDescription
+
+        if let appBackgroundStore {
+            Task {
+                await appBackgroundStore.scheduleCoalesced(
+                    key: .feature("bros.warmup"),
+                    operationName: "bros.warmup",
+                    priority: .utility,
+                    cancelExisting: force
+                ) { backgroundContext in
+                    guard !Task.isCancelled else { return }
+                    guard let snapshot = try? await Self.buildBrosWarmSnapshot(
+                        modelContext: backgroundContext,
+                        cloudSyncEnabled: cloudSyncEnabled,
+                        cloudSyncErrorDescription: cloudSyncErrorDescription
+                    ) else {
+                        return
+                    }
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        appWarmupState.storeBros(snapshot)
+                    }
+                }
+            }
+            return
+        }
+
+        Task { @MainActor in
+            guard let snapshot = try? await Self.buildBrosWarmSnapshot(
+                modelContext: modelContext,
+                cloudSyncEnabled: cloudSyncEnabled,
+                cloudSyncErrorDescription: cloudSyncErrorDescription
+            ) else {
+                return
+            }
+            appWarmupState.storeBros(snapshot)
+        }
+    }
+
+    private func scheduleCoachWarmupIfNeeded() {
+        Task {
+            await warmCoachBriefIfNeeded()
         }
     }
 
@@ -490,28 +611,142 @@ struct ContentView: View {
         return try WeeklyCoachInsightService(modelContext: modelContext).weeklyInsightSnapshot()
     }
 
-    private func bootstrapProfileIdentityIfNeeded() async {
-        let cloudSyncEnabled = appRuntimeState.cloudSyncEnabled
-
+    private func prepareLocalProfileIdentityIfNeeded() async {
         do {
             if let appBackgroundStore {
-                let snapshot = try await appBackgroundStore.performAsync("profile.bootstrap") { backgroundContext in
-                    try await ProfileRepository(modelContext: backgroundContext).bootstrapProfileIdentitySnapshot(
-                        cloudSyncEnabled: cloudSyncEnabled
-                    )
+                let snapshot = try await appBackgroundStore.perform("profile.bootstrap.local") { backgroundContext in
+                    let repository = ProfileRepository(modelContext: backgroundContext)
+                    if let existing = try repository.currentProfileSnapshot() {
+                        return existing
+                    }
+
+                    return ProfileIdentitySnapshot(profile: try repository.loadOrCreateProfile())
                 }
                 AppRuntimeState.shared.updateWorkoutNotificationStyle(snapshot.workoutNotificationStyle)
             } else {
                 let repository = ProfileRepository(modelContext: modelContext)
-                let profile = try await repository.bootstrapProfileIdentity(
-                    cloudSyncEnabled: cloudSyncEnabled
-                )
+                let profile = try repository.currentProfileSnapshot()
+                    ?? ProfileIdentitySnapshot(profile: repository.loadOrCreateProfile())
                 AppRuntimeState.shared.updateWorkoutNotificationStyle(profile.workoutNotificationStyle)
             }
         } catch {
             if let profile = try? ProfileRepository(modelContext: modelContext).loadOrCreateProfile() {
                 AppRuntimeState.shared.updateWorkoutNotificationStyle(profile.workoutNotificationStyle)
             }
+        }
+    }
+
+    private static func buildProfileWarmSnapshot(
+        modelContext: ModelContext,
+        cloudSyncEnabled: Bool
+    ) async throws -> ProfileWarmSnapshot {
+        let profile = try await ProfileRepository(modelContext: modelContext).bootstrapProfileIdentitySnapshot(
+            cloudSyncEnabled: cloudSyncEnabled
+        )
+        let widgetRepository = ProfileWidgetRepository(modelContext: modelContext)
+        let metricsService = WorkoutMetricsService(modelContext: modelContext)
+        let enabledWidgets = try widgetRepository.enabledConfigurationSnapshots()
+        let dashboard = try metricsService.profileDashboardSnapshot(prLimit: 5, weeks: 8)
+        var content = ProfileDashboardContent.make(
+            enabledWidgets: enabledWidgets,
+            dashboard: dashboard,
+            trendSeriesByKind: [:]
+        )
+        content.weeklyGoal = profile.weeklyWorkoutGoal
+        return ProfileWarmSnapshot(
+            profile: profile,
+            dashboard: content,
+            warmedAt: .now
+        )
+    }
+
+    private static func buildBrosWarmSnapshot(
+        modelContext: ModelContext,
+        cloudSyncEnabled: Bool,
+        cloudSyncErrorDescription: String?
+    ) async throws -> BrosWarmSnapshot {
+        let blockedUserRecordNames = blockedUserRecordNames(in: modelContext)
+
+        guard AppRuntimeConfig.reviewPolicy.brosEnabled else {
+            return BrosWarmSnapshot(
+                state: .unavailable("Bros is disabled for this build."),
+                blockedUserRecordNames: blockedUserRecordNames,
+                warmedAt: .now
+            )
+        }
+
+        guard cloudSyncEnabled else {
+            return BrosWarmSnapshot(
+                state: .unavailable(cloudSyncErrorDescription ?? BrosSocialServiceError.unavailable.localizedDescription),
+                blockedUserRecordNames: blockedUserRecordNames,
+                warmedAt: .now
+            )
+        }
+
+        if let cloudSyncErrorDescription, !cloudSyncErrorDescription.isEmpty {
+            return BrosWarmSnapshot(
+                state: .unavailable(cloudSyncErrorDescription),
+                blockedUserRecordNames: blockedUserRecordNames,
+                warmedAt: .now
+            )
+        }
+
+        let accountStatus = await AccountStatusService().fetchAccountStatus()
+        switch accountStatus {
+        case .checking:
+            return BrosWarmSnapshot(
+                state: .loading,
+                blockedUserRecordNames: blockedUserRecordNames,
+                warmedAt: .now
+            )
+        case .available:
+            break
+        case .unavailable(let reason):
+            return BrosWarmSnapshot(
+                state: .unavailable(brosUnavailableMessage(for: reason)),
+                blockedUserRecordNames: blockedUserRecordNames,
+                warmedAt: .now
+            )
+        }
+
+        guard let service = CloudKitBrosSocialService.makeIfContainerAvailable(modelContext: modelContext) else {
+            return BrosWarmSnapshot(
+                state: .unavailable(BrosSocialServiceError.unavailable.localizedDescription),
+                blockedUserRecordNames: blockedUserRecordNames,
+                warmedAt: .now
+            )
+        }
+
+        let snapshot = try await service.fetchSnapshot()
+        return BrosWarmSnapshot(
+            state: snapshot.map(BrosWarmStateSnapshot.active) ?? .onboarding,
+            blockedUserRecordNames: blockedUserRecordNames,
+            warmedAt: .now
+        )
+    }
+
+    private static func blockedUserRecordNames(in modelContext: ModelContext) -> Set<String> {
+        let descriptor = FetchDescriptor<BlockedBro>(
+            sortBy: [SortDescriptor(\.blockedAt, order: .forward)]
+        )
+        let blockedItems = (try? modelContext.fetch(descriptor)) ?? []
+        return Set(
+            blockedItems
+                .map(\.userRecordName)
+                .filter { !$0.isEmpty }
+        )
+    }
+
+    private static func brosUnavailableMessage(for reason: AccountUnavailableReason) -> String {
+        switch reason {
+        case .noAccount:
+            return "Sign into iCloud to create or join a bro circle. The rest of the app still works locally."
+        case .restricted:
+            return "iCloud access is restricted on this device, so Bros cannot load right now."
+        case .temporarilyUnavailable:
+            return "iCloud is temporarily unavailable. Try again in a moment."
+        case .unknown:
+            return "Bros could not reach iCloud right now."
         }
     }
 

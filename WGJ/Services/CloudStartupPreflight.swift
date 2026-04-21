@@ -36,6 +36,10 @@ nonisolated protocol CloudStartupAccountStatusProviding {
     func currentStatus(timeout: TimeInterval) -> CloudStartupAccountStatus
 }
 
+nonisolated protocol AsyncCloudStartupAccountStatusProviding {
+    func currentStatus() async -> CloudStartupAccountStatus
+}
+
 nonisolated struct CloudKitStartupAccountStatusProvider: CloudStartupAccountStatusProviding {
     private let container: CKContainer?
 
@@ -90,6 +94,46 @@ nonisolated struct CloudKitStartupAccountStatusProvider: CloudStartupAccountStat
     }
 }
 
+nonisolated struct AsyncCloudKitStartupAccountStatusProvider: AsyncCloudStartupAccountStatusProviding {
+    private let container: CKContainer?
+
+    init(container: CKContainer? = AppRuntimeConfig.makeCloudKitContainer()) {
+        self.container = container
+    }
+
+    func currentStatus() async -> CloudStartupAccountStatus {
+        guard let container else {
+            return .containerUnavailable
+        }
+
+        return await withCheckedContinuation { continuation in
+            container.accountStatus { status, error in
+                let nextStatus: CloudStartupAccountStatus
+                if error != nil {
+                    nextStatus = .error
+                } else {
+                    switch status {
+                    case .available:
+                        nextStatus = .available
+                    case .noAccount:
+                        nextStatus = .noAccount
+                    case .restricted:
+                        nextStatus = .restricted
+                    case .temporarilyUnavailable:
+                        nextStatus = .temporarilyUnavailable
+                    case .couldNotDetermine:
+                        nextStatus = .couldNotDetermine
+                    @unknown default:
+                        nextStatus = .couldNotDetermine
+                    }
+                }
+
+                continuation.resume(returning: nextStatus)
+            }
+        }
+    }
+}
+
 nonisolated enum CloudStartupPreflight {
     static let defaultTimeout: TimeInterval = 1.0
 
@@ -97,7 +141,32 @@ nonisolated enum CloudStartupPreflight {
         statusProvider: any CloudStartupAccountStatusProviding = CloudKitStartupAccountStatusProvider(),
         timeout: TimeInterval = defaultTimeout
     ) -> CloudStartupDecision {
-        switch statusProvider.currentStatus(timeout: timeout) {
+        decision(for: statusProvider.currentStatus(timeout: timeout))
+    }
+
+    static func makeDecisionAsync(
+        statusProvider: any AsyncCloudStartupAccountStatusProviding = AsyncCloudKitStartupAccountStatusProvider(),
+        timeout: Duration = .milliseconds(Int(defaultTimeout * 1_000))
+    ) async -> CloudStartupDecision {
+        let status = await withTaskGroup(of: CloudStartupAccountStatus.self) { group in
+            group.addTask {
+                await statusProvider.currentStatus()
+            }
+            group.addTask {
+                try? await Task.sleep(for: timeout)
+                return .timedOut
+            }
+
+            let resolvedStatus = await group.next() ?? .couldNotDetermine
+            group.cancelAll()
+            return resolvedStatus
+        }
+
+        return decision(for: status)
+    }
+
+    private static func decision(for status: CloudStartupAccountStatus) -> CloudStartupDecision {
+        switch status {
         case .available:
             return CloudStartupDecision(
                 accountStatus: .available,

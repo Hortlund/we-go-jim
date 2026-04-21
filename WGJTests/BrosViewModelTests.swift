@@ -47,6 +47,58 @@ struct BrosViewModelTests {
     }
 
     @Test
+    func warmSnapshotRendersImmediatelyAndRefreshesInBackground() async throws {
+        let context = try makeInMemoryContext()
+        let service = StubBrosSocialService()
+        let warmSnapshot = makeSnapshot(displayName: "Atlas")
+        let refreshedSnapshot = makeSnapshot(displayName: "Custom Bro")
+        service.snapshot = refreshedSnapshot
+
+        let viewModel = BrosViewModel(
+            accountStatusProvider: { .available },
+            serviceFactory: { _ in service }
+        )
+
+        viewModel.seedWarmState(warmSnapshot)
+
+        let loadTask = Task {
+            await viewModel.loadIfNeeded(
+                modelContext: context,
+                cloudSyncEnabled: false,
+                cloudSyncErrorDescription: nil
+            )
+        }
+
+        #expect(viewModel.state == .active(warmSnapshot))
+
+        await loadTask.value
+
+        #expect(service.fetchSnapshotCallCount == 1)
+        #expect(viewModel.state == .active(refreshedSnapshot))
+    }
+
+    @Test
+    func warmSnapshotStaysVisibleWhenRefreshSourceIsUnavailable() async throws {
+        let context = try makeInMemoryContext()
+        let warmSnapshot = makeSnapshot(displayName: "Atlas")
+
+        let viewModel = BrosViewModel(
+            accountStatusProvider: { .available },
+            serviceFactory: { _ in nil }
+        )
+
+        viewModel.seedWarmState(warmSnapshot)
+
+        await viewModel.loadIfNeeded(
+            modelContext: context,
+            cloudSyncEnabled: false,
+            cloudSyncErrorDescription: "Cloud-backed ModelContainer unavailable."
+        )
+
+        #expect(viewModel.state == .active(warmSnapshot))
+    }
+
+    @Test
     func toggleReactionAppliesOptimisticStateBeforeCloudKitCompletes() async throws {
         let context = try makeInMemoryContext()
         let service = StubBrosSocialService()
@@ -99,6 +151,73 @@ struct BrosViewModelTests {
         #expect(service.fetchSnapshotCallCount == 1)
         #expect(viewModel.state == .active(authoritativeSnapshot))
         #expect(!viewModel.isReactionPending(eventID: "event-1"))
+    }
+
+    @Test
+    func createCircleMarksReturnedSnapshotAuthoritative() async throws {
+        let context = try makeInMemoryContext()
+        let service = StubBrosSocialService()
+        let createdSnapshot = makeSnapshot(displayName: "Atlas")
+        service.snapshot = createdSnapshot
+
+        let viewModel = BrosViewModel(
+            accountStatusProvider: { .available },
+            serviceFactory: { _ in service }
+        )
+
+        await viewModel.createCircle(modelContext: context)
+
+        #expect(viewModel.state == .active(createdSnapshot))
+        await Task.yield()
+        #expect(service.fetchSnapshotCallCount == 0)
+    }
+
+    @Test
+    func joinCircleMarksReturnedSnapshotAuthoritative() async throws {
+        let context = try makeInMemoryContext()
+        let service = StubBrosSocialService()
+        let joinedSnapshot = makeSnapshot(displayName: "Brody", role: .member)
+        service.snapshot = joinedSnapshot
+
+        let viewModel = BrosViewModel(
+            accountStatusProvider: { .available },
+            serviceFactory: { _ in service }
+        )
+        viewModel.joinCode = "ABC123"
+
+        await viewModel.joinCircle(modelContext: context)
+
+        #expect(viewModel.state == .active(joinedSnapshot))
+        await Task.yield()
+        #expect(service.fetchSnapshotCallCount == 0)
+    }
+
+    @Test
+    func removeMemberMarksLocalMutationAuthoritative() async throws {
+        let context = try makeInMemoryContext()
+        let service = StubBrosSocialService()
+        let initialSnapshot = makeSnapshot(displayName: "Brody", role: .member)
+        service.snapshot = initialSnapshot
+
+        let viewModel = BrosViewModel(
+            accountStatusProvider: { .available },
+            serviceFactory: { _ in service }
+        )
+        viewModel.state = .active(initialSnapshot)
+
+        await viewModel.removeMember(
+            membershipID: "membership-circle-1-user-1",
+            modelContext: context
+        )
+
+        if case .active(let snapshot) = viewModel.state {
+            #expect(snapshot.members.map(\.id) == ["membership-circle-1-user-2"])
+        } else {
+            Issue.record("Expected active state after removing a member")
+        }
+
+        await Task.yield()
+        #expect(service.fetchSnapshotCallCount == 0)
     }
 
     @Test
@@ -337,12 +456,12 @@ nonisolated private final class StubBrosSocialService: BrosSocialService, BrosSo
 
     @MainActor
     func createCircle(memberLimit: Int) async throws -> BrosFeedSnapshot {
-        throw BrosSocialServiceError.unavailable
+        return try #require(snapshot)
     }
 
     @MainActor
     func joinCircle(inviteCode: String) async throws -> BrosFeedSnapshot {
-        throw BrosSocialServiceError.unavailable
+        return try #require(snapshot)
     }
 
     @MainActor

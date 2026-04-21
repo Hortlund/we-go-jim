@@ -702,7 +702,9 @@ struct ActiveWorkoutView: View {
         ActiveWorkoutExercisePersistenceSnapshot(
             setDrafts: resolvedDrafts(for: exercise),
             restSeconds: resolvedRest(for: exercise),
-            notes: resolvedNotes(for: exercise)
+            notes: resolvedNotes(for: exercise),
+            targetRepMin: exercise.targetRepMin,
+            targetRepMax: exercise.targetRepMax
         )
     }
 
@@ -1091,7 +1093,6 @@ struct ActiveWorkoutView: View {
     @MainActor
     private func persistSessionMeta() {
         syncSessionMetaDirtyState()
-        flushDirtyWrites(checkpoint: .manual)
     }
 
     private func handlePickedExercise(_ item: ExerciseCatalogItem, target: ActiveWorkoutPickerTarget) {
@@ -1586,26 +1587,26 @@ struct ActiveWorkoutView: View {
 
     private func saveExerciseSettings(_ draft: ActiveWorkoutExerciseSettingsDraft) {
         do {
+            guard let exercise = sessionExercises.first(where: { $0.id == draft.exerciseID }) else {
+                throw WorkoutSessionRepositoryError.sessionExerciseNotFound
+            }
+
             let minReps = parsedRepValue(from: draft.minRepsText)
             let maxReps = parsedRepValue(from: draft.maxRepsText)
-            try activeWorkoutRepository.updateExerciseRepRange(
-                sessionExerciseID: draft.exerciseID,
-                minReps: minReps,
-                maxReps: maxReps
-            )
-            try activeWorkoutRepository.updateExerciseRest(
-                sessionExerciseID: draft.exerciseID,
-                restSeconds: draft.restSeconds
-            )
-            restByExerciseID[draft.exerciseID] = draft.restSeconds
+            let normalizedRest = max(0, min(3600, draft.restSeconds))
+
+            exercise.targetRepMin = minReps
+            exercise.targetRepMax = maxReps
+            exercise.restSeconds = normalizedRest
+            exercise.updatedAt = .now
+
+            restByExerciseID[draft.exerciseID] = normalizedRest
             applyPersistedRestChange(
                 sessionExerciseID: draft.exerciseID,
-                updatedRest: draft.restSeconds
+                updatedRest: normalizedRest
             )
-            if let snapshot = currentPersistenceSnapshot(for: draft.exerciseID) {
-                lastPersistedExerciseStateByID[draft.exerciseID] = snapshot
-            }
-            pendingWrites.clearExercise(draft.exerciseID)
+            pendingWrites.markExerciseDirty(draft.exerciseID)
+            scheduleExerciseCheckpointFlushIfNeeded()
             loadedExerciseEntryStampByID[draft.exerciseID] = sessionExercises
                 .first(where: { $0.id == draft.exerciseID })
                 .map(ActiveWorkoutExerciseEntryStamp.init(exercise:))
@@ -1982,7 +1983,9 @@ struct ActiveWorkoutView: View {
             loadedPersistenceState[exercise.id] = ActiveWorkoutExercisePersistenceSnapshot(
                 setDrafts: normalizedDrafts,
                 restSeconds: exercise.restSeconds,
-                notes: exercise.notes
+                notes: exercise.notes,
+                targetRepMin: exercise.targetRepMin,
+                targetRepMax: exercise.targetRepMax
             )
         }
 

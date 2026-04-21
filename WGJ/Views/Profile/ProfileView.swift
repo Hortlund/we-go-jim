@@ -13,6 +13,7 @@ struct ProfileView: View {
     @Environment(\.isTabActive) private var isTabActive
     @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
     @Environment(\.appBackgroundStore) private var appBackgroundStore
+    @Environment(AppWarmupState.self) private var appWarmupState
 
     @State private var currentProfile: ProfileIdentitySnapshot?
     @State private var dashboardContent = ProfileDashboardContent.empty
@@ -31,6 +32,10 @@ struct ProfileView: View {
     @State private var loadingCoachFollowUps: Set<CoachFollowUpKind> = []
     @State private var coachFollowUpTasks: [CoachFollowUpKind: Task<Void, Never>] = [:]
     @State private var coachFollowUpTokens: [CoachFollowUpKind: UUID] = [:]
+    @State private var hasLoadedProfile = false
+    @State private var needsExplicitRefresh = true
+    @State private var lastLoadedProfileUpdatedAt: Date?
+    @State private var lastRefreshAt: Date?
 
     @State private var errorMessage = ""
     @State private var showingError = false
@@ -52,7 +57,7 @@ struct ProfileView: View {
         .toolbar(.hidden, for: .navigationBar)
         .task(id: isTabActive) {
             guard isTabActive else { return }
-            await reloadProfile()
+            await reloadProfileIfNeeded(force: false)
         }
         .onDisappear {
             cancelTrendSeriesLoad()
@@ -65,7 +70,7 @@ struct ProfileView: View {
             }
             .wgjSheetSurface()
             .onDisappear {
-                reloadProfileIfActive()
+                markProfileDirtyAndReloadIfActive()
             }
         }
         .sheet(isPresented: $showingProfileManagement) {
@@ -74,7 +79,7 @@ struct ProfileView: View {
             }
             .wgjSheetSurface()
             .onDisappear {
-                reloadProfileIfActive()
+                markProfileDirtyAndReloadIfActive()
             }
         }
         .sheet(isPresented: $showingCoachAnalysis) {
@@ -619,6 +624,24 @@ struct ProfileView: View {
     }
 
     @MainActor
+    private func reloadProfileIfNeeded(force: Bool) async {
+        applyWarmProfileSnapshotIfAvailable()
+
+        let currentProfileUpdatedAt = appWarmupState.latestProfile?.profile.updatedAt ?? currentProfile?.updatedAt
+        guard force || ProfileReloadPolicy.shouldReload(
+            hasLoadedProfile: hasLoadedProfile,
+            needsExplicitRefresh: needsExplicitRefresh,
+            currentProfileUpdatedAt: currentProfileUpdatedAt,
+            lastLoadedProfileUpdatedAt: lastLoadedProfileUpdatedAt,
+            lastRefreshAt: lastRefreshAt
+        ) else {
+            return
+        }
+
+        await reloadProfile()
+    }
+
+    @MainActor
     private func reloadProfile() async {
         let reloadToken = UUID()
         profileReloadToken = reloadToken
@@ -630,7 +653,6 @@ struct ProfileView: View {
             showingCoachAnalysis = false
             coachFollowUpSummaries = [:]
             cancelCoachFollowUpLoads()
-            controller.invalidateTrendSeriesCache()
 
             let localProfile = try controller.loadLocalProfileIdentity(modelContext: modelContext)
             guard profileReloadToken == reloadToken else { return }
@@ -652,12 +674,30 @@ struct ProfileView: View {
             )
             guard profileReloadToken == reloadToken else { return }
             self.dashboardContent = dashboardContent
+            appWarmupState.storeProfile(
+                ProfileWarmSnapshot(
+                    profile: profile,
+                    dashboard: dashboardContent,
+                    warmedAt: .now
+                )
+            )
+            hasLoadedProfile = true
+            needsExplicitRefresh = false
+            lastLoadedProfileUpdatedAt = profile.updatedAt
+            lastRefreshAt = .now
             scheduleCoachBriefLoad(enabledWidgets: dashboardContent.enabledWidgets)
             scheduleTrendSeriesLoad()
         } catch {
             guard profileReloadToken == reloadToken else { return }
             showError(error)
         }
+    }
+
+    @MainActor
+    private func applyWarmProfileSnapshotIfAvailable() {
+        guard let warmSnapshot = appWarmupState.latestProfile else { return }
+        currentProfile = warmSnapshot.profile
+        dashboardContent = warmSnapshot.dashboard
     }
 
     private func scheduleCoachBriefLoad(enabledWidgets: [ProfileWidgetConfigSnapshot]) {
@@ -757,10 +797,12 @@ struct ProfileView: View {
         loadingCoachFollowUps = []
     }
 
-    private func reloadProfileIfActive() {
+    private func markProfileDirtyAndReloadIfActive() {
+        needsExplicitRefresh = true
+        appWarmupState.invalidateProfile()
         guard isTabActive else { return }
         Task {
-            await reloadProfile()
+            await reloadProfileIfNeeded(force: true)
         }
     }
 

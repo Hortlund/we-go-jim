@@ -82,6 +82,30 @@ final class BrosViewModel {
         }
     }
 
+    func seedWarmState(_ snapshot: BrosFeedSnapshot) {
+        state = .active(snapshot)
+        hasLoaded = false
+        errorMessage = nil
+        lastSuccessfulSnapshotRefreshAt = nil
+    }
+
+    func applyWarmState(_ snapshot: BrosWarmSnapshot) {
+        switch snapshot.state {
+        case .loading:
+            state = .loading
+        case .unavailable(let message):
+            state = .unavailable(message)
+        case .onboarding:
+            state = .onboarding
+        case .active(let feedSnapshot):
+            state = .active(feedSnapshot)
+        }
+
+        hasLoaded = false
+        errorMessage = nil
+        lastSuccessfulSnapshotRefreshAt = nil
+    }
+
     func refresh(
         modelContext: ModelContext,
         cloudSyncEnabled: Bool,
@@ -102,7 +126,9 @@ final class BrosViewModel {
         }
 
         guard serviceFactory(modelContext) != nil else {
-            state = .unavailable(BrosSocialServiceError.unavailable.localizedDescription)
+            if !hasRenderableState {
+                state = .unavailable(BrosSocialServiceError.unavailable.localizedDescription)
+            }
             return
         }
 
@@ -117,7 +143,9 @@ final class BrosViewModel {
             }
             return
         case .unavailable(let reason):
-            state = .unavailable(message(for: reason))
+            if !hasRenderableState {
+                state = .unavailable(message(for: reason))
+            }
             return
         }
 
@@ -156,6 +184,7 @@ final class BrosViewModel {
             let service = try service(modelContext: modelContext)
             let snapshot = try await service.createCircle(memberLimit: self.circleMemberLimit)
             self.state = .active(snapshot)
+            self.markCurrentSnapshotAuthoritative()
             self.joinCode = ""
             self.circleMemberLimit = BrosSocialRules.defaultMemberLimit
             self.scheduleReactionNotificationSync(modelContext: modelContext)
@@ -192,6 +221,7 @@ final class BrosViewModel {
             let snapshot = try await service
                 .joinCircle(inviteCode: self.joinCode)
             self.state = .active(snapshot)
+            self.markCurrentSnapshotAuthoritative()
             self.joinCode = ""
             self.scheduleReactionNotificationSync(modelContext: modelContext)
             self.scheduleBackgroundHydration(modelContext: modelContext)
@@ -224,6 +254,7 @@ final class BrosViewModel {
                         feedEvents: snapshot.feedEvents
                     )
                 )
+                self.markCurrentSnapshotAuthoritative()
             }
             self.scheduleBackgroundHydration(modelContext: modelContext)
         }
@@ -464,6 +495,10 @@ final class BrosViewModel {
             circleMemberLimit = BrosSocialRules.defaultMemberLimit
         }
 
+        lastSuccessfulSnapshotRefreshAt = .now
+    }
+
+    private func markCurrentSnapshotAuthoritative() {
         lastSuccessfulSnapshotRefreshAt = .now
     }
 
@@ -751,6 +786,7 @@ struct BroReactionBarPresentation: Equatable {
 struct BrosView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AppNotificationRouter.self) private var notificationRouter
+    @Environment(AppWarmupState.self) private var appWarmupState
     @Environment(\.isTabActive) private var isTabActive
     @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
     @Environment(\.cloudSyncErrorDescription) private var cloudSyncErrorDescription
@@ -802,6 +838,7 @@ struct BrosView: View {
         .toolbar(.hidden, for: .navigationBar)
         .task(id: isTabActive) {
             guard isTabActive else { return }
+            applyWarmSnapshotIfAvailable()
             reloadBlockedBros()
             await viewModel.loadIfNeeded(
                 modelContext: modelContext,
@@ -833,9 +870,11 @@ struct BrosView: View {
         }
         .onChange(of: viewModel.state) { _, _ in
             rebuildFilteredSnapshot()
+            persistWarmSnapshotIfNeeded()
         }
         .onChange(of: blockedUserRecordNames) { _, _ in
             rebuildFilteredSnapshot()
+            persistWarmSnapshotIfNeeded()
         }
         .alert("Bros", isPresented: Binding(
             get: { viewModel.errorMessage != nil },
@@ -968,6 +1007,36 @@ struct BrosView: View {
         case .loading, .unavailable, .onboarding:
             filteredActiveSnapshot = nil
         }
+    }
+
+    private func applyWarmSnapshotIfAvailable() {
+        guard let warmSnapshot = appWarmupState.latestBros else { return }
+        blockedUserRecordNames = warmSnapshot.blockedUserRecordNames
+        viewModel.applyWarmState(warmSnapshot)
+        rebuildFilteredSnapshot()
+    }
+
+    private func persistWarmSnapshotIfNeeded() {
+        let state: BrosWarmStateSnapshot
+
+        switch viewModel.state {
+        case .loading:
+            return
+        case .unavailable(let message):
+            state = .unavailable(message)
+        case .onboarding:
+            state = .onboarding
+        case .active(let snapshot):
+            state = .active(snapshot)
+        }
+
+        appWarmupState.storeBros(
+            BrosWarmSnapshot(
+                state: state,
+                blockedUserRecordNames: blockedUserRecordNames,
+                warmedAt: .now
+            )
+        )
     }
 
     private func activeContent(_ snapshot: BrosFeedSnapshot) -> some View {
@@ -2081,12 +2150,13 @@ private struct BroAvatarView: View {
         }
 
         if let cachedData = BrosAvatarCacheService.shared.cachedData(for: avatarCacheKey) {
-            let decodedImage = await AvatarImageCodec.thumbnail(
-                from: cachedData,
+            await BrosAvatarCacheService.shared.prime(
+                data: cachedData,
+                for: avatarCacheKey,
                 maxPixelSize: min(size * 2, 256)
             )
             guard !Task.isCancelled else { return }
-            image = decodedImage
+            image = BrosAvatarCacheService.shared.cachedThumbnail(for: avatarCacheKey)
             return
         }
 

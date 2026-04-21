@@ -5,104 +5,52 @@ import UIKit
 
 @main
 struct WGJApp: App {
-    private let bootstrap: ModelContainerBootstrap
-    private let appBackgroundStore: AppBackgroundStore
+    @State private var launchBootstrapState = AppLaunchBootstrapState()
 
     init() {
-        let bootstrap = Self.makeContainerBootstrap()
-        self.bootstrap = bootstrap
-        self.appBackgroundStore = AppBackgroundStore(container: bootstrap.container)
         Self.configureNavigationTitleAppearance()
         RestTimerNotificationManager.shared.configureNotifications()
         CloudSyncEventMonitor.shared.start()
-        AppRuntimeState.shared.updateCloudState(
-            isEnabled: bootstrap.cloudSyncEnabled,
-            errorDescription: bootstrap.cloudSyncErrorDescription
-        )
-        AppRuntimeState.shared.updateUserDataSyncStatus(
-            UserDataSyncTrackerBridge.configureForLaunch(
-                isCloudEnabled: bootstrap.cloudSyncEnabled,
-                errorDescription: bootstrap.cloudSyncErrorDescription
-            )
-        )
     }
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environment(\.cloudSyncEnabled, bootstrap.cloudSyncEnabled)
-                .environment(\.cloudSyncErrorDescription, bootstrap.cloudSyncErrorDescription)
-                .environment(\.userDataSyncStatus, AppRuntimeState.shared.userDataSyncStatus)
-                .environment(\.appBackgroundStore, appBackgroundStore)
-                .environment(AppNotificationRouter.shared)
+            Group {
+                if let resolvedBootstrap = launchBootstrapState.resolvedBootstrap {
+                    ContentView()
+                        .environment(\.cloudSyncEnabled, resolvedBootstrap.bootstrap.cloudSyncEnabled)
+                        .environment(\.cloudSyncErrorDescription, resolvedBootstrap.bootstrap.cloudSyncErrorDescription)
+                        .environment(\.userDataSyncStatus, AppRuntimeState.shared.userDataSyncStatus)
+                        .environment(\.appBackgroundStore, resolvedBootstrap.backgroundStore)
+                        .environment(AppNotificationRouter.shared)
+                        .modelContainer(resolvedBootstrap.bootstrap.container)
+                } else {
+                    SplashView()
+                        .task {
+                            launchBootstrapState.resolveIfNeeded {
+                                try await Self.makeContainerBootstrap()
+                            }
+                        }
+                }
+            }
         }
-        .modelContainer(bootstrap.container)
     }
 
-    private static func makeContainerBootstrap() -> ModelContainerBootstrap {
-        if ProcessInfo.processInfo.arguments.contains("UITEST_IN_MEMORY_STORE") {
-            do {
-                return ModelContainerBootstrap(
-                    container: try makeUITestContainer(),
-                    cloudSyncEnabled: false,
-                    cloudSyncErrorDescription: "UI test run using an in-memory local container."
-                )
-            } catch {
-                fatalError("Could not create UI test ModelContainer: \(describe(error))")
+    private static func makeContainerBootstrap() async throws -> ModelContainerBootstrap {
+        try await AppLaunchBootstrapResolver.resolve(
+            makeUITestContainer: {
+                try makeUITestContainer()
+            },
+            makeCloudBackedContainer: {
+                try makeCloudBackedContainer()
+            },
+            makeLocalFallbackContainer: {
+                try makeLocalFallbackContainer()
+            },
+            describeError: { error in
+                describe(error)
             }
-        }
-
-        guard AppRuntimeConfig.canUseConfiguredCloudKitContainer else {
-            do {
-                return ModelContainerBootstrap(
-                    container: try makeLocalFallbackContainer(),
-                    cloudSyncEnabled: false,
-                    cloudSyncErrorDescription: "CloudKit is unavailable for this build. Using local-only mode for this session."
-                )
-            } catch {
-                fatalError("Could not create fallback ModelContainer without CloudKit sync: \(describe(error))")
-            }
-        }
-
-        let startupDecision = CloudStartupPreflight.makeDecision()
-        if startupDecision.shouldForceLocalFallbackStore {
-            do {
-                return ModelContainerBootstrap(
-                    container: try makeLocalFallbackContainer(),
-                    cloudSyncEnabled: false,
-                    cloudSyncErrorDescription: startupDecision.cloudSyncErrorDescription
-                )
-            } catch {
-                fatalError("Could not create fallback ModelContainer without CloudKit sync: \(describe(error))")
-            }
-        }
-
-        do {
-            return ModelContainerBootstrap(
-                container: try makeCloudBackedContainer(),
-                cloudSyncEnabled: true,
-                cloudSyncErrorDescription: nil
-            )
-        } catch {
-            let cloudError = describe(error)
-            let fallbackContainer: ModelContainer
-
-            do {
-                fallbackContainer = try makeLocalFallbackContainer()
-            } catch {
-                fatalError("Could not create fallback ModelContainer without CloudKit sync: \(describe(error))")
-            }
-
-            #if DEBUG
-            print("Cloud-backed ModelContainer unavailable. Falling back to local-only mode. Error: \(cloudError)")
-            #endif
-
-            return ModelContainerBootstrap(
-                container: fallbackContainer,
-                cloudSyncEnabled: false,
-                cloudSyncErrorDescription: cloudError
-            )
-        }
+        )
     }
 
     private static func makeCloudBackedContainer() throws -> ModelContainer {
@@ -313,10 +261,4 @@ enum AppStoreLayout {
 
 enum AppBootstrapRecoveryPolicy {
     static let preservesExistingStoresOnCloudFailure = true
-}
-
-private struct ModelContainerBootstrap {
-    let container: ModelContainer
-    let cloudSyncEnabled: Bool
-    let cloudSyncErrorDescription: String?
 }

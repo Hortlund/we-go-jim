@@ -66,22 +66,6 @@ nonisolated struct BroMemberSummary: Identifiable, Equatable {
         )
         self.joinedAt = joinedAt
         self.role = role
-
-        let resolvedCacheKey = self.avatarCacheKey ?? id
-        if let avatarImageData {
-            BrosAvatarCacheService.shared.primeSynchronously(
-                data: avatarImageData,
-                for: resolvedCacheKey
-            )
-            Task {
-                await BrosAvatarCacheService.shared.prime(
-                    data: avatarImageData,
-                    for: resolvedCacheKey
-                )
-            }
-        } else if avatarCacheKey == nil {
-            BrosAvatarCacheService.shared.remove(for: resolvedCacheKey)
-        }
     }
 }
 
@@ -154,22 +138,6 @@ nonisolated struct BroFeedEvent: Identifiable, Equatable {
         self.workout = workout
         self.pr = pr
         self.reactions = reactions
-
-        let resolvedCacheKey = self.actorAvatarCacheKey ?? actorMembershipID
-        if let actorAvatarImageData {
-            BrosAvatarCacheService.shared.primeSynchronously(
-                data: actorAvatarImageData,
-                for: resolvedCacheKey
-            )
-            Task {
-                await BrosAvatarCacheService.shared.prime(
-                    data: actorAvatarImageData,
-                    for: resolvedCacheKey
-                )
-            }
-        } else if actorAvatarCacheKey == nil {
-            BrosAvatarCacheService.shared.remove(for: resolvedCacheKey)
-        }
     }
 }
 
@@ -2249,13 +2217,6 @@ nonisolated final class CloudKitBrosSocialService: BrosSocialService, BrosSocial
         let remoteIdentityUpdatedAt = remoteUpdatedAt ?? remoteSummary.joinedAt
         guard localProfile.updatedAt >= remoteIdentityUpdatedAt else {
             return remoteSummary
-        }
-
-        if let avatarImageData = localProfile.avatarImageData {
-            BrosAvatarCacheService.shared.primeSynchronously(
-                data: avatarImageData,
-                for: remoteSummary.id
-            )
         }
 
         return BroMemberSummary(

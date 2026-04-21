@@ -307,6 +307,61 @@ struct ActiveWorkoutDraftRepositoryTests {
     }
 
     @Test
+    func persistCheckpointAppliesExerciseSettingsInOnePass() throws {
+        let context = try makeInMemoryContext()
+        let repository = ActiveWorkoutDraftRepository(modelContext: context)
+
+        let item = makeCatalogItem(
+            remoteUUID: "checkpoint-settings-1",
+            displayName: "Incline Press",
+            equipmentSummary: "Dumbbell",
+            context: context
+        )
+
+        let session = try repository.createEmptySession(name: "Push Day")
+        try repository.addExercise(sessionID: session.id, catalogItem: item)
+
+        let exercise = try #require(try repository.sessionExercises(sessionID: session.id).first)
+        let drafts = try repository.setDrafts(sessionExerciseID: exercise.id)
+        let updatedSnapshot = ActiveWorkoutExercisePersistenceSnapshot(
+            setDrafts: drafts,
+            restSeconds: 150,
+            notes: "Keep shoulders packed.",
+            targetRepMin: 8,
+            targetRepMax: 12
+        )
+        let persistedSnapshot = ActiveWorkoutExercisePersistenceSnapshot(
+            setDrafts: drafts,
+            restSeconds: exercise.restSeconds,
+            notes: exercise.notes,
+            targetRepMin: exercise.targetRepMin,
+            targetRepMax: exercise.targetRepMax
+        )
+
+        let result = try repository.persistCheckpoint(
+            sessionID: session.id,
+            sessionName: session.name,
+            sessionNotes: session.notes,
+            dirtyExerciseIDs: [exercise.id],
+            snapshotsByExerciseID: [exercise.id: updatedSnapshot],
+            persistedSnapshotsByExerciseID: [exercise.id: persistedSnapshot]
+        )
+
+        let refreshedExercise = try #require(try repository.sessionExercises(sessionID: session.id).first)
+        let refreshedDrafts = try repository.setDrafts(sessionExerciseID: refreshedExercise.id)
+
+        #expect(result.didPersistSessionMeta == false)
+        #expect(result.handledExerciseIDs == [exercise.id])
+        #expect(result.persistedExerciseIDs == [exercise.id])
+        #expect(refreshedExercise.restSeconds == 150)
+        #expect(refreshedExercise.notes == "Keep shoulders packed.")
+        #expect(refreshedExercise.targetRepMin == 8)
+        #expect(refreshedExercise.targetRepMax == 12)
+        #expect(refreshedDrafts[0].restSeconds == 150)
+        #expect(refreshedDrafts[1].restSeconds == 150)
+    }
+
+    @Test
     func cancelSessionRemovesDraftRows() throws {
         let context = try makeInMemoryContext()
         let repository = ActiveWorkoutDraftRepository(modelContext: context)

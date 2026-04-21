@@ -5,15 +5,21 @@ nonisolated struct ActiveWorkoutExercisePersistenceSnapshot: Equatable, Sendable
     var setDrafts: [WorkoutSessionSetDraft]
     var restSeconds: Int
     var notes: String
+    var targetRepMin: Int?
+    var targetRepMax: Int?
 
     init(
         setDrafts: [WorkoutSessionSetDraft],
         restSeconds: Int,
-        notes: String
+        notes: String,
+        targetRepMin: Int? = nil,
+        targetRepMax: Int? = nil
     ) {
         self.setDrafts = setDrafts
         self.restSeconds = max(0, min(3600, restSeconds))
         self.notes = notes
+        self.targetRepMin = targetRepMin
+        self.targetRepMax = targetRepMax
     }
 }
 
@@ -21,6 +27,7 @@ nonisolated struct ActiveWorkoutExercisePersistenceChangeSet: Equatable, Sendabl
     let persistDrafts: Bool
     let persistRest: Bool
     let persistNotes: Bool
+    let persistRepRange: Bool
 
     init(
         current: ActiveWorkoutExercisePersistenceSnapshot,
@@ -29,10 +36,12 @@ nonisolated struct ActiveWorkoutExercisePersistenceChangeSet: Equatable, Sendabl
         persistDrafts = current.setDrafts != persisted.setDrafts
         persistRest = current.restSeconds != persisted.restSeconds
         persistNotes = current.notes != persisted.notes
+        persistRepRange = current.targetRepMin != persisted.targetRepMin
+            || current.targetRepMax != persisted.targetRepMax
     }
 
     var hasChanges: Bool {
-        persistDrafts || persistRest || persistNotes
+        persistDrafts || persistRest || persistNotes || persistRepRange
     }
 }
 
@@ -467,13 +476,10 @@ nonisolated final class ActiveWorkoutDraftRepository {
             throw WorkoutSessionRepositoryError.sessionExerciseNotFound
         }
 
-        let normalized = sanitizedRepRange(min: minReps, max: maxReps)
-        guard exercise.targetRepMin != normalized.min || exercise.targetRepMax != normalized.max else {
+        let now = Date()
+        guard applyExerciseRepRange(minReps: minReps, maxReps: maxReps, to: exercise, now: now) else {
             return
         }
-        exercise.targetRepMin = normalized.min
-        exercise.targetRepMax = normalized.max
-        exercise.updatedAt = .now
         try modelContext.save()
     }
 
@@ -506,6 +512,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
         sessionExerciseID: UUID,
         snapshot: ActiveWorkoutExercisePersistenceSnapshot,
         persistDrafts: Bool = true,
+        persistRepRange: Bool = true,
         persistRest: Bool = true,
         persistNotes: Bool = true
     ) throws {
@@ -519,6 +526,15 @@ nonisolated final class ActiveWorkoutDraftRepository {
         if persistDrafts {
             let changes = applySetDrafts(snapshot.setDrafts, to: exercise, now: now)
             shouldSave = shouldSave || changes.didMutateExerciseStructure || changes.didMutateAnySet
+        }
+
+        if persistRepRange {
+            shouldSave = applyExerciseRepRange(
+                minReps: snapshot.targetRepMin,
+                maxReps: snapshot.targetRepMax,
+                to: exercise,
+                now: now
+            ) || shouldSave
         }
 
         if persistRest {
@@ -584,6 +600,15 @@ nonisolated final class ActiveWorkoutDraftRepository {
             if changes.persistDrafts {
                 let draftChanges = applySetDrafts(snapshot.setDrafts, to: exercise, now: now)
                 didMutateExercise = draftChanges.didMutateExerciseStructure || draftChanges.didMutateAnySet
+            }
+
+            if changes.persistRepRange {
+                didMutateExercise = applyExerciseRepRange(
+                    minReps: snapshot.targetRepMin,
+                    maxReps: snapshot.targetRepMax,
+                    to: exercise,
+                    now: now
+                ) || didMutateExercise
             }
 
             if changes.persistRest {
@@ -1159,6 +1184,24 @@ nonisolated final class ActiveWorkoutDraftRepository {
             set.restSeconds = normalizedRest
             set.updatedAt = now
         }
+        exercise.updatedAt = now
+        return true
+    }
+
+    @discardableResult
+    private func applyExerciseRepRange(
+        minReps: Int?,
+        maxReps: Int?,
+        to exercise: ActiveWorkoutDraftExercise,
+        now: Date
+    ) -> Bool {
+        let normalized = sanitizedRepRange(min: minReps, max: maxReps)
+        guard exercise.targetRepMin != normalized.min || exercise.targetRepMax != normalized.max else {
+            return false
+        }
+
+        exercise.targetRepMin = normalized.min
+        exercise.targetRepMax = normalized.max
         exercise.updatedAt = now
         return true
     }

@@ -101,6 +101,46 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
+    func activeWorkoutPersistenceChangeSetTracksRepRangeChanges() {
+        let persisted = ActiveWorkoutExercisePersistenceSnapshot(
+            setDrafts: [
+                WorkoutSessionSetDraft(
+                    targetReps: 8,
+                    targetWeight: 100,
+                    targetLoadUnit: .kg,
+                    actualReps: 8,
+                    actualWeight: 100,
+                    actualLoadUnit: .kg,
+                    isCompleted: true
+                ),
+            ],
+            restSeconds: 120,
+            notes: "Stable",
+            targetRepMin: 6,
+            targetRepMax: 8
+        )
+
+        let current = ActiveWorkoutExercisePersistenceSnapshot(
+            setDrafts: persisted.setDrafts,
+            restSeconds: persisted.restSeconds,
+            notes: persisted.notes,
+            targetRepMin: 8,
+            targetRepMax: 12
+        )
+
+        let changes = ActiveWorkoutExercisePersistenceChangeSet(
+            current: current,
+            persisted: persisted
+        )
+
+        #expect(changes.persistDrafts == false)
+        #expect(changes.persistRest == false)
+        #expect(changes.persistNotes == false)
+        #expect(changes.persistRepRange)
+        #expect(changes.hasChanges)
+    }
+
+    @Test
     func historyHydrationPlannerOnlyRequestsExpandedRowsThatStillNeedPayloads() {
         let first = UUID()
         let second = UUID()
