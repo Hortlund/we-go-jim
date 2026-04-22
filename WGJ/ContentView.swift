@@ -176,9 +176,18 @@ struct ContentView: View {
             return
         }
 
+        let requestedExtension = environment["UITEST_TEMPLATE_OPEN_FILE_EXTENSION"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let filenameExtension = TemplateTransferFileFormat.supportedImportFilenameExtensions.contains(
+            requestedExtension ?? ""
+        )
+            ? (requestedExtension ?? TemplateTransferFileFormat.filenameExtension)
+            : TemplateTransferFileFormat.filenameExtension
+
         let fileURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("UITestTemplateOpen")
-            .appendingPathExtension(TemplateTransferFileFormat.filenameExtension)
+            .appendingPathExtension(filenameExtension)
 
         do {
             if FileManager.default.fileExists(atPath: fileURL.path) {

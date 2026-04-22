@@ -5,23 +5,173 @@ import UniformTypeIdentifiers
 nonisolated enum TemplateTransferFileFormat {
     static let typeIdentifier = "com.hortlund.wgj.template"
     static let filenameExtension = "wgjtemplate"
+    static let jsonFilenameExtension = "json"
+    static let textFilenameExtension = "txt"
+
+    static let supportedImportFilenameExtensions: Set<String> = [
+        filenameExtension,
+        jsonFilenameExtension,
+    ]
+}
+
+nonisolated enum TemplateTransferExportFormat: String, CaseIterable, Equatable, Sendable {
+    case bundle
+    case json
+    case text
+
+    var filenameExtension: String {
+        switch self {
+        case .bundle:
+            return TemplateTransferFileFormat.filenameExtension
+        case .json:
+            return TemplateTransferFileFormat.jsonFilenameExtension
+        case .text:
+            return TemplateTransferFileFormat.textFilenameExtension
+        }
+    }
+}
+
+nonisolated enum TemplateTransferArtifactKind: String, Codable, Equatable, Sendable {
+    case template
+    case folder
+}
+
+nonisolated enum TemplateTransferImportResult: Equatable, Sendable {
+    case template(UUID)
+    case folder(UUID)
+}
+
+nonisolated enum TemplateTransferArtifact: Codable, Equatable, Sendable {
+    case template(TemplateTransferTemplate)
+    case folder(TemplateTransferFolder)
+
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case template
+        case folder
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let kind = try container.decode(TemplateTransferArtifactKind.self, forKey: .kind)
+
+        switch kind {
+        case .template:
+            self = .template(try container.decode(TemplateTransferTemplate.self, forKey: .template))
+        case .folder:
+            self = .folder(try container.decode(TemplateTransferFolder.self, forKey: .folder))
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+
+        switch self {
+        case .template(let template):
+            try container.encode(TemplateTransferArtifactKind.template, forKey: .kind)
+            try container.encode(template, forKey: .template)
+        case .folder(let folder):
+            try container.encode(TemplateTransferArtifactKind.folder, forKey: .kind)
+            try container.encode(folder, forKey: .folder)
+        }
+    }
+
+    var suggestedFilenameBase: String {
+        switch self {
+        case .template(let template):
+            return template.name
+        case .folder(let folder):
+            return folder.name
+        }
+    }
+
+    var suggestedFilenameKind: ReviewTextKind {
+        switch self {
+        case .template:
+            return .templateName
+        case .folder:
+            return .folderName
+        }
+    }
 }
 
 nonisolated struct TemplateTransferEnvelope: Codable, Equatable, Sendable {
-    static let currentFormatVersion = 5
+    static let currentFormatVersion = 6
 
     let formatVersion: Int
     let exportedAt: Date
-    let template: TemplateTransferTemplate
+    let artifact: TemplateTransferArtifact
+
+    init(
+        formatVersion: Int = TemplateTransferEnvelope.currentFormatVersion,
+        exportedAt: Date = .now,
+        artifact: TemplateTransferArtifact
+    ) {
+        self.formatVersion = formatVersion
+        self.exportedAt = exportedAt
+        self.artifact = artifact
+    }
 
     init(
         formatVersion: Int = TemplateTransferEnvelope.currentFormatVersion,
         exportedAt: Date = .now,
         template: TemplateTransferTemplate
     ) {
-        self.formatVersion = formatVersion
-        self.exportedAt = exportedAt
-        self.template = template
+        self.init(
+            formatVersion: formatVersion,
+            exportedAt: exportedAt,
+            artifact: .template(template)
+        )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case formatVersion
+        case exportedAt
+        case artifact
+        case template
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        formatVersion = try container.decode(Int.self, forKey: .formatVersion)
+        exportedAt = try container.decode(Date.self, forKey: .exportedAt)
+
+        if formatVersion >= TemplateTransferEnvelope.currentFormatVersion,
+           container.contains(.artifact)
+        {
+            artifact = try container.decode(TemplateTransferArtifact.self, forKey: .artifact)
+            return
+        }
+
+        artifact = .template(try container.decode(TemplateTransferTemplate.self, forKey: .template))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(formatVersion, forKey: .formatVersion)
+        try container.encode(exportedAt, forKey: .exportedAt)
+
+        if formatVersion >= TemplateTransferEnvelope.currentFormatVersion {
+            try container.encode(artifact, forKey: .artifact)
+            return
+        }
+
+        switch artifact {
+        case .template(let template):
+            try container.encode(template, forKey: .template)
+        case .folder:
+            try container.encode(artifact, forKey: .artifact)
+        }
+    }
+}
+
+nonisolated struct TemplateTransferFolder: Codable, Equatable, Sendable {
+    let name: String
+    let templates: [TemplateTransferTemplate]
+
+    init(name: String, templates: [TemplateTransferTemplate]) {
+        self.name = name
+        self.templates = templates
     }
 }
 
@@ -184,6 +334,7 @@ nonisolated enum TemplateTransferError: LocalizedError, Equatable, Sendable {
     case unreadableFile
     case malformedFile
     case unsupportedVersion(Int)
+    case unsupportedFileType(String)
 
     var errorDescription: String? {
         switch self {
@@ -193,6 +344,8 @@ nonisolated enum TemplateTransferError: LocalizedError, Equatable, Sendable {
             return "That template file is invalid."
         case .unsupportedVersion(let version):
             return "That template file uses unsupported format version \(version)."
+        case .unsupportedFileType:
+            return "WGJ can only import .wgjtemplate or .json files."
         }
     }
 }
@@ -223,24 +376,40 @@ nonisolated final class TemplateTransferService {
     }
 
     func exportData(templateID: UUID) throws -> Data {
-        try encoded(exportEnvelope(templateID: templateID))
+        try exportData(templateID: templateID, format: .bundle)
+    }
+
+    func exportData(templateID: UUID, format: TemplateTransferExportFormat) throws -> Data {
+        try encodedExportData(
+            artifact: try exportTemplateArtifact(templateID: templateID),
+            format: format
+        )
+    }
+
+    func exportData(folderID: UUID, format: TemplateTransferExportFormat) throws -> Data {
+        try encodedExportData(
+            artifact: try exportFolderArtifact(folderID: folderID),
+            format: format
+        )
     }
 
     func writeExportFile(templateID: UUID) throws -> URL {
-        let envelope = try exportEnvelope(templateID: templateID)
-        let data = try encoded(envelope)
-        let directoryURL = try exportDirectoryURL()
-        let fileURL = directoryURL.appendingPathComponent(exportFilename(for: envelope.template.name))
-
-        if fileManager.fileExists(atPath: fileURL.path) {
-            try fileManager.removeItem(at: fileURL)
-        }
-
-        try data.write(to: fileURL, options: .atomic)
-        return fileURL
+        try writeExportFile(templateID: templateID, format: .bundle)
     }
 
-    func importTemplate(from fileURL: URL) throws -> WorkoutTemplate {
+    func writeExportFile(templateID: UUID, format: TemplateTransferExportFormat) throws -> URL {
+        let artifact = try exportTemplateArtifact(templateID: templateID)
+        return try writeExportFile(artifact: artifact, format: format)
+    }
+
+    func writeExportFile(folderID: UUID, format: TemplateTransferExportFormat) throws -> URL {
+        let artifact = try exportFolderArtifact(folderID: folderID)
+        return try writeExportFile(artifact: artifact, format: format)
+    }
+
+    func importTransfer(from fileURL: URL) throws -> TemplateTransferImportResult {
+        try validateSupportedImportFileURL(fileURL)
+
         let startedAccess = fileURL.startAccessingSecurityScopedResource()
         defer {
             if startedAccess {
@@ -255,46 +424,173 @@ nonisolated final class TemplateTransferService {
             throw TemplateTransferError.unreadableFile
         }
 
-        return try importTemplate(from: data)
+        return try importTransfer(from: data)
+    }
+
+    func importTransfer(from data: Data) throws -> TemplateTransferImportResult {
+        try importTransfer(from: decodedEnvelope(from: data))
+    }
+
+    func importTemplate(from fileURL: URL) throws -> WorkoutTemplate {
+        try importedTemplate(from: importTransfer(from: fileURL))
     }
 
     func importTemplate(from data: Data) throws -> WorkoutTemplate {
-        let envelope = try decodedEnvelope(from: data)
-        let repository = TemplateRepository(modelContext: modelContext, autoSaveChanges: false)
+        try importedTemplate(from: importTransfer(from: data))
+    }
+
+    private func encodedExportData(
+        artifact: TemplateTransferArtifact,
+        format: TemplateTransferExportFormat
+    ) throws -> Data {
+        switch format {
+        case .bundle, .json:
+            return try encoded(TemplateTransferEnvelope(artifact: artifact))
+        case .text:
+            return Data(textDocument(for: artifact).utf8)
+        }
+    }
+
+    private func writeExportFile(
+        artifact: TemplateTransferArtifact,
+        format: TemplateTransferExportFormat
+    ) throws -> URL {
+        let data = try encodedExportData(artifact: artifact, format: format)
+        let directoryURL = try exportDirectoryURL()
+        let fileURL = directoryURL.appendingPathComponent(
+            exportFilename(
+                for: artifact.suggestedFilenameBase,
+                kind: artifact.suggestedFilenameKind,
+                format: format
+            )
+        )
+
+        if fileManager.fileExists(atPath: fileURL.path) {
+            try fileManager.removeItem(at: fileURL)
+        }
+
+        try data.write(to: fileURL, options: .atomic)
+        return fileURL
+    }
+
+    private func importedTemplate(from result: TemplateTransferImportResult) throws -> WorkoutTemplate {
+        guard case .template(let templateID) = result,
+              let template = try TemplateRepository(modelContext: modelContext).template(id: templateID)
+        else {
+            throw TemplateTransferError.malformedFile
+        }
+
+        return template
+    }
+
+    private func importTransfer(from envelope: TemplateTransferEnvelope) throws -> TemplateTransferImportResult {
         let catalogRepository = ExerciseCatalogRepository(modelContext: modelContext)
         try? catalogRepository.ensureSeedImportedIfNeeded()
+
+        switch envelope.artifact {
+        case .template(let template):
+            return .template(try importTemplateArtifact(template, catalogRepository: catalogRepository))
+        case .folder(let folder):
+            return .folder(try importFolderArtifact(folder, catalogRepository: catalogRepository))
+        }
+    }
+
+    private func importTemplateArtifact(
+        _ transferTemplate: TemplateTransferTemplate,
+        catalogRepository: ExerciseCatalogRepository
+    ) throws -> UUID {
+        let repository = TemplateRepository(modelContext: modelContext, autoSaveChanges: false)
         let importedName = try nextImportedTemplateName(
-            baseName: envelope.template.name,
+            baseName: transferTemplate.name,
             repository: repository
         )
         let template = try repository.createTemplate(
             name: importedName,
-            notes: envelope.template.notes
+            notes: transferTemplate.notes
         )
 
         do {
             try repository.importExercises(
                 templateID: template.id,
-                drafts: try envelope.template.exercises.map {
+                drafts: try transferTemplate.exercises.map {
                     try exerciseDraft(from: $0, catalogRepository: catalogRepository)
                 }
             )
             try repository.setCardioBlocks(
                 templateID: template.id,
-                drafts: try cardioDrafts(from: envelope.template, catalogRepository: catalogRepository)
+                drafts: try cardioDrafts(from: transferTemplate, catalogRepository: catalogRepository)
             )
             try repository.finalizeDeferredUserDataChangesIfNeeded()
-            return template
+            return template.id
         } catch {
             throw error
         }
     }
 
-    private func exportEnvelope(templateID: UUID) throws -> TemplateTransferEnvelope {
+    private func importFolderArtifact(
+        _ transferFolder: TemplateTransferFolder,
+        catalogRepository: ExerciseCatalogRepository
+    ) throws -> UUID {
+        let repository = TemplateRepository(modelContext: modelContext, autoSaveChanges: false)
+        let importedName = try nextImportedFolderName(
+            baseName: transferFolder.name,
+            repository: repository
+        )
+        let folder = try repository.createFolder(name: importedName)
+
+        do {
+            for transferTemplate in transferFolder.templates {
+                let template = try repository.createTemplate(
+                    folderID: folder.id,
+                    name: transferTemplate.name,
+                    notes: transferTemplate.notes
+                )
+                try repository.importExercises(
+                    templateID: template.id,
+                    drafts: try transferTemplate.exercises.map {
+                        try exerciseDraft(from: $0, catalogRepository: catalogRepository)
+                    }
+                )
+                try repository.setCardioBlocks(
+                    templateID: template.id,
+                    drafts: try cardioDrafts(from: transferTemplate, catalogRepository: catalogRepository)
+                )
+            }
+
+            try repository.finalizeDeferredUserDataChangesIfNeeded()
+            return folder.id
+        } catch {
+            throw error
+        }
+    }
+
+    private func exportTemplateArtifact(templateID: UUID) throws -> TemplateTransferArtifact {
+        .template(try transferTemplate(templateID: templateID))
+    }
+
+    private func exportFolderArtifact(folderID: UUID) throws -> TemplateTransferArtifact {
+        .folder(try transferFolder(folderID: folderID))
+    }
+
+    private func transferFolder(folderID: UUID) throws -> TemplateTransferFolder {
+        let repository = TemplateRepository(modelContext: modelContext)
+        guard let folder = try repository.folders().first(where: { $0.id == folderID }) else {
+            throw TemplateRepositoryError.folderNotFound
+        }
+
+        let templates = try repository.templates(in: folder.id).map { template in
+            try transferTemplate(templateID: template.id)
+        }
+
+        return TemplateTransferFolder(name: folder.name, templates: templates)
+    }
+
+    private func transferTemplate(templateID: UUID) throws -> TemplateTransferTemplate {
         let repository = TemplateRepository(modelContext: modelContext)
         guard let template = try repository.template(id: templateID) else {
             throw TemplateRepositoryError.templateNotFound
         }
+
         let cardioBlocks = try repository.cardioBlocks(templateID: templateID)
         let cardioByPhase = Dictionary(uniqueKeysWithValues: cardioBlocks.map { ($0.phase, $0) })
 
@@ -307,6 +603,7 @@ nonisolated final class TemplateTransferService {
                     muscleSummarySnapshot: component.muscleSummarySnapshot
                 )
             }
+
             return TemplateTransferExercise(
                 catalogExerciseUUID: exercise.catalogExerciseUUID,
                 exerciseNameSnapshot: exercise.exerciseNameSnapshot,
@@ -322,14 +619,16 @@ nonisolated final class TemplateTransferService {
             )
         }
 
-        return TemplateTransferEnvelope(
-            template: TemplateTransferTemplate(
-                name: template.name,
-                notes: template.notes,
-                preWorkoutCardio: cardioByPhase[.preWorkout].map { transferCardio(from: TemplateCardioBlockDraft(model: $0)) },
-                postWorkoutCardio: cardioByPhase[.postWorkout].map { transferCardio(from: TemplateCardioBlockDraft(model: $0)) },
-                exercises: exercises
-            )
+        return TemplateTransferTemplate(
+            name: template.name,
+            notes: template.notes,
+            preWorkoutCardio: cardioByPhase[.preWorkout].map {
+                transferCardio(from: TemplateCardioBlockDraft(model: $0))
+            },
+            postWorkoutCardio: cardioByPhase[.postWorkout].map {
+                transferCardio(from: TemplateCardioBlockDraft(model: $0))
+            },
+            exercises: exercises
         )
     }
 
@@ -441,6 +740,7 @@ nonisolated final class TemplateTransferService {
                 muscleSummarySnapshot: component.muscleSummarySnapshot,
                 catalogRepository: catalogRepository
             )
+
             guard seenCatalogExerciseUUIDs.insert(resolvedComponent.catalogExerciseUUID).inserted else {
                 continue
             }
@@ -528,21 +828,44 @@ nonisolated final class TemplateTransferService {
         baseName: String,
         repository: TemplateRepository
     ) throws -> String {
-        let sanitizedBase = ReviewModerationService.sanitizedForSharing(baseName, kind: .templateName)
-        let existingNames = try repository.templatesWithoutFolder().map(\.name)
-        guard containsName(sanitizedBase, in: existingNames) else {
-            return sanitizedBase
+        try nextImportedName(
+            baseName: baseName,
+            kind: .templateName,
+            existingNames: repository.templatesWithoutFolder().map(\.name)
+        )
+    }
+
+    private func nextImportedFolderName(
+        baseName: String,
+        repository: TemplateRepository
+    ) throws -> String {
+        try nextImportedName(
+            baseName: baseName,
+            kind: .folderName,
+            existingNames: repository.folders().map(\.name)
+        )
+    }
+
+    private func nextImportedName(
+        baseName: String,
+        kind: ReviewTextKind,
+        existingNames: [String]
+    ) throws -> String {
+        let sanitizedBase = ReviewModerationService.sanitizedForSharing(baseName, kind: kind)
+        guard !containsName(sanitizedBase, in: existingNames) else {
+            var copyIndex = 1
+
+            while true {
+                let suffix = copyIndex == 1 ? " Copy" : " Copy \(copyIndex)"
+                let candidate = suffixedName(base: sanitizedBase, suffix: suffix, kind: kind)
+                if !containsName(candidate, in: existingNames) {
+                    return candidate
+                }
+                copyIndex += 1
+            }
         }
 
-        var copyIndex = 1
-        while true {
-            let suffix = copyIndex == 1 ? " Copy" : " Copy \(copyIndex)"
-            let candidate = suffixedTemplateName(base: sanitizedBase, suffix: suffix)
-            if !containsName(candidate, in: existingNames) {
-                return candidate
-            }
-            copyIndex += 1
-        }
+        return sanitizedBase
     }
 
     private func containsName(_ name: String, in existingNames: [String]) -> Bool {
@@ -551,9 +874,8 @@ nonisolated final class TemplateTransferService {
         }
     }
 
-    private func suffixedTemplateName(base: String, suffix: String) -> String {
-        let limit = ReviewTextKind.templateName.maxLength
-        let availableCount = max(1, limit - suffix.count)
+    private func suffixedName(base: String, suffix: String, kind: ReviewTextKind) -> String {
+        let availableCount = max(1, kind.maxLength - suffix.count)
         let truncatedBase = String(base.prefix(availableCount))
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return "\(truncatedBase)\(suffix)"
@@ -570,16 +892,182 @@ nonisolated final class TemplateTransferService {
         return directoryURL
     }
 
-    private func exportFilename(for templateName: String) -> String {
-        let base = ReviewModerationService.sanitizedForSharing(templateName, kind: .templateName)
+    private func exportFilename(
+        for baseName: String,
+        kind: ReviewTextKind,
+        format: TemplateTransferExportFormat
+    ) -> String {
+        let base = ReviewModerationService.sanitizedForSharing(baseName, kind: kind)
         let invalidCharacters = CharacterSet(charactersIn: "/\\:?%*|\"<>")
         let cleaned = base.unicodeScalars.map { scalar in
             invalidCharacters.contains(scalar) ? "_" : String(scalar)
         }
         .joined()
         let normalized = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolved = normalized.isEmpty ? ReviewTextKind.templateName.fallbackValue : normalized
-        return "\(resolved).\(TemplateTransferFileFormat.filenameExtension)"
+        let resolved = normalized.isEmpty ? kind.fallbackValue : normalized
+        return "\(resolved).\(format.filenameExtension)"
+    }
+
+    private func validateSupportedImportFileURL(_ fileURL: URL) throws {
+        guard fileURL.isFileURL else {
+            throw TemplateTransferError.unreadableFile
+        }
+
+        let fileExtension = fileURL.pathExtension.lowercased()
+        guard !fileExtension.isEmpty else {
+            return
+        }
+
+        guard TemplateTransferFileFormat.supportedImportFilenameExtensions.contains(fileExtension) else {
+            throw TemplateTransferError.unsupportedFileType(fileExtension)
+        }
+    }
+
+    private func textDocument(for artifact: TemplateTransferArtifact) -> String {
+        switch artifact {
+        case .template(let template):
+            return render(template: template, heading: "Template: \(template.name)")
+        case .folder(let folder):
+            var sections = ["Folder: \(folder.name)"]
+
+            for (index, template) in folder.templates.enumerated() {
+                sections.append("")
+                sections.append(
+                    render(
+                        template: template,
+                        heading: "Template \(index + 1): \(template.name)"
+                    )
+                )
+            }
+
+            return sections.joined(separator: "\n")
+        }
+    }
+
+    private func render(template: TemplateTransferTemplate, heading: String) -> String {
+        var lines: [String] = [heading]
+        lines.append("Notes: \(template.notes.isEmpty ? "-" : template.notes)")
+
+        if let preWorkoutCardio = template.preWorkoutCardio {
+            lines.append("")
+            lines.append(contentsOf: render(cardio: preWorkoutCardio, title: "Pre-workout cardio"))
+        }
+
+        if let postWorkoutCardio = template.postWorkoutCardio {
+            lines.append("")
+            lines.append(contentsOf: render(cardio: postWorkoutCardio, title: "Post-workout cardio"))
+        }
+
+        if template.exercises.isEmpty {
+            lines.append("")
+            lines.append("Exercises: none")
+            return lines.joined(separator: "\n")
+        }
+
+        for (index, exercise) in template.exercises.enumerated() {
+            lines.append("")
+            lines.append(contentsOf: render(exercise: exercise, index: index + 1))
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    private func render(cardio: TemplateTransferCardioBlock, title: String) -> [String] {
+        [
+            title,
+            "Exercise: \(cardio.exerciseNameSnapshot)",
+            "Duration: \(cardio.targetDurationSeconds)s",
+            "Category: \(cardio.categorySnapshot)",
+            "Muscles: \(cardio.muscleSummarySnapshot)",
+        ]
+    }
+
+    private func render(exercise: TemplateTransferExercise, index: Int) -> [String] {
+        var lines = [
+            "Exercise \(index): \(exercise.exerciseNameSnapshot)",
+            "Category: \(exercise.categorySnapshot)",
+            "Muscles: \(exercise.muscleSummarySnapshot)",
+            "Notes: \(exercise.notes.isEmpty ? "-" : exercise.notes)",
+        ]
+
+        if let targetRepMin = exercise.targetRepMin, let targetRepMax = exercise.targetRepMax {
+            lines.append("Rep range: \(targetRepMin)-\(targetRepMax)")
+        } else if let targetRepMin = exercise.targetRepMin {
+            lines.append("Rep range: \(targetRepMin)+")
+        } else if let targetRepMax = exercise.targetRepMax {
+            lines.append("Rep range: up to \(targetRepMax)")
+        }
+
+        lines.append("Rest: \(exercise.restSeconds)s")
+
+        if let components = exercise.components, !components.isEmpty {
+            lines.append(
+                "Components: \(components.map(\.exerciseNameSnapshot).joined(separator: ", "))"
+            )
+        }
+
+        if let superset = exercise.superset {
+            lines.append("Superset: \(superset.position.rawValue), round rest \(superset.roundRestSeconds)s")
+        }
+
+        for (setIndex, set) in exercise.sets.enumerated() {
+            lines.append(contentsOf: render(set: set, index: setIndex + 1))
+        }
+
+        return lines
+    }
+
+    private func render(set: TemplateTransferSet, index: Int) -> [String] {
+        let status = setStatusDescription(set)
+        var lines = ["Set \(index): \(status)"]
+        lines.append("  Target: \(loadDescription(weight: set.targetWeight, unit: set.loadUnit, reps: set.targetReps))")
+        lines.append("  Rest: \(set.restSeconds)s")
+
+        for (dropIndex, stage) in set.dropStages.enumerated() {
+            lines.append(
+                "  Drop set \(dropIndex + 1): \(loadDescription(weight: stage.targetWeight, unit: stage.loadUnit, reps: stage.targetReps))"
+            )
+        }
+
+        return lines
+    }
+
+    private func setStatusDescription(_ set: TemplateTransferSet) -> String {
+        switch (set.isWarmup, set.isLocked) {
+        case (true, true):
+            return "warmup, locked"
+        case (true, false):
+            return "warmup"
+        case (false, true):
+            return "locked"
+        case (false, false):
+            return "working"
+        }
+    }
+
+    private func loadDescription(weight: Double?, unit: TemplateLoadUnit, reps: Int?) -> String {
+        let load: String
+        if let weight {
+            load = "\(formattedNumber(weight)) \(unit.shortLabel)"
+        } else if unit == .bodyweight {
+            load = unit.shortLabel
+        } else {
+            load = "-"
+        }
+
+        if let reps {
+            return "\(load) x \(reps)"
+        }
+
+        return load
+    }
+
+    private func formattedNumber(_ value: Double) -> String {
+        if value.rounded() == value {
+            return String(Int(value))
+        }
+
+        return String(value)
     }
 }
 

@@ -256,7 +256,7 @@ struct TemplateTransferServiceTests {
     }
 
     @Test
-    func exportImportRoundTripPreservesMultiComponentExerciseOptionsAndUsesFormatVersionFive() throws {
+    func exportTemplateBundleUsesVersionSixArtifactEnvelope() throws {
         let context = try makeInMemoryContext()
         let repository = TemplateRepository(modelContext: context)
         let service = TemplateTransferService(modelContext: context)
@@ -303,19 +303,357 @@ struct TemplateTransferServiceTests {
             ]
         )
 
-        let exportedData = try service.exportData(templateID: template.id)
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let envelope = try decoder.decode(TemplateTransferEnvelope.self, from: exportedData)
-        #expect(envelope.formatVersion == 5)
-        #expect(envelope.template.exercises.first?.components?.map(\.exerciseNameSnapshot) == ["Reverse Curl", "Wrist Curl"])
+        let exportedData = try service.exportData(templateID: template.id, format: .bundle)
+        let json = try #require(try JSONSerialization.jsonObject(with: exportedData) as? [String: Any])
+        let artifact = try #require(json["artifact"] as? [String: Any])
+        let exportedTemplate = try #require(artifact["template"] as? [String: Any])
+        let exportedExercises = try #require(exportedTemplate["exercises"] as? [[String: Any]])
+        let firstExercise = try #require(exportedExercises.first)
+        let exportedComponents = try #require(firstExercise["components"] as? [[String: Any]])
 
-        let importedTemplate = try service.importTemplate(from: exportedData)
+        #expect(json["formatVersion"] as? Int == 6)
+        #expect(artifact["kind"] as? String == "template")
+        #expect(exportedComponents.map { $0["exerciseNameSnapshot"] as? String } == ["Reverse Curl", "Wrist Curl"])
+
+        let importResult = try service.importTransfer(from: exportedData)
+        let importedTemplateID: UUID
+        switch importResult {
+        case .template(let templateID):
+            importedTemplateID = templateID
+        case .folder:
+            Issue.record("Expected template import result")
+            return
+        }
+
+        let importedTemplate = try #require(try repository.template(id: importedTemplateID))
         let importedExercise = try #require(try repository.exercises(in: importedTemplate.id).first)
         let importedComponents = try repository.components(for: importedExercise.id)
 
         #expect(importedExercise.exerciseNameSnapshot == "Reverse Curl")
         #expect(importedComponents.map(\.catalogExerciseUUID) == [reverseCurl.remoteUUID, wristCurl.remoteUUID])
+    }
+
+    @Test
+    func exportFolderBundleAndImportTransferPreservesFolderStructure() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+        let service = TemplateTransferService(modelContext: context)
+
+        try repository.createFolder(name: "Push")
+        let sourceFolder = try #require(try repository.folders().first(where: { $0.name == "Push" }))
+
+        let primaryTemplate = try repository.createTemplate(
+            folderID: sourceFolder.id,
+            name: "Bench Day",
+            notes: "Heavy press"
+        )
+        try repository.setExercises(
+            templateID: primaryTemplate.id,
+            drafts: [
+                TemplateExerciseDraft(
+                    catalogExerciseUUID: "folder-bench",
+                    exerciseNameSnapshot: "WGJ Folder Bench",
+                    categorySnapshot: "WGJ Folder Chest",
+                    muscleSummarySnapshot: "WGJ Folder Chest",
+                    targetRepMin: 5,
+                    targetRepMax: 8,
+                    restSeconds: 150,
+                    setDrafts: [
+                        TemplateExerciseSetDraft(
+                            targetReps: 5,
+                            targetWeight: 110,
+                            loadUnit: .kg,
+                            restSeconds: 150
+                        ),
+                    ]
+                ),
+            ]
+        )
+
+        let secondaryTemplate = try repository.createTemplate(
+            folderID: sourceFolder.id,
+            name: "Row Day",
+            notes: "Lats and upper back"
+        )
+        try repository.setExercises(
+            templateID: secondaryTemplate.id,
+            drafts: [
+                TemplateExerciseDraft(
+                    catalogExerciseUUID: "folder-row",
+                    exerciseNameSnapshot: "WGJ Folder Row",
+                    categorySnapshot: "WGJ Folder Back",
+                    muscleSummarySnapshot: "WGJ Folder Lats",
+                    targetRepMin: 8,
+                    targetRepMax: 10,
+                    restSeconds: 120,
+                    setDrafts: [
+                        TemplateExerciseSetDraft(
+                            targetReps: 8,
+                            targetWeight: 80,
+                            loadUnit: .kg,
+                            restSeconds: 120
+                        ),
+                    ]
+                ),
+            ]
+        )
+
+        let exportedData = try service.exportData(folderID: sourceFolder.id, format: .bundle)
+        let importResult = try service.importTransfer(from: exportedData)
+        let importedFolderID: UUID
+        switch importResult {
+        case .folder(let folderID):
+            importedFolderID = folderID
+        case .template:
+            Issue.record("Expected folder import result")
+            return
+        }
+
+        let importedFolder = try #require(try repository.folders().first(where: { $0.id == importedFolderID }))
+        let importedTemplates = try repository.templates(in: importedFolder.id)
+
+        #expect(importedFolder.name == "Push Copy")
+        #expect(importedTemplates.map(\.name) == ["Bench Day", "Row Day"])
+        #expect(importedTemplates.map(\.notes) == ["Heavy press", "Lats and upper back"])
+        #expect(try repository.exercises(in: importedTemplates[0].id).map(\.exerciseNameSnapshot) == ["WGJ Folder Bench"])
+        #expect(try repository.exercises(in: importedTemplates[1].id).map(\.exerciseNameSnapshot) == ["WGJ Folder Row"])
+    }
+
+    @Test
+    func importFolderKeepsAddingCopySuffixesForRepeatedImports() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+        let service = TemplateTransferService(modelContext: context)
+
+        try repository.createFolder(name: "Push")
+        let sourceFolder = try #require(try repository.folders().first(where: { $0.name == "Push" }))
+        _ = try repository.createTemplate(folderID: sourceFolder.id, name: "Bench Day", notes: "")
+
+        let exportedData = try service.exportData(folderID: sourceFolder.id, format: .bundle)
+        let firstImport = try service.importTransfer(from: exportedData)
+        let secondImport = try service.importTransfer(from: exportedData)
+
+        let firstFolderID: UUID
+        switch firstImport {
+        case .folder(let folderID):
+            firstFolderID = folderID
+        case .template:
+            Issue.record("Expected folder import result")
+            return
+        }
+
+        let secondFolderID: UUID
+        switch secondImport {
+        case .folder(let folderID):
+            secondFolderID = folderID
+        case .template:
+            Issue.record("Expected folder import result")
+            return
+        }
+
+        let importedFolders = try repository.folders()
+            .filter { [$0.id].contains(firstFolderID) || [$0.id].contains(secondFolderID) }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+
+        #expect(importedFolders.map(\.name) == ["Push Copy", "Push Copy 2"])
+    }
+
+    @Test
+    func exportTemplateAsJsonRoundTripsThroughTransferImport() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+        let service = TemplateTransferService(modelContext: context)
+
+        let template = try repository.createTemplate(name: "JSON Push", notes: "Machine readable")
+        try repository.setExercises(
+            templateID: template.id,
+            drafts: [
+                TemplateExerciseDraft(
+                    catalogExerciseUUID: "json-bench",
+                    exerciseNameSnapshot: "WGJ JSON Bench",
+                    categorySnapshot: "WGJ JSON Chest",
+                    muscleSummarySnapshot: "WGJ JSON Chest",
+                    targetRepMin: 6,
+                    targetRepMax: 8,
+                    restSeconds: 120,
+                    setDrafts: [
+                        TemplateExerciseSetDraft(
+                            targetReps: 6,
+                            targetWeight: 100,
+                            loadUnit: .kg,
+                            restSeconds: 120
+                        ),
+                    ]
+                ),
+            ]
+        )
+
+        let exportedData = try service.exportData(templateID: template.id, format: .json)
+        let importResult = try service.importTransfer(from: exportedData)
+        let importedTemplateID: UUID
+        switch importResult {
+        case .template(let templateID):
+            importedTemplateID = templateID
+        case .folder:
+            Issue.record("Expected template import result")
+            return
+        }
+
+        let importedTemplate = try #require(try repository.template(id: importedTemplateID))
+        #expect(importedTemplate.name == "JSON Push Copy")
+        #expect(try repository.exercises(in: importedTemplate.id).map(\.exerciseNameSnapshot) == ["WGJ JSON Bench"])
+    }
+
+    @Test
+    func exportTemplateAsTextIncludesHumanReadableStructure() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+        let service = TemplateTransferService(modelContext: context)
+
+        let template = try repository.createTemplate(name: "Readable Push", notes: "Use a controlled eccentric.")
+        try repository.setCardioBlocks(
+            templateID: template.id,
+            drafts: [
+                TemplateCardioBlockDraft(
+                    phase: .preWorkout,
+                    catalogExerciseUUID: "readable-bike",
+                    exerciseNameSnapshot: "Bike",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Warmup",
+                    targetDurationSeconds: 300
+                ),
+            ]
+        )
+        try repository.setExercises(
+            templateID: template.id,
+            drafts: [
+                TemplateExerciseDraft(
+                    catalogExerciseUUID: "readable-bench",
+                    exerciseNameSnapshot: "Bench Press",
+                    categorySnapshot: "Chest",
+                    muscleSummarySnapshot: "Chest",
+                    notes: "Pause on the chest.",
+                    targetRepMin: 6,
+                    targetRepMax: 8,
+                    restSeconds: 150,
+                    setDrafts: [
+                        TemplateExerciseSetDraft(
+                            targetReps: 8,
+                            targetWeight: 100,
+                            loadUnit: .kg,
+                            restSeconds: 150,
+                            isWarmup: true
+                        ),
+                        TemplateExerciseSetDraft(
+                            targetReps: 6,
+                            targetWeight: 110,
+                            loadUnit: .kg,
+                            restSeconds: 150,
+                            isLocked: true,
+                            dropStages: [
+                                TemplateExerciseDropStageDraft(targetReps: 8, targetWeight: 90, loadUnit: .kg),
+                            ]
+                        ),
+                    ],
+                    components: [
+                        TemplateExerciseComponentDraft(
+                            catalogExerciseUUID: "readable-bench",
+                            exerciseNameSnapshot: "Bench Press",
+                            categorySnapshot: "Chest",
+                            muscleSummarySnapshot: "Chest"
+                        ),
+                        TemplateExerciseComponentDraft(
+                            catalogExerciseUUID: "readable-incline",
+                            exerciseNameSnapshot: "Incline Press",
+                            categorySnapshot: "Chest",
+                            muscleSummarySnapshot: "Upper Chest"
+                        ),
+                    ],
+                    superset: ExerciseSupersetMembershipDraft(
+                        groupID: UUID(uuidString: "00000000-0000-0000-0000-000000000090")!,
+                        position: .first,
+                        roundRestSeconds: 90
+                    )
+                ),
+                TemplateExerciseDraft(
+                    catalogExerciseUUID: "readable-row",
+                    exerciseNameSnapshot: "Chest Supported Row",
+                    categorySnapshot: "Back",
+                    muscleSummarySnapshot: "Upper Back",
+                    targetRepMin: 8,
+                    targetRepMax: 10,
+                    restSeconds: 90,
+                    setDrafts: [
+                        TemplateExerciseSetDraft(
+                            targetReps: 10,
+                            targetWeight: 60,
+                            loadUnit: .kg,
+                            restSeconds: 90
+                        ),
+                    ],
+                    superset: ExerciseSupersetMembershipDraft(
+                        groupID: UUID(uuidString: "00000000-0000-0000-0000-000000000090")!,
+                        position: .second,
+                        roundRestSeconds: 90
+                    )
+                ),
+            ]
+        )
+
+        let exportedData = try service.exportData(templateID: template.id, format: .text)
+        let text = try #require(String(data: exportedData, encoding: .utf8))
+
+        #expect(text.contains("Template: Readable Push"))
+        #expect(text.contains("Notes: Use a controlled eccentric."))
+        #expect(text.contains("Pre-workout cardio"))
+        #expect(text.contains("Bike"))
+        #expect(text.contains("Exercise 1: Bench Press"))
+        #expect(text.contains("Components: Bench Press, Incline Press"))
+        #expect(text.contains("Superset: first, round rest 90s"))
+        #expect(text.contains("Set 1: warmup"))
+        #expect(text.contains("Set 2: locked"))
+        #expect(text.contains("Drop set 1: 90 kg x 8"))
+    }
+
+    @Test
+    func exportFolderAsTextIncludesFolderAndTemplateSections() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+        let service = TemplateTransferService(modelContext: context)
+
+        try repository.createFolder(name: "Legs")
+        let folder = try #require(try repository.folders().first(where: { $0.name == "Legs" }))
+        _ = try repository.createTemplate(folderID: folder.id, name: "Squat Day", notes: "Heavy squats first.")
+        _ = try repository.createTemplate(folderID: folder.id, name: "Hinge Day", notes: "Posterior chain.")
+
+        let exportedData = try service.exportData(folderID: folder.id, format: .text)
+        let text = try #require(String(data: exportedData, encoding: .utf8))
+
+        #expect(text.contains("Folder: Legs"))
+        #expect(text.contains("Template 1: Squat Day"))
+        #expect(text.contains("Template 2: Hinge Day"))
+    }
+
+    @Test
+    func writeExportFilesUseRequestedExtensions() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+        let service = TemplateTransferService(modelContext: context)
+
+        try repository.createFolder(name: "Export Targets")
+        let folder = try #require(try repository.folders().first(where: { $0.name == "Export Targets" }))
+        let template = try repository.createTemplate(folderID: folder.id, name: "Push", notes: "")
+
+        let jsonFileURL = try service.writeExportFile(templateID: template.id, format: .json)
+        let textFileURL = try service.writeExportFile(folderID: folder.id, format: .text)
+
+        defer {
+            try? FileManager.default.removeItem(at: jsonFileURL)
+            try? FileManager.default.removeItem(at: textFileURL)
+        }
+
+        #expect(jsonFileURL.pathExtension == "json")
+        #expect(textFileURL.pathExtension == "txt")
     }
 
     @Test
@@ -780,6 +1118,58 @@ struct TemplateTransferServiceTests {
         #expect(try repository.cardioBlocks(templateID: importedTemplate.id).map(\.phase) == [.preWorkout])
         #expect(importedComponents.count == 1)
         #expect(importedComponents.first?.exerciseNameSnapshot == "Seated Calf Raise")
+    }
+
+    @Test
+    func importSupportsLegacyFormatVersionFiveWithoutArtifactKey() throws {
+        let context = try makeInMemoryContext()
+        let service = TemplateTransferService(modelContext: context)
+        let repository = TemplateRepository(modelContext: context)
+        let legacyPayload: [String: Any] = [
+            "formatVersion": 5,
+            "exportedAt": ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: 0)),
+            "template": [
+                "name": "Legacy V5 Push",
+                "notes": "Pre-artifact envelope",
+                "exercises": [
+                    [
+                        "catalogExerciseUUID": "legacy-v5-bench",
+                        "exerciseNameSnapshot": "WGJ Legacy Bench",
+                        "categorySnapshot": "WGJ Legacy Chest",
+                        "muscleSummarySnapshot": "WGJ Legacy Chest",
+                        "restSeconds": 120,
+                        "sets": [
+                            [
+                                "targetReps": 6,
+                                "targetWeight": 100,
+                                "loadUnit": "kg",
+                                "restSeconds": 120,
+                                "isWarmup": false,
+                                "isLocked": false,
+                                "dropStages": [],
+                            ],
+                        ],
+                        "components": [
+                            [
+                                "catalogExerciseUUID": "legacy-v5-bench",
+                                "exerciseNameSnapshot": "WGJ Legacy Bench",
+                                "categorySnapshot": "WGJ Legacy Chest",
+                                "muscleSummarySnapshot": "WGJ Legacy Chest",
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ]
+        let legacyData = try JSONSerialization.data(withJSONObject: legacyPayload, options: [])
+
+        let importedTemplate = try service.importTemplate(from: legacyData)
+        let importedExercise = try #require(try repository.exercises(in: importedTemplate.id).first)
+        let importedComponents = try repository.components(for: importedExercise.id)
+
+        #expect(importedTemplate.name == "Legacy V5 Push")
+        #expect(importedExercise.exerciseNameSnapshot == "WGJ Legacy Bench")
+        #expect(importedComponents.map(\.exerciseNameSnapshot) == ["WGJ Legacy Bench"])
     }
 
     @Test

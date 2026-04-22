@@ -35,6 +35,15 @@ struct TemplateFileOpenStateTests {
     }
 
     @Test
+    func enqueueIfSupportedAcceptsJsonFiles() {
+        let state = TemplateFileOpenState()
+        let jsonFileURL = URL(fileURLWithPath: "/tmp/template.json")
+
+        #expect(state.enqueueIfSupported(url: jsonFileURL))
+        #expect(state.pendingRequest?.fileURL == jsonFileURL)
+    }
+
+    @Test
     func routePendingRequestWaitsUntilMainPhase() {
         let state = TemplateFileOpenState()
         let tabState = AppTabState()

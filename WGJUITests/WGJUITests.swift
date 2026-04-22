@@ -69,11 +69,19 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
-    func testTemplateImportAndExportControlsSmoke() throws {
+    func testTemplateAndFolderExportControlsSmoke() throws {
         let app = launchApp()
 
         tapTab("Start Workout", in: app)
         XCTAssertTrue(identifiedElement("start-workout-import-template-button", in: app).waitForExistence(timeout: 5))
+
+        app.buttons["start-workout-new-folder-button"].tap()
+        let folderNameField = app.textFields["template-folder-name-field"]
+        XCTAssertTrue(folderNameField.waitForExistence(timeout: 5))
+        folderNameField.tap()
+        folderNameField.typeText("Export Folder")
+        app.buttons["template-folder-save-button"].tap()
+        XCTAssertTrue(app.staticTexts["Export Folder"].waitForExistence(timeout: 5))
 
         app.buttons["start-workout-new-template-button"].tap()
         let templateNameField = app.textFields["template-editor-name-field"]
@@ -88,6 +96,23 @@ final class WGJUITests: XCTestCase {
         actionsButton.tap()
 
         XCTAssertTrue(identifiedElement("start-workout-template-export-button", in: app).waitForExistence(timeout: 5))
+        identifiedElement("start-workout-template-export-button", in: app).tap()
+        XCTAssertTrue(app.buttons["WGJ Template File"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["JSON"].exists)
+        XCTAssertTrue(app.buttons["Text"].exists)
+        app.buttons["Cancel"].tap()
+
+        let folderActionsButton = identifiedElement("start-workout-folder-actions-button", in: app)
+        XCTAssertTrue(folderActionsButton.waitForExistence(timeout: 5))
+        folderActionsButton.tap()
+
+        let folderExportButton = identifiedElement("start-workout-folder-export-button", in: app)
+        XCTAssertTrue(folderExportButton.waitForExistence(timeout: 5))
+        folderExportButton.tap()
+
+        XCTAssertTrue(app.buttons["WGJ Template File"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["JSON"].exists)
+        XCTAssertTrue(app.buttons["Text"].exists)
     }
 
     @MainActor
@@ -331,6 +356,24 @@ final class WGJUITests: XCTestCase {
 
         app.buttons["Cancel"].tap()
         XCTAssertTrue(app.staticTexts["Launch Hook Template"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testJsonTemplateFileLaunchHookImportsAndShowsPreview() throws {
+        let app = launchApp(launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "JSON Launch Hook Template",
+                notes: "Imported from JSON launch hook"
+            ),
+            "UITEST_TEMPLATE_OPEN_FILE_EXTENSION": "json",
+        ])
+
+        let previewSheet = identifiedElement("template-preview-sheet", in: app)
+        XCTAssertTrue(previewSheet.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["JSON Launch Hook Template"].waitForExistence(timeout: 5))
+
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(app.staticTexts["JSON Launch Hook Template"].waitForExistence(timeout: 5))
     }
 
     @MainActor

@@ -305,13 +305,15 @@ nonisolated final class TemplateRepository {
         return try modelContext.fetch(descriptor)
     }
 
-    func createFolder(name: String) throws {
+    @discardableResult
+    func createFolder(name: String) throws -> TemplateFolder {
         let cleaned = try ReviewModerationService.validateUserInput(name, kind: .folderName)
 
         let existing = try folders()
         let created = TemplateFolder(name: cleaned, sortOrder: (existing.last?.sortOrder ?? -1) + 1)
         modelContext.insert(created)
         try saveUserDataChanges()
+        return created
     }
 
     func renameFolder(id: UUID, name: String) throws {

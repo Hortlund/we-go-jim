@@ -2,6 +2,7 @@ import SwiftData
 import SwiftUI
 
 struct FolderDetailView: View {
+    @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(\.modelContext) private var modelContext
 
     private let folderID: UUID
@@ -21,11 +22,17 @@ struct FolderDetailView: View {
 
     @State private var templateEditorContext: FolderTemplateEditorContext?
     @State private var showingAddExistingTemplate = false
+    @State private var exportRequest: TemplateTransferExportRequest?
+    @State private var shareSheetItem: TemplateTransferShareSheetItem?
     @State private var errorMessage = ""
     @State private var showingError = false
 
     private var repository: TemplateRepository {
         TemplateRepository(modelContext: modelContext)
+    }
+
+    private var templateTransferService: TemplateTransferService {
+        TemplateTransferService(modelContext: modelContext)
     }
 
     init(folderID: UUID, folderName: String) {
@@ -66,10 +73,42 @@ struct FolderDetailView: View {
         .sheet(isPresented: $showingAddExistingTemplate) {
             addExistingSheet
         }
+        .sheet(item: $shareSheetItem) { sheet in
+            WGJActivityShareSheet(activityItems: [sheet.fileURL]) {
+                cleanupExportedFile(at: sheet.fileURL)
+            }
+        }
         .alert("Template Error", isPresented: $showingError) {
             Button("OK", role: .cancel) { }
         } message: {
             Text(errorMessage)
+        }
+        .confirmationDialog(
+            "Export / Share",
+            isPresented: Binding(
+                get: { exportRequest != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        exportRequest = nil
+                    }
+                }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("WGJ Template File") {
+                exportFolder(format: .bundle)
+            }
+            Button("JSON") {
+                exportFolder(format: .json)
+            }
+            Button("Text") {
+                exportFolder(format: .text)
+            }
+            Button("Cancel", role: .cancel) {
+                exportRequest = nil
+            }
+        } message: {
+            Text("Choose a format to export or share this folder.")
         }
     }
 
@@ -90,12 +129,14 @@ struct FolderDetailView: View {
             HStack(spacing: 10) {
                 addTemplateButton
                 addExistingButton
+                exportButton
                 Spacer(minLength: 0)
             }
 
             VStack(alignment: .leading, spacing: 10) {
                 addTemplateButton
                 addExistingButton
+                exportButton
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -119,6 +160,17 @@ struct FolderDetailView: View {
                 .wgjSingleLineText(scale: 0.82)
         }
         .buttonStyle(WGJGhostButtonStyle())
+    }
+
+    private var exportButton: some View {
+        Button {
+            exportRequest = TemplateTransferExportRequest(target: .folder(folderID))
+        } label: {
+            Label("Export", systemImage: "square.and.arrow.up")
+                .wgjSingleLineText(scale: 0.82)
+        }
+        .buttonStyle(WGJGhostButtonStyle())
+        .accessibilityIdentifier("folder-detail-export-button")
     }
 
     private func templateCard(_ template: WorkoutTemplate) -> some View {
@@ -293,6 +345,37 @@ struct FolderDetailView: View {
     private func showError(_ error: Error) {
         errorMessage = String(describing: error)
         showingError = true
+    }
+
+    private func exportFolder(format: TemplateTransferExportFormat) {
+        guard exportRequest != nil else {
+            return
+        }
+        exportRequest = nil
+
+        Task { @MainActor in
+            do {
+                let fileURL: URL
+                if let appBackgroundStore {
+                    fileURL = try await appBackgroundStore.performWrite("folder-detail.folder.export") { backgroundContext in
+                        try TemplateTransferService(modelContext: backgroundContext)
+                            .writeExportFile(folderID: folderID, format: format)
+                    }
+                } else {
+                    fileURL = try templateTransferService.writeExportFile(folderID: folderID, format: format)
+                }
+
+                shareSheetItem = TemplateTransferShareSheetItem(fileURL: fileURL)
+            } catch {
+                showError(error)
+            }
+        }
+    }
+
+    private func cleanupExportedFile(at fileURL: URL) {
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            try? FileManager.default.removeItem(at: fileURL)
+        }
     }
 }
 

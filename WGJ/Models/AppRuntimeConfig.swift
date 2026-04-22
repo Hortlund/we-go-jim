@@ -464,9 +464,9 @@ final class TemplateFileOpenState {
             return false
         }
 
-        return url.pathExtension.localizedCaseInsensitiveCompare(
-            TemplateTransferFileFormat.filenameExtension
-        ) == .orderedSame
+        return TemplateTransferFileFormat.supportedImportFilenameExtensions.contains(
+            url.pathExtension.lowercased()
+        )
     }
 }
 

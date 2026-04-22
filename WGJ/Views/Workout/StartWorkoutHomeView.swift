@@ -23,7 +23,8 @@ struct StartWorkoutHomeView: View {
     @State private var showingActiveWorkoutConflict = false
     @State private var pendingFolderDeletion: StartWorkoutPendingFolderDeletion?
     @State private var showingTemplateImporter = false
-    @State private var templateShareSheet: StartWorkoutTemplateShareSheet?
+    @State private var exportRequest: TemplateTransferExportRequest?
+    @State private var shareSheetItem: TemplateTransferShareSheetItem?
     @State private var directOpenImportRequestID: UUID?
     @State private var hasLoadedSnapshot = false
     @State private var needsExplicitRefresh = true
@@ -86,11 +87,11 @@ struct StartWorkoutHomeView: View {
                     editTemplate(templateID: preview.templateID, folderID: preview.folderID)
                 },
                 onExport: {
-                    exportTemplate(templateID: preview.templateID)
+                    presentExportOptions(for: .template(preview.templateID))
                 }
             )
         }
-        .sheet(item: $templateShareSheet) { sheet in
+        .sheet(item: $shareSheetItem) { sheet in
             WGJActivityShareSheet(activityItems: [sheet.fileURL]) {
                 cleanupExportedFile(at: sheet.fileURL)
             }
@@ -115,7 +116,7 @@ struct StartWorkoutHomeView: View {
         }
         .fileImporter(
             isPresented: $showingTemplateImporter,
-            allowedContentTypes: [.wgjTemplate]
+            allowedContentTypes: [.wgjTemplate, .json]
         ) { result in
             handleTemplateImport(result)
         }
@@ -150,6 +151,33 @@ struct StartWorkoutHomeView: View {
             }
         } message: { folder in
             Text(folderDeletionMessage(for: folder))
+        }
+        .confirmationDialog(
+            "Export / Share",
+            isPresented: Binding(
+                get: { exportRequest != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        exportRequest = nil
+                    }
+                }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("WGJ Template File") {
+                exportSelectedTransfer(format: .bundle)
+            }
+            Button("JSON") {
+                exportSelectedTransfer(format: .json)
+            }
+            Button("Text") {
+                exportSelectedTransfer(format: .text)
+            }
+            Button("Cancel", role: .cancel) {
+                exportRequest = nil
+            }
+        } message: {
+            Text("Choose a format to export or share this item.")
         }
         .task(id: isTabActive) {
             guard isTabActive else { return }
@@ -363,7 +391,7 @@ struct StartWorkoutHomeView: View {
                     .accessibilityIdentifier("start-workout-template-edit-menu-button")
 
                     Button {
-                        exportTemplate(templateID: template.id)
+                        presentExportOptions(for: .template(template.id))
                     } label: {
                         Label("Export / Share", systemImage: "square.and.arrow.up")
                     }
@@ -459,6 +487,13 @@ struct StartWorkoutHomeView: View {
             }
 
             Button {
+                presentExportOptions(for: .folder(folder.id))
+            } label: {
+                Label("Export / Share", systemImage: "square.and.arrow.up")
+            }
+            .accessibilityIdentifier("start-workout-folder-export-button")
+
+            Button {
                 moveFolder(folder.id, by: -1)
             } label: {
                 Label("Move Up", systemImage: "arrow.up")
@@ -480,6 +515,7 @@ struct StartWorkoutHomeView: View {
         } label: {
             StartWorkoutUtilityIcon(systemImage: "ellipsis", tint: WGJTheme.textSecondary)
         }
+        .accessibilityIdentifier("start-workout-folder-actions-button")
     }
 
     private func emptySectionState(_ section: StartWorkoutTemplateSection) -> some View {
@@ -865,7 +901,7 @@ struct StartWorkoutHomeView: View {
     private func handleTemplateImport(_ result: Result<URL, Error>) {
         switch result {
         case .success(let fileURL):
-            importTemplate(from: fileURL)
+            importTransfer(from: fileURL)
         case .failure(let error):
             guard !isUserCancelledImport(error) else {
                 return
@@ -889,10 +925,10 @@ struct StartWorkoutHomeView: View {
             }
         }
 
-        importTemplate(from: pendingRequest.fileURL, clearingPendingRequestID: pendingRequest.requestID)
+        importTransfer(from: pendingRequest.fileURL, clearingPendingRequestID: pendingRequest.requestID)
     }
 
-    private func importTemplate(from fileURL: URL, clearingPendingRequestID requestID: UUID? = nil) {
+    private func importTransfer(from fileURL: URL, clearingPendingRequestID requestID: UUID? = nil) {
         Task { @MainActor in
             defer {
                 if let requestID {
@@ -901,25 +937,22 @@ struct StartWorkoutHomeView: View {
             }
 
             do {
-                let importedTemplateID: UUID
+                let importResult: TemplateTransferImportResult
                 if let appBackgroundStore {
-                    importedTemplateID = try await appBackgroundStore.performWrite("start-workout.template.import") { backgroundContext in
+                    importResult = try await appBackgroundStore.performWrite("start-workout.template.import") { backgroundContext in
                         try TemplateTransferService(modelContext: backgroundContext)
-                            .importTemplate(from: fileURL)
-                            .id
+                            .importTransfer(from: fileURL)
                     }
                 } else {
-                    importedTemplateID = try templateTransferService.importTemplate(from: fileURL).id
+                    importResult = try templateTransferService.importTransfer(from: fileURL)
                 }
 
-                expandedFolderIDs[TemplateRepository.unfiledFolderID] = true
-                persistExpandedFolderState()
                 try controller.reload(modelContext: modelContext)
                 hasLoadedSnapshot = true
                 needsExplicitRefresh = false
                 lastLoadedContentUpdatedAt = currentHomeContentUpdatedAt()
                 lastRefreshAt = .now
-                selectImportedTemplatePreview(templateID: importedTemplateID)
+                applyImportedTransfer(importResult)
             } catch {
                 showError(error)
             }
@@ -958,19 +991,53 @@ struct StartWorkoutHomeView: View {
         selectedTemplatePreview = makeTemplatePreview(for: importedTemplate)
     }
 
-    private func exportTemplate(templateID: UUID) {
+    @MainActor
+    private func applyImportedTransfer(_ result: TemplateTransferImportResult) {
+        switch result {
+        case .template(let templateID):
+            expandedFolderIDs[TemplateRepository.unfiledFolderID] = true
+            persistExpandedFolderState()
+            selectImportedTemplatePreview(templateID: templateID)
+        case .folder(let folderID):
+            expandedFolderIDs[folderID] = true
+            persistExpandedFolderState()
+            selectedTemplatePreview = nil
+        }
+    }
+
+    private func presentExportOptions(for target: TemplateTransferShareTarget) {
+        exportRequest = TemplateTransferExportRequest(target: target)
+    }
+
+    private func exportSelectedTransfer(format: TemplateTransferExportFormat) {
+        guard let request = exportRequest else {
+            return
+        }
+        exportRequest = nil
+
         Task { @MainActor in
             do {
                 let fileURL: URL
                 if let appBackgroundStore {
                     fileURL = try await appBackgroundStore.performWrite("start-workout.template.export") { backgroundContext in
-                        try TemplateTransferService(modelContext: backgroundContext)
-                            .writeExportFile(templateID: templateID)
+                        let transferService = TemplateTransferService(modelContext: backgroundContext)
+
+                        switch request.target {
+                        case .template(let templateID):
+                            return try transferService.writeExportFile(templateID: templateID, format: format)
+                        case .folder(let folderID):
+                            return try transferService.writeExportFile(folderID: folderID, format: format)
+                        }
                     }
                 } else {
-                    fileURL = try templateTransferService.writeExportFile(templateID: templateID)
+                    switch request.target {
+                    case .template(let templateID):
+                        fileURL = try templateTransferService.writeExportFile(templateID: templateID, format: format)
+                    case .folder(let folderID):
+                        fileURL = try templateTransferService.writeExportFile(folderID: folderID, format: format)
+                    }
                 }
-                templateShareSheet = StartWorkoutTemplateShareSheet(fileURL: fileURL)
+                shareSheetItem = TemplateTransferShareSheetItem(fileURL: fileURL)
             } catch {
                 showError(error)
             }
@@ -1177,11 +1244,6 @@ private struct StartWorkoutPendingFolderDeletion: Identifiable {
     let id: UUID
     let name: String
     let templateCount: Int
-}
-
-private struct StartWorkoutTemplateShareSheet: Identifiable {
-    let id = UUID()
-    let fileURL: URL
 }
 
 enum StartWorkoutFolderExpansionPersistence {
