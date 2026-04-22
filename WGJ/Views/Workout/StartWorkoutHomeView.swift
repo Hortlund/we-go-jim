@@ -1321,6 +1321,8 @@ struct StartWorkoutTemplatePreview: Identifiable, Equatable {
         let targetRepMax: Int?
         let restSeconds: Int
         let plannedSetCount: Int
+        let hasDropset: Bool
+        let supersetMembership: ExerciseSupersetMembershipDraft?
 
         init(
             templateExercise: TemplateExercise,
@@ -1354,6 +1356,10 @@ struct StartWorkoutTemplatePreview: Identifiable, Equatable {
             targetRepMin = templateExercise.targetRepMin
             targetRepMax = templateExercise.targetRepMax
             restSeconds = templateExercise.restSeconds
+            hasDropset = (templateExercise.prescribedSets ?? []).contains {
+                !($0.dropStages ?? []).isEmpty
+            }
+            supersetMembership = templateExercise.supersetMembership
 
             let prescribedSetCount = (templateExercise.prescribedSets ?? []).count
             plannedSetCount = prescribedSetCount > 0 ? prescribedSetCount : 3
@@ -1434,6 +1440,13 @@ private struct TemplateStartPreviewSheet: View {
 
     private var orderedExercises: [StartWorkoutTemplatePreview.Exercise] {
         preview.exercises
+    }
+
+    private var exerciseDisplayGroups: [WorkoutExerciseDisplayGroup<StartWorkoutTemplatePreview.Exercise>] {
+        WorkoutExerciseDisplayGrouping.build(
+            items: orderedExercises,
+            membership: { $0.supersetMembership }
+        )
     }
 
     private var totalPlannedSets: Int {
@@ -1517,14 +1530,14 @@ private struct TemplateStartPreviewSheet: View {
                 )
 
                 VStack(spacing: 0) {
-                    ForEach(Array(orderedExercises.enumerated()), id: \.element.id) { index, exercise in
-                        previewExerciseRow(exercise, index: index + 1)
+                    ForEach(Array(exerciseDisplayGroups.enumerated()), id: \.element.id) { index, group in
+                        previewExerciseGroup(group)
 
-                        if index < orderedExercises.count - 1 {
+                        if index < exerciseDisplayGroups.count - 1 {
                             Rectangle()
                                 .fill(WGJTheme.rowDivider.opacity(0.42))
                                 .frame(height: 1)
-                                .padding(.leading, 60)
+                                .padding(.leading, 24)
                         }
                     }
                 }
@@ -1627,9 +1640,34 @@ private struct TemplateStartPreviewSheet: View {
         }
     }
 
-    private func previewExerciseRow(_ exercise: StartWorkoutTemplatePreview.Exercise, index: Int) -> some View {
+    @ViewBuilder
+    private func previewExerciseGroup(
+        _ group: WorkoutExerciseDisplayGroup<StartWorkoutTemplatePreview.Exercise>
+    ) -> some View {
+        switch group {
+        case .single(let exercise, let index):
+            previewExerciseRow(exercise, title: "\(index + 1)")
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+        case .superset(let superset):
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 8) {
+                    structureBadge("Superset", tint: WGJTheme.accentBlue)
+                    structureBadge("Rest after A2 \(formattedRest(superset.roundRestSeconds))", tint: WGJTheme.accentCyan)
+                }
+
+                previewExerciseRow(superset.first, title: SupersetExercisePosition.first.label)
+                previewExerciseRow(superset.second, title: SupersetExercisePosition.second.label)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .accessibilityIdentifier("template-preview-superset-group-\(superset.groupID.uuidString.lowercased())")
+        }
+    }
+
+    private func previewExerciseRow(_ exercise: StartWorkoutTemplatePreview.Exercise, title: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            Text("\(index)")
+            Text(title)
                 .font(.caption.weight(.bold))
                 .foregroundStyle(WGJTheme.accentBlue)
                 .frame(width: 34, height: 34)
@@ -1645,7 +1683,7 @@ private struct TemplateStartPreviewSheet: View {
                             .font(.headline.weight(.semibold))
                             .foregroundStyle(WGJTheme.textPrimary)
                             .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("template-preview-exercise-row-\(index)-name")
+                            .accessibilityIdentifier("template-preview-exercise-row-\(title.lowercased())-name")
 
                         if let descriptor = exercise.descriptor {
                             Text(descriptor)
@@ -1654,6 +1692,8 @@ private struct TemplateStartPreviewSheet: View {
                                 .lineLimit(2)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
+
+                        structureBadgeRow(for: exercise)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -1672,29 +1712,27 @@ private struct TemplateStartPreviewSheet: View {
 
                 if exercise.componentOptionCount > 1 {
                     VStack(alignment: .leading, spacing: 8) {
-                        componentContainerSummary(for: exercise, index: index)
+                        componentContainerSummary(for: exercise, title: title)
 
                         Text("Options: \(exercise.componentNames.joined(separator: ", "))")
                             .font(.caption)
                             .foregroundStyle(WGJTheme.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("template-preview-exercise-row-\(index)-options")
+                            .accessibilityIdentifier("template-preview-exercise-row-\(title.lowercased())-options")
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("template-preview-exercise-row-\(index)")
+        .accessibilityIdentifier("template-preview-exercise-row-\(title.lowercased())")
     }
 
     private func componentContainerSummary(
         for exercise: StartWorkoutTemplatePreview.Exercise,
-        index: Int
+        title: String
     ) -> some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 8) {
@@ -1703,7 +1741,7 @@ private struct TemplateStartPreviewSheet: View {
                     systemImage: "square.stack.3d.up.fill",
                     tint: WGJTheme.accentBlue
                 )
-                .accessibilityIdentifier("template-preview-exercise-row-\(index)-component-summary")
+                .accessibilityIdentifier("template-preview-exercise-row-\(title.lowercased())-component-summary")
 
                 if let lastExerciseName = exercise.lastExerciseName {
                     componentSummaryChip(
@@ -1711,7 +1749,7 @@ private struct TemplateStartPreviewSheet: View {
                         systemImage: "clock.arrow.circlepath",
                         tint: WGJTheme.accentGold
                     )
-                    .accessibilityIdentifier("template-preview-exercise-row-\(index)-component-summary-last")
+                    .accessibilityIdentifier("template-preview-exercise-row-\(title.lowercased())-component-summary-last")
                 }
 
                 if let nextExerciseName = exercise.nextExerciseName {
@@ -1720,7 +1758,7 @@ private struct TemplateStartPreviewSheet: View {
                         systemImage: "arrow.right.circle.fill",
                         tint: WGJTheme.accentCyan
                     )
-                    .accessibilityIdentifier("template-preview-exercise-row-\(index)-component-summary-next")
+                    .accessibilityIdentifier("template-preview-exercise-row-\(title.lowercased())-component-summary-next")
                 }
             }
 
@@ -1730,7 +1768,7 @@ private struct TemplateStartPreviewSheet: View {
                     systemImage: "square.stack.3d.up.fill",
                     tint: WGJTheme.accentBlue
                 )
-                .accessibilityIdentifier("template-preview-exercise-row-\(index)-component-summary")
+                .accessibilityIdentifier("template-preview-exercise-row-\(title.lowercased())-component-summary")
 
                 if let lastExerciseName = exercise.lastExerciseName {
                     componentSummaryChip(
@@ -1738,7 +1776,7 @@ private struct TemplateStartPreviewSheet: View {
                         systemImage: "clock.arrow.circlepath",
                         tint: WGJTheme.accentGold
                     )
-                    .accessibilityIdentifier("template-preview-exercise-row-\(index)-component-summary-last")
+                    .accessibilityIdentifier("template-preview-exercise-row-\(title.lowercased())-component-summary-last")
                 }
 
                 if let nextExerciseName = exercise.nextExerciseName {
@@ -1747,7 +1785,7 @@ private struct TemplateStartPreviewSheet: View {
                         systemImage: "arrow.right.circle.fill",
                         tint: WGJTheme.accentCyan
                     )
-                    .accessibilityIdentifier("template-preview-exercise-row-\(index)-component-summary-next")
+                    .accessibilityIdentifier("template-preview-exercise-row-\(title.lowercased())-component-summary-next")
                 }
             }
         }
@@ -1772,6 +1810,40 @@ private struct TemplateStartPreviewSheet: View {
             )
             .accessibilityElement(children: .combine)
             .accessibilityLabel(title)
+    }
+
+    @ViewBuilder
+    private func structureBadgeRow(for exercise: StartWorkoutTemplatePreview.Exercise) -> some View {
+        let presentation = WorkoutExerciseStructurePresentation(
+            supersetMembership: exercise.supersetMembership,
+            hasDropset: exercise.hasDropset
+        )
+
+        if presentation.isSuperset || presentation.hasDropset {
+            HStack(spacing: 8) {
+                if presentation.isSuperset {
+                    structureBadge("Superset", tint: WGJTheme.accentBlue)
+                }
+                if let position = presentation.supersetPosition {
+                    structureBadge(position.label, tint: WGJTheme.accentCyan)
+                }
+                if presentation.hasDropset {
+                    structureBadge("Dropset", tint: WGJTheme.accentGold)
+                }
+            }
+        }
+    }
+
+    private func structureBadge(_ title: String, tint: Color) -> some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(tint.opacity(0.12))
+            )
     }
 
     private func cardioSection(_ cardioBlock: StartWorkoutTemplatePreview.CardioBlock) -> some View {

@@ -50,6 +50,7 @@ nonisolated struct TemplateExerciseSetDraft: Identifiable, Equatable, Sendable {
     var previousTargetReps: Int?
     var previousTargetWeight: Double?
     var previousLoadUnit: TemplateLoadUnit
+    var dropStages: [TemplateExerciseDropStageDraft]
 
     init(
         id: UUID = UUID(),
@@ -61,7 +62,8 @@ nonisolated struct TemplateExerciseSetDraft: Identifiable, Equatable, Sendable {
         isLocked: Bool = false,
         previousTargetReps: Int? = nil,
         previousTargetWeight: Double? = nil,
-        previousLoadUnit: TemplateLoadUnit = .kg
+        previousLoadUnit: TemplateLoadUnit = .kg,
+        dropStages: [TemplateExerciseDropStageDraft] = []
     ) {
         self.id = id
         self.targetReps = targetReps
@@ -73,6 +75,7 @@ nonisolated struct TemplateExerciseSetDraft: Identifiable, Equatable, Sendable {
         self.previousTargetReps = previousTargetReps
         self.previousTargetWeight = previousTargetWeight
         self.previousLoadUnit = previousLoadUnit
+        self.dropStages = dropStages
     }
 
     nonisolated init(model: TemplateExerciseSet) {
@@ -86,6 +89,9 @@ nonisolated struct TemplateExerciseSetDraft: Identifiable, Equatable, Sendable {
         self.previousTargetReps = model.previousTargetReps
         self.previousTargetWeight = model.previousTargetWeight
         self.previousLoadUnit = model.previousLoadUnit
+        self.dropStages = (model.dropStages ?? [])
+            .sorted { $0.sortOrder < $1.sortOrder }
+            .map(TemplateExerciseDropStageDraft.init(model:))
     }
 }
 
@@ -101,6 +107,7 @@ nonisolated struct TemplateExerciseDraft: Identifiable, Equatable, Sendable {
     var restSeconds: Int
     var setDrafts: [TemplateExerciseSetDraft]
     var components: [TemplateExerciseComponentDraft]
+    var superset: ExerciseSupersetMembershipDraft?
 
     init(
         id: UUID = UUID(),
@@ -113,7 +120,8 @@ nonisolated struct TemplateExerciseDraft: Identifiable, Equatable, Sendable {
         targetRepMax: Int? = nil,
         restSeconds: Int = 120,
         setDrafts: [TemplateExerciseSetDraft] = [],
-        components: [TemplateExerciseComponentDraft] = []
+        components: [TemplateExerciseComponentDraft] = [],
+        superset: ExerciseSupersetMembershipDraft? = nil
     ) {
         let normalizedComponents = Self.normalizedComponents(
             from: components,
@@ -134,6 +142,7 @@ nonisolated struct TemplateExerciseDraft: Identifiable, Equatable, Sendable {
         self.restSeconds = restSeconds
         self.setDrafts = setDrafts
         self.components = normalizedComponents
+        self.superset = superset
     }
 
     nonisolated init(model: TemplateExercise, preferredLoadUnit: TemplateLoadUnit = .kg) {
@@ -157,6 +166,7 @@ nonisolated struct TemplateExerciseDraft: Identifiable, Equatable, Sendable {
         self.targetRepMax = model.targetRepMax
         self.restSeconds = model.restSeconds
         self.components = normalizedComponents
+        self.superset = model.supersetMembership
         let orderedSets = (model.prescribedSets ?? []).sorted { $0.sortOrder < $1.sortOrder }
         if orderedSets.isEmpty {
             self.setDrafts = Self.defaultSetDrafts(loadUnit: preferredLoadUnit)
@@ -175,7 +185,10 @@ nonisolated struct TemplateExerciseDraft: Identifiable, Equatable, Sendable {
                         isLocked: set.isLocked,
                         previousTargetReps: set.previousTargetReps,
                         previousTargetWeight: set.previousTargetWeight,
-                        previousLoadUnit: set.previousLoadUnit
+                        previousLoadUnit: set.previousLoadUnit,
+                        dropStages: (set.dropStages ?? [])
+                            .sorted { $0.sortOrder < $1.sortOrder }
+                            .map(TemplateExerciseDropStageDraft.init(model:))
                     )
                 )
             }
@@ -198,6 +211,7 @@ nonisolated struct TemplateExerciseDraft: Identifiable, Equatable, Sendable {
             loadUnit: TemplateLoadUnit.inferredDefault(fromEquipmentSummary: catalogItem.equipmentSummary)
                 ?? preferredLoadUnit
         )
+        self.superset = nil
     }
 
     static func normalizedComponents(
@@ -478,7 +492,17 @@ nonisolated final class TemplateRepository {
                     loadUnit: usedActual ? set.actualLoadUnit : set.targetLoadUnit,
                     restSeconds: exercise.restSeconds,
                     isWarmup: set.isWarmup,
-                    isLocked: set.isLocked
+                    isLocked: set.isLocked,
+                    dropStages: (set.dropStages ?? [])
+                        .sorted { $0.sortOrder < $1.sortOrder }
+                        .map { stage in
+                            let usedActualStage = stage.actualReps != nil || stage.actualWeight != nil
+                            return TemplateExerciseDropStageDraft(
+                                targetReps: usedActualStage ? stage.actualReps : stage.targetReps,
+                                targetWeight: usedActualStage ? stage.actualWeight : stage.targetWeight,
+                                loadUnit: usedActualStage ? stage.actualLoadUnit : stage.targetLoadUnit
+                            )
+                        }
                 )
             }
 
@@ -499,7 +523,8 @@ nonisolated final class TemplateRepository {
                         categorySnapshot: exercise.categorySnapshot,
                         muscleSummarySnapshot: exercise.muscleSummarySnapshot
                     ),
-                ]
+                ],
+                superset: exercise.supersetMembership
             )
         }
 
@@ -1075,6 +1100,7 @@ nonisolated final class TemplateRepository {
             modelSet.isWarmup = draft.isWarmup
             modelSet.isLocked = draft.isLocked
             modelSet.updatedAt = .now
+            syncDropStageStructure(for: modelSet, desiredDrafts: draft.dropStages)
             updatedSets.append(modelSet)
         }
 
@@ -1129,7 +1155,8 @@ nonisolated final class TemplateRepository {
                     targetRepMax: mutation.targetRepMax,
                     restSeconds: mutation.restSeconds,
                     setDrafts: mutation.setDrafts,
-                    components: mutation.components
+                    components: mutation.components,
+                    superset: mutation.superset
                 )
             }
         )
@@ -1206,6 +1233,15 @@ nonisolated final class TemplateRepository {
         }
 
         template.exercises = updatedExercises
+        syncTemplateSupersetGroups(
+            for: template,
+            exercises: updatedExercises,
+            membershipsByExerciseID: Dictionary(
+                uniqueKeysWithValues: zip(updatedExercises, mutations).compactMap { exercise, mutation in
+                    mutation.superset.map { (exercise.id, $0) }
+                }
+            )
+        )
         syncCardioStructure(
             for: template,
             desiredDrafts: cardioMutations.map { mutation in
@@ -1294,6 +1330,15 @@ nonisolated final class TemplateRepository {
         updatedExercises.removeAll(where: { $0.id == templateExerciseID })
         template.exercises = updatedExercises
         reorder(template: template)
+        syncTemplateSupersetGroups(
+            for: template,
+            exercises: (template.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder },
+            membershipsByExerciseID: Dictionary(
+                uniqueKeysWithValues: (template.exercises ?? []).compactMap { exercise in
+                    exercise.supersetMembership.map { (exercise.id, $0) }
+                }
+            )
+        )
         template.updatedAt = .now
         try saveUserDataChanges()
     }
@@ -1321,6 +1366,15 @@ nonisolated final class TemplateRepository {
         }
 
         template.exercises = ordered
+        syncTemplateSupersetGroups(
+            for: template,
+            exercises: ordered,
+            membershipsByExerciseID: Dictionary(
+                uniqueKeysWithValues: ordered.compactMap { exercise in
+                    exercise.supersetMembership.map { (exercise.id, $0) }
+                }
+            )
+        )
         template.updatedAt = .now
         try saveUserDataChanges()
     }
@@ -1394,6 +1448,15 @@ nonisolated final class TemplateRepository {
             createdExercises.append(exercise)
         }
         template.exercises = createdExercises
+        syncTemplateSupersetGroups(
+            for: template,
+            exercises: createdExercises,
+            membershipsByExerciseID: Dictionary(
+                uniqueKeysWithValues: zip(createdExercises, drafts).compactMap { exercise, draft in
+                    draft.superset.map { (exercise.id, $0) }
+                }
+            )
+        )
 
         template.updatedAt = .now
         try saveUserDataChanges()
@@ -1793,6 +1856,7 @@ nonisolated final class TemplateRepository {
             modelSet.isWarmup = draft.isWarmup
             modelSet.isLocked = draft.isLocked
             modelSet.updatedAt = .now
+            syncDropStageStructure(for: modelSet, desiredDrafts: draft.dropStages)
             updatedSets.append(modelSet)
         }
 
@@ -1801,6 +1865,228 @@ nonisolated final class TemplateRepository {
         }
 
         exercise.prescribedSets = updatedSets
+    }
+
+    private func syncDropStageStructure(
+        for set: TemplateExerciseSet,
+        desiredDrafts: [TemplateExerciseDropStageDraft]
+    ) {
+        let normalizedDrafts = Array(desiredDrafts.prefix(2))
+        let existingStages = (set.dropStages ?? []).sorted { $0.sortOrder < $1.sortOrder }
+        let existingByID = Dictionary(uniqueKeysWithValues: existingStages.map { ($0.id, $0) })
+        let incomingIDs = Set(normalizedDrafts.map(\.id))
+
+        for stage in existingStages where !incomingIDs.contains(stage.id) {
+            modelContext.delete(stage)
+        }
+
+        var updatedStages: [TemplateExerciseDropStage] = []
+        updatedStages.reserveCapacity(normalizedDrafts.count)
+        for (index, draft) in normalizedDrafts.enumerated() {
+            let stage = existingByID[draft.id] ?? TemplateExerciseDropStage(
+                id: draft.id,
+                templateExerciseSetID: set.id,
+                sortOrder: index,
+                targetReps: sanitizedReps(draft.targetReps),
+                targetWeight: sanitizedWeight(draft.targetWeight),
+                loadUnit: draft.loadUnit,
+                templateExerciseSet: set
+            )
+
+            if stage.modelContext == nil {
+                modelContext.insert(stage)
+            }
+
+            stage.templateExerciseSetID = set.id
+            stage.templateExerciseSet = set
+            stage.sortOrder = index
+            stage.targetReps = sanitizedReps(draft.targetReps)
+            stage.targetWeight = sanitizedWeight(draft.targetWeight)
+            stage.loadUnit = draft.loadUnit
+            stage.updatedAt = .now
+            updatedStages.append(stage)
+        }
+
+        set.dropStages = updatedStages
+    }
+
+    private func syncTemplateSupersetGroups(
+        for template: WorkoutTemplate,
+        exercises: [TemplateExercise],
+        membershipsByExerciseID: [UUID: ExerciseSupersetMembershipDraft]
+    ) {
+        let orderedExercises = exercises.sorted { $0.sortOrder < $1.sortOrder }
+        let existingGroups = (template.supersetGroups ?? []).filter { $0.modelContext != nil }
+        let existingGroupsByID = Dictionary(uniqueKeysWithValues: existingGroups.map { ($0.id, $0) })
+        let normalized = normalizedSupersetMemberships(
+            for: orderedExercises,
+            membershipsByExerciseID: membershipsByExerciseID
+        )
+
+        for group in existingGroups where normalized.groupsByID[group.id] == nil {
+            modelContext.delete(group)
+        }
+
+        var updatedGroups: [TemplateSupersetGroup] = []
+        updatedGroups.reserveCapacity(normalized.groupsByID.count)
+        for exercise in orderedExercises {
+            guard let membership = normalized.membershipsByExerciseID[exercise.id] else {
+                clearSupersetMembership(for: exercise)
+                if let standaloneRest = normalized.standaloneRestSecondsByExerciseID[exercise.id] {
+                    applyStandaloneRest(standaloneRest, to: exercise)
+                }
+                continue
+            }
+
+            let spec = normalized.groupsByID[membership.groupID]
+            let group = existingGroupsByID[membership.groupID] ?? TemplateSupersetGroup(
+                id: membership.groupID,
+                templateID: template.id,
+                roundRestSeconds: membership.roundRestSeconds,
+                template: template
+            )
+
+            if group.modelContext == nil {
+                modelContext.insert(group)
+            }
+
+            group.templateID = template.id
+            group.template = template
+            group.roundRestSeconds = spec?.roundRestSeconds ?? membership.roundRestSeconds
+            group.updatedAt = .now
+
+            exercise.supersetGroupID = group.id
+            exercise.supersetPosition = membership.position
+            exercise.supersetGroup = group
+            exercise.updatedAt = .now
+
+            if updatedGroups.contains(where: { $0.id == group.id }) == false {
+                updatedGroups.append(group)
+            }
+        }
+
+        for group in updatedGroups {
+            let members = orderedExercises
+                .filter { $0.supersetGroupID == group.id }
+                .sorted {
+                    ($0.supersetPosition?.sortOrder ?? .max) < ($1.supersetPosition?.sortOrder ?? .max)
+                }
+            group.exercises = members
+        }
+
+        template.supersetGroups = updatedGroups.sorted { lhs, rhs in
+            let lhsOrder = lhs.exercises?
+                .sorted { $0.sortOrder < $1.sortOrder }
+                .first?
+                .sortOrder ?? .max
+            let rhsOrder = rhs.exercises?
+                .sorted { $0.sortOrder < $1.sortOrder }
+                .first?
+                .sortOrder ?? .max
+            if lhsOrder != rhsOrder {
+                return lhsOrder < rhsOrder
+            }
+            return lhs.id.uuidString < rhs.id.uuidString
+        }
+    }
+
+    private func normalizedSupersetMemberships(
+        for exercises: [TemplateExercise],
+        membershipsByExerciseID: [UUID: ExerciseSupersetMembershipDraft]
+    ) -> TemplateSupersetNormalization {
+        var memberships: [UUID: ExerciseSupersetMembershipDraft] = [:]
+        var standaloneRestSecondsByExerciseID: [UUID: Int] = [:]
+        var groupsByID: [UUID: TemplateSupersetGroupSpec] = [:]
+        var duplicateGroupIDs: Set<UUID> = []
+        var index = 0
+
+        while index < exercises.count {
+            let exercise = exercises[index]
+            guard let membership = membershipsByExerciseID[exercise.id] else {
+                index += 1
+                continue
+            }
+
+            guard membership.position == .first else {
+                standaloneRestSecondsByExerciseID[exercise.id] = membership.roundRestSeconds
+                index += 1
+                continue
+            }
+
+            let nextIndex = index + 1
+            guard nextIndex < exercises.count,
+                  let nextMembership = membershipsByExerciseID[exercises[nextIndex].id],
+                  nextMembership.groupID == membership.groupID,
+                  nextMembership.position == .second else {
+                standaloneRestSecondsByExerciseID[exercise.id] = membership.roundRestSeconds
+                index += 1
+                continue
+            }
+
+            if groupsByID[membership.groupID] != nil {
+                duplicateGroupIDs.insert(membership.groupID)
+            } else {
+                let roundRestSeconds = sanitizedRestSeconds(nextMembership.roundRestSeconds)
+                memberships[exercise.id] = ExerciseSupersetMembershipDraft(
+                    groupID: membership.groupID,
+                    position: .first,
+                    roundRestSeconds: roundRestSeconds
+                )
+                memberships[exercises[nextIndex].id] = ExerciseSupersetMembershipDraft(
+                    groupID: membership.groupID,
+                    position: .second,
+                    roundRestSeconds: roundRestSeconds
+                )
+                groupsByID[membership.groupID] = TemplateSupersetGroupSpec(
+                    roundRestSeconds: roundRestSeconds,
+                    exerciseIDs: [exercise.id, exercises[nextIndex].id]
+                )
+            }
+
+            index += 2
+        }
+
+        for duplicateGroupID in duplicateGroupIDs {
+            guard let spec = groupsByID.removeValue(forKey: duplicateGroupID) else { continue }
+            for exerciseID in spec.exerciseIDs {
+                memberships.removeValue(forKey: exerciseID)
+                standaloneRestSecondsByExerciseID[exerciseID] = spec.roundRestSeconds
+            }
+        }
+
+        for exercise in exercises where membershipsByExerciseID[exercise.id] != nil && memberships[exercise.id] == nil {
+            standaloneRestSecondsByExerciseID[exercise.id] = sanitizedRestSeconds(
+                membershipsByExerciseID[exercise.id]?.roundRestSeconds ?? exercise.restSeconds
+            )
+        }
+
+        return TemplateSupersetNormalization(
+            membershipsByExerciseID: memberships,
+            standaloneRestSecondsByExerciseID: standaloneRestSecondsByExerciseID,
+            groupsByID: groupsByID
+        )
+    }
+
+    private func clearSupersetMembership(for exercise: TemplateExercise) {
+        exercise.supersetGroupID = nil
+        exercise.supersetPosition = nil
+        exercise.supersetGroup = nil
+        exercise.updatedAt = .now
+    }
+
+    private func applyStandaloneRest(_ restSeconds: Int, to exercise: TemplateExercise) {
+        let normalizedRest = sanitizedRestSeconds(restSeconds)
+        guard exercise.restSeconds != normalizedRest
+            || (exercise.prescribedSets ?? []).contains(where: { $0.restSeconds != normalizedRest }) else {
+            return
+        }
+
+        exercise.restSeconds = normalizedRest
+        for set in exercise.prescribedSets ?? [] where set.restSeconds != normalizedRest {
+            set.restSeconds = normalizedRest
+            set.updatedAt = .now
+        }
+        exercise.updatedAt = .now
     }
 
     private func templateSyncExerciseMutation(
@@ -1817,7 +2103,8 @@ nonisolated final class TemplateRepository {
             targetRepMax: draft.targetRepMax,
             restSeconds: draft.restSeconds,
             setDrafts: draft.setDrafts,
-            components: draft.components
+            components: draft.components,
+            superset: draft.superset
         )
     }
 
@@ -1851,7 +2138,10 @@ nonisolated final class TemplateRepository {
             loadUnit: draft.loadUnit,
             restSeconds: sanitizedRestSeconds(draft.restSeconds),
             isWarmup: draft.isWarmup,
-            isLocked: draft.isLocked
+            isLocked: draft.isLocked,
+            dropStages: draft.dropStages.enumerated().map { stageIndex, stage in
+                persistenceSignature(for: stage, at: stageIndex)
+            }
         )
     }
 
@@ -1867,7 +2157,39 @@ nonisolated final class TemplateRepository {
             loadUnit: set.loadUnit,
             restSeconds: set.restSeconds,
             isWarmup: set.isWarmup,
-            isLocked: set.isLocked
+            isLocked: set.isLocked,
+            dropStages: (set.dropStages ?? [])
+                .sorted { $0.sortOrder < $1.sortOrder }
+                .enumerated()
+                .map { stageIndex, stage in
+                    persistenceSignature(for: stage, at: stageIndex)
+                }
+        )
+    }
+
+    private func persistenceSignature(
+        for draft: TemplateExerciseDropStageDraft,
+        at index: Int
+    ) -> TemplateExerciseDropStagePersistenceSignature {
+        TemplateExerciseDropStagePersistenceSignature(
+            id: draft.id,
+            sortOrder: index,
+            targetReps: sanitizedReps(draft.targetReps),
+            targetWeight: sanitizedWeight(draft.targetWeight),
+            loadUnit: draft.loadUnit
+        )
+    }
+
+    private func persistenceSignature(
+        for stage: TemplateExerciseDropStage,
+        at index: Int
+    ) -> TemplateExerciseDropStagePersistenceSignature {
+        TemplateExerciseDropStagePersistenceSignature(
+            id: stage.id,
+            sortOrder: index,
+            targetReps: stage.targetReps,
+            targetWeight: stage.targetWeight,
+            loadUnit: stage.loadUnit
         )
     }
 
@@ -1911,4 +2233,24 @@ private struct TemplateExerciseSetPersistenceSignature: Equatable {
     let restSeconds: Int
     let isWarmup: Bool
     let isLocked: Bool
+    let dropStages: [TemplateExerciseDropStagePersistenceSignature]
+}
+
+private struct TemplateExerciseDropStagePersistenceSignature: Equatable {
+    let id: UUID
+    let sortOrder: Int
+    let targetReps: Int?
+    let targetWeight: Double?
+    let loadUnit: TemplateLoadUnit
+}
+
+private struct TemplateSupersetNormalization {
+    let membershipsByExerciseID: [UUID: ExerciseSupersetMembershipDraft]
+    let standaloneRestSecondsByExerciseID: [UUID: Int]
+    let groupsByID: [UUID: TemplateSupersetGroupSpec]
+}
+
+private struct TemplateSupersetGroupSpec {
+    let roundRestSeconds: Int
+    let exerciseIDs: [UUID]
 }

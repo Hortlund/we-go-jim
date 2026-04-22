@@ -158,6 +158,7 @@ nonisolated struct WorkoutTemplateSyncExerciseMutation: Equatable, Sendable {
     let restSeconds: Int
     let setDrafts: [TemplateExerciseSetDraft]
     let components: [TemplateExerciseComponentDraft]
+    let superset: ExerciseSupersetMembershipDraft?
 
     init(
         templateExerciseID: UUID? = nil,
@@ -170,7 +171,8 @@ nonisolated struct WorkoutTemplateSyncExerciseMutation: Equatable, Sendable {
         targetRepMax: Int?,
         restSeconds: Int,
         setDrafts: [TemplateExerciseSetDraft],
-        components: [TemplateExerciseComponentDraft] = []
+        components: [TemplateExerciseComponentDraft] = [],
+        superset: ExerciseSupersetMembershipDraft? = nil
     ) {
         self.templateExerciseID = templateExerciseID
         self.catalogExerciseUUID = catalogExerciseUUID
@@ -183,6 +185,7 @@ nonisolated struct WorkoutTemplateSyncExerciseMutation: Equatable, Sendable {
         self.restSeconds = restSeconds
         self.setDrafts = setDrafts
         self.components = components
+        self.superset = superset
     }
 }
 

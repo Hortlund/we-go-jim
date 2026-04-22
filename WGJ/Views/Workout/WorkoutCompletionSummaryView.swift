@@ -377,6 +377,7 @@ struct WorkoutCompletionExerciseRecap: Identifiable, Equatable {
     let completedSetCount: Int
     let totalSetCount: Int
     let bestSetText: String
+    let structure: WorkoutExerciseStructurePresentation
 }
 
 struct WorkoutCompletionCardioRecap: Identifiable, Equatable {
@@ -447,7 +448,9 @@ enum WorkoutCompletionSnapshotBuilder {
 
     private static func makeExerciseData(_ exercise: WorkoutSessionExercise) -> WorkoutCompletionExerciseData {
         let sets = orderedSessionSets(for: exercise)
-        let completedSets = sets.filter(\.isCompleted)
+        let completedSets = sets.filter {
+            WorkoutSessionSetDraft(model: $0).isCycleCompleted
+        }
 
         return WorkoutCompletionExerciseData(
             completedSetCount: completedSets.count,
@@ -456,7 +459,11 @@ enum WorkoutCompletionSnapshotBuilder {
                 exerciseName: exercise.exerciseNameSnapshot,
                 completedSetCount: completedSets.count,
                 totalSetCount: sets.count,
-                bestSetText: WorkoutMetricsService.bestSetText(for: sets, emptyText: "No working set logged")
+                bestSetText: WorkoutMetricsService.bestSetText(for: sets, emptyText: "No working set logged"),
+                structure: WorkoutExerciseStructurePresentation(
+                    supersetMembership: exercise.supersetMembership,
+                    hasDropset: sets.contains { !($0.dropStages ?? []).isEmpty }
+                )
             )
         )
     }
@@ -648,6 +655,8 @@ private struct WorkoutCompletionExerciseRecapCard: View {
                 )
             }
 
+            structureBadgeRow
+
             VStack(alignment: .leading, spacing: 4) {
                 Text("Best Set")
                     .font(.caption.weight(.bold))
@@ -660,6 +669,39 @@ private struct WorkoutCompletionExerciseRecapCard: View {
         }
         .padding(16)
         .wgjCardContainer(strong: true)
+    }
+
+    @ViewBuilder
+    private var structureBadgeRow: some View {
+        if recap.structure.isSuperset || recap.structure.hasDropset {
+            HStack(spacing: 8) {
+                if recap.structure.isSuperset {
+                    structureBadge("Superset", tint: WGJTheme.accentBlue)
+                }
+                if let position = recap.structure.supersetPosition {
+                    structureBadge(position.label, tint: WGJTheme.accentCyan)
+                }
+                if recap.structure.hasDropset {
+                    structureBadge("Dropset", tint: WGJTheme.accentGold)
+                }
+            }
+        }
+    }
+
+    private func structureBadge(_ title: String, tint: Color) -> some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(tint.opacity(0.12))
+                    .overlay(
+                        Capsule()
+                            .stroke(tint.opacity(0.24), lineWidth: 1)
+                    )
+            )
     }
 }
 

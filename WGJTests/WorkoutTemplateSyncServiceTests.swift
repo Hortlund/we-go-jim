@@ -213,6 +213,106 @@ struct WorkoutTemplateSyncServiceTests {
     }
 
     @Test
+    func previewAndApplyTemplateUpdatePreserveSupersetAndDropsetStructure() throws {
+        let context = try makeInMemoryContext()
+        let templateRepository = TemplateRepository(modelContext: context)
+        let sessionRepository = WorkoutSessionRepository(modelContext: context)
+        let syncService = WorkoutTemplateSyncService(modelContext: context)
+
+        let press = catalogItem(
+            remoteUUID: "sync-superset-press",
+            displayName: "Incline DB Press",
+            categoryName: "Chest",
+            equipmentSummary: "Dumbbells"
+        )
+        let row = catalogItem(
+            remoteUUID: "sync-superset-row",
+            displayName: "Chest Supported Row",
+            categoryName: "Back",
+            equipmentSummary: "Machine"
+        )
+        context.insert(press)
+        context.insert(row)
+
+        let template = try makeTemplate(
+            name: "Push Pull",
+            exercises: [
+                draft(for: press, minReps: 8, maxReps: 10, restSeconds: 60, targetWeight: 28),
+                draft(for: row, minReps: 8, maxReps: 12, restSeconds: 60, targetWeight: 55),
+            ],
+            repository: templateRepository
+        )
+
+        let session = try sessionRepository.createSessionFromTemplate(templateID: template.id)
+        let exercises = try sessionRepository.sessionExercises(sessionID: session.id)
+        let firstExercise = try #require(exercises.first)
+        let secondExercise = try #require(exercises.last)
+        let supersetGroup = WorkoutSessionSupersetGroup(
+            sessionID: session.id,
+            roundRestSeconds: 75,
+            session: session
+        )
+        context.insert(supersetGroup)
+        supersetGroup.exercises = [firstExercise, secondExercise]
+        session.supersetGroups = [supersetGroup]
+        firstExercise.supersetGroupID = supersetGroup.id
+        firstExercise.supersetPosition = .first
+        firstExercise.supersetGroup = supersetGroup
+        secondExercise.supersetGroupID = supersetGroup.id
+        secondExercise.supersetPosition = .second
+        secondExercise.supersetGroup = supersetGroup
+
+        let firstSet = try #require((firstExercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }.first)
+        let firstDropStage = WorkoutSessionDropStage(
+            sessionSetID: firstSet.id,
+            sortOrder: 0,
+            targetReps: 8,
+            targetWeight: 22,
+            targetLoadUnit: .kg,
+            sessionSet: firstSet
+        )
+        let secondDropStage = WorkoutSessionDropStage(
+            sessionSetID: firstSet.id,
+            sortOrder: 1,
+            targetReps: 10,
+            targetWeight: 18,
+            targetLoadUnit: .kg,
+            sessionSet: firstSet
+        )
+        context.insert(firstDropStage)
+        context.insert(secondDropStage)
+        firstSet.dropStages = [firstDropStage, secondDropStage]
+        try context.save()
+
+        try sessionRepository.finishSession(sessionID: session.id)
+
+        let preview = try #require(try syncService.previewTemplateUpdate(forSessionID: session.id))
+        let firstEditedExercise = try #require(preview.editedExercises.first(where: { $0.exerciseName == press.displayName }))
+        let firstMutation = try #require(preview.mutation.exercises.first)
+        let secondMutation = try #require(preview.mutation.exercises.last)
+
+        #expect(firstEditedExercise.changes.contains("Superset pairing added"))
+        #expect(firstEditedExercise.changes.contains("Dropset layout changed"))
+        #expect(firstMutation.superset?.position == .first)
+        #expect(secondMutation.superset?.position == .second)
+        #expect(firstMutation.setDrafts.first?.dropStages.map(\.targetWeight) == [22, 18])
+
+        try syncService.applyTemplateUpdate(preview)
+
+        let updatedExercises = try templateRepository.exercises(in: template.id)
+        let updatedFirstExercise = try #require(updatedExercises.first)
+        let updatedSecondExercise = try #require(updatedExercises.last)
+        let updatedFirstSetDrafts = try templateRepository.setDrafts(for: updatedFirstExercise.id)
+
+        #expect(updatedFirstExercise.supersetPosition == .first)
+        #expect(updatedSecondExercise.supersetPosition == .second)
+        #expect(updatedFirstExercise.supersetGroupID == updatedSecondExercise.supersetGroupID)
+        #expect(updatedFirstExercise.supersetGroup?.roundRestSeconds == 75)
+        #expect(updatedFirstSetDrafts.first?.dropStages.map(\.targetWeight) == [22, 18])
+        #expect(updatedFirstSetDrafts.first?.dropStages.map(\.targetReps) == [8, 10])
+    }
+
+    @Test
     func previewTreatsTemplateSwapAsRemoveAddAndReorder() throws {
         let context = try makeInMemoryContext()
         let templateRepository = TemplateRepository(modelContext: context)
@@ -680,15 +780,21 @@ struct WorkoutTemplateSyncServiceTests {
             TemplateExercise.self,
             TemplateExerciseComponent.self,
             TemplateExerciseSet.self,
+            TemplateSupersetGroup.self,
+            TemplateExerciseDropStage.self,
             ActiveWorkoutDraftSession.self,
             ActiveWorkoutDraftCardioBlock.self,
             ActiveWorkoutDraftExercise.self,
             ActiveWorkoutDraftExerciseComponent.self,
             ActiveWorkoutDraftSet.self,
+            ActiveWorkoutDraftSupersetGroup.self,
+            ActiveWorkoutDraftDropStage.self,
             WorkoutSession.self,
             WorkoutSessionCardioBlock.self,
             WorkoutSessionExercise.self,
             WorkoutSessionSet.self,
+            WorkoutSessionSupersetGroup.self,
+            WorkoutSessionDropStage.self,
             CompletedSetFact.self,
             SocialOutboxItem.self,
         ])

@@ -170,10 +170,9 @@ struct ActiveWorkoutView: View {
                         }
                     }
 
-                    ForEach(Array(sessionExercises.enumerated()), id: \.element.id) { index, exercise in
-                        exerciseRow(
-                            for: exercise,
-                            index: index,
+                    ForEach(exerciseDisplayGroups) { group in
+                        exerciseSection(
+                            for: group,
                             scrollProxy: scrollProxy
                         )
                     }
@@ -422,6 +421,35 @@ struct ActiveWorkoutView: View {
         WorkoutCardioPhase.allCases.filter { cardioBlock(for: $0) == nil }
     }
 
+    @MainActor
+    private var exerciseDisplayGroups: [WorkoutExerciseDisplayGroup<ActiveWorkoutDraftExercise>] {
+        WorkoutExerciseDisplayGrouping.build(
+            items: sessionExercises,
+            membership: { $0.supersetMembership }
+        )
+    }
+
+    @MainActor
+    private var supersetContextByExerciseID: [UUID: ActiveWorkoutSupersetContext] {
+        var contexts: [UUID: ActiveWorkoutSupersetContext] = [:]
+
+        for group in exerciseDisplayGroups {
+            guard case .superset(let superset) = group else { continue }
+            contexts[superset.first.id] = ActiveWorkoutSupersetContext(
+                position: .first,
+                roundRestSeconds: superset.roundRestSeconds,
+                pairedExerciseID: superset.second.id
+            )
+            contexts[superset.second.id] = ActiveWorkoutSupersetContext(
+                position: .second,
+                roundRestSeconds: superset.roundRestSeconds,
+                pairedExerciseID: superset.first.id
+            )
+        }
+
+        return contexts
+    }
+
     private var shouldShowBottomDock: Bool {
         guard !isKeyboardVisible, !isEndingSession, session != nil else {
             return false
@@ -593,6 +621,7 @@ struct ActiveWorkoutView: View {
     private func exerciseRow(
         for exercise: ActiveWorkoutDraftExercise,
         index: Int,
+        displayTitle: String? = nil,
         scrollProxy: ScrollViewProxy
     ) -> some View {
         let exerciseID = exercise.id
@@ -606,7 +635,7 @@ struct ActiveWorkoutView: View {
             exerciseName: exerciseName,
             muscleSummary: exercise.muscleSummarySnapshot,
             category: exercise.categorySnapshot,
-            exerciseIndexTitle: "Exercise \(index + 1)",
+            exerciseIndexTitle: displayTitle ?? "Exercise \(index + 1)",
             targetRepMin: exercise.targetRepMin,
             targetRepMax: exercise.targetRepMax,
             previousPerformanceResolution: resolvedPreviousPerformanceResolution(for: exerciseID),
@@ -645,11 +674,12 @@ struct ActiveWorkoutView: View {
             onSetCompletionChange: { setID, setLabel, restSeconds, isCompleted in
                 if isCompleted {
                     WorkoutFeedbackCenter.shared.setCompleted()
-                    restTimerState.startRestTimer(
-                        seconds: restSeconds,
-                        exerciseName: exerciseName,
+                    handleSetCompletionChange(
+                        sourceID: setID,
                         setLabel: setLabel,
-                        sourceSetID: setID
+                        restSeconds: restSeconds,
+                        exercise: exercise,
+                        scrollProxy: scrollProxy
                     )
                 } else {
                     restTimerState.clearRestTimer(sourceSetID: setID)
@@ -677,6 +707,53 @@ struct ActiveWorkoutView: View {
         )
         .id(ActiveWorkoutScrollTarget.exercise(exerciseID))
         .transition(exerciseCardTransition)
+    }
+
+    @MainActor
+    @ViewBuilder
+    private func exerciseSection(
+        for group: WorkoutExerciseDisplayGroup<ActiveWorkoutDraftExercise>,
+        scrollProxy: ScrollViewProxy
+    ) -> some View {
+        switch group {
+        case .single(let exercise, let index):
+            exerciseRow(
+                for: exercise,
+                index: index,
+                scrollProxy: scrollProxy
+            )
+        case .superset(let superset):
+            VStack(alignment: .leading, spacing: 12) {
+                ActiveWorkoutSupersetHeader(
+                    roundRestSeconds: superset.roundRestSeconds
+                )
+
+                exerciseRow(
+                    for: superset.first,
+                    index: superset.firstIndex,
+                    displayTitle: SupersetExercisePosition.first.label,
+                    scrollProxy: scrollProxy
+                )
+
+                exerciseRow(
+                    for: superset.second,
+                    index: superset.secondIndex,
+                    displayTitle: SupersetExercisePosition.second.label,
+                    scrollProxy: scrollProxy
+                )
+            }
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
+                    .fill(WGJTheme.cardStrong.opacity(0.66))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
+                            .stroke(WGJTheme.accentCyan.opacity(0.18), lineWidth: 1)
+                    )
+            )
+            .accessibilityIdentifier("active-workout-superset-group-\(superset.groupID.uuidString.lowercased())")
+            .transition(exerciseCardTransition)
+        }
     }
 
     @MainActor
@@ -1315,8 +1392,124 @@ struct ActiveWorkoutView: View {
         }
     }
 
+    @MainActor
+    private func handleSetCompletionChange(
+        sourceID: UUID,
+        setLabel: String?,
+        restSeconds: Int,
+        exercise: ActiveWorkoutDraftExercise,
+        scrollProxy: ScrollViewProxy
+    ) {
+        let drafts = resolvedDrafts(for: exercise)
+        guard let source = completionSourceContext(sourceID: sourceID, drafts: drafts) else {
+            startRestTimer(
+                seconds: restSeconds,
+                exerciseName: exercise.exerciseNameSnapshot,
+                setLabel: setLabel,
+                sourceSetID: sourceID
+            )
+            return
+        }
+
+        guard source.completesSetCycle else {
+            restTimerState.clearRestTimer(sourceSetID: sourceID)
+            return
+        }
+
+        if let supersetContext = supersetContextByExerciseID[exercise.id],
+           supersetContext.position == .first,
+           pairedExerciseNeedsCurrentSetCycle(
+                currentSetIndex: source.setIndex,
+                pairedExerciseID: supersetContext.pairedExerciseID
+           )
+        {
+            cardStateController.setExpanded(true, for: supersetContext.pairedExerciseID)
+            scrollToTarget(
+                ActiveWorkoutScrollTarget.exercise(supersetContext.pairedExerciseID),
+                using: scrollProxy
+            )
+            restTimerState.clearRestTimer(sourceSetID: sourceID)
+            return
+        }
+
+        let resolvedRestSeconds: Int
+        if let supersetContext = supersetContextByExerciseID[exercise.id],
+           supersetContext.position == .second {
+            resolvedRestSeconds = supersetContext.roundRestSeconds
+        } else {
+            resolvedRestSeconds = restSeconds
+        }
+
+        startRestTimer(
+            seconds: resolvedRestSeconds,
+            exerciseName: exercise.exerciseNameSnapshot,
+            setLabel: setLabel,
+            sourceSetID: sourceID
+        )
+    }
+
+    @MainActor
+    private func completionSourceContext(
+        sourceID: UUID,
+        drafts: [WorkoutSessionSetDraft]
+    ) -> ActiveWorkoutCompletionSourceContext? {
+        for (setIndex, draft) in drafts.enumerated() {
+            if draft.id == sourceID {
+                return ActiveWorkoutCompletionSourceContext(
+                    setIndex: setIndex,
+                    completesSetCycle: !draft.hasDropset
+                )
+            }
+
+            if let dropStageIndex = draft.dropStages.firstIndex(where: { $0.id == sourceID }) {
+                return ActiveWorkoutCompletionSourceContext(
+                    setIndex: setIndex,
+                    completesSetCycle: dropStageIndex == draft.dropStages.count - 1
+                )
+            }
+        }
+
+        return nil
+    }
+
+    @MainActor
+    private func pairedExerciseNeedsCurrentSetCycle(
+        currentSetIndex: Int,
+        pairedExerciseID: UUID
+    ) -> Bool {
+        guard let pairedExercise = sessionExercises.first(where: { $0.id == pairedExerciseID }) else {
+            return false
+        }
+
+        let pairedDrafts = resolvedDrafts(for: pairedExercise)
+        guard pairedDrafts.indices.contains(currentSetIndex) else {
+            return false
+        }
+
+        return !pairedDrafts[currentSetIndex].isCycleCompleted
+    }
+
+    @MainActor
+    private func startRestTimer(
+        seconds: Int,
+        exerciseName: String,
+        setLabel: String?,
+        sourceSetID: UUID
+    ) {
+        if seconds > 0 {
+            restTimerState.startRestTimer(
+                seconds: seconds,
+                exerciseName: exerciseName,
+                setLabel: setLabel,
+                sourceSetID: sourceSetID
+            )
+        } else {
+            restTimerState.clearRestTimer(sourceSetID: sourceSetID)
+        }
+    }
+
     private func isExerciseCompleted(_ drafts: [WorkoutSessionSetDraft]) -> Bool {
-        !drafts.isEmpty && drafts.allSatisfy(\.isCompleted)
+        !drafts.isEmpty && drafts.allSatisfy(\.isCycleCompleted)
     }
 
     private var isTrainingGuidanceEnabled: Bool {
@@ -3271,6 +3464,59 @@ private struct ActiveWorkoutExerciseSettingsSheet: View {
     }
 }
 
+private struct ActiveWorkoutSupersetContext {
+    let position: SupersetExercisePosition
+    let roundRestSeconds: Int
+    let pairedExerciseID: UUID
+}
+
+private struct ActiveWorkoutCompletionSourceContext {
+    let setIndex: Int
+    let completesSetCycle: Bool
+}
+
+private struct ActiveWorkoutSupersetHeader: View {
+    let roundRestSeconds: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                structureChip("Superset", tint: WGJTheme.accentBlue)
+                structureChip(SupersetExercisePosition.first.label, tint: WGJTheme.accentCyan)
+                structureChip(SupersetExercisePosition.second.label, tint: WGJTheme.accentCyan)
+            }
+
+            Text("Complete A1, move straight into A2, then rest \(formattedRest(roundRestSeconds)).")
+                .font(.caption)
+                .foregroundStyle(WGJTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func structureChip(_ title: String, tint: Color) -> some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(tint.opacity(0.12))
+                    .overlay(
+                        Capsule()
+                            .stroke(tint.opacity(0.24), lineWidth: 1)
+                    )
+            )
+    }
+
+    private func formattedRest(_ seconds: Int) -> String {
+        let mins = max(0, seconds) / 60
+        let secs = max(0, seconds) % 60
+        return String(format: "%d:%02d", mins, secs)
+    }
+}
+
 #Preview {
     NavigationStack {
         ActiveWorkoutView(sessionID: UUID())
@@ -3293,14 +3539,20 @@ private struct ActiveWorkoutExerciseSettingsSheet: View {
         TemplateExercise.self,
         TemplateExerciseComponent.self,
         TemplateExerciseSet.self,
+        TemplateSupersetGroup.self,
+        TemplateExerciseDropStage.self,
         ActiveWorkoutDraftSession.self,
         ActiveWorkoutDraftCardioBlock.self,
         ActiveWorkoutDraftExercise.self,
         ActiveWorkoutDraftExerciseComponent.self,
         ActiveWorkoutDraftSet.self,
+        ActiveWorkoutDraftSupersetGroup.self,
+        ActiveWorkoutDraftDropStage.self,
         WorkoutSession.self,
         WorkoutSessionCardioBlock.self,
         WorkoutSessionExercise.self,
         WorkoutSessionSet.self,
+        WorkoutSessionSupersetGroup.self,
+        WorkoutSessionDropStage.self,
     ], inMemory: true)
 }

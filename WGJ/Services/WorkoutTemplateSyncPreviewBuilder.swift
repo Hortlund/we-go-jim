@@ -226,7 +226,8 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
             targetRepMax: sessionExercise.targetRepMax,
             restSeconds: normalizedRest(sessionExercise.restSeconds),
             setDrafts: mappedSetDrafts(from: sessionExercise),
-            components: componentDrafts
+            components: componentDrafts,
+            superset: sessionExercise.supersetMembership
         )
     }
 
@@ -249,7 +250,17 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
                 loadUnit: sessionSet.targetLoadUnit,
                 restSeconds: normalizedRest(sessionExercise.restSeconds),
                 isWarmup: sessionSet.isWarmup,
-                isLocked: sessionSet.isLocked
+                isLocked: sessionSet.isLocked,
+                dropStages: (sessionSet.dropStages ?? [])
+                    .sorted { $0.sortOrder < $1.sortOrder }
+                    .map { stage in
+                        TemplateExerciseDropStageDraft(
+                            id: stage.id,
+                            targetReps: stage.targetReps,
+                            targetWeight: stage.targetWeight,
+                            loadUnit: stage.targetLoadUnit
+                        )
+                    }
             )
         }
     }
@@ -324,6 +335,27 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
             changes.append("Rest \(formattedRest(templateExercise.restSeconds)) -> \(formattedRest(normalizedSessionRest))")
         }
 
+        if templateExercise.supersetMembership != sessionExercise.supersetMembership {
+            switch (templateExercise.supersetMembership, sessionExercise.supersetMembership) {
+            case (nil, .some):
+                changes.append("Superset pairing added")
+            case (.some, nil):
+                changes.append("Superset pairing removed")
+            case let (.some(templateMembership), .some(sessionMembership)):
+                if templateMembership.position != sessionMembership.position {
+                    changes.append("Superset slot \(templateMembership.position.label) -> \(sessionMembership.position.label)")
+                } else if templateMembership.roundRestSeconds != sessionMembership.roundRestSeconds {
+                    changes.append(
+                        "Superset rest \(formattedRest(templateMembership.roundRestSeconds)) -> \(formattedRest(sessionMembership.roundRestSeconds))"
+                    )
+                } else {
+                    changes.append("Superset pairing updated")
+                }
+            case (nil, nil):
+                break
+            }
+        }
+
         let normalizedTemplateNotes = normalizedExerciseNotes(templateExercise.notes)
         let normalizedSessionNotes = normalizedExerciseNotes(sessionExercise.notes)
         if normalizedTemplateNotes != normalizedSessionNotes {
@@ -358,6 +390,10 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
 
         if templateSetSnapshots.map(\.isLocked) != sessionSetSnapshots.map(\.isLocked) {
             changes.append("Locked sets changed")
+        }
+
+        if templateSetSnapshots.map(\.dropStageIdentity) != sessionSetSnapshots.map(\.dropStageIdentity) {
+            changes.append("Dropset layout changed")
         }
 
         return changes
@@ -555,9 +591,16 @@ nonisolated private struct TemplateOwnedSetSnapshot: Equatable {
         let loadUnit: TemplateLoadUnit
     }
 
+    struct DropStageIdentity: Equatable {
+        let targetReps: Int?
+        let targetWeight: Double?
+        let loadUnit: TemplateLoadUnit
+    }
+
     let targetIdentity: TargetIdentity
     let isWarmup: Bool
     let isLocked: Bool
+    let dropStageIdentity: [DropStageIdentity]
 
     nonisolated init(templateSet: TemplateExerciseSet) {
         self.targetIdentity = TargetIdentity(
@@ -567,6 +610,15 @@ nonisolated private struct TemplateOwnedSetSnapshot: Equatable {
         )
         self.isWarmup = templateSet.isWarmup
         self.isLocked = templateSet.isLocked
+        self.dropStageIdentity = (templateSet.dropStages ?? [])
+            .sorted { $0.sortOrder < $1.sortOrder }
+            .map {
+                DropStageIdentity(
+                    targetReps: $0.targetReps,
+                    targetWeight: $0.targetWeight,
+                    loadUnit: $0.loadUnit
+                )
+            }
     }
 
     nonisolated init(sessionSet: WorkoutSessionSet) {
@@ -577,5 +629,14 @@ nonisolated private struct TemplateOwnedSetSnapshot: Equatable {
         )
         self.isWarmup = sessionSet.isWarmup
         self.isLocked = sessionSet.isLocked
+        self.dropStageIdentity = (sessionSet.dropStages ?? [])
+            .sorted { $0.sortOrder < $1.sortOrder }
+            .map {
+                DropStageIdentity(
+                    targetReps: $0.targetReps,
+                    targetWeight: $0.targetWeight,
+                    loadUnit: $0.targetLoadUnit
+                )
+            }
     }
 }

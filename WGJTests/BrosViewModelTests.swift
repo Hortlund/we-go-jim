@@ -373,6 +373,8 @@ struct BrosViewModelTests {
             ActiveWorkoutDraftExercise.self,
             ActiveWorkoutDraftExerciseComponent.self,
             ActiveWorkoutDraftSet.self,
+            ActiveWorkoutDraftSupersetGroup.self,
+            ActiveWorkoutDraftDropStage.self,
             SocialOutboxItem.self,
         ])
         let configuration = ModelConfiguration(

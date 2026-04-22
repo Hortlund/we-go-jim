@@ -435,6 +435,20 @@ struct TemplateExercisePrescriptionEditor: View {
                             onMoveUp: { moveSetUp(row.index) },
                             onMoveDown: { moveSetDown(row.index) },
                             onSetRestChanged: { updateSetRest($0, at: row.index) },
+                            onAddDropStage: { addDropStage(to: row.index) },
+                            onRemoveDropStage: { stageID in
+                                removeDropStage(stageID, from: row.index)
+                            },
+                            onClearDropStages: { clearDropStages(from: row.index) },
+                            onDropStageRepsChanged: { stageID, value in
+                                updateDropStageRepsText(value, stageID: stageID, setIndex: row.index)
+                            },
+                            onDropStageWeightChanged: { stageID, value in
+                                updateDropStageWeightText(value, stageID: stageID, setIndex: row.index)
+                            },
+                            onDropStageLoadUnitChanged: { stageID, unit in
+                                updateDropStageLoadUnit(unit, stageID: stageID, setIndex: row.index)
+                            },
                             onToggleLock: { toggleLock(at: row.index) },
                             onDelete: { removeSet(at: row.index) }
                         )
@@ -910,6 +924,78 @@ struct TemplateExercisePrescriptionEditor: View {
         )
     }
 
+    private func addDropStage(to index: Int) {
+        guard setDrafts.indices.contains(index) else { return }
+        guard !setDrafts[index].isWarmup, setDrafts[index].dropStages.count < 2 else { return }
+        let sourceStage = setDrafts[index].dropStages.last
+        let sourceReps = sourceStage?.targetReps ?? setDrafts[index].targetReps
+        let sourceWeight = sourceStage?.targetWeight ?? setDrafts[index].targetWeight
+        let sourceLoadUnit = sourceStage?.loadUnit ?? setDrafts[index].loadUnit
+        setDrafts[index].dropStages.append(
+            TemplateExerciseDropStageDraft(
+                targetReps: sourceReps,
+                targetWeight: sourceWeight,
+                loadUnit: sourceLoadUnit
+            )
+        )
+        requestImmediateCommit()
+    }
+
+    private func removeDropStage(_ stageID: UUID, from setIndex: Int) {
+        guard setDrafts.indices.contains(setIndex) else { return }
+        setDrafts[setIndex].dropStages.removeAll { $0.id == stageID }
+        requestImmediateCommit()
+    }
+
+    private func clearDropStages(from index: Int) {
+        guard setDrafts.indices.contains(index), !setDrafts[index].dropStages.isEmpty else { return }
+        setDrafts[index].dropStages = []
+        requestImmediateCommit()
+    }
+
+    private func updateDropStageRepsText(_ newValue: String, stageID: UUID, setIndex: Int) {
+        guard setDrafts.indices.contains(setIndex),
+              let stageIndex = setDrafts[setIndex].dropStages.firstIndex(where: { $0.id == stageID }) else {
+            return
+        }
+        let cleaned = newValue.filter(\.isNumber)
+        let updatedValue = cleaned.isEmpty ? nil : Int(cleaned)
+        guard setDrafts[setIndex].dropStages[stageIndex].targetReps != updatedValue else { return }
+        setDrafts[setIndex].dropStages[stageIndex].targetReps = updatedValue
+        requestImmediateCommit()
+    }
+
+    private func updateDropStageWeightText(_ newValue: String, stageID: UUID, setIndex: Int) {
+        guard setDrafts.indices.contains(setIndex),
+              let stageIndex = setDrafts[setIndex].dropStages.firstIndex(where: { $0.id == stageID }) else {
+            return
+        }
+
+        let normalized = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let updatedValue: Double?
+        if normalized.isEmpty {
+            updatedValue = nil
+        } else if let parsed = WGJFormatters.parseLocalizedDecimal(normalized) {
+            updatedValue = max(0, parsed)
+        } else {
+            updatedValue = setDrafts[setIndex].dropStages[stageIndex].targetWeight
+        }
+
+        guard setDrafts[setIndex].dropStages[stageIndex].targetWeight != updatedValue else { return }
+        setDrafts[setIndex].dropStages[stageIndex].targetWeight = updatedValue
+        requestImmediateCommit()
+    }
+
+    private func updateDropStageLoadUnit(_ loadUnit: TemplateLoadUnit, stageID: UUID, setIndex: Int) {
+        guard setDrafts.indices.contains(setIndex),
+              let stageIndex = setDrafts[setIndex].dropStages.firstIndex(where: { $0.id == stageID }) else {
+            return
+        }
+        guard setDrafts[setIndex].dropStages[stageIndex].loadUnit != loadUnit else { return }
+        setDrafts[setIndex].dropStages[stageIndex].loadUnit = loadUnit
+        requestImmediateCommit()
+    }
+
     private func formattedRest(_ seconds: Int) -> String {
         let mins = max(0, seconds) / 60
         let secs = max(0, seconds) % 60
@@ -1153,6 +1239,12 @@ private struct TemplateExerciseSetCardView: View, Equatable {
     let onMoveUp: () -> Void
     let onMoveDown: () -> Void
     let onSetRestChanged: (Int) -> Void
+    let onAddDropStage: () -> Void
+    let onRemoveDropStage: (UUID) -> Void
+    let onClearDropStages: () -> Void
+    let onDropStageRepsChanged: (UUID, String) -> Void
+    let onDropStageWeightChanged: (UUID, String) -> Void
+    let onDropStageLoadUnitChanged: (UUID, TemplateLoadUnit) -> Void
     let onToggleLock: () -> Void
     let onDelete: () -> Void
 
@@ -1223,6 +1315,10 @@ private struct TemplateExerciseSetCardView: View, Equatable {
                         repsField
                     }
                 }
+            }
+
+            if !set.dropStages.isEmpty {
+                dropStagesSection
             }
         }
         .padding(12)
@@ -1381,6 +1477,29 @@ private struct TemplateExerciseSetCardView: View, Equatable {
                 Label(set.isLocked ? "Unlock set" : "Lock set", systemImage: set.isLocked ? "lock.open" : "lock")
             }
 
+            if !set.isWarmup {
+                if set.dropStages.isEmpty {
+                    Button {
+                        onAddDropStage()
+                    } label: {
+                        Label("Make dropset", systemImage: "arrow.down.to.line")
+                    }
+                } else {
+                    Button {
+                        onAddDropStage()
+                    } label: {
+                        Label("Add drop stage", systemImage: "plus")
+                    }
+                    .disabled(set.dropStages.count >= 2)
+
+                    Button(role: .destructive) {
+                        onClearDropStages()
+                    } label: {
+                        Label("Remove dropset", systemImage: "trash")
+                    }
+                }
+            }
+
             Button(role: .destructive) {
                 onDelete()
             } label: {
@@ -1419,5 +1538,142 @@ private struct TemplateExerciseSetCardView: View, Equatable {
         let mins = max(0, seconds) / 60
         let secs = max(0, seconds) % 60
         return String(format: "%d:%02d", mins, secs)
+    }
+
+    private var dropStagesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Dropset")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(WGJTheme.accentCyan)
+
+                Spacer()
+
+                if set.dropStages.count < 2 {
+                    Button {
+                        onAddDropStage()
+                    } label: {
+                        Label("Add Drop", systemImage: "plus.circle")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(WGJTheme.accentBlue)
+                }
+            }
+
+            ForEach(Array(set.dropStages.enumerated()), id: \.element.id) { stageIndex, stage in
+                TemplateExerciseDropStageCardView(
+                    index: stageIndex,
+                    stage: stage,
+                    onRepsChanged: { onDropStageRepsChanged(stage.id, $0) },
+                    onWeightChanged: { onDropStageWeightChanged(stage.id, $0) },
+                    onLoadUnitChanged: { onDropStageLoadUnitChanged(stage.id, $0) },
+                    onDelete: { onRemoveDropStage(stage.id) }
+                )
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(WGJTheme.accentCyan.opacity(0.08))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(WGJTheme.accentCyan.opacity(0.18), lineWidth: 1)
+                )
+        )
+    }
+}
+
+private struct TemplateExerciseDropStageCardView: View, Equatable {
+    let index: Int
+    let stage: TemplateExerciseDropStageDraft
+    let onRepsChanged: (String) -> Void
+    let onWeightChanged: (String) -> Void
+    let onLoadUnitChanged: (TemplateLoadUnit) -> Void
+    let onDelete: () -> Void
+
+    @State private var repsText: String
+    @State private var weightText: String
+
+    init(
+        index: Int,
+        stage: TemplateExerciseDropStageDraft,
+        onRepsChanged: @escaping (String) -> Void,
+        onWeightChanged: @escaping (String) -> Void,
+        onLoadUnitChanged: @escaping (TemplateLoadUnit) -> Void,
+        onDelete: @escaping () -> Void
+    ) {
+        self.index = index
+        self.stage = stage
+        self.onRepsChanged = onRepsChanged
+        self.onWeightChanged = onWeightChanged
+        self.onLoadUnitChanged = onLoadUnitChanged
+        self.onDelete = onDelete
+        _repsText = State(initialValue: stage.targetReps.map(String.init) ?? "")
+        _weightText = State(initialValue: stage.targetWeight.map(WGJFormatters.decimalString) ?? "")
+    }
+
+    static func == (lhs: TemplateExerciseDropStageCardView, rhs: TemplateExerciseDropStageCardView) -> Bool {
+        lhs.index == rhs.index && lhs.stage == rhs.stage
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Drop \(index + 1)")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(WGJTheme.textPrimary)
+
+                Spacer()
+
+                Button(role: .destructive) {
+                    onDelete()
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(WGJTheme.textSecondary)
+            }
+
+            HStack(spacing: 10) {
+                TextField("Weight", text: $weightText)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.center)
+                    .wgjPillField()
+                    .onChange(of: weightText) { _, newValue in
+                        onWeightChanged(newValue)
+                    }
+
+                WGJActionMenuButton("Drop Load Unit", titleVisibility: .hidden) {
+                    ForEach(TemplateLoadUnit.allCases) { unit in
+                        Button(unit.shortLabel) {
+                            onLoadUnitChanged(unit)
+                        }
+                    }
+                } label: {
+                    Text(stage.loadUnit.shortLabel)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(WGJTheme.accentCyan)
+                }
+
+                TextField("Reps", text: $repsText)
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.center)
+                    .wgjPillField()
+                    .onChange(of: repsText) { _, newValue in
+                        onRepsChanged(newValue)
+                    }
+            }
+        }
+        .onChange(of: stage.targetReps) { _, newValue in
+            let resolved = newValue.map(String.init) ?? ""
+            guard repsText != resolved else { return }
+            repsText = resolved
+        }
+        .onChange(of: stage.targetWeight) { _, newValue in
+            let resolved = newValue.map(WGJFormatters.decimalString) ?? ""
+            guard weightText != resolved else { return }
+            weightText = resolved
+        }
     }
 }

@@ -240,6 +240,97 @@ struct TemplateRepositoryTests {
     }
 
     @Test
+    func setExercisesPersistsSupersetPairsAndDropsetStages() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+
+        let inclinePress = ExerciseCatalogItem(
+            remoteUUID: "template-superset-incline-press",
+            displayName: "Incline DB Press",
+            categoryName: "Chest",
+            equipmentSummary: "Dumbbells",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        let chestSupportedRow = ExerciseCatalogItem(
+            remoteUUID: "template-superset-supported-row",
+            displayName: "Chest Supported Row",
+            categoryName: "Back",
+            equipmentSummary: "Machine",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(inclinePress)
+        context.insert(chestSupportedRow)
+
+        let supersetID = UUID()
+        let template = try repository.createTemplate(name: "Push Pull", notes: "")
+        try repository.setExercises(
+            templateID: template.id,
+            drafts: [
+                TemplateExerciseDraft(
+                    catalogExerciseUUID: inclinePress.remoteUUID,
+                    exerciseNameSnapshot: inclinePress.displayName,
+                    categorySnapshot: inclinePress.categoryName,
+                    muscleSummarySnapshot: inclinePress.primaryMuscleNames,
+                    targetRepMin: 8,
+                    targetRepMax: 10,
+                    restSeconds: 60,
+                    setDrafts: [
+                        TemplateExerciseSetDraft(
+                            targetReps: 10,
+                            targetWeight: 28,
+                            loadUnit: .kg,
+                            restSeconds: 60,
+                            dropStages: [
+                                TemplateExerciseDropStageDraft(targetReps: 8, targetWeight: 22, loadUnit: .kg),
+                                TemplateExerciseDropStageDraft(targetReps: 10, targetWeight: 18, loadUnit: .kg),
+                            ]
+                        ),
+                    ],
+                    superset: ExerciseSupersetMembershipDraft(
+                        groupID: supersetID,
+                        position: .first,
+                        roundRestSeconds: 75
+                    )
+                ),
+                TemplateExerciseDraft(
+                    catalogExerciseUUID: chestSupportedRow.remoteUUID,
+                    exerciseNameSnapshot: chestSupportedRow.displayName,
+                    categorySnapshot: chestSupportedRow.categoryName,
+                    muscleSummarySnapshot: chestSupportedRow.primaryMuscleNames,
+                    targetRepMin: 8,
+                    targetRepMax: 12,
+                    restSeconds: 60,
+                    setDrafts: [
+                        TemplateExerciseSetDraft(targetReps: 12, targetWeight: 55, loadUnit: .kg, restSeconds: 60),
+                    ],
+                    superset: ExerciseSupersetMembershipDraft(
+                        groupID: supersetID,
+                        position: .second,
+                        roundRestSeconds: 75
+                    )
+                ),
+            ]
+        )
+
+        let exercises = try repository.exercises(in: template.id)
+        let firstExercise = try #require(exercises.first)
+        let secondExercise = try #require(exercises.last)
+        let firstSetDrafts = try repository.setDrafts(for: firstExercise.id)
+
+        #expect(firstExercise.supersetGroupID == supersetID)
+        #expect(secondExercise.supersetGroupID == supersetID)
+        #expect(firstExercise.supersetPosition == .first)
+        #expect(secondExercise.supersetPosition == .second)
+        #expect(firstExercise.supersetGroup?.roundRestSeconds == 75)
+        #expect(secondExercise.supersetGroup?.roundRestSeconds == 75)
+        #expect(firstSetDrafts.count == 1)
+        #expect(firstSetDrafts[0].dropStages.map(\.targetWeight) == [22, 18])
+        #expect(firstSetDrafts[0].dropStages.map(\.targetReps) == [8, 10])
+    }
+
+    @Test
     func exercisesLazyNormalizeLegacySingleExerciseIntoOneComponentSlot() throws {
         let context = try makeInMemoryContext()
         let repository = TemplateRepository(modelContext: context)
@@ -535,15 +626,21 @@ struct TemplateRepositoryTests {
             TemplateExercise.self,
             TemplateExerciseComponent.self,
             TemplateExerciseSet.self,
+            TemplateSupersetGroup.self,
+            TemplateExerciseDropStage.self,
             ActiveWorkoutDraftSession.self,
             ActiveWorkoutDraftCardioBlock.self,
             ActiveWorkoutDraftExercise.self,
             ActiveWorkoutDraftExerciseComponent.self,
             ActiveWorkoutDraftSet.self,
+            ActiveWorkoutDraftSupersetGroup.self,
+            ActiveWorkoutDraftDropStage.self,
             WorkoutSession.self,
             WorkoutSessionCardioBlock.self,
             WorkoutSessionExercise.self,
             WorkoutSessionSet.self,
+            WorkoutSessionSupersetGroup.self,
+            WorkoutSessionDropStage.self,
             CompletedSetFact.self,
             SocialOutboxItem.self,
         ])

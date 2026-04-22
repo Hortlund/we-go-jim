@@ -19,6 +19,7 @@ nonisolated struct WorkoutSessionSetDraft: Identifiable, Equatable, Sendable {
     var actualLoadUnit: TemplateLoadUnit
     var isCompleted: Bool
     var isLocked: Bool
+    var dropStages: [WorkoutSessionDropStageDraft]
 
     init(
         id: UUID = UUID(),
@@ -31,7 +32,8 @@ nonisolated struct WorkoutSessionSetDraft: Identifiable, Equatable, Sendable {
         actualWeight: Double? = nil,
         actualLoadUnit: TemplateLoadUnit = .kg,
         isCompleted: Bool = false,
-        isLocked: Bool = false
+        isLocked: Bool = false,
+        dropStages: [WorkoutSessionDropStageDraft] = []
     ) {
         self.id = id
         self.isWarmup = isWarmup
@@ -44,6 +46,7 @@ nonisolated struct WorkoutSessionSetDraft: Identifiable, Equatable, Sendable {
         self.actualLoadUnit = actualLoadUnit
         self.isCompleted = isCompleted
         self.isLocked = isLocked
+        self.dropStages = dropStages
     }
 
     nonisolated init(model: WorkoutSessionSet) {
@@ -58,6 +61,9 @@ nonisolated struct WorkoutSessionSetDraft: Identifiable, Equatable, Sendable {
         self.actualLoadUnit = model.actualLoadUnit
         self.isCompleted = model.isCompleted
         self.isLocked = model.isLocked
+        self.dropStages = (model.dropStages ?? [])
+            .sorted { $0.sortOrder < $1.sortOrder }
+            .map(WorkoutSessionDropStageDraft.init(model:))
     }
 
     nonisolated init(model: ActiveWorkoutDraftSet) {
@@ -72,6 +78,19 @@ nonisolated struct WorkoutSessionSetDraft: Identifiable, Equatable, Sendable {
         self.actualLoadUnit = model.actualLoadUnit
         self.isCompleted = model.isCompleted
         self.isLocked = model.isLocked
+        self.dropStages = (model.dropStages ?? [])
+            .sorted { $0.sortOrder < $1.sortOrder }
+            .map(WorkoutSessionDropStageDraft.init(model:))
+    }
+}
+
+nonisolated extension WorkoutSessionSetDraft {
+    var hasDropset: Bool {
+        !dropStages.isEmpty
+    }
+
+    var isCycleCompleted: Bool {
+        isCompleted && dropStages.allSatisfy(\.isCompleted)
     }
 }
 
@@ -85,7 +104,7 @@ nonisolated enum WorkoutRestTimerContextBuilder {
         }
 
         guard let nextIndex = setDrafts.indices.first(where: { index in
-            index > completedIndex && !setDrafts[index].isCompleted
+            index > completedIndex && !setDrafts[index].isCycleCompleted
         }) else {
             return nil
         }
@@ -194,6 +213,8 @@ nonisolated final class WorkoutSessionRepository {
         session.cardioBlocks = createdCardioBlocks
 
         let orderedExercises = (template.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
+        var createdExercises: [WorkoutSessionExercise] = []
+        var supersetMembershipsByExerciseID: [UUID: ExerciseSupersetMembershipDraft] = [:]
         for (exerciseIndex, templateExercise) in orderedExercises.enumerated() {
             let selectedComponent = try componentRotationResolver
                 .resolution(
@@ -238,6 +259,28 @@ nonisolated final class WorkoutSessionRepository {
                     sessionExercise: exercise
                 )
                 modelContext.insert(set)
+                let createdDropStages = (templateSet.dropStages ?? [])
+                    .sorted { $0.sortOrder < $1.sortOrder }
+                    .prefix(2)
+                    .enumerated()
+                    .map { stageIndex, templateStage in
+                        WorkoutSessionDropStage(
+                            sessionSetID: set.id,
+                            sortOrder: stageIndex,
+                            targetReps: templateStage.targetReps,
+                            targetWeight: templateStage.targetWeight,
+                            targetLoadUnit: templateStage.loadUnit,
+                            actualReps: nil,
+                            actualWeight: nil,
+                            actualLoadUnit: templateStage.loadUnit,
+                            isCompleted: false,
+                            sessionSet: set
+                        )
+                    }
+                for dropStage in createdDropStages {
+                    modelContext.insert(dropStage)
+                }
+                set.dropStages = createdDropStages
                 createdSets.append(set)
             }
 
@@ -251,7 +294,18 @@ nonisolated final class WorkoutSessionRepository {
             }
 
             exercise.sets = createdSets
+            createdExercises.append(exercise)
+            if let membership = templateExercise.supersetMembership {
+                supersetMembershipsByExerciseID[exercise.id] = membership
+            }
         }
+
+        session.exercises = createdExercises
+        syncSupersetGroups(
+            for: session,
+            exercises: createdExercises,
+            membershipsByExerciseID: supersetMembershipsByExerciseID
+        )
 
         try saveUserDataChanges()
         return session
@@ -425,6 +479,16 @@ nonisolated final class WorkoutSessionRepository {
             row.updatedAt = .now
         }
 
+        session.exercises = remaining
+        syncSupersetGroups(
+            for: session,
+            exercises: remaining,
+            membershipsByExerciseID: Dictionary(
+                uniqueKeysWithValues: remaining.compactMap { exercise in
+                    exercise.supersetMembership.map { (exercise.id, $0) }
+                }
+            )
+        )
         session.updatedAt = .now
         try saveUserDataChanges()
     }
@@ -573,7 +637,7 @@ nonisolated final class WorkoutSessionRepository {
                 didMutateExerciseStructure = true
             }
 
-            let didMutateSet = apply(draft: draft, to: set, sortOrder: index)
+            let didMutateSet = apply(draft: draft, to: set, sortOrder: index, now: now)
             if didMutateSet {
                 didMutateAnySet = true
                 set.updatedAt = now
@@ -1102,10 +1166,281 @@ nonisolated final class WorkoutSessionRepository {
         (session.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
     }
 
+    private func syncSupersetGroups(
+        for session: WorkoutSession,
+        exercises: [WorkoutSessionExercise],
+        membershipsByExerciseID: [UUID: ExerciseSupersetMembershipDraft]
+    ) {
+        let orderedExercises = exercises.sorted { $0.sortOrder < $1.sortOrder }
+        let existingGroups = (session.supersetGroups ?? []).filter { $0.modelContext != nil }
+        let existingGroupsByID = Dictionary(uniqueKeysWithValues: existingGroups.map { ($0.id, $0) })
+        let normalized = normalizedSupersetMemberships(
+            for: orderedExercises,
+            membershipsByExerciseID: membershipsByExerciseID
+        )
+
+        for group in existingGroups where normalized.groupsByID[group.id] == nil {
+            modelContext.delete(group)
+        }
+
+        var updatedGroups: [WorkoutSessionSupersetGroup] = []
+        updatedGroups.reserveCapacity(normalized.groupsByID.count)
+        for exercise in orderedExercises {
+            guard let membership = normalized.membershipsByExerciseID[exercise.id] else {
+                clearSupersetMembership(for: exercise)
+                if let standaloneRest = normalized.standaloneRestSecondsByExerciseID[exercise.id] {
+                    applyStandaloneRest(standaloneRest, to: exercise)
+                }
+                continue
+            }
+
+            let spec = normalized.groupsByID[membership.groupID]
+            let group = existingGroupsByID[membership.groupID] ?? WorkoutSessionSupersetGroup(
+                id: membership.groupID,
+                sessionID: session.id,
+                roundRestSeconds: membership.roundRestSeconds,
+                session: session
+            )
+
+            if group.modelContext == nil {
+                modelContext.insert(group)
+            }
+
+            group.sessionID = session.id
+            group.session = session
+            group.roundRestSeconds = spec?.roundRestSeconds ?? membership.roundRestSeconds
+            group.updatedAt = .now
+
+            exercise.supersetGroupID = group.id
+            exercise.supersetPosition = membership.position
+            exercise.supersetGroup = group
+            exercise.updatedAt = .now
+
+            if updatedGroups.contains(where: { $0.id == group.id }) == false {
+                updatedGroups.append(group)
+            }
+        }
+
+        for group in updatedGroups {
+            let members = orderedExercises
+                .filter { $0.supersetGroupID == group.id }
+                .sorted {
+                    ($0.supersetPosition?.sortOrder ?? Int.max) < ($1.supersetPosition?.sortOrder ?? Int.max)
+                }
+            group.exercises = members
+        }
+
+        session.supersetGroups = updatedGroups.sorted { lhs, rhs in
+            let lhsOrder = lhs.exercises?
+                .sorted { $0.sortOrder < $1.sortOrder }
+                .first?
+                .sortOrder ?? Int.max
+            let rhsOrder = rhs.exercises?
+                .sorted { $0.sortOrder < $1.sortOrder }
+                .first?
+                .sortOrder ?? Int.max
+            if lhsOrder != rhsOrder {
+                return lhsOrder < rhsOrder
+            }
+            return lhs.id.uuidString < rhs.id.uuidString
+        }
+    }
+
+    private func normalizedSupersetMemberships(
+        for exercises: [WorkoutSessionExercise],
+        membershipsByExerciseID: [UUID: ExerciseSupersetMembershipDraft]
+    ) -> WorkoutSessionSupersetNormalization {
+        var memberships: [UUID: ExerciseSupersetMembershipDraft] = [:]
+        var standaloneRestSecondsByExerciseID: [UUID: Int] = [:]
+        var groupsByID: [UUID: WorkoutSessionSupersetGroupSpec] = [:]
+        var duplicateGroupIDs: Set<UUID> = []
+        var index = 0
+
+        while index < exercises.count {
+            let exercise = exercises[index]
+            guard let membership = membershipsByExerciseID[exercise.id] else {
+                index += 1
+                continue
+            }
+
+            guard membership.position == .first else {
+                standaloneRestSecondsByExerciseID[exercise.id] = membership.roundRestSeconds
+                index += 1
+                continue
+            }
+
+            let nextIndex = index + 1
+            guard nextIndex < exercises.count,
+                  let nextMembership = membershipsByExerciseID[exercises[nextIndex].id],
+                  nextMembership.groupID == membership.groupID,
+                  nextMembership.position == .second else {
+                standaloneRestSecondsByExerciseID[exercise.id] = membership.roundRestSeconds
+                index += 1
+                continue
+            }
+
+            if groupsByID[membership.groupID] != nil {
+                duplicateGroupIDs.insert(membership.groupID)
+            } else {
+                let roundRestSeconds = sanitizedRest(membership.roundRestSeconds)
+                memberships[exercise.id] = ExerciseSupersetMembershipDraft(
+                    groupID: membership.groupID,
+                    position: .first,
+                    roundRestSeconds: roundRestSeconds
+                )
+                memberships[exercises[nextIndex].id] = ExerciseSupersetMembershipDraft(
+                    groupID: membership.groupID,
+                    position: .second,
+                    roundRestSeconds: roundRestSeconds
+                )
+                groupsByID[membership.groupID] = WorkoutSessionSupersetGroupSpec(
+                    roundRestSeconds: roundRestSeconds,
+                    exerciseIDs: [exercise.id, exercises[nextIndex].id]
+                )
+            }
+
+            index += 2
+        }
+
+        for duplicateGroupID in duplicateGroupIDs {
+            guard let spec = groupsByID.removeValue(forKey: duplicateGroupID) else { continue }
+            for exerciseID in spec.exerciseIDs {
+                memberships.removeValue(forKey: exerciseID)
+                standaloneRestSecondsByExerciseID[exerciseID] = spec.roundRestSeconds
+            }
+        }
+
+        for exercise in exercises where membershipsByExerciseID[exercise.id] != nil && memberships[exercise.id] == nil {
+            standaloneRestSecondsByExerciseID[exercise.id] = sanitizedRest(
+                membershipsByExerciseID[exercise.id]?.roundRestSeconds ?? exercise.restSeconds
+            )
+        }
+
+        return WorkoutSessionSupersetNormalization(
+            membershipsByExerciseID: memberships,
+            standaloneRestSecondsByExerciseID: standaloneRestSecondsByExerciseID,
+            groupsByID: groupsByID
+        )
+    }
+
+    private func clearSupersetMembership(for exercise: WorkoutSessionExercise) {
+        exercise.supersetGroupID = nil
+        exercise.supersetPosition = nil
+        exercise.supersetGroup = nil
+        exercise.updatedAt = .now
+    }
+
+    private func applyStandaloneRest(_ restSeconds: Int, to exercise: WorkoutSessionExercise) {
+        let normalizedRest = sanitizedRest(restSeconds)
+        guard exercise.restSeconds != normalizedRest
+            || (exercise.sets ?? []).contains(where: { $0.restSeconds != normalizedRest }) else {
+            return
+        }
+
+        exercise.restSeconds = normalizedRest
+        for set in exercise.sets ?? [] where set.restSeconds != normalizedRest {
+            set.restSeconds = normalizedRest
+            set.updatedAt = .now
+        }
+        exercise.updatedAt = .now
+    }
+
+    private func syncDropStageStructure(
+        for set: WorkoutSessionSet,
+        desiredDrafts: [WorkoutSessionDropStageDraft],
+        now: Date
+    ) -> Bool {
+        let normalizedDrafts = Array(desiredDrafts.prefix(2))
+        let existingStages = (set.dropStages ?? []).sorted { $0.sortOrder < $1.sortOrder }
+        let existingByID = Dictionary(uniqueKeysWithValues: existingStages.map { ($0.id, $0) })
+        let incomingIDs = Set(normalizedDrafts.map(\.id))
+        let existingOrderedIDs = existingStages.map(\.id)
+        let incomingOrderedIDs = normalizedDrafts.map(\.id)
+        var didChange = existingOrderedIDs != incomingOrderedIDs
+
+        for stage in existingStages where !incomingIDs.contains(stage.id) {
+            modelContext.delete(stage)
+            didChange = true
+        }
+
+        var updatedStages: [WorkoutSessionDropStage] = []
+        updatedStages.reserveCapacity(normalizedDrafts.count)
+        for (index, draft) in normalizedDrafts.enumerated() {
+            let stage = existingByID[draft.id] ?? WorkoutSessionDropStage(
+                id: draft.id,
+                sessionSetID: set.id,
+                sortOrder: index,
+                targetReps: sanitizedReps(draft.targetReps),
+                targetWeight: sanitizedWeight(draft.targetWeight),
+                targetLoadUnit: draft.targetLoadUnit,
+                actualReps: sanitizedReps(draft.actualReps),
+                actualWeight: sanitizedWeight(draft.actualWeight),
+                actualLoadUnit: draft.actualLoadUnit,
+                isCompleted: draft.isCompleted,
+                sessionSet: set
+            )
+
+            if stage.modelContext == nil {
+                modelContext.insert(stage)
+                didChange = true
+            }
+
+            if stage.sortOrder != index {
+                stage.sortOrder = index
+                didChange = true
+            }
+            let normalizedTargetReps = sanitizedReps(draft.targetReps)
+            let normalizedTargetWeight = sanitizedWeight(draft.targetWeight)
+            let normalizedActualReps = sanitizedReps(draft.actualReps)
+            let normalizedActualWeight = sanitizedWeight(draft.actualWeight)
+            if stage.targetReps != normalizedTargetReps {
+                stage.targetReps = normalizedTargetReps
+                didChange = true
+            }
+            if stage.targetWeight != normalizedTargetWeight {
+                stage.targetWeight = normalizedTargetWeight
+                didChange = true
+            }
+            if stage.targetLoadUnit != draft.targetLoadUnit {
+                stage.targetLoadUnit = draft.targetLoadUnit
+                didChange = true
+            }
+            if stage.actualReps != normalizedActualReps {
+                stage.actualReps = normalizedActualReps
+                didChange = true
+            }
+            if stage.actualWeight != normalizedActualWeight {
+                stage.actualWeight = normalizedActualWeight
+                didChange = true
+            }
+            if stage.actualLoadUnit != draft.actualLoadUnit {
+                stage.actualLoadUnit = draft.actualLoadUnit
+                didChange = true
+            }
+            if stage.isCompleted != draft.isCompleted {
+                stage.isCompleted = draft.isCompleted
+                didChange = true
+            }
+            if didChange {
+                stage.updatedAt = now
+            }
+            stage.sessionSetID = set.id
+            stage.sessionSet = set
+            updatedStages.append(stage)
+        }
+
+        if didChange {
+            set.dropStages = updatedStages
+        }
+
+        return didChange
+    }
+
     private func apply(
         draft: WorkoutSessionSetDraft,
         to set: WorkoutSessionSet,
-        sortOrder: Int
+        sortOrder: Int,
+        now: Date
     ) -> Bool {
         let normalizedRest = sanitizedRest(draft.restSeconds)
         let normalizedTargetReps = sanitizedReps(draft.targetReps)
@@ -1159,6 +1494,21 @@ nonisolated final class WorkoutSessionRepository {
             didChange = true
         }
 
+        if syncDropStageStructure(for: set, desiredDrafts: draft.dropStages, now: now) {
+            didChange = true
+        }
+
         return didChange
     }
+}
+
+private struct WorkoutSessionSupersetNormalization {
+    let membershipsByExerciseID: [UUID: ExerciseSupersetMembershipDraft]
+    let standaloneRestSecondsByExerciseID: [UUID: Int]
+    let groupsByID: [UUID: WorkoutSessionSupersetGroupSpec]
+}
+
+private struct WorkoutSessionSupersetGroupSpec {
+    let roundRestSeconds: Int
+    let exerciseIDs: [UUID]
 }

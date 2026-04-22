@@ -362,6 +362,213 @@ nonisolated enum WorkoutCardioPhase: String, Codable, CaseIterable, Equatable, I
     }
 }
 
+nonisolated enum SupersetExercisePosition: String, Codable, CaseIterable, Equatable, Identifiable, Sendable {
+    case first
+    case second
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .first:
+            return "A1"
+        case .second:
+            return "A2"
+        }
+    }
+
+    var sortOrder: Int {
+        switch self {
+        case .first:
+            return 0
+        case .second:
+            return 1
+        }
+    }
+}
+
+nonisolated struct ExerciseSupersetMembershipDraft: Equatable, Codable, Sendable {
+    var groupID: UUID
+    var position: SupersetExercisePosition
+    var roundRestSeconds: Int
+
+    init(
+        groupID: UUID,
+        position: SupersetExercisePosition,
+        roundRestSeconds: Int
+    ) {
+        self.groupID = groupID
+        self.position = position
+        self.roundRestSeconds = max(0, min(3600, roundRestSeconds))
+    }
+}
+
+nonisolated struct WorkoutExerciseStructurePresentation: Equatable, Sendable {
+    var supersetMembership: ExerciseSupersetMembershipDraft?
+    var hasDropset: Bool
+
+    var isSuperset: Bool {
+        supersetMembership != nil
+    }
+
+    var supersetPosition: SupersetExercisePosition? {
+        supersetMembership?.position
+    }
+}
+
+nonisolated struct WorkoutSupersetDisplayGroup<Item: Identifiable>: Identifiable
+where Item.ID: Hashable {
+    let groupID: UUID
+    let roundRestSeconds: Int
+    let first: Item
+    let second: Item
+    let firstIndex: Int
+    let secondIndex: Int
+
+    var id: UUID {
+        groupID
+    }
+}
+
+nonisolated enum WorkoutExerciseDisplayGroup<Item: Identifiable>: Identifiable
+where Item.ID: Hashable {
+    case single(item: Item, index: Int)
+    case superset(WorkoutSupersetDisplayGroup<Item>)
+
+    var id: String {
+        switch self {
+        case .single(let item, _):
+            return "single-\(item.id)"
+        case .superset(let group):
+            return "superset-\(group.groupID.uuidString.lowercased())"
+        }
+    }
+}
+
+nonisolated enum WorkoutExerciseDisplayGrouping {
+    static func build<Item: Identifiable>(
+        items: [Item],
+        membership: (Item) -> ExerciseSupersetMembershipDraft?
+    ) -> [WorkoutExerciseDisplayGroup<Item>] where Item.ID: Hashable {
+        var groups: [WorkoutExerciseDisplayGroup<Item>] = []
+        groups.reserveCapacity(items.count)
+
+        var index = 0
+        while index < items.count {
+            let current = items[index]
+
+            if index + 1 < items.count,
+               let currentMembership = membership(current),
+               currentMembership.position == .first {
+                let next = items[index + 1]
+                if let nextMembership = membership(next),
+                   nextMembership.position == .second,
+                   nextMembership.groupID == currentMembership.groupID
+                {
+                    groups.append(
+                        .superset(
+                            WorkoutSupersetDisplayGroup(
+                                groupID: currentMembership.groupID,
+                                roundRestSeconds: currentMembership.roundRestSeconds,
+                                first: current,
+                                second: next,
+                                firstIndex: index,
+                                secondIndex: index + 1
+                            )
+                        )
+                    )
+                    index += 2
+                    continue
+                }
+            }
+
+            groups.append(.single(item: current, index: index))
+            index += 1
+        }
+
+        return groups
+    }
+}
+
+nonisolated struct TemplateExerciseDropStageDraft: Identifiable, Equatable, Codable, Sendable {
+    let id: UUID
+    var targetReps: Int?
+    var targetWeight: Double?
+    var loadUnit: TemplateLoadUnit
+
+    init(
+        id: UUID = UUID(),
+        targetReps: Int? = nil,
+        targetWeight: Double? = nil,
+        loadUnit: TemplateLoadUnit = .kg
+    ) {
+        self.id = id
+        self.targetReps = targetReps
+        self.targetWeight = targetWeight
+        self.loadUnit = loadUnit
+    }
+
+    nonisolated init(model: TemplateExerciseDropStage) {
+        self.id = model.id
+        self.targetReps = model.targetReps
+        self.targetWeight = model.targetWeight
+        self.loadUnit = model.loadUnit
+    }
+}
+
+nonisolated struct WorkoutSessionDropStageDraft: Identifiable, Equatable, Sendable {
+    let id: UUID
+    var targetReps: Int?
+    var targetWeight: Double?
+    var targetLoadUnit: TemplateLoadUnit
+    var actualReps: Int?
+    var actualWeight: Double?
+    var actualLoadUnit: TemplateLoadUnit
+    var isCompleted: Bool
+
+    init(
+        id: UUID = UUID(),
+        targetReps: Int? = nil,
+        targetWeight: Double? = nil,
+        targetLoadUnit: TemplateLoadUnit = .kg,
+        actualReps: Int? = nil,
+        actualWeight: Double? = nil,
+        actualLoadUnit: TemplateLoadUnit = .kg,
+        isCompleted: Bool = false
+    ) {
+        self.id = id
+        self.targetReps = targetReps
+        self.targetWeight = targetWeight
+        self.targetLoadUnit = targetLoadUnit
+        self.actualReps = actualReps
+        self.actualWeight = actualWeight
+        self.actualLoadUnit = actualLoadUnit
+        self.isCompleted = isCompleted
+    }
+
+    nonisolated init(model: ActiveWorkoutDraftDropStage) {
+        self.id = model.id
+        self.targetReps = model.targetReps
+        self.targetWeight = model.targetWeight
+        self.targetLoadUnit = model.targetLoadUnit
+        self.actualReps = model.actualReps
+        self.actualWeight = model.actualWeight
+        self.actualLoadUnit = model.actualLoadUnit
+        self.isCompleted = model.isCompleted
+    }
+
+    nonisolated init(model: WorkoutSessionDropStage) {
+        self.id = model.id
+        self.targetReps = model.targetReps
+        self.targetWeight = model.targetWeight
+        self.targetLoadUnit = model.targetLoadUnit
+        self.actualReps = model.actualReps
+        self.actualWeight = model.actualWeight
+        self.actualLoadUnit = model.actualLoadUnit
+        self.isCompleted = model.isCompleted
+    }
+}
+
 nonisolated struct TemplateCardioBlockDraft: Identifiable, Equatable {
     let id: UUID
     var phase: WorkoutCardioPhase
@@ -776,6 +983,7 @@ final class WorkoutTemplate {
     @Relationship var folder: TemplateFolder?
     @Relationship(inverse: \TemplateExercise.template) var exercises: [TemplateExercise]?
     @Relationship(inverse: \TemplateCardioBlock.template) var cardioBlocks: [TemplateCardioBlock]?
+    @Relationship(deleteRule: .cascade, inverse: \TemplateSupersetGroup.template) var supersetGroups: [TemplateSupersetGroup]?
 
     init(
         id: UUID = UUID(),
@@ -797,6 +1005,36 @@ final class WorkoutTemplate {
         self.folder = folder
         self.exercises = []
         self.cardioBlocks = []
+        self.supersetGroups = []
+    }
+}
+
+@Model
+final class TemplateSupersetGroup {
+    var id: UUID = UUID()
+    var templateID: UUID = UUID()
+    var roundRestSeconds: Int = 120
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
+
+    @Relationship var template: WorkoutTemplate?
+    @Relationship(inverse: \TemplateExercise.supersetGroup) var exercises: [TemplateExercise]?
+
+    init(
+        id: UUID = UUID(),
+        templateID: UUID,
+        roundRestSeconds: Int,
+        createdAt: Date = .now,
+        updatedAt: Date = .now,
+        template: WorkoutTemplate? = nil
+    ) {
+        self.id = id
+        self.templateID = templateID
+        self.roundRestSeconds = max(0, min(3600, roundRestSeconds))
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.template = template
+        self.exercises = []
     }
 }
 
@@ -859,6 +1097,8 @@ final class TemplateExercise {
     var targetRepMin: Int?
     var targetRepMax: Int?
     var restSeconds: Int = 120
+    var supersetGroupID: UUID?
+    var supersetPositionRaw: String?
     var sortOrder: Int = 0
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
@@ -866,6 +1106,31 @@ final class TemplateExercise {
     @Relationship var template: WorkoutTemplate?
     @Relationship(deleteRule: .cascade, inverse: \TemplateExerciseSet.templateExercise) var prescribedSets: [TemplateExerciseSet]?
     @Relationship(deleteRule: .cascade, inverse: \TemplateExerciseComponent.templateExercise) var components: [TemplateExerciseComponent]?
+    @Relationship var supersetGroup: TemplateSupersetGroup?
+
+    var supersetPosition: SupersetExercisePosition? {
+        get {
+            guard let supersetPositionRaw else { return nil }
+            return SupersetExercisePosition(rawValue: supersetPositionRaw)
+        }
+        set {
+            supersetPositionRaw = newValue?.rawValue
+        }
+    }
+
+    var supersetMembership: ExerciseSupersetMembershipDraft? {
+        guard let supersetGroupID,
+              let supersetPosition,
+              let supersetGroup else {
+            return nil
+        }
+
+        return ExerciseSupersetMembershipDraft(
+            groupID: supersetGroupID,
+            position: supersetPosition,
+            roundRestSeconds: supersetGroup.roundRestSeconds
+        )
+    }
 
     init(
         id: UUID = UUID(),
@@ -878,10 +1143,13 @@ final class TemplateExercise {
         targetRepMin: Int? = nil,
         targetRepMax: Int? = nil,
         restSeconds: Int = 120,
+        supersetGroupID: UUID? = nil,
+        supersetPosition: SupersetExercisePosition? = nil,
         sortOrder: Int = 0,
         createdAt: Date = .now,
         updatedAt: Date = .now,
-        template: WorkoutTemplate? = nil
+        template: WorkoutTemplate? = nil,
+        supersetGroup: TemplateSupersetGroup? = nil
     ) {
         self.id = id
         self.templateID = templateID
@@ -893,10 +1161,13 @@ final class TemplateExercise {
         self.targetRepMin = targetRepMin
         self.targetRepMax = targetRepMax
         self.restSeconds = max(0, min(3600, restSeconds))
+        self.supersetGroupID = supersetGroupID
+        self.supersetPositionRaw = supersetPosition?.rawValue
         self.sortOrder = sortOrder
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.template = template
+        self.supersetGroup = supersetGroup
         self.prescribedSets = []
         self.components = []
     }
@@ -960,6 +1231,7 @@ final class TemplateExerciseSet {
     var updatedAt: Date = Date()
 
     @Relationship var templateExercise: TemplateExercise?
+    @Relationship(deleteRule: .cascade, inverse: \TemplateExerciseDropStage.templateExerciseSet) var dropStages: [TemplateExerciseDropStage]?
 
     var loadUnit: TemplateLoadUnit {
         get { TemplateLoadUnit(rawValue: loadUnitRaw) ?? .kg }
@@ -1003,6 +1275,48 @@ final class TemplateExerciseSet {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.templateExercise = templateExercise
+        self.dropStages = []
+    }
+}
+
+@Model
+final class TemplateExerciseDropStage {
+    var id: UUID = UUID()
+    var templateExerciseSetID: UUID = UUID()
+    var sortOrder: Int = 0
+    var targetReps: Int?
+    var targetWeight: Double?
+    var loadUnitRaw: String = TemplateLoadUnit.kg.rawValue
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
+
+    @Relationship var templateExerciseSet: TemplateExerciseSet?
+
+    var loadUnit: TemplateLoadUnit {
+        get { TemplateLoadUnit(rawValue: loadUnitRaw) ?? .kg }
+        set { loadUnitRaw = newValue.rawValue }
+    }
+
+    init(
+        id: UUID = UUID(),
+        templateExerciseSetID: UUID,
+        sortOrder: Int = 0,
+        targetReps: Int? = nil,
+        targetWeight: Double? = nil,
+        loadUnit: TemplateLoadUnit = .kg,
+        createdAt: Date = .now,
+        updatedAt: Date = .now,
+        templateExerciseSet: TemplateExerciseSet? = nil
+    ) {
+        self.id = id
+        self.templateExerciseSetID = templateExerciseSetID
+        self.sortOrder = sortOrder
+        self.targetReps = targetReps
+        self.targetWeight = targetWeight
+        self.loadUnitRaw = loadUnit.rawValue
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.templateExerciseSet = templateExerciseSet
     }
 }
 
@@ -1018,6 +1332,7 @@ final class ActiveWorkoutDraftSession {
 
     @Relationship(deleteRule: .cascade, inverse: \ActiveWorkoutDraftExercise.session) var exercises: [ActiveWorkoutDraftExercise]?
     @Relationship(deleteRule: .cascade, inverse: \ActiveWorkoutDraftCardioBlock.session) var cardioBlocks: [ActiveWorkoutDraftCardioBlock]?
+    @Relationship(deleteRule: .cascade, inverse: \ActiveWorkoutDraftSupersetGroup.session) var supersetGroups: [ActiveWorkoutDraftSupersetGroup]?
 
     init(
         id: UUID = UUID(),
@@ -1037,6 +1352,7 @@ final class ActiveWorkoutDraftSession {
         self.updatedAt = updatedAt
         self.exercises = []
         self.cardioBlocks = []
+        self.supersetGroups = []
     }
 }
 
@@ -1103,6 +1419,8 @@ final class ActiveWorkoutDraftExercise {
     var targetRepMin: Int?
     var targetRepMax: Int?
     var restSeconds: Int = 120
+    var supersetGroupID: UUID?
+    var supersetPositionRaw: String?
     var sortOrder: Int = 0
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
@@ -1110,6 +1428,31 @@ final class ActiveWorkoutDraftExercise {
     @Relationship var session: ActiveWorkoutDraftSession?
     @Relationship(deleteRule: .cascade, inverse: \ActiveWorkoutDraftSet.sessionExercise) var sets: [ActiveWorkoutDraftSet]?
     @Relationship(deleteRule: .cascade, inverse: \ActiveWorkoutDraftExerciseComponent.sessionExercise) var components: [ActiveWorkoutDraftExerciseComponent]?
+    @Relationship var supersetGroup: ActiveWorkoutDraftSupersetGroup?
+
+    var supersetPosition: SupersetExercisePosition? {
+        get {
+            guard let supersetPositionRaw else { return nil }
+            return SupersetExercisePosition(rawValue: supersetPositionRaw)
+        }
+        set {
+            supersetPositionRaw = newValue?.rawValue
+        }
+    }
+
+    var supersetMembership: ExerciseSupersetMembershipDraft? {
+        guard let supersetGroupID,
+              let supersetPosition,
+              let supersetGroup else {
+            return nil
+        }
+
+        return ExerciseSupersetMembershipDraft(
+            groupID: supersetGroupID,
+            position: supersetPosition,
+            roundRestSeconds: supersetGroup.roundRestSeconds
+        )
+    }
 
     init(
         id: UUID = UUID(),
@@ -1123,10 +1466,13 @@ final class ActiveWorkoutDraftExercise {
         targetRepMin: Int? = nil,
         targetRepMax: Int? = nil,
         restSeconds: Int = 120,
+        supersetGroupID: UUID? = nil,
+        supersetPosition: SupersetExercisePosition? = nil,
         sortOrder: Int = 0,
         createdAt: Date = .now,
         updatedAt: Date = .now,
-        session: ActiveWorkoutDraftSession? = nil
+        session: ActiveWorkoutDraftSession? = nil,
+        supersetGroup: ActiveWorkoutDraftSupersetGroup? = nil
     ) {
         self.id = id
         self.sessionID = sessionID
@@ -1139,12 +1485,44 @@ final class ActiveWorkoutDraftExercise {
         self.targetRepMin = targetRepMin
         self.targetRepMax = targetRepMax
         self.restSeconds = max(0, min(3600, restSeconds))
+        self.supersetGroupID = supersetGroupID
+        self.supersetPositionRaw = supersetPosition?.rawValue
         self.sortOrder = sortOrder
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.session = session
+        self.supersetGroup = supersetGroup
         self.sets = []
         self.components = []
+    }
+}
+
+@Model
+final class ActiveWorkoutDraftSupersetGroup {
+    var id: UUID = UUID()
+    var sessionID: UUID = UUID()
+    var roundRestSeconds: Int = 120
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
+
+    @Relationship var session: ActiveWorkoutDraftSession?
+    @Relationship(inverse: \ActiveWorkoutDraftExercise.supersetGroup) var exercises: [ActiveWorkoutDraftExercise]?
+
+    init(
+        id: UUID = UUID(),
+        sessionID: UUID,
+        roundRestSeconds: Int,
+        createdAt: Date = .now,
+        updatedAt: Date = .now,
+        session: ActiveWorkoutDraftSession? = nil
+    ) {
+        self.id = id
+        self.sessionID = sessionID
+        self.roundRestSeconds = max(0, min(3600, roundRestSeconds))
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.session = session
+        self.exercises = []
     }
 }
 
@@ -1206,6 +1584,7 @@ final class ActiveWorkoutDraftSet {
     var updatedAt: Date = Date()
 
     @Relationship var sessionExercise: ActiveWorkoutDraftExercise?
+    @Relationship(deleteRule: .cascade, inverse: \ActiveWorkoutDraftDropStage.sessionSet) var dropStages: [ActiveWorkoutDraftDropStage]?
 
     var targetLoadUnit: TemplateLoadUnit {
         get { TemplateLoadUnit(rawValue: targetLoadUnitRaw) ?? .kg }
@@ -1251,6 +1630,65 @@ final class ActiveWorkoutDraftSet {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.sessionExercise = sessionExercise
+        self.dropStages = []
+    }
+}
+
+@Model
+final class ActiveWorkoutDraftDropStage {
+    var id: UUID = UUID()
+    var sessionSetID: UUID = UUID()
+    var sortOrder: Int = 0
+    var targetReps: Int?
+    var targetWeight: Double?
+    var targetLoadUnitRaw: String = TemplateLoadUnit.kg.rawValue
+    var actualReps: Int?
+    var actualWeight: Double?
+    var actualLoadUnitRaw: String = TemplateLoadUnit.kg.rawValue
+    var isCompleted: Bool = false
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
+
+    @Relationship var sessionSet: ActiveWorkoutDraftSet?
+
+    var targetLoadUnit: TemplateLoadUnit {
+        get { TemplateLoadUnit(rawValue: targetLoadUnitRaw) ?? .kg }
+        set { targetLoadUnitRaw = newValue.rawValue }
+    }
+
+    var actualLoadUnit: TemplateLoadUnit {
+        get { TemplateLoadUnit(rawValue: actualLoadUnitRaw) ?? .kg }
+        set { actualLoadUnitRaw = newValue.rawValue }
+    }
+
+    init(
+        id: UUID = UUID(),
+        sessionSetID: UUID,
+        sortOrder: Int = 0,
+        targetReps: Int? = nil,
+        targetWeight: Double? = nil,
+        targetLoadUnit: TemplateLoadUnit = .kg,
+        actualReps: Int? = nil,
+        actualWeight: Double? = nil,
+        actualLoadUnit: TemplateLoadUnit = .kg,
+        isCompleted: Bool = false,
+        createdAt: Date = .now,
+        updatedAt: Date = .now,
+        sessionSet: ActiveWorkoutDraftSet? = nil
+    ) {
+        self.id = id
+        self.sessionSetID = sessionSetID
+        self.sortOrder = sortOrder
+        self.targetReps = targetReps
+        self.targetWeight = targetWeight
+        self.targetLoadUnitRaw = targetLoadUnit.rawValue
+        self.actualReps = actualReps
+        self.actualWeight = actualWeight
+        self.actualLoadUnitRaw = actualLoadUnit.rawValue
+        self.isCompleted = isCompleted
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.sessionSet = sessionSet
     }
 }
 
@@ -1273,6 +1711,7 @@ final class WorkoutSession {
 
     @Relationship(deleteRule: .cascade, inverse: \WorkoutSessionExercise.session) var exercises: [WorkoutSessionExercise]?
     @Relationship(deleteRule: .cascade, inverse: \WorkoutSessionCardioBlock.session) var cardioBlocks: [WorkoutSessionCardioBlock]?
+    @Relationship(deleteRule: .cascade, inverse: \WorkoutSessionSupersetGroup.session) var supersetGroups: [WorkoutSessionSupersetGroup]?
 
     var status: WorkoutSessionStatus {
         get { WorkoutSessionStatus(rawValue: statusRaw) ?? .active }
@@ -1311,6 +1750,7 @@ final class WorkoutSession {
         self.updatedAt = updatedAt
         self.exercises = []
         self.cardioBlocks = []
+        self.supersetGroups = []
     }
 }
 
@@ -1377,12 +1817,39 @@ final class WorkoutSessionExercise {
     var targetRepMin: Int?
     var targetRepMax: Int?
     var restSeconds: Int = 120
+    var supersetGroupID: UUID?
+    var supersetPositionRaw: String?
     var sortOrder: Int = 0
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
 
     @Relationship var session: WorkoutSession?
     @Relationship(deleteRule: .cascade, inverse: \WorkoutSessionSet.sessionExercise) var sets: [WorkoutSessionSet]?
+    @Relationship var supersetGroup: WorkoutSessionSupersetGroup?
+
+    var supersetPosition: SupersetExercisePosition? {
+        get {
+            guard let supersetPositionRaw else { return nil }
+            return SupersetExercisePosition(rawValue: supersetPositionRaw)
+        }
+        set {
+            supersetPositionRaw = newValue?.rawValue
+        }
+    }
+
+    var supersetMembership: ExerciseSupersetMembershipDraft? {
+        guard let supersetGroupID,
+              let supersetPosition,
+              let supersetGroup else {
+            return nil
+        }
+
+        return ExerciseSupersetMembershipDraft(
+            groupID: supersetGroupID,
+            position: supersetPosition,
+            roundRestSeconds: supersetGroup.roundRestSeconds
+        )
+    }
 
     init(
         id: UUID = UUID(),
@@ -1396,10 +1863,13 @@ final class WorkoutSessionExercise {
         targetRepMin: Int? = nil,
         targetRepMax: Int? = nil,
         restSeconds: Int = 120,
+        supersetGroupID: UUID? = nil,
+        supersetPosition: SupersetExercisePosition? = nil,
         sortOrder: Int = 0,
         createdAt: Date = .now,
         updatedAt: Date = .now,
-        session: WorkoutSession? = nil
+        session: WorkoutSession? = nil,
+        supersetGroup: WorkoutSessionSupersetGroup? = nil
     ) {
         self.id = id
         self.sessionID = sessionID
@@ -1412,11 +1882,43 @@ final class WorkoutSessionExercise {
         self.targetRepMin = targetRepMin
         self.targetRepMax = targetRepMax
         self.restSeconds = max(0, min(3600, restSeconds))
+        self.supersetGroupID = supersetGroupID
+        self.supersetPositionRaw = supersetPosition?.rawValue
         self.sortOrder = sortOrder
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.session = session
+        self.supersetGroup = supersetGroup
         self.sets = []
+    }
+}
+
+@Model
+final class WorkoutSessionSupersetGroup {
+    var id: UUID = UUID()
+    var sessionID: UUID = UUID()
+    var roundRestSeconds: Int = 120
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
+
+    @Relationship var session: WorkoutSession?
+    @Relationship(inverse: \WorkoutSessionExercise.supersetGroup) var exercises: [WorkoutSessionExercise]?
+
+    init(
+        id: UUID = UUID(),
+        sessionID: UUID,
+        roundRestSeconds: Int,
+        createdAt: Date = .now,
+        updatedAt: Date = .now,
+        session: WorkoutSession? = nil
+    ) {
+        self.id = id
+        self.sessionID = sessionID
+        self.roundRestSeconds = max(0, min(3600, roundRestSeconds))
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.session = session
+        self.exercises = []
     }
 }
 
@@ -1439,6 +1941,7 @@ final class WorkoutSessionSet {
     var updatedAt: Date = Date()
 
     @Relationship var sessionExercise: WorkoutSessionExercise?
+    @Relationship(deleteRule: .cascade, inverse: \WorkoutSessionDropStage.sessionSet) var dropStages: [WorkoutSessionDropStage]?
 
     var targetLoadUnit: TemplateLoadUnit {
         get { TemplateLoadUnit(rawValue: targetLoadUnitRaw) ?? .kg }
@@ -1484,6 +1987,65 @@ final class WorkoutSessionSet {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.sessionExercise = sessionExercise
+        self.dropStages = []
+    }
+}
+
+@Model
+final class WorkoutSessionDropStage {
+    var id: UUID = UUID()
+    var sessionSetID: UUID = UUID()
+    var sortOrder: Int = 0
+    var targetReps: Int?
+    var targetWeight: Double?
+    var targetLoadUnitRaw: String = TemplateLoadUnit.kg.rawValue
+    var actualReps: Int?
+    var actualWeight: Double?
+    var actualLoadUnitRaw: String = TemplateLoadUnit.kg.rawValue
+    var isCompleted: Bool = false
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
+
+    @Relationship var sessionSet: WorkoutSessionSet?
+
+    var targetLoadUnit: TemplateLoadUnit {
+        get { TemplateLoadUnit(rawValue: targetLoadUnitRaw) ?? .kg }
+        set { targetLoadUnitRaw = newValue.rawValue }
+    }
+
+    var actualLoadUnit: TemplateLoadUnit {
+        get { TemplateLoadUnit(rawValue: actualLoadUnitRaw) ?? .kg }
+        set { actualLoadUnitRaw = newValue.rawValue }
+    }
+
+    init(
+        id: UUID = UUID(),
+        sessionSetID: UUID,
+        sortOrder: Int = 0,
+        targetReps: Int? = nil,
+        targetWeight: Double? = nil,
+        targetLoadUnit: TemplateLoadUnit = .kg,
+        actualReps: Int? = nil,
+        actualWeight: Double? = nil,
+        actualLoadUnit: TemplateLoadUnit = .kg,
+        isCompleted: Bool = false,
+        createdAt: Date = .now,
+        updatedAt: Date = .now,
+        sessionSet: WorkoutSessionSet? = nil
+    ) {
+        self.id = id
+        self.sessionSetID = sessionSetID
+        self.sortOrder = sortOrder
+        self.targetReps = targetReps
+        self.targetWeight = targetWeight
+        self.targetLoadUnitRaw = targetLoadUnit.rawValue
+        self.actualReps = actualReps
+        self.actualWeight = actualWeight
+        self.actualLoadUnitRaw = actualLoadUnit.rawValue
+        self.isCompleted = isCompleted
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.sessionSet = sessionSet
     }
 }
 

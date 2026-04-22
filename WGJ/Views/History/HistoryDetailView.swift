@@ -455,65 +455,109 @@ struct HistoryDetailView: View {
         let restSeconds = restByExerciseID[exercise.id] ?? exercise.restSeconds
         let hydrationPayload = hydrationPayloadByExerciseID[exercise.id]
 
-        if isExpanded {
-            WorkoutExerciseRowHostView(
-                exerciseID: exercise.id,
-                exerciseAccessibilityIdentifier: "history-exercise-\(exercise.catalogExerciseUUID)",
-                exerciseName: exercise.exerciseNameSnapshot,
-                muscleSummary: exercise.muscleSummarySnapshot,
-                category: exercise.categorySnapshot,
-                exerciseIndexTitle: "Exercise \(index + 1)",
-                targetRepMin: exercise.targetRepMin,
-                targetRepMax: exercise.targetRepMax,
-                previousPerformanceResolution: hydrationPayload?.previousPerformanceResolution ?? .loading,
-                personalRecordSummaryKinds: hydrationPayload?.personalRecords.summaryKinds ?? [],
-                personalRecordKindsBySetID: hydrationPayload?.personalRecords.setKindsBySetID ?? [:],
-                preferredLoadUnit: preferredLoadUnit,
-                exerciseNotes: notesByExerciseID[exercise.id] ?? exercise.notes,
-                restSeconds: restSeconds,
-                setDrafts: drafts,
-                isExpanded: true,
-                onExerciseNotesCommitted: { notes in
-                    updateNotesValue(notes, for: exercise.id)
-                },
-                onSetDraftsCommitted: { drafts in
-                    updateDraftsValue(drafts, for: exercise.id)
-                },
-                onRestCommitted: { rest in
-                    updateRestValue(rest, for: exercise.id)
-                },
-                onExpandedChanged: { handleExpandedChange($0, for: exercise.id) },
-                onExerciseDelete: {
-                    removeExercise(exerciseID: exercise.id)
-                },
-                flushCoordinator: rowFlushCoordinator
-            )
-        } else {
-            let collapsedSummary = HistoryExerciseCollapsedSummary(
-                targetRepMin: exercise.targetRepMin,
-                targetRepMax: exercise.targetRepMax,
-                completedSetCount: drafts.filter(\.isCompleted).count,
-                totalSetCount: drafts.count,
-                restSeconds: restSeconds,
-                notes: notesByExerciseID[exercise.id] ?? exercise.notes
-            )
+        VStack(alignment: .leading, spacing: 8) {
+            exerciseStructureBadgeRow(for: exercise, drafts: drafts)
 
-            HistoryCollapsedExerciseCard(
-                exerciseAccessibilityIdentifier: "history-exercise-\(exercise.catalogExerciseUUID)",
-                exerciseName: exercise.exerciseNameSnapshot,
-                muscleSummary: exercise.muscleSummarySnapshot,
-                category: exercise.categorySnapshot,
-                exerciseIndexTitle: "Exercise \(index + 1)",
-                summary: collapsedSummary,
-                onExpand: {
-                    handleExpandedChange(true, for: exercise.id)
-                },
-                onDelete: {
-                    removeExercise(exerciseID: exercise.id)
-                }
-            )
+            if isExpanded {
+                WorkoutExerciseRowHostView(
+                    exerciseID: exercise.id,
+                    exerciseAccessibilityIdentifier: "history-exercise-\(exercise.catalogExerciseUUID)",
+                    exerciseName: exercise.exerciseNameSnapshot,
+                    muscleSummary: exercise.muscleSummarySnapshot,
+                    category: exercise.categorySnapshot,
+                    exerciseIndexTitle: "Exercise \(index + 1)",
+                    targetRepMin: exercise.targetRepMin,
+                    targetRepMax: exercise.targetRepMax,
+                    previousPerformanceResolution: hydrationPayload?.previousPerformanceResolution ?? .loading,
+                    personalRecordSummaryKinds: hydrationPayload?.personalRecords.summaryKinds ?? [],
+                    personalRecordKindsBySetID: hydrationPayload?.personalRecords.setKindsBySetID ?? [:],
+                    preferredLoadUnit: preferredLoadUnit,
+                    exerciseNotes: notesByExerciseID[exercise.id] ?? exercise.notes,
+                    restSeconds: restSeconds,
+                    setDrafts: drafts,
+                    isExpanded: true,
+                    onExerciseNotesCommitted: { notes in
+                        updateNotesValue(notes, for: exercise.id)
+                    },
+                    onSetDraftsCommitted: { drafts in
+                        updateDraftsValue(drafts, for: exercise.id)
+                    },
+                    onRestCommitted: { rest in
+                        updateRestValue(rest, for: exercise.id)
+                    },
+                    onExpandedChanged: { handleExpandedChange($0, for: exercise.id) },
+                    onExerciseDelete: {
+                        removeExercise(exerciseID: exercise.id)
+                    },
+                    flushCoordinator: rowFlushCoordinator
+                )
+            } else {
+                let collapsedSummary = HistoryExerciseCollapsedSummary(
+                    targetRepMin: exercise.targetRepMin,
+                    targetRepMax: exercise.targetRepMax,
+                    completedSetCount: drafts.filter(\.isCycleCompleted).count,
+                    totalSetCount: drafts.count,
+                    restSeconds: restSeconds,
+                    notes: notesByExerciseID[exercise.id] ?? exercise.notes
+                )
+
+                HistoryCollapsedExerciseCard(
+                    exerciseAccessibilityIdentifier: "history-exercise-\(exercise.catalogExerciseUUID)",
+                    exerciseName: exercise.exerciseNameSnapshot,
+                    muscleSummary: exercise.muscleSummarySnapshot,
+                    category: exercise.categorySnapshot,
+                    exerciseIndexTitle: "Exercise \(index + 1)",
+                    summary: collapsedSummary,
+                    onExpand: {
+                        handleExpandedChange(true, for: exercise.id)
+                    },
+                    onDelete: {
+                        removeExercise(exerciseID: exercise.id)
+                    }
+                )
+            }
         }
+    }
 
+    @ViewBuilder
+    private func exerciseStructureBadgeRow(
+        for exercise: WorkoutSessionExercise,
+        drafts: [WorkoutSessionSetDraft]
+    ) -> some View {
+        let presentation = WorkoutExerciseStructurePresentation(
+            supersetMembership: exercise.supersetMembership,
+            hasDropset: drafts.contains(where: \.hasDropset)
+        )
+
+        if presentation.isSuperset || presentation.hasDropset {
+            HStack(spacing: 8) {
+                if presentation.isSuperset {
+                    structureBadge("Superset", tint: WGJTheme.accentBlue)
+                }
+                if let position = presentation.supersetPosition {
+                    structureBadge(position.label, tint: WGJTheme.accentCyan)
+                }
+                if presentation.hasDropset {
+                    structureBadge("Dropset", tint: WGJTheme.accentGold)
+                }
+            }
+        }
+    }
+
+    private func structureBadge(_ title: String, tint: Color) -> some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(tint.opacity(0.12))
+                    .overlay(
+                        Capsule()
+                            .stroke(tint.opacity(0.24), lineWidth: 1)
+                    )
+            )
     }
 
     @MainActor
@@ -1253,14 +1297,20 @@ private struct HistoryCollapsedExerciseCard: View, Equatable {
         TemplateExercise.self,
         TemplateExerciseComponent.self,
         TemplateExerciseSet.self,
+        TemplateSupersetGroup.self,
+        TemplateExerciseDropStage.self,
         ActiveWorkoutDraftSession.self,
         ActiveWorkoutDraftCardioBlock.self,
         ActiveWorkoutDraftExercise.self,
         ActiveWorkoutDraftExerciseComponent.self,
         ActiveWorkoutDraftSet.self,
+        ActiveWorkoutDraftSupersetGroup.self,
+        ActiveWorkoutDraftDropStage.self,
         WorkoutSession.self,
         WorkoutSessionCardioBlock.self,
         WorkoutSessionExercise.self,
         WorkoutSessionSet.self,
+        WorkoutSessionSupersetGroup.self,
+        WorkoutSessionDropStage.self,
     ], inMemory: true)
 }

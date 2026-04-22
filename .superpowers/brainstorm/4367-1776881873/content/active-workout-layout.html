@@ -1,0 +1,119 @@
+<h2>Which active-workout pattern feels most intuitive?</h2>
+<p class="subtitle">Focus on fast logging, clear flow, and how obvious the superset or dropset state feels mid-workout.</p>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">A. Group Card</div>
+        <div class="mockup-body">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <strong>Superset 1</strong>
+            <span class="label">Round 2 / 3</span>
+          </div>
+          <div style="border:1px solid #2f5b6a;border-radius:12px;padding:10px;margin-bottom:8px;">
+            <div class="label">A1</div>
+            <strong>Incline DB Press</strong>
+            <div style="margin-top:8px;" class="placeholder">Set rows</div>
+          </div>
+          <div style="border:1px solid #2f5b6a;border-radius:12px;padding:10px;margin-bottom:8px;">
+            <div class="label">A2</div>
+            <strong>Chest Supported Row</strong>
+            <div style="margin-top:8px;" class="placeholder">Set rows</div>
+          </div>
+          <div style="border:1px solid #5b4d22;border-radius:12px;padding:10px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <strong>Lateral Raise</strong>
+              <span class="label">Dropset</span>
+            </div>
+            <div style="margin-top:8px;">
+              <div class="mock-input">Set 3: 14kg x 10</div>
+              <div class="mock-input" style="margin-top:6px;">Drop 1: 10kg x 8</div>
+              <div class="mock-input" style="margin-top:6px;">Drop 2: 7kg x 10</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>Grouped workout blocks</h3>
+      <p>One card owns the whole superset round. Dropsets expand inside a single set row.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">B. Linked Cards</div>
+        <div class="mockup-body">
+          <div style="border:1px solid #2f5b6a;border-radius:12px;padding:10px;margin-bottom:8px;">
+            <div style="display:flex;justify-content:space-between;">
+              <strong>Incline DB Press</strong>
+              <span class="label">A1</span>
+            </div>
+            <div class="placeholder" style="margin-top:8px;">Set rows</div>
+            <div style="margin-top:8px;" class="subtitle">Next: Chest Supported Row</div>
+          </div>
+          <div style="border:1px solid #2f5b6a;border-radius:12px;padding:10px;margin-bottom:8px;">
+            <div style="display:flex;justify-content:space-between;">
+              <strong>Chest Supported Row</strong>
+              <span class="label">A2</span>
+            </div>
+            <div class="placeholder" style="margin-top:8px;">Set rows</div>
+            <div style="margin-top:8px;" class="subtitle">Rest after A2</div>
+          </div>
+          <div style="border:1px solid #5b4d22;border-radius:12px;padding:10px;">
+            <strong>Lateral Raise</strong>
+            <div style="margin-top:8px;" class="mock-input">Set 3</div>
+            <button class="mock-button" style="margin-top:8px;">Open Dropset Stages</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>Keep today’s card structure</h3>
+      <p>Each exercise stays separate, but the app links them with A1/A2 labels and flow cues.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">C. Compact Strip + Detail</div>
+        <div class="mockup-body">
+          <div style="display:flex;gap:8px;margin-bottom:10px;">
+            <div style="flex:1;border:1px solid #2f5b6a;border-radius:999px;padding:8px;text-align:center;">A1</div>
+            <div style="flex:1;border:1px solid #2f5b6a;border-radius:999px;padding:8px;text-align:center;">A2</div>
+            <div style="flex:1;border:1px solid #5b4d22;border-radius:999px;padding:8px;text-align:center;">DS</div>
+          </div>
+          <div style="border:1px solid #36515b;border-radius:12px;padding:10px;">
+            <strong>Selected: Chest Supported Row</strong>
+            <div class="placeholder" style="margin-top:8px;">Only one exercise editor open at a time</div>
+            <div style="margin-top:8px;" class="subtitle">Swipe the strip to move between linked items</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>Navigator first</h3>
+      <p>Linked exercises live in a compact strip, with one detailed editor shown underneath.</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="pros-cons">
+    <div class="pros">
+      <h4>Recommendation</h4>
+      <ul>
+        <li><strong>A</strong> if you want the feature to feel explicit and beginner-proof.</li>
+      </ul>
+    </div>
+    <div class="cons">
+      <h4>Watch-out</h4>
+      <ul>
+        <li><strong>B</strong> is cheaper to graft onto the current UI, but the group can feel less obvious.</li>
+      </ul>
+    </div>
+  </div>
+</div>

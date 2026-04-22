@@ -8,7 +8,7 @@ nonisolated enum TemplateTransferFileFormat {
 }
 
 nonisolated struct TemplateTransferEnvelope: Codable, Equatable, Sendable {
-    static let currentFormatVersion = 4
+    static let currentFormatVersion = 5
 
     let formatVersion: Int
     let exportedAt: Date
@@ -66,6 +66,7 @@ nonisolated struct TemplateTransferExercise: Codable, Equatable, Sendable {
     let restSeconds: Int
     let sets: [TemplateTransferSet]
     let components: [TemplateTransferExerciseComponent]?
+    let superset: ExerciseSupersetMembershipDraft?
 
     init(
         catalogExerciseUUID: String,
@@ -77,7 +78,8 @@ nonisolated struct TemplateTransferExercise: Codable, Equatable, Sendable {
         targetRepMax: Int?,
         restSeconds: Int,
         sets: [TemplateTransferSet],
-        components: [TemplateTransferExerciseComponent]? = nil
+        components: [TemplateTransferExerciseComponent]? = nil,
+        superset: ExerciseSupersetMembershipDraft? = nil
     ) {
         self.catalogExerciseUUID = catalogExerciseUUID
         self.exerciseNameSnapshot = exerciseNameSnapshot
@@ -89,6 +91,7 @@ nonisolated struct TemplateTransferExercise: Codable, Equatable, Sendable {
         self.restSeconds = restSeconds
         self.sets = sets
         self.components = components
+        self.superset = superset
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -102,6 +105,7 @@ nonisolated struct TemplateTransferExercise: Codable, Equatable, Sendable {
         case restSeconds
         case sets
         case components
+        case superset
     }
 
     init(from decoder: Decoder) throws {
@@ -116,6 +120,7 @@ nonisolated struct TemplateTransferExercise: Codable, Equatable, Sendable {
         restSeconds = try container.decode(Int.self, forKey: .restSeconds)
         sets = try container.decode([TemplateTransferSet].self, forKey: .sets)
         components = try container.decodeIfPresent([TemplateTransferExerciseComponent].self, forKey: .components)
+        superset = try container.decodeIfPresent(ExerciseSupersetMembershipDraft.self, forKey: .superset)
     }
 }
 
@@ -133,6 +138,46 @@ nonisolated struct TemplateTransferSet: Codable, Equatable, Sendable {
     let restSeconds: Int
     let isWarmup: Bool
     let isLocked: Bool
+    let dropStages: [TemplateExerciseDropStageDraft]
+
+    init(
+        targetReps: Int?,
+        targetWeight: Double?,
+        loadUnit: TemplateLoadUnit,
+        restSeconds: Int,
+        isWarmup: Bool,
+        isLocked: Bool,
+        dropStages: [TemplateExerciseDropStageDraft] = []
+    ) {
+        self.targetReps = targetReps
+        self.targetWeight = targetWeight
+        self.loadUnit = loadUnit
+        self.restSeconds = restSeconds
+        self.isWarmup = isWarmup
+        self.isLocked = isLocked
+        self.dropStages = dropStages
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case targetReps
+        case targetWeight
+        case loadUnit
+        case restSeconds
+        case isWarmup
+        case isLocked
+        case dropStages
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        targetReps = try container.decodeIfPresent(Int.self, forKey: .targetReps)
+        targetWeight = try container.decodeIfPresent(Double.self, forKey: .targetWeight)
+        loadUnit = try container.decode(TemplateLoadUnit.self, forKey: .loadUnit)
+        restSeconds = try container.decode(Int.self, forKey: .restSeconds)
+        isWarmup = try container.decode(Bool.self, forKey: .isWarmup)
+        isLocked = try container.decode(Bool.self, forKey: .isLocked)
+        dropStages = try container.decodeIfPresent([TemplateExerciseDropStageDraft].self, forKey: .dropStages) ?? []
+    }
 }
 
 nonisolated enum TemplateTransferError: LocalizedError, Equatable, Sendable {
@@ -272,7 +317,8 @@ nonisolated final class TemplateTransferService {
                 targetRepMax: exercise.targetRepMax,
                 restSeconds: exercise.restSeconds,
                 sets: try repository.setDrafts(for: exercise.id).map(transferSet(from:)),
-                components: components
+                components: components,
+                superset: exercise.supersetMembership
             )
         }
 
@@ -319,7 +365,8 @@ nonisolated final class TemplateTransferService {
             loadUnit: draft.loadUnit,
             restSeconds: draft.restSeconds,
             isWarmup: draft.isWarmup,
-            isLocked: draft.isLocked
+            isLocked: draft.isLocked,
+            dropStages: draft.dropStages
         )
     }
 
@@ -362,13 +409,15 @@ nonisolated final class TemplateTransferService {
                     restSeconds: set.restSeconds,
                     isWarmup: set.isWarmup,
                     isLocked: set.isLocked,
-                    previousLoadUnit: set.loadUnit
+                    previousLoadUnit: set.loadUnit,
+                    dropStages: Array(set.dropStages.prefix(2))
                 )
             },
             components: try componentDrafts(
                 from: exercise.components,
                 catalogRepository: catalogRepository
-            )
+            ),
+            superset: exercise.superset
         )
     }
 

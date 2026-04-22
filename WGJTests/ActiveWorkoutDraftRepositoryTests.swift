@@ -93,6 +93,92 @@ struct ActiveWorkoutDraftRepositoryTests {
     }
 
     @Test
+    func createSessionFromTemplateCopiesSupersetAndDropsetStructureIntoDrafts() throws {
+        let context = try makeInMemoryContext()
+        let templateRepository = TemplateRepository(modelContext: context)
+        let repository = ActiveWorkoutDraftRepository(modelContext: context)
+
+        let inclinePress = makeCatalogItem(
+            remoteUUID: "draft-superset-incline-press",
+            displayName: "Incline DB Press",
+            equipmentSummary: "Dumbbells",
+            context: context
+        )
+        let chestSupportedRow = makeCatalogItem(
+            remoteUUID: "draft-superset-supported-row",
+            displayName: "Chest Supported Row",
+            equipmentSummary: "Machine",
+            context: context
+        )
+
+        let supersetID = UUID()
+        let template = try templateRepository.createTemplate(name: "Push Pull", notes: "")
+        try templateRepository.setExercises(
+            templateID: template.id,
+            drafts: [
+                TemplateExerciseDraft(
+                    catalogExerciseUUID: inclinePress.remoteUUID,
+                    exerciseNameSnapshot: inclinePress.displayName,
+                    categorySnapshot: inclinePress.categoryName,
+                    muscleSummarySnapshot: inclinePress.primaryMuscleNames,
+                    targetRepMin: 8,
+                    targetRepMax: 10,
+                    restSeconds: 60,
+                    setDrafts: [
+                        TemplateExerciseSetDraft(
+                            targetReps: 10,
+                            targetWeight: 28,
+                            loadUnit: .kg,
+                            restSeconds: 60,
+                            dropStages: [
+                                TemplateExerciseDropStageDraft(targetReps: 8, targetWeight: 22, loadUnit: .kg),
+                                TemplateExerciseDropStageDraft(targetReps: 10, targetWeight: 18, loadUnit: .kg),
+                            ]
+                        ),
+                    ],
+                    superset: ExerciseSupersetMembershipDraft(
+                        groupID: supersetID,
+                        position: .first,
+                        roundRestSeconds: 75
+                    )
+                ),
+                TemplateExerciseDraft(
+                    catalogExerciseUUID: chestSupportedRow.remoteUUID,
+                    exerciseNameSnapshot: chestSupportedRow.displayName,
+                    categorySnapshot: chestSupportedRow.categoryName,
+                    muscleSummarySnapshot: chestSupportedRow.primaryMuscleNames,
+                    targetRepMin: 8,
+                    targetRepMax: 12,
+                    restSeconds: 60,
+                    setDrafts: [
+                        TemplateExerciseSetDraft(targetReps: 12, targetWeight: 55, loadUnit: .kg, restSeconds: 60),
+                    ],
+                    superset: ExerciseSupersetMembershipDraft(
+                        groupID: supersetID,
+                        position: .second,
+                        roundRestSeconds: 75
+                    )
+                ),
+            ]
+        )
+
+        let draftSession = try repository.createSessionFromTemplate(templateID: template.id)
+        let exercises = try repository.sessionExercises(sessionID: draftSession.id)
+        let firstExercise = try #require(exercises.first)
+        let secondExercise = try #require(exercises.last)
+        let firstSetDrafts = try repository.setDrafts(sessionExerciseID: firstExercise.id)
+
+        #expect(firstExercise.supersetGroupID == supersetID)
+        #expect(secondExercise.supersetGroupID == supersetID)
+        #expect(firstExercise.supersetPosition == .first)
+        #expect(secondExercise.supersetPosition == .second)
+        #expect(firstExercise.supersetGroup?.roundRestSeconds == 75)
+        #expect(secondExercise.supersetGroup?.roundRestSeconds == 75)
+        #expect(firstSetDrafts[0].dropStages.map(\.targetWeight) == [22, 18])
+        #expect(firstSetDrafts[0].dropStages.map(\.targetReps) == [8, 10])
+    }
+
+    @Test
     func overrideExerciseComponentUsesLoggedChoiceForNextDraftRotation() throws {
         let context = try makeInMemoryContext()
         let templateRepository = TemplateRepository(modelContext: context)
@@ -630,15 +716,21 @@ struct ActiveWorkoutDraftRepositoryTests {
             TemplateExercise.self,
             TemplateExerciseComponent.self,
             TemplateExerciseSet.self,
+            TemplateSupersetGroup.self,
+            TemplateExerciseDropStage.self,
             ActiveWorkoutDraftSession.self,
             ActiveWorkoutDraftCardioBlock.self,
             ActiveWorkoutDraftExercise.self,
             ActiveWorkoutDraftExerciseComponent.self,
             ActiveWorkoutDraftSet.self,
+            ActiveWorkoutDraftSupersetGroup.self,
+            ActiveWorkoutDraftDropStage.self,
             WorkoutSession.self,
             WorkoutSessionCardioBlock.self,
             WorkoutSessionExercise.self,
             WorkoutSessionSet.self,
+            WorkoutSessionSupersetGroup.self,
+            WorkoutSessionDropStage.self,
             CompletedSetFact.self,
             SocialOutboxItem.self,
             BlockedBro.self,
@@ -669,10 +761,14 @@ struct ActiveWorkoutDraftRepositoryTests {
                     TemplateExercise.self,
                     TemplateExerciseComponent.self,
                     TemplateExerciseSet.self,
+            TemplateSupersetGroup.self,
+            TemplateExerciseDropStage.self,
                     WorkoutSession.self,
                     WorkoutSessionCardioBlock.self,
                     WorkoutSessionExercise.self,
                     WorkoutSessionSet.self,
+            WorkoutSessionSupersetGroup.self,
+            WorkoutSessionDropStage.self,
                 ]),
                 isStoredInMemoryOnly: true,
                 cloudKitDatabase: .none
@@ -685,6 +781,8 @@ struct ActiveWorkoutDraftRepositoryTests {
                     ActiveWorkoutDraftExercise.self,
                     ActiveWorkoutDraftExerciseComponent.self,
                     ActiveWorkoutDraftSet.self,
+            ActiveWorkoutDraftSupersetGroup.self,
+            ActiveWorkoutDraftDropStage.self,
                 ]),
                 isStoredInMemoryOnly: true,
                 cloudKitDatabase: .none

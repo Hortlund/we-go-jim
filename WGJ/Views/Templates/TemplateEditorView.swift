@@ -266,11 +266,22 @@ struct TemplateEditorView: View {
                     presentExerciseReorder(for: row.draftStore)
                 } : nil,
                 preferredLoadUnit: preferredLoadUnit,
+                supersetPresentation: row.supersetPresentation,
+                canMakeSupersetWithNext: row.index < rows.count - 1 && row.supersetPresentation == nil && rows[row.index + 1].supersetPresentation == nil,
                 onMoveUp: {
                     moveExerciseUp(row.index)
                 },
                 onMoveDown: {
                     moveExerciseDown(row.index)
+                },
+                onMakeSuperset: {
+                    makeSuperset(startingAt: row.index)
+                },
+                onUnpairSuperset: { groupID in
+                    unpairSuperset(for: groupID)
+                },
+                onSupersetRoundRestChanged: { groupID, restSeconds in
+                    updateSupersetRoundRest(restSeconds, for: groupID)
                 },
                 onExerciseDelete: {
                     removeExercise(withID: row.id)
@@ -361,6 +372,7 @@ struct TemplateEditorView: View {
         withAnimation(WGJMotion.quickAnimation(reduceMotion: reduceMotion)) {
             _ = exerciseDrafts.remove(at: index)
         }
+        normalizeSupersets()
     }
 
     private func removeExercise(withID exerciseID: UUID) {
@@ -395,6 +407,7 @@ struct TemplateEditorView: View {
         withAnimation(WGJMotion.quickAnimation(reduceMotion: reduceMotion)) {
             exerciseDrafts.swapAt(index, index - 1)
         }
+        normalizeSupersets()
     }
 
     private func moveExerciseDown(_ index: Int) {
@@ -402,6 +415,7 @@ struct TemplateEditorView: View {
         withAnimation(WGJMotion.quickAnimation(reduceMotion: reduceMotion)) {
             exerciseDrafts.swapAt(index, index + 1)
         }
+        normalizeSupersets()
     }
 
     private func moveExercise(withID exerciseID: UUID, toPosition position: Int) {
@@ -411,6 +425,101 @@ struct TemplateEditorView: View {
         withAnimation(WGJMotion.quickAnimation(reduceMotion: reduceMotion)) {
             let movingDraft = exerciseDrafts.remove(at: currentIndex)
             exerciseDrafts.insert(movingDraft, at: position)
+        }
+        normalizeSupersets()
+    }
+
+    private func makeSuperset(startingAt index: Int) {
+        guard exerciseDrafts.indices.contains(index), exerciseDrafts.indices.contains(index + 1) else { return }
+        let groupID = UUID()
+        let roundRestSeconds = exerciseDrafts[index + 1].restSeconds
+
+        clearSupersetIfNeeded(for: exerciseDrafts[index])
+        clearSupersetIfNeeded(for: exerciseDrafts[index + 1])
+
+        exerciseDrafts[index].superset = ExerciseSupersetMembershipDraft(
+            groupID: groupID,
+            position: .first,
+            roundRestSeconds: roundRestSeconds
+        )
+        exerciseDrafts[index + 1].superset = ExerciseSupersetMembershipDraft(
+            groupID: groupID,
+            position: .second,
+            roundRestSeconds: roundRestSeconds
+        )
+    }
+
+    private func unpairSuperset(for groupID: UUID) {
+        guard let roundRestSeconds = exerciseDrafts.first(where: { $0.superset?.groupID == groupID })?.superset?.roundRestSeconds else {
+            return
+        }
+
+        for draftStore in exerciseDrafts where draftStore.superset?.groupID == groupID {
+            draftStore.superset = nil
+            applyStandaloneRest(roundRestSeconds, to: draftStore)
+        }
+    }
+
+    private func updateSupersetRoundRest(_ restSeconds: Int, for groupID: UUID) {
+        let normalized = max(0, min(3600, restSeconds))
+        for draftStore in exerciseDrafts where draftStore.superset?.groupID == groupID {
+            guard let membership = draftStore.superset else { continue }
+            draftStore.superset = ExerciseSupersetMembershipDraft(
+                groupID: membership.groupID,
+                position: membership.position,
+                roundRestSeconds: normalized
+            )
+        }
+    }
+
+    private func normalizeSupersets() {
+        var consumedGroupIDs: Set<UUID> = []
+        for index in exerciseDrafts.indices {
+            guard let membership = exerciseDrafts[index].superset else { continue }
+
+            guard membership.position == .first else {
+                clearSupersetIfNeeded(for: exerciseDrafts[index])
+                applyStandaloneRest(membership.roundRestSeconds, to: exerciseDrafts[index])
+                continue
+            }
+
+            let nextIndex = index + 1
+            guard exerciseDrafts.indices.contains(nextIndex),
+                  let nextMembership = exerciseDrafts[nextIndex].superset,
+                  nextMembership.groupID == membership.groupID,
+                  nextMembership.position == .second,
+                  !consumedGroupIDs.contains(membership.groupID) else {
+                clearSupersetIfNeeded(for: exerciseDrafts[index])
+                applyStandaloneRest(membership.roundRestSeconds, to: exerciseDrafts[index])
+                continue
+            }
+
+            let normalizedRest = max(0, min(3600, nextMembership.roundRestSeconds))
+            exerciseDrafts[index].superset = ExerciseSupersetMembershipDraft(
+                groupID: membership.groupID,
+                position: .first,
+                roundRestSeconds: normalizedRest
+            )
+            exerciseDrafts[nextIndex].superset = ExerciseSupersetMembershipDraft(
+                groupID: membership.groupID,
+                position: .second,
+                roundRestSeconds: normalizedRest
+            )
+            consumedGroupIDs.insert(membership.groupID)
+        }
+    }
+
+    private func clearSupersetIfNeeded(for draftStore: TemplateExerciseDraftStore) {
+        guard let membership = draftStore.superset else { return }
+        draftStore.superset = nil
+        applyStandaloneRest(membership.roundRestSeconds, to: draftStore)
+    }
+
+    private func applyStandaloneRest(_ restSeconds: Int, to draftStore: TemplateExerciseDraftStore) {
+        let normalized = max(0, min(3600, restSeconds))
+        draftStore.restSeconds = normalized
+        for index in draftStore.setDrafts.indices {
+            draftStore.setDrafts[index].restSeconds = normalized
         }
     }
 
@@ -534,15 +643,49 @@ struct TemplateEditorView: View {
     }
 
     private var exerciseRows: [TemplateEditorExerciseRowData] {
-        exerciseDrafts.enumerated().map { index, draftStore in
+        let supersetsByExerciseID = supersetPresentationByExerciseID()
+        return exerciseDrafts.enumerated().map { index, draftStore in
             TemplateEditorExerciseRowData(
                 id: draftStore.id,
                 index: index,
                 draftStore: draftStore,
                 recommendation: recommendationByExerciseID[draftStore.id]
-                    ?? templateRecommendation(for: draftStore, catalogByUUID: [:])
+                    ?? templateRecommendation(for: draftStore, catalogByUUID: [:]),
+                supersetPresentation: supersetsByExerciseID[draftStore.id]
             )
         }
+    }
+
+    private func supersetPresentationByExerciseID() -> [UUID: TemplateEditorSupersetPresentation] {
+        var result: [UUID: TemplateEditorSupersetPresentation] = [:]
+        var pairedGroupIDs: [UUID] = []
+        for draftStore in exerciseDrafts {
+            guard let groupID = draftStore.superset?.groupID else { continue }
+            if pairedGroupIDs.contains(groupID) == false {
+                pairedGroupIDs.append(groupID)
+            }
+        }
+        var groupLetterByID: [UUID: String] = [:]
+        for (position, groupID) in pairedGroupIDs.enumerated() {
+            let unicode = UnicodeScalar(65 + position)
+            groupLetterByID[groupID] = unicode.map(String.init) ?? "A"
+        }
+
+        for draftStore in exerciseDrafts {
+            guard let membership = draftStore.superset else { continue }
+            let letter = groupLetterByID[membership.groupID] ?? "A"
+            let pairedExerciseName = exerciseDrafts.first {
+                $0.superset?.groupID == membership.groupID && $0.id != draftStore.id
+            }?.exerciseNameSnapshot
+            result[draftStore.id] = TemplateEditorSupersetPresentation(
+                groupID: membership.groupID,
+                label: "\(letter)\(membership.position == .first ? "1" : "2")",
+                roundRestSeconds: membership.roundRestSeconds,
+                pairedExerciseName: pairedExerciseName
+            )
+        }
+
+        return result
     }
 
     private var exerciseReorderItems: [ExerciseReorderListItem] {
@@ -628,6 +771,7 @@ private final class TemplateExerciseDraftStore: Identifiable {
     var restSeconds: Int
     var setDrafts: [TemplateExerciseSetDraft]
     var components: [TemplateExerciseComponentDraft]
+    var superset: ExerciseSupersetMembershipDraft?
     var isExpanded: Bool
 
     init(draft: TemplateExerciseDraft, isExpanded: Bool = false) {
@@ -638,6 +782,7 @@ private final class TemplateExerciseDraftStore: Identifiable {
         restSeconds = draft.restSeconds
         setDrafts = draft.setDrafts
         components = draft.components
+        superset = draft.superset
         self.isExpanded = isExpanded
     }
 
@@ -669,7 +814,8 @@ private final class TemplateExerciseDraftStore: Identifiable {
             targetRepMax: targetRepMax,
             restSeconds: restSeconds,
             setDrafts: setDrafts,
-            components: components
+            components: components,
+            superset: superset
         )
     }
 }
@@ -683,8 +829,13 @@ private struct TemplateEditorExerciseRow: View {
     let canMoveDown: Bool
     let onMoveToPosition: (() -> Void)?
     let preferredLoadUnit: TemplateLoadUnit
+    let supersetPresentation: TemplateEditorSupersetPresentation?
+    let canMakeSupersetWithNext: Bool
     let onMoveUp: () -> Void
     let onMoveDown: () -> Void
+    let onMakeSuperset: () -> Void
+    let onUnpairSuperset: (UUID) -> Void
+    let onSupersetRoundRestChanged: (UUID, Int) -> Void
     let onExerciseDelete: () -> Void
     let onAddComponent: () -> Void
     let onMoveComponentUp: (Int) -> Void
@@ -708,8 +859,13 @@ private struct TemplateEditorExerciseRow: View {
         canMoveDown: Bool,
         onMoveToPosition: (() -> Void)?,
         preferredLoadUnit: TemplateLoadUnit,
+        supersetPresentation: TemplateEditorSupersetPresentation?,
+        canMakeSupersetWithNext: Bool,
         onMoveUp: @escaping () -> Void,
         onMoveDown: @escaping () -> Void,
+        onMakeSuperset: @escaping () -> Void,
+        onUnpairSuperset: @escaping (UUID) -> Void,
+        onSupersetRoundRestChanged: @escaping (UUID, Int) -> Void,
         onExerciseDelete: @escaping () -> Void,
         onAddComponent: @escaping () -> Void,
         onMoveComponentUp: @escaping (Int) -> Void,
@@ -723,8 +879,13 @@ private struct TemplateEditorExerciseRow: View {
         self.canMoveDown = canMoveDown
         self.onMoveToPosition = onMoveToPosition
         self.preferredLoadUnit = preferredLoadUnit
+        self.supersetPresentation = supersetPresentation
+        self.canMakeSupersetWithNext = canMakeSupersetWithNext
         self.onMoveUp = onMoveUp
         self.onMoveDown = onMoveDown
+        self.onMakeSuperset = onMakeSuperset
+        self.onUnpairSuperset = onUnpairSuperset
+        self.onSupersetRoundRestChanged = onSupersetRoundRestChanged
         self.onExerciseDelete = onExerciseDelete
         self.onAddComponent = onAddComponent
         self.onMoveComponentUp = onMoveComponentUp
@@ -786,6 +947,8 @@ private struct TemplateEditorExerciseRow: View {
                 canMoveUp: canMoveUp,
                 canMoveDown: canMoveDown,
                 preferredLoadUnit: preferredLoadUnit,
+                supersetPresentation: supersetPresentation,
+                canMakeSupersetWithNext: canMakeSupersetWithNext,
                 notes: localNotes,
                 targetRepMin: localTargetRepMin,
                 targetRepMax: localTargetRepMax,
@@ -830,6 +993,9 @@ private struct TemplateEditorExerciseRow: View {
                 },
                 onMoveUp: onMoveUp,
                 onMoveDown: onMoveDown,
+                onMakeSuperset: onMakeSuperset,
+                onUnpairSuperset: onUnpairSuperset,
+                onSupersetRoundRestChanged: onSupersetRoundRestChanged,
                 onMoveToPosition: onMoveToPosition,
                 onExerciseDelete: onExerciseDelete,
                 components: draftStore.components,
@@ -923,6 +1089,8 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
     let canMoveUp: Bool
     let canMoveDown: Bool
     let preferredLoadUnit: TemplateLoadUnit
+    let supersetPresentation: TemplateEditorSupersetPresentation?
+    let canMakeSupersetWithNext: Bool
     let notes: String
     let targetRepMin: Int?
     let targetRepMax: Int?
@@ -939,6 +1107,9 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
     let onSetDraftsChanged: ([TemplateExerciseSetDraft]) -> Void
     let onMoveUp: () -> Void
     let onMoveDown: () -> Void
+    let onMakeSuperset: () -> Void
+    let onUnpairSuperset: (UUID) -> Void
+    let onSupersetRoundRestChanged: (UUID, Int) -> Void
     let onMoveToPosition: (() -> Void)?
     let onExerciseDelete: () -> Void
     let components: [TemplateExerciseComponentDraft]
@@ -959,6 +1130,8 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
             && lhs.canMoveUp == rhs.canMoveUp
             && lhs.canMoveDown == rhs.canMoveDown
             && lhs.preferredLoadUnit == rhs.preferredLoadUnit
+            && lhs.supersetPresentation == rhs.supersetPresentation
+            && lhs.canMakeSupersetWithNext == rhs.canMakeSupersetWithNext
             && lhs.notes == rhs.notes
             && lhs.targetRepMin == rhs.targetRepMin
             && lhs.targetRepMax == rhs.targetRepMax
@@ -977,6 +1150,14 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
             recommendation: recommendation,
             supplementaryContent: AnyView(
                 VStack(alignment: .leading, spacing: 12) {
+                    TemplateEditorSupersetSection(
+                        presentation: supersetPresentation,
+                        canMakeSupersetWithNext: canMakeSupersetWithNext,
+                        onMakeSuperset: onMakeSuperset,
+                        onUnpairSuperset: onUnpairSuperset,
+                        onRoundRestChanged: onSupersetRoundRestChanged
+                    )
+
                     WGJExerciseNotesEditor(
                         placeholder: "Add notes for this exercise",
                         accessibilityIdentifier: "\(exerciseAccessibilityIdentifier)-notes-field",
@@ -1036,11 +1217,111 @@ private struct TemplateEditorExerciseRowData: Identifiable {
     let index: Int
     let draftStore: TemplateExerciseDraftStore
     let recommendation: TemplateExerciseRecommendation?
+    let supersetPresentation: TemplateEditorSupersetPresentation?
 }
 
 private struct TemplateEditorRecommendationReloadKey: Hashable {
     let catalogExerciseUUIDs: [String]
     let isTrainingGuidanceEnabled: Bool
+}
+
+private struct TemplateEditorSupersetPresentation: Equatable {
+    let groupID: UUID
+    let label: String
+    let roundRestSeconds: Int
+    let pairedExerciseName: String?
+}
+
+private struct TemplateEditorSupersetSection: View {
+    let presentation: TemplateEditorSupersetPresentation?
+    let canMakeSupersetWithNext: Bool
+    let onMakeSuperset: () -> Void
+    let onUnpairSuperset: (UUID) -> Void
+    let onRoundRestChanged: (UUID, Int) -> Void
+
+    private let restPresets = [30, 45, 60, 75, 90, 105, 120, 150, 180]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Superset")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(WGJTheme.textSecondary)
+
+            if let presentation {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        Text(presentation.label)
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(WGJTheme.accentBlue)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule()
+                                    .fill(WGJTheme.accentBlue.opacity(0.12))
+                            )
+
+                        Text("Round rest \(formattedRest(presentation.roundRestSeconds))")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(WGJTheme.textPrimary)
+
+                        Spacer(minLength: 8)
+                    }
+
+                    if let pairedExerciseName = presentation.pairedExerciseName,
+                       !pairedExerciseName.isEmpty {
+                        Text("Paired with \(pairedExerciseName)")
+                            .font(.caption)
+                            .foregroundStyle(WGJTheme.textSecondary)
+                    }
+
+                    HStack(spacing: 10) {
+                        WGJActionMenuButton("Superset Rest") {
+                            ForEach(restPresets, id: \.self) { value in
+                                Button(formattedRest(value)) {
+                                    onRoundRestChanged(presentation.groupID, value)
+                                }
+                            }
+                        } label: {
+                            Label("Round Rest", systemImage: "timer")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(WGJGhostButtonStyle())
+                        .accessibilityIdentifier("template-editor-superset-rest-button-\(presentation.groupID.uuidString.lowercased())")
+
+                        Button("Unpair", role: .destructive) {
+                            onUnpairSuperset(presentation.groupID)
+                        }
+                        .buttonStyle(WGJGhostButtonStyle())
+                        .accessibilityIdentifier("template-editor-superset-unpair-button-\(presentation.groupID.uuidString.lowercased())")
+                    }
+                }
+                .padding(12)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(WGJTheme.accentBlue.opacity(0.08))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(WGJTheme.accentBlue.opacity(0.18), lineWidth: 1)
+                        )
+                )
+            } else if canMakeSupersetWithNext {
+                Button {
+                    onMakeSuperset()
+                } label: {
+                    Label("Make Superset With Next Exercise", systemImage: "link")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(WGJGhostButtonStyle())
+                .accessibilityIdentifier("template-editor-make-superset-button")
+            }
+        }
+    }
+
+    private func formattedRest(_ seconds: Int) -> String {
+        let mins = max(0, seconds) / 60
+        let secs = max(0, seconds) % 60
+        return String(format: "%d:%02d", mins, secs)
+    }
 }
 
 #Preview {

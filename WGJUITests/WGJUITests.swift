@@ -204,6 +204,9 @@ final class WGJUITests: XCTestCase {
         ])
 
         let previewSheet = identifiedElement("template-preview-sheet", in: app)
+        if !previewSheet.waitForExistence(timeout: 5) {
+            tapTab("Start Workout", in: app)
+        }
         XCTAssertTrue(previewSheet.waitForExistence(timeout: 5))
         app.buttons["Cancel"].tap()
 
@@ -274,6 +277,9 @@ final class WGJUITests: XCTestCase {
         ])
 
         let previewSheet = identifiedElement("template-preview-sheet", in: app)
+        if !previewSheet.waitForExistence(timeout: 5) {
+            tapTab("Start Workout", in: app)
+        }
         XCTAssertTrue(previewSheet.waitForExistence(timeout: 5))
         app.buttons["Cancel"].tap()
 
@@ -3103,8 +3109,15 @@ final class WGJUITests: XCTestCase {
         }
 
         let hasExerciseComponents = exercises.contains { $0["components"] != nil }
+        let hasSupersetOrDropset = exercises.contains { exercise in
+            if exercise["superset"] != nil {
+                return true
+            }
+            let sets = exercise["sets"] as? [[String: Any]] ?? []
+            return sets.contains { $0["dropStages"] != nil }
+        }
         let formatVersion: Int
-        if hasExerciseComponents {
+        if hasSupersetOrDropset || hasExerciseComponents {
             formatVersion = 3
         } else if preWorkoutCardio != nil || postWorkoutCardio != nil {
             formatVersion = 2
@@ -3147,7 +3160,8 @@ final class WGJUITests: XCTestCase {
         targetRepMax: Int?,
         restSeconds: Int,
         sets: [[String: Any]],
-        components: [[String: Any]] = []
+        components: [[String: Any]] = [],
+        superset: [String: Any]? = nil
     ) -> [String: Any] {
         var payload: [String: Any] = [
             "catalogExerciseUUID": catalogExerciseUUID,
@@ -3163,7 +3177,22 @@ final class WGJUITests: XCTestCase {
         if !components.isEmpty {
             payload["components"] = components
         }
+        if let superset {
+            payload["superset"] = superset
+        }
         return payload
+    }
+
+    private func templatePayloadSuperset(
+        groupID: String,
+        position: String,
+        roundRestSeconds: Int
+    ) -> [String: Any] {
+        [
+            "groupID": groupID,
+            "position": position,
+            "roundRestSeconds": roundRestSeconds,
+        ]
     }
 
     private func templatePayloadExerciseComponent(
@@ -3186,7 +3215,8 @@ final class WGJUITests: XCTestCase {
         loadUnit: String,
         restSeconds: Int,
         isWarmup: Bool,
-        isLocked: Bool = false
+        isLocked: Bool = false,
+        dropStages: [[String: Any]] = []
     ) -> [String: Any] {
         var payload: [String: Any] = [
             "loadUnit": loadUnit,
@@ -3195,6 +3225,22 @@ final class WGJUITests: XCTestCase {
             "isLocked": isLocked,
         ]
 
+        payload["targetReps"] = targetReps
+        payload["targetWeight"] = targetWeight
+        if !dropStages.isEmpty {
+            payload["dropStages"] = dropStages
+        }
+        return payload
+    }
+
+    private func templatePayloadDropStage(
+        targetReps: Int?,
+        targetWeight: Double?,
+        loadUnit: String
+    ) -> [String: Any] {
+        var payload: [String: Any] = [
+            "loadUnit": loadUnit,
+        ]
         payload["targetReps"] = targetReps
         payload["targetWeight"] = targetWeight
         return payload

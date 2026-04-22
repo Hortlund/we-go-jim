@@ -165,7 +165,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         self._rowSnapshots = State(initialValue: initialRows)
         self._cachedCompletedSetCount = State(
             initialValue: setDrafts.wrappedValue.reduce(0) { partialResult, draft in
-                partialResult + (draft.isCompleted ? 1 : 0)
+                partialResult + (draft.isCycleCompleted ? 1 : 0)
             }
         )
     }
@@ -671,6 +671,10 @@ struct WorkoutSessionExerciseGridEditor: View {
                 inlineHintRow(inlineHintPresentation, at: row.index)
             }
 
+            if !set.dropStages.isEmpty {
+                dropStagesSection(for: row.index)
+            }
+
             if manualCompletionMode {
                 completionRow(for: row)
             }
@@ -991,7 +995,39 @@ struct WorkoutSessionExerciseGridEditor: View {
             }
             .disabled(!isSetEditingEnabled)
 
-            if setDrafts[index].actualReps != nil || setDrafts[index].actualWeight != nil {
+            if !setDrafts[index].isWarmup && setDrafts[index].dropStages.isEmpty {
+                Button {
+                    addDropStage(to: index)
+                } label: {
+                    Label("Make dropset", systemImage: "arrow.down.to.line.compact")
+                }
+                .disabled(!isSetEditingEnabled || isLocked)
+            }
+
+            if !setDrafts[index].dropStages.isEmpty && setDrafts[index].dropStages.count < 2 {
+                Button {
+                    addDropStage(to: index)
+                } label: {
+                    Label("Add drop stage", systemImage: "plus.circle")
+                }
+                .disabled(!isSetEditingEnabled || isLocked)
+            }
+
+            if !setDrafts[index].dropStages.isEmpty {
+                Button(role: .destructive) {
+                    clearDropStages(from: index)
+                } label: {
+                    Label("Remove dropset", systemImage: "trash")
+                }
+                .disabled(!isSetEditingEnabled || isLocked)
+            }
+
+            if setDrafts[index].actualReps != nil
+                || setDrafts[index].actualWeight != nil
+                || setDrafts[index].dropStages.contains(where: {
+                    $0.actualReps != nil || $0.actualWeight != nil || $0.isCompleted
+                })
+            {
                 Button {
                     clearLoggedValues(at: index)
                 } label: {
@@ -1271,7 +1307,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private var isExerciseCompleted: Bool {
-        !setDrafts.isEmpty && completedSetCount == setDrafts.count
+        !setDrafts.isEmpty && setDrafts.allSatisfy(\.isCycleCompleted)
     }
 
     private var shouldEmphasizeCompletedExercise: Bool {
@@ -1582,15 +1618,27 @@ struct WorkoutSessionExerciseGridEditor: View {
         guard setDrafts.indices.contains(index) else { return }
         guard !setDrafts[index].isLocked else { return }
         let set = setDrafts[index]
+        let completedDropStageIDs = set.dropStages.filter(\.isCompleted).map(\.id)
         setDrafts[index].actualReps = nil
         setDrafts[index].actualWeight = nil
         if setDrafts[index].targetLoadUnit == .bodyweight {
             setDrafts[index].actualLoadUnit = .bodyweight
         }
         setDrafts[index].isCompleted = false
+        for stageIndex in setDrafts[index].dropStages.indices {
+            setDrafts[index].dropStages[stageIndex].actualReps = nil
+            setDrafts[index].dropStages[stageIndex].actualWeight = nil
+            if setDrafts[index].dropStages[stageIndex].targetLoadUnit == .bodyweight {
+                setDrafts[index].dropStages[stageIndex].actualLoadUnit = .bodyweight
+            }
+            setDrafts[index].dropStages[stageIndex].isCompleted = false
+        }
         notifyChanged()
         if set.isCompleted {
             onSetCompletionChange?(set.id, setTitle(for: index), set.restSeconds, false)
+        }
+        for stageID in completedDropStageIDs {
+            onSetCompletionChange?(stageID, nil, 0, false)
         }
     }
 
@@ -1618,7 +1666,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         }
         rowSnapshots = snapshot
         cachedCompletedSetCount = snapshot.reduce(0) { partialResult, row in
-            partialResult + (row.set.isCompleted ? 1 : 0)
+            partialResult + (row.set.isCycleCompleted ? 1 : 0)
         }
     }
 
@@ -1729,7 +1777,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                         targetRepMax: targetRepMax,
                         formatWeight: formatWeight
                     ),
-                    completionButtonTitle: completionButtonTitle(restSeconds: draft.restSeconds)
+                    completionButtonTitle: completionButtonTitle(for: draft)
                 )
             )
         }
@@ -1778,6 +1826,10 @@ struct WorkoutSessionExerciseGridEditor: View {
             parts.append("Rest \(restLabel(for: set.restSeconds))")
         }
 
+        if !set.dropStages.isEmpty {
+            parts.append("\(set.dropStages.count) drop" + (set.dropStages.count == 1 ? "" : "s"))
+        }
+
         guard !parts.isEmpty else { return nil }
         return parts.joined(separator: " • ")
     }
@@ -1798,7 +1850,11 @@ struct WorkoutSessionExerciseGridEditor: View {
         return "Target \(targetReps)"
     }
 
-    private static func completionButtonTitle(restSeconds: Int) -> String {
+    private static func completionButtonTitle(for draft: WorkoutSessionSetDraft) -> String {
+        if !draft.dropStages.isEmpty {
+            return "Complete Main Set"
+        }
+        let restSeconds = draft.restSeconds
         let restLabel = restSeconds > 0 ? " + Rest \(formattedRest(restSeconds))" : ""
         return "Complete Set\(restLabel)"
     }
@@ -1866,6 +1922,143 @@ struct WorkoutSessionExerciseGridEditor: View {
             isCompleted: false,
             isLocked: false
         )
+    }
+
+    private func addDropStage(to index: Int) {
+        guard setDrafts.indices.contains(index) else { return }
+        guard !setDrafts[index].isWarmup, !setDrafts[index].isLocked, setDrafts[index].dropStages.count < 2 else { return }
+        let sourceStage = setDrafts[index].dropStages.last
+        let sourceReps = sourceStage?.targetReps ?? setDrafts[index].targetReps
+        let sourceWeight = sourceStage?.targetWeight ?? setDrafts[index].targetWeight
+        let sourceLoadUnit = sourceStage?.targetLoadUnit ?? setDrafts[index].targetLoadUnit
+        let sourceActualLoadUnit = sourceStage?.actualLoadUnit ?? setDrafts[index].actualLoadUnit
+        setDrafts[index].dropStages.append(
+            WorkoutSessionDropStageDraft(
+                targetReps: sourceReps,
+                targetWeight: sourceWeight,
+                targetLoadUnit: sourceLoadUnit,
+                actualReps: nil,
+                actualWeight: nil,
+                actualLoadUnit: sourceActualLoadUnit,
+                isCompleted: false
+            )
+        )
+        notifyChanged()
+    }
+
+    private func removeDropStage(_ stageID: UUID, from setIndex: Int) {
+        guard setDrafts.indices.contains(setIndex) else { return }
+        setDrafts[setIndex].dropStages.removeAll { $0.id == stageID }
+        notifyChanged()
+    }
+
+    private func clearDropStages(from index: Int) {
+        guard setDrafts.indices.contains(index), !setDrafts[index].dropStages.isEmpty else { return }
+        setDrafts[index].dropStages = []
+        notifyChanged()
+    }
+
+    private func updateDropStageWeightText(_ newValue: String, stageID: UUID, setIndex: Int) {
+        guard setDrafts.indices.contains(setIndex),
+              let stageIndex = setDrafts[setIndex].dropStages.firstIndex(where: { $0.id == stageID }) else {
+            return
+        }
+
+        let normalized = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let updatedValue: Double?
+        if normalized.isEmpty {
+            updatedValue = nil
+        } else if let parsed = WGJFormatters.parseLocalizedDecimal(normalized) {
+            updatedValue = max(0, parsed)
+        } else {
+            updatedValue = setDrafts[setIndex].dropStages[stageIndex].actualWeight
+        }
+
+        guard setDrafts[setIndex].dropStages[stageIndex].actualWeight != updatedValue else { return }
+        let previousDrafts = setDrafts
+        setDrafts[setIndex].dropStages[stageIndex].actualWeight = updatedValue
+        if let updatedValue, updatedValue > 0,
+           setDrafts[setIndex].dropStages[stageIndex].actualLoadUnit == .bodyweight
+        {
+            let fallbackUnit = setDrafts[setIndex].dropStages[stageIndex].targetLoadUnit == .bodyweight
+                ? preferredLoadUnit
+                : setDrafts[setIndex].dropStages[stageIndex].targetLoadUnit
+            setDrafts[setIndex].dropStages[stageIndex].actualLoadUnit = fallbackUnit
+        } else if updatedValue == nil,
+                  setDrafts[setIndex].dropStages[stageIndex].targetLoadUnit == .bodyweight
+        {
+            setDrafts[setIndex].dropStages[stageIndex].actualLoadUnit = .bodyweight
+        }
+        if !manualCompletionMode {
+            let stage = setDrafts[setIndex].dropStages[stageIndex]
+            setDrafts[setIndex].dropStages[stageIndex].isCompleted = stage.actualReps != nil || stage.actualWeight != nil
+        }
+        handleDraftValueMutation(previousDrafts: previousDrafts)
+    }
+
+    private func updateDropStageRepsText(_ newValue: String, stageID: UUID, setIndex: Int) {
+        guard setDrafts.indices.contains(setIndex),
+              let stageIndex = setDrafts[setIndex].dropStages.firstIndex(where: { $0.id == stageID }) else {
+            return
+        }
+        let cleaned = newValue.filter(\.isNumber)
+        let updatedValue = cleaned.isEmpty ? nil : Int(cleaned)
+        guard setDrafts[setIndex].dropStages[stageIndex].actualReps != updatedValue else { return }
+        let previousDrafts = setDrafts
+        setDrafts[setIndex].dropStages[stageIndex].actualReps = updatedValue
+        if !manualCompletionMode {
+            let stage = setDrafts[setIndex].dropStages[stageIndex]
+            setDrafts[setIndex].dropStages[stageIndex].isCompleted = stage.actualReps != nil || stage.actualWeight != nil
+        }
+        handleDraftValueMutation(previousDrafts: previousDrafts)
+    }
+
+    private func updateDropStageLoadUnit(_ loadUnit: TemplateLoadUnit, stageID: UUID, setIndex: Int) {
+        guard setDrafts.indices.contains(setIndex),
+              let stageIndex = setDrafts[setIndex].dropStages.firstIndex(where: { $0.id == stageID }) else {
+            return
+        }
+        guard setDrafts[setIndex].dropStages[stageIndex].actualLoadUnit != loadUnit else { return }
+        setDrafts[setIndex].dropStages[stageIndex].actualLoadUnit = loadUnit
+        if loadUnit == .bodyweight {
+            setDrafts[setIndex].dropStages[stageIndex].actualWeight = nil
+        }
+        notifyChanged()
+    }
+
+    private func toggleDropStageCompletion(_ stageID: UUID, in setIndex: Int) {
+        guard setDrafts.indices.contains(setIndex),
+              let stageIndex = setDrafts[setIndex].dropStages.firstIndex(where: { $0.id == stageID }) else {
+            return
+        }
+        guard !setDrafts[setIndex].isLocked, setDrafts[setIndex].isCompleted else { return }
+
+        let isCompleted = !setDrafts[setIndex].dropStages[stageIndex].isCompleted
+        setDrafts[setIndex].dropStages[stageIndex].isCompleted = isCompleted
+        let restLabel: String?
+        let restSeconds: Int
+        if isCompleted {
+            let nextStageIndex = stageIndex + 1
+            if setDrafts[setIndex].dropStages.indices.contains(nextStageIndex),
+               !setDrafts[setIndex].dropStages[nextStageIndex].isCompleted {
+                restLabel = "Drop \(nextStageIndex + 1)"
+                restSeconds = 0
+            } else {
+                restLabel = WorkoutRestTimerContextBuilder.nextSetLabel(
+                    afterCompletingSetAt: setIndex,
+                    in: setDrafts
+                )
+                restSeconds = setDrafts[setIndex].restSeconds
+            }
+        } else {
+            for trailingIndex in setDrafts[setIndex].dropStages.indices where trailingIndex > stageIndex {
+                setDrafts[setIndex].dropStages[trailingIndex].isCompleted = false
+            }
+            restLabel = "Drop \(stageIndex + 1)"
+            restSeconds = setDrafts[setIndex].restSeconds
+        }
+        notifyChanged()
+        onSetCompletionChange?(stageID, restLabel, restSeconds, isCompleted)
     }
 
     private func resolvedWeightedLoadUnit(for set: WorkoutSessionSetDraft) -> TemplateLoadUnit {
@@ -1960,7 +2153,33 @@ struct WorkoutSessionExerciseGridEditor: View {
                         )
                 )
                 .accessibilityIdentifier("workout-set-\(index)-bozar-pending")
-            } else if set.isCompleted {
+            } else if set.isCompleted && !set.isCycleCompleted {
+                HStack(spacing: 10) {
+                    Label("Main set complete", systemImage: "arrow.down.to.line.compact")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(WGJTheme.accentCyan)
+                        .wgjSingleLineText(scale: 0.9)
+
+                    Spacer(minLength: 8)
+
+                    Button("Undo Main Set") {
+                        requestCompletionChange(at: index, isCompleted: false)
+                    }
+                    .buttonStyle(WGJGhostButtonStyle())
+                    .disabled(!isSetEditingEnabled || set.isLocked)
+                    .accessibilityIdentifier("workout-set-\(index)-undo-main-set-button")
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(WGJTheme.accentCyan.opacity(0.10))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(WGJTheme.accentCyan.opacity(0.22), lineWidth: 1)
+                        )
+                )
+            } else if set.isCycleCompleted {
                 HStack(spacing: 10) {
                     Label("Completed", systemImage: "checkmark.circle.fill")
                         .font(.subheadline.weight(.semibold))
@@ -2061,6 +2280,64 @@ struct WorkoutSessionExerciseGridEditor: View {
         )
     }
 
+    private func dropStagesSection(for setIndex: Int) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Dropset")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(WGJTheme.accentCyan)
+
+                Spacer()
+
+                if isSetEditingEnabled,
+                   !setDrafts[setIndex].isLocked,
+                   setDrafts[setIndex].dropStages.count < 2
+                {
+                    Button {
+                        addDropStage(to: setIndex)
+                    } label: {
+                        Label("Add Drop", systemImage: "plus.circle")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(WGJTheme.accentBlue)
+                    .accessibilityIdentifier("workout-set-\(setIndex)-add-drop-stage-button")
+                }
+            }
+
+            if !setDrafts[setIndex].isCompleted {
+                Text("Finish the main set before completing the drop stages.")
+                    .font(.caption)
+                    .foregroundStyle(WGJTheme.textSecondary)
+            }
+
+            ForEach(Array(setDrafts[setIndex].dropStages.enumerated()), id: \.element.id) { stageIndex, stage in
+                WorkoutExerciseDropStageCardView(
+                    setIndex: setIndex,
+                    stageIndex: stageIndex,
+                    stage: stage,
+                    isEditingEnabled: isSetEditingEnabled,
+                    isCompletionEnabled: setDrafts[setIndex].isCompleted,
+                    onToggleCompletion: { toggleDropStageCompletion(stage.id, in: setIndex) },
+                    onRepsChanged: { updateDropStageRepsText($0, stageID: stage.id, setIndex: setIndex) },
+                    onWeightChanged: { updateDropStageWeightText($0, stageID: stage.id, setIndex: setIndex) },
+                    onLoadUnitChanged: { updateDropStageLoadUnit($0, stageID: stage.id, setIndex: setIndex) },
+                    onDelete: { removeDropStage(stage.id, from: setIndex) }
+                )
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(WGJTheme.accentCyan.opacity(0.08))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(WGJTheme.accentCyan.opacity(0.18), lineWidth: 1)
+                )
+        )
+        .accessibilityIdentifier("workout-set-\(setIndex)-drop-stages")
+    }
+
     private func toggleCompletion(at index: Int) {
         guard setDrafts.indices.contains(index) else { return }
         requestCompletionChange(at: index, isCompleted: !setDrafts[index].isCompleted)
@@ -2130,22 +2407,36 @@ struct WorkoutSessionExerciseGridEditor: View {
         }
 
         let setID = updatedDrafts[index].id
+        let dropStageIDs = updatedDrafts[index].dropStages.map(\.id)
         pendingBozarCompletionSetIDs.remove(setID)
         guard updatedDrafts[index].isCompleted != isCompleted else { return }
         let setRestSeconds = updatedDrafts[index].restSeconds
         updatedDrafts[index].isCompleted = isCompleted
+        if !isCompleted {
+            for stageIndex in updatedDrafts[index].dropStages.indices {
+                updatedDrafts[index].dropStages[stageIndex].isCompleted = false
+            }
+        }
         setDrafts = updatedDrafts
         let restTimerSetLabel: String?
         if isCompleted {
-            restTimerSetLabel = WorkoutRestTimerContextBuilder.nextSetLabel(
-                afterCompletingSetAt: index,
-                in: updatedDrafts
-            )
+            restTimerSetLabel = updatedDrafts[index].hasDropset
+                ? "Drop 1"
+                : WorkoutRestTimerContextBuilder.nextSetLabel(
+                    afterCompletingSetAt: index,
+                    in: updatedDrafts
+                )
         } else {
             restTimerSetLabel = setTitle(for: index, in: updatedDrafts)
         }
         notifyChanged(drafts: updatedDrafts)
-        onSetCompletionChange?(setID, restTimerSetLabel, setRestSeconds, isCompleted)
+        let resolvedRestSeconds = isCompleted && updatedDrafts[index].hasDropset ? 0 : setRestSeconds
+        onSetCompletionChange?(setID, restTimerSetLabel, resolvedRestSeconds, isCompleted)
+        if !isCompleted {
+            for stageID in dropStageIDs {
+                onSetCompletionChange?(stageID, nil, 0, false)
+            }
+        }
     }
 
     private func notifyChanged(drafts: [WorkoutSessionSetDraft]? = nil) {
@@ -2263,14 +2554,14 @@ struct WorkoutSessionExerciseGridEditor: View {
     private func syncCompletedSetCount(using drafts: [WorkoutSessionSetDraft]? = nil) {
         let currentDrafts = drafts ?? setDrafts
         cachedCompletedSetCount = currentDrafts.reduce(0) { partialResult, draft in
-            partialResult + (draft.isCompleted ? 1 : 0)
+            partialResult + (draft.isCycleCompleted ? 1 : 0)
         }
     }
 
     private func prunePendingBozarCompletions() {
         let validSetIDs = Set(
             setDrafts
-                .filter { !$0.isCompleted }
+                .filter { !$0.isCycleCompleted }
                 .map(\.id)
         )
         pendingBozarCompletionSetIDs = pendingBozarCompletionSetIDs.filter { validSetIDs.contains($0) }
@@ -2368,6 +2659,214 @@ struct WorkoutSessionExerciseGridEditor: View {
     private func focusMetric(_ metric: SetInputFocus.Metric, forSetID setID: UUID) {
         guard let index = setDrafts.firstIndex(where: { $0.id == setID }) else { return }
         focusMetric(metric, at: index)
+    }
+}
+
+private struct WorkoutExerciseDropStageCardView: View, Equatable {
+    let setIndex: Int
+    let stageIndex: Int
+    let stage: WorkoutSessionDropStageDraft
+    let isEditingEnabled: Bool
+    let isCompletionEnabled: Bool
+    let onToggleCompletion: () -> Void
+    let onRepsChanged: (String) -> Void
+    let onWeightChanged: (String) -> Void
+    let onLoadUnitChanged: (TemplateLoadUnit) -> Void
+    let onDelete: () -> Void
+
+    @State private var repsText: String
+    @State private var weightText: String
+
+    init(
+        setIndex: Int,
+        stageIndex: Int,
+        stage: WorkoutSessionDropStageDraft,
+        isEditingEnabled: Bool,
+        isCompletionEnabled: Bool,
+        onToggleCompletion: @escaping () -> Void,
+        onRepsChanged: @escaping (String) -> Void,
+        onWeightChanged: @escaping (String) -> Void,
+        onLoadUnitChanged: @escaping (TemplateLoadUnit) -> Void,
+        onDelete: @escaping () -> Void
+    ) {
+        self.setIndex = setIndex
+        self.stageIndex = stageIndex
+        self.stage = stage
+        self.isEditingEnabled = isEditingEnabled
+        self.isCompletionEnabled = isCompletionEnabled
+        self.onToggleCompletion = onToggleCompletion
+        self.onRepsChanged = onRepsChanged
+        self.onWeightChanged = onWeightChanged
+        self.onLoadUnitChanged = onLoadUnitChanged
+        self.onDelete = onDelete
+        _repsText = State(initialValue: stage.actualReps.map(String.init) ?? "")
+        _weightText = State(initialValue: stage.actualWeight.map(WGJFormatters.decimalString) ?? "")
+    }
+
+    static func == (lhs: WorkoutExerciseDropStageCardView, rhs: WorkoutExerciseDropStageCardView) -> Bool {
+        lhs.setIndex == rhs.setIndex
+            && lhs.stageIndex == rhs.stageIndex
+            && lhs.stage == rhs.stage
+            && lhs.isEditingEnabled == rhs.isEditingEnabled
+            && lhs.isCompletionEnabled == rhs.isCompletionEnabled
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Drop \(stageIndex + 1)")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(WGJTheme.textPrimary)
+
+                    if let targetSummary {
+                        Text(targetSummary)
+                            .font(.caption)
+                            .foregroundStyle(WGJTheme.textSecondary)
+                    }
+                }
+
+                Spacer()
+
+                if stage.isCompleted {
+                    Text("Done")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(WGJTheme.success)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            Capsule()
+                                .fill(WGJTheme.success.opacity(0.12))
+                        )
+                }
+
+                if isEditingEnabled {
+                    Button(role: .destructive, action: onDelete) {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(WGJTheme.textSecondary)
+                    .accessibilityIdentifier("workout-set-\(setIndex)-drop-stage-\(stageIndex)-delete-button")
+                }
+            }
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) {
+                    weightField
+                    repsField
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    weightField
+                    repsField
+                }
+            }
+
+            Group {
+                if stage.isCompleted {
+                    Button(action: onToggleCompletion) {
+                        Label("Undo Drop \(stageIndex + 1)", systemImage: "arrow.uturn.backward.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(WGJGhostButtonStyle())
+                } else {
+                    Button(action: onToggleCompletion) {
+                        Label("Complete Drop \(stageIndex + 1)", systemImage: "checkmark.circle.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(WGJCompactPrimaryButtonStyle())
+                }
+            }
+            .disabled(!isEditingEnabled || !isCompletionEnabled)
+            .accessibilityIdentifier("workout-set-\(setIndex)-drop-stage-\(stageIndex)-completion-button")
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(WGJTheme.cardStrong.opacity(0.82))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(
+                            stage.isCompleted ? WGJTheme.success.opacity(0.24) : WGJTheme.outline.opacity(0.18),
+                            lineWidth: 1
+                        )
+                )
+        )
+        .accessibilityIdentifier("workout-set-\(setIndex)-drop-stage-\(stageIndex)")
+        .onChange(of: stage.actualReps) { _, newValue in
+            let resolved = newValue.map(String.init) ?? ""
+            guard repsText != resolved else { return }
+            repsText = resolved
+        }
+        .onChange(of: stage.actualWeight) { _, newValue in
+            let resolved = newValue.map(WGJFormatters.decimalString) ?? ""
+            guard weightText != resolved else { return }
+            weightText = resolved
+        }
+    }
+
+    private var weightField: some View {
+        HStack(spacing: 8) {
+            TextField("Weight", text: $weightText)
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.center)
+                .wgjPillField()
+                .disabled(!isEditingEnabled)
+                .accessibilityIdentifier("workout-set-\(setIndex)-drop-stage-\(stageIndex)-weight-field")
+                .onChange(of: weightText) { _, newValue in
+                    onWeightChanged(newValue)
+                }
+
+            WGJActionMenuButton("Drop Load Unit", titleVisibility: .hidden) {
+                ForEach(TemplateLoadUnit.allCases) { unit in
+                    Button(unit.shortLabel) {
+                        onLoadUnitChanged(unit)
+                    }
+                }
+            } label: {
+                Text(stage.actualLoadUnit.shortLabel)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(WGJTheme.accentCyan)
+            }
+            .disabled(!isEditingEnabled)
+            .accessibilityIdentifier("workout-set-\(setIndex)-drop-stage-\(stageIndex)-load-unit-button")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var repsField: some View {
+        TextField("Reps", text: $repsText)
+            .keyboardType(.numberPad)
+            .multilineTextAlignment(.center)
+            .wgjPillField()
+            .disabled(!isEditingEnabled)
+            .accessibilityIdentifier("workout-set-\(setIndex)-drop-stage-\(stageIndex)-reps-field")
+            .onChange(of: repsText) { _, newValue in
+                onRepsChanged(newValue)
+            }
+    }
+
+    private var targetSummary: String? {
+        let repsText = stage.targetReps.map { "\($0) reps" }
+        let weightText: String?
+        if let targetWeight = stage.targetWeight {
+            weightText = "\(WGJFormatters.decimalString(targetWeight)) \(stage.targetLoadUnit.shortLabel)"
+        } else if stage.targetLoadUnit == .bodyweight {
+            weightText = TemplateLoadUnit.bodyweight.shortLabel
+        } else {
+            weightText = nil
+        }
+
+        switch (weightText, repsText) {
+        case let (weight?, reps?):
+            return "Target \(weight) x \(reps)"
+        case let (weight?, nil):
+            return "Target \(weight)"
+        case let (nil, reps?):
+            return "Target \(reps)"
+        case (nil, nil):
+            return nil
+        }
     }
 }
 

@@ -101,15 +101,21 @@ struct WGJApp: App {
             TemplateExercise.self,
             TemplateExerciseComponent.self,
             TemplateExerciseSet.self,
+            TemplateSupersetGroup.self,
+            TemplateExerciseDropStage.self,
             ActiveWorkoutDraftSession.self,
             ActiveWorkoutDraftCardioBlock.self,
             ActiveWorkoutDraftExercise.self,
             ActiveWorkoutDraftExerciseComponent.self,
             ActiveWorkoutDraftSet.self,
+            ActiveWorkoutDraftSupersetGroup.self,
+            ActiveWorkoutDraftDropStage.self,
             WorkoutSession.self,
             WorkoutSessionCardioBlock.self,
             WorkoutSessionExercise.self,
             WorkoutSessionSet.self,
+            WorkoutSessionSupersetGroup.self,
+            WorkoutSessionDropStage.self,
             CompletedSetFact.self,
             SocialOutboxItem.self,
             BlockedBro.self,
@@ -137,10 +143,14 @@ struct WGJApp: App {
             TemplateExercise.self,
             TemplateExerciseComponent.self,
             TemplateExerciseSet.self,
+            TemplateSupersetGroup.self,
+            TemplateExerciseDropStage.self,
             WorkoutSession.self,
             WorkoutSessionCardioBlock.self,
             WorkoutSessionExercise.self,
             WorkoutSessionSet.self,
+            WorkoutSessionSupersetGroup.self,
+            WorkoutSessionDropStage.self,
         ])
 
         let activeWorkoutDraftSchema = Schema([
@@ -149,6 +159,8 @@ struct WGJApp: App {
             ActiveWorkoutDraftExercise.self,
             ActiveWorkoutDraftExerciseComponent.self,
             ActiveWorkoutDraftSet.self,
+            ActiveWorkoutDraftSupersetGroup.self,
+            ActiveWorkoutDraftDropStage.self,
         ])
 
         let socialOutboxSchema = Schema([
