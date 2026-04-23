@@ -87,6 +87,51 @@ struct HistoryProjectionRepositoryTests {
     }
 
     @Test
+    func rebuildFactsTreatsZeroWeightBodyweightTargetsAsBodyweightHistory() throws {
+        let context = try makeInMemoryContext()
+        let sessionRepository = WorkoutSessionRepository(modelContext: context)
+        let projectionRepository = HistoryProjectionRepository(modelContext: context)
+
+        let hangingLegRaise = ExerciseCatalogItem(
+            remoteUUID: "projection-hanging-leg-raise",
+            displayName: "Hanging Leg Raise",
+            categoryName: "Core",
+            equipmentSummary: "Bodyweight",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(hangingLegRaise)
+
+        let session = try sessionRepository.createEmptySession(name: "Core Day")
+        try sessionRepository.addExercise(sessionID: session.id, catalogItem: hangingLegRaise)
+        let exercise = try #require(try sessionRepository.sessionExercises(sessionID: session.id).first)
+
+        var drafts = try sessionRepository.setDrafts(sessionExerciseID: exercise.id)
+        #expect(drafts[1].targetLoadUnit == .bodyweight)
+
+        drafts[1].actualReps = 15
+        drafts[1].actualWeight = 0
+        drafts[1].actualLoadUnit = .kg
+        drafts[1].isCompleted = true
+        try sessionRepository.saveSetDrafts(sessionExerciseID: exercise.id, drafts: drafts)
+
+        try sessionRepository.finishSession(sessionID: session.id)
+
+        try waitForProjectedFacts(
+            sessionID: session.id,
+            expectedCount: 1,
+            repository: projectionRepository
+        )
+        let fact = try #require(try projectionRepository.facts(forSessionID: session.id).first)
+
+        #expect(fact.reps == 15)
+        #expect(fact.loadUnit == .bodyweight)
+        #expect(fact.weight == nil)
+        #expect(fact.normalizedWeightKg == nil)
+        #expect(fact.volumeKg == nil)
+    }
+
+    @Test
     func recalculateSessionSummaryRebuildsFactsAfterHistoryEdits() throws {
         let context = try makeInMemoryContext()
         let sessionRepository = WorkoutSessionRepository(modelContext: context)

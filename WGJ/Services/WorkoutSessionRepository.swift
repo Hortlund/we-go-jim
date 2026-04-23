@@ -50,6 +50,11 @@ nonisolated struct WorkoutSessionSetDraft: Identifiable, Equatable, Sendable {
     }
 
     nonisolated init(model: WorkoutSessionSet) {
+        let normalizedActualLoad = WorkoutLoggedLoadNormalization.resolved(
+            actualWeight: model.actualWeight,
+            actualLoadUnit: model.actualLoadUnit,
+            targetLoadUnit: model.targetLoadUnit
+        )
         self.id = model.id
         self.isWarmup = model.isWarmup
         self.restSeconds = model.restSeconds
@@ -57,8 +62,8 @@ nonisolated struct WorkoutSessionSetDraft: Identifiable, Equatable, Sendable {
         self.targetWeight = model.targetWeight
         self.targetLoadUnit = model.targetLoadUnit
         self.actualReps = model.actualReps
-        self.actualWeight = model.actualWeight
-        self.actualLoadUnit = model.actualLoadUnit
+        self.actualWeight = normalizedActualLoad.weight
+        self.actualLoadUnit = normalizedActualLoad.unit
         self.isCompleted = model.isCompleted
         self.isLocked = model.isLocked
         self.dropStages = (model.dropStages ?? [])
@@ -67,6 +72,11 @@ nonisolated struct WorkoutSessionSetDraft: Identifiable, Equatable, Sendable {
     }
 
     nonisolated init(model: ActiveWorkoutDraftSet) {
+        let normalizedActualLoad = WorkoutLoggedLoadNormalization.resolved(
+            actualWeight: model.actualWeight,
+            actualLoadUnit: model.actualLoadUnit,
+            targetLoadUnit: model.targetLoadUnit
+        )
         self.id = model.id
         self.isWarmup = model.isWarmup
         self.restSeconds = model.restSeconds
@@ -74,8 +84,8 @@ nonisolated struct WorkoutSessionSetDraft: Identifiable, Equatable, Sendable {
         self.targetWeight = model.targetWeight
         self.targetLoadUnit = model.targetLoadUnit
         self.actualReps = model.actualReps
-        self.actualWeight = model.actualWeight
-        self.actualLoadUnit = model.actualLoadUnit
+        self.actualWeight = normalizedActualLoad.weight
+        self.actualLoadUnit = normalizedActualLoad.unit
         self.isCompleted = model.isCompleted
         self.isLocked = model.isLocked
         self.dropStages = (model.dropStages ?? [])
@@ -1048,11 +1058,15 @@ nonisolated final class WorkoutSessionRepository {
     }
 
     private func previousSnapshot(from set: WorkoutSessionSet) -> WorkoutPreviousSetSnapshot {
-        let loggedUnit: TemplateLoadUnit = set.actualLoadUnit == .bodyweight ? .bodyweight : set.actualLoadUnit
+        let normalizedActualLoad = WorkoutLoggedLoadNormalization.resolved(
+            actualWeight: set.actualWeight,
+            actualLoadUnit: set.actualLoadUnit,
+            targetLoadUnit: set.targetLoadUnit
+        )
         return WorkoutPreviousSetSnapshot(
             reps: set.actualReps,
-            weight: set.actualWeight,
-            unit: loggedUnit
+            weight: normalizedActualLoad.weight,
+            unit: normalizedActualLoad.unit
         )
     }
 
@@ -1366,6 +1380,11 @@ nonisolated final class WorkoutSessionRepository {
         var updatedStages: [WorkoutSessionDropStage] = []
         updatedStages.reserveCapacity(normalizedDrafts.count)
         for (index, draft) in normalizedDrafts.enumerated() {
+            let normalizedActualLoad = WorkoutLoggedLoadNormalization.resolved(
+                actualWeight: sanitizedWeight(draft.actualWeight),
+                actualLoadUnit: draft.actualLoadUnit,
+                targetLoadUnit: draft.targetLoadUnit
+            )
             let stage = existingByID[draft.id] ?? WorkoutSessionDropStage(
                 id: draft.id,
                 sessionSetID: set.id,
@@ -1374,8 +1393,8 @@ nonisolated final class WorkoutSessionRepository {
                 targetWeight: sanitizedWeight(draft.targetWeight),
                 targetLoadUnit: draft.targetLoadUnit,
                 actualReps: sanitizedReps(draft.actualReps),
-                actualWeight: sanitizedWeight(draft.actualWeight),
-                actualLoadUnit: draft.actualLoadUnit,
+                actualWeight: normalizedActualLoad.weight,
+                actualLoadUnit: normalizedActualLoad.unit,
                 isCompleted: draft.isCompleted,
                 sessionSet: set
             )
@@ -1392,7 +1411,7 @@ nonisolated final class WorkoutSessionRepository {
             let normalizedTargetReps = sanitizedReps(draft.targetReps)
             let normalizedTargetWeight = sanitizedWeight(draft.targetWeight)
             let normalizedActualReps = sanitizedReps(draft.actualReps)
-            let normalizedActualWeight = sanitizedWeight(draft.actualWeight)
+            let normalizedActualWeight = normalizedActualLoad.weight
             if stage.targetReps != normalizedTargetReps {
                 stage.targetReps = normalizedTargetReps
                 didChange = true
@@ -1413,8 +1432,8 @@ nonisolated final class WorkoutSessionRepository {
                 stage.actualWeight = normalizedActualWeight
                 didChange = true
             }
-            if stage.actualLoadUnit != draft.actualLoadUnit {
-                stage.actualLoadUnit = draft.actualLoadUnit
+            if stage.actualLoadUnit != normalizedActualLoad.unit {
+                stage.actualLoadUnit = normalizedActualLoad.unit
                 didChange = true
             }
             if stage.isCompleted != draft.isCompleted {
@@ -1446,7 +1465,11 @@ nonisolated final class WorkoutSessionRepository {
         let normalizedTargetReps = sanitizedReps(draft.targetReps)
         let normalizedTargetWeight = sanitizedWeight(draft.targetWeight)
         let normalizedActualReps = sanitizedReps(draft.actualReps)
-        let normalizedActualWeight = sanitizedWeight(draft.actualWeight)
+        let normalizedActualLoad = WorkoutLoggedLoadNormalization.resolved(
+            actualWeight: sanitizedWeight(draft.actualWeight),
+            actualLoadUnit: draft.actualLoadUnit,
+            targetLoadUnit: draft.targetLoadUnit
+        )
         var didChange = false
 
         if set.sortOrder != sortOrder {
@@ -1477,12 +1500,12 @@ nonisolated final class WorkoutSessionRepository {
             set.actualReps = normalizedActualReps
             didChange = true
         }
-        if set.actualWeight != normalizedActualWeight {
-            set.actualWeight = normalizedActualWeight
+        if set.actualWeight != normalizedActualLoad.weight {
+            set.actualWeight = normalizedActualLoad.weight
             didChange = true
         }
-        if set.actualLoadUnit != draft.actualLoadUnit {
-            set.actualLoadUnit = draft.actualLoadUnit
+        if set.actualLoadUnit != normalizedActualLoad.unit {
+            set.actualLoadUnit = normalizedActualLoad.unit
             didChange = true
         }
         if set.isCompleted != draft.isCompleted {

@@ -1539,7 +1539,6 @@ nonisolated final class CloudKitBrosSocialService: BrosSocialService, BrosSocial
             .sorted { $0.sortOrder < $1.sortOrder }
             .map { ReviewModerationService.sanitizedForSharing($0.exerciseNameSnapshot, kind: .exerciseName) }
             .filter { !$0.isEmpty }
-            .prefix(3)
             .map { $0 }
 
         let workoutPayload = PendingWorkoutEventPayload(

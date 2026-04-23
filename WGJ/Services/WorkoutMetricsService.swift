@@ -255,7 +255,7 @@ nonisolated private struct BestSetPresentation: Equatable {
 
 nonisolated private enum WorkoutMetricsPolicy {
     // Bump when session summary math or projected history facts change semantics.
-    nonisolated static let summaryMetricsVersion = 1
+    nonisolated static let summaryMetricsVersion = 2
 
     nonisolated static func estimatedOneRepMax(weight: Double, reps: Int) -> Double {
         guard reps > 0 else { return weight }
@@ -283,9 +283,15 @@ nonisolated private enum WorkoutMetricsPolicy {
             return nil
         }
 
-        switch set.actualLoadUnit {
+        let normalizedActualLoad = WorkoutLoggedLoadNormalization.resolved(
+            actualWeight: set.actualWeight,
+            actualLoadUnit: set.actualLoadUnit,
+            targetLoadUnit: set.targetLoadUnit
+        )
+
+        switch normalizedActualLoad.unit {
         case .kg, .lb:
-            guard let actualWeight = set.actualWeight, actualWeight > 0 else {
+            guard let actualWeight = normalizedActualLoad.weight, actualWeight > 0 else {
                 return nil
             }
 
@@ -295,7 +301,7 @@ nonisolated private enum WorkoutMetricsPolicy {
                     sortOrder: set.sortOrder,
                     weight: actualWeight,
                     reps: actualReps,
-                    unit: set.actualLoadUnit
+                    unit: normalizedActualLoad.unit
                 )
             )
         case .bodyweight:

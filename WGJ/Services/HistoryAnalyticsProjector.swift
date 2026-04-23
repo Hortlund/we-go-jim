@@ -45,16 +45,22 @@ nonisolated enum HistoryProjectionSnapshotBuilder {
             return nil
         }
 
-        switch set.actualLoadUnit {
+        let normalizedActualLoad = WorkoutLoggedLoadNormalization.resolved(
+            actualWeight: set.actualWeight,
+            actualLoadUnit: set.actualLoadUnit,
+            targetLoadUnit: set.targetLoadUnit
+        )
+
+        switch normalizedActualLoad.unit {
         case .kg, .lb:
-            guard let weight = set.actualWeight, weight > 0 else {
+            guard let weight = normalizedActualLoad.weight, weight > 0 else {
                 return nil
             }
 
-            let normalizedWeightKg = normalizedLoad(weight, unit: set.actualLoadUnit)
+            let normalizedWeightKg = normalizedLoad(weight, unit: normalizedActualLoad.unit)
             let estimatedOneRepMaxKg = normalizedLoad(
                 estimatedOneRepMax(weight: weight, reps: reps),
-                unit: set.actualLoadUnit
+                unit: normalizedActualLoad.unit
             )
 
             return CompletedSetFactDraft(
@@ -69,7 +75,7 @@ nonisolated enum HistoryProjectionSnapshotBuilder {
                 isWarmup: set.isWarmup,
                 reps: reps,
                 weight: weight,
-                loadUnit: set.actualLoadUnit,
+                loadUnit: normalizedActualLoad.unit,
                 normalizedWeightKg: normalizedWeightKg,
                 estimatedOneRepMaxKg: estimatedOneRepMaxKg,
                 volumeKg: normalizedWeightKg * Double(reps),

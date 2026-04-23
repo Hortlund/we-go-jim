@@ -606,6 +606,57 @@ struct ActiveWorkoutDraftRepositoryTests {
     }
 
     @Test
+    func finishSessionNormalizesZeroWeightBodyweightTargetsIntoBodyweightHistory() throws {
+        let context = try makeInMemoryContext()
+        let repository = ActiveWorkoutDraftRepository(modelContext: context)
+        let completedRepository = WorkoutSessionRepository(modelContext: context)
+        let metrics = WorkoutMetricsService(modelContext: context)
+
+        let item = makeCatalogItem(
+            remoteUUID: "finish-bodyweight-leg-raise-1",
+            displayName: "Hanging Leg Raise",
+            equipmentSummary: "Bodyweight",
+            context: context
+        )
+
+        let session = try repository.createEmptySession(name: "Core Day")
+        try repository.addExercise(sessionID: session.id, catalogItem: item)
+
+        let draftExercise = try #require(try repository.sessionExercises(sessionID: session.id).first)
+        var drafts = try repository.setDrafts(sessionExerciseID: draftExercise.id)
+        #expect(drafts[1].targetLoadUnit == .bodyweight)
+
+        drafts[1].actualReps = 15
+        drafts[1].actualWeight = 0
+        drafts[1].actualLoadUnit = .kg
+        drafts[1].isCompleted = true
+        try repository.saveSetDrafts(sessionExerciseID: draftExercise.id, drafts: drafts)
+
+        let completedSessionID = try repository.finishSession(sessionID: session.id)
+        let completedExercise = try #require(
+            try completedRepository.sessionExercises(sessionID: completedSessionID).first
+        )
+        let completedDrafts = try completedRepository.setDrafts(sessionExerciseID: completedExercise.id)
+        let projectionRepository = HistoryProjectionRepository(modelContext: context)
+
+        try waitForProjectedFacts(
+            sessionID: completedSessionID,
+            expectedCount: 1,
+            repository: projectionRepository
+        )
+
+        let fact = try #require(try projectionRepository.facts(forSessionID: completedSessionID).first)
+        let achievements = try metrics.sessionSetPRAchievements(sessionID: completedSessionID)
+
+        #expect(completedDrafts[1].actualWeight == nil)
+        #expect(completedDrafts[1].actualLoadUnit == .bodyweight)
+        #expect(fact.loadUnit == .bodyweight)
+        #expect(fact.weight == nil)
+        #expect(achievements.first?.kinds == [.reps])
+        #expect(achievements.first?.loadUnit == .bodyweight)
+    }
+
+    @Test
     func moveExercisePersistsDraftOrdering() throws {
         let context = try makeInMemoryContext()
         let repository = ActiveWorkoutDraftRepository(modelContext: context)

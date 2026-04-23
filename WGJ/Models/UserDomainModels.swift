@@ -547,24 +547,34 @@ nonisolated struct WorkoutSessionDropStageDraft: Identifiable, Equatable, Sendab
     }
 
     nonisolated init(model: ActiveWorkoutDraftDropStage) {
+        let normalizedActualLoad = WorkoutLoggedLoadNormalization.resolved(
+            actualWeight: model.actualWeight,
+            actualLoadUnit: model.actualLoadUnit,
+            targetLoadUnit: model.targetLoadUnit
+        )
         self.id = model.id
         self.targetReps = model.targetReps
         self.targetWeight = model.targetWeight
         self.targetLoadUnit = model.targetLoadUnit
         self.actualReps = model.actualReps
-        self.actualWeight = model.actualWeight
-        self.actualLoadUnit = model.actualLoadUnit
+        self.actualWeight = normalizedActualLoad.weight
+        self.actualLoadUnit = normalizedActualLoad.unit
         self.isCompleted = model.isCompleted
     }
 
     nonisolated init(model: WorkoutSessionDropStage) {
+        let normalizedActualLoad = WorkoutLoggedLoadNormalization.resolved(
+            actualWeight: model.actualWeight,
+            actualLoadUnit: model.actualLoadUnit,
+            targetLoadUnit: model.targetLoadUnit
+        )
         self.id = model.id
         self.targetReps = model.targetReps
         self.targetWeight = model.targetWeight
         self.targetLoadUnit = model.targetLoadUnit
         self.actualReps = model.actualReps
-        self.actualWeight = model.actualWeight
-        self.actualLoadUnit = model.actualLoadUnit
+        self.actualWeight = normalizedActualLoad.weight
+        self.actualLoadUnit = normalizedActualLoad.unit
         self.isCompleted = model.isCompleted
     }
 }

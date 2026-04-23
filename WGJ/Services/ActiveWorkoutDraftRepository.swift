@@ -869,6 +869,11 @@ nonisolated final class ActiveWorkoutDraftRepository {
             var draftSets: [ActiveWorkoutDraftSet] = []
             let orderedSets = (legacyExercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
             for legacySet in orderedSets {
+                let normalizedActualLoad = WorkoutLoggedLoadNormalization.resolved(
+                    actualWeight: legacySet.actualWeight,
+                    actualLoadUnit: legacySet.actualLoadUnit,
+                    targetLoadUnit: legacySet.targetLoadUnit
+                )
                 let draftSet = ActiveWorkoutDraftSet(
                     id: legacySet.id,
                     sessionExerciseID: draftExercise.id,
@@ -879,8 +884,8 @@ nonisolated final class ActiveWorkoutDraftRepository {
                     targetWeight: legacySet.targetWeight,
                     targetLoadUnit: legacySet.targetLoadUnit,
                     actualReps: legacySet.actualReps,
-                    actualWeight: legacySet.actualWeight,
-                    actualLoadUnit: legacySet.actualLoadUnit,
+                    actualWeight: normalizedActualLoad.weight,
+                    actualLoadUnit: normalizedActualLoad.unit,
                     isCompleted: legacySet.isCompleted,
                     isLocked: legacySet.isLocked,
                     createdAt: legacySet.createdAt,
@@ -893,7 +898,12 @@ nonisolated final class ActiveWorkoutDraftRepository {
                     .prefix(2)
                     .enumerated()
                     .map { stageIndex, legacyStage in
-                        ActiveWorkoutDraftDropStage(
+                        let normalizedStageLoad = WorkoutLoggedLoadNormalization.resolved(
+                            actualWeight: legacyStage.actualWeight,
+                            actualLoadUnit: legacyStage.actualLoadUnit,
+                            targetLoadUnit: legacyStage.targetLoadUnit
+                        )
+                        return ActiveWorkoutDraftDropStage(
                             id: legacyStage.id,
                             sessionSetID: draftSet.id,
                             sortOrder: stageIndex,
@@ -901,8 +911,8 @@ nonisolated final class ActiveWorkoutDraftRepository {
                             targetWeight: legacyStage.targetWeight,
                             targetLoadUnit: legacyStage.targetLoadUnit,
                             actualReps: legacyStage.actualReps,
-                            actualWeight: legacyStage.actualWeight,
-                            actualLoadUnit: legacyStage.actualLoadUnit,
+                            actualWeight: normalizedStageLoad.weight,
+                            actualLoadUnit: normalizedStageLoad.unit,
                             isCompleted: legacyStage.isCompleted,
                             createdAt: legacyStage.createdAt,
                             updatedAt: legacyStage.updatedAt,
@@ -1001,6 +1011,11 @@ nonisolated final class ActiveWorkoutDraftRepository {
 
             var completedSets: [WorkoutSessionSet] = []
             for draftSet in orderedSessionSets(for: draftExercise) {
+                let normalizedActualLoad = WorkoutLoggedLoadNormalization.resolved(
+                    actualWeight: draftSet.actualWeight,
+                    actualLoadUnit: draftSet.actualLoadUnit,
+                    targetLoadUnit: draftSet.targetLoadUnit
+                )
                 let completedSet = WorkoutSessionSet(
                     id: draftSet.id,
                     sessionExerciseID: completedExercise.id,
@@ -1011,8 +1026,8 @@ nonisolated final class ActiveWorkoutDraftRepository {
                     targetWeight: draftSet.targetWeight,
                     targetLoadUnit: draftSet.targetLoadUnit,
                     actualReps: draftSet.actualReps,
-                    actualWeight: draftSet.actualWeight,
-                    actualLoadUnit: draftSet.actualLoadUnit,
+                    actualWeight: normalizedActualLoad.weight,
+                    actualLoadUnit: normalizedActualLoad.unit,
                     isCompleted: draftSet.isCompleted,
                     isLocked: draftSet.isLocked,
                     createdAt: draftSet.createdAt,
@@ -1025,7 +1040,12 @@ nonisolated final class ActiveWorkoutDraftRepository {
                     .prefix(2)
                     .enumerated()
                     .map { stageIndex, draftStage in
-                        WorkoutSessionDropStage(
+                        let normalizedStageLoad = WorkoutLoggedLoadNormalization.resolved(
+                            actualWeight: draftStage.actualWeight,
+                            actualLoadUnit: draftStage.actualLoadUnit,
+                            targetLoadUnit: draftStage.targetLoadUnit
+                        )
+                        return WorkoutSessionDropStage(
                             id: draftStage.id,
                             sessionSetID: completedSet.id,
                             sortOrder: stageIndex,
@@ -1033,8 +1053,8 @@ nonisolated final class ActiveWorkoutDraftRepository {
                             targetWeight: draftStage.targetWeight,
                             targetLoadUnit: draftStage.targetLoadUnit,
                             actualReps: draftStage.actualReps,
-                            actualWeight: draftStage.actualWeight,
-                            actualLoadUnit: draftStage.actualLoadUnit,
+                            actualWeight: normalizedStageLoad.weight,
+                            actualLoadUnit: normalizedStageLoad.unit,
                             isCompleted: draftStage.isCompleted,
                             createdAt: draftStage.createdAt,
                             updatedAt: draftStage.updatedAt,
@@ -1549,6 +1569,11 @@ nonisolated final class ActiveWorkoutDraftRepository {
         var updatedStages: [ActiveWorkoutDraftDropStage] = []
         updatedStages.reserveCapacity(normalizedDrafts.count)
         for (index, draft) in normalizedDrafts.enumerated() {
+            let normalizedActualLoad = WorkoutLoggedLoadNormalization.resolved(
+                actualWeight: sanitizedWeight(draft.actualWeight),
+                actualLoadUnit: draft.actualLoadUnit,
+                targetLoadUnit: draft.targetLoadUnit
+            )
             let stage = existingByID[draft.id] ?? ActiveWorkoutDraftDropStage(
                 id: draft.id,
                 sessionSetID: set.id,
@@ -1557,8 +1582,8 @@ nonisolated final class ActiveWorkoutDraftRepository {
                 targetWeight: sanitizedWeight(draft.targetWeight),
                 targetLoadUnit: draft.targetLoadUnit,
                 actualReps: sanitizedReps(draft.actualReps),
-                actualWeight: sanitizedWeight(draft.actualWeight),
-                actualLoadUnit: draft.actualLoadUnit,
+                actualWeight: normalizedActualLoad.weight,
+                actualLoadUnit: normalizedActualLoad.unit,
                 isCompleted: draft.isCompleted,
                 sessionSet: set
             )
@@ -1575,7 +1600,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
             let normalizedTargetReps = sanitizedReps(draft.targetReps)
             let normalizedTargetWeight = sanitizedWeight(draft.targetWeight)
             let normalizedActualReps = sanitizedReps(draft.actualReps)
-            let normalizedActualWeight = sanitizedWeight(draft.actualWeight)
+            let normalizedActualWeight = normalizedActualLoad.weight
             if stage.targetReps != normalizedTargetReps {
                 stage.targetReps = normalizedTargetReps
                 didChange = true
@@ -1596,8 +1621,8 @@ nonisolated final class ActiveWorkoutDraftRepository {
                 stage.actualWeight = normalizedActualWeight
                 didChange = true
             }
-            if stage.actualLoadUnit != draft.actualLoadUnit {
-                stage.actualLoadUnit = draft.actualLoadUnit
+            if stage.actualLoadUnit != normalizedActualLoad.unit {
+                stage.actualLoadUnit = normalizedActualLoad.unit
                 didChange = true
             }
             if stage.isCompleted != draft.isCompleted {
@@ -1766,7 +1791,11 @@ nonisolated final class ActiveWorkoutDraftRepository {
         let normalizedTargetReps = sanitizedReps(draft.targetReps)
         let normalizedTargetWeight = sanitizedWeight(draft.targetWeight)
         let normalizedActualReps = sanitizedReps(draft.actualReps)
-        let normalizedActualWeight = sanitizedWeight(draft.actualWeight)
+        let normalizedActualLoad = WorkoutLoggedLoadNormalization.resolved(
+            actualWeight: sanitizedWeight(draft.actualWeight),
+            actualLoadUnit: draft.actualLoadUnit,
+            targetLoadUnit: draft.targetLoadUnit
+        )
         var didChange = false
 
         if set.sortOrder != sortOrder {
@@ -1797,12 +1826,12 @@ nonisolated final class ActiveWorkoutDraftRepository {
             set.actualReps = normalizedActualReps
             didChange = true
         }
-        if set.actualWeight != normalizedActualWeight {
-            set.actualWeight = normalizedActualWeight
+        if set.actualWeight != normalizedActualLoad.weight {
+            set.actualWeight = normalizedActualLoad.weight
             didChange = true
         }
-        if set.actualLoadUnit != draft.actualLoadUnit {
-            set.actualLoadUnit = draft.actualLoadUnit
+        if set.actualLoadUnit != normalizedActualLoad.unit {
+            set.actualLoadUnit = normalizedActualLoad.unit
             didChange = true
         }
         if set.isCompleted != draft.isCompleted {

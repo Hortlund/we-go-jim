@@ -374,6 +374,66 @@ struct WorkoutMetricsServiceTests {
     }
 
     @Test
+    func zeroWeightBodyweightTargetsStillCreateRepPRsAndBestPerformance() throws {
+        let context = try makeInMemoryContext()
+        let sessionRepository = WorkoutSessionRepository(modelContext: context)
+        let metrics = WorkoutMetricsService(modelContext: context)
+
+        let exercise = ExerciseCatalogItem(
+            remoteUUID: "bodyweight-zero-weight-hanging-leg-raise",
+            displayName: "Hanging Leg Raise",
+            categoryName: "Core",
+            equipmentSummary: "Bodyweight",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(exercise)
+
+        let baseline = try sessionRepository.createEmptySession(name: "Baseline")
+        try sessionRepository.addExercise(sessionID: baseline.id, catalogItem: exercise)
+        let baselineExercise = try #require(try sessionRepository.sessionExercises(sessionID: baseline.id).first)
+        var baselineDrafts = try sessionRepository.setDrafts(sessionExerciseID: baselineExercise.id)
+        baselineDrafts[1].actualReps = 10
+        baselineDrafts[1].actualLoadUnit = .bodyweight
+        baselineDrafts[1].isCompleted = true
+        try sessionRepository.saveSetDrafts(sessionExerciseID: baselineExercise.id, drafts: baselineDrafts)
+        try sessionRepository.finishSession(sessionID: baseline.id)
+
+        let current = try sessionRepository.createEmptySession(name: "Current")
+        try sessionRepository.addExercise(sessionID: current.id, catalogItem: exercise)
+        let currentExercise = try #require(try sessionRepository.sessionExercises(sessionID: current.id).first)
+        var currentDrafts = try sessionRepository.setDrafts(sessionExerciseID: currentExercise.id)
+        #expect(currentDrafts[1].targetLoadUnit == .bodyweight)
+
+        currentDrafts[1].actualReps = 15
+        currentDrafts[1].actualWeight = 0
+        currentDrafts[1].actualLoadUnit = .kg
+        currentDrafts[1].isCompleted = true
+        try sessionRepository.saveSetDrafts(sessionExerciseID: currentExercise.id, drafts: currentDrafts)
+        try sessionRepository.finishSession(sessionID: current.id)
+
+        let achievements = try metrics.sessionSetPRAchievements(sessionID: current.id)
+        let refreshed = try #require(try sessionRepository.session(id: current.id))
+        let detail = try #require(
+            try metrics.exerciseDetailStats(
+                for: exercise.remoteUUID,
+                preferredExerciseName: exercise.displayName,
+                limit: 8
+            )
+        )
+
+        #expect(achievements.count == 1)
+        #expect(achievements.first?.kinds == [.reps])
+        #expect(achievements.first?.weight == nil)
+        #expect(achievements.first?.loadUnit == .bodyweight)
+        #expect(refreshed.totalVolume == 0)
+        #expect(refreshed.prHitsCount == 1)
+        #expect(detail.bestPerformance?.kind == .bodyweight)
+        #expect(detail.bestPerformance?.reps == 15)
+        #expect(detail.bestPerformance?.weight == nil)
+    }
+
+    @Test
     func targetOnlyCompletedSetsDoNotCreateMetrics() throws {
         let context = try makeInMemoryContext()
         let sessionRepository = WorkoutSessionRepository(modelContext: context)

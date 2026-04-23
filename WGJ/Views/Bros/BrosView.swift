@@ -810,6 +810,7 @@ struct BrosView: View {
     @State private var supportNoticeMessage = ""
     @State private var showingSupportNotice = false
     @State private var reactionDetailPresentation: BroReactionDetailPresentation?
+    @State private var selectedFeedEvent: BroFeedEvent?
 
     private var blockedRepository: BlockedBroRepository {
         BlockedBroRepository(modelContext: modelContext)
@@ -903,6 +904,10 @@ struct BrosView: View {
         }
         .sheet(item: $reactionDetailPresentation) { presentation in
             BroReactionDetailSheet(presentation: presentation)
+                .wgjSheetSurface()
+        }
+        .sheet(item: $selectedFeedEvent) { event in
+            BroFeedEventDetailSheet(event: event)
                 .wgjSheetSurface()
         }
         .wgjMinimalKeyboardToolbar()
@@ -1306,76 +1311,111 @@ struct BrosView: View {
                 }
             }
 
-            switch event.kind {
-            case .workoutCompleted:
-                if let workout = event.workout {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text(workout.workoutName)
-                            .font(.title3.weight(.bold))
-                            .foregroundStyle(WGJTheme.textPrimary)
-                            .wgjSingleLineText(scale: 0.76)
+            Button {
+                selectedFeedEvent = event
+            } label: {
+                VStack(alignment: .leading, spacing: 12) {
+                    feedCardPrimaryContent(event)
 
-                        LazyVGrid(
-                            columns: [
-                                GridItem(.flexible(), spacing: 8),
-                                GridItem(.flexible(), spacing: 8),
-                                GridItem(.flexible(), spacing: 8),
-                            ],
-                            spacing: 8
-                        ) {
-                            WGJMetricPill(systemImage: "clock.fill", value: durationText(workout.durationSeconds))
-                            WGJMetricPill(systemImage: "scalemass.fill", value: volumeText(workout.totalVolume))
-                            WGJMetricPill(systemImage: "trophy.fill", value: "\(workout.prCount) PR", tint: WGJTheme.accentGold)
-                        }
-
-                        if !workout.exercisePreview.isEmpty {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Exercises")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(WGJTheme.textSecondary)
-
-                                ForEach(workout.exercisePreview, id: \.self) { exerciseName in
-                                    HStack(spacing: 8) {
-                                        Circle()
-                                            .fill(WGJTheme.accentBlue.opacity(0.22))
-                                            .frame(width: 8, height: 8)
-                                        Text(exerciseName)
-                                            .font(.subheadline)
-                                            .foregroundStyle(WGJTheme.textPrimary)
-                                            .wgjSingleLineText(scale: 0.8)
-                                    }
-                                }
-                            }
-                        }
+                    HStack(spacing: 6) {
+                        Text(event.kind == .workoutCompleted ? "View workout" : "View PR")
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
                     }
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(WGJTheme.accentBlue)
                 }
-            case .prHit:
-                if let pr = event.pr {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text(pr.exerciseName)
-                            .font(.title3.weight(.bold))
-                            .foregroundStyle(WGJTheme.textPrimary)
-                            .wgjSingleLineText(scale: 0.76)
-
-                        HStack(spacing: 8) {
-                            WGJMetricPill(
-                                systemImage: "chart.line.uptrend.xyaxis",
-                                value: "\(WGJFormatters.oneDecimalString(pr.estimatedOneRepMax)) \(pr.loadUnit.shortLabel)"
-                            )
-                            WGJMetricPill(
-                                systemImage: "dumbbell.fill",
-                                value: "\(WGJFormatters.decimalString(pr.weight)) \(pr.loadUnit.shortLabel) x \(pr.reps)"
-                            )
-                        }
-                    }
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("bros-feed-detail-button-\(event.id)")
 
             reactionBar(event: event, presentation: reactionPresentation)
         }
         .padding(WGJSpacing.card)
         .frame(maxWidth: .infinity, alignment: .leading)
         .wgjCardContainer()
+    }
+
+    @ViewBuilder
+    private func feedCardPrimaryContent(_ event: BroFeedEvent) -> some View {
+        switch event.kind {
+        case .workoutCompleted:
+            if let workout = event.workout {
+                let previewExercises = Array(workout.exercisePreview.prefix(4))
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(workout.workoutName)
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(WGJTheme.textPrimary)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    LazyVGrid(
+                        columns: [
+                            GridItem(.flexible(), spacing: 8),
+                            GridItem(.flexible(), spacing: 8),
+                            GridItem(.flexible(), spacing: 8),
+                        ],
+                        spacing: 8
+                    ) {
+                        WGJMetricPill(systemImage: "clock.fill", value: durationText(workout.durationSeconds))
+                        WGJMetricPill(systemImage: "scalemass.fill", value: volumeText(workout.totalVolume))
+                        WGJMetricPill(systemImage: "trophy.fill", value: "\(workout.prCount) PR", tint: WGJTheme.accentGold)
+                    }
+
+                    if !previewExercises.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Exercises")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(WGJTheme.textSecondary)
+
+                            ForEach(previewExercises, id: \.self) { exerciseName in
+                                HStack(alignment: .top, spacing: 8) {
+                                    Circle()
+                                        .fill(WGJTheme.accentBlue.opacity(0.22))
+                                        .frame(width: 8, height: 8)
+                                        .padding(.top, 6)
+
+                                    Text(exerciseName)
+                                        .font(.subheadline)
+                                        .foregroundStyle(WGJTheme.textPrimary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+
+                            if workout.exercisePreview.count > previewExercises.count {
+                                Text("+ \(workout.exercisePreview.count - previewExercises.count) more")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(WGJTheme.textSecondary)
+                            }
+                        }
+                    }
+                }
+            }
+        case .prHit:
+            if let pr = event.pr {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(pr.exerciseName)
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(WGJTheme.textPrimary)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        WGJMetricPill(
+                            systemImage: "chart.line.uptrend.xyaxis",
+                            value: "\(WGJFormatters.oneDecimalString(pr.estimatedOneRepMax)) \(pr.loadUnit.shortLabel)"
+                        )
+                        WGJMetricPill(
+                            systemImage: "dumbbell.fill",
+                            value: "\(WGJFormatters.decimalString(pr.weight)) \(pr.loadUnit.shortLabel) x \(pr.reps)"
+                        )
+                    }
+                }
+            }
+        }
     }
 
     private func eventKindBadge(_ kind: BroFeedEventKind) -> some View {

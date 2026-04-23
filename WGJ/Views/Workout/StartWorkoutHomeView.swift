@@ -475,7 +475,9 @@ struct StartWorkoutHomeView: View {
                 .frame(maxWidth: .infinity)
         }
         .buttonStyle(WGJCompactGhostButtonStyle())
-        .accessibilityIdentifier("start-workout-template-inline-edit-button")
+        .accessibilityIdentifier(
+            "start-workout-template-inline-edit-button-\(templateAccessibilityKey(template.name))"
+        )
     }
 
     private func folderActionsMenu(for folder: TemplateFolder) -> some View {
@@ -652,6 +654,14 @@ struct StartWorkoutHomeView: View {
     private func optionalNotes(for template: WorkoutTemplate) -> String? {
         let trimmed = template.notes.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func templateAccessibilityKey(_ templateName: String) -> String {
+        templateName
+            .lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: "-")
     }
 
     private func exerciseCountText(for template: WorkoutTemplate) -> String {

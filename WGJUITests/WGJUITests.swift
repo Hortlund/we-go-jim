@@ -137,7 +137,7 @@ final class WGJUITests: XCTestCase {
 
     @MainActor
     func testTemplateEditFlowSmoke() throws {
-        let app = launchApp()
+        let app = launchApp(mode: .localInMemory)
 
         tapTab("Start Workout", in: app)
 
@@ -1031,9 +1031,10 @@ final class WGJUITests: XCTestCase {
 
     @MainActor
     func testStartWorkoutTemplateActionsScrollAboveMinimizedActiveWorkoutStrip() throws {
+        let templateName = "Strip Clearance Template"
         let app = launchApp(launchEnvironment: [
             "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
-                name: "Strip Clearance Template",
+                name: templateName,
                 notes: "Ensure minimized strip does not cover template actions.",
                 exercises: [
                     templatePayloadExercise(
@@ -1059,7 +1060,10 @@ final class WGJUITests: XCTestCase {
         let strip = identifiedElement("active-workout-strip", in: app)
         XCTAssertTrue(strip.waitForExistence(timeout: 5))
 
-        let editButton = identifiedElement("start-workout-template-inline-edit-button", in: app)
+        let editButton = identifiedElement(
+            startWorkoutTemplateInlineEditButtonID(for: templateName),
+            in: app
+        )
         revealElementAbove(strip, target: editButton, in: app, maxSwipes: 8)
 
         XCTAssertTrue(editButton.waitForExistence(timeout: 5))
@@ -1069,9 +1073,10 @@ final class WGJUITests: XCTestCase {
 
     @MainActor
     func testEditingSameTemplateWhileWorkoutIsMinimizedCanScrollBottomWithoutCrash() throws {
-        let app = launchApp(launchEnvironment: [
+        let templateName = "Active Template Scroll Crash"
+        let app = launchApp(mode: .localInMemory, launchEnvironment: [
             "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
-                name: "Active Template Scroll Crash",
+                name: templateName,
                 notes: "Scroll the editor while the same workout stays active.",
                 exercises: (1...11).map { index in
                     templatePayloadExercise(
@@ -1096,7 +1101,7 @@ final class WGJUITests: XCTestCase {
             ),
         ])
 
-        openTemplateEditorFromMinimizedActiveWorkout(in: app)
+        openTemplateEditorFromMinimizedActiveWorkout(templateName: templateName, in: app)
         assertTemplateEditorBottomExerciseRemainsInteractive(
             catalogExerciseUUID: "active-template-scroll-11",
             in: app
@@ -1104,10 +1109,51 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
-    func testEditingLegacyTemplateWithoutStoredSetsWhileWorkoutIsMinimizedDoesNotCrash() throws {
-        let app = launchApp(launchEnvironment: [
+    func testCloudBackedEditingSameTemplateWhileWorkoutIsMinimizedCanScrollBottomWithoutCrash() throws {
+        let suffix = String(UUID().uuidString.prefix(8)).lowercased()
+        let finalExerciseUUID = "icloud-template-scroll-\(suffix)-11"
+        let templateName = "iCloud Active Template Scroll \(suffix)"
+
+        let app = launchApp(mode: .iCloud, launchEnvironment: [
             "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
-                name: "Legacy Empty Set Template",
+                name: templateName,
+                notes: "Scroll the cloud-backed editor while the same workout stays active.",
+                exercises: (1...11).map { index in
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "icloud-template-scroll-\(suffix)-\(index)",
+                        exerciseNameSnapshot: "iCloud Active Template Exercise \(index)",
+                        categorySnapshot: "Strength",
+                        muscleSummarySnapshot: "Full Body",
+                        targetRepMin: 8,
+                        targetRepMax: 10,
+                        restSeconds: 90,
+                        sets: [
+                            templatePayloadSet(
+                                targetReps: 8,
+                                targetWeight: Double(40 + index * 5),
+                                loadUnit: "kg",
+                                restSeconds: 90,
+                                isWarmup: false
+                            ),
+                        ]
+                    )
+                }
+            ),
+        ])
+
+        openTemplateEditorFromMinimizedActiveWorkout(templateName: templateName, in: app)
+        assertTemplateEditorBottomExerciseRemainsInteractive(
+            catalogExerciseUUID: finalExerciseUUID,
+            in: app
+        )
+    }
+
+    @MainActor
+    func testEditingLegacyTemplateWithoutStoredSetsWhileWorkoutIsMinimizedDoesNotCrash() throws {
+        let templateName = "Legacy Empty Set Template"
+        let app = launchApp(mode: .localInMemory, launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: templateName,
                 notes: "Opening the editor should stay read-only until save.",
                 exercises: (1...11).map { index in
                     templatePayloadExercise(
@@ -1124,9 +1170,41 @@ final class WGJUITests: XCTestCase {
             ),
         ])
 
-        openTemplateEditorFromMinimizedActiveWorkout(in: app)
+        openTemplateEditorFromMinimizedActiveWorkout(templateName: templateName, in: app)
         assertTemplateEditorBottomExerciseRemainsInteractive(
             catalogExerciseUUID: "legacy-template-scroll-11",
+            in: app
+        )
+    }
+
+    @MainActor
+    func testCloudBackedEditingLegacyTemplateWithoutStoredSetsWhileWorkoutIsMinimizedDoesNotCrash() throws {
+        let suffix = String(UUID().uuidString.prefix(8)).lowercased()
+        let finalExerciseUUID = "icloud-legacy-template-scroll-\(suffix)-11"
+        let templateName = "iCloud Legacy Empty Set Template \(suffix)"
+
+        let app = launchApp(mode: .iCloud, launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: templateName,
+                notes: "Opening the cloud-backed editor should stay stable before save.",
+                exercises: (1...11).map { index in
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "icloud-legacy-template-scroll-\(suffix)-\(index)",
+                        exerciseNameSnapshot: "iCloud Legacy Template Exercise \(index)",
+                        categorySnapshot: "Strength",
+                        muscleSummarySnapshot: "Full Body",
+                        targetRepMin: 8,
+                        targetRepMax: 10,
+                        restSeconds: 90,
+                        sets: []
+                    )
+                }
+            ),
+        ])
+
+        openTemplateEditorFromMinimizedActiveWorkout(templateName: templateName, in: app)
+        assertTemplateEditorBottomExerciseRemainsInteractive(
+            catalogExerciseUUID: finalExerciseUUID,
             in: app
         )
     }
@@ -3118,26 +3196,83 @@ final class WGJUITests: XCTestCase {
     }
 
     private func startPreviewedTemplateWorkout(in app: XCUIApplication) {
-        let previewSheet = identifiedElement("template-preview-sheet", in: app)
-        XCTAssertTrue(previewSheet.waitForExistence(timeout: 5))
+        func startFromPreview() {
+            let previewSheet = identifiedElement("template-preview-sheet", in: app)
+            XCTAssertTrue(previewSheet.waitForExistence(timeout: 5))
 
-        let startButton = identifiedElement("template-preview-start-button", in: app)
-        if startButton.waitForExistence(timeout: 2) {
-            startButton.tap()
-        } else {
-            let labeledButtons = app.buttons.matching(NSPredicate(format: "label == %@", "Start Workout"))
-            let fallbackButton = labeledButtons
-                .allElementsBoundByIndex
-                .first(where: \.isHittable)
-                ?? labeledButtons.element(boundBy: max(0, labeledButtons.count - 1))
-            XCTAssertTrue(fallbackButton.waitForExistence(timeout: 5))
-            fallbackButton.tap()
+            let startButton = identifiedElement("template-preview-start-button", in: app)
+            if startButton.waitForExistence(timeout: 2) {
+                startButton.tap()
+            } else {
+                let labeledButtons = app.buttons.matching(NSPredicate(format: "label == %@", "Start Workout"))
+                let fallbackButton = labeledButtons
+                    .allElementsBoundByIndex
+                    .first(where: \.isHittable)
+                    ?? labeledButtons.element(boundBy: max(0, labeledButtons.count - 1))
+                XCTAssertTrue(fallbackButton.waitForExistence(timeout: 5))
+                fallbackButton.tap()
+            }
+        }
+
+        startFromPreview()
+
+        if app.buttons["active-workout-finish-button"].waitForExistence(timeout: 5) {
+            return
+        }
+
+        let resumeCurrentWorkoutButton = app.buttons["Resume Current Workout"]
+        if resumeCurrentWorkoutButton.waitForExistence(timeout: 2) {
+            resumeCurrentWorkoutButton.tap()
+            discardCurrentWorkout(in: app)
+
+            app.terminate()
+            app.launch()
+            authenticateIfNeeded(app, mode: launchMode(for: app))
+
+            startFromPreview()
         }
 
         XCTAssertTrue(app.buttons["active-workout-finish-button"].waitForExistence(timeout: 5))
     }
 
-    private func openTemplateEditorFromMinimizedActiveWorkout(in app: XCUIApplication) {
+    private func discardCurrentWorkout(in app: XCUIApplication) {
+        let finishButton = app.buttons["active-workout-finish-button"]
+        XCTAssertTrue(finishButton.waitForExistence(timeout: 5))
+
+        let cancelButton = identifiedElement("active-workout-cancel-button", in: app)
+        revealElement(cancelButton, in: app)
+        let elapsedTimer = identifiedElement("active-workout-elapsed-timer", in: app)
+        revealElementAbove(elapsedTimer, target: cancelButton, in: app)
+
+        XCTAssertTrue(cancelButton.isHittable)
+        cancelButton.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
+
+        let discardButton = app.buttons["Discard Workout"]
+        XCTAssertTrue(discardButton.waitForExistence(timeout: 5))
+        discardButton.tap()
+        XCTAssertTrue(waitForElementToDisappear(finishButton, timeout: 5))
+    }
+
+    private func launchMode(for app: XCUIApplication) -> LaunchMode {
+        app.launchArguments.contains("UITEST_IN_MEMORY_STORE") ? .localInMemory : .iCloud
+    }
+
+    private func startWorkoutTemplateInlineEditButtonID(for templateName: String) -> String {
+        "start-workout-template-inline-edit-button-\(accessibilityKey(for: templateName))"
+    }
+
+    private func accessibilityKey(for text: String) -> String {
+        text
+            .lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: "-")
+    }
+
+    private func openTemplateEditorFromMinimizedActiveWorkout(
+        templateName: String,
+        in app: XCUIApplication
+    ) {
         startPreviewedTemplateWorkout(in: app)
 
         let minimizeButton = app.buttons["active-workout-minimize-button"]
@@ -3149,7 +3284,10 @@ final class WGJUITests: XCTestCase {
         let strip = identifiedElement("active-workout-strip", in: app)
         XCTAssertTrue(strip.waitForExistence(timeout: 5))
 
-        let editButton = identifiedElement("start-workout-template-inline-edit-button", in: app)
+        let editButton = identifiedElement(
+            startWorkoutTemplateInlineEditButtonID(for: templateName),
+            in: app
+        )
         revealElementAbove(strip, target: editButton, in: app, maxSwipes: 10)
 
         XCTAssertTrue(editButton.waitForExistence(timeout: 5))

@@ -1068,6 +1068,91 @@ struct BrosSocialServiceTests {
         #expect(try context.fetch(FetchDescriptor<SocialOutboxItem>()).isEmpty)
     }
 
+    @Test
+    func queueCompletedSessionPublishPreservesFullExerciseListForWorkoutDetails() async throws {
+        let context = try makeInMemoryContext()
+        let profile = try ProfileRepository(modelContext: context).loadOrCreateProfile()
+        profile.displayName = "Local Atlas"
+        profile.updateBrosMembership(
+            circleID: "circle-1",
+            membershipID: "membership-circle-1-user-1",
+            userRecordName: "user-1",
+            joinedAt: Date(timeIntervalSince1970: 100),
+            role: .owner
+        )
+
+        let session = WorkoutSession(
+            name: "Push Day",
+            status: .completed,
+            startedAt: Date(timeIntervalSince1970: 200),
+            endedAt: Date(timeIntervalSince1970: 3_800),
+            durationSeconds: 3_600,
+            totalVolume: 0,
+            prHitsCount: 0,
+            summaryMetricsVersion: WorkoutMetricsService.currentSummaryMetricsVersion
+        )
+        let exercises = [
+            WorkoutSessionExercise(
+                sessionID: session.id,
+                catalogExerciseUUID: "bros-bench",
+                exerciseNameSnapshot: "Bench Press",
+                categorySnapshot: "Chest",
+                muscleSummarySnapshot: "Chest",
+                sortOrder: 0,
+                session: session
+            ),
+            WorkoutSessionExercise(
+                sessionID: session.id,
+                catalogExerciseUUID: "bros-row",
+                exerciseNameSnapshot: "Barbell Row",
+                categorySnapshot: "Back",
+                muscleSummarySnapshot: "Lats",
+                sortOrder: 1,
+                session: session
+            ),
+            WorkoutSessionExercise(
+                sessionID: session.id,
+                catalogExerciseUUID: "bros-squat",
+                exerciseNameSnapshot: "Back Squat",
+                categorySnapshot: "Legs",
+                muscleSummarySnapshot: "Quads",
+                sortOrder: 2,
+                session: session
+            ),
+            WorkoutSessionExercise(
+                sessionID: session.id,
+                catalogExerciseUUID: "bros-pull-up",
+                exerciseNameSnapshot: "Pull Up",
+                categorySnapshot: "Back",
+                muscleSummarySnapshot: "Lats",
+                sortOrder: 3,
+                session: session
+            ),
+        ]
+        session.exercises = exercises
+        context.insert(session)
+        exercises.forEach(context.insert)
+        try context.save()
+
+        var savedWorkoutRecord: CKRecord?
+        let store = TestBrosCloudStore()
+        store.saveHandler = { records, _ in
+            savedWorkoutRecord = records.first(where: { $0.recordType == "BroFeedEvent" })
+        }
+
+        let service = CloudKitBrosSocialService(modelContext: context, cloudStore: store)
+        try service.queueCompletedSessionPublish(sessionID: session.id)
+        await service.flushOutbox()
+
+        let savedRecord = try #require(savedWorkoutRecord)
+        #expect(savedRecord["exercisePreviewText"] as? String == [
+            "Bench Press",
+            "Barbell Row",
+            "Back Squat",
+            "Pull Up",
+        ].joined(separator: "\n"))
+    }
+
     func joinCircleRepairsStaleMemberIndexBeforeBuildingSnapshot() async throws {
         let context = try makeInMemoryContext()
         let ownerMembership = makeMembershipRecord(
@@ -1662,6 +1747,12 @@ struct BrosSocialServiceTests {
     private func makeInMemoryContext() throws -> ModelContext {
         let schema = Schema([
             UserProfile.self,
+            WorkoutSession.self,
+            WorkoutSessionCardioBlock.self,
+            WorkoutSessionExercise.self,
+            WorkoutSessionSet.self,
+            WorkoutSessionSupersetGroup.self,
+            WorkoutSessionDropStage.self,
             ActiveWorkoutDraftSession.self,
             ActiveWorkoutDraftCardioBlock.self,
             ActiveWorkoutDraftExercise.self,
@@ -1669,6 +1760,7 @@ struct BrosSocialServiceTests {
             ActiveWorkoutDraftSet.self,
             ActiveWorkoutDraftSupersetGroup.self,
             ActiveWorkoutDraftDropStage.self,
+            CompletedSetFact.self,
             SocialOutboxItem.self,
         ])
         let configuration = ModelConfiguration(

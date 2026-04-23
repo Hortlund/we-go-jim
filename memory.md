@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-04-23 - Cloud-Backed Template UI Tests Need Unique Targets And Local Draft Cleanup
+
+- Date: 2026-04-23
+- Trigger/Problem: iCloud-backed template editor smoke tests on the signed-in `iPhone 17 / iOS 26.2` simulator produced misleading failures because starting an imported template workout hit a stale active-workout conflict, and generic inline edit selectors reopened the wrong synced template from a crowded library.
+- Root Cause: WGJ keeps `activeWorkoutDraft` in a local-only store that persists across launches even when templates live in the cloud-backed user-data store, and `StartWorkoutHomeView` originally exposed only a generic template inline-edit accessibility identifier.
+- Durable Rule: For WGJ cloud-backed template/editor UI verification on a shared signed-in simulator, treat stale local active-workout drafts as a separate cleanup step and target template actions with unique per-template accessibility identifiers instead of first-match edit buttons.
+- How to Verify Next Time: Launch the iCloud-enabled UI test path with a uniquely named imported template, handle any existing local active-workout conflict by resuming and discarding it first, then assert the exact template-specific edit button opens the expected editor content.
+- Status: active
+
 ## 2026-04-16 - Workout Completion Summary Must Promote From Shell Teardown
 
 - Date: 2026-04-16
