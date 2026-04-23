@@ -22,13 +22,15 @@ final class WGJUITestsLaunchTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = [
             "UITEST_SKIP_SPLASH",
-            "UITEST_IN_MEMORY_STORE",
+            "UITEST_ENABLE_ICLOUD",
         ]
         app.launch()
 
-        let continueLocally = app.buttons["Continue Locally"]
-        if continueLocally.waitForExistence(timeout: 5) {
-            continueLocally.tap()
+        let continueWithICloud = app.buttons["Continue with iCloud"]
+        if continueWithICloud.waitForExistence(timeout: 10) {
+            continueWithICloud.tap()
+        } else if app.buttons["Continue Locally"].exists {
+            XCTFail("Expected an iCloud-backed launch test, but the app only offered local mode.")
         }
 
         XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 5))
@@ -44,7 +46,7 @@ final class WGJUITestsLaunchTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = [
             "UITEST_SKIP_SPLASH",
-            "UITEST_IN_MEMORY_STORE",
+            "UITEST_ENABLE_ICLOUD",
             "UITEST_FORCE_AUTO_ENTER_AFTER_SPLASH",
         ]
         app.launch()

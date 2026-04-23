@@ -189,24 +189,24 @@ nonisolated enum CloudStartupPreflight {
                 "CloudKit is unavailable for this build. Using local-only mode for this session."
             )
         case .temporarilyUnavailable:
-            return cloudBackedRetryDecision(
+            return localFallbackDecision(
                 .temporarilyUnavailable,
-                "iCloud is temporarily unavailable on this device. Retrying cloud availability in the background."
+                "iCloud is temporarily unavailable on this device. Using local-only mode for this session."
             )
         case .couldNotDetermine:
-            return cloudBackedRetryDecision(
+            return localFallbackDecision(
                 .couldNotDetermine,
-                "WGJ could not verify iCloud availability at launch. Retrying cloud availability in the background."
+                "WGJ could not verify iCloud availability at launch. Using local-only mode for this session."
             )
         case .timedOut:
-            return cloudBackedRetryDecision(
+            return localFallbackDecision(
                 .timedOut,
-                "The iCloud account check timed out during launch. Retrying cloud availability in the background."
+                "The iCloud account check timed out during launch. Using local-only mode for this session."
             )
         case .error:
-            return cloudBackedRetryDecision(
+            return localFallbackDecision(
                 .error,
-                "WGJ hit a CloudKit startup error during launch. Retrying cloud availability in the background."
+                "WGJ hit a CloudKit startup error during launch. Using local-only mode for this session."
             )
         }
     }
@@ -222,14 +222,4 @@ nonisolated enum CloudStartupPreflight {
         )
     }
 
-    private static func cloudBackedRetryDecision(
-        _ accountStatus: CloudStartupAccountStatus,
-        _ description: String
-    ) -> CloudStartupDecision {
-        CloudStartupDecision(
-            accountStatus: accountStatus,
-            storeMode: .cloudBacked,
-            cloudSyncErrorDescription: description
-        )
-    }
 }

@@ -849,16 +849,11 @@ struct BrosView: View {
         .task(id: isTabActive) {
             guard isTabActive else { return }
             applyWarmSnapshotIfAvailable()
-            reloadBlockedBros()
-            await viewModel.loadIfNeeded(
-                modelContext: modelContext,
-                cloudSyncEnabled: cloudSyncEnabled,
-                cloudSyncErrorDescription: cloudSyncErrorDescription
-            )
+            await reloadForCurrentActivation()
             rebuildFilteredSnapshot()
         }
         .task(id: notificationRouter.brosRefreshRequestID) {
-            guard notificationRouter.brosRefreshRequestID != nil, isTabActive else { return }
+            guard notificationRouter.brosRefreshRequestID != nil else { return }
             reloadBlockedBros()
             await viewModel.refresh(
                 modelContext: modelContext,
@@ -866,6 +861,7 @@ struct BrosView: View {
                 cloudSyncErrorDescription: cloudSyncErrorDescription,
                 force: true
             )
+            notificationRouter.consumeBrosRefreshRequest()
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active, isTabActive else { return }
@@ -910,6 +906,33 @@ struct BrosView: View {
                 .wgjSheetSurface()
         }
         .wgjMinimalKeyboardToolbar()
+    }
+
+    @MainActor
+    private func reloadForCurrentActivation() async {
+        reloadBlockedBros()
+
+        if notificationRouter.brosRefreshRequestID != nil {
+            await viewModel.refresh(
+                modelContext: modelContext,
+                cloudSyncEnabled: cloudSyncEnabled,
+                cloudSyncErrorDescription: cloudSyncErrorDescription,
+                force: true
+            )
+            notificationRouter.consumeBrosRefreshRequest()
+            return
+        }
+
+        await viewModel.loadIfNeeded(
+            modelContext: modelContext,
+            cloudSyncEnabled: cloudSyncEnabled,
+            cloudSyncErrorDescription: cloudSyncErrorDescription
+        )
+        await viewModel.refreshIfStale(
+            modelContext: modelContext,
+            cloudSyncEnabled: cloudSyncEnabled,
+            cloudSyncErrorDescription: cloudSyncErrorDescription
+        )
     }
 
     private var loadingCard: some View {

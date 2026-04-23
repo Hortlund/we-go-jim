@@ -7,6 +7,8 @@ struct ProfileManagementView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
+    @Environment(AppNotificationRouter.self) private var notificationRouter
+    @Environment(AppWarmupState.self) private var appWarmupState
 
     @State private var displayName = ""
     @State private var savedDisplayName = ""
@@ -263,6 +265,11 @@ struct ProfileManagementView: View {
                     }
                 } else {
                     BrosAvatarCacheService.shared.remove(for: cacheKey)
+                }
+
+                if profile.brosMembershipID != nil {
+                    appWarmupState.invalidateBros()
+                    notificationRouter.requestBrosRefresh()
                 }
             }
             dismiss()

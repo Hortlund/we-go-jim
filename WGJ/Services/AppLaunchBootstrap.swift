@@ -35,7 +35,7 @@ final class AppLaunchBootstrapState {
         resolutionGeneration += 1
         let currentGeneration = resolutionGeneration
 
-        let task = Task.detached(priority: .userInitiated) { [weak self] in
+        let task = Task(priority: .userInitiated) { [weak self] in
             do {
                 let bootstrap = try await resolver()
                 guard !Task.isCancelled else { return }
@@ -45,36 +45,18 @@ final class AppLaunchBootstrapState {
                     backgroundStore: AppBackgroundStore(container: bootstrap.container)
                 )
 
-                await MainActor.run {
-                    guard let self else { return }
-                    guard self.resolutionGeneration == currentGeneration else { return }
-                    guard self.resolutionTask != nil else { return }
-
-                    AppRuntimeState.shared.updateCloudState(
-                        isEnabled: bootstrap.cloudSyncEnabled,
-                        errorDescription: bootstrap.cloudSyncErrorDescription
-                    )
-                    AppRuntimeState.shared.updateUserDataSyncStatus(
-                        UserDataSyncTrackerBridge.configureForLaunch(
-                            isCloudEnabled: bootstrap.cloudSyncEnabled,
-                            errorDescription: bootstrap.cloudSyncErrorDescription
-                        )
-                    )
-                    self.resolvedBootstrap = resolved
-                    self.resolutionTask = nil
-                }
+                guard let self else { return }
+                self.finishResolution(
+                    resolved,
+                    bootstrap: bootstrap,
+                    generation: currentGeneration
+                )
             } catch is CancellationError {
-                await MainActor.run {
-                    guard let self else { return }
-                    guard self.resolutionGeneration == currentGeneration else { return }
-                    self.resolutionTask = nil
-                }
+                guard let self else { return }
+                self.clearResolutionTask(generation: currentGeneration)
             } catch {
-                await MainActor.run {
-                    guard let self else { return }
-                    guard self.resolutionGeneration == currentGeneration else { return }
-                    self.resolutionTask = nil
-                }
+                guard let self else { return }
+                self.clearResolutionTask(generation: currentGeneration)
                 preconditionFailure("Could not create ModelContainer bootstrap: \(error)")
             }
         }
@@ -87,6 +69,33 @@ final class AppLaunchBootstrapState {
         resolutionTask?.cancel()
         resolutionTask = nil
         resolvedBootstrap = nil
+    }
+
+    private func finishResolution(
+        _ resolved: ResolvedAppLaunchBootstrap,
+        bootstrap: ModelContainerBootstrap,
+        generation: Int
+    ) {
+        guard resolutionGeneration == generation else { return }
+        guard resolutionTask != nil else { return }
+
+        AppRuntimeState.shared.updateCloudState(
+            isEnabled: bootstrap.cloudSyncEnabled,
+            errorDescription: bootstrap.cloudSyncErrorDescription
+        )
+        AppRuntimeState.shared.updateUserDataSyncStatus(
+            UserDataSyncTrackerBridge.configureForLaunch(
+                isCloudEnabled: bootstrap.cloudSyncEnabled,
+                errorDescription: bootstrap.cloudSyncErrorDescription
+            )
+        )
+        resolvedBootstrap = resolved
+        resolutionTask = nil
+    }
+
+    private func clearResolutionTask(generation: Int) {
+        guard resolutionGeneration == generation else { return }
+        resolutionTask = nil
     }
 }
 

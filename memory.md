@@ -220,6 +220,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 - How to Verify Next Time: Run the template workout finish flows that edit workout notes and choose both `Keep Template` and `Apply Template`; confirm the review sheet appears immediately after finishing and the flow advances to workout completion without getting stuck on `Wrapping up workout`.
 - Status: active
 
+## 2026-04-23 - Cloud UI Verification Must Opt Into iCloud Explicitly
+
+- Date: 2026-04-23
+- Trigger/Problem: Cloud and Bros verification kept appearing green in code while the UI suite was still launching with `UITEST_IN_MEMORY_STORE`, which meant sync-sensitive flows never exercised the signed-in iCloud simulator path.
+- Root Cause: WGJ disabled CloudKit for all XCTest launches, and the shared UI helper hardcoded local in-memory launch arguments plus `Continue Locally`, so cloud-backed behavior was silently skipped during automation.
+- Durable Rule: Keep unit tests hermetic, but any UI automation intended to verify cloud sync, Bros, or profile propagation must launch with an explicit iCloud opt-in path and must fail fast if the login gate falls back to local mode.
+- How to Verify Next Time: On the signed-in simulator, run an iCloud launch smoke test and confirm the UI waits for `Continue with iCloud`, enters the app, and never accepts `Continue Locally` for that path.
+- Status: active
+
 ## 2026-04-12 - History Detail Hydration Must Stay Scoped To Expanded Exercise Cards
 
 - Date: 2026-04-12

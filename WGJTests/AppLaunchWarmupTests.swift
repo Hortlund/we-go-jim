@@ -281,13 +281,13 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
-    func asyncCloudStartupPreflightKeepsCloudBackedStoreForTimedOutStatus() async {
+    func asyncCloudStartupPreflightUsesLocalFallbackForTimedOutStatus() async {
         let decision = await CloudStartupPreflight.makeDecisionAsync(
             statusProvider: MockAsyncCloudStartupAccountStatusProvider(status: .timedOut)
         )
 
-        #expect(decision.storeMode == .cloudBacked)
-        #expect(decision.cloudSyncEnabled)
+        #expect(decision.storeMode == .localFallback)
+        #expect(decision.cloudSyncEnabled == false)
         #expect(decision.cloudSyncErrorDescription?.contains("timed out") == true)
     }
 
@@ -329,7 +329,7 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
-    func appLaunchBootstrapResolverKeepsCloudBackedContainerForRetryableStartupStatus() async throws {
+    func appLaunchBootstrapResolverBuildsLocalFallbackForTimedOutStartupStatus() async throws {
         let container = try makeContainer()
         var didRequestCloudContainer = false
         var didRequestLocalFallback = false
@@ -340,8 +340,8 @@ struct AppLaunchWarmupTests {
             startupDecisionProvider: {
                 CloudStartupDecision(
                     accountStatus: .timedOut,
-                    storeMode: .cloudBacked,
-                    cloudSyncErrorDescription: "The iCloud account check timed out during launch. Retrying cloud availability in the background."
+                    storeMode: .localFallback,
+                    cloudSyncErrorDescription: "The iCloud account check timed out during launch. Using local-only mode for this session."
                 )
             },
             makeUITestContainer: {
@@ -359,10 +359,43 @@ struct AppLaunchWarmupTests {
             describeError: { _ in "unreachable" }
         )
 
-        #expect(bootstrap.cloudSyncEnabled)
+        #expect(bootstrap.cloudSyncEnabled == false)
         #expect(bootstrap.cloudSyncErrorDescription?.contains("timed out") == true)
-        #expect(didRequestCloudContainer)
-        #expect(!didRequestLocalFallback)
+        #expect(!didRequestCloudContainer)
+        #expect(didRequestLocalFallback)
+    }
+
+    @Test
+    func cloudKitContainerAvailabilityOnlyAllowsExplicitICloudUITestLaunches() {
+        #expect(AppRuntimeConfig.canUseConfiguredCloudKitContainer(
+            isRunningXCTest: false,
+            launchArguments: [],
+            cloudKitContainerIdentifier: "iCloud.se.highball.WeGoJim"
+        ))
+
+        #expect(!AppRuntimeConfig.canUseConfiguredCloudKitContainer(
+            isRunningXCTest: true,
+            launchArguments: [],
+            cloudKitContainerIdentifier: "iCloud.se.highball.WeGoJim"
+        ))
+
+        #expect(AppRuntimeConfig.canUseConfiguredCloudKitContainer(
+            isRunningXCTest: true,
+            launchArguments: ["UITEST_ENABLE_ICLOUD"],
+            cloudKitContainerIdentifier: "iCloud.se.highball.WeGoJim"
+        ))
+
+        #expect(!AppRuntimeConfig.canUseConfiguredCloudKitContainer(
+            isRunningXCTest: true,
+            launchArguments: ["UITEST_ENABLE_ICLOUD", "UITEST_IN_MEMORY_STORE"],
+            cloudKitContainerIdentifier: "iCloud.se.highball.WeGoJim"
+        ))
+
+        #expect(!AppRuntimeConfig.canUseConfiguredCloudKitContainer(
+            isRunningXCTest: true,
+            launchArguments: ["UITEST_ENABLE_ICLOUD"],
+            cloudKitContainerIdentifier: "   "
+        ))
     }
 
     @Test

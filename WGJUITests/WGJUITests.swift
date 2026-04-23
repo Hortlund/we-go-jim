@@ -1,6 +1,26 @@
 import XCTest
 
 final class WGJUITests: XCTestCase {
+    private enum LaunchMode {
+        case iCloud
+        case localInMemory
+
+        var launchArguments: [String] {
+            switch self {
+            case .iCloud:
+                return [
+                    "UITEST_SKIP_SPLASH",
+                    "UITEST_ENABLE_ICLOUD",
+                ]
+            case .localInMemory:
+                return [
+                    "UITEST_SKIP_SPLASH",
+                    "UITEST_IN_MEMORY_STORE",
+                ]
+            }
+        }
+    }
+
     override func setUpWithError() throws {
         continueAfterFailure = false
     }
@@ -782,6 +802,70 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(reopenedNotesField.waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["active-workout-finish-button"].waitForExistence(timeout: 5))
         XCTAssertEqual(reopenedNotesField.value as? String, editedNotes)
+    }
+
+    @MainActor
+    func testActiveWorkoutHomeReturnKeepsTypedSetValuesInteractive() throws {
+        let app = launchApp(launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Home Return Set Workout",
+                notes: "Resume after backgrounding with typed set values.",
+                exercises: [
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "active-home-return-set-bench",
+                        exerciseNameSnapshot: "Bench Press",
+                        categorySnapshot: "Chest",
+                        muscleSummarySnapshot: "Chest",
+                        targetRepMin: 6,
+                        targetRepMax: 8,
+                        restSeconds: 120,
+                        sets: [
+                            templatePayloadSet(
+                                targetReps: 6,
+                                targetWeight: 100,
+                                loadUnit: "kg",
+                                restSeconds: 120,
+                                isWarmup: false
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+        ])
+
+        startPreviewedTemplateWorkout(in: app)
+
+        let weightField = identifiedElement("workout-set-0-weight-field", in: app)
+        XCTAssertTrue(weightField.waitForExistence(timeout: 5))
+        revealElement(weightField, in: app)
+        weightField.tap()
+        if !app.keyboards.element.waitForExistence(timeout: 1) {
+            weightField.tap()
+        }
+        weightField.typeText("95")
+
+        let repsField = identifiedElement("workout-set-0-reps-field", in: app)
+        XCTAssertTrue(repsField.waitForExistence(timeout: 5))
+        revealElement(repsField, in: app)
+        repsField.tap()
+        if !app.keyboards.element.waitForExistence(timeout: 1) {
+            repsField.tap()
+        }
+        repsField.typeText("7")
+
+        XCUIDevice.shared.press(.home)
+        app.activate()
+
+        let reopenedWeightField = identifiedElement("workout-set-0-weight-field", in: app)
+        let reopenedRepsField = identifiedElement("workout-set-0-reps-field", in: app)
+        XCTAssertTrue(reopenedWeightField.waitForExistence(timeout: 5))
+        XCTAssertTrue(reopenedRepsField.waitForExistence(timeout: 5))
+        XCTAssertEqual(reopenedWeightField.value as? String, "95")
+        XCTAssertEqual(reopenedRepsField.value as? String, "7")
+        XCTAssertTrue(app.buttons["active-workout-finish-button"].waitForExistence(timeout: 5))
+
+        reopenedWeightField.tap()
+        XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 2))
     }
 
     @MainActor
@@ -2927,26 +3011,55 @@ final class WGJUITests: XCTestCase {
     }
 
     private func launchApp(
+        mode: LaunchMode = .iCloud,
         launchArguments extraLaunchArguments: [String] = [],
         launchEnvironment extraLaunchEnvironment: [String: String] = [:]
     ) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = [
-            "UITEST_SKIP_SPLASH",
-            "UITEST_IN_MEMORY_STORE",
-        ] + extraLaunchArguments
+        app.launchArguments = mode.launchArguments + extraLaunchArguments
         app.launchEnvironment = extraLaunchEnvironment
         app.launch()
-        authenticateIfNeeded(app)
+        authenticateIfNeeded(app, mode: mode)
         XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 5))
         return app
     }
 
-    private func authenticateIfNeeded(_ app: XCUIApplication) {
+    private func authenticateIfNeeded(_ app: XCUIApplication, mode: LaunchMode) {
+        let tabBar = app.tabBars.firstMatch
+        let continueWithICloud = app.buttons["Continue with iCloud"]
         let continueLocally = app.buttons["Continue Locally"]
-        if continueLocally.waitForExistence(timeout: 5) {
-            continueLocally.tap()
+        let deadline = Date().addingTimeInterval(12)
+
+        while Date() < deadline {
+            if tabBar.exists {
+                return
+            }
+
+            switch mode {
+            case .iCloud:
+                if continueWithICloud.exists {
+                    continueWithICloud.tap()
+                    return
+                }
+
+                if continueLocally.exists {
+                    let statusText = app.staticTexts.allElementsBoundByIndex
+                        .first(where: { !$0.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })?
+                        .label ?? "No login-gate status text captured."
+                    XCTFail("Expected an iCloud-backed UI test launch, but the app only offered local mode. First status text: \(statusText)")
+                    return
+                }
+            case .localInMemory:
+                if continueLocally.exists {
+                    continueLocally.tap()
+                    return
+                }
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         }
+
+        XCTFail("Timed out waiting for the app to reach an authenticated state.")
     }
 
     private func tapTab(_ name: String, in app: XCUIApplication) {

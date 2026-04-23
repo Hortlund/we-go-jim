@@ -102,6 +102,11 @@ nonisolated enum AppRuntimeConfig {
         static let cloudKitContainerIdentifier = "WGJCloudKitContainerIdentifier"
     }
 
+    private enum TestArgument {
+        static let inMemoryStore = "UITEST_IN_MEMORY_STORE"
+        static let enableICloud = "UITEST_ENABLE_ICLOUD"
+    }
+
     static let supportEmail = "support@wegojim.app"
     static let privacyPolicyURL: URL? = nil
     static let supportURL: URL? = nil
@@ -131,16 +136,36 @@ nonisolated enum AppRuntimeConfig {
     static var isRunningTests: Bool {
         let processInfo = ProcessInfo.processInfo
         return processInfo.environment["XCTestConfigurationFilePath"] != nil
-            || processInfo.arguments.contains("UITEST_IN_MEMORY_STORE")
+            || processInfo.arguments.contains(TestArgument.inMemoryStore)
     }
 
-    static var canUseConfiguredCloudKitContainer: Bool {
-        guard !isRunningTests else {
+    static func canUseConfiguredCloudKitContainer(
+        isRunningXCTest: Bool,
+        launchArguments: [String],
+        cloudKitContainerIdentifier: String?
+    ) -> Bool {
+        guard let normalizedIdentifier = cloudKitContainerIdentifier?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !normalizedIdentifier.isEmpty
+        else {
             return false
         }
 
-        // `url(forUbiquityContainerIdentifier:)` checks iCloud Drive containers, not CloudKit-only setup.
-        return !cloudKitContainerIdentifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard isRunningXCTest else {
+            return true
+        }
+
+        return launchArguments.contains(TestArgument.enableICloud)
+            && !launchArguments.contains(TestArgument.inMemoryStore)
+    }
+
+    static var canUseConfiguredCloudKitContainer: Bool {
+        let processInfo = ProcessInfo.processInfo
+        return canUseConfiguredCloudKitContainer(
+            isRunningXCTest: processInfo.environment["XCTestConfigurationFilePath"] != nil,
+            launchArguments: processInfo.arguments,
+            cloudKitContainerIdentifier: cloudKitContainerIdentifier
+        )
     }
 
     static func makeCloudKitContainer() -> CKContainer? {
@@ -268,17 +293,14 @@ final class AppRuntimeState {
 
         let statusProvider = accountService ?? AccountStatusService()
 
-        let refreshTask = Task.detached(priority: .utility) { [weak self] in
+        let refreshTask = Task(priority: .utility) { [weak self, statusProvider] in
             let status = await statusProvider.fetchAccountStatus()
-
-            await MainActor.run {
-                guard let self else { return }
-                self.finishRuntimeCloudAvailabilityRefresh(
-                    refreshGeneration: refreshGeneration,
-                    status: status,
-                    taskWasCancelled: Task.isCancelled
-                )
-            }
+            guard let self else { return }
+            self.finishRuntimeCloudAvailabilityRefresh(
+                refreshGeneration: refreshGeneration,
+                status: status,
+                taskWasCancelled: Task.isCancelled
+            )
         }
 
         runtimeCloudAvailabilityRefreshTask = refreshTask
@@ -482,14 +504,31 @@ final class AppNotificationRouter {
     private init() { }
 
     func openBros() {
-        requestedTab = .bros
-        routeRequestID = UUID()
+        requestBrosRefresh(openTab: true)
+    }
+
+    func requestBrosRefresh(openTab: Bool = false) {
+        if openTab {
+            requestedTab = .bros
+            routeRequestID = UUID()
+        }
+
         brosRefreshRequestID = UUID()
     }
 
     func consumeRequestedTab() {
         requestedTab = nil
     }
+
+    func consumeBrosRefreshRequest() {
+        brosRefreshRequestID = nil
+    }
+
+#if DEBUG
+    static func makeTestingInstance() -> AppNotificationRouter {
+        AppNotificationRouter()
+    }
+#endif
 }
 
 struct WorkoutCompletionPresentation: Identifiable, Equatable {
