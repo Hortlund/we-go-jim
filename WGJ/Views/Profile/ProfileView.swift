@@ -879,7 +879,7 @@ struct ProfileView: View {
             return
         }
 
-        let delay: Duration = hasRenderedDashboardContent ? .zero : .milliseconds(450)
+        let delay: Duration = hasLoadedProfile ? .zero : .milliseconds(450)
         let renderToken = profileReloadToken
         dashboardRenderTask = Task {
             if delay > .zero {

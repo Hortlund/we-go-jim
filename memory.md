@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-04-24 - Cold Profile And Bros Warmup Belongs In Splash
+
+- Date: 2026-04-24
+- Trigger/Problem: Moving Profile and Bros warmup after main entry protected app launch but shifted the lag into normal tab use, which made first Profile/Bros visits still feel unacceptable.
+- Root Cause: Profile dashboard preparation and Bros CloudKit snapshot refresh are non-trivial first-load work. Deferring them until after the app is interactive competes with the exact tab/menu gestures the user is trying to perform.
+- Durable Rule: Do bounded cold Profile and initial Bros snapshot preparation during splash/main preparation, then avoid scheduling non-critical Profile/Bros warmups immediately after main entry. After the main UI is visible, user interaction has priority; only active-workout-ended should force a warmup because the underlying data changed.
+- How to Verify Next Time: Cold launch without `UITEST_SKIP_SPLASH`, confirm splash may stay briefly while warm snapshots prepare, then tap Profile and Bros immediately after main appears and confirm tab switches render from warm state without a visible freeze.
+- Status: active
+
 ## 2026-04-24 - Cold Profile Entry Must Not Touch Main SwiftData Before First Render
 
 - Date: 2026-04-24

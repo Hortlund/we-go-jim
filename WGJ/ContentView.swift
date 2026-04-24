@@ -27,7 +27,6 @@ struct ContentView: View {
     @State private var isPreparingMainPhase = false
     @State private var hasInstalledUITestPendingTemplate = false
     @State private var hasScheduledInitialDeferredMaintenance = false
-    @State private var delayedNonCriticalWarmupTask: Task<Void, Never>?
     @State private var fallbackCoachWarmupTask: Task<Void, Never>?
 
     private var currentProfile: UserProfile? {
@@ -141,6 +140,7 @@ struct ContentView: View {
         defer { isPreparingMainPhase = false }
 
         await prepareLocalProfileIdentityIfNeeded()
+        await prepareStartupWarmSnapshotsIfNeeded()
 
         guard appPhase != .main else { return }
         withAnimation(.easeInOut(duration: 0.2)) {
@@ -504,8 +504,6 @@ struct ContentView: View {
     private func resetToStartupFlow() {
         socialMaintenanceScheduler.cancel()
         resetResumeCriticalMaintenanceCycle()
-        delayedNonCriticalWarmupTask?.cancel()
-        delayedNonCriticalWarmupTask = nil
         fallbackCoachWarmupTask?.cancel()
         fallbackCoachWarmupTask = nil
         activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
@@ -542,10 +540,7 @@ struct ContentView: View {
         }
 
         let forceWarmup = trigger == .activeWorkoutEnded
-        guard forceWarmup else {
-            scheduleDelayedNonCriticalWarmups(trigger: trigger)
-            return
-        }
+        guard forceWarmup else { return }
 
         scheduleProfileWarmupIfNeeded(force: forceWarmup)
         scheduleBrosWarmupIfNeeded(force: forceWarmup)
@@ -555,27 +550,84 @@ struct ContentView: View {
     }
 
     @MainActor
-    private func scheduleDelayedNonCriticalWarmups(trigger: AppWarmupTrigger) {
-        delayedNonCriticalWarmupTask?.cancel()
-        delayedNonCriticalWarmupTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(1_200))
-            guard !Task.isCancelled else { return }
-            guard AppWarmupPolicy.shouldWarm(
-                appPhase: appPhase,
-                scenePhase: scenePhase,
-                activeSessionID: activeWorkoutPresentationState.activeSessionID
-            ) else {
-                delayedNonCriticalWarmupTask = nil
-                return
+    private func prepareStartupWarmSnapshotsIfNeeded() async {
+        guard !ProcessInfo.processInfo.arguments.contains(AppStartupRouting.skipSplashArgument) else {
+            return
+        }
+        guard appWarmupState.shouldWarmProfile() || appWarmupState.shouldWarmBros() else {
+            return
+        }
+
+        await withTaskGroup(of: Bool.self) { group in
+            group.addTask { @MainActor in
+                async let profileWarmup: Void = prepareStartupProfileWarmSnapshotIfNeeded()
+                async let brosWarmup: Void = prepareStartupBrosWarmSnapshotIfNeeded()
+                _ = await (profileWarmup, brosWarmup)
+                return true
+            }
+            group.addTask {
+                try? await Task.sleep(for: .milliseconds(3_500))
+                return false
             }
 
-            scheduleProfileWarmupIfNeeded(force: false)
-            scheduleBrosWarmupIfNeeded(force: false)
-            if trigger != .sceneActivated {
-                scheduleCoachWarmupIfNeeded()
-            }
-            delayedNonCriticalWarmupTask = nil
+            _ = await group.next()
+            group.cancelAll()
         }
+    }
+
+    @MainActor
+    private func prepareStartupProfileWarmSnapshotIfNeeded() async {
+        guard let runID = appWarmupState.beginProfileWarmup() else { return }
+
+        let snapshot: ProfileWarmSnapshot?
+        if let appBackgroundStore {
+            snapshot = try? await appBackgroundStore.performAsync("profile.startup-warmup") { backgroundContext in
+                try await Self.buildProfileWarmSnapshot(
+                    modelContext: backgroundContext,
+                    cloudSyncEnabled: appRuntimeState.cloudSyncEnabled
+                )
+            }
+        } else {
+            snapshot = try? await Self.buildProfileWarmSnapshot(
+                modelContext: modelContext,
+                cloudSyncEnabled: appRuntimeState.cloudSyncEnabled
+            )
+        }
+
+        let completedSnapshot = Task.isCancelled ? nil : snapshot
+        appWarmupState.finishProfileWarmup(runID: runID, snapshot: completedSnapshot)
+        if let completedSnapshot {
+            AppRuntimeState.shared.updateWorkoutNotificationStyle(completedSnapshot.profile.workoutNotificationStyle)
+        }
+    }
+
+    @MainActor
+    private func prepareStartupBrosWarmSnapshotIfNeeded() async {
+        guard let runID = appWarmupState.beginBrosWarmup() else { return }
+
+        let cloudSyncEnabled = appRuntimeState.cloudSyncEnabled
+        let cloudSyncErrorDescription = appRuntimeState.cloudSyncErrorDescription
+        let snapshot: BrosWarmSnapshot?
+        if let appBackgroundStore {
+            snapshot = try? await appBackgroundStore.performAsync("bros.startup-warmup") { backgroundContext in
+                try await Self.buildBrosWarmSnapshot(
+                    modelContext: backgroundContext,
+                    cloudSyncEnabled: cloudSyncEnabled,
+                    cloudSyncErrorDescription: cloudSyncErrorDescription
+                )
+            }
+        } else {
+            snapshot = try? await Self.buildBrosWarmSnapshot(
+                modelContext: modelContext,
+                cloudSyncEnabled: cloudSyncEnabled,
+                cloudSyncErrorDescription: cloudSyncErrorDescription
+            )
+        }
+
+        appWarmupState.finishBrosWarmup(
+            runID: runID,
+            snapshot: Task.isCancelled ? nil : snapshot
+        )
     }
 
     private func scheduleProfileWarmupIfNeeded(force: Bool) {

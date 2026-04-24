@@ -945,7 +945,7 @@ struct BrosView: View {
     @MainActor
     private func scheduleActivationRefresh() {
         activationRefreshTask?.cancel()
-        let delay: Duration = hasCompletedInitialActivationRefresh ? .milliseconds(100) : .milliseconds(550)
+        let delay: Duration = hasCompletedInitialActivationRefresh ? .milliseconds(100) : .milliseconds(1_000)
         activationRefreshTask = Task { @MainActor in
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled, isTabActive else { return }
