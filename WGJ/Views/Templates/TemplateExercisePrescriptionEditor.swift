@@ -22,6 +22,7 @@ struct TemplateExercisePrescriptionEditor: View {
     let canMoveUp: Bool
     let canMoveDown: Bool
     let recommendation: TemplateExerciseRecommendation?
+    let structureSummaries: [String]
     let preferredLoadUnit: TemplateLoadUnit
     let supplementaryContent: AnyView?
 
@@ -56,6 +57,7 @@ struct TemplateExercisePrescriptionEditor: View {
         exerciseAccessibilityIdentifier: String? = nil,
         infoDestination: AnyView? = nil,
         recommendation: TemplateExerciseRecommendation? = nil,
+        structureSummaries: [String] = [],
         supplementaryContent: AnyView? = nil,
         initiallyExpanded: Bool = false,
         isExpanded: Binding<Bool>? = nil,
@@ -80,6 +82,7 @@ struct TemplateExercisePrescriptionEditor: View {
         self.exerciseAccessibilityIdentifier = exerciseAccessibilityIdentifier
         self.infoDestination = infoDestination
         self.recommendation = recommendation
+        self.structureSummaries = structureSummaries
         self.supplementaryContent = supplementaryContent
         self.exerciseIndexTitle = exerciseIndexTitle
         self.canMoveUp = canMoveUp
@@ -572,13 +575,23 @@ struct TemplateExercisePrescriptionEditor: View {
             HStack(spacing: 8) {
                 infoChip(repRangeSummary, tint: WGJTheme.accentGold)
                 infoChip(summary, tint: WGJTheme.accentBlue)
+                ForEach(structureSummaries, id: \.self) { structureSummary in
+                    infoChip(structureSummary, tint: structureTint(for: structureSummary))
+                }
             }
 
             VStack(alignment: .leading, spacing: 8) {
                 infoChip(repRangeSummary, tint: WGJTheme.accentGold)
                 infoChip(summary, tint: WGJTheme.accentBlue)
+                ForEach(structureSummaries, id: \.self) { structureSummary in
+                    infoChip(structureSummary, tint: structureTint(for: structureSummary))
+                }
             }
         }
+    }
+
+    private func structureTint(for summary: String) -> Color {
+        summary.localizedCaseInsensitiveContains("drop") ? WGJTheme.accentCyan : WGJTheme.accentBlue
     }
 
     private func infoChip(_ title: String, tint: Color) -> some View {
@@ -929,7 +942,7 @@ struct TemplateExercisePrescriptionEditor: View {
 
     private func addDropStage(to index: Int) {
         guard setDrafts.indices.contains(index) else { return }
-        guard !setDrafts[index].isWarmup, setDrafts[index].dropStages.count < 2 else { return }
+        guard !setDrafts[index].isWarmup else { return }
         let sourceStage = setDrafts[index].dropStages.last
         let sourceReps = sourceStage?.targetReps ?? setDrafts[index].targetReps
         let sourceWeight = sourceStage?.targetWeight ?? setDrafts[index].targetWeight
@@ -1493,7 +1506,6 @@ private struct TemplateExerciseSetCardView: View, Equatable {
                     } label: {
                         Label("Add drop stage", systemImage: "plus")
                     }
-                    .disabled(set.dropStages.count >= 2)
 
                     Button(role: .destructive) {
                         onClearDropStages()
@@ -1552,16 +1564,14 @@ private struct TemplateExerciseSetCardView: View, Equatable {
 
                 Spacer()
 
-                if set.dropStages.count < 2 {
-                    Button {
-                        onAddDropStage()
-                    } label: {
-                        Label("Add Drop", systemImage: "plus.circle")
-                            .font(.caption.weight(.semibold))
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(WGJTheme.accentBlue)
+                Button {
+                    onAddDropStage()
+                } label: {
+                    Label("Add Drop", systemImage: "plus.circle")
+                        .font(.caption.weight(.semibold))
                 }
+                .buttonStyle(.plain)
+                .foregroundStyle(WGJTheme.accentBlue)
             }
 
             ForEach(Array(set.dropStages.enumerated()), id: \.element.id) { stageIndex, stage in

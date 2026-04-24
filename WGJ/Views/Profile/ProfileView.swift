@@ -693,6 +693,10 @@ struct ProfileView: View {
         guard let warmSnapshot = appWarmupState.freshProfile() else { return }
         currentProfile = warmSnapshot.profile
         dashboardContent = warmSnapshot.dashboard
+        hasLoadedProfile = true
+        needsExplicitRefresh = false
+        lastLoadedProfileUpdatedAt = warmSnapshot.profile.updatedAt
+        lastRefreshAt = warmSnapshot.warmedAt
     }
 
     @MainActor

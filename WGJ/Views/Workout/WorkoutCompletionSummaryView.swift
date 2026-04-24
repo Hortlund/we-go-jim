@@ -15,7 +15,7 @@ struct WorkoutCompletionSummaryView: View {
     @State private var celebrationBurstCount = 0
     @State private var confettiBursts: [WorkoutCompletionConfettiBurst] = []
     @State private var confettiDismissTasks: [UUID: Task<Void, Never>] = [:]
-    @State private var heroCardSize: CGSize = .zero
+    @State private var heroCardFrame: CGRect = .zero
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -40,16 +40,16 @@ struct WorkoutCompletionSummaryView: View {
             if !confettiBursts.isEmpty && !reduceMotion {
                 ZStack {
                     ForEach(confettiBursts) { burst in
-                        WorkoutCompletionConfettiOverlay(origin: burst.origin)
+                        WorkoutCompletionConfettiOverlay(origin: burst.origin, seed: burst.seed)
                             .id(burst.id)
                     }
                 }
-                .frame(height: 280)
-                .ignoresSafeArea(edges: .top)
+                .ignoresSafeArea()
                 .transition(.opacity)
                 .accessibilityIdentifier("workout-completion-confetti-overlay")
             }
         }
+        .coordinateSpace(name: "workout-completion-summary-space")
         .safeAreaInset(edge: .bottom, spacing: 0) {
             bottomAction
         }
@@ -175,7 +175,10 @@ struct WorkoutCompletionSummaryView: View {
             .background {
                 GeometryReader { geometry in
                     Color.clear
-                        .preference(key: WorkoutCompletionHeroSizePreferenceKey.self, value: geometry.size)
+                        .preference(
+                            key: WorkoutCompletionHeroFramePreferenceKey.self,
+                            value: geometry.frame(in: .named("workout-completion-summary-space"))
+                        )
                 }
             }
             .background {
@@ -203,17 +206,17 @@ struct WorkoutCompletionSummaryView: View {
         }
         .buttonStyle(.plain)
         .contentShape(RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous))
-        .onPreferenceChange(WorkoutCompletionHeroSizePreferenceKey.self) { size in
-            heroCardSize = size
+        .onPreferenceChange(WorkoutCompletionHeroFramePreferenceKey.self) { frame in
+            heroCardFrame = frame
         }
         .simultaneousGesture(
             SpatialTapGesture()
                 .onEnded { value in
-                    triggerCelebration(origin: normalizedConfettiOrigin(for: value.location))
+                    triggerCelebration(origin: confettiOrigin(for: value.location))
                 }
         )
         .accessibilityAction {
-            triggerCelebration(origin: .init(x: 0.5, y: 0.34))
+            triggerCelebration(origin: defaultConfettiOrigin())
         }
         .accessibilityIdentifier("workout-completion-hero-card")
         .accessibilityLabel("Workout completion celebration")
@@ -329,10 +332,10 @@ struct WorkoutCompletionSummaryView: View {
     private func triggerCelebrationIfNeeded() {
         guard !hasTriggeredCelebration else { return }
         hasTriggeredCelebration = true
-        triggerCelebration(origin: .init(x: 0.5, y: 0.12))
+        triggerCelebration(origin: defaultConfettiOrigin())
     }
 
-    private func triggerCelebration(origin: UnitPoint) {
+    private func triggerCelebration(origin: CGPoint) {
         celebrationBurstCount += 1
 
         WorkoutFeedbackCenter.shared.workoutCompleted()
@@ -351,13 +354,20 @@ struct WorkoutCompletionSummaryView: View {
         }
     }
 
-    private func normalizedConfettiOrigin(for location: CGPoint) -> UnitPoint {
-        let width = max(heroCardSize.width, 1)
-        let height = max(heroCardSize.height, 1)
-        return UnitPoint(
-            x: min(1, max(0, location.x / width)),
-            y: min(1, max(0, location.y / height))
+    private func confettiOrigin(for location: CGPoint) -> CGPoint {
+        guard !heroCardFrame.isEmpty else { return location }
+        return CGPoint(
+            x: heroCardFrame.minX + location.x,
+            y: heroCardFrame.minY + location.y
         )
+    }
+
+    private func defaultConfettiOrigin() -> CGPoint {
+        guard !heroCardFrame.isEmpty else {
+            return CGPoint(x: UIScreen.main.bounds.midX, y: 140)
+        }
+
+        return CGPoint(x: heroCardFrame.midX, y: heroCardFrame.minY + min(96, heroCardFrame.height * 0.36))
     }
 
     private func continueToHistory() {
@@ -724,25 +734,29 @@ private struct WorkoutCompletionExerciseRecapCard: View {
     }
 }
 
-private struct WorkoutCompletionHeroSizePreferenceKey: PreferenceKey {
-    static let defaultValue: CGSize = .zero
+private struct WorkoutCompletionHeroFramePreferenceKey: PreferenceKey {
+    static let defaultValue: CGRect = .zero
 
-    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
         value = nextValue()
     }
 }
 
 private struct WorkoutCompletionConfettiBurst: Identifiable {
     let id = UUID()
-    let origin: UnitPoint
+    let origin: CGPoint
+    let seed = UInt64.random(in: 1...UInt64.max)
 }
 
 private struct WorkoutCompletionConfettiOverlay: View {
-    let origin: UnitPoint
+    let origin: CGPoint
+    let seed: UInt64
 
     @State private var animate = false
 
-    private let pieces = WorkoutCompletionConfettiPiece.defaults
+    private var pieces: [WorkoutCompletionConfettiPiece] {
+        WorkoutCompletionConfettiPiece.random(seed: seed, count: 28)
+    }
 
     var body: some View {
         GeometryReader { proxy in
@@ -753,12 +767,12 @@ private struct WorkoutCompletionConfettiOverlay: View {
                         .frame(width: piece.width, height: piece.height)
                         .rotationEffect(.degrees(animate ? piece.endRotation : piece.startRotation))
                         .position(
-                            x: (proxy.size.width * origin.x) + (piece.originX * proxy.size.width * 0.16),
-                            y: (proxy.size.height * origin.y) + (piece.originY * 20)
+                            x: origin.x + (piece.originX * 18),
+                            y: origin.y + (piece.originY * 18)
                         )
                         .offset(
-                            x: animate ? piece.travelX * proxy.size.width * 0.48 : 0,
-                            y: animate ? piece.travelY * proxy.size.height : 0
+                            x: animate ? piece.travelX * min(proxy.size.width, 420) : 0,
+                            y: animate ? piece.travelY * min(proxy.size.height, 520) : 0
                         )
                         .opacity(animate ? 0 : 1)
                         .animation(
@@ -792,22 +806,56 @@ private struct WorkoutCompletionConfettiPiece: Identifiable {
     let duration: Double
     let color: Color
 
-    static let defaults: [WorkoutCompletionConfettiPiece] = [
-        WorkoutCompletionConfettiPiece(id: 0, width: 10, height: 18, cornerRadius: 4, originX: -0.4, originY: 0.2, travelX: -0.65, travelY: 0.86, startRotation: -12, endRotation: 240, delay: 0.00, duration: 1.7, color: WGJTheme.accentBlue),
-        WorkoutCompletionConfettiPiece(id: 1, width: 12, height: 12, cornerRadius: 6, originX: -0.22, originY: 0.5, travelX: -0.32, travelY: 0.92, startRotation: 8, endRotation: 320, delay: 0.04, duration: 1.8, color: WGJTheme.accentGold),
-        WorkoutCompletionConfettiPiece(id: 2, width: 8, height: 18, cornerRadius: 4, originX: -0.08, originY: 0.1, travelX: -0.12, travelY: 0.80, startRotation: -18, endRotation: 260, delay: 0.07, duration: 1.55, color: WGJTheme.success),
-        WorkoutCompletionConfettiPiece(id: 3, width: 10, height: 14, cornerRadius: 4, originX: 0.10, originY: 0.6, travelX: 0.14, travelY: 0.88, startRotation: 12, endRotation: 280, delay: 0.02, duration: 1.7, color: WGJTheme.accentCyan),
-        WorkoutCompletionConfettiPiece(id: 4, width: 12, height: 16, cornerRadius: 5, originX: 0.28, originY: 0.2, travelX: 0.46, travelY: 0.84, startRotation: -10, endRotation: 250, delay: 0.03, duration: 1.75, color: WGJTheme.accentBlue),
-        WorkoutCompletionConfettiPiece(id: 5, width: 9, height: 18, cornerRadius: 4, originX: 0.42, originY: 0.4, travelX: 0.70, travelY: 0.90, startRotation: 20, endRotation: 330, delay: 0.09, duration: 1.88, color: WGJTheme.accentGold),
-        WorkoutCompletionConfettiPiece(id: 6, width: 10, height: 10, cornerRadius: 5, originX: -0.34, originY: 0.8, travelX: -0.56, travelY: 0.74, startRotation: 0, endRotation: 180, delay: 0.12, duration: 1.45, color: WGJTheme.success),
-        WorkoutCompletionConfettiPiece(id: 7, width: 8, height: 20, cornerRadius: 4, originX: -0.16, originY: 0.3, travelX: -0.22, travelY: 0.96, startRotation: 16, endRotation: 300, delay: 0.11, duration: 1.92, color: WGJTheme.accentCyan),
-        WorkoutCompletionConfettiPiece(id: 8, width: 12, height: 14, cornerRadius: 4, originX: 0.00, originY: 0.4, travelX: 0.00, travelY: 0.90, startRotation: -6, endRotation: 210, delay: 0.05, duration: 1.65, color: WGJTheme.accentGold),
-        WorkoutCompletionConfettiPiece(id: 9, width: 10, height: 18, cornerRadius: 4, originX: 0.18, originY: 0.1, travelX: 0.24, travelY: 0.76, startRotation: 14, endRotation: 280, delay: 0.14, duration: 1.50, color: WGJTheme.accentBlue),
-        WorkoutCompletionConfettiPiece(id: 10, width: 9, height: 16, cornerRadius: 4, originX: 0.36, originY: 0.7, travelX: 0.60, travelY: 0.78, startRotation: -8, endRotation: 230, delay: 0.10, duration: 1.58, color: WGJTheme.success),
-        WorkoutCompletionConfettiPiece(id: 11, width: 12, height: 12, cornerRadius: 6, originX: -0.48, originY: 0.6, travelX: -0.74, travelY: 0.68, startRotation: 6, endRotation: 190, delay: 0.06, duration: 1.38, color: WGJTheme.accentCyan),
-        WorkoutCompletionConfettiPiece(id: 12, width: 8, height: 18, cornerRadius: 4, originX: -0.26, originY: 0.2, travelX: -0.18, travelY: 0.70, startRotation: -14, endRotation: 210, delay: 0.18, duration: 1.32, color: WGJTheme.accentBlue),
-        WorkoutCompletionConfettiPiece(id: 13, width: 10, height: 20, cornerRadius: 4, originX: 0.08, originY: 0.3, travelX: 0.18, travelY: 0.72, startRotation: 8, endRotation: 220, delay: 0.16, duration: 1.42, color: WGJTheme.accentGold),
-        WorkoutCompletionConfettiPiece(id: 14, width: 11, height: 14, cornerRadius: 4, originX: 0.24, originY: 0.5, travelX: 0.40, travelY: 0.66, startRotation: -10, endRotation: 200, delay: 0.19, duration: 1.34, color: WGJTheme.success),
-        WorkoutCompletionConfettiPiece(id: 15, width: 8, height: 16, cornerRadius: 4, originX: -0.02, originY: 0.9, travelX: -0.05, travelY: 0.62, startRotation: 18, endRotation: 170, delay: 0.15, duration: 1.24, color: WGJTheme.accentCyan),
-    ]
+    static func random(seed: UInt64, count: Int) -> [WorkoutCompletionConfettiPiece] {
+        var generator = WorkoutCompletionConfettiRandom(seed: seed)
+        let colors = [WGJTheme.accentBlue, WGJTheme.accentGold, WGJTheme.success, WGJTheme.accentCyan]
+
+        return (0..<count).map { index in
+            let width = generator.value(in: CGFloat(7)...CGFloat(14))
+            let height = generator.value(in: CGFloat(9)...CGFloat(22))
+            let direction = generator.value(in: 0.0...(2.0 * Double.pi))
+            let distance = generator.value(in: 0.32...1.0)
+            let upwardKick = generator.value(in: -0.28...0.14)
+            return WorkoutCompletionConfettiPiece(
+                id: index,
+                width: width,
+                height: height,
+                cornerRadius: min(width, height) * generator.value(in: 0.18...0.5),
+                originX: generator.value(in: -1...1),
+                originY: generator.value(in: -0.8...0.8),
+                travelX: cos(direction) * distance,
+                travelY: abs(sin(direction)) * generator.value(in: 0.42...1.02) + upwardKick,
+                startRotation: generator.value(in: -45...45),
+                endRotation: generator.value(in: 180...760) * (generator.nextBool() ? 1 : -1),
+                delay: generator.value(in: 0...0.18),
+                duration: generator.value(in: 1.15...2.1),
+                color: colors[index % colors.count]
+            )
+        }
+    }
+}
+
+private struct WorkoutCompletionConfettiRandom {
+    private var state: UInt64
+
+    init(seed: UInt64) {
+        state = seed == 0 ? 1 : seed
+    }
+
+    mutating func nextBool() -> Bool {
+        nextUnit() >= 0.5
+    }
+
+    mutating func value(in range: ClosedRange<Double>) -> Double {
+        range.lowerBound + nextUnit() * (range.upperBound - range.lowerBound)
+    }
+
+    mutating func value(in range: ClosedRange<CGFloat>) -> CGFloat {
+        CGFloat(value(in: Double(range.lowerBound)...Double(range.upperBound)))
+    }
+
+    private mutating func nextUnit() -> Double {
+        state = state &* 6364136223846793005 &+ 1442695040888963407
+        return Double(state >> 11) / Double(UInt64.max >> 11)
+    }
 }

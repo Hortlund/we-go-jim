@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-04-24 - Dropset Limits Must Be Removed Across UI And Persistence
+
+- Date: 2026-04-24
+- Trigger/Problem: Dropsets still capped at two stages and could disappear or appear clipped after prior UI-focused fixes.
+- Root Cause: The two-stage limit existed in multiple layers: template editor controls, active workout grid controls, template persistence, active draft creation/sync, completed session creation/sync, direct session creation, and template import.
+- Durable Rule: When changing dropset capacity or rendering, audit every `dropStages` transformation and editor path. Do not fix only the visible button state.
+- How to Verify Next Time: Search for `dropStages` with `prefix(2)`, `count < 2`, and `count >= 2`; run template repository, active draft repository, direct session repository, and template transfer tests with at least three drop stages.
+- Status: active
+
 ## 2026-04-23 - Cloud-Backed Template UI Tests Need Unique Targets And Local Draft Cleanup
 
 - Date: 2026-04-23

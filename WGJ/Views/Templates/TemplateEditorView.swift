@@ -63,7 +63,9 @@ struct TemplateEditorView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 16) {
+                // Dynamic exercise cards can grow after dropset edits; a non-lazy stack keeps
+                // the post-workout cardio section from temporarily clipping into the row below.
+                VStack(alignment: .leading, spacing: 16) {
                     templateMetaCard
                     cardioSection(for: .preWorkout)
                     exercisesSection
@@ -949,6 +951,10 @@ private struct TemplateEditorExerciseRow: View {
                 preferredLoadUnit: preferredLoadUnit,
                 supersetPresentation: supersetPresentation,
                 canMakeSupersetWithNext: canMakeSupersetWithNext,
+                structureSummaries: structureSummaries(
+                    supersetPresentation: supersetPresentation,
+                    setDrafts: localSetDrafts
+                ),
                 notes: localNotes,
                 targetRepMin: localTargetRepMin,
                 targetRepMax: localTargetRepMax,
@@ -1077,6 +1083,20 @@ private struct TemplateEditorExerciseRow: View {
         guard draftStore.isExpanded != isExpanded else { return }
         draftStore.isExpanded = isExpanded
     }
+
+    private func structureSummaries(
+        supersetPresentation: TemplateEditorSupersetPresentation?,
+        setDrafts: [TemplateExerciseSetDraft]
+    ) -> [String] {
+        var summaries: [String] = []
+        if let supersetPresentation {
+            summaries.append("Superset \(supersetPresentation.label)")
+        }
+        if setDrafts.contains(where: { !$0.dropStages.isEmpty }) {
+            summaries.append("Dropset")
+        }
+        return summaries
+    }
 }
 
 private struct TemplateEditorExerciseCardView: View, Equatable {
@@ -1091,6 +1111,7 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
     let preferredLoadUnit: TemplateLoadUnit
     let supersetPresentation: TemplateEditorSupersetPresentation?
     let canMakeSupersetWithNext: Bool
+    let structureSummaries: [String]
     let notes: String
     let targetRepMin: Int?
     let targetRepMax: Int?
@@ -1132,6 +1153,7 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
             && lhs.preferredLoadUnit == rhs.preferredLoadUnit
             && lhs.supersetPresentation == rhs.supersetPresentation
             && lhs.canMakeSupersetWithNext == rhs.canMakeSupersetWithNext
+            && lhs.structureSummaries == rhs.structureSummaries
             && lhs.notes == rhs.notes
             && lhs.targetRepMin == rhs.targetRepMin
             && lhs.targetRepMax == rhs.targetRepMax
@@ -1148,6 +1170,7 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
             category: category,
             exerciseAccessibilityIdentifier: exerciseAccessibilityIdentifier,
             recommendation: recommendation,
+            structureSummaries: structureSummaries,
             supplementaryContent: AnyView(
                 VStack(alignment: .leading, spacing: 12) {
                     TemplateEditorSupersetSection(

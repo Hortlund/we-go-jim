@@ -1873,7 +1873,7 @@ nonisolated final class TemplateRepository {
         for set: TemplateExerciseSet,
         desiredDrafts: [TemplateExerciseDropStageDraft]
     ) {
-        let normalizedDrafts = Array(desiredDrafts.prefix(2))
+        let normalizedDrafts = desiredDrafts
         let existingStages = (set.dropStages ?? []).sorted { $0.sortOrder < $1.sortOrder }
         let existingByID = Dictionary(uniqueKeysWithValues: existingStages.map { ($0.id, $0) })
         let incomingIDs = Set(normalizedDrafts.map(\.id))

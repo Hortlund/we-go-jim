@@ -271,7 +271,6 @@ nonisolated final class WorkoutSessionRepository {
                 modelContext.insert(set)
                 let createdDropStages = (templateSet.dropStages ?? [])
                     .sorted { $0.sortOrder < $1.sortOrder }
-                    .prefix(2)
                     .enumerated()
                     .map { stageIndex, templateStage in
                         WorkoutSessionDropStage(
@@ -1364,7 +1363,7 @@ nonisolated final class WorkoutSessionRepository {
         desiredDrafts: [WorkoutSessionDropStageDraft],
         now: Date
     ) -> Bool {
-        let normalizedDrafts = Array(desiredDrafts.prefix(2))
+        let normalizedDrafts = desiredDrafts
         let existingStages = (set.dropStages ?? []).sorted { $0.sortOrder < $1.sortOrder }
         let existingByID = Dictionary(uniqueKeysWithValues: existingStages.map { ($0.id, $0) })
         let incomingIDs = Set(normalizedDrafts.map(\.id))

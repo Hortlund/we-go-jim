@@ -174,7 +174,6 @@ nonisolated final class ActiveWorkoutDraftRepository {
                 modelContext.insert(set)
                 let createdDropStages = (templateSet.dropStages ?? [])
                     .sorted { $0.sortOrder < $1.sortOrder }
-                    .prefix(2)
                     .enumerated()
                     .map { stageIndex, templateStage in
                         ActiveWorkoutDraftDropStage(
@@ -895,7 +894,6 @@ nonisolated final class ActiveWorkoutDraftRepository {
                 modelContext.insert(draftSet)
                 let draftDropStages = (legacySet.dropStages ?? [])
                     .sorted { $0.sortOrder < $1.sortOrder }
-                    .prefix(2)
                     .enumerated()
                     .map { stageIndex, legacyStage in
                         let normalizedStageLoad = WorkoutLoggedLoadNormalization.resolved(
@@ -1037,7 +1035,6 @@ nonisolated final class ActiveWorkoutDraftRepository {
                 modelContext.insert(completedSet)
                 let completedDropStages = (draftSet.dropStages ?? [])
                     .sorted { $0.sortOrder < $1.sortOrder }
-                    .prefix(2)
                     .enumerated()
                     .map { stageIndex, draftStage in
                         let normalizedStageLoad = WorkoutLoggedLoadNormalization.resolved(
@@ -1553,7 +1550,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
         desiredDrafts: [WorkoutSessionDropStageDraft],
         now: Date
     ) -> Bool {
-        let normalizedDrafts = Array(desiredDrafts.prefix(2))
+        let normalizedDrafts = desiredDrafts
         let existingStages = (set.dropStages ?? []).sorted { $0.sortOrder < $1.sortOrder }
         let existingByID = Dictionary(uniqueKeysWithValues: existingStages.map { ($0.id, $0) })
         let incomingIDs = Set(normalizedDrafts.map(\.id))

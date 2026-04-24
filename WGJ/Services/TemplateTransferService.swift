@@ -709,7 +709,7 @@ nonisolated final class TemplateTransferService {
                     isWarmup: set.isWarmup,
                     isLocked: set.isLocked,
                     previousLoadUnit: set.loadUnit,
-                    dropStages: Array(set.dropStages.prefix(2))
+                    dropStages: set.dropStages
                 )
             },
             components: try componentDrafts(

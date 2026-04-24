@@ -133,6 +133,7 @@ struct ActiveWorkoutDraftRepositoryTests {
                             dropStages: [
                                 TemplateExerciseDropStageDraft(targetReps: 8, targetWeight: 22, loadUnit: .kg),
                                 TemplateExerciseDropStageDraft(targetReps: 10, targetWeight: 18, loadUnit: .kg),
+                                TemplateExerciseDropStageDraft(targetReps: 12, targetWeight: 14, loadUnit: .kg),
                             ]
                         ),
                     ],
@@ -174,8 +175,8 @@ struct ActiveWorkoutDraftRepositoryTests {
         #expect(secondExercise.supersetPosition == .second)
         #expect(firstExercise.supersetGroup?.roundRestSeconds == 75)
         #expect(secondExercise.supersetGroup?.roundRestSeconds == 75)
-        #expect(firstSetDrafts[0].dropStages.map(\.targetWeight) == [22, 18])
-        #expect(firstSetDrafts[0].dropStages.map(\.targetReps) == [8, 10])
+        #expect(firstSetDrafts[0].dropStages.map(\.targetWeight) == [22, 18, 14])
+        #expect(firstSetDrafts[0].dropStages.map(\.targetReps) == [8, 10, 12])
     }
 
     @Test

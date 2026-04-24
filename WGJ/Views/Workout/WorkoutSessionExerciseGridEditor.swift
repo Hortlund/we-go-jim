@@ -1004,7 +1004,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                 .disabled(!isSetEditingEnabled || isLocked)
             }
 
-            if !setDrafts[index].dropStages.isEmpty && setDrafts[index].dropStages.count < 2 {
+            if !setDrafts[index].dropStages.isEmpty {
                 Button {
                     addDropStage(to: index)
                 } label: {
@@ -1926,7 +1926,7 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func addDropStage(to index: Int) {
         guard setDrafts.indices.contains(index) else { return }
-        guard !setDrafts[index].isWarmup, !setDrafts[index].isLocked, setDrafts[index].dropStages.count < 2 else { return }
+        guard !setDrafts[index].isWarmup, !setDrafts[index].isLocked else { return }
         let sourceStage = setDrafts[index].dropStages.last
         let sourceReps = sourceStage?.targetReps ?? setDrafts[index].targetReps
         let sourceWeight = sourceStage?.targetWeight ?? setDrafts[index].targetWeight
@@ -2289,10 +2289,7 @@ struct WorkoutSessionExerciseGridEditor: View {
 
                 Spacer()
 
-                if isSetEditingEnabled,
-                   !setDrafts[setIndex].isLocked,
-                   setDrafts[setIndex].dropStages.count < 2
-                {
+                if isSetEditingEnabled, !setDrafts[setIndex].isLocked {
                     Button {
                         addDropStage(to: setIndex)
                     } label: {
