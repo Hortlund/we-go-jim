@@ -103,10 +103,33 @@ struct ExercisesCatalogView: View {
     }
 
     private var pinnedControlsTopPadding: CGFloat {
+        guard !isPickerMode else {
+            let proportionalPadding = UIScreen.main.bounds.height * 0.010
+            return min(max(proportionalPadding, 6), 12)
+        }
+
+        let safeTopInset = UIApplication.shared.connectedScenes
+            .compactMap { ($0 as? UIWindowScene)?.keyWindow?.safeAreaInsets.top }
+            .first ?? 59
+        let screenHeight = UIScreen.main.bounds.height
+        let compactHeightBoost = max(0, 844 - screenHeight) * 0.45
+        let proportionalPadding = safeTopInset + (screenHeight * 0.132) + compactHeightBoost
+        return min(max(proportionalPadding, screenHeight * 0.18), screenHeight * 0.30)
+    }
+
+    private var pinnedControlsReferenceTopPadding: CGFloat {
         let proportionalPadding = UIScreen.main.bounds.height * (isPickerMode ? 0.010 : 0.016)
         let lowerBound: CGFloat = isPickerMode ? 6 : 10
         let upperBound: CGFloat = isPickerMode ? 12 : 18
         return min(max(proportionalPadding, lowerBound), upperBound)
+    }
+
+    private var headerSearchSpacing: CGFloat {
+        isPickerMode ? 0 : 30
+    }
+
+    private var controlsSpacing: CGFloat {
+        14
     }
 
     private var pinnedControlsReservedHeight: CGFloat {
@@ -117,8 +140,11 @@ struct ExercisesCatalogView: View {
             baseHeight = isPickerMode ? 126 : 164
         }
 
+        let headerSpacingDelta = max(headerSearchSpacing - controlsSpacing, 0)
+        let topPaddingDelta = max(pinnedControlsTopPadding - pinnedControlsReferenceTopPadding, 0)
+        let adjustedBaseHeight = baseHeight + headerSpacingDelta + topPaddingDelta
         let heightAdjustment = (UIScreen.main.bounds.height - 874) * 0.06
-        return min(max(baseHeight + heightAdjustment, baseHeight - 24), baseHeight + 28)
+        return min(max(adjustedBaseHeight + heightAdjustment, adjustedBaseHeight - 24), adjustedBaseHeight + 28)
     }
 
     var body: some View {
@@ -218,6 +244,7 @@ struct ExercisesCatalogView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .wgjScreenBackground()
         .confirmationDialog(
             "No active workout",
@@ -282,13 +309,19 @@ struct ExercisesCatalogView: View {
     }
 
     private var pinnedSearchControls: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 0) {
             if !isPickerMode {
                 WGJRootHeader("Exercises", subtitle: "Search, filter, and add exercises fast.")
+                Color.clear
+                    .frame(height: headerSearchSpacing)
             }
 
             searchField
+            Color.clear
+                .frame(height: controlsSpacing)
             filterRow
+            Color.clear
+                .frame(height: controlsSpacing)
             createExerciseButton
         }
         .padding(.horizontal, 16)
