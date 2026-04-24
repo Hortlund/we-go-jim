@@ -1013,8 +1013,12 @@ struct WGJTests {
             .unavailable(.temporarilyUnavailable),
             .available,
         ])
+        let firstRefreshAt = Date(timeIntervalSince1970: 1_000)
 
-        runtimeState.refreshCloudAvailabilityIfNeeded(accountService: accountService)
+        runtimeState.refreshCloudAvailabilityIfNeeded(
+            accountService: accountService,
+            now: firstRefreshAt
+        )
         await waitForRuntimeRefresh(fetchCount: 1, accountService: accountService)
 
         #expect(
@@ -1022,7 +1026,10 @@ struct WGJTests {
         )
         #expect(accountService.fetchCount == 1)
 
-        runtimeState.refreshCloudAvailabilityIfNeeded(accountService: accountService)
+        runtimeState.refreshCloudAvailabilityIfNeeded(
+            accountService: accountService,
+            now: firstRefreshAt.addingTimeInterval(RuntimeCloudAvailabilityRefreshPolicy.unresolvedRetryInterval)
+        )
         await waitForRuntimeRefresh(fetchCount: 2, accountService: accountService)
 
         #expect(runtimeState.cloudSyncErrorDescription == nil)

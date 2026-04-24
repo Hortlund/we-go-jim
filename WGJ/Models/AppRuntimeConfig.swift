@@ -108,8 +108,8 @@ nonisolated enum AppRuntimeConfig {
     }
 
     static let supportEmail = "support@wegojim.app"
-    static let privacyPolicyURL: URL? = nil
-    static let supportURL: URL? = nil
+    static let privacyPolicyURL = URL(string: "https://wegojim.app/privacy")
+    static let supportURL = URL(string: "https://wegojim.app/support")
     static let reviewPolicy = AppReviewPolicy(
         brosEnabled: true,
         syncBrosAvatars: true
@@ -157,6 +157,23 @@ nonisolated enum AppRuntimeConfig {
 
         return launchArguments.contains(TestArgument.enableICloud)
             && !launchArguments.contains(TestArgument.inMemoryStore)
+    }
+
+    static func isExplicitICloudUITestLaunch(
+        isRunningXCTest: Bool,
+        launchArguments: [String]
+    ) -> Bool {
+        _ = isRunningXCTest
+        return launchArguments.contains(TestArgument.enableICloud)
+            && !launchArguments.contains(TestArgument.inMemoryStore)
+    }
+
+    static var isExplicitICloudUITestLaunch: Bool {
+        let processInfo = ProcessInfo.processInfo
+        return isExplicitICloudUITestLaunch(
+            isRunningXCTest: processInfo.environment["XCTestConfigurationFilePath"] != nil,
+            launchArguments: processInfo.arguments
+        )
     }
 
     static var canUseConfiguredCloudKitContainer: Bool {

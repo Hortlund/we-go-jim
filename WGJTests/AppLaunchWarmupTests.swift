@@ -385,6 +385,21 @@ struct AppLaunchWarmupTests {
             cloudKitContainerIdentifier: "iCloud.se.highball.WeGoJim"
         ))
 
+        #expect(AppRuntimeConfig.isExplicitICloudUITestLaunch(
+            isRunningXCTest: true,
+            launchArguments: ["UITEST_ENABLE_ICLOUD"]
+        ))
+
+        #expect(AppRuntimeConfig.isExplicitICloudUITestLaunch(
+            isRunningXCTest: false,
+            launchArguments: ["UITEST_ENABLE_ICLOUD"]
+        ))
+
+        #expect(!AppRuntimeConfig.isExplicitICloudUITestLaunch(
+            isRunningXCTest: true,
+            launchArguments: ["UITEST_ENABLE_ICLOUD", "UITEST_IN_MEMORY_STORE"]
+        ))
+
         #expect(!AppRuntimeConfig.canUseConfiguredCloudKitContainer(
             isRunningXCTest: true,
             launchArguments: ["UITEST_ENABLE_ICLOUD", "UITEST_IN_MEMORY_STORE"],
@@ -396,6 +411,49 @@ struct AppLaunchWarmupTests {
             launchArguments: ["UITEST_ENABLE_ICLOUD"],
             cloudKitContainerIdentifier: "   "
         ))
+    }
+
+    @Test
+    func appLaunchBootstrapResolverTrustsExplicitICloudUITestOptIn() async throws {
+        let container = try makeContainer()
+        var didRunStartupPreflight = false
+        var didRequestCloudContainer = false
+        var didRequestLocalFallback = false
+
+        let bootstrap = try await AppLaunchBootstrapResolver.resolve(
+            processInfo: MockProcessInfo(
+                arguments: ["UITEST_ENABLE_ICLOUD"],
+                environment: ["XCTestConfigurationFilePath": "UITest.xctestconfiguration"]
+            ),
+            canUseConfiguredCloudKitContainer: true,
+            startupDecisionProvider: {
+                didRunStartupPreflight = true
+                return CloudStartupDecision(
+                    accountStatus: .timedOut,
+                    storeMode: .localFallback,
+                    cloudSyncErrorDescription: "unreachable"
+                )
+            },
+            makeUITestContainer: {
+                Issue.record("UI test container should not be requested.")
+                return container
+            },
+            makeCloudBackedContainer: {
+                didRequestCloudContainer = true
+                return container
+            },
+            makeLocalFallbackContainer: {
+                didRequestLocalFallback = true
+                return container
+            },
+            describeError: { _ in "unreachable" }
+        )
+
+        #expect(bootstrap.cloudSyncEnabled)
+        #expect(bootstrap.cloudSyncErrorDescription == nil)
+        #expect(!didRunStartupPreflight)
+        #expect(didRequestCloudContainer)
+        #expect(!didRequestLocalFallback)
     }
 
     @Test
@@ -618,6 +676,7 @@ private struct MockAsyncCloudStartupAccountStatusProvider: AsyncCloudStartupAcco
 
 private struct MockProcessInfo: ProcessInfoProviding {
     let arguments: [String]
+    var environment: [String: String] = [:]
 }
 
 private actor ControlledRuntimeAccountStatusProvider: AccountStatusProviding {

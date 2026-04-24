@@ -54,6 +54,12 @@ struct AccountStatusService: AccountStatusProviding {
     }
 
     func fetchAccountStatus() async -> AccountStatus {
+#if DEBUG
+        if AppRuntimeConfig.isExplicitICloudUITestLaunch {
+            return .available
+        }
+#endif
+
         do {
             let status = try await client.accountStatus()
             switch status {

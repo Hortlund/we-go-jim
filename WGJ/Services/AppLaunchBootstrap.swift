@@ -4,6 +4,7 @@ import SwiftData
 
 protocol ProcessInfoProviding {
     var arguments: [String] { get }
+    var environment: [String: String] { get }
 }
 
 extension ProcessInfo: ProcessInfoProviding { }
@@ -100,6 +101,8 @@ final class AppLaunchBootstrapState {
 }
 
 enum AppLaunchBootstrapResolver {
+    private static let uiTestInMemoryStoreArgument = "UITEST_IN_MEMORY_STORE"
+
     static func resolve(
         processInfo: any ProcessInfoProviding = ProcessInfo.processInfo,
         canUseConfiguredCloudKitContainer: Bool = AppRuntimeConfig.canUseConfiguredCloudKitContainer,
@@ -111,7 +114,7 @@ enum AppLaunchBootstrapResolver {
         makeLocalFallbackContainer: @escaping @Sendable () throws -> ModelContainer,
         describeError: @escaping @Sendable (Error) -> String
     ) async throws -> ModelContainerBootstrap {
-        if processInfo.arguments.contains("UITEST_IN_MEMORY_STORE") {
+        if processInfo.arguments.contains(uiTestInMemoryStoreArgument) {
             return ModelContainerBootstrap(
                 container: try makeUITestContainer(),
                 cloudSyncEnabled: false,
@@ -127,15 +130,23 @@ enum AppLaunchBootstrapResolver {
             )
         }
 
-        try Task.checkCancellation()
-        let startupDecision = await startupDecisionProvider()
-        try Task.checkCancellation()
-        if startupDecision.shouldForceLocalFallbackStore {
-            return ModelContainerBootstrap(
-                container: try makeLocalFallbackContainer(),
-                cloudSyncEnabled: false,
-                cloudSyncErrorDescription: startupDecision.cloudSyncErrorDescription
-            )
+        let explicitICloudUITest = AppRuntimeConfig.isExplicitICloudUITestLaunch(
+            isRunningXCTest: processInfo.environment["XCTestConfigurationFilePath"] != nil,
+            launchArguments: processInfo.arguments
+        )
+        var cloudSyncErrorDescription: String?
+        if !explicitICloudUITest {
+            try Task.checkCancellation()
+            let startupDecision = await startupDecisionProvider()
+            try Task.checkCancellation()
+            cloudSyncErrorDescription = startupDecision.cloudSyncErrorDescription
+            if startupDecision.shouldForceLocalFallbackStore {
+                return ModelContainerBootstrap(
+                    container: try makeLocalFallbackContainer(),
+                    cloudSyncEnabled: false,
+                    cloudSyncErrorDescription: startupDecision.cloudSyncErrorDescription
+                )
+            }
         }
 
         do {
@@ -143,7 +154,7 @@ enum AppLaunchBootstrapResolver {
             return ModelContainerBootstrap(
                 container: try makeCloudBackedContainer(),
                 cloudSyncEnabled: true,
-                cloudSyncErrorDescription: startupDecision.cloudSyncErrorDescription
+                cloudSyncErrorDescription: cloudSyncErrorDescription
             )
         } catch {
             let fallbackContainer = try makeLocalFallbackContainer()

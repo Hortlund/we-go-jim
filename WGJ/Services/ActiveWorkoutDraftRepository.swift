@@ -1276,7 +1276,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
         let existingGroups = (session.supersetGroups ?? []).filter { $0.modelContext != nil }
         let existingGroupsByID = Dictionary(uniqueKeysWithValues: existingGroups.map { ($0.id, $0) })
         let normalized = normalizedSupersetMemberships(
-            for: orderedExercises,
+            for: orderedExercises.map(ActiveWorkoutSupersetExerciseSnapshot.init),
             membershipsByExerciseID: membershipsByExerciseID
         )
 
@@ -1356,7 +1356,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
         let existingGroups = (session.supersetGroups ?? []).filter { $0.modelContext != nil }
         let existingGroupsByID = Dictionary(uniqueKeysWithValues: existingGroups.map { ($0.id, $0) })
         let normalized = normalizedSupersetMemberships(
-            for: orderedExercises,
+            for: orderedExercises.map(ActiveWorkoutSupersetExerciseSnapshot.init),
             membershipsByExerciseID: membershipsByExerciseID
         )
 
@@ -1427,10 +1427,10 @@ nonisolated final class ActiveWorkoutDraftRepository {
         }
     }
 
-    private func normalizedSupersetMemberships<T>(
-        for exercises: [T],
+    private func normalizedSupersetMemberships(
+        for exercises: [ActiveWorkoutSupersetExerciseSnapshot],
         membershipsByExerciseID: [UUID: ExerciseSupersetMembershipDraft]
-    ) -> ActiveWorkoutSupersetNormalization where T: ActiveWorkoutSupersetExerciseLike {
+    ) -> ActiveWorkoutSupersetNormalization {
         var memberships: [UUID: ExerciseSupersetMembershipDraft] = [:]
         var standaloneRestSecondsByExerciseID: [UUID: Int] = [:]
         var groupsByID: [UUID: ActiveWorkoutSupersetGroupSpec] = [:]
@@ -1851,13 +1851,20 @@ nonisolated final class ActiveWorkoutDraftRepository {
     }
 }
 
-private protocol ActiveWorkoutSupersetExerciseLike {
-    var id: UUID { get }
-    var restSeconds: Int { get }
-}
+nonisolated private struct ActiveWorkoutSupersetExerciseSnapshot: Sendable {
+    let id: UUID
+    let restSeconds: Int
 
-extension ActiveWorkoutDraftExercise: ActiveWorkoutSupersetExerciseLike {}
-extension WorkoutSessionExercise: ActiveWorkoutSupersetExerciseLike {}
+    init(exercise: ActiveWorkoutDraftExercise) {
+        id = exercise.id
+        restSeconds = exercise.restSeconds
+    }
+
+    init(exercise: WorkoutSessionExercise) {
+        id = exercise.id
+        restSeconds = exercise.restSeconds
+    }
+}
 
 private struct ActiveWorkoutSupersetNormalization {
     let membershipsByExerciseID: [UUID: ExerciseSupersetMembershipDraft]

@@ -219,12 +219,15 @@ final class AppleCoachNarrativeService {
 
             do {
                 if let generated = try await generate() {
+                    try await ensureSharedRequestStillObserved(cacheKey: cacheKey)
                     try persist(generated)
                     return generated
                 }
             } catch let cancellation as CancellationError {
                 throw cancellation
             }
+
+            try await ensureSharedRequestStillObserved(cacheKey: cacheKey)
 
             if let cachedFallback {
                 return cachedFallback
@@ -236,6 +239,16 @@ final class AppleCoachNarrativeService {
         }
         inFlightRequests[cacheKey] = task
         return try await awaitSharedTask(task, cacheKey: cacheKey)
+    }
+
+    private func ensureSharedRequestStillObserved(cacheKey: String) async throws {
+        try Task.checkCancellation()
+        await Task.yield()
+        try Task.checkCancellation()
+
+        guard inFlightWaiters[cacheKey]?.isEmpty == false else {
+            throw CancellationError()
+        }
     }
 
     private func awaitSharedTask(
