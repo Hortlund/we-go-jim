@@ -65,6 +65,7 @@
 - Changes to navigation, sheets, launch behavior, accessibility identifiers, or interactive screen flows belong in `WGJUITests`.
 - Match the current test style: Swift Testing in `WGJTests`, XCTest in `WGJUITests`.
 - Prefer the Build iOS Apps plugin capabilities when build/run/debug work is needed.
+- When simulator verification depends on iCloud sign-in or CloudKit behavior, use the signed-in `iPhone 17` simulator on `iOS 26.2` (`AA6BE993-B5B3-4F6E-B334-D661C8DDDDD2`) instead of a generic/latest simulator.
 - Otherwise use the documented `xcodebuild` flow from `README.md`, with the `WGJ` scheme and an available iPhone simulator destination.
 - Preserve the existing UI-test launch flags and payload hooks rather than replacing them with new bespoke test plumbing.
 - For doc-only changes, review the docs directly and do not run app tests unless source files changed too.

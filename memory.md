@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-04-24 - ICloud Simulator Verification Uses iPhone 17 iOS 26.2
+
+- Date: 2026-04-24
+- Trigger/Problem: Build/run verification was initially pointed at a generic iPhone 16 simulator, but the user's iCloud-signed-in simulator for realistic cloud-backed WGJ checks is `iPhone 17 / iOS 26.2`.
+- Root Cause: Generic simulator selection does not preserve the signed-in iCloud environment needed for CloudKit and cloud-backed behavior verification.
+- Durable Rule: When verification depends on iCloud sign-in, CloudKit, or cloud-backed app behavior, use simulator `AA6BE993-B5B3-4F6E-B334-D661C8DDDDD2` (`iPhone 17`, `iOS 26.2`) with the Build iOS Apps plugin instead of a generic/latest simulator.
+- How to Verify Next Time: Set xcodebuildmcp session defaults to the WGJ project, `WGJ` scheme, Debug configuration, and simulator ID `AA6BE993-B5B3-4F6E-B334-D661C8DDDDD2`; confirm the simulator resolves as `iPhone 17` on `iOS 26.2` before launching cloud-sensitive flows.
+- Status: active
+
 ## 2026-04-24 - Cold Profile And Bros Warmup Belongs In Splash
 
 - Date: 2026-04-24

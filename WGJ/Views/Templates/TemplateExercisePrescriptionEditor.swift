@@ -430,30 +430,30 @@ struct TemplateExercisePrescriptionEditor: View {
                             focusedInput: $focusedInput,
                             repsText: repsText(for: row.index),
                             weightText: weightText(for: row.index),
-                            onRepsTextChanged: { updateRepsText($0, at: row.index) },
-                            onWeightTextChanged: { updateWeightText($0, at: row.index) },
-                            onLoadUnitChanged: { updateLoadUnit($0, at: row.index) },
-                            onToggleWarmup: { toggleWarmup(at: row.index) },
-                            onInsertBelow: { insertSet(after: row.index) },
-                            onMoveUp: { moveSetUp(row.index) },
-                            onMoveDown: { moveSetDown(row.index) },
-                            onSetRestChanged: { updateSetRest($0, at: row.index) },
-                            onAddDropStage: { addDropStage(to: row.index) },
+                            onRepsTextChanged: { updateRepsText($0, forSetID: row.id) },
+                            onWeightTextChanged: { updateWeightText($0, forSetID: row.id) },
+                            onLoadUnitChanged: { updateLoadUnit($0, forSetID: row.id) },
+                            onToggleWarmup: { toggleWarmup(setID: row.id) },
+                            onInsertBelow: { insertSet(afterSetID: row.id) },
+                            onMoveUp: { moveSetUp(setID: row.id) },
+                            onMoveDown: { moveSetDown(setID: row.id) },
+                            onSetRestChanged: { updateSetRest($0, forSetID: row.id) },
+                            onAddDropStage: { addDropStage(toSetID: row.id) },
                             onRemoveDropStage: { stageID in
-                                removeDropStage(stageID, from: row.index)
+                                removeDropStage(stageID, fromSetID: row.id)
                             },
-                            onClearDropStages: { clearDropStages(from: row.index) },
+                            onClearDropStages: { clearDropStages(fromSetID: row.id) },
                             onDropStageRepsChanged: { stageID, value in
-                                updateDropStageRepsText(value, stageID: stageID, setIndex: row.index)
+                                updateDropStageRepsText(value, stageID: stageID, setID: row.id)
                             },
                             onDropStageWeightChanged: { stageID, value in
-                                updateDropStageWeightText(value, stageID: stageID, setIndex: row.index)
+                                updateDropStageWeightText(value, stageID: stageID, setID: row.id)
                             },
                             onDropStageLoadUnitChanged: { stageID, unit in
-                                updateDropStageLoadUnit(unit, stageID: stageID, setIndex: row.index)
+                                updateDropStageLoadUnit(unit, stageID: stageID, setID: row.id)
                             },
-                            onToggleLock: { toggleLock(at: row.index) },
-                            onDelete: { removeSet(at: row.index) }
+                            onToggleLock: { toggleLock(setID: row.id) },
+                            onDelete: { removeSet(withID: row.id) }
                         )
                         .equatable()
                         .fixedSize(horizontal: false, vertical: true)
@@ -835,6 +835,11 @@ struct TemplateExercisePrescriptionEditor: View {
         setDrafts[index].targetReps = updatedValue
     }
 
+    private func updateRepsText(_ newValue: String, forSetID setID: UUID) {
+        guard let index = indexForSetID(setID) else { return }
+        updateRepsText(newValue, at: index)
+    }
+
     private func updateWeightText(_ newValue: String, at index: Int) {
         guard setDrafts.indices.contains(index) else { return }
         let setID = setDrafts[index].id
@@ -854,11 +859,21 @@ struct TemplateExercisePrescriptionEditor: View {
         setDrafts[index].targetWeight = updatedValue
     }
 
+    private func updateWeightText(_ newValue: String, forSetID setID: UUID) {
+        guard let index = indexForSetID(setID) else { return }
+        updateWeightText(newValue, at: index)
+    }
+
     private func updateLoadUnit(_ loadUnit: TemplateLoadUnit, at index: Int) {
         guard setDrafts.indices.contains(index) else { return }
         guard setDrafts[index].loadUnit != loadUnit else { return }
         setDrafts[index].loadUnit = loadUnit
         requestImmediateCommit()
+    }
+
+    private func updateLoadUnit(_ loadUnit: TemplateLoadUnit, forSetID setID: UUID) {
+        guard let index = indexForSetID(setID) else { return }
+        updateLoadUnit(loadUnit, at: index)
     }
 
     private func addSet() {
@@ -875,6 +890,11 @@ struct TemplateExercisePrescriptionEditor: View {
             setDrafts.insert(makeSetDraft(copying: setDrafts[index]), at: index + 1)
         }
         requestImmediateCommit()
+    }
+
+    private func insertSet(afterSetID setID: UUID) {
+        guard let index = indexForSetID(setID) else { return }
+        insertSet(after: index)
     }
 
     private func removeSet(at index: Int) {
@@ -901,10 +921,20 @@ struct TemplateExercisePrescriptionEditor: View {
         requestImmediateCommit()
     }
 
+    private func toggleWarmup(setID: UUID) {
+        guard let index = indexForSetID(setID) else { return }
+        toggleWarmup(at: index)
+    }
+
     private func toggleLock(at index: Int) {
         guard setDrafts.indices.contains(index) else { return }
         setDrafts[index].isLocked.toggle()
         requestImmediateCommit()
+    }
+
+    private func toggleLock(setID: UUID) {
+        guard let index = indexForSetID(setID) else { return }
+        toggleLock(at: index)
     }
 
     private func moveSetUp(_ index: Int) {
@@ -916,6 +946,11 @@ struct TemplateExercisePrescriptionEditor: View {
         requestImmediateCommit()
     }
 
+    private func moveSetUp(setID: UUID) {
+        guard let index = indexForSetID(setID) else { return }
+        moveSetUp(index)
+    }
+
     private func moveSetDown(_ index: Int) {
         guard index < setDrafts.count - 1 else { return }
 
@@ -923,6 +958,11 @@ struct TemplateExercisePrescriptionEditor: View {
             setDrafts.swapAt(index, index + 1)
         }
         requestImmediateCommit()
+    }
+
+    private func moveSetDown(setID: UUID) {
+        guard let index = indexForSetID(setID) else { return }
+        moveSetDown(index)
     }
 
     private func makeSetDraft(copying source: TemplateExerciseSetDraft?) -> TemplateExerciseSetDraft {
@@ -957,16 +997,31 @@ struct TemplateExercisePrescriptionEditor: View {
         requestImmediateCommit()
     }
 
+    private func addDropStage(toSetID setID: UUID) {
+        guard let index = indexForSetID(setID) else { return }
+        addDropStage(to: index)
+    }
+
     private func removeDropStage(_ stageID: UUID, from setIndex: Int) {
         guard setDrafts.indices.contains(setIndex) else { return }
         setDrafts[setIndex].dropStages.removeAll { $0.id == stageID }
         requestImmediateCommit()
     }
 
+    private func removeDropStage(_ stageID: UUID, fromSetID setID: UUID) {
+        guard let index = indexForSetID(setID) else { return }
+        removeDropStage(stageID, from: index)
+    }
+
     private func clearDropStages(from index: Int) {
         guard setDrafts.indices.contains(index), !setDrafts[index].dropStages.isEmpty else { return }
         setDrafts[index].dropStages = []
         requestImmediateCommit()
+    }
+
+    private func clearDropStages(fromSetID setID: UUID) {
+        guard let index = indexForSetID(setID) else { return }
+        clearDropStages(from: index)
     }
 
     private func updateDropStageRepsText(_ newValue: String, stageID: UUID, setIndex: Int) {
@@ -979,6 +1034,11 @@ struct TemplateExercisePrescriptionEditor: View {
         guard setDrafts[setIndex].dropStages[stageIndex].targetReps != updatedValue else { return }
         setDrafts[setIndex].dropStages[stageIndex].targetReps = updatedValue
         requestImmediateCommit()
+    }
+
+    private func updateDropStageRepsText(_ newValue: String, stageID: UUID, setID: UUID) {
+        guard let index = indexForSetID(setID) else { return }
+        updateDropStageRepsText(newValue, stageID: stageID, setIndex: index)
     }
 
     private func updateDropStageWeightText(_ newValue: String, stageID: UUID, setIndex: Int) {
@@ -1002,6 +1062,11 @@ struct TemplateExercisePrescriptionEditor: View {
         requestImmediateCommit()
     }
 
+    private func updateDropStageWeightText(_ newValue: String, stageID: UUID, setID: UUID) {
+        guard let index = indexForSetID(setID) else { return }
+        updateDropStageWeightText(newValue, stageID: stageID, setIndex: index)
+    }
+
     private func updateDropStageLoadUnit(_ loadUnit: TemplateLoadUnit, stageID: UUID, setIndex: Int) {
         guard setDrafts.indices.contains(setIndex),
               let stageIndex = setDrafts[setIndex].dropStages.firstIndex(where: { $0.id == stageID }) else {
@@ -1010,6 +1075,11 @@ struct TemplateExercisePrescriptionEditor: View {
         guard setDrafts[setIndex].dropStages[stageIndex].loadUnit != loadUnit else { return }
         setDrafts[setIndex].dropStages[stageIndex].loadUnit = loadUnit
         requestImmediateCommit()
+    }
+
+    private func updateDropStageLoadUnit(_ loadUnit: TemplateLoadUnit, stageID: UUID, setID: UUID) {
+        guard let index = indexForSetID(setID) else { return }
+        updateDropStageLoadUnit(loadUnit, stageID: stageID, setIndex: index)
     }
 
     private func formattedRest(_ seconds: Int) -> String {
@@ -1042,6 +1112,11 @@ struct TemplateExercisePrescriptionEditor: View {
         guard setDrafts[index].restSeconds != normalized else { return }
         setDrafts[index].restSeconds = normalized
         requestImmediateCommit()
+    }
+
+    private func updateSetRest(_ seconds: Int, forSetID setID: UUID) {
+        guard let index = indexForSetID(setID) else { return }
+        updateSetRest(seconds, at: index)
     }
 
     private func restLabel(for seconds: Int) -> String {
