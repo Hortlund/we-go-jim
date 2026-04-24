@@ -103,11 +103,22 @@ struct ExercisesCatalogView: View {
     }
 
     private var pinnedControlsTopPadding: CGFloat {
-        isPickerMode ? 8 : 14
+        let proportionalPadding = UIScreen.main.bounds.height * (isPickerMode ? 0.010 : 0.016)
+        let lowerBound: CGFloat = isPickerMode ? 6 : 10
+        let upperBound: CGFloat = isPickerMode ? 12 : 18
+        return min(max(proportionalPadding, lowerBound), upperBound)
     }
 
     private var pinnedControlsReservedHeight: CGFloat {
-        isPickerMode ? 156 : 192
+        let baseHeight: CGFloat
+        if shouldUseCompactFilterLayout {
+            baseHeight = isPickerMode ? 156 : 192
+        } else {
+            baseHeight = isPickerMode ? 126 : 164
+        }
+
+        let heightAdjustment = (UIScreen.main.bounds.height - 874) * 0.06
+        return min(max(baseHeight + heightAdjustment, baseHeight - 24), baseHeight + 28)
     }
 
     var body: some View {
@@ -177,7 +188,7 @@ struct ExercisesCatalogView: View {
                             )
                             .wgjRoundedGlass(cornerRadius: 12, tint: WGJTheme.accentBlue.opacity(0.10))
                     )
-                    .padding(.top, pinnedControlsReservedHeight)
+                    .padding(.top, pinnedControlsReservedHeight + 8)
                     .padding(.trailing, 2)
                     .opacity(shouldShowIndexRail ? 1 : 0)
                     .allowsHitTesting(shouldShowIndexRail)

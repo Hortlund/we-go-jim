@@ -27,6 +27,7 @@ struct MainTabView: View {
 
         GeometryReader { proxy in
             let bottomSafeAreaInset = proxy.safeAreaInsets.bottom
+            let topSafeAreaInset = proxy.safeAreaInsets.top
 
             ZStack(alignment: .bottom) {
                 TabView(selection: $tabState.selectedTab) {
@@ -64,9 +65,12 @@ struct MainTabView: View {
                 .wgjTabChrome()
                 .environment(\.activeWorkoutOverlayBottomInset, activeWorkoutOverlayBottomInset)
 
-                overlayChrome(bottomSafeAreaInset: bottomSafeAreaInset)
+                bottomOverlayChrome(bottomSafeAreaInset: bottomSafeAreaInset)
                     .animation(overlayAnimation, value: activeWorkoutPresentationState.isActiveWorkoutStripCollapsed)
                     .animation(overlayAnimation, value: restTimerState.restTimerPopup?.id)
+                    .animation(overlayAnimation, value: isKeyboardVisible)
+
+                syncBannerChrome(topSafeAreaInset: topSafeAreaInset)
                     .animation(overlayAnimation, value: shouldShowSyncBanner)
                     .animation(overlayAnimation, value: isKeyboardVisible)
             }
@@ -154,7 +158,7 @@ struct MainTabView: View {
     }
 
     @ViewBuilder
-    private func overlayChrome(bottomSafeAreaInset: CGFloat) -> some View {
+    private func bottomOverlayChrome(bottomSafeAreaInset: CGFloat) -> some View {
         ZStack(alignment: .bottom) {
             Color.clear
                 .preference(key: ActiveWorkoutStripHeightPreferenceKey.self, value: 0)
@@ -193,9 +197,15 @@ struct MainTabView: View {
                 .padding(.bottom, popupBottomLift(bottomSafeAreaInset: bottomSafeAreaInset))
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .wgjGlassContainer(spacing: 16)
+    }
 
+    @ViewBuilder
+    private func syncBannerChrome(topSafeAreaInset: CGFloat) -> some View {
+        ZStack(alignment: .top) {
             if shouldShowSyncBanner,
-               restTimerState.restTimerPopup == nil,
                !activeWorkoutPresentationState.isActiveWorkoutPresented,
                !isKeyboardVisible
             {
@@ -206,13 +216,13 @@ struct MainTabView: View {
                     tint: WGJTheme.accentBlue
                 )
                 .padding(.horizontal, WGJSpacing.page)
-                .padding(.bottom, syncBannerBottomLift(bottomSafeAreaInset: bottomSafeAreaInset))
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .padding(.top, topSafeAreaInset + 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
                 .accessibilityIdentifier("user-data-sync-banner")
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-        .wgjGlassContainer(spacing: 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .allowsHitTesting(false)
     }
 
     private var shouldShowSyncBanner: Bool {
@@ -244,12 +254,6 @@ struct MainTabView: View {
         return bottomSafeAreaInset + 72
     }
 
-    private func syncBannerBottomLift(bottomSafeAreaInset: CGFloat) -> CGFloat {
-        if activeWorkoutPresentationState.isActiveWorkoutStripCollapsed {
-            return activeWorkoutStripBottomLift(bottomSafeAreaInset: bottomSafeAreaInset) + 82
-        }
-        return bottomSafeAreaInset + 72
-    }
 }
 
 private struct ActiveWorkoutStripHeightPreferenceKey: PreferenceKey {
