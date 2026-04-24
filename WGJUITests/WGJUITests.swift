@@ -81,6 +81,12 @@ final class WGJUITests: XCTestCase {
 
         let clearFiltersButton = app.buttons["exercises-clear-filters-button"]
         XCTAssertTrue(clearFiltersButton.waitForExistence(timeout: 5))
+        if app.keyboards.element.exists {
+            let hideKeyboardButton = app.buttons["keyboard-hide-button"]
+            XCTAssertTrue(hideKeyboardButton.waitForExistence(timeout: 2))
+            hideKeyboardButton.tap()
+            XCTAssertFalse(app.keyboards.element.waitForExistence(timeout: 1))
+        }
         clearFiltersButton.tap()
         XCTAssertFalse((searchField.value as? String) == "zzzz-no-exercise")
         XCTAssertFalse(clearFiltersButton.waitForExistence(timeout: 2))

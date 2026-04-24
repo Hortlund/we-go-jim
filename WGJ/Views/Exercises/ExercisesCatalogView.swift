@@ -197,6 +197,7 @@ struct ExercisesCatalogView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .wgjScreenBackground()
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .confirmationDialog(
             "No active workout",
             isPresented: $showingCreateSessionPrompt,
@@ -276,28 +277,25 @@ struct ExercisesCatalogView: View {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(WGJTheme.textSecondary)
 
-            TextField("Search", text: $query)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .foregroundStyle(WGJTheme.textPrimary)
-                .focused($isSearchFieldFocused)
-                .accessibilityIdentifier("exercises-search-field")
-                .toolbar {
-                    ToolbarItemGroup(placement: .keyboard) {
-                        Spacer()
-
-                        Button {
-                            isSearchFieldFocused = false
-                            WGJKeyboard.dismiss()
-                        } label: {
-                            Label("Hide", systemImage: "keyboard.chevron.compact.down")
-                        }
-                        .accessibilityLabel("Hide keyboard")
-                        .accessibilityIdentifier("keyboard-hide-button")
-                    }
+            WGJAccessoryTextField(
+                "Search",
+                text: $query,
+                isFocused: searchFocusBinding,
+                onDismiss: {
+                    isSearchFieldFocused = false
+                    WGJKeyboard.dismiss()
                 }
+            )
+            .frame(height: 22)
         }
         .wgjPillField()
+    }
+
+    private var searchFocusBinding: Binding<Bool> {
+        Binding(
+            get: { isSearchFieldFocused },
+            set: { isSearchFieldFocused = $0 }
+        )
     }
 
     private var filterRow: some View {
