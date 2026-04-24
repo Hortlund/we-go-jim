@@ -878,6 +878,9 @@ struct StartWorkoutHomeView: View {
 
     @MainActor
     private func reloadHomeSnapshotIfNeeded(force: Bool) async {
+        await Task.yield()
+        guard !Task.isCancelled else { return }
+
         let currentContentUpdatedAt = currentHomeContentUpdatedAt()
         guard force || TimestampedReloadPolicy.shouldReload(
             hasLoaded: hasLoadedSnapshot,
@@ -895,7 +898,9 @@ struct StartWorkoutHomeView: View {
     @MainActor
     private func reloadHomeSnapshot(contentUpdatedAt: Date?) async {
         do {
-            try controller.reload(modelContext: modelContext)
+            try WGJPerformance.measure("start-workout.snapshot.reload") {
+                try controller.reload(modelContext: modelContext)
+            }
             hasLoadedSnapshot = true
             needsExplicitRefresh = false
             lastLoadedContentUpdatedAt = contentUpdatedAt
@@ -1137,16 +1142,18 @@ final class StartWorkoutHomeController {
     var snapshot = StartWorkoutHomeSnapshot.empty
 
     func reload(modelContext: ModelContext) throws {
+        snapshot = try StartWorkoutHomeSnapshotLoader.load(modelContext: modelContext)
+    }
+}
+
+enum StartWorkoutHomeSnapshotLoader {
+    static func load(modelContext: ModelContext) throws -> StartWorkoutHomeSnapshot {
         let templateRepository = TemplateRepository(modelContext: modelContext)
         let sessionRepository = WorkoutSessionRepository(modelContext: modelContext)
-        let loadedFolders = try templateRepository.folders()
-        let loadedTemplates = try templateRepository.templates()
-        let completedSessions = try sessionRepository.completedSessions()
-
-        snapshot = StartWorkoutHomeSnapshotBuilder.build(
-            folders: loadedFolders,
-            templates: loadedTemplates,
-            completedSessions: completedSessions
+        return StartWorkoutHomeSnapshotBuilder.build(
+            folders: try templateRepository.folders(),
+            templates: try templateRepository.templates(),
+            completedSessions: try sessionRepository.completedSessions()
         )
     }
 }

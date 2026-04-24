@@ -871,6 +871,9 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func loadExerciseStateIfNeeded(using scrollProxy: ScrollViewProxy) async {
+        let trace = WGJPerformance.begin("active-workout.hydrate")
+        defer { WGJPerformance.end(trace) }
+
         shouldTrackVisibleScrollTarget = false
         discardRemovedExerciseState(keeping: Set(sessionExercises.map(\.id)))
         let preparedPreviousResolutionByExerciseID = activeWorkoutPresentationState.preparedPreviousPerformanceResolution(
@@ -2508,21 +2511,23 @@ struct ActiveWorkoutView: View {
     }
 
     private func performFinishCommand(notes: String) async throws -> ActiveWorkoutFinishResult {
-        if let appBackgroundStore {
-            return try await appBackgroundStore.performWrite("active-workout.finish") { backgroundContext in
-                try Self.finishSession(
-                    sessionID: sessionID,
-                    notes: notes,
-                    modelContext: backgroundContext
-                )
+        try await WGJPerformance.measureAsync("active-workout.finish") {
+            if let appBackgroundStore {
+                return try await appBackgroundStore.performWrite("active-workout.finish") { backgroundContext in
+                    try Self.finishSession(
+                        sessionID: sessionID,
+                        notes: notes,
+                        modelContext: backgroundContext
+                    )
+                }
             }
-        }
 
-        return try Self.finishSession(
-            sessionID: sessionID,
-            notes: notes,
-            modelContext: modelContext
-        )
+            return try Self.finishSession(
+                sessionID: sessionID,
+                notes: notes,
+                modelContext: modelContext
+            )
+        }
     }
 
     nonisolated private static func finishSession(

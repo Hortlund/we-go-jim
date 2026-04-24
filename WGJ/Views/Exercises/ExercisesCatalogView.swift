@@ -103,7 +103,7 @@ struct ExercisesCatalogView: View {
     }
 
     private var pinnedControlsTopPadding: CGFloat {
-        isPickerMode ? 8 : 16
+        isPickerMode ? 8 : 14
     }
 
     private var pinnedControlsReservedHeight: CGFloat {
@@ -243,9 +243,14 @@ struct ExercisesCatalogView: View {
         }
         .task(id: shouldLoadCatalog) {
             guard shouldLoadCatalog else { return }
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+
             if hasAttemptedBootstrap {
                 do {
-                    try controller.reload(modelContext: modelContext)
+                    try WGJPerformance.measure("exercises.snapshot.reload") {
+                        try controller.reload(modelContext: modelContext)
+                    }
                     applyCurrentFilters()
                 } catch {
                     showError(error)
@@ -647,7 +652,9 @@ struct ExercisesCatalogView: View {
         }
 
         do {
-            try controller.reload(modelContext: modelContext)
+            try WGJPerformance.measure("exercises.snapshot.reload") {
+                try controller.reload(modelContext: modelContext)
+            }
         } catch {
             loadState = .failed
             showError(bootstrapError ?? error)
@@ -701,10 +708,7 @@ final class ExercisesCatalogController {
     var snapshot = ExercisesCatalogSnapshot.empty
 
     func reload(modelContext: ModelContext) throws {
-        let repository = ExerciseCatalogRepository(modelContext: modelContext)
-        let exercises = try repository.allExercises()
-        let muscles = try repository.availableMuscles()
-        snapshot.rebuild(from: exercises, muscleGroups: muscles)
+        snapshot = try ExercisesCatalogSnapshotLoader.load(modelContext: modelContext)
     }
 
     func applyFilters(
@@ -723,6 +727,18 @@ final class ExercisesCatalogController {
 
     func muscleName(for muscleID: Int?) -> String? {
         snapshot.muscleName(for: muscleID)
+    }
+}
+
+enum ExercisesCatalogSnapshotLoader {
+    static func load(modelContext: ModelContext) throws -> ExercisesCatalogSnapshot {
+        let repository = ExerciseCatalogRepository(modelContext: modelContext)
+        var snapshot = ExercisesCatalogSnapshot.empty
+        snapshot.rebuild(
+            from: try repository.allExercises(),
+            muscleGroups: try repository.availableMuscles()
+        )
+        return snapshot
     }
 }
 

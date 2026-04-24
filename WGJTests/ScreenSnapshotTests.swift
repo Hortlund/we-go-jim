@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import Testing
 @testable import WGJ
 
@@ -54,6 +55,79 @@ struct ScreenSnapshotTests {
         #expect(snapshot.sections.count == 1)
         #expect(snapshot.sections.first?.title == "B")
         #expect(snapshot.sections.first?.rows.map(\.displayName) == ["Bench Press"])
+    }
+
+    @Test
+    func exercisesCatalogSnapshotLoaderBuildsControllerSnapshotFromContext() throws {
+        let context = try makeSnapshotLoaderContext()
+        let chest = MuscleGroup(remoteID: 1, name: "Chest", nameEn: "Chest")
+        let bench = ExerciseCatalogItem(
+            remoteUUID: "bench",
+            displayName: "Bench Press",
+            categoryName: "Strength",
+            equipmentSummary: "Barbell",
+            isCurated: true
+        )
+        bench.primaryMuscles = [chest]
+        context.insert(chest)
+        context.insert(bench)
+        try context.save()
+
+        let snapshot = try ExercisesCatalogSnapshotLoader.load(modelContext: context)
+
+        #expect(snapshot.availableCategories == ["Strength"])
+        #expect(snapshot.sections.first?.rows.map(\.displayName) == ["Bench Press"])
+    }
+
+    @Test
+    func startWorkoutSnapshotLoaderBuildsGroupedSnapshotFromContext() throws {
+        let context = try makeSnapshotLoaderContext()
+        let folder = TemplateFolder(name: "Push", sortOrder: 0)
+        let template = WorkoutTemplate(folderID: folder.id, name: "Push Template")
+        let session = WorkoutSession(
+            templateID: template.id,
+            name: "Push Day",
+            status: .completed,
+            startedAt: Date(timeIntervalSince1970: 1_736_035_200),
+            endedAt: Date(timeIntervalSince1970: 1_736_038_800),
+            durationSeconds: 3600,
+            totalVolume: 1200,
+            prHitsCount: 1
+        )
+        context.insert(folder)
+        context.insert(template)
+        context.insert(session)
+        try context.save()
+
+        let snapshot = try StartWorkoutHomeSnapshotLoader.load(modelContext: context)
+
+        #expect(snapshot.sections.map(\.title) == ["Push"])
+        #expect(snapshot.sections.first?.templates.map(\.name) == ["Push Template"])
+        #expect(snapshot.lastCompletedByTemplateID[template.id] == session.endedAt)
+    }
+
+    @Test
+    func historyOverviewSnapshotLoaderBuildsFilteredSnapshotFromContext() throws {
+        let context = try makeSnapshotLoaderContext()
+        let session = WorkoutSession(
+            name: "Push Day",
+            status: .completed,
+            startedAt: Date(timeIntervalSince1970: 1_736_035_200),
+            endedAt: Date(timeIntervalSince1970: 1_736_038_800),
+            durationSeconds: 3600,
+            totalVolume: 1200,
+            prHitsCount: 1
+        )
+        context.insert(session)
+        try context.save()
+
+        let loaded = try HistoryOverviewSnapshotLoader.load(
+            modelContext: context,
+            selectedDayFilter: session.endedAt
+        )
+
+        #expect(loaded.completedSessions.map(\.id) == [session.id])
+        #expect(loaded.snapshot.sections.first?.cards.map(\.name) == ["Push Day"])
     }
 
     @Test
@@ -304,5 +378,52 @@ struct ScreenSnapshotTests {
         #expect(content.coachBrief?.recap.headline == "Bench Press Led The Week")
         #expect(content.coachBrief?.snapshot.topRisingSignals.map(\.exerciseName) == ["Bench Press"])
         #expect(content.coachBrief?.snapshot.followUpKinds == [.whatImproved, .whatChanged, .whyFlat])
+    }
+
+    private func makeSnapshotLoaderContext() throws -> ModelContext {
+        let schema = Schema([
+            ExerciseCatalogItem.self,
+            MuscleGroup.self,
+            ExerciseImageAsset.self,
+            ExerciseAlias.self,
+            ExerciseAttribution.self,
+            ExerciseCatalogSyncState.self,
+            UserProfile.self,
+            ProfileWidgetConfig.self,
+            TemplateFolder.self,
+            WorkoutTemplate.self,
+            TemplateCardioBlock.self,
+            TemplateExercise.self,
+            TemplateExerciseComponent.self,
+            TemplateExerciseSet.self,
+            TemplateSupersetGroup.self,
+            TemplateExerciseDropStage.self,
+            WorkoutSession.self,
+            WorkoutSessionCardioBlock.self,
+            WorkoutSessionExercise.self,
+            WorkoutSessionSet.self,
+            WorkoutSessionSupersetGroup.self,
+            WorkoutSessionDropStage.self,
+            ActiveWorkoutDraftSession.self,
+            ActiveWorkoutDraftCardioBlock.self,
+            ActiveWorkoutDraftExercise.self,
+            ActiveWorkoutDraftExerciseComponent.self,
+            ActiveWorkoutDraftSet.self,
+            ActiveWorkoutDraftSupersetGroup.self,
+            ActiveWorkoutDraftDropStage.self,
+            CompletedSetFact.self,
+            CachedCoachNarrative.self,
+            CachedCoachFollowUpNarrative.self,
+            SocialOutboxItem.self,
+            BlockedBro.self,
+        ])
+        let configuration = ModelConfiguration(
+            "SnapshotLoaderTests",
+            schema: schema,
+            isStoredInMemoryOnly: true,
+            cloudKitDatabase: .none
+        )
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        return ModelContext(container)
     }
 }

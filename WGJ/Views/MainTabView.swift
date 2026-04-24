@@ -278,7 +278,17 @@ private struct LazyTabContainer<Content: View>: View {
                     .environment(\.isTabActive, false)
             }
         }
-        .task(id: tabState.selectedTab) {
+        .onAppear {
+            markLoadedIfSelected()
+        }
+        .onChange(of: tabState.selectedTab) { _, _ in
+            markLoadedIfSelected()
+        }
+    }
+
+    private func markLoadedIfSelected() {
+        guard !hasLoaded else { return }
+        WGJPerformance.measure("main-tab.first-load") {
             if tabState.selectedTab == tab {
                 hasLoaded = true
             }

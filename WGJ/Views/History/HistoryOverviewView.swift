@@ -179,6 +179,9 @@ struct HistoryOverviewView: View {
 
     @MainActor
     private func reloadSnapshotIfNeeded(force: Bool) async {
+        await Task.yield()
+        guard !Task.isCancelled else { return }
+
         let currentContentUpdatedAt = currentHistoryContentUpdatedAt()
         guard force || TimestampedReloadPolicy.shouldReload(
             hasLoaded: hasLoadedSnapshot,
@@ -196,10 +199,12 @@ struct HistoryOverviewView: View {
     @MainActor
     private func reloadSnapshot(contentUpdatedAt: Date?) async {
         do {
-            try controller.reload(
-                modelContext: modelContext,
-                selectedDayFilter: selectedDayFilter
-            )
+            try WGJPerformance.measure("history-overview.snapshot.reload") {
+                try controller.reload(
+                    modelContext: modelContext,
+                    selectedDayFilter: selectedDayFilter
+                )
+            }
             hasLoadedSnapshot = true
             needsExplicitRefresh = false
             lastLoadedContentUpdatedAt = contentUpdatedAt
@@ -254,10 +259,32 @@ final class HistoryOverviewController {
         modelContext: ModelContext,
         selectedDayFilter: Date?
     ) throws {
-        completedSessions = try WorkoutSessionRepository(modelContext: modelContext).completedSessions()
-        snapshot = HistoryOverviewSnapshotBuilder.build(
-            sessions: completedSessions,
+        let loaded = try HistoryOverviewSnapshotLoader.load(
+            modelContext: modelContext,
             selectedDayFilter: selectedDayFilter
+        )
+        completedSessions = loaded.completedSessions
+        snapshot = loaded.snapshot
+    }
+}
+
+struct HistoryOverviewLoadedSnapshot {
+    let completedSessions: [WorkoutSession]
+    let snapshot: HistoryOverviewSnapshot
+}
+
+enum HistoryOverviewSnapshotLoader {
+    static func load(
+        modelContext: ModelContext,
+        selectedDayFilter: Date?
+    ) throws -> HistoryOverviewLoadedSnapshot {
+        let completedSessions = try WorkoutSessionRepository(modelContext: modelContext).completedSessions()
+        return HistoryOverviewLoadedSnapshot(
+            completedSessions: completedSessions,
+            snapshot: HistoryOverviewSnapshotBuilder.build(
+                sessions: completedSessions,
+                selectedDayFilter: selectedDayFilter
+            )
         )
     }
 }
