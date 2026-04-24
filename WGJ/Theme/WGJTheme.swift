@@ -452,11 +452,18 @@ struct WGJActionHeader<Trailing: View>: View {
 struct WGJRootHeader<Trailing: View>: View {
     let title: String
     let subtitle: String?
+    let titleAccessibilityIdentifier: String?
     @ViewBuilder let trailing: Trailing
 
-    init(_ title: String, subtitle: String? = nil, @ViewBuilder trailing: () -> Trailing) {
+    init(
+        _ title: String,
+        subtitle: String? = nil,
+        titleAccessibilityIdentifier: String? = nil,
+        @ViewBuilder trailing: () -> Trailing
+    ) {
         self.title = title
         self.subtitle = subtitle
+        self.titleAccessibilityIdentifier = titleAccessibilityIdentifier
         self.trailing = trailing()
     }
 
@@ -464,13 +471,24 @@ struct WGJRootHeader<Trailing: View>: View {
         self.init(title, subtitle: subtitle) { EmptyView() }
     }
 
+    init(
+        _ title: String,
+        subtitle: String? = nil,
+        titleAccessibilityIdentifier: String?
+    ) where Trailing == EmptyView {
+        self.init(
+            title,
+            subtitle: subtitle,
+            titleAccessibilityIdentifier: titleAccessibilityIdentifier
+        ) {
+            EmptyView()
+        }
+    }
+
     var body: some View {
         HStack(alignment: .bottom, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.largeTitle.weight(.bold))
-                    .foregroundStyle(WGJTheme.textPrimary)
-                    .wgjSingleLineText(scale: 0.82)
+                rootTitle
 
                 if let subtitle, !subtitle.isEmpty {
                     Text(subtitle)
@@ -484,6 +502,20 @@ struct WGJRootHeader<Trailing: View>: View {
             trailing
                 .fixedSize(horizontal: true, vertical: false)
                 .layoutPriority(1)
+        }
+    }
+
+    @ViewBuilder
+    private var rootTitle: some View {
+        let titleText = Text(title)
+            .font(.largeTitle.weight(.bold))
+            .foregroundStyle(WGJTheme.textPrimary)
+            .wgjSingleLineText(scale: 0.82)
+
+        if let titleAccessibilityIdentifier {
+            titleText.accessibilityIdentifier(titleAccessibilityIdentifier)
+        } else {
+            titleText
         }
     }
 }

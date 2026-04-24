@@ -51,8 +51,13 @@ final class WGJUITests: XCTestCase {
 
         tapTab("Exercises", in: app)
 
+        let title = app.staticTexts["exercises-catalog-title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(title.frame.minY, 20)
+
         let searchField = app.textFields["exercises-search-field"]
         XCTAssertTrue(searchField.waitForExistence(timeout: 5))
+        XCTAssertLessThan(title.frame.maxY, searchField.frame.minY)
         searchField.tap()
         XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 2))
         let initialHideKeyboardButton = app.buttons["keyboard-hide-button"]

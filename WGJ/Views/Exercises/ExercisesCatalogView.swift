@@ -1,6 +1,5 @@
 import SwiftData
 import SwiftUI
-import UIKit
 
 enum ExercisesCatalogMode {
     case browse
@@ -102,28 +101,6 @@ struct ExercisesCatalogView: View {
         isPickerMode || isTabActive
     }
 
-    private var pinnedControlsTopPadding: CGFloat {
-        guard !isPickerMode else {
-            let proportionalPadding = UIScreen.main.bounds.height * 0.010
-            return min(max(proportionalPadding, 6), 12)
-        }
-
-        let safeTopInset = UIApplication.shared.connectedScenes
-            .compactMap { ($0 as? UIWindowScene)?.keyWindow?.safeAreaInsets.top }
-            .first ?? 59
-        let screenHeight = UIScreen.main.bounds.height
-        let compactHeightBoost = max(0, 844 - screenHeight) * 0.45
-        let proportionalPadding = safeTopInset + (screenHeight * 0.132) + compactHeightBoost
-        return min(max(proportionalPadding, screenHeight * 0.18), screenHeight * 0.30)
-    }
-
-    private var pinnedControlsReferenceTopPadding: CGFloat {
-        let proportionalPadding = UIScreen.main.bounds.height * (isPickerMode ? 0.010 : 0.016)
-        let lowerBound: CGFloat = isPickerMode ? 6 : 10
-        let upperBound: CGFloat = isPickerMode ? 12 : 18
-        return min(max(proportionalPadding, lowerBound), upperBound)
-    }
-
     private var headerSearchSpacing: CGFloat {
         isPickerMode ? 0 : 30
     }
@@ -132,99 +109,89 @@ struct ExercisesCatalogView: View {
         14
     }
 
-    private var pinnedControlsReservedHeight: CGFloat {
-        let baseHeight: CGFloat
-        if shouldUseCompactFilterLayout {
-            baseHeight = isPickerMode ? 156 : 192
-        } else {
-            baseHeight = isPickerMode ? 126 : 164
-        }
-
-        let headerSpacingDelta = max(headerSearchSpacing - controlsSpacing, 0)
-        let topPaddingDelta = max(pinnedControlsTopPadding - pinnedControlsReferenceTopPadding, 0)
-        let adjustedBaseHeight = baseHeight + headerSpacingDelta + topPaddingDelta
-        let heightAdjustment = (UIScreen.main.bounds.height - 874) * 0.06
-        return min(max(adjustedBaseHeight + heightAdjustment, adjustedBaseHeight - 24), adjustedBaseHeight + 28)
-    }
-
     var body: some View {
         let catalogRepository = ExerciseCatalogRepository(modelContext: modelContext)
 
         ScrollViewReader { proxy in
-            ZStack(alignment: .topTrailing) {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Color.clear
-                            .frame(height: pinnedControlsReservedHeight)
-                            .id(topAnchorID)
+            GeometryReader { geometry in
+                VStack(alignment: .leading, spacing: 0) {
+                    pinnedSearchControls
+                        .fixedSize(horizontal: false, vertical: true)
 
-                        if controller.snapshot.sections.isEmpty {
-                            emptyState
-                                .padding(.top, 6)
-                        } else {
-                            LazyVStack(alignment: .leading, spacing: 0) {
-                                ForEach(controller.snapshot.sections) { section in
-                                    VStack(alignment: .leading, spacing: 0) {
-                                        WGJCompactSectionHeader(section.title)
-                                            .id(section.id)
-                                            .padding(.vertical, 8)
+                    ZStack(alignment: .topTrailing) {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 0) {
+                                Color.clear
+                                    .frame(height: 0)
+                                    .id(topAnchorID)
 
-                                        LazyVStack(alignment: .leading, spacing: 0) {
-                                            ForEach(section.rows) { row in
-                                                if let exercise = controller.snapshot.exerciseByUUID[row.id] {
-                                                    exerciseRow(exercise, repository: catalogRepository)
+                                if controller.snapshot.sections.isEmpty {
+                                    emptyState
+                                        .padding(.top, 6)
+                                } else {
+                                    LazyVStack(alignment: .leading, spacing: 0) {
+                                        ForEach(controller.snapshot.sections) { section in
+                                            VStack(alignment: .leading, spacing: 0) {
+                                                WGJCompactSectionHeader(section.title)
+                                                    .id(section.id)
+                                                    .padding(.vertical, 8)
+
+                                                LazyVStack(alignment: .leading, spacing: 0) {
+                                                    ForEach(section.rows) { row in
+                                                        if let exercise = controller.snapshot.exerciseByUUID[row.id] {
+                                                            exerciseRow(exercise, repository: catalogRepository)
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
                                     }
                                 }
                             }
+                            .padding(.horizontal, 16)
+                            .padding(.trailing, contentTrailingPadding)
+                            .padding(.bottom, 16)
                         }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.trailing, contentTrailingPadding)
-                    .padding(.bottom, 16)
-                }
-                .scrollDismissesKeyboard(.interactively)
+                        .scrollDismissesKeyboard(.interactively)
 
-                if reservesIndexRailSpace {
-                    VStack(spacing: 4) {
-                        ForEach(controller.snapshot.sections) { section in
-                            Button(section.title) {
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    proxy.scrollTo(section.id, anchor: .top)
+                        if reservesIndexRailSpace {
+                            VStack(spacing: 4) {
+                                ForEach(controller.snapshot.sections) { section in
+                                    Button(section.title) {
+                                        withAnimation(.easeInOut(duration: 0.2)) {
+                                            proxy.scrollTo(section.id, anchor: .top)
+                                        }
+                                    }
+                                    .font(.headline)
+                                    .foregroundStyle(WGJTheme.accentBlue)
+                                    .frame(width: indexRailWidth, height: 28)
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel("Jump to \(section.title)")
+                                    .accessibilityIdentifier("exercises-index-rail-\(section.id)")
                                 }
                             }
-                            .font(.headline)
-                            .foregroundStyle(WGJTheme.accentBlue)
-                            .frame(width: indexRailWidth, height: 28)
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Jump to \(section.title)")
-                            .accessibilityIdentifier("exercises-index-rail-\(section.id)")
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(WGJTheme.fieldStrong.opacity(0.96))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .fill(WGJTheme.field.opacity(0.55))
+                                    )
+                                    .wgjRoundedGlass(cornerRadius: 12, tint: WGJTheme.accentBlue.opacity(0.10))
+                            )
+                            .padding(.top, 8)
+                            .padding(.trailing, 2)
+                            .opacity(shouldShowIndexRail ? 1 : 0)
+                            .allowsHitTesting(shouldShowIndexRail)
+                            .accessibilityHidden(!shouldShowIndexRail)
                         }
                     }
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(WGJTheme.fieldStrong.opacity(0.96))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(WGJTheme.field.opacity(0.55))
-                            )
-                            .wgjRoundedGlass(cornerRadius: 12, tint: WGJTheme.accentBlue.opacity(0.10))
-                    )
-                    .padding(.top, pinnedControlsReservedHeight + 8)
-                    .padding(.trailing, 2)
-                    .opacity(shouldShowIndexRail ? 1 : 0)
-                    .allowsHitTesting(shouldShowIndexRail)
-                    .accessibilityHidden(!shouldShowIndexRail)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .layoutPriority(1)
                 }
-
-                pinnedSearchControls
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                    .padding(.top, pinnedControlsTopPadding)
-                    .zIndex(1)
+                .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .onChange(of: debouncedQuery) { _, _ in
@@ -311,7 +278,11 @@ struct ExercisesCatalogView: View {
     private var pinnedSearchControls: some View {
         VStack(alignment: .leading, spacing: 0) {
             if !isPickerMode {
-                WGJRootHeader("Exercises", subtitle: "Search, filter, and add exercises fast.")
+                WGJRootHeader(
+                    "Exercises",
+                    subtitle: "Search, filter, and add exercises fast.",
+                    titleAccessibilityIdentifier: "exercises-catalog-title"
+                )
                 Color.clear
                     .frame(height: headerSearchSpacing)
             }

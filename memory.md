@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-04-24 - Exercises Header Must Use Safe-Area Layout, Not Manual Offsets
+
+- Date: 2026-04-24
+- Trigger/Problem: The Exercises tab title and search controls repeatedly ended up too high or outside the safe area on compact iPhones, especially when the keyboard/search path was exercised.
+- Root Cause: The screen used manual screen-height and safe-inset offset math plus an overlaid pinned-controls stack. On small devices, SwiftUI could crop the controls stack above the visible tab page instead of keeping the title inside the safe area.
+- Durable Rule: Keep the Exercises header/search/filter controls in normal safe-area-owned layout, constrain the catalog list to the remaining geometry, and let only the list scroll. Do not reintroduce manual `UIScreen`/`UIApplication` top-padding math for this screen.
+- How to Verify Next Time: Run `WGJUITests/WGJUITests/testExercisesSearchAndFilterSmoke` on both an iPhone SE-sized simulator and the signed-in `iPhone 17 / iOS 26.2` simulator; assert the dedicated `exercises-catalog-title` is visible above the search field and the search field remains visible when the keyboard is up.
+- Status: active
+
 ## 2026-04-24 - ICloud Simulator Verification Uses iPhone 17 iOS 26.2
 
 - Date: 2026-04-24
