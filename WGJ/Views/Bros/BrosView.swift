@@ -811,6 +811,8 @@ struct BrosView: View {
     @State private var showingSupportNotice = false
     @State private var reactionDetailPresentation: BroReactionDetailPresentation?
     @State private var selectedFeedEvent: BroFeedEvent?
+    @State private var activationRefreshTask: Task<Void, Never>?
+    @State private var hasCompletedInitialActivationRefresh = false
 
     private var blockedRepository: BlockedBroRepository {
         BlockedBroRepository(modelContext: modelContext)
@@ -848,9 +850,13 @@ struct BrosView: View {
         .wgjScreenBackground()
         .toolbar(.hidden, for: .navigationBar)
         .task(id: isTabActive) {
-            guard isTabActive else { return }
+            guard isTabActive else {
+                cancelActivationRefresh()
+                return
+            }
             applyWarmSnapshotIfAvailable()
-            await reloadForCurrentActivation()
+            reloadBlockedBros()
+            scheduleActivationRefresh()
             rebuildFilteredSnapshot()
         }
         .task(id: notificationRouter.brosRefreshRequestID) {
@@ -866,14 +872,7 @@ struct BrosView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active, isTabActive else { return }
-            reloadBlockedBros()
-            Task {
-                await viewModel.refreshIfStale(
-                    modelContext: modelContext,
-                    cloudSyncEnabled: cloudSyncEnabled,
-                    cloudSyncErrorDescription: cloudSyncErrorDescription
-                )
-            }
+            scheduleActivationRefresh()
         }
         .onChange(of: viewModel.state) { _, _ in
             rebuildFilteredSnapshot()
@@ -910,6 +909,9 @@ struct BrosView: View {
             BroFeedEventDetailSheet(event: event)
                 .wgjSheetSurface()
         }
+        .onDisappear {
+            cancelActivationRefresh()
+        }
         .wgjMinimalKeyboardToolbar()
     }
 
@@ -938,6 +940,27 @@ struct BrosView: View {
             cloudSyncEnabled: cloudSyncEnabled,
             cloudSyncErrorDescription: cloudSyncErrorDescription
         )
+    }
+
+    @MainActor
+    private func scheduleActivationRefresh() {
+        activationRefreshTask?.cancel()
+        let delay: Duration = hasCompletedInitialActivationRefresh ? .milliseconds(100) : .milliseconds(550)
+        activationRefreshTask = Task { @MainActor in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled, isTabActive else { return }
+            await reloadForCurrentActivation()
+            guard !Task.isCancelled, isTabActive else { return }
+            hasCompletedInitialActivationRefresh = true
+            activationRefreshTask = nil
+            rebuildFilteredSnapshot()
+        }
+    }
+
+    @MainActor
+    private func cancelActivationRefresh() {
+        activationRefreshTask?.cancel()
+        activationRefreshTask = nil
     }
 
     private var loadingCard: some View {

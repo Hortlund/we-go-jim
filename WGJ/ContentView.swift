@@ -27,6 +27,7 @@ struct ContentView: View {
     @State private var isPreparingMainPhase = false
     @State private var hasInstalledUITestPendingTemplate = false
     @State private var hasScheduledInitialDeferredMaintenance = false
+    @State private var delayedNonCriticalWarmupTask: Task<Void, Never>?
     @State private var fallbackCoachWarmupTask: Task<Void, Never>?
 
     private var currentProfile: UserProfile? {
@@ -503,6 +504,8 @@ struct ContentView: View {
     private func resetToStartupFlow() {
         socialMaintenanceScheduler.cancel()
         resetResumeCriticalMaintenanceCycle()
+        delayedNonCriticalWarmupTask?.cancel()
+        delayedNonCriticalWarmupTask = nil
         fallbackCoachWarmupTask?.cancel()
         fallbackCoachWarmupTask = nil
         activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
@@ -539,10 +542,39 @@ struct ContentView: View {
         }
 
         let forceWarmup = trigger == .activeWorkoutEnded
+        guard forceWarmup else {
+            scheduleDelayedNonCriticalWarmups(trigger: trigger)
+            return
+        }
+
         scheduleProfileWarmupIfNeeded(force: forceWarmup)
         scheduleBrosWarmupIfNeeded(force: forceWarmup)
         if trigger != .sceneActivated {
             scheduleCoachWarmupIfNeeded()
+        }
+    }
+
+    @MainActor
+    private func scheduleDelayedNonCriticalWarmups(trigger: AppWarmupTrigger) {
+        delayedNonCriticalWarmupTask?.cancel()
+        delayedNonCriticalWarmupTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(1_200))
+            guard !Task.isCancelled else { return }
+            guard AppWarmupPolicy.shouldWarm(
+                appPhase: appPhase,
+                scenePhase: scenePhase,
+                activeSessionID: activeWorkoutPresentationState.activeSessionID
+            ) else {
+                delayedNonCriticalWarmupTask = nil
+                return
+            }
+
+            scheduleProfileWarmupIfNeeded(force: false)
+            scheduleBrosWarmupIfNeeded(force: false)
+            if trigger != .sceneActivated {
+                scheduleCoachWarmupIfNeeded()
+            }
+            delayedNonCriticalWarmupTask = nil
         }
     }
 

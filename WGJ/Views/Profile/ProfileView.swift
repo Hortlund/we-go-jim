@@ -22,8 +22,11 @@ struct ProfileView: View {
     @State private var trendSeriesLoadToken: UUID?
     @State private var coachBriefLoadTask: Task<Void, Never>?
     @State private var coachBriefLoadToken: UUID?
+    @State private var dashboardRenderTask: Task<Void, Never>?
     @State private var profileReloadToken: UUID?
     @State private var isLoadingTrendSeries = false
+    @State private var shouldRenderDashboardContent = false
+    @State private var hasRenderedDashboardContent = false
     @State private var showingWidgetManager = false
     @State private var showingProfileManagement = false
     @State private var showingCoachAnalysis = false
@@ -60,6 +63,7 @@ struct ProfileView: View {
             await reloadProfileIfNeeded(force: false)
         }
         .onDisappear {
+            cancelDashboardRender()
             cancelTrendSeriesLoad()
             cancelCoachBriefLoad()
             cancelCoachFollowUpLoads()
@@ -214,7 +218,9 @@ struct ProfileView: View {
                 .accessibilityIdentifier("profile-dashboard-manage-button")
             }
 
-            if dashboardContent.enabledWidgets.isEmpty {
+            if !shouldRenderDashboardContent {
+                dashboardDeferredPlaceholder
+            } else if dashboardContent.enabledWidgets.isEmpty {
                 WGJEmptyStateCard(
                     title: "No widgets enabled",
                     message: "Turn on widgets for PRs, streaks, favorite lifts, and training trends.",
@@ -227,39 +233,62 @@ struct ProfileView: View {
                 }
             }
 
-            ForEach(dashboardContent.enabledWidgets) { config in
-                switch config.kind {
-                case .prs:
-                    prWidget
-                case .weeklyGoals:
-                    weeklyGoalsWidget
-                case .coachBrief:
-                    coachBriefWidget
-                case .exerciseOneRMTrend:
-                    exerciseTrendWidget(
-                        title: "1RM Trend",
-                        subtitle: "Estimated max strength for \(config.selectedExerciseNameSnapshot ?? "your lift")",
-                        accent: WGJTheme.accentCyan,
-                        series: dashboardContent.trendSeriesByKind[config.kind],
-                        emptyMessage: "Log weighted sets for this lift to start the trend."
-                    )
-                case .exerciseVolumeTrend:
-                    exerciseTrendWidget(
-                        title: "Volume Trend",
-                        subtitle: "Training volume for \(config.selectedExerciseNameSnapshot ?? "your lift")",
-                        accent: WGJTheme.accentBlue,
-                        series: dashboardContent.trendSeriesByKind[config.kind],
-                        emptyMessage: "Log weighted sets for this lift to chart your volume."
-                    )
-                case .streaks:
-                    streaksWidget
-                case .topExercises:
-                    topExercisesWidget
-                case .consistencyCalendar:
-                    consistencyCalendarWidget
+            if shouldRenderDashboardContent {
+                ForEach(dashboardContent.enabledWidgets) { config in
+                    switch config.kind {
+                    case .prs:
+                        prWidget
+                    case .weeklyGoals:
+                        weeklyGoalsWidget
+                    case .coachBrief:
+                        coachBriefWidget
+                    case .exerciseOneRMTrend:
+                        exerciseTrendWidget(
+                            title: "1RM Trend",
+                            subtitle: "Estimated max strength for \(config.selectedExerciseNameSnapshot ?? "your lift")",
+                            accent: WGJTheme.accentCyan,
+                            series: dashboardContent.trendSeriesByKind[config.kind],
+                            emptyMessage: "Log weighted sets for this lift to start the trend."
+                        )
+                    case .exerciseVolumeTrend:
+                        exerciseTrendWidget(
+                            title: "Volume Trend",
+                            subtitle: "Training volume for \(config.selectedExerciseNameSnapshot ?? "your lift")",
+                            accent: WGJTheme.accentBlue,
+                            series: dashboardContent.trendSeriesByKind[config.kind],
+                            emptyMessage: "Log weighted sets for this lift to chart your volume."
+                        )
+                    case .streaks:
+                        streaksWidget
+                    case .topExercises:
+                        topExercisesWidget
+                    case .consistencyCalendar:
+                        consistencyCalendarWidget
+                    }
                 }
             }
         }
+    }
+
+    private var dashboardDeferredPlaceholder: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                ProgressView()
+                    .controlSize(.small)
+
+                Text("Preparing dashboard")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(WGJTheme.textPrimary)
+            }
+
+            Text("Your profile is ready. Widgets will appear right after the tab settles.")
+                .font(.subheadline)
+                .foregroundStyle(WGJTheme.textSecondary)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .wgjCardContainer()
+        .accessibilityIdentifier("profile-dashboard-deferred-placeholder")
     }
 
     private var prWidget: some View {
@@ -635,6 +664,7 @@ struct ProfileView: View {
             lastLoadedProfileUpdatedAt: lastLoadedProfileUpdatedAt,
             lastRefreshAt: lastRefreshAt
         ) else {
+            scheduleDashboardRenderIfNeeded()
             return
         }
 
@@ -687,8 +717,7 @@ struct ProfileView: View {
             needsExplicitRefresh = false
             lastLoadedProfileUpdatedAt = profile.updatedAt
             lastRefreshAt = .now
-            scheduleCoachBriefLoad(enabledWidgets: dashboardContent.enabledWidgets)
-            scheduleTrendSeriesLoad()
+            scheduleDashboardRender(enabledWidgets: dashboardContent.enabledWidgets)
         } catch {
             guard profileReloadToken == reloadToken else { return }
             showError(error)
@@ -705,6 +734,14 @@ struct ProfileView: View {
         needsExplicitRefresh = false
         lastLoadedProfileUpdatedAt = warmSnapshot.profile.updatedAt
         lastRefreshAt = warmSnapshot.warmedAt
+        scheduleDashboardRender(enabledWidgets: warmSnapshot.dashboard.enabledWidgets)
+    }
+
+    @MainActor
+    private func scheduleDashboardRenderIfNeeded() {
+        guard hasLoadedProfile else { return }
+        guard !shouldRenderDashboardContent else { return }
+        scheduleDashboardRender(enabledWidgets: dashboardContent.enabledWidgets)
     }
 
     @MainActor
@@ -721,6 +758,10 @@ struct ProfileView: View {
 
     private func scheduleCoachBriefLoad(enabledWidgets: [ProfileWidgetConfigSnapshot]) {
         cancelCoachBriefLoad()
+        guard shouldRenderDashboardContent else {
+            coachBriefLoadState = .idle
+            return
+        }
         guard enabledWidgets.contains(where: { $0.kind == .coachBrief }) else {
             coachBriefLoadState = .idle
             return
@@ -820,10 +861,49 @@ struct ProfileView: View {
     private func markProfileDirtyAndReloadIfActive() {
         needsExplicitRefresh = true
         appWarmupState.invalidateProfile()
+        shouldRenderDashboardContent = hasRenderedDashboardContent
         guard isTabActive else { return }
         Task {
             await reloadProfileIfNeeded(force: true)
         }
+    }
+
+    private func scheduleDashboardRender(enabledWidgets: [ProfileWidgetConfigSnapshot]) {
+        cancelDashboardRender()
+        cancelTrendSeriesLoad()
+        cancelCoachBriefLoad()
+        coachBriefLoadState = .idle
+
+        guard isTabActive else {
+            shouldRenderDashboardContent = false
+            return
+        }
+
+        let delay: Duration = hasRenderedDashboardContent ? .zero : .milliseconds(450)
+        let renderToken = profileReloadToken
+        dashboardRenderTask = Task {
+            if delay > .zero {
+                try? await Task.sleep(for: delay)
+            } else {
+                await Task.yield()
+            }
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard isTabActive else { return }
+                guard profileReloadToken == renderToken else { return }
+                shouldRenderDashboardContent = true
+                hasRenderedDashboardContent = true
+                dashboardRenderTask = nil
+                scheduleCoachBriefLoad(enabledWidgets: enabledWidgets)
+                scheduleTrendSeriesLoad()
+            }
+        }
+    }
+
+    private func cancelDashboardRender() {
+        dashboardRenderTask?.cancel()
+        dashboardRenderTask = nil
+        shouldRenderDashboardContent = false
     }
 
     private func cancelTrendSeriesLoad() {
