@@ -91,6 +91,8 @@ final class AppWarmupState {
 
     private(set) var latestProfile: ProfileWarmSnapshot?
     private(set) var latestBros: BrosWarmSnapshot?
+    private(set) var isProfileWarmupActive = false
+    private(set) var isBrosWarmupActive = false
 
     @ObservationIgnored private var profileWarmupGeneration = 0
     @ObservationIgnored private var brosWarmupGeneration = 0
@@ -148,6 +150,7 @@ final class AppWarmupState {
 
         profileWarmupGeneration += 1
         activeProfileWarmupRunID = profileWarmupGeneration
+        isProfileWarmupActive = true
         return activeProfileWarmupRunID
     }
 
@@ -157,6 +160,7 @@ final class AppWarmupState {
             latestProfile = snapshot
         }
         activeProfileWarmupRunID = nil
+        isProfileWarmupActive = false
     }
 
     func beginBrosWarmup(
@@ -170,6 +174,7 @@ final class AppWarmupState {
 
         brosWarmupGeneration += 1
         activeBrosWarmupRunID = brosWarmupGeneration
+        isBrosWarmupActive = true
         return activeBrosWarmupRunID
     }
 
@@ -179,17 +184,20 @@ final class AppWarmupState {
             latestBros = snapshot
         }
         activeBrosWarmupRunID = nil
+        isBrosWarmupActive = false
     }
 
     func invalidateProfile() {
         latestProfile = nil
         activeProfileWarmupRunID = nil
+        isProfileWarmupActive = false
         profileWarmupGeneration += 1
     }
 
     func invalidateBros() {
         latestBros = nil
         activeBrosWarmupRunID = nil
+        isBrosWarmupActive = false
         brosWarmupGeneration += 1
     }
 
@@ -198,6 +206,8 @@ final class AppWarmupState {
         latestBros = nil
         activeProfileWarmupRunID = nil
         activeBrosWarmupRunID = nil
+        isProfileWarmupActive = false
+        isBrosWarmupActive = false
         profileWarmupGeneration = 0
         brosWarmupGeneration = 0
     }

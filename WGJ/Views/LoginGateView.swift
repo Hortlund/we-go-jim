@@ -192,6 +192,8 @@ struct LoginGateView: View {
             return "Checking your iCloud account status."
         case .available:
             switch userDataSyncStatus.state {
+            case .syncing:
+                return "iCloud is available. Templates, profile, and workout data are still syncing."
             case .caughtUp:
                 return "iCloud is available and durable user data looks caught up."
             case .pendingExport:

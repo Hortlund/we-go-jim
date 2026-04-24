@@ -67,6 +67,8 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(searchField.waitForExistence(timeout: 2))
         XCTAssertTrue(searchField.isHittable)
         XCTAssertGreaterThanOrEqual(searchField.frame.minY, 72)
+        XCTAssertLessThanOrEqual(searchField.frame.maxY, app.keyboards.element.frame.minY - 12)
+        XCTAssertLessThanOrEqual(searchField.frame.minY, 180)
 
         let sortButton = app.buttons["exercises-sort-button"]
         XCTAssertTrue(sortButton.waitForExistence(timeout: 5))

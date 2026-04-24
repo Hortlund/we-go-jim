@@ -11,6 +11,8 @@ struct MainTabView: View {
     @Environment(WorkoutCompletionPresentationState.self) private var workoutCompletionPresentationState
     @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
     @Environment(RestTimerState.self) private var restTimerState
+    @Environment(AppWarmupState.self) private var appWarmupState
+    @Environment(\.userDataSyncStatus) private var userDataSyncStatus
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isKeyboardVisible = false
     @State private var activeWorkoutStripHeight = Self.activeWorkoutStripFallbackHeight
@@ -65,6 +67,7 @@ struct MainTabView: View {
                 overlayChrome(bottomSafeAreaInset: bottomSafeAreaInset)
                     .animation(overlayAnimation, value: activeWorkoutPresentationState.isActiveWorkoutStripCollapsed)
                     .animation(overlayAnimation, value: restTimerState.restTimerPopup?.id)
+                    .animation(overlayAnimation, value: shouldShowSyncBanner)
                     .animation(overlayAnimation, value: isKeyboardVisible)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -190,9 +193,44 @@ struct MainTabView: View {
                 .padding(.bottom, popupBottomLift(bottomSafeAreaInset: bottomSafeAreaInset))
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+
+            if shouldShowSyncBanner,
+               restTimerState.restTimerPopup == nil,
+               !activeWorkoutPresentationState.isActiveWorkoutPresented,
+               !isKeyboardVisible
+            {
+                WGJTransientBanner(
+                    title: syncBannerTitle,
+                    message: syncBannerMessage,
+                    icon: "arrow.triangle.2.circlepath.icloud.fill",
+                    tint: WGJTheme.accentBlue
+                )
+                .padding(.horizontal, WGJSpacing.page)
+                .padding(.bottom, syncBannerBottomLift(bottomSafeAreaInset: bottomSafeAreaInset))
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .accessibilityIdentifier("user-data-sync-banner")
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .wgjGlassContainer(spacing: 16)
+    }
+
+    private var shouldShowSyncBanner: Bool {
+        userDataSyncStatus.state == .syncing
+            || appWarmupState.isProfileWarmupActive
+            || appWarmupState.isBrosWarmupActive
+    }
+
+    private var syncBannerTitle: String {
+        userDataSyncStatus.state == .syncing ? "Syncing iCloud data" : "Preparing your data"
+    }
+
+    private var syncBannerMessage: String {
+        if appWarmupState.isProfileWarmupActive || appWarmupState.isBrosWarmupActive {
+            return "Profile, templates, and Bros are catching up."
+        }
+
+        return userDataSyncStatus.detail
     }
 
     private func activeWorkoutStripBottomLift(bottomSafeAreaInset: CGFloat) -> CGFloat {
@@ -200,6 +238,13 @@ struct MainTabView: View {
     }
 
     private func popupBottomLift(bottomSafeAreaInset: CGFloat) -> CGFloat {
+        if activeWorkoutPresentationState.isActiveWorkoutStripCollapsed {
+            return activeWorkoutStripBottomLift(bottomSafeAreaInset: bottomSafeAreaInset) + 82
+        }
+        return bottomSafeAreaInset + 72
+    }
+
+    private func syncBannerBottomLift(bottomSafeAreaInset: CGFloat) -> CGFloat {
         if activeWorkoutPresentationState.isActiveWorkoutStripCollapsed {
             return activeWorkoutStripBottomLift(bottomSafeAreaInset: bottomSafeAreaInset) + 82
         }
@@ -249,6 +294,7 @@ private struct LazyTabContainer<Content: View>: View {
         .environment(WorkoutCompletionPresentationState())
         .environment(ActiveWorkoutPresentationState())
         .environment(RestTimerState())
+        .environment(AppWarmupState())
         .environment(\.cloudSyncEnabled, false)
         .modelContainer(for: [
             ExerciseCatalogItem.self,

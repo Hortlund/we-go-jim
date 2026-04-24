@@ -102,15 +102,23 @@ struct ExercisesCatalogView: View {
         isPickerMode || isTabActive
     }
 
+    private var pinnedControlsTopPadding: CGFloat {
+        isPickerMode ? 8 : 16
+    }
+
+    private var pinnedControlsReservedHeight: CGFloat {
+        isPickerMode ? 156 : 192
+    }
+
     var body: some View {
         let catalogRepository = ExerciseCatalogRepository(modelContext: modelContext)
 
         ScrollViewReader { proxy in
-            ZStack(alignment: .trailing) {
+            ZStack(alignment: .topTrailing) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         Color.clear
-                            .frame(height: 0)
+                            .frame(height: pinnedControlsReservedHeight)
                             .id(topAnchorID)
 
                         if controller.snapshot.sections.isEmpty {
@@ -139,9 +147,6 @@ struct ExercisesCatalogView: View {
                     .padding(.horizontal, 16)
                     .padding(.trailing, contentTrailingPadding)
                     .padding(.bottom, 16)
-                }
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    pinnedSearchControls
                 }
                 .scrollDismissesKeyboard(.interactively)
 
@@ -172,11 +177,17 @@ struct ExercisesCatalogView: View {
                             )
                             .wgjRoundedGlass(cornerRadius: 12, tint: WGJTheme.accentBlue.opacity(0.10))
                     )
+                    .padding(.top, pinnedControlsReservedHeight)
                     .padding(.trailing, 2)
                     .opacity(shouldShowIndexRail ? 1 : 0)
                     .allowsHitTesting(shouldShowIndexRail)
                     .accessibilityHidden(!shouldShowIndexRail)
                 }
+
+                pinnedSearchControls
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .padding(.top, pinnedControlsTopPadding)
+                    .zIndex(1)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .onChange(of: debouncedQuery) { _, _ in
@@ -197,7 +208,6 @@ struct ExercisesCatalogView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .wgjScreenBackground()
-        .ignoresSafeArea(.keyboard, edges: .bottom)
         .confirmationDialog(
             "No active workout",
             isPresented: $showingCreateSessionPrompt,
@@ -231,7 +241,6 @@ struct ExercisesCatalogView: View {
             }
             .wgjSheetSurface()
         }
-        .toolbar(isPickerMode ? .visible : .hidden, for: .navigationBar)
         .task(id: shouldLoadCatalog) {
             guard shouldLoadCatalog else { return }
             if hasAttemptedBootstrap {

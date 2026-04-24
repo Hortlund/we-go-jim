@@ -2,6 +2,7 @@ import Foundation
 
 nonisolated enum UserDataSyncStateKind: String, Equatable, Sendable {
     case localOnly
+    case syncing
     case caughtUp
     case pendingExport
     case degraded
@@ -15,6 +16,7 @@ nonisolated struct UserDataSyncStatusSnapshot: Equatable, Sendable {
     let latestSuccessfulImportAt: Date?
     let latestSuccessfulExportAt: Date?
     let hasPendingExport: Bool
+    let runningCloudEventType: CloudSyncEventType?
     let latestErrorDescription: String?
     let localOnlyReason: String?
 
@@ -27,6 +29,7 @@ nonisolated struct UserDataSyncStatusSnapshot: Equatable, Sendable {
             latestSuccessfulImportAt: nil,
             latestSuccessfulExportAt: nil,
             hasPendingExport: false,
+            runningCloudEventType: nil,
             latestErrorDescription: nil,
             localOnlyReason: reason
         )
@@ -36,6 +39,8 @@ nonisolated struct UserDataSyncStatusSnapshot: Equatable, Sendable {
         switch state {
         case .localOnly:
             return "Local-only mode"
+        case .syncing:
+            return "Cloud sync in progress"
         case .caughtUp:
             return "Cloud sync caught up"
         case .pendingExport:
@@ -50,6 +55,11 @@ nonisolated struct UserDataSyncStatusSnapshot: Equatable, Sendable {
         case .localOnly:
             return localOnlyReason
                 ?? "This session is running locally, so durable data will stay on this device until iCloud is available."
+        case .syncing:
+            if let runningCloudEventType {
+                return "\(runningCloudEventType.label) is syncing templates, profile, and workout data."
+            }
+            return "Templates, profile, and workout data are catching up from iCloud."
         case .caughtUp:
             if let latestSuccessfulExportAt {
                 return "Latest export finished at \(latestSuccessfulExportAt.formatted(date: .abbreviated, time: .shortened))."
@@ -81,6 +91,7 @@ nonisolated final class UserDataSyncTracker {
     private var latestSuccessfulSetupAt: Date?
     private var latestSuccessfulImportAt: Date?
     private var latestSuccessfulExportAt: Date?
+    private var runningCloudEventType: CloudSyncEventType?
     private var latestErrorDescription: String?
 
     private init() { }
@@ -95,6 +106,7 @@ nonisolated final class UserDataSyncTracker {
         latestSuccessfulSetupAt = nil
         latestSuccessfulImportAt = nil
         latestSuccessfulExportAt = nil
+        runningCloudEventType = nil
         latestErrorDescription = isCloudEnabled ? errorDescription : nil
         return makeSnapshotLocked()
     }
@@ -115,8 +127,13 @@ nonisolated final class UserDataSyncTracker {
 
         switch summary.status {
         case .running:
-            break
+            if summary.type != .unknown {
+                runningCloudEventType = summary.type
+            }
         case .succeeded:
+            if summary.type == runningCloudEventType {
+                runningCloudEventType = nil
+            }
             switch summary.type {
             case .setup:
                 latestSuccessfulSetupAt = completedAt
@@ -132,6 +149,9 @@ nonisolated final class UserDataSyncTracker {
                 latestErrorDescription = nil
             }
         case .failed:
+            if summary.type == runningCloudEventType {
+                runningCloudEventType = nil
+            }
             latestErrorDescription = CloudSyncEventHealthClassifier.runtimeErrorDescription(for: summary)
                 ?? summary.errorDescription
         }
@@ -164,6 +184,8 @@ nonisolated final class UserDataSyncTracker {
         let state: UserDataSyncStateKind
         if let latestErrorDescription, !latestErrorDescription.isEmpty {
             state = .degraded
+        } else if runningCloudEventType != nil {
+            state = .syncing
         } else if hasPendingExport {
             state = .pendingExport
         } else {
@@ -178,6 +200,7 @@ nonisolated final class UserDataSyncTracker {
             latestSuccessfulImportAt: latestSuccessfulImportAt,
             latestSuccessfulExportAt: latestSuccessfulExportAt,
             hasPendingExport: hasPendingExport,
+            runningCloudEventType: runningCloudEventType,
             latestErrorDescription: latestErrorDescription,
             localOnlyReason: localOnlyReason
         )

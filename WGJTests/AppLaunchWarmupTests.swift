@@ -79,6 +79,7 @@ struct AppLaunchWarmupTests {
     func appWarmupStateIgnoresLateWarmupResultsAfterInvalidationOrNewerRun() throws {
         let state = AppWarmupState()
         let firstRunID = try #require(state.beginProfileWarmup())
+        #expect(state.isProfileWarmupActive)
         let newerRunID = try #require(state.beginProfileWarmup(force: true))
         let staleSnapshot = ProfileWarmSnapshot(
             profile: makeProfileSnapshot(updatedAt: Date(timeIntervalSince1970: 100)),
@@ -96,8 +97,10 @@ struct AppLaunchWarmupTests {
 
         state.finishProfileWarmup(runID: newerRunID, snapshot: currentSnapshot)
         #expect(state.latestProfile?.warmedAt == currentSnapshot.warmedAt)
+        #expect(!state.isProfileWarmupActive)
 
         let brosRunID = try #require(state.beginBrosWarmup())
+        #expect(state.isBrosWarmupActive)
         state.invalidateBros()
         state.finishBrosWarmup(
             runID: brosRunID,
@@ -108,6 +111,39 @@ struct AppLaunchWarmupTests {
             )
         )
         #expect(state.latestBros == nil)
+        #expect(!state.isBrosWarmupActive)
+    }
+
+    @Test
+    func userDataSyncTrackerReportsRunningCloudImportAsSyncing() {
+        let tracker = UserDataSyncTracker.shared
+        var snapshot = tracker.configureForLaunch(isCloudEnabled: true, errorDescription: nil)
+        #expect(snapshot.state == .caughtUp)
+
+        snapshot = tracker.recordCloudEvent(CloudSyncEventSummary(
+            type: .import,
+            status: .running,
+            storeIdentifier: "UserData",
+            startedAt: Date(timeIntervalSince1970: 100),
+            endedAt: nil,
+            error: nil
+        ))
+
+        #expect(snapshot.state == .syncing)
+        #expect(snapshot.runningCloudEventType == .import)
+        #expect(snapshot.title == "Cloud sync in progress")
+
+        snapshot = tracker.recordCloudEvent(CloudSyncEventSummary(
+            type: .import,
+            status: .succeeded,
+            storeIdentifier: "UserData",
+            startedAt: Date(timeIntervalSince1970: 100),
+            endedAt: Date(timeIntervalSince1970: 120),
+            error: nil
+        ))
+
+        #expect(snapshot.state == .caughtUp)
+        #expect(snapshot.runningCloudEventType == nil)
     }
 
     @Test

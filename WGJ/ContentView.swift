@@ -558,21 +558,18 @@ struct ContentView: View {
             return
         }
 
-        await withTaskGroup(of: Bool.self) { group in
-            group.addTask { @MainActor in
-                async let profileWarmup: Void = prepareStartupProfileWarmSnapshotIfNeeded()
-                async let brosWarmup: Void = prepareStartupBrosWarmSnapshotIfNeeded()
-                _ = await (profileWarmup, brosWarmup)
-                return true
+        if appWarmupState.shouldWarmProfile() {
+            Task { @MainActor in
+                await prepareStartupProfileWarmSnapshotIfNeeded()
             }
-            group.addTask {
-                try? await Task.sleep(for: .milliseconds(3_500))
-                return false
-            }
-
-            _ = await group.next()
-            group.cancelAll()
         }
+        if appWarmupState.shouldWarmBros() {
+            Task { @MainActor in
+                await prepareStartupBrosWarmSnapshotIfNeeded()
+            }
+        }
+
+        try? await Task.sleep(for: .milliseconds(650))
     }
 
     @MainActor
