@@ -47,6 +47,31 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
+    func historyInitialLocalStateLoadOnlyTargetsFirstExpandedExercise() {
+        let first = UUID()
+        let second = UUID()
+        let third = UUID()
+
+        let exerciseIDs = HistoryExerciseHydrationPlanner.initialLocalStateExerciseIDs(
+            orderedExerciseIDs: [first, second, third],
+            expandedExerciseIDs: [first: true, second: false, third: true]
+        )
+
+        #expect(exerciseIDs == [first])
+    }
+
+    @Test
+    func resumeCriticalMaintenanceSkipsWhenActiveWorkoutIsAlreadyKnown() {
+        let shouldRun = AppMaintenancePolicy.shouldRunResumeCritical(
+            appPhase: .main,
+            scenePhase: .active,
+            activeSessionID: UUID()
+        )
+
+        #expect(!shouldRun)
+    }
+
+    @Test
     func activeWorkoutPendingWritesOnlyFlushesDirtyValidExercises() {
         let validExerciseID = UUID()
         let staleExerciseID = UUID()
@@ -375,5 +400,22 @@ struct AppPerformanceRuntimeTests {
         state.clearPresentation()
 
         #expect(state.preparedPreviousPerformanceResolution(for: sessionID, exerciseID: exerciseID) == nil)
+    }
+
+    @MainActor
+    @Test
+    func presentingCollapsedActiveWorkoutClearsStaleScrollTarget() {
+        let sessionID = UUID()
+        let staleExerciseID = UUID()
+        let state = ActiveWorkoutPresentationState()
+
+        state.present(sessionID: sessionID)
+        state.scrollTarget = .exercise(staleExerciseID)
+        state.collapseActiveWorkout()
+        state.present(sessionID: sessionID)
+
+        #expect(state.scrollTarget == nil)
+        #expect(state.isActiveWorkoutPresented)
+        #expect(!state.isActiveWorkoutStripCollapsed)
     }
 }

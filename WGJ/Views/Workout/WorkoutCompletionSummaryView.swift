@@ -13,9 +13,9 @@ struct WorkoutCompletionSummaryView: View {
     @State private var snapshot: WorkoutCompletionSnapshot?
     @State private var hasTriggeredCelebration = false
     @State private var celebrationBurstCount = 0
-    @State private var showsConfetti = false
-    @State private var confettiPresentationID = UUID()
-    @State private var confettiDismissTask: Task<Void, Never>?
+    @State private var confettiBursts: [WorkoutCompletionConfettiBurst] = []
+    @State private var confettiDismissTasks: [UUID: Task<Void, Never>] = [:]
+    @State private var heroCardSize: CGSize = .zero
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -37,13 +37,17 @@ struct WorkoutCompletionSummaryView: View {
             }
             .wgjScreenBackground()
 
-            if showsConfetti && !reduceMotion {
-                WorkoutCompletionConfettiOverlay()
-                    .id(confettiPresentationID)
-                    .frame(height: 280)
-                    .ignoresSafeArea(edges: .top)
-                    .transition(.opacity)
-                    .accessibilityIdentifier("workout-completion-confetti-overlay")
+            if !confettiBursts.isEmpty && !reduceMotion {
+                ZStack {
+                    ForEach(confettiBursts) { burst in
+                        WorkoutCompletionConfettiOverlay(origin: burst.origin)
+                            .id(burst.id)
+                    }
+                }
+                .frame(height: 280)
+                .ignoresSafeArea(edges: .top)
+                .transition(.opacity)
+                .accessibilityIdentifier("workout-completion-confetti-overlay")
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -53,8 +57,8 @@ struct WorkoutCompletionSummaryView: View {
             await loadSnapshotIfNeeded()
         }
         .onDisappear {
-            confettiDismissTask?.cancel()
-            confettiDismissTask = nil
+            confettiDismissTasks.values.forEach { $0.cancel() }
+            confettiDismissTasks = [:]
         }
         .accessibilityIdentifier("workout-completion-summary")
     }
@@ -97,9 +101,7 @@ struct WorkoutCompletionSummaryView: View {
     }
 
     private func heroCard(_ snapshot: WorkoutCompletionSnapshot) -> some View {
-        Button {
-            triggerCelebration()
-        } label: {
+        Button { } label: {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(alignment: .top, spacing: 16) {
                     VStack(alignment: .leading, spacing: 8) {
@@ -167,16 +169,15 @@ struct WorkoutCompletionSummaryView: View {
                         )
                     }
                 }
-
-                Label(
-                    reduceMotion ? "Tap to celebrate again" : "Tap for more confetti",
-                    systemImage: "sparkles"
-                )
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(WGJTheme.accentCyan)
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                GeometryReader { geometry in
+                    Color.clear
+                        .preference(key: WorkoutCompletionHeroSizePreferenceKey.self, value: geometry.size)
+                }
+            }
             .background {
                 RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
                     .fill(WGJTheme.cardStrong.opacity(0.98))
@@ -201,6 +202,19 @@ struct WorkoutCompletionSummaryView: View {
             }
         }
         .buttonStyle(.plain)
+        .contentShape(RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous))
+        .onPreferenceChange(WorkoutCompletionHeroSizePreferenceKey.self) { size in
+            heroCardSize = size
+        }
+        .simultaneousGesture(
+            SpatialTapGesture()
+                .onEnded { value in
+                    triggerCelebration(origin: normalizedConfettiOrigin(for: value.location))
+                }
+        )
+        .accessibilityAction {
+            triggerCelebration(origin: .init(x: 0.5, y: 0.34))
+        }
         .accessibilityIdentifier("workout-completion-hero-card")
         .accessibilityLabel("Workout completion celebration")
         .accessibilityValue("Celebration burst \(celebrationBurstCount)")
@@ -315,30 +329,35 @@ struct WorkoutCompletionSummaryView: View {
     private func triggerCelebrationIfNeeded() {
         guard !hasTriggeredCelebration else { return }
         hasTriggeredCelebration = true
-        triggerCelebration()
+        triggerCelebration(origin: .init(x: 0.5, y: 0.12))
     }
 
-    private func triggerCelebration() {
+    private func triggerCelebration(origin: UnitPoint) {
         celebrationBurstCount += 1
 
         WorkoutFeedbackCenter.shared.workoutCompleted()
 
         guard !reduceMotion else { return }
-        confettiDismissTask?.cancel()
-
-        confettiPresentationID = UUID()
-        showsConfetti = true
-        let burstCount = celebrationBurstCount
-
-        confettiDismissTask = Task { @MainActor in
+        let burst = WorkoutCompletionConfettiBurst(origin: origin)
+        confettiBursts.append(burst)
+        confettiDismissTasks[burst.id]?.cancel()
+        confettiDismissTasks[burst.id] = Task { @MainActor in
             try? await Task.sleep(for: .seconds(2.8))
             guard !Task.isCancelled else { return }
-            guard burstCount == celebrationBurstCount else { return }
             withAnimation(.easeOut(duration: 0.25)) {
-                showsConfetti = false
+                confettiBursts.removeAll { $0.id == burst.id }
             }
-            confettiDismissTask = nil
+            confettiDismissTasks[burst.id] = nil
         }
+    }
+
+    private func normalizedConfettiOrigin(for location: CGPoint) -> UnitPoint {
+        let width = max(heroCardSize.width, 1)
+        let height = max(heroCardSize.height, 1)
+        return UnitPoint(
+            x: min(1, max(0, location.x / width)),
+            y: min(1, max(0, location.y / height))
+        )
     }
 
     private func continueToHistory() {
@@ -705,7 +724,22 @@ private struct WorkoutCompletionExerciseRecapCard: View {
     }
 }
 
+private struct WorkoutCompletionHeroSizePreferenceKey: PreferenceKey {
+    static let defaultValue: CGSize = .zero
+
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        value = nextValue()
+    }
+}
+
+private struct WorkoutCompletionConfettiBurst: Identifiable {
+    let id = UUID()
+    let origin: UnitPoint
+}
+
 private struct WorkoutCompletionConfettiOverlay: View {
+    let origin: UnitPoint
+
     @State private var animate = false
 
     private let pieces = WorkoutCompletionConfettiPiece.defaults
@@ -719,8 +753,8 @@ private struct WorkoutCompletionConfettiOverlay: View {
                         .frame(width: piece.width, height: piece.height)
                         .rotationEffect(.degrees(animate ? piece.endRotation : piece.startRotation))
                         .position(
-                            x: (proxy.size.width * 0.5) + (piece.originX * proxy.size.width * 0.16),
-                            y: -24 + (piece.originY * 20)
+                            x: (proxy.size.width * origin.x) + (piece.originX * proxy.size.width * 0.16),
+                            y: (proxy.size.height * origin.y) + (piece.originY * 20)
                         )
                         .offset(
                             x: animate ? piece.travelX * proxy.size.width * 0.48 : 0,

@@ -226,7 +226,11 @@ struct ContentView: View {
     }
 
     private func scheduleResumeCriticalMaintenanceIfNeeded() {
-        guard AppMaintenancePolicy.shouldRunResumeCritical(appPhase: appPhase, scenePhase: scenePhase) else {
+        guard AppMaintenancePolicy.shouldRunResumeCritical(
+            appPhase: appPhase,
+            scenePhase: scenePhase,
+            activeSessionID: activeWorkoutPresentationState.activeSessionID
+        ) else {
             resetResumeCriticalMaintenanceCycle()
             return
         }

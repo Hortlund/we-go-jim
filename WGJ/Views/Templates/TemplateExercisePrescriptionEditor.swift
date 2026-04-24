@@ -411,7 +411,7 @@ struct TemplateExercisePrescriptionEditor: View {
                     .padding(.vertical, 6)
             }
 
-            LazyVStack(alignment: .leading, spacing: 10) {
+            LazyVStack(alignment: .leading, spacing: 14) {
                 ForEach(presentation.rows) { row in
                     SwipeDeleteRow(
                         offset: setSwipeOffsetBinding(for: row.id),
@@ -453,7 +453,9 @@ struct TemplateExercisePrescriptionEditor: View {
                             onDelete: { removeSet(at: row.index) }
                         )
                         .equatable()
+                        .fixedSize(horizontal: false, vertical: true)
                     }
+                    .padding(.bottom, row.set.dropStages.isEmpty ? 0 : 6)
                 }
             }
 
@@ -761,6 +763,7 @@ struct TemplateExercisePrescriptionEditor: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(tint.opacity(0.10))
@@ -1573,6 +1576,8 @@ private struct TemplateExerciseSetCardView: View, Equatable {
             }
         }
         .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(WGJTheme.accentCyan.opacity(0.08))

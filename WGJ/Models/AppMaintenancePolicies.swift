@@ -66,8 +66,12 @@ final class AppDeferredMaintenanceState {
 }
 
 nonisolated enum AppMaintenancePolicy {
-    static func shouldRunResumeCritical(appPhase: AppPhase, scenePhase: ScenePhase) -> Bool {
-        appPhase == .main && scenePhase == .active
+    static func shouldRunResumeCritical(
+        appPhase: AppPhase,
+        scenePhase: ScenePhase,
+        activeSessionID: UUID? = nil
+    ) -> Bool {
+        appPhase == .main && scenePhase == .active && activeSessionID == nil
     }
 
     static func shouldScheduleDeferred(

@@ -598,6 +598,10 @@ final class ActiveWorkoutPresentationState {
     @ObservationIgnored private var preparedPreviousPerformanceResolutionBySessionID: [UUID: [UUID: WorkoutPreviousPerformanceResolution]] = [:]
 
     func present(sessionID: UUID) {
+        if activeSessionID == sessionID, isActiveWorkoutStripCollapsed {
+            scrollTarget = nil
+        }
+
         if activeSessionID != sessionID {
             if let activeSessionID {
                 preparedPreviousPerformanceResolutionBySessionID.removeValue(forKey: activeSessionID)

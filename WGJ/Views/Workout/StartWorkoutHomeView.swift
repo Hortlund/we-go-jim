@@ -683,18 +683,13 @@ struct StartWorkoutHomeView: View {
     }
 
     private func startEmptyWorkout() {
-        do {
-            if let activeSession = try activeWorkoutRepository.activeSession() {
-                stagePreparedPreviousPerformance(for: activeSession.id)
-                activeWorkoutPresentationState.present(sessionID: activeSession.id)
-                return
+        Task { @MainActor in
+            do {
+                let preparation = try await prepareActiveWorkoutStart(templateID: nil)
+                presentPreparedActiveWorkout(preparation)
+            } catch {
+                showError(error)
             }
-
-            let session = try activeWorkoutRepository.createEmptySession()
-            stagePreparedPreviousPerformance(for: session.id)
-            activeWorkoutPresentationState.present(sessionID: session.id)
-        } catch {
-            showError(error)
         }
     }
 
@@ -709,34 +704,54 @@ struct StartWorkoutHomeView: View {
     }
 
     private func startFromTemplate(templateID: UUID) {
-        do {
-            if let activeSession = try activeWorkoutRepository.activeSession() {
-                stagePreparedPreviousPerformance(for: activeSession.id)
-                activeWorkoutPresentationState.present(sessionID: activeSession.id)
+        Task { @MainActor in
+            do {
+                let preparation = try await prepareActiveWorkoutStart(templateID: templateID)
+                presentPreparedActiveWorkout(preparation)
                 selectedTemplatePreview = nil
-                return
+            } catch {
+                showError(error)
             }
-
-            let session = try activeWorkoutRepository.createSessionFromTemplate(templateID: templateID)
-            stagePreparedPreviousPerformance(for: session.id)
-            activeWorkoutPresentationState.present(sessionID: session.id)
-            selectedTemplatePreview = nil
-        } catch {
-            showError(error)
         }
     }
 
-    private func stagePreparedPreviousPerformance(for sessionID: UUID) {
-        guard let resolutionByExerciseID = try? activeWorkoutRepository.previousPerformanceResolutionByExerciseID(
-            sessionID: sessionID
-        ) else {
-            return
+    private func prepareActiveWorkoutStart(templateID: UUID?) async throws -> ActiveWorkoutStartPreparation {
+        if let appBackgroundStore {
+            return try await appBackgroundStore.performWrite("start-workout.prepare-active-session") { backgroundContext in
+                try Self.prepareActiveWorkoutStart(templateID: templateID, modelContext: backgroundContext)
+            }
         }
 
-        activeWorkoutPresentationState.stagePreparedPreviousPerformanceResolution(
-            resolutionByExerciseID,
-            for: sessionID
+        return try Self.prepareActiveWorkoutStart(templateID: templateID, modelContext: modelContext)
+    }
+
+    nonisolated private static func prepareActiveWorkoutStart(
+        templateID: UUID?,
+        modelContext: ModelContext
+    ) throws -> ActiveWorkoutStartPreparation {
+        let repository = ActiveWorkoutDraftRepository(modelContext: modelContext)
+        let sessionID: UUID
+        if let activeSession = try repository.activeSession() {
+            sessionID = activeSession.id
+        } else if let templateID {
+            sessionID = try repository.createSessionFromTemplate(templateID: templateID).id
+        } else {
+            sessionID = try repository.createEmptySession().id
+        }
+
+        let previousPerformance = try repository.previousPerformanceResolutionByExerciseID(sessionID: sessionID)
+        return ActiveWorkoutStartPreparation(
+            sessionID: sessionID,
+            previousPerformanceResolutionByExerciseID: previousPerformance
         )
+    }
+
+    private func presentPreparedActiveWorkout(_ preparation: ActiveWorkoutStartPreparation) {
+        activeWorkoutPresentationState.stagePreparedPreviousPerformanceResolution(
+            preparation.previousPerformanceResolutionByExerciseID,
+            for: preparation.sessionID
+        )
+        activeWorkoutPresentationState.present(sessionID: preparation.sessionID)
     }
 
     private func lastPerformedDate(for templateID: UUID) -> Date? {
@@ -2003,6 +2018,11 @@ private struct TemplateStartPreviewSheet: View {
 private struct PendingTemplateFileTaskKey: Hashable {
     let requestID: UUID?
     let isTabActive: Bool
+}
+
+private struct ActiveWorkoutStartPreparation: Sendable {
+    let sessionID: UUID
+    let previousPerformanceResolutionByExerciseID: [UUID: WorkoutPreviousPerformanceResolution]
 }
 
 #Preview {

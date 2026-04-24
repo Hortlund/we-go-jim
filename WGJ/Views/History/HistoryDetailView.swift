@@ -317,7 +317,16 @@ struct HistoryDetailView: View {
             }
         }
 
-        if !exerciseIDsToRefresh.isEmpty {
+        syncExpandedExerciseState()
+
+        let localStateExerciseIDs = previousStamp == nil
+            ? HistoryExerciseHydrationPlanner.initialLocalStateExerciseIDs(
+                orderedExerciseIDs: sessionExercises.map(\.id),
+                expandedExerciseIDs: expandedExerciseIDs
+            )
+            : exerciseIDsToRefresh
+
+        if !localStateExerciseIDs.isEmpty {
             do {
                 let localState: HistoryExerciseLocalStateResult
                 if let appBackgroundStore {
@@ -325,21 +334,21 @@ struct HistoryDetailView: View {
                         try Self.loadLocalExerciseState(
                             modelContext: backgroundContext,
                             sessionID: sessionID,
-                            exerciseIDs: exerciseIDsToRefresh
+                            exerciseIDs: localStateExerciseIDs
                         )
                     }
                 } else {
                     localState = try Self.loadLocalExerciseState(
                         modelContext: modelContext,
                         sessionID: sessionID,
-                        exerciseIDs: exerciseIDsToRefresh
+                        exerciseIDs: localStateExerciseIDs
                     )
                 }
 
                 setDraftsByExerciseID.merge(localState.setDraftsByExerciseID) { _, new in new }
                 restByExerciseID.merge(localState.restByExerciseID) { _, new in new }
                 notesByExerciseID.merge(localState.notesByExerciseID) { _, new in new }
-                for exerciseID in exerciseIDsToRefresh {
+                for exerciseID in localStateExerciseIDs {
                     hydrationPayloadByExerciseID.removeValue(forKey: exerciseID)
                 }
             } catch {
@@ -354,7 +363,6 @@ struct HistoryDetailView: View {
         hydrationPayloadByExerciseID = hydrationPayloadByExerciseID.filter {
             currentStamp.exerciseIDs.contains($0.key)
         }
-        syncExpandedExerciseState()
 
         let eagerlyHydratedExerciseIDs = WorkoutExerciseHydrationPlanner.orderedExerciseIDsToHydrate(
             orderedExerciseIDs: sessionExercises.map(\.id),
