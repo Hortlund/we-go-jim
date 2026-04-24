@@ -34,6 +34,7 @@ struct ExercisesCatalogView: View {
 
     @State private var errorMessage = ""
     @State private var showingError = false
+    @State private var isKeyboardVisible = false
     @FocusState private var isSearchFieldFocused: Bool
 
     private let topAnchorID = "exercises-catalog-top"
@@ -85,6 +86,17 @@ struct ExercisesCatalogView: View {
     private var shouldShowIndexRail: Bool {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         return reservesIndexRailSpace && !isSearchFieldFocused && trimmedQuery.isEmpty
+    }
+
+    private var keyboardToolbarVisibility: Binding<Bool> {
+        Binding(
+            get: {
+                isKeyboardVisible || isSearchFieldFocused
+            },
+            set: { newValue in
+                isKeyboardVisible = newValue
+            }
+        )
     }
 
     private var hasActiveFilters: Bool {
@@ -181,6 +193,7 @@ struct ExercisesCatalogView: View {
             }
             .onChange(of: debouncedQuery) { _, _ in
                 applyCurrentFilters()
+                keepSearchVisible(using: proxy)
             }
             .onChange(of: selectedPrimaryMuscleID) { _, _ in
                 applyCurrentFilters()
@@ -193,6 +206,11 @@ struct ExercisesCatalogView: View {
             .onChange(of: sortDescending) { _, _ in
                 applyCurrentFilters()
                 scrollToTop(using: proxy)
+            }
+            .onChange(of: isSearchFieldFocused) { _, newValue in
+                if newValue {
+                    keepSearchVisible(using: proxy)
+                }
             }
         }
         .confirmationDialog(
@@ -249,9 +267,11 @@ struct ExercisesCatalogView: View {
             queryDebounceTask?.cancel()
             queryDebounceTask = nil
             isSearchFieldFocused = false
+            isKeyboardVisible = false
             WGJKeyboard.dismiss()
         }
-        .wgjMinimalKeyboardToolbar()
+        .wgjTrackKeyboardVisibility($isKeyboardVisible)
+        .wgjMinimalKeyboardToolbar(isKeyboardVisible: keyboardToolbarVisibility)
     }
 
     private var searchField: some View {
@@ -577,6 +597,13 @@ struct ExercisesCatalogView: View {
 
     private func scrollToTop(using proxy: ScrollViewProxy) {
         withAnimation(.easeInOut(duration: 0.2)) {
+            proxy.scrollTo(topAnchorID, anchor: .top)
+        }
+    }
+
+    private func keepSearchVisible(using proxy: ScrollViewProxy) {
+        guard isSearchFieldFocused else { return }
+        withAnimation(.easeInOut(duration: 0.18)) {
             proxy.scrollTo(topAnchorID, anchor: .top)
         }
     }

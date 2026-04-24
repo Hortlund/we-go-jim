@@ -54,7 +54,12 @@ final class WGJUITests: XCTestCase {
         let searchField = app.textFields["exercises-search-field"]
         XCTAssertTrue(searchField.waitForExistence(timeout: 5))
         searchField.tap()
+        XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["keyboard-hide-button"].exists)
+
         searchField.typeText("bench")
+        XCTAssertTrue(searchField.waitForExistence(timeout: 2))
+        XCTAssertTrue(searchField.isHittable)
 
         let sortButton = app.buttons["exercises-sort-button"]
         XCTAssertTrue(sortButton.waitForExistence(timeout: 5))

@@ -121,6 +121,7 @@ private struct WGJMinimalKeyboardToolbarModifier: ViewModifier {
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Hide keyboard")
+                        .accessibilityIdentifier("keyboard-hide-button")
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
