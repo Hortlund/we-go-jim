@@ -87,6 +87,14 @@ struct ExercisesCatalogView: View {
         return reservesIndexRailSpace && !isSearchFieldFocused && trimmedQuery.isEmpty
     }
 
+    private var hasActiveFilters: Bool {
+        !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !debouncedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || selectedPrimaryMuscleID != nil
+            || selectedCategory != nil
+            || sortDescending
+    }
+
     private var shouldLoadCatalog: Bool {
         isPickerMode || isTabActive
     }
@@ -148,7 +156,10 @@ struct ExercisesCatalogView: View {
                             }
                             .font(.headline)
                             .foregroundStyle(WGJTheme.accentBlue)
+                            .frame(width: indexRailWidth, height: 28)
                             .buttonStyle(.plain)
+                            .accessibilityLabel("Jump to \(section.title)")
+                            .accessibilityIdentifier("exercises-index-rail-\(section.id)")
                         }
                     }
                     .padding(.vertical, 8)
@@ -165,6 +176,7 @@ struct ExercisesCatalogView: View {
                     .padding(.trailing, 2)
                     .opacity(shouldShowIndexRail ? 1 : 0)
                     .allowsHitTesting(shouldShowIndexRail)
+                    .accessibilityHidden(!shouldShowIndexRail)
                 }
             }
             .onChange(of: debouncedQuery) { _, _ in
@@ -271,11 +283,11 @@ struct ExercisesCatalogView: View {
                     }
                 }
             } else {
-            HStack(spacing: 8) {
-                bodyPartFilter
-                categoryFilter
-                sortButton
-            }
+                HStack(spacing: 8) {
+                    bodyPartFilter
+                    categoryFilter
+                    sortButton
+                }
             }
         }
     }
@@ -395,7 +407,15 @@ struct ExercisesCatalogView: View {
             message: emptyStateMessage,
             icon: emptyStateIcon
         ) {
-            if controller.snapshot.catalogExercises.isEmpty && loadState != .loading && !isBootstrappingCatalog {
+            if hasActiveFilters && loadState != .loading && !isBootstrappingCatalog {
+                Button {
+                    clearSearchAndFilters()
+                } label: {
+                    Label("Clear Search and Filters", systemImage: "xmark.circle")
+                }
+                .buttonStyle(WGJGhostButtonStyle())
+                .accessibilityIdentifier("exercises-clear-filters-button")
+            } else if controller.snapshot.catalogExercises.isEmpty && loadState != .loading && !isBootstrappingCatalog {
                 Button("Retry") {
                     beginRetryCatalogBootstrap()
                 }
@@ -460,6 +480,19 @@ struct ExercisesCatalogView: View {
             selectedCategory: selectedCategory,
             sortDescending: sortDescending
         )
+    }
+
+    private func clearSearchAndFilters() {
+        queryDebounceTask?.cancel()
+        queryDebounceTask = nil
+        query = ""
+        debouncedQuery = ""
+        selectedPrimaryMuscleID = nil
+        selectedCategory = nil
+        sortDescending = false
+        isSearchFieldFocused = false
+        WGJKeyboard.dismiss()
+        applyCurrentFilters()
     }
 
     private func handleSelection(_ exercise: ExerciseCatalogItem) {

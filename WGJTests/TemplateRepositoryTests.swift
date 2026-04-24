@@ -184,6 +184,153 @@ struct TemplateRepositoryTests {
     }
 
     @Test
+    func duplicateTemplatePreservesFullTemplateStructureWithFreshIDs() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+
+        let press = ExerciseCatalogItem(
+            remoteUUID: "template-duplicate-press",
+            displayName: "Incline DB Press",
+            categoryName: "Chest",
+            equipmentSummary: "Dumbbells",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        let row = ExerciseCatalogItem(
+            remoteUUID: "template-duplicate-row",
+            displayName: "Chest Supported Row",
+            categoryName: "Back",
+            equipmentSummary: "Machine",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        let fly = ExerciseCatalogItem(
+            remoteUUID: "template-duplicate-fly",
+            displayName: "Cable Fly",
+            categoryName: "Chest",
+            equipmentSummary: "Cable",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(press)
+        context.insert(row)
+        context.insert(fly)
+
+        let folder = try repository.createFolder(name: "Upper")
+        let supersetID = UUID()
+        let source = try repository.createTemplate(
+            folderID: folder.id,
+            name: "Upper Density",
+            notes: "Keep transitions tight."
+        )
+        try repository.setCardioBlocks(
+            templateID: source.id,
+            drafts: [
+                TemplateCardioBlockDraft(
+                    phase: .preWorkout,
+                    catalogExerciseUUID: "template-duplicate-bike",
+                    exerciseNameSnapshot: "Bike",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Warmup",
+                    targetDurationSeconds: 300
+                ),
+                TemplateCardioBlockDraft(
+                    phase: .postWorkout,
+                    catalogExerciseUUID: "template-duplicate-walk",
+                    exerciseNameSnapshot: "Incline Walk",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Cooldown",
+                    targetDurationSeconds: 900
+                ),
+            ]
+        )
+        try repository.setExercises(
+            templateID: source.id,
+            drafts: [
+                TemplateExerciseDraft(
+                    catalogExerciseUUID: press.remoteUUID,
+                    exerciseNameSnapshot: press.displayName,
+                    categorySnapshot: press.categoryName,
+                    muscleSummarySnapshot: press.primaryMuscleNames,
+                    notes: "Pause at the bottom.",
+                    targetRepMin: 8,
+                    targetRepMax: 10,
+                    restSeconds: 75,
+                    setDrafts: [
+                        TemplateExerciseSetDraft(
+                            targetReps: 10,
+                            targetWeight: 28,
+                            loadUnit: .kg,
+                            restSeconds: 75,
+                            isWarmup: true,
+                            dropStages: [
+                                TemplateExerciseDropStageDraft(targetReps: 8, targetWeight: 22, loadUnit: .kg),
+                                TemplateExerciseDropStageDraft(targetReps: 10, targetWeight: 18, loadUnit: .kg),
+                            ]
+                        ),
+                    ],
+                    components: [
+                        TemplateExerciseComponentDraft(catalogItem: press),
+                        TemplateExerciseComponentDraft(catalogItem: fly),
+                    ],
+                    superset: ExerciseSupersetMembershipDraft(
+                        groupID: supersetID,
+                        position: .first,
+                        roundRestSeconds: 90
+                    )
+                ),
+                TemplateExerciseDraft(
+                    catalogExerciseUUID: row.remoteUUID,
+                    exerciseNameSnapshot: row.displayName,
+                    categorySnapshot: row.categoryName,
+                    muscleSummarySnapshot: row.primaryMuscleNames,
+                    notes: "Drive elbows back.",
+                    targetRepMin: 8,
+                    targetRepMax: 12,
+                    restSeconds: 75,
+                    setDrafts: [
+                        TemplateExerciseSetDraft(targetReps: 12, targetWeight: 55, loadUnit: .kg, restSeconds: 75),
+                    ],
+                    components: [TemplateExerciseComponentDraft(catalogItem: row)],
+                    superset: ExerciseSupersetMembershipDraft(
+                        groupID: supersetID,
+                        position: .second,
+                        roundRestSeconds: 90
+                    )
+                ),
+            ]
+        )
+
+        let duplicate = try repository.duplicateTemplate(id: source.id, name: "Upper Density Copy")
+        let sourceExercises = try repository.exercises(in: source.id)
+        let copiedExercises = try repository.exercises(in: duplicate.id)
+        let copiedFirstSetDrafts = try repository.setDrafts(for: try #require(copiedExercises.first).id)
+        let copiedCardioBlocks = try repository.cardioBlocks(templateID: duplicate.id)
+        let sourceCardioBlocks = try repository.cardioBlocks(templateID: source.id)
+
+        #expect(duplicate.id != source.id)
+        #expect(duplicate.folderID == folder.id)
+        #expect(duplicate.name == "Upper Density Copy")
+        #expect(duplicate.notes == "Keep transitions tight.")
+        #expect(copiedCardioBlocks.map(\.phase) == [.preWorkout, .postWorkout])
+        #expect(copiedCardioBlocks.map(\.targetDurationSeconds) == [300, 900])
+        #expect(copiedCardioBlocks.map(\.id) != sourceCardioBlocks.map(\.id))
+        #expect(copiedExercises.map(\.id) != sourceExercises.map(\.id))
+        #expect(copiedExercises.map(\.exerciseNameSnapshot) == ["Incline DB Press", "Chest Supported Row"])
+        #expect(copiedExercises.map(\.notes) == ["Pause at the bottom.", "Drive elbows back."])
+        #expect(try repository.components(for: copiedExercises[0].id).map(\.exerciseNameSnapshot) == [
+            "Incline DB Press",
+            "Cable Fly",
+        ])
+        #expect(copiedFirstSetDrafts.first?.dropStages.map(\.targetWeight) == [22, 18])
+        #expect(copiedExercises[0].supersetGroupID != supersetID)
+        #expect(copiedExercises[0].supersetGroupID == copiedExercises[1].supersetGroupID)
+        #expect(copiedExercises[0].supersetPosition == .first)
+        #expect(copiedExercises[1].supersetPosition == .second)
+        #expect(copiedExercises[0].supersetGroup?.roundRestSeconds == 90)
+    }
+
+    @Test
     func setExercisesPersistsOrderedExerciseComponents() throws {
         let context = try makeInMemoryContext()
         let repository = TemplateRepository(modelContext: context)

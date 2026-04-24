@@ -163,7 +163,10 @@ nonisolated enum AppRuntimeConfig {
         isRunningXCTest: Bool,
         launchArguments: [String]
     ) -> Bool {
-        _ = isRunningXCTest
+        guard isRunningXCTest else {
+            return false
+        }
+
         return launchArguments.contains(TestArgument.enableICloud)
             && !launchArguments.contains(TestArgument.inMemoryStore)
     }

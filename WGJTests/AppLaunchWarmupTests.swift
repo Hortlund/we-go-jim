@@ -390,7 +390,7 @@ struct AppLaunchWarmupTests {
             launchArguments: ["UITEST_ENABLE_ICLOUD"]
         ))
 
-        #expect(AppRuntimeConfig.isExplicitICloudUITestLaunch(
+        #expect(!AppRuntimeConfig.isExplicitICloudUITestLaunch(
             isRunningXCTest: false,
             launchArguments: ["UITEST_ENABLE_ICLOUD"]
         ))
@@ -454,6 +454,49 @@ struct AppLaunchWarmupTests {
         #expect(!didRunStartupPreflight)
         #expect(didRequestCloudContainer)
         #expect(!didRequestLocalFallback)
+    }
+
+    @Test
+    func appLaunchBootstrapResolverDoesNotTrustICloudUITestOptInOutsideXCTest() async throws {
+        let container = try makeContainer()
+        var didRunStartupPreflight = false
+        var didRequestCloudContainer = false
+        var didRequestLocalFallback = false
+
+        let bootstrap = try await AppLaunchBootstrapResolver.resolve(
+            processInfo: MockProcessInfo(
+                arguments: ["UITEST_ENABLE_ICLOUD"],
+                environment: [:]
+            ),
+            canUseConfiguredCloudKitContainer: true,
+            startupDecisionProvider: {
+                didRunStartupPreflight = true
+                return CloudStartupDecision(
+                    accountStatus: .timedOut,
+                    storeMode: .localFallback,
+                    cloudSyncErrorDescription: "The iCloud account check timed out during launch. Using local-only mode for this session."
+                )
+            },
+            makeUITestContainer: {
+                Issue.record("UI test container should not be requested.")
+                return container
+            },
+            makeCloudBackedContainer: {
+                didRequestCloudContainer = true
+                return container
+            },
+            makeLocalFallbackContainer: {
+                didRequestLocalFallback = true
+                return container
+            },
+            describeError: { _ in "unreachable" }
+        )
+
+        #expect(bootstrap.cloudSyncEnabled == false)
+        #expect(bootstrap.cloudSyncErrorDescription?.contains("timed out") == true)
+        #expect(didRunStartupPreflight)
+        #expect(!didRequestCloudContainer)
+        #expect(didRequestLocalFallback)
     }
 
     @Test

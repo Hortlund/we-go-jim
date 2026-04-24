@@ -122,17 +122,25 @@ final class BrosViewModel {
         force: Bool = false
     ) async {
         guard !isSnapshotRefreshInFlight else { return }
-        guard shouldRefreshSnapshot(force: force) else { return }
-        isSnapshotRefreshInFlight = true
-        defer { isSnapshotRefreshInFlight = false }
-
-        _ = cloudSyncEnabled
-        _ = cloudSyncErrorDescription
 
         guard AppRuntimeConfig.reviewPolicy.brosEnabled else {
             state = .unavailable("Bros is disabled for this build.")
             return
         }
+
+        guard cloudSyncEnabled else {
+            setRuntimeUnavailable(cloudSyncErrorDescription ?? BrosSocialServiceError.unavailable.localizedDescription)
+            return
+        }
+
+        if let cloudSyncErrorDescription, !cloudSyncErrorDescription.isEmpty {
+            setRuntimeUnavailable(cloudSyncErrorDescription)
+            return
+        }
+
+        guard shouldRefreshSnapshot(force: force) else { return }
+        isSnapshotRefreshInFlight = true
+        defer { isSnapshotRefreshInFlight = false }
 
         guard serviceFactory(modelContext) != nil else {
             if !hasRenderableState {
@@ -473,6 +481,16 @@ final class BrosViewModel {
             throw BrosSocialServiceError.unavailable
         }
         return service
+    }
+
+    private func setRuntimeUnavailable(_ message: String) {
+        outboxFlushTask?.cancel()
+        outboxFlushTask = nil
+        pendingOutboxHydration = false
+        pendingReactionEventIDs.removeAll()
+        lastSuccessfulSnapshotRefreshAt = nil
+        errorMessage = nil
+        state = .unavailable(message)
     }
 
     private func shouldRefreshSnapshot(force: Bool) -> Bool {

@@ -15,7 +15,6 @@ struct TemplatesOverviewView: View {
         SortDescriptor(\TemplateFolder.name, order: .forward),
     ])
     private var folders: [TemplateFolder]
-    @Query private var profiles: [UserProfile]
 
     @State private var folderFilter: FolderFilter = .all
     @State private var templateEditorContext: TemplateEditorContext?
@@ -29,14 +28,6 @@ struct TemplatesOverviewView: View {
 
     private var repository: TemplateRepository {
         TemplateRepository(modelContext: modelContext)
-    }
-
-    private var currentProfile: UserProfile? {
-        UserProfileSelection.currentProfile(in: profiles)
-    }
-
-    private var preferredLoadUnit: TemplateLoadUnit {
-        currentProfile?.preferredLoadUnit ?? .kg
     }
 
     var body: some View {
@@ -389,63 +380,7 @@ struct TemplatesOverviewView: View {
 
     private func duplicateTemplate(_ template: WorkoutTemplate) {
         do {
-            let folderID = template.folderID == TemplateRepository.unfiledFolderID ? nil : template.folderID
-            let copy = try repository.createTemplate(
-                folderID: folderID,
-                name: "\(template.name) Copy",
-                notes: template.notes
-            )
-
-            let orderedExercises = (template.exercises ?? [])
-                .sorted { $0.sortOrder < $1.sortOrder }
-            var drafts: [TemplateExerciseDraft] = []
-            drafts.reserveCapacity(orderedExercises.count)
-
-            for exercise in orderedExercises {
-                let orderedSets = (exercise.prescribedSets ?? [])
-                    .sorted { $0.sortOrder < $1.sortOrder }
-
-                let setDrafts: [TemplateExerciseSetDraft]
-                if orderedSets.isEmpty {
-                    setDrafts = TemplateExerciseDraft.defaultSetDrafts(loadUnit: preferredLoadUnit)
-                } else {
-                    var mappedSetDrafts: [TemplateExerciseSetDraft] = []
-                    mappedSetDrafts.reserveCapacity(orderedSets.count)
-                    for set in orderedSets {
-                        mappedSetDrafts.append(
-                            TemplateExerciseSetDraft(
-                                id: set.id,
-                                targetReps: set.targetReps,
-                                targetWeight: set.targetWeight,
-                                loadUnit: set.loadUnit,
-                                restSeconds: set.restSeconds,
-                                isWarmup: set.isWarmup,
-                                isLocked: set.isLocked,
-                                previousTargetReps: set.previousTargetReps,
-                                previousTargetWeight: set.previousTargetWeight,
-                                previousLoadUnit: set.previousLoadUnit
-                            )
-                        )
-                    }
-                    setDrafts = mappedSetDrafts
-                }
-
-                drafts.append(
-                    TemplateExerciseDraft(
-                        id: exercise.id,
-                        catalogExerciseUUID: exercise.catalogExerciseUUID,
-                        exerciseNameSnapshot: exercise.exerciseNameSnapshot,
-                        categorySnapshot: exercise.categorySnapshot,
-                        muscleSummarySnapshot: exercise.muscleSummarySnapshot,
-                        targetRepMin: exercise.targetRepMin,
-                        targetRepMax: exercise.targetRepMax,
-                        restSeconds: exercise.restSeconds,
-                        setDrafts: setDrafts
-                    )
-                )
-            }
-
-            try repository.setExercises(templateID: copy.id, drafts: drafts)
+            _ = try repository.duplicateTemplate(id: template.id)
         } catch {
             showError(error)
         }

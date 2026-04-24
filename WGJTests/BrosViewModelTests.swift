@@ -6,7 +6,7 @@ import Testing
 @MainActor
 struct BrosViewModelTests {
     @Test
-    func refreshAllowsBrosWhenAppCloudSyncBootstrapFallsBackToLocal() async throws {
+    func refreshShowsUnavailableWhenAppCloudSyncBootstrapFallsBackToLocal() async throws {
         let context = try makeInMemoryContext()
         let service = StubBrosSocialService()
         let viewModel = BrosViewModel(
@@ -21,9 +21,32 @@ struct BrosViewModelTests {
         )
         await Task.yield()
 
-        #expect(viewModel.state == .onboarding)
+        #expect(viewModel.state == .unavailable("Cloud-backed ModelContainer unavailable."))
         #expect(!service.didRefreshLocalMembershipState)
-        #expect(service.didFlushOutbox)
+        #expect(!service.didFlushOutbox)
+    }
+
+    @Test
+    func warmSnapshotIsClearedWhenRuntimeCloudBecomesUnavailable() async throws {
+        let context = try makeInMemoryContext()
+        let service = StubBrosSocialService()
+        let warmSnapshot = makeSnapshot(displayName: "Atlas")
+        let viewModel = BrosViewModel(
+            accountStatusProvider: { .available },
+            serviceFactory: { _ in service }
+        )
+
+        viewModel.seedWarmState(warmSnapshot)
+
+        await viewModel.loadIfNeeded(
+            modelContext: context,
+            cloudSyncEnabled: false,
+            cloudSyncErrorDescription: "iCloud is unavailable for this session."
+        )
+        await Task.yield()
+
+        #expect(viewModel.state == .unavailable("iCloud is unavailable for this session."))
+        #expect(service.fetchSnapshotCallCount == 0)
     }
 
     @Test
@@ -64,7 +87,7 @@ struct BrosViewModelTests {
         let loadTask = Task {
             await viewModel.loadIfNeeded(
                 modelContext: context,
-                cloudSyncEnabled: false,
+                cloudSyncEnabled: true,
                 cloudSyncErrorDescription: nil
             )
         }
@@ -91,8 +114,8 @@ struct BrosViewModelTests {
 
         await viewModel.loadIfNeeded(
             modelContext: context,
-            cloudSyncEnabled: false,
-            cloudSyncErrorDescription: "Cloud-backed ModelContainer unavailable."
+            cloudSyncEnabled: true,
+            cloudSyncErrorDescription: nil
         )
 
         #expect(viewModel.state == .active(warmSnapshot))

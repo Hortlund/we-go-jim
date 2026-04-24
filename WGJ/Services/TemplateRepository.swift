@@ -553,6 +553,38 @@ nonisolated final class TemplateRepository {
         }
     }
 
+    func duplicateTemplate(id sourceTemplateID: UUID, name: String? = nil) throws -> WorkoutTemplate {
+        guard let sourceTemplate = try template(id: sourceTemplateID) else {
+            throw TemplateRepositoryError.templateNotFound
+        }
+
+        let targetFolderID = sourceTemplate.folderID == Self.unfiledFolderID ? nil : sourceTemplate.folderID
+        let deferredRepository = TemplateRepository(modelContext: modelContext, autoSaveChanges: false)
+        let copy = try deferredRepository.createTemplate(
+            folderID: targetFolderID,
+            name: name ?? "\(sourceTemplate.name) Copy",
+            notes: sourceTemplate.notes
+        )
+
+        let sourceExercises = (sourceTemplate.exercises ?? [])
+            .sorted { $0.sortOrder < $1.sortOrder }
+        let groupIDMap = duplicateSupersetGroupIDMap(from: sourceExercises)
+        let exerciseDrafts = sourceExercises.map { exercise in
+            duplicateDraft(from: exercise, groupIDMap: groupIDMap)
+        }
+        let cardioDrafts = orderedCardioBlocks(for: sourceTemplate).map(duplicateDraft(from:))
+
+        do {
+            try deferredRepository.setExercises(templateID: copy.id, drafts: exerciseDrafts)
+            try deferredRepository.setCardioBlocks(templateID: copy.id, drafts: cardioDrafts)
+            try deferredRepository.finalizeDeferredUserDataChangesIfNeeded()
+            return copy
+        } catch {
+            modelContext.delete(copy)
+            throw error
+        }
+    }
+
     func updateTemplate(id: UUID, name: String, notes: String) throws {
         let cleaned = try ReviewModerationService.validateUserInput(name, kind: .templateName)
         let normalizedNotes = normalizedTemplateNotes(notes)
@@ -2120,6 +2152,92 @@ nonisolated final class TemplateRepository {
             categorySnapshot: draft.categorySnapshot,
             muscleSummarySnapshot: draft.muscleSummarySnapshot,
             targetDurationSeconds: draft.targetDurationSeconds
+        )
+    }
+
+    private func duplicateSupersetGroupIDMap(from exercises: [TemplateExercise]) -> [UUID: UUID] {
+        let sourceGroupIDs = Set(exercises.compactMap(\.supersetGroupID))
+        return Dictionary(uniqueKeysWithValues: sourceGroupIDs.map { ($0, UUID()) })
+    }
+
+    private func duplicateDraft(
+        from exercise: TemplateExercise,
+        groupIDMap: [UUID: UUID]
+    ) -> TemplateExerciseDraft {
+        let copiedSuperset = exercise.supersetMembership.map { membership in
+            ExerciseSupersetMembershipDraft(
+                groupID: groupIDMap[membership.groupID] ?? UUID(),
+                position: membership.position,
+                roundRestSeconds: membership.roundRestSeconds
+            )
+        }
+
+        return TemplateExerciseDraft(
+            id: UUID(),
+            catalogExerciseUUID: exercise.catalogExerciseUUID,
+            exerciseNameSnapshot: exercise.exerciseNameSnapshot,
+            categorySnapshot: exercise.categorySnapshot,
+            muscleSummarySnapshot: exercise.muscleSummarySnapshot,
+            notes: exercise.notes,
+            targetRepMin: exercise.targetRepMin,
+            targetRepMax: exercise.targetRepMax,
+            restSeconds: exercise.restSeconds,
+            setDrafts: (exercise.prescribedSets ?? [])
+                .sorted { $0.sortOrder < $1.sortOrder }
+                .map(duplicateDraft(from:)),
+            components: (exercise.components ?? [])
+                .sorted { $0.sortOrder < $1.sortOrder }
+                .map(duplicateDraft(from:)),
+            superset: copiedSuperset
+        )
+    }
+
+    private func duplicateDraft(from set: TemplateExerciseSet) -> TemplateExerciseSetDraft {
+        TemplateExerciseSetDraft(
+            id: UUID(),
+            targetReps: set.targetReps,
+            targetWeight: set.targetWeight,
+            loadUnit: set.loadUnit,
+            restSeconds: set.restSeconds,
+            isWarmup: set.isWarmup,
+            isLocked: set.isLocked,
+            previousTargetReps: set.previousTargetReps,
+            previousTargetWeight: set.previousTargetWeight,
+            previousLoadUnit: set.previousLoadUnit,
+            dropStages: (set.dropStages ?? [])
+                .sorted { $0.sortOrder < $1.sortOrder }
+                .map(duplicateDraft(from:))
+        )
+    }
+
+    private func duplicateDraft(from stage: TemplateExerciseDropStage) -> TemplateExerciseDropStageDraft {
+        TemplateExerciseDropStageDraft(
+            id: UUID(),
+            targetReps: stage.targetReps,
+            targetWeight: stage.targetWeight,
+            loadUnit: stage.loadUnit
+        )
+    }
+
+    private func duplicateDraft(from component: TemplateExerciseComponent) -> TemplateExerciseComponentDraft {
+        TemplateExerciseComponentDraft(
+            id: UUID(),
+            catalogExerciseUUID: component.catalogExerciseUUID,
+            exerciseNameSnapshot: component.exerciseNameSnapshot,
+            categorySnapshot: component.categorySnapshot,
+            muscleSummarySnapshot: component.muscleSummarySnapshot
+        )
+    }
+
+    private func duplicateDraft(from cardioBlock: TemplateCardioBlock) -> TemplateCardioBlockDraft {
+        TemplateCardioBlockDraft(
+            id: UUID(),
+            phase: cardioBlock.phase,
+            catalogExerciseUUID: cardioBlock.catalogExerciseUUID,
+            exerciseNameSnapshot: cardioBlock.exerciseNameSnapshot,
+            categorySnapshot: cardioBlock.categorySnapshot,
+            muscleSummarySnapshot: cardioBlock.muscleSummarySnapshot,
+            targetDurationSeconds: cardioBlock.targetDurationSeconds
         )
     }
 

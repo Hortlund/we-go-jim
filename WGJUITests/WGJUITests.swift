@@ -47,7 +47,7 @@ final class WGJUITests: XCTestCase {
 
     @MainActor
     func testExercisesSearchAndFilterSmoke() throws {
-        let app = launchApp()
+        let app = launchApp(mode: .localInMemory)
 
         tapTab("Exercises", in: app)
 
@@ -63,6 +63,15 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(app.buttons["exercises-body-part-filter"].exists)
         XCTAssertTrue(app.buttons["exercises-category-filter"].exists)
         XCTAssertTrue(searchField.value as? String == "bench")
+
+        searchField.tap()
+        clearTextField(searchField, replacement: "zzzz-no-exercise")
+
+        let clearFiltersButton = app.buttons["exercises-clear-filters-button"]
+        XCTAssertTrue(clearFiltersButton.waitForExistence(timeout: 5))
+        clearFiltersButton.tap()
+        XCTAssertFalse((searchField.value as? String) == "zzzz-no-exercise")
+        XCTAssertFalse(clearFiltersButton.waitForExistence(timeout: 2))
     }
 
     @MainActor
@@ -3148,6 +3157,12 @@ final class WGJUITests: XCTestCase {
 
     private func identifiedElement(_ identifier: String, in app: XCUIApplication) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+    }
+
+    private func clearTextField(_ textField: XCUIElement, replacement: String) {
+        textField.press(forDuration: 0.1)
+        textField.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 64))
+        textField.typeText(replacement)
     }
 
     private func revealElement(_ element: XCUIElement, in app: XCUIApplication, maxSwipes: Int = 6) {
