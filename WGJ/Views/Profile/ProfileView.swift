@@ -654,16 +654,24 @@ struct ProfileView: View {
             coachFollowUpSummaries = [:]
             cancelCoachFollowUpLoads()
 
-            let localProfile = try controller.loadLocalProfileIdentity(modelContext: modelContext)
-            guard profileReloadToken == reloadToken else { return }
-            currentProfile = localProfile
-            dashboardContent.weeklyGoal = localProfile.weeklyWorkoutGoal
-
-            let profile = (try? await controller.loadPublishedProfileIdentity(
-                modelContext: modelContext,
-                cloudSyncEnabled: cloudSyncEnabled,
-                backgroundStore: appBackgroundStore
-            )) ?? localProfile
+            let profile: ProfileIdentitySnapshot
+            if appBackgroundStore != nil {
+                profile = try await controller.loadPublishedProfileIdentity(
+                    modelContext: modelContext,
+                    cloudSyncEnabled: cloudSyncEnabled,
+                    backgroundStore: appBackgroundStore
+                )
+            } else {
+                let localProfile = try controller.loadLocalProfileIdentity(modelContext: modelContext)
+                guard profileReloadToken == reloadToken else { return }
+                currentProfile = localProfile
+                dashboardContent.weeklyGoal = localProfile.weeklyWorkoutGoal
+                profile = (try? await controller.loadPublishedProfileIdentity(
+                    modelContext: modelContext,
+                    cloudSyncEnabled: cloudSyncEnabled,
+                    backgroundStore: appBackgroundStore
+                )) ?? localProfile
+            }
             guard profileReloadToken == reloadToken else { return }
             currentProfile = profile
             dashboardContent.weeklyGoal = profile.weeklyWorkoutGoal

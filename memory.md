@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-04-24 - Cold Profile Entry Must Not Touch Main SwiftData Before First Render
+
+- Date: 2026-04-24
+- Trigger/Problem: First Profile visit after cold app startup could freeze the tab switch for a very long time, especially in CloudKit-backed launches.
+- Root Cause: `ProfileView.reloadProfile()` still performed an immediate main-actor `ModelContext` profile fetch/create before reaching the background-store path. During cold startup, CloudKit mirroring and deferred maintenance can make that main-context access wait on persistent-store work.
+- Durable Rule: On first Profile entry, render from an existing warm snapshot or placeholder and load identity/dashboard through `AppBackgroundStore` when available. Do not add synchronous main-context SwiftData reads or writes to the tab-switch path.
+- How to Verify Next Time: Cold launch a CloudKit-enabled build, tap Profile immediately, and confirm the tab selection changes without a visible hang while profile/dashboard data fills in asynchronously. Review `ProfileView.reloadProfile()` for any pre-await main-context fetch/create work.
+- Status: active
+
 ## 2026-04-24 - Dropset Limits Must Be Removed Across UI And Persistence
 
 - Date: 2026-04-24
