@@ -34,7 +34,6 @@ struct ExercisesCatalogView: View {
 
     @State private var errorMessage = ""
     @State private var showingError = false
-    @State private var isKeyboardVisible = false
     @FocusState private var isSearchFieldFocused: Bool
 
     private let topAnchorID = "exercises-catalog-top"
@@ -85,18 +84,10 @@ struct ExercisesCatalogView: View {
 
     private var shouldShowIndexRail: Bool {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        return reservesIndexRailSpace && !isSearchFieldFocused && trimmedQuery.isEmpty
-    }
-
-    private var keyboardToolbarVisibility: Binding<Bool> {
-        Binding(
-            get: {
-                isKeyboardVisible || isSearchFieldFocused
-            },
-            set: { newValue in
-                isKeyboardVisible = newValue
-            }
-        )
+        return horizontalSizeClass == .regular
+            && reservesIndexRailSpace
+            && !isSearchFieldFocused
+            && trimmedQuery.isEmpty
     }
 
     private var hasActiveFilters: Bool {
@@ -117,31 +108,26 @@ struct ExercisesCatalogView: View {
         ScrollViewReader { proxy in
             ZStack(alignment: .trailing) {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        if !isPickerMode {
-                            WGJRootHeader("Exercises", subtitle: "Search, filter, and add exercises fast.")
-                        }
+                    VStack(alignment: .leading, spacing: 0) {
+                        Color.clear
+                            .frame(height: 0)
+                            .id(topAnchorID)
 
-                        VStack(alignment: .leading, spacing: 14) {
-                            searchField
-                            filterRow
-                            createExerciseButton
+                        if controller.snapshot.sections.isEmpty {
+                            emptyState
+                                .padding(.top, 6)
+                        } else {
+                            LazyVStack(alignment: .leading, spacing: 0) {
+                                ForEach(controller.snapshot.sections) { section in
+                                    VStack(alignment: .leading, spacing: 0) {
+                                        WGJCompactSectionHeader(section.title)
+                                            .id(section.id)
+                                            .padding(.vertical, 8)
 
-                            if controller.snapshot.sections.isEmpty {
-                                emptyState
-                            } else {
-                                LazyVStack(alignment: .leading, spacing: 0) {
-                                    ForEach(controller.snapshot.sections) { section in
-                                        VStack(alignment: .leading, spacing: 0) {
-                                            WGJCompactSectionHeader(section.title)
-                                                .id(section.id)
-                                                .padding(.vertical, 8)
-
-                                            LazyVStack(alignment: .leading, spacing: 0) {
-                                                ForEach(section.rows) { row in
-                                                    if let exercise = controller.snapshot.exerciseByUUID[row.id] {
-                                                        exerciseRow(exercise, repository: catalogRepository)
-                                                    }
+                                        LazyVStack(alignment: .leading, spacing: 0) {
+                                            ForEach(section.rows) { row in
+                                                if let exercise = controller.snapshot.exerciseByUUID[row.id] {
+                                                    exerciseRow(exercise, repository: catalogRepository)
                                                 }
                                             }
                                         }
@@ -149,14 +135,15 @@ struct ExercisesCatalogView: View {
                                 }
                             }
                         }
-                        .padding(.trailing, contentTrailingPadding)
                     }
-                    .id(topAnchorID)
-                    .padding(.top, isPickerMode ? 10 : 8)
-                    .padding(16)
+                    .padding(.horizontal, 16)
+                    .padding(.trailing, contentTrailingPadding)
+                    .padding(.bottom, 16)
+                }
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    pinnedSearchControls
                 }
                 .scrollDismissesKeyboard(.interactively)
-                .wgjScreenBackground()
 
                 if reservesIndexRailSpace {
                     VStack(spacing: 4) {
@@ -191,9 +178,9 @@ struct ExercisesCatalogView: View {
                     .accessibilityHidden(!shouldShowIndexRail)
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .onChange(of: debouncedQuery) { _, _ in
                 applyCurrentFilters()
-                keepSearchVisible(using: proxy)
             }
             .onChange(of: selectedPrimaryMuscleID) { _, _ in
                 applyCurrentFilters()
@@ -207,12 +194,9 @@ struct ExercisesCatalogView: View {
                 applyCurrentFilters()
                 scrollToTop(using: proxy)
             }
-            .onChange(of: isSearchFieldFocused) { _, newValue in
-                if newValue {
-                    keepSearchVisible(using: proxy)
-                }
-            }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .wgjScreenBackground()
         .confirmationDialog(
             "No active workout",
             isPresented: $showingCreateSessionPrompt,
@@ -267,11 +251,24 @@ struct ExercisesCatalogView: View {
             queryDebounceTask?.cancel()
             queryDebounceTask = nil
             isSearchFieldFocused = false
-            isKeyboardVisible = false
             WGJKeyboard.dismiss()
         }
-        .wgjTrackKeyboardVisibility($isKeyboardVisible)
-        .wgjMinimalKeyboardToolbar(isKeyboardVisible: keyboardToolbarVisibility)
+    }
+
+    private var pinnedSearchControls: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if !isPickerMode {
+                WGJRootHeader("Exercises", subtitle: "Search, filter, and add exercises fast.")
+            }
+
+            searchField
+            filterRow
+            createExerciseButton
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, isPickerMode ? 10 : 16)
+        .padding(.bottom, 10)
+        .background(WGJTheme.bgBase)
     }
 
     private var searchField: some View {
@@ -285,6 +282,20 @@ struct ExercisesCatalogView: View {
                 .foregroundStyle(WGJTheme.textPrimary)
                 .focused($isSearchFieldFocused)
                 .accessibilityIdentifier("exercises-search-field")
+                .toolbar {
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+
+                        Button {
+                            isSearchFieldFocused = false
+                            WGJKeyboard.dismiss()
+                        } label: {
+                            Label("Hide", systemImage: "keyboard.chevron.compact.down")
+                        }
+                        .accessibilityLabel("Hide keyboard")
+                        .accessibilityIdentifier("keyboard-hide-button")
+                    }
+                }
         }
         .wgjPillField()
     }
@@ -597,13 +608,6 @@ struct ExercisesCatalogView: View {
 
     private func scrollToTop(using proxy: ScrollViewProxy) {
         withAnimation(.easeInOut(duration: 0.2)) {
-            proxy.scrollTo(topAnchorID, anchor: .top)
-        }
-    }
-
-    private func keepSearchVisible(using proxy: ScrollViewProxy) {
-        guard isSearchFieldFocused else { return }
-        withAnimation(.easeInOut(duration: 0.18)) {
             proxy.scrollTo(topAnchorID, anchor: .top)
         }
     }

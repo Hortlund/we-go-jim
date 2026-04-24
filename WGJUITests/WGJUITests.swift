@@ -55,11 +55,18 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(searchField.waitForExistence(timeout: 5))
         searchField.tap()
         XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 2))
-        XCTAssertTrue(app.buttons["keyboard-hide-button"].exists)
+        let initialHideKeyboardButton = app.buttons["keyboard-hide-button"]
+        XCTAssertTrue(initialHideKeyboardButton.exists)
+        XCTAssertTrue(initialHideKeyboardButton.isHittable)
+        initialHideKeyboardButton.tap()
+        XCTAssertFalse(app.keyboards.element.waitForExistence(timeout: 1))
 
+        searchField.tap()
+        XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 2))
         searchField.typeText("bench")
         XCTAssertTrue(searchField.waitForExistence(timeout: 2))
         XCTAssertTrue(searchField.isHittable)
+        XCTAssertGreaterThanOrEqual(searchField.frame.minY, 72)
 
         let sortButton = app.buttons["exercises-sort-button"]
         XCTAssertTrue(sortButton.waitForExistence(timeout: 5))
