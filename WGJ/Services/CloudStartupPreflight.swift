@@ -189,26 +189,22 @@ nonisolated enum CloudStartupPreflight {
                 "CloudKit is unavailable for this build. Using local-only mode for this session."
             )
         case .temporarilyUnavailable:
-            return localFallbackDecision(
-                .temporarilyUnavailable,
-                "iCloud is temporarily unavailable on this device. Using local-only mode for this session."
-            )
+            return cloudBackedDecision(.temporarilyUnavailable)
         case .couldNotDetermine:
-            return localFallbackDecision(
-                .couldNotDetermine,
-                "WGJ could not verify iCloud availability at launch. Using local-only mode for this session."
-            )
+            return cloudBackedDecision(.couldNotDetermine)
         case .timedOut:
-            return localFallbackDecision(
-                .timedOut,
-                "The iCloud account check timed out during launch. Using local-only mode for this session."
-            )
+            return cloudBackedDecision(.timedOut)
         case .error:
-            return localFallbackDecision(
-                .error,
-                "WGJ hit a CloudKit startup error during launch. Using local-only mode for this session."
-            )
+            return cloudBackedDecision(.error)
         }
+    }
+
+    private static func cloudBackedDecision(_ accountStatus: CloudStartupAccountStatus) -> CloudStartupDecision {
+        CloudStartupDecision(
+            accountStatus: accountStatus,
+            storeMode: .cloudBacked,
+            cloudSyncErrorDescription: nil
+        )
     }
 
     private static func localFallbackDecision(

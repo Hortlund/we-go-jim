@@ -32,20 +32,21 @@ nonisolated enum CloudSyncEventHealthClassifier {
         }
     }
 
+    static func suppressesUserVisibleFailure(_ summary: CloudSyncEventSummary) -> Bool {
+        guard summary.status == .failed, let error = summary.error else {
+            return false
+        }
+
+        return matches(error, domain: backgroundTaskSchedulerErrorDomain, codes: ignoredBackgroundTaskSchedulerCodes)
+            || matchesAccountAuthNoise(error)
+    }
+
     static func runtimeErrorDescription(for summary: CloudSyncEventSummary) -> String? {
+        if suppressesUserVisibleFailure(summary) {
+            return nil
+        }
+
         if let error = summary.error {
-            if matches(error, domain: backgroundTaskSchedulerErrorDomain, codes: ignoredBackgroundTaskSchedulerCodes) {
-                return nil
-            }
-
-            if matches(error, domain: NSCocoaErrorDomain, codes: [134400]) {
-                return "No iCloud account is signed in on this device. Cloud features are unavailable for this session."
-            }
-
-            if matches(error, domain: CKError.errorDomain, codes: [CKError.Code.notAuthenticated.rawValue]) {
-                return "You are not signed into iCloud. Cloud features are unavailable until iCloud is available again."
-            }
-
             if matches(error, domain: CKError.errorDomain, codes: [CKError.Code.permissionFailure.rawValue]) {
                 return "CloudKit permission failed for this account. Cloud features are currently unavailable."
             }
@@ -77,6 +78,11 @@ nonisolated enum CloudSyncEventHealthClassifier {
         }
 
         return underlyingDomain == domain && codes.contains(underlyingCode)
+    }
+
+    private static func matchesAccountAuthNoise(_ error: CloudSyncErrorSnapshot) -> Bool {
+        matches(error, domain: NSCocoaErrorDomain, codes: [134400])
+            || matches(error, domain: CKError.errorDomain, codes: [CKError.Code.notAuthenticated.rawValue])
     }
 }
 

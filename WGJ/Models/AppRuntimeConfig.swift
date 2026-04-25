@@ -105,6 +105,7 @@ nonisolated enum AppRuntimeConfig {
     private enum TestArgument {
         static let inMemoryStore = "UITEST_IN_MEMORY_STORE"
         static let enableICloud = "UITEST_ENABLE_ICLOUD"
+        static let skipSplash = "UITEST_SKIP_SPLASH"
     }
 
     static let supportEmail = "support@wegojim.app"
@@ -163,12 +164,21 @@ nonisolated enum AppRuntimeConfig {
         isRunningXCTest: Bool,
         launchArguments: [String]
     ) -> Bool {
-        guard isRunningXCTest else {
+        guard launchArguments.contains(TestArgument.enableICloud),
+              !launchArguments.contains(TestArgument.inMemoryStore)
+        else {
             return false
         }
 
-        return launchArguments.contains(TestArgument.enableICloud)
-            && !launchArguments.contains(TestArgument.inMemoryStore)
+        if isRunningXCTest {
+            return true
+        }
+
+#if DEBUG
+        return launchArguments.contains(TestArgument.skipSplash)
+#else
+        return false
+#endif
     }
 
     static var isExplicitICloudUITestLaunch: Bool {
@@ -601,10 +611,6 @@ final class ActiveWorkoutPresentationState {
     @ObservationIgnored private var preparedPreviousPerformanceResolutionBySessionID: [UUID: [UUID: WorkoutPreviousPerformanceResolution]] = [:]
 
     func present(sessionID: UUID) {
-        if activeSessionID == sessionID, isActiveWorkoutStripCollapsed {
-            scrollTarget = nil
-        }
-
         if activeSessionID != sessionID {
             if let activeSessionID {
                 preparedPreviousPerformanceResolutionBySessionID.removeValue(forKey: activeSessionID)

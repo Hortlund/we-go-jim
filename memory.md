@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-04-25 - Active Workout Smoothness Needs Stable Rows
+
+- Date: 2026-04-25
+- Trigger/Problem: Active workout and history detail lag work started drifting toward lazy-row and scroll-tracking complexity, while the user correctly pushed back that loading all workout exercises is acceptable if it keeps the UI stable.
+- Root Cause: The expensive part was not the number of visible workout exercise rows; it was synchronous SwiftData relationship scanning and derived draft creation on render/scroll paths. Lazy mounting also fought active-workout scroll restoration because completed rows change height and the visible target can shift.
+- Durable Rule: In active workout, prefer a stable full exercise stack and move expensive hydration/relationship work out of render and input paths. Do not introduce lazy-row scroll-state machinery unless profiling shows row count itself is the bottleneck.
+- How to Verify Next Time: Run active workout UI smokes for typed set values and minimize/restore scroll position, then review active row rendering for synchronous SwiftData relationship scans or fallback draft creation during `body`.
+- Status: active
+
 ## 2026-04-25 - Cold Tab Smoothness Needs UI Preload, Not Only Data Warmup
 
 - Date: 2026-04-25

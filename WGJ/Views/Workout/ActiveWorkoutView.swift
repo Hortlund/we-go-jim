@@ -33,8 +33,8 @@ struct ActiveWorkoutView: View {
     @State private var componentResolutionByExerciseID: [UUID: ExerciseComponentRotationResolution] = [:]
     @State private var guidanceByExerciseID: [UUID: ActiveWorkoutExerciseGuidancePresentation?] = [:]
     @State private var catalogMatchesByUUID: [String: TrainingGuidanceCatalogSnapshot] = [:]
-    @State private var loadedExerciseStateStamp: ActiveWorkoutExerciseStateStamp?
-    @State private var loadedExerciseEntryStampByID: [UUID: ActiveWorkoutExerciseEntryStamp] = [:]
+    @State private var loadedExerciseStateStamp: ActiveWorkoutExerciseInteractionStamp?
+    @State private var exerciseHydrationInvalidation = 0
     @State private var deferredHydrationTask: Task<Void, Never>?
     @State private var pendingCheckpointScheduleTask: Task<Void, Never>?
     @State private var cardStateController = ActiveWorkoutExerciseCardStateController()
@@ -384,9 +384,8 @@ struct ActiveWorkoutView: View {
         Binding(
             get: { activeWorkoutPresentationState.scrollTarget },
             set: { newValue in
-                guard shouldTrackVisibleScrollTarget || newValue == activeWorkoutPresentationState.scrollTarget else {
-                    return
-                }
+                guard shouldTrackVisibleScrollTarget else { return }
+                guard newValue != activeWorkoutPresentationState.scrollTarget else { return }
                 activeWorkoutPresentationState.scrollTarget = newValue
             }
         )
@@ -466,16 +465,20 @@ struct ActiveWorkoutView: View {
         return shouldShowBottomDock ? cancelSectionDockClearanceHeight : 24
     }
 
-    private var exerciseHydrationStamp: ActiveWorkoutExerciseStateStamp {
-        ActiveWorkoutExerciseStateStamp(exercises: sessionExercises)
-    }
-
-    private var exerciseEntryStampsByID: [UUID: ActiveWorkoutExerciseEntryStamp] {
-        Dictionary(
-            uniqueKeysWithValues: sessionExercises.map { exercise in
-                let stamp = ActiveWorkoutExerciseEntryStamp(exercise: exercise)
-                return (stamp.id, stamp)
-            }
+    private var exerciseHydrationStamp: ActiveWorkoutExerciseInteractionStamp {
+        ActiveWorkoutExerciseInteractionStamp(
+            entries: sessionExercises.map { exercise in
+                ActiveWorkoutExerciseInteractionStamp.Entry(
+                    id: exercise.id,
+                    catalogExerciseUUID: exercise.catalogExerciseUUID,
+                    restSeconds: exercise.restSeconds,
+                    targetRepMin: exercise.targetRepMin,
+                    targetRepMax: exercise.targetRepMax,
+                    supersetGroupID: exercise.supersetGroupID,
+                    supersetPositionRaw: exercise.supersetPositionRaw
+                )
+            },
+            invalidation: exerciseHydrationInvalidation
         )
     }
 
@@ -618,6 +621,7 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
+    @ViewBuilder
     private func exerciseRow(
         for exercise: ActiveWorkoutDraftExercise,
         index: Int,
@@ -626,85 +630,97 @@ struct ActiveWorkoutView: View {
     ) -> some View {
         let exerciseID = exercise.id
         let exerciseName = exercise.exerciseNameSnapshot
-        let drafts = resolvedDrafts(for: exercise)
         let guidance = guidanceByExerciseID[exerciseID] ?? nil
 
-        return WorkoutExerciseRowHostView(
-            exerciseID: exerciseID,
-            exerciseAccessibilityIdentifier: "active-workout-exercise-\(exercise.catalogExerciseUUID)",
-            exerciseName: exerciseName,
-            muscleSummary: exercise.muscleSummarySnapshot,
-            category: exercise.categorySnapshot,
-            exerciseIndexTitle: displayTitle ?? "Exercise \(index + 1)",
-            targetRepMin: exercise.targetRepMin,
-            targetRepMax: exercise.targetRepMax,
-            previousPerformanceResolution: resolvedPreviousPerformanceResolution(for: exerciseID),
-            guidance: guidance,
-            preferredLoadUnit: preferredLoadUnit,
-            componentSummaryResolution: componentResolutionByExerciseID[exerciseID],
-            componentSummaryAccessibilityIdentifierPrefix: "active-workout-exercise-\(exercise.catalogExerciseUUID)-component-summary",
-            exerciseNotes: resolvedNotes(for: exercise),
-            restSeconds: resolvedRest(for: exercise),
-            setDrafts: drafts,
-            isExpanded: cardStateController.isExpanded(for: exerciseID),
-            manualCompletionMode: true,
-            isBozarModeEnabled: currentProfile?.isBozarModeEnabled ?? false,
-            isSetEditingEnabled: true,
-            isSetCompletionEnabled: areMainExercisesUnlocked,
-            setCompletionGatePresentation: areMainExercisesUnlocked
-                ? nil
-                : .preWorkoutCardioRequired,
-            canMoveExerciseUp: index > 0,
-            canMoveExerciseDown: index < sessionExercises.count - 1,
-            onExerciseNotesCommitted: { notes in
-                updateNotesValue(notes, for: exerciseID)
-            },
-            onSetDraftsCommitted: { drafts in
-                handleDraftsChanged(drafts, for: exercise, scrollProxy: scrollProxy)
-            },
-            onRestCommitted: { rest in
-                updateRestValue(rest, for: exerciseID)
-            },
-            onExpandedChanged: { isExpanded in
-                cardStateController.setExpanded(isExpanded, for: exerciseID)
-                if isExpanded {
-                    scheduleExpandedExerciseHydrationIfNeeded()
-                }
-            },
-            onSetCompletionChange: { setID, setLabel, restSeconds, isCompleted in
-                if isCompleted {
-                    WorkoutFeedbackCenter.shared.setCompleted()
-                    handleSetCompletionChange(
-                        sourceID: setID,
-                        setLabel: setLabel,
-                        restSeconds: restSeconds,
-                        exercise: exercise,
-                        scrollProxy: scrollProxy
-                    )
-                } else {
-                    restTimerState.clearRestTimer(sourceSetID: setID)
-                }
-            },
-            onExerciseSettings: {
-                showExerciseSettings(for: exercise)
-            },
-            onExerciseComponentPicker: componentResolutionByExerciseID[exerciseID]?.availableComponents.count ?? 0 > 1
-                ? { showExerciseComponentPicker(for: exercise) }
-                : nil,
-            onExerciseMoveUp: {
-                moveExerciseUp(index)
-            },
-            onExerciseMoveDown: {
-                moveExerciseDown(index)
-            },
-            onExerciseMoveToPosition: sessionExercises.count > 1 ? {
-                presentExerciseReorder(for: exercise)
-            } : nil,
-            onExerciseDelete: {
-                removeExercise(exerciseID: exerciseID)
-            },
-            flushCoordinator: rowFlushCoordinator
-        )
+        Group {
+            if let drafts = setDraftsByExerciseID[exerciseID] {
+                WorkoutExerciseRowHostView(
+                    exerciseID: exerciseID,
+                    exerciseAccessibilityIdentifier: "active-workout-exercise-\(exercise.catalogExerciseUUID)",
+                    exerciseName: exerciseName,
+                    muscleSummary: exercise.muscleSummarySnapshot,
+                    category: exercise.categorySnapshot,
+                    exerciseIndexTitle: displayTitle ?? "Exercise \(index + 1)",
+                    targetRepMin: exercise.targetRepMin,
+                    targetRepMax: exercise.targetRepMax,
+                    previousPerformanceResolution: resolvedPreviousPerformanceResolution(for: exerciseID),
+                    guidance: guidance,
+                    preferredLoadUnit: preferredLoadUnit,
+                    componentSummaryResolution: componentResolutionByExerciseID[exerciseID],
+                    componentSummaryAccessibilityIdentifierPrefix: "active-workout-exercise-\(exercise.catalogExerciseUUID)-component-summary",
+                    exerciseNotes: resolvedNotes(for: exercise),
+                    restSeconds: resolvedRest(for: exercise),
+                    setDrafts: drafts,
+                    isExpanded: cardStateController.isExpanded(for: exerciseID),
+                    manualCompletionMode: true,
+                    isBozarModeEnabled: currentProfile?.isBozarModeEnabled ?? false,
+                    isSetEditingEnabled: true,
+                    isSetCompletionEnabled: areMainExercisesUnlocked,
+                    setCompletionGatePresentation: areMainExercisesUnlocked
+                        ? nil
+                        : .preWorkoutCardioRequired,
+                    canMoveExerciseUp: index > 0,
+                    canMoveExerciseDown: index < sessionExercises.count - 1,
+                    onExerciseNotesCommitted: { notes in
+                        updateNotesValue(notes, for: exerciseID)
+                    },
+                    onSetDraftsCommitted: { drafts in
+                        handleDraftsChanged(drafts, for: exercise, scrollProxy: scrollProxy)
+                    },
+                    onRestCommitted: { rest in
+                        updateRestValue(rest, for: exerciseID)
+                    },
+                    onExpandedChanged: { isExpanded in
+                        cardStateController.setExpanded(isExpanded, for: exerciseID)
+                        if isExpanded {
+                            scheduleExpandedExerciseHydrationIfNeeded()
+                        }
+                    },
+                    onSetCompletionChange: { setID, setLabel, restSeconds, isCompleted in
+                        if isCompleted {
+                            WorkoutFeedbackCenter.shared.setCompleted()
+                            handleSetCompletionChange(
+                                sourceID: setID,
+                                setLabel: setLabel,
+                                restSeconds: restSeconds,
+                                exercise: exercise,
+                                scrollProxy: scrollProxy
+                            )
+                        } else {
+                            restTimerState.clearRestTimer(sourceSetID: setID)
+                        }
+                    },
+                    onExerciseSettings: {
+                        showExerciseSettings(for: exercise)
+                    },
+                    onExerciseComponentPicker: componentResolutionByExerciseID[exerciseID]?.availableComponents.count ?? 0 > 1
+                        ? { showExerciseComponentPicker(for: exercise) }
+                        : nil,
+                    onExerciseMoveUp: {
+                        moveExerciseUp(index)
+                    },
+                    onExerciseMoveDown: {
+                        moveExerciseDown(index)
+                    },
+                    onExerciseMoveToPosition: sessionExercises.count > 1 ? {
+                        presentExerciseReorder(for: exercise)
+                    } : nil,
+                    onExerciseDelete: {
+                        removeExercise(exerciseID: exerciseID)
+                    },
+                    flushCoordinator: rowFlushCoordinator
+                )
+            } else {
+                ActiveWorkoutExerciseLoadingCard(
+                    exerciseAccessibilityIdentifier: "active-workout-exercise-\(exercise.catalogExerciseUUID)",
+                    exerciseName: exerciseName,
+                    muscleSummary: exercise.muscleSummarySnapshot,
+                    category: exercise.categorySnapshot,
+                    exerciseIndexTitle: displayTitle ?? "Exercise \(index + 1)"
+                )
+                .equatable()
+            }
+        }
         .id(ActiveWorkoutScrollTarget.exercise(exerciseID))
         .transition(exerciseCardTransition)
     }
@@ -758,10 +774,7 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func resolvedDrafts(for exercise: ActiveWorkoutDraftExercise) -> [WorkoutSessionSetDraft] {
-        if let cached = setDraftsByExerciseID[exercise.id] {
-            return cached
-        }
-        return makeDrafts(from: exercise)
+        setDraftsByExerciseID[exercise.id] ?? []
     }
 
     @MainActor
@@ -884,13 +897,8 @@ struct ActiveWorkoutView: View {
             activeWorkoutPresentationState.clearPreparedPreviousPerformanceResolution(for: sessionID)
         }
         let currentStamp = exerciseHydrationStamp
-        let currentEntryStampsByID = exerciseEntryStampsByID
-        let changedExerciseIDs = Set(
-            currentEntryStampsByID.compactMap { exerciseID, entryStamp in
-                loadedExerciseEntryStampByID[exerciseID] == entryStamp ? nil : exerciseID
-            }
-        )
-        guard currentStamp != loadedExerciseStateStamp || !changedExerciseIDs.isEmpty else { return }
+        let changedExerciseIDs = currentStamp.changedExerciseIDs(comparedTo: loadedExerciseStateStamp)
+        guard !changedExerciseIDs.isEmpty else { return }
         deferredHydrationTask?.cancel()
         deferredHydrationTask = nil
 
@@ -940,7 +948,7 @@ struct ActiveWorkoutView: View {
 
         let completedExerciseIDs = Set(
             sessionExercises.compactMap { exercise in
-                let drafts = setDraftsByExerciseID[exercise.id] ?? makeDrafts(from: exercise)
+                let drafts = setDraftsByExerciseID[exercise.id] ?? []
                 return isExerciseCompleted(drafts) ? exercise.id : nil
             }
         )
@@ -1002,7 +1010,6 @@ struct ActiveWorkoutView: View {
         }
 
         loadedExerciseStateStamp = currentStamp
-        loadedExerciseEntryStampByID = currentEntryStampsByID
         seedOrRepairScrollTarget(
             draftsByExerciseID: setDraftsByExerciseID
         )
@@ -1036,7 +1043,7 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func scheduleDeferredHydration(
-        for stamp: ActiveWorkoutExerciseStateStamp,
+        for stamp: ActiveWorkoutExerciseInteractionStamp,
         draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
     ) {
         let expandedExerciseIDs = Set(sessionExercises.map(\.id).filter { cardStateController.isExpanded(for: $0) })
@@ -1196,6 +1203,7 @@ struct ActiveWorkoutView: View {
             do {
                 try activeWorkoutRepository.addExercise(sessionID: sessionID, catalogItem: item)
                 loadedExerciseStateStamp = nil
+                exerciseHydrationInvalidation += 1
             } catch {
                 capturedError = error
             }
@@ -1235,6 +1243,7 @@ struct ActiveWorkoutView: View {
                     toOffset: toOffset
                 )
                 loadedExerciseStateStamp = nil
+                exerciseHydrationInvalidation += 1
             } catch {
                 capturedError = error
             }
@@ -1260,6 +1269,7 @@ struct ActiveWorkoutView: View {
                 try activeWorkoutRepository.removeExercise(sessionID: sessionID, sessionExerciseID: exerciseID)
                 discardExerciseState(for: exerciseID)
                 loadedExerciseStateStamp = nil
+                exerciseHydrationInvalidation += 1
             } catch {
                 capturedError = error
             }
@@ -1566,7 +1576,7 @@ struct ActiveWorkoutView: View {
         }
 
         return Dictionary(uniqueKeysWithValues: sessionExercises.map { exercise in
-            let drafts = draftsByExerciseID[exercise.id] ?? makeDrafts(from: exercise)
+            let drafts = draftsByExerciseID[exercise.id] ?? []
             let guidance: ActiveWorkoutExerciseGuidancePresentation?
             if let catalogExercise = catalogMatchesByUUID[exercise.catalogExerciseUUID] {
                 guidance = WGJPerformance.measure("active-workout.guidance") {
@@ -1637,7 +1647,7 @@ struct ActiveWorkoutView: View {
                 if candidate.id == exerciseID {
                     candidateDrafts = drafts
                 } else {
-                    candidateDrafts = setDraftsByExerciseID[candidate.id] ?? makeDrafts(from: candidate)
+                    candidateDrafts = setDraftsByExerciseID[candidate.id] ?? []
                 }
 
                 return isExerciseCompleted(candidateDrafts) ? candidate.id : nil
@@ -1651,7 +1661,7 @@ struct ActiveWorkoutView: View {
         draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
     ) -> UUID? {
         for exercise in exercises {
-            let drafts = draftsByExerciseID[exercise.id] ?? makeDrafts(from: exercise)
+            let drafts = draftsByExerciseID[exercise.id] ?? []
             if !isExerciseCompleted(drafts) {
                 return exercise.id
             }
@@ -1665,7 +1675,7 @@ struct ActiveWorkoutView: View {
         draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
     ) -> Bool {
         exercises.allSatisfy { exercise in
-            let drafts = draftsByExerciseID[exercise.id] ?? makeDrafts(from: exercise)
+            let drafts = draftsByExerciseID[exercise.id] ?? []
             return isExerciseCompleted(drafts)
         }
     }
@@ -1803,9 +1813,6 @@ struct ActiveWorkoutView: View {
             )
             pendingWrites.markExerciseDirty(draft.exerciseID)
             scheduleExerciseCheckpointFlushIfNeeded()
-            loadedExerciseEntryStampByID[draft.exerciseID] = sessionExercises
-                .first(where: { $0.id == draft.exerciseID })
-                .map(ActiveWorkoutExerciseEntryStamp.init(exercise:))
             exerciseSettingsDraft = nil
             refreshGuidance(for: draft.exerciseID)
         } catch {
@@ -1821,6 +1828,7 @@ struct ActiveWorkoutView: View {
             )
             exerciseComponentPickerDraft = nil
             loadedExerciseStateStamp = nil
+            exerciseHydrationInvalidation += 1
         } catch {
             showError(error)
         }
@@ -2040,7 +2048,6 @@ struct ActiveWorkoutView: View {
             .union(restByExerciseID.keys)
             .union(notesByExerciseID.keys)
             .union(lastPersistedExerciseStateByID.keys)
-            .union(loadedExerciseEntryStampByID.keys)
             .union(previousResolutionByExerciseID.keys)
             .union(componentResolutionByExerciseID.keys)
             .union(guidanceByExerciseID.keys)
@@ -2059,7 +2066,6 @@ struct ActiveWorkoutView: View {
         restByExerciseID[exerciseID] = nil
         notesByExerciseID[exerciseID] = nil
         lastPersistedExerciseStateByID[exerciseID] = nil
-        loadedExerciseEntryStampByID[exerciseID] = nil
         previousResolutionByExerciseID[exerciseID] = nil
         componentResolutionByExerciseID[exerciseID] = nil
         guidanceByExerciseID[exerciseID] = nil
@@ -2122,20 +2128,10 @@ struct ActiveWorkoutView: View {
     private func makeFinishConfirmationContent() -> ActiveWorkoutFinishConfirmationContent {
         ActiveWorkoutFinishConfirmationContent(
             exerciseDrafts: sessionExercises.map { exercise in
-                setDraftsByExerciseID[exercise.id] ?? makeDrafts(from: exercise)
+                setDraftsByExerciseID[exercise.id] ?? []
             },
             cardioBlocks: orderedCardioBlocks.map(WorkoutCardioBlockDraft.init(model:))
         )
-    }
-
-    @MainActor
-    private func orderedSessionSets(for exercise: ActiveWorkoutDraftExercise) -> [ActiveWorkoutDraftSet] {
-        (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
-    }
-
-    @MainActor
-    private func makeDrafts(from exercise: ActiveWorkoutDraftExercise) -> [WorkoutSessionSetDraft] {
-        orderedSessionSets(for: exercise).map(WorkoutSessionSetDraft.init(model:))
     }
 
     nonisolated private static func loadHydrationResult(
@@ -2825,6 +2821,76 @@ private struct ActiveWorkoutHeaderCard: View {
     }
 }
 
+private struct ActiveWorkoutExerciseLoadingCard: View, Equatable {
+    let exerciseAccessibilityIdentifier: String
+    let exerciseName: String
+    let muscleSummary: String
+    let category: String
+    let exerciseIndexTitle: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(exerciseIndexTitle.uppercased())
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(WGJTheme.accentCyan)
+
+                    Text(exerciseName)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(WGJTheme.accentBlue)
+                        .wgjSingleLineText(scale: 0.8)
+                        .accessibilityIdentifier(exerciseAccessibilityIdentifier)
+
+                    Text(summaryLine)
+                        .font(.subheadline)
+                        .foregroundStyle(WGJTheme.textSecondary)
+                        .lineLimit(2)
+
+                    Text("Loading sets")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(WGJTheme.textSecondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule()
+                                .fill(WGJTheme.field)
+                                .overlay(
+                                    Capsule()
+                                        .stroke(WGJTheme.outline.opacity(0.24), lineWidth: 1)
+                                )
+                        )
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
+
+                Image(systemName: "ellipsis.circle")
+                    .font(.title3)
+                    .foregroundStyle(WGJTheme.textTertiary)
+                    .frame(width: 34, height: 34)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(WGJTheme.field)
+                    )
+            }
+        }
+        .padding(16)
+        .wgjCardContainer(strong: true)
+    }
+
+    private var summaryLine: String {
+        if !muscleSummary.isEmpty {
+            return muscleSummary
+        }
+
+        if !category.isEmpty {
+            return category
+        }
+
+        return "Track the working sets below."
+    }
+}
+
 private struct ActiveWorkoutBottomDock: View {
     @Environment(RestTimerState.self) private var restTimerState
 
@@ -3309,34 +3375,6 @@ private enum ActiveWorkoutWriteCheckpoint: Sendable {
     case sceneTransition
     case finish
     case cancel
-}
-
-private struct ActiveWorkoutExerciseStateStamp: Hashable {
-    private let entries: [ActiveWorkoutExerciseEntryStamp]
-
-    @MainActor
-    init(exercises: [ActiveWorkoutDraftExercise]) {
-        entries = exercises.map(ActiveWorkoutExerciseEntryStamp.init(exercise:))
-    }
-}
-
-private struct ActiveWorkoutExerciseEntryStamp: Hashable {
-    let id: UUID
-    let catalogExerciseUUID: String
-    let orderedComponentIDs: [UUID]
-    let orderedSetIDs: [UUID]
-
-    @MainActor
-    init(exercise: ActiveWorkoutDraftExercise) {
-        id = exercise.id
-        catalogExerciseUUID = exercise.catalogExerciseUUID
-        orderedComponentIDs = (exercise.components ?? [])
-            .sorted { $0.sortOrder < $1.sortOrder }
-            .map(\.id)
-        orderedSetIDs = (exercise.sets ?? [])
-            .sorted { $0.sortOrder < $1.sortOrder }
-            .map(\.id)
-    }
 }
 
 private struct ActiveWorkoutExerciseSettingsSheet: View {

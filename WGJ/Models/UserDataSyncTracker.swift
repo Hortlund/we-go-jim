@@ -152,8 +152,10 @@ nonisolated final class UserDataSyncTracker {
             if summary.type == runningCloudEventType {
                 runningCloudEventType = nil
             }
-            latestErrorDescription = CloudSyncEventHealthClassifier.runtimeErrorDescription(for: summary)
-                ?? summary.errorDescription
+            if !CloudSyncEventHealthClassifier.suppressesUserVisibleFailure(summary) {
+                latestErrorDescription = CloudSyncEventHealthClassifier.runtimeErrorDescription(for: summary)
+                    ?? summary.errorDescription
+            }
         }
 
         return makeSnapshotLocked()

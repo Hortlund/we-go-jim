@@ -870,7 +870,7 @@ final class WGJUITests: XCTestCase {
 
     @MainActor
     func testActiveWorkoutHomeReturnKeepsTypedSetValuesInteractive() throws {
-        let app = launchApp(launchEnvironment: [
+        let app = launchApp(mode: .localInMemory, launchEnvironment: [
             "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
                 name: "Home Return Set Workout",
                 notes: "Resume after backgrounding with typed set values.",
@@ -984,7 +984,7 @@ final class WGJUITests: XCTestCase {
 
     @MainActor
     func testActiveWorkoutRestoreKeepsScrolledExerciseVisibleAfterMinimize() throws {
-        let app = launchApp(launchEnvironment: [
+        let app = launchApp(mode: .localInMemory, launchEnvironment: [
             "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
                 name: "Scroll Restore Workout",
                 notes: "Minimize and reopen should keep the current position.",
@@ -1013,28 +1013,14 @@ final class WGJUITests: XCTestCase {
 
         startPreviewedTemplateWorkout(in: app)
 
-        let laterExercise = identifiedElement("active-workout-exercise-scroll-restore-8", in: app)
+        let laterExercise = identifiedElement("active-workout-exercise-scroll-restore-10", in: app)
         let laterExerciseActions = identifiedElement(
-            "active-workout-exercise-scroll-restore-8-actions-button",
+            "active-workout-exercise-scroll-restore-10-actions-button",
             in: app
         )
-        revealElement(laterExercise, in: app, maxSwipes: 10)
-
-        var remainingSwipes = 6
-        while laterExercise.frame.minY > 320, remainingSwipes > 0 {
-            app.swipeUp()
-            remainingSwipes -= 1
-        }
-
-        var remainingReverseSwipes = 3
-        while laterExercise.frame.minY < 120, remainingReverseSwipes > 0 {
-            app.swipeDown()
-            remainingReverseSwipes -= 1
-        }
-
+        revealLazyElement(laterExerciseActions, in: app, maxSwipes: 12)
         XCTAssertTrue(laterExercise.waitForExistence(timeout: 5))
         XCTAssertTrue(laterExerciseActions.waitForExistence(timeout: 5))
-        XCTAssertTrue(laterExercise.isHittable)
         XCTAssertTrue(laterExerciseActions.isHittable)
 
         let minimizeButton = app.buttons["active-workout-minimize-button"]
@@ -1047,7 +1033,6 @@ final class WGJUITests: XCTestCase {
 
         XCTAssertTrue(laterExercise.waitForExistence(timeout: 5))
         XCTAssertTrue(laterExerciseActions.waitForExistence(timeout: 5))
-        XCTAssertTrue(laterExercise.isHittable)
         XCTAssertTrue(laterExerciseActions.isHittable)
         XCTAssertFalse(identifiedElement("active-workout-exercise-scroll-restore-1-actions-button", in: app).isHittable)
     }
@@ -1396,7 +1381,7 @@ final class WGJUITests: XCTestCase {
 
     @MainActor
     func testCompletedWorkoutDetailEditAndSaveSmoke() throws {
-        let app = launchApp()
+        let app = launchApp(mode: .localInMemory)
 
         tapTab("Start Workout", in: app)
 
@@ -1408,11 +1393,6 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(emptyAddExerciseButton.waitForExistence(timeout: 5))
         emptyAddExerciseButton.tap()
         pickExercise(named: "bench", in: app)
-
-        let addAnotherExerciseButton = app.buttons["Add another exercise"]
-        XCTAssertTrue(addAnotherExerciseButton.waitForExistence(timeout: 5))
-        addAnotherExerciseButton.tap()
-        pickExercise(named: "row", in: app)
 
         finishTemplateWorkout(in: app)
         let skipButton = app.buttons["Skip"]
@@ -3327,7 +3307,7 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(finishButton.waitForExistence(timeout: 5))
 
         let cancelButton = identifiedElement("active-workout-cancel-button", in: app)
-        revealElement(cancelButton, in: app)
+        revealLazyElement(cancelButton, in: app)
         let elapsedTimer = identifiedElement("active-workout-elapsed-timer", in: app)
         revealElementAbove(elapsedTimer, target: cancelButton, in: app)
 

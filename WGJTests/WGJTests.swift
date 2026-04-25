@@ -853,15 +853,21 @@ struct WGJTests {
     func accountStatusServiceMapsProviderResponses() async {
         let availableService = AccountStatusService(client: MockCloudAccountStatusClient(status: .available, error: nil))
         let noAccountService = AccountStatusService(client: MockCloudAccountStatusClient(status: .noAccount, error: nil))
+        let temporaryService = AccountStatusService(client: MockCloudAccountStatusClient(status: .temporarilyUnavailable, error: nil))
+        let unknownService = AccountStatusService(client: MockCloudAccountStatusClient(status: .couldNotDetermine, error: nil))
         let failingService = AccountStatusService(client: MockCloudAccountStatusClient(status: .couldNotDetermine, error: NSError(domain: "test", code: 1)))
 
         let available = await availableService.fetchAccountStatus()
         let noAccount = await noAccountService.fetchAccountStatus()
+        let temporary = await temporaryService.fetchAccountStatus()
+        let unknown = await unknownService.fetchAccountStatus()
         let failed = await failingService.fetchAccountStatus()
 
         #expect(available == .available)
         #expect(noAccount == .unavailable(.noAccount))
-        #expect(failed == .unavailable(.unknown))
+        #expect(temporary == .available)
+        #expect(unknown == .available)
+        #expect(failed == .available)
     }
 
     @Test
@@ -898,7 +904,7 @@ struct WGJTests {
     }
 
     @Test
-    func cloudStartupPreflightChoosesLocalFallbackForAnyUncertainStartupStatus() {
+    func cloudStartupPreflightKeepsCloudBackedBootstrapForTransientStartupStatus() {
         let expectations: [(CloudStartupAccountStatus, String)] = [
             (.temporarilyUnavailable, "temporarily unavailable"),
             (.couldNotDetermine, "could not verify"),
@@ -911,9 +917,9 @@ struct WGJTests {
                 statusProvider: MockCloudStartupAccountStatusProvider(status: status)
             )
 
-            #expect(decision.storeMode == .localFallback)
-            #expect(!decision.cloudSyncEnabled)
-            #expect(decision.cloudSyncErrorDescription?.contains(expectedMessageFragment) == true)
+            #expect(decision.storeMode == .cloudBacked, "Expected cloud-backed launch for \(expectedMessageFragment).")
+            #expect(decision.cloudSyncEnabled)
+            #expect(decision.cloudSyncErrorDescription == nil)
         }
     }
 
@@ -923,10 +929,6 @@ struct WGJTests {
             (.noAccount, "No iCloud account"),
             (.restricted, "restricted"),
             (.containerUnavailable, "CloudKit is unavailable"),
-            (.temporarilyUnavailable, "temporarily unavailable"),
-            (.couldNotDetermine, "could not verify"),
-            (.timedOut, "timed out"),
-            (.error, "CloudKit startup error"),
         ]
 
         for (status, expectedMessageFragment) in expectations {
@@ -940,7 +942,7 @@ struct WGJTests {
     }
 
     @Test
-    func cloudSyncClassifierTreatsNoAccountSetupFailureAsRuntimeError() {
+    func cloudSyncClassifierSuppressesNoAccountSetupFailureAsUserVisibleRuntimeError() {
         let summary = makeCloudSyncSummary(
             type: .setup,
             status: .failed,
@@ -954,12 +956,27 @@ struct WGJTests {
         )
 
         let resolution = CloudSyncEventHealthClassifier.resolution(for: summary)
-        switch resolution {
-        case .setRuntimeError(let description):
-            #expect(description.contains("No iCloud account"))
-        default:
-            Issue.record("Expected a runtime CloudKit error for the no-account setup failure.")
-        }
+        #expect(resolution == .noChange)
+        #expect(CloudSyncEventHealthClassifier.suppressesUserVisibleFailure(summary))
+    }
+
+    @Test
+    func cloudSyncClassifierSuppressesNotAuthenticatedFailureAsUserVisibleRuntimeError() {
+        let summary = makeCloudSyncSummary(
+            type: .import,
+            status: .failed,
+            error: CloudSyncErrorSnapshot(
+                domain: CKError.errorDomain,
+                code: CKError.Code.notAuthenticated.rawValue,
+                underlyingDomain: nil,
+                underlyingCode: nil,
+                description: "Not authenticated."
+            )
+        )
+
+        let resolution = CloudSyncEventHealthClassifier.resolution(for: summary)
+        #expect(resolution == .noChange)
+        #expect(CloudSyncEventHealthClassifier.suppressesUserVisibleFailure(summary))
     }
 
     @Test

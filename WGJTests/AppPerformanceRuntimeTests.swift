@@ -61,6 +61,100 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
+    func historyInitialLocalStateLoadCanIncludeCollapsedRowsForBackgroundWarmScrollState() {
+        let first = UUID()
+        let second = UUID()
+        let third = UUID()
+
+        let exerciseIDs = HistoryExerciseHydrationPlanner.initialLocalStateExerciseIDs(
+            orderedExerciseIDs: [first, second, third],
+            expandedExerciseIDs: [first: true, second: false, third: true],
+            includeCollapsedRows: true,
+            limit: nil
+        )
+
+        #expect(exerciseIDs == Set([first, second, third]))
+    }
+
+    @Test
+    func historyInteractionStampTracksScalarExerciseChangesWithoutSetMetadata() {
+        let exerciseID = UUID()
+        let base = HistoryExerciseInteractionStamp.Entry(
+            id: exerciseID,
+            updatedAt: Date(timeIntervalSinceReferenceDate: 10),
+            restSeconds: 90,
+            targetRepMin: 8,
+            targetRepMax: 12
+        )
+        let initial = HistoryExerciseInteractionStamp(entries: [base])
+
+        #expect(initial.changedExerciseIDs(comparedTo: nil) == Set([exerciseID]))
+        #expect(initial.changedExerciseIDs(comparedTo: initial).isEmpty)
+
+        let changed = HistoryExerciseInteractionStamp(entries: [
+            HistoryExerciseInteractionStamp.Entry(
+                id: exerciseID,
+                updatedAt: Date(timeIntervalSinceReferenceDate: 11),
+                restSeconds: 90,
+                targetRepMin: 8,
+                targetRepMax: 12
+            ),
+        ])
+
+        #expect(changed.changedExerciseIDs(comparedTo: initial) == Set([exerciseID]))
+    }
+
+    @Test
+    func activeWorkoutInteractionStampTracksUserVisibleScalarChangesWithoutSetOrComponentMetadata() {
+        let exerciseID = UUID()
+        let base = ActiveWorkoutExerciseInteractionStamp.Entry(
+            id: exerciseID,
+            catalogExerciseUUID: "bench-press",
+            restSeconds: 120,
+            targetRepMin: nil,
+            targetRepMax: nil,
+            supersetGroupID: nil,
+            supersetPositionRaw: nil
+        )
+        let initial = ActiveWorkoutExerciseInteractionStamp(entries: [base])
+
+        #expect(initial.changedExerciseIDs(comparedTo: nil) == Set([exerciseID]))
+        #expect(initial.changedExerciseIDs(comparedTo: initial).isEmpty)
+
+        let changed = ActiveWorkoutExerciseInteractionStamp(entries: [
+            ActiveWorkoutExerciseInteractionStamp.Entry(
+                id: exerciseID,
+                catalogExerciseUUID: "bench-press",
+                restSeconds: 90,
+                targetRepMin: 8,
+                targetRepMax: nil,
+                supersetGroupID: nil,
+                supersetPositionRaw: nil
+            ),
+        ])
+
+        #expect(changed.changedExerciseIDs(comparedTo: initial) == Set([exerciseID]))
+    }
+
+    @Test
+    func activeWorkoutInteractionStampInvalidationRefreshesCurrentExercisesWithoutTimestampChurn() {
+        let exerciseID = UUID()
+        let entry = ActiveWorkoutExerciseInteractionStamp.Entry(
+            id: exerciseID,
+            catalogExerciseUUID: "bench-press",
+            restSeconds: 120,
+            targetRepMin: nil,
+            targetRepMax: nil,
+            supersetGroupID: nil,
+            supersetPositionRaw: nil
+        )
+        let initial = ActiveWorkoutExerciseInteractionStamp(entries: [entry], invalidation: 0)
+        let invalidated = ActiveWorkoutExerciseInteractionStamp(entries: [entry], invalidation: 1)
+
+        #expect(invalidated.changedExerciseIDs(comparedTo: initial) == Set([exerciseID]))
+    }
+
+    @Test
     func resumeCriticalMaintenanceSkipsWhenActiveWorkoutIsAlreadyKnown() {
         let shouldRun = AppMaintenancePolicy.shouldRunResumeCritical(
             appPhase: .main,
@@ -404,15 +498,32 @@ struct AppPerformanceRuntimeTests {
 
     @MainActor
     @Test
-    func presentingCollapsedActiveWorkoutClearsStaleScrollTarget() {
+    func presentingCollapsedActiveWorkoutPreservesScrollTargetForSameSession() {
         let sessionID = UUID()
-        let staleExerciseID = UUID()
+        let exerciseID = UUID()
         let state = ActiveWorkoutPresentationState()
 
         state.present(sessionID: sessionID)
-        state.scrollTarget = .exercise(staleExerciseID)
+        state.scrollTarget = .exercise(exerciseID)
         state.collapseActiveWorkout()
         state.present(sessionID: sessionID)
+
+        #expect(state.scrollTarget == .exercise(exerciseID))
+        #expect(state.isActiveWorkoutPresented)
+        #expect(!state.isActiveWorkoutStripCollapsed)
+    }
+
+    @MainActor
+    @Test
+    func presentingDifferentActiveWorkoutClearsScrollTarget() {
+        let firstSessionID = UUID()
+        let secondSessionID = UUID()
+        let exerciseID = UUID()
+        let state = ActiveWorkoutPresentationState()
+
+        state.present(sessionID: firstSessionID)
+        state.scrollTarget = .exercise(exerciseID)
+        state.present(sessionID: secondSessionID)
 
         #expect(state.scrollTarget == nil)
         #expect(state.isActiveWorkoutPresented)

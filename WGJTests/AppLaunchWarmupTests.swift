@@ -569,14 +569,14 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
-    func asyncCloudStartupPreflightUsesLocalFallbackForTimedOutStatus() async {
+    func asyncCloudStartupPreflightKeepsCloudBackedStoreForTransientStartupStatus() async {
         let decision = await CloudStartupPreflight.makeDecisionAsync(
             statusProvider: MockAsyncCloudStartupAccountStatusProvider(status: .timedOut)
         )
 
-        #expect(decision.storeMode == .localFallback)
-        #expect(decision.cloudSyncEnabled == false)
-        #expect(decision.cloudSyncErrorDescription?.contains("timed out") == true)
+        #expect(decision.storeMode == .cloudBacked)
+        #expect(decision.cloudSyncEnabled)
+        #expect(decision.cloudSyncErrorDescription == nil)
     }
 
     @Test
@@ -617,7 +617,7 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
-    func appLaunchBootstrapResolverBuildsLocalFallbackForTimedOutStartupStatus() async throws {
+    func appLaunchBootstrapResolverKeepsCloudBackedStoreForTimedOutStartupStatus() async throws {
         let container = try makeContainer()
         var didRequestCloudContainer = false
         var didRequestLocalFallback = false
@@ -626,10 +626,8 @@ struct AppLaunchWarmupTests {
             processInfo: MockProcessInfo(arguments: []),
             canUseConfiguredCloudKitContainer: true,
             startupDecisionProvider: {
-                CloudStartupDecision(
-                    accountStatus: .timedOut,
-                    storeMode: .localFallback,
-                    cloudSyncErrorDescription: "The iCloud account check timed out during launch. Using local-only mode for this session."
+                await CloudStartupPreflight.makeDecisionAsync(
+                    statusProvider: MockAsyncCloudStartupAccountStatusProvider(status: .timedOut)
                 )
             },
             makeUITestContainer: {
@@ -647,10 +645,10 @@ struct AppLaunchWarmupTests {
             describeError: { _ in "unreachable" }
         )
 
-        #expect(bootstrap.cloudSyncEnabled == false)
-        #expect(bootstrap.cloudSyncErrorDescription?.contains("timed out") == true)
-        #expect(!didRequestCloudContainer)
-        #expect(didRequestLocalFallback)
+        #expect(bootstrap.cloudSyncEnabled)
+        #expect(bootstrap.cloudSyncErrorDescription == nil)
+        #expect(didRequestCloudContainer)
+        #expect(!didRequestLocalFallback)
     }
 
     @Test
@@ -745,6 +743,49 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
+    func appLaunchBootstrapResolverRecognizesUITestLaunchArgumentsWithoutXCTestEnvironment() async throws {
+        let container = try makeContainer()
+        var didRunStartupPreflight = false
+        var didRequestCloudContainer = false
+        var didRequestLocalFallback = false
+
+        let bootstrap = try await AppLaunchBootstrapResolver.resolve(
+            processInfo: MockProcessInfo(
+                arguments: ["UITEST_SKIP_SPLASH", "UITEST_ENABLE_ICLOUD"],
+                environment: [:]
+            ),
+            canUseConfiguredCloudKitContainer: true,
+            startupDecisionProvider: {
+                didRunStartupPreflight = true
+                return CloudStartupDecision(
+                    accountStatus: .temporarilyUnavailable,
+                    storeMode: .localFallback,
+                    cloudSyncErrorDescription: "unreachable"
+                )
+            },
+            makeUITestContainer: {
+                Issue.record("UI test container should not be requested.")
+                return container
+            },
+            makeCloudBackedContainer: {
+                didRequestCloudContainer = true
+                return container
+            },
+            makeLocalFallbackContainer: {
+                didRequestLocalFallback = true
+                return container
+            },
+            describeError: { _ in "unreachable" }
+        )
+
+        #expect(bootstrap.cloudSyncEnabled)
+        #expect(bootstrap.cloudSyncErrorDescription == nil)
+        #expect(!didRunStartupPreflight)
+        #expect(didRequestCloudContainer)
+        #expect(!didRequestLocalFallback)
+    }
+
+    @Test
     func appLaunchBootstrapResolverDoesNotTrustICloudUITestOptInOutsideXCTest() async throws {
         let container = try makeContainer()
         var didRunStartupPreflight = false
@@ -760,9 +801,9 @@ struct AppLaunchWarmupTests {
             startupDecisionProvider: {
                 didRunStartupPreflight = true
                 return CloudStartupDecision(
-                    accountStatus: .timedOut,
+                    accountStatus: .noAccount,
                     storeMode: .localFallback,
-                    cloudSyncErrorDescription: "The iCloud account check timed out during launch. Using local-only mode for this session."
+                    cloudSyncErrorDescription: "No iCloud account is signed in on this device. Using local-only mode for this session."
                 )
             },
             makeUITestContainer: {
@@ -781,7 +822,7 @@ struct AppLaunchWarmupTests {
         )
 
         #expect(bootstrap.cloudSyncEnabled == false)
-        #expect(bootstrap.cloudSyncErrorDescription?.contains("timed out") == true)
+        #expect(bootstrap.cloudSyncErrorDescription?.contains("No iCloud account") == true)
         #expect(didRunStartupPreflight)
         #expect(!didRequestCloudContainer)
         #expect(didRequestLocalFallback)

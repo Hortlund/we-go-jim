@@ -1,3 +1,4 @@
+import CloudKit
 import Dispatch
 import Foundation
 import Testing
@@ -5,7 +6,7 @@ import Testing
 
 struct UserDataSyncTrackerTests {
     @Test
-    func cloudStartupPreflightForcesLocalFallbackWheneverLaunchDecisionUsesLocalStore() {
+    func cloudStartupPreflightOnlyForcesLocalFallbackForDefinitiveLocalOnlyStatuses() {
         let definitiveStatuses: [CloudStartupAccountStatus] = [
             .noAccount,
             .restricted,
@@ -32,8 +33,9 @@ struct UserDataSyncTrackerTests {
                 statusProvider: MockCloudStartupAccountStatusProvider(status: status)
             )
 
-            #expect(decision.shouldForceLocalFallbackStore)
-            #expect(decision.storeMode == .localFallback)
+            #expect(!decision.shouldForceLocalFallbackStore)
+            #expect(decision.storeMode == .cloudBacked)
+            #expect(decision.cloudSyncErrorDescription == nil)
         }
     }
 
@@ -68,16 +70,16 @@ struct UserDataSyncTrackerTests {
                 startedAt: Date(timeIntervalSinceReferenceDate: 30),
                 endedAt: Date(timeIntervalSinceReferenceDate: 31),
                 error: CloudSyncErrorSnapshot(
-                    domain: NSCocoaErrorDomain,
-                    code: 134400,
+                    domain: CKError.errorDomain,
+                    code: CKError.Code.permissionFailure.rawValue,
                     underlyingDomain: nil,
                     underlyingCode: nil,
-                    description: "Unable to initialize without an iCloud account."
+                    description: "CloudKit permission failure."
                 )
             )
         )
         #expect(degraded.state == .degraded)
-        #expect(degraded.latestErrorDescription?.contains("iCloud account") == true)
+        #expect(degraded.latestErrorDescription?.contains("permission") == true)
 
         let recovered = tracker.recordCloudEvent(
             makeCloudSyncSummary(
@@ -89,6 +91,46 @@ struct UserDataSyncTrackerTests {
         )
         #expect(recovered.state == .caughtUp)
         #expect(recovered.latestSuccessfulImportAt == Date(timeIntervalSinceReferenceDate: 41))
+    }
+
+    @Test
+    func userDataSyncTrackerDoesNotDegradeForAccountAuthFrameworkEvents() {
+        let tracker = UserDataSyncTracker.shared
+
+        let configured = tracker.configureForLaunch(isCloudEnabled: true, errorDescription: nil)
+        #expect(configured.state == .caughtUp)
+
+        let noAccount = tracker.recordCloudEvent(
+            makeCloudSyncSummary(
+                type: .setup,
+                status: .failed,
+                error: CloudSyncErrorSnapshot(
+                    domain: NSCocoaErrorDomain,
+                    code: 134400,
+                    underlyingDomain: nil,
+                    underlyingCode: nil,
+                    description: "Unable to initialize without an iCloud account."
+                )
+            )
+        )
+        #expect(noAccount.state == .caughtUp)
+        #expect(noAccount.latestErrorDescription == nil)
+
+        let notAuthenticated = tracker.recordCloudEvent(
+            makeCloudSyncSummary(
+                type: .import,
+                status: .failed,
+                error: CloudSyncErrorSnapshot(
+                    domain: CKError.errorDomain,
+                    code: CKError.Code.notAuthenticated.rawValue,
+                    underlyingDomain: nil,
+                    underlyingCode: nil,
+                    description: "Not authenticated."
+                )
+            )
+        )
+        #expect(notAuthenticated.state == .caughtUp)
+        #expect(notAuthenticated.latestErrorDescription == nil)
     }
 
     private func makeCloudSyncSummary(

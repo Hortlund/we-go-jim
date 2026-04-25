@@ -23,7 +23,7 @@ struct HistoryDetailView: View {
     @State private var notesByExerciseID: [UUID: String] = [:]
     @State private var hydrationPayloadByExerciseID: [UUID: HistoryExerciseHydrationPayload] = [:]
     @State private var personalRecordPresentationByExerciseID: [UUID: HistoryExercisePersonalRecordPresentation] = [:]
-    @State private var loadedExerciseStateStamp: HistoryExerciseStateStamp?
+    @State private var loadedExerciseStateStamp: HistoryExerciseInteractionStamp?
     @State private var deferredHydrationTask: Task<Void, Never>?
     @State private var expandedExerciseIDs: [UUID: Bool] = [:]
     @State private var hasPendingSummaryRebuild = false
@@ -164,8 +164,18 @@ struct HistoryDetailView: View {
     }
 
     @MainActor
-    private var historyExerciseStateStamp: HistoryExerciseStateStamp {
-        HistoryExerciseStateStamp(exercises: sessionExercises)
+    private var historyExerciseStateStamp: HistoryExerciseInteractionStamp {
+        HistoryExerciseInteractionStamp(
+            entries: sessionExercises.map { exercise in
+                HistoryExerciseInteractionStamp.Entry(
+                    id: exercise.id,
+                    updatedAt: exercise.updatedAt,
+                    restSeconds: exercise.restSeconds,
+                    targetRepMin: exercise.targetRepMin,
+                    targetRepMax: exercise.targetRepMax
+                )
+            }
+        )
     }
 
     private var exercisesSectionHeader: some View {
@@ -297,7 +307,7 @@ struct HistoryDetailView: View {
     }
 
     @MainActor
-    private func loadExerciseStateIfNeeded(stamp currentStamp: HistoryExerciseStateStamp) async {
+    private func loadExerciseStateIfNeeded(stamp currentStamp: HistoryExerciseInteractionStamp) async {
         let previousStamp = loadedExerciseStateStamp
         let changedExerciseIDs = currentStamp.changedExerciseIDs(comparedTo: previousStamp)
         let removedExerciseIDs = previousStamp.map {
@@ -327,7 +337,9 @@ struct HistoryDetailView: View {
         let localStateExerciseIDs = previousStamp == nil
             ? HistoryExerciseHydrationPlanner.initialLocalStateExerciseIDs(
                 orderedExerciseIDs: sessionExercises.map(\.id),
-                expandedExerciseIDs: expandedExerciseIDs
+                expandedExerciseIDs: expandedExerciseIDs,
+                includeCollapsedRows: appBackgroundStore != nil,
+                limit: appBackgroundStore == nil ? 1 : nil
             )
             : exerciseIDsToRefresh
 
@@ -464,14 +476,15 @@ struct HistoryDetailView: View {
     @ViewBuilder
     private func exerciseSection(_ exercise: WorkoutSessionExercise, index: Int) -> some View {
         let isExpanded = expandedExerciseIDs[exercise.id] ?? false
-        let drafts = setDraftsByExerciseID[exercise.id] ?? makeDrafts(from: exercise)
+        let hasLoadedLocalState = setDraftsByExerciseID.keys.contains(exercise.id)
+        let drafts = setDraftsByExerciseID[exercise.id] ?? []
         let restSeconds = restByExerciseID[exercise.id] ?? exercise.restSeconds
         let hydrationPayload = hydrationPayloadByExerciseID[exercise.id]
 
         VStack(alignment: .leading, spacing: 8) {
             exerciseStructureBadgeRow(for: exercise, drafts: drafts)
 
-            if isExpanded {
+            if isExpanded, hasLoadedLocalState {
                 WorkoutExerciseRowHostView(
                     exerciseID: exercise.id,
                     exerciseAccessibilityIdentifier: "history-exercise-\(exercise.catalogExerciseUUID)",
@@ -504,12 +517,27 @@ struct HistoryDetailView: View {
                     },
                     flushCoordinator: rowFlushCoordinator
                 )
+            } else if isExpanded {
+                HistoryExerciseLoadingCard(
+                    exerciseAccessibilityIdentifier: "history-exercise-\(exercise.catalogExerciseUUID)",
+                    exerciseName: exercise.exerciseNameSnapshot,
+                    muscleSummary: exercise.muscleSummarySnapshot,
+                    category: exercise.categorySnapshot,
+                    exerciseIndexTitle: "Exercise \(index + 1)",
+                    onCollapse: {
+                        handleExpandedChange(false, for: exercise.id)
+                    },
+                    onDelete: {
+                        removeExercise(exerciseID: exercise.id)
+                    }
+                )
+                .equatable()
             } else {
                 let collapsedSummary = HistoryExerciseCollapsedSummary(
                     targetRepMin: exercise.targetRepMin,
                     targetRepMax: exercise.targetRepMax,
-                    completedSetCount: drafts.filter(\.isCycleCompleted).count,
-                    totalSetCount: drafts.count,
+                    completedSetCount: hasLoadedLocalState ? drafts.filter(\.isCycleCompleted).count : nil,
+                    totalSetCount: hasLoadedLocalState ? drafts.count : nil,
                     restSeconds: restSeconds,
                     notes: notesByExerciseID[exercise.id] ?? exercise.notes
                 )
@@ -528,6 +556,7 @@ struct HistoryDetailView: View {
                         removeExercise(exerciseID: exercise.id)
                     }
                 )
+                .equatable()
             }
         }
     }
@@ -575,7 +604,7 @@ struct HistoryDetailView: View {
 
     @MainActor
     private func scheduleDeferredHydration(
-        for stamp: HistoryExerciseStateStamp,
+        for stamp: HistoryExerciseInteractionStamp,
         draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
     ) {
         let exerciseIDsToHydrate = HistoryExerciseHydrationPlanner.pendingExerciseIDs(
@@ -1008,72 +1037,6 @@ private struct HistorySaveCommand: Sendable {
     let exerciseSnapshotsByID: [UUID: HistoryExerciseSaveSnapshot]
 }
 
-private struct HistoryExerciseStateStamp: Hashable {
-    private let entries: [Entry]
-    private let entriesByID: [UUID: Entry]
-    private let exercisesByID: [UUID: WorkoutSessionExercise]
-
-    @MainActor
-    init(exercises: [WorkoutSessionExercise]) {
-        entries = exercises.map(Entry.init(exercise:))
-        entriesByID = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0) })
-        exercisesByID = Dictionary(uniqueKeysWithValues: exercises.map { ($0.id, $0) })
-    }
-
-    var exerciseIDs: Set<UUID> {
-        Set(entries.map(\.id))
-    }
-
-    func exercise(for exerciseID: UUID) -> WorkoutSessionExercise? {
-        exercisesByID[exerciseID]
-    }
-
-    func changedExerciseIDs(comparedTo previous: HistoryExerciseStateStamp?) -> Set<UUID> {
-        guard let previous else {
-            return exerciseIDs
-        }
-
-        var changed = exerciseIDs.symmetricDifference(previous.exerciseIDs)
-
-        for exerciseID in exerciseIDs.intersection(previous.exerciseIDs) {
-            guard entriesByID[exerciseID] != previous.entriesByID[exerciseID] else {
-                continue
-            }
-            changed.insert(exerciseID)
-        }
-
-        return changed
-    }
-
-    static func == (lhs: HistoryExerciseStateStamp, rhs: HistoryExerciseStateStamp) -> Bool {
-        lhs.entries == rhs.entries
-    }
-
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(entries)
-    }
-
-    private struct Entry: Hashable {
-        let id: UUID
-        let exerciseUpdatedAt: TimeInterval
-        let restSeconds: Int
-        let setCount: Int
-        let latestSetUpdate: TimeInterval
-
-        @MainActor
-        init(exercise: WorkoutSessionExercise) {
-            id = exercise.id
-            exerciseUpdatedAt = exercise.updatedAt.timeIntervalSinceReferenceDate
-            restSeconds = exercise.restSeconds
-            let sets = exercise.sets ?? []
-            setCount = sets.count
-            latestSetUpdate = sets
-                .map { $0.updatedAt.timeIntervalSinceReferenceDate }
-                .max() ?? 0
-        }
-    }
-}
-
 nonisolated struct HistoryExercisePersonalRecordPresentation: Equatable, Sendable {
     let summaryKinds: [WorkoutPersonalRecordKind]
     let setKindsBySetID: [UUID: [WorkoutPersonalRecordKind]]
@@ -1126,8 +1089,8 @@ private struct HistoryWorkoutPersonalRecordSummary {
 private struct HistoryExerciseCollapsedSummary: Equatable {
     let targetRepMin: Int?
     let targetRepMax: Int?
-    let completedSetCount: Int
-    let totalSetCount: Int
+    let completedSetCount: Int?
+    let totalSetCount: Int?
     let restSeconds: Int
     let notes: String
 
@@ -1145,7 +1108,11 @@ private struct HistoryExerciseCollapsedSummary: Equatable {
     }
 
     var setProgressText: String {
-        "\(completedSetCount)/\(totalSetCount) sets"
+        guard let completedSetCount, let totalSetCount else {
+            return "Loading sets"
+        }
+
+        return "\(completedSetCount)/\(totalSetCount) sets"
     }
 
     var restText: String {
@@ -1161,6 +1128,108 @@ private struct HistoryExerciseCollapsedSummary: Equatable {
     var trimmedNotes: String? {
         let trimmed = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+private struct HistoryExerciseLoadingCard: View, Equatable {
+    let exerciseAccessibilityIdentifier: String
+    let exerciseName: String
+    let muscleSummary: String
+    let category: String
+    let exerciseIndexTitle: String
+    let onCollapse: () -> Void
+    let onDelete: () -> Void
+
+    static func == (lhs: HistoryExerciseLoadingCard, rhs: HistoryExerciseLoadingCard) -> Bool {
+        lhs.exerciseAccessibilityIdentifier == rhs.exerciseAccessibilityIdentifier
+            && lhs.exerciseName == rhs.exerciseName
+            && lhs.muscleSummary == rhs.muscleSummary
+            && lhs.category == rhs.category
+            && lhs.exerciseIndexTitle == rhs.exerciseIndexTitle
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(exerciseIndexTitle.uppercased())
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(WGJTheme.accentCyan)
+
+                    Text(exerciseName)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(WGJTheme.accentBlue)
+                        .wgjSingleLineText(scale: 0.8)
+                        .accessibilityIdentifier(exerciseAccessibilityIdentifier)
+
+                    Text(summaryLine)
+                        .font(.subheadline)
+                        .foregroundStyle(WGJTheme.textSecondary)
+                        .lineLimit(2)
+
+                    Text("Loading sets")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(WGJTheme.textSecondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule()
+                                .fill(WGJTheme.field)
+                                .overlay(
+                                    Capsule()
+                                        .stroke(WGJTheme.outline.opacity(0.24), lineWidth: 1)
+                                )
+                        )
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
+
+                Spacer(minLength: 12)
+
+                VStack(spacing: 8) {
+                    Menu {
+                        Button(role: .destructive, action: onDelete) {
+                            Label("Delete exercise", systemImage: "trash")
+                        }
+                    } label: {
+                        headerIcon(symbol: "ellipsis.circle")
+                    }
+                    .menuIndicator(.hidden)
+                    .accessibilityIdentifier("\(exerciseAccessibilityIdentifier)-actions-button")
+
+                    Button(action: onCollapse) {
+                        headerIcon(symbol: "chevron.up.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("\(exerciseAccessibilityIdentifier)-expand-button")
+                }
+            }
+        }
+        .padding(16)
+        .wgjCardContainer(strong: true)
+    }
+
+    private var summaryLine: String {
+        if !muscleSummary.isEmpty {
+            return muscleSummary
+        }
+
+        if !category.isEmpty {
+            return category
+        }
+
+        return "Saved exercise"
+    }
+
+    private func headerIcon(symbol: String) -> some View {
+        Image(systemName: symbol)
+            .font(.title3)
+            .foregroundStyle(WGJTheme.accentBlue)
+            .frame(width: 34, height: 34)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(WGJTheme.field)
+            )
     }
 }
 

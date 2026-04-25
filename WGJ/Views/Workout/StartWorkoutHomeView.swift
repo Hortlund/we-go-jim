@@ -858,9 +858,12 @@ struct StartWorkoutHomeView: View {
     }
 
     private func resumeConflictingActiveWorkout() {
-        guard let conflictingActiveSessionID else { return }
-        activeWorkoutPresentationState.present(sessionID: conflictingActiveSessionID)
+        guard let sessionID = conflictingActiveSessionID else { return }
         clearActiveWorkoutConflict()
+        Task { @MainActor in
+            await Task.yield()
+            activeWorkoutPresentationState.present(sessionID: sessionID)
+        }
     }
 
     private func clearActiveWorkoutConflict() {

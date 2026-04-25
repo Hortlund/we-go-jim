@@ -70,14 +70,14 @@ struct AccountStatusService: AccountStatusProviding {
             case .restricted:
                 return .unavailable(.restricted)
             case .temporarilyUnavailable:
-                return .unavailable(.temporarilyUnavailable)
+                return .available
             case .couldNotDetermine:
-                return .unavailable(.unknown)
+                return .available
             @unknown default:
-                return .unavailable(.unknown)
+                return .available
             }
         } catch {
-            return .unavailable(.unknown)
+            return .available
         }
     }
 }

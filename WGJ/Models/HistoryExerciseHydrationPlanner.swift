@@ -4,11 +4,16 @@ enum HistoryExerciseHydrationPlanner {
     static func initialLocalStateExerciseIDs(
         orderedExerciseIDs: [UUID],
         expandedExerciseIDs: [UUID: Bool],
-        limit: Int = 1
+        includeCollapsedRows: Bool = false,
+        limit: Int? = 1
     ) -> Set<UUID> {
-        WorkoutExerciseHydrationPlanner.orderedExerciseIDsToHydrate(
+        let eligibleExerciseIDs = includeCollapsedRows
+            ? Set(orderedExerciseIDs)
+            : Set(orderedExerciseIDs.filter { expandedExerciseIDs[$0] == true })
+
+        return WorkoutExerciseHydrationPlanner.orderedExerciseIDsToHydrate(
             orderedExerciseIDs: orderedExerciseIDs,
-            eligibleExerciseIDs: Set(orderedExerciseIDs.filter { expandedExerciseIDs[$0] == true }),
+            eligibleExerciseIDs: eligibleExerciseIDs,
             limit: limit
         )
     }
