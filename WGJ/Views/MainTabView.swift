@@ -21,6 +21,10 @@ struct MainTabView: View {
         WGJMotion.overlayAnimation(reduceMotion: reduceMotion)
     }
 
+    private var syncBannerAnimation: Animation {
+        reduceMotion ? .easeOut(duration: 0.01) : .smooth(duration: 0.36, extraBounce: 0.10)
+    }
+
     var body: some View {
         @Bindable var tabState = tabState
         @Bindable var workoutCompletionPresentationState = workoutCompletionPresentationState
@@ -71,8 +75,8 @@ struct MainTabView: View {
                     .animation(overlayAnimation, value: isKeyboardVisible)
 
                 syncBannerChrome(topSafeAreaInset: topSafeAreaInset)
-                    .animation(overlayAnimation, value: shouldShowSyncBanner)
-                    .animation(overlayAnimation, value: isKeyboardVisible)
+                    .animation(syncBannerAnimation, value: shouldShowSyncBanner)
+                    .animation(syncBannerAnimation, value: isKeyboardVisible)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             .onPreferenceChange(ActiveWorkoutStripHeightPreferenceKey.self) { newValue in
@@ -209,20 +213,20 @@ struct MainTabView: View {
                !activeWorkoutPresentationState.isActiveWorkoutPresented,
                !isKeyboardVisible
             {
-                WGJTransientBanner(
+                WGJTopAttachedSyncBanner(
                     title: syncBannerTitle,
                     message: syncBannerMessage,
                     icon: "arrow.triangle.2.circlepath.icloud.fill",
-                    tint: WGJTheme.accentBlue
+                    tint: WGJTheme.accentBlue,
+                    topSafeAreaInset: topSafeAreaInset
                 )
-                .padding(.horizontal, WGJSpacing.page)
-                .padding(.top, topSafeAreaInset + 8)
                 .transition(.move(edge: .top).combined(with: .opacity))
                 .accessibilityIdentifier("user-data-sync-banner")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .allowsHitTesting(false)
+        .ignoresSafeArea(.container, edges: .top)
     }
 
     private var shouldShowSyncBanner: Bool {
@@ -254,6 +258,92 @@ struct MainTabView: View {
         return bottomSafeAreaInset + 72
     }
 
+}
+
+private struct WGJTopAttachedSyncBanner: View {
+    let title: String
+    let message: String?
+    let icon: String
+    let tint: Color
+    let topSafeAreaInset: CGFloat
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Color.clear
+                .frame(height: max(topSafeAreaInset, 0))
+
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(tint)
+                    .frame(width: 42, height: 42)
+                    .background {
+                        Circle()
+                            .fill(tint.opacity(0.14))
+                    }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(WGJTheme.textPrimary)
+                        .wgjSingleLineText(scale: 0.82)
+
+                    if let message, !message.isEmpty {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(WGJTheme.textSecondary)
+                            .wgjSingleLineText(scale: 0.8)
+                    }
+                }
+
+                Spacer(minLength: 12)
+            }
+            .padding(.horizontal, WGJSpacing.page)
+            .padding(.top, 10)
+            .padding(.bottom, 14)
+        }
+        .frame(maxWidth: .infinity, alignment: .top)
+        .background {
+            UnevenRoundedRectangle(
+                topLeadingRadius: 0,
+                bottomLeadingRadius: 24,
+                bottomTrailingRadius: 24,
+                topTrailingRadius: 0,
+                style: .continuous
+            )
+            .fill(WGJTheme.cardStrong.opacity(0.97))
+            .overlay {
+                UnevenRoundedRectangle(
+                    topLeadingRadius: 0,
+                    bottomLeadingRadius: 24,
+                    bottomTrailingRadius: 24,
+                    topTrailingRadius: 0,
+                    style: .continuous
+                )
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            tint.opacity(0.13),
+                            Color.clear,
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+            }
+            .overlay {
+                UnevenRoundedRectangle(
+                    topLeadingRadius: 0,
+                    bottomLeadingRadius: 24,
+                    bottomTrailingRadius: 24,
+                    topTrailingRadius: 0,
+                    style: .continuous
+                )
+                .stroke(tint.opacity(0.24), lineWidth: 1)
+            }
+            .shadow(color: WGJTheme.shadowStrong.opacity(0.55), radius: 18, x: 0, y: 10)
+        }
+    }
 }
 
 private struct ActiveWorkoutStripHeightPreferenceKey: PreferenceKey {
