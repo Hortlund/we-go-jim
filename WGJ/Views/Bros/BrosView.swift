@@ -867,7 +867,7 @@ struct BrosView: View {
             )
         }
         .wgjScreenBackground()
-        .accessibilityIdentifier("bros-first-shell")
+        .accessibilityIdentifier("bros-content-root")
         .toolbar(.hidden, for: .navigationBar)
         .task(id: isTabActive) {
             guard isTabActive else {
@@ -1051,6 +1051,7 @@ struct BrosView: View {
         .padding(WGJSpacing.card)
         .frame(maxWidth: .infinity, alignment: .leading)
         .wgjCardContainer(strong: true)
+        .accessibilityIdentifier("bros-loading-card")
     }
 
     private func unavailableCard(message: String) -> some View {

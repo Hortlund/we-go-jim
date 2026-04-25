@@ -398,21 +398,29 @@ private struct ProfileFirstFrameShellView: View {
             LazyVStack(alignment: .leading, spacing: 16) {
                 WGJRootHeader("Profile", subtitle: "Your training snapshot, progress, and app controls.")
 
-                placeholderCard(title: "Preparing profile", subtitle: "Loading your profile shell.")
+                placeholderCard(
+                    title: "Preparing profile",
+                    subtitle: "Loading your profile shell.",
+                    accessibilityID: "profile-first-shell"
+                )
                 placeholderCard(title: "Highlights", subtitle: "Stats will fill in after the first frame.")
             }
             .padding(.top, 8)
             .padding(16)
         }
         .wgjScreenBackground()
-        .accessibilityIdentifier("profile-first-shell")
     }
 
-    private func placeholderCard(title: String, subtitle: String) -> some View {
+    private func placeholderCard(
+        title: String,
+        subtitle: String,
+        accessibilityID: String? = nil
+    ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             WGJActionHeader(title, subtitle: subtitle) {
-                ProgressView()
-                    .progressViewStyle(.circular)
+                Image(systemName: "ellipsis")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(WGJTheme.textSecondary)
             }
 
             VStack(spacing: 8) {
@@ -425,6 +433,8 @@ private struct ProfileFirstFrameShellView: View {
         }
         .padding(14)
         .wgjCardContainer(strong: true)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(accessibilityID ?? "")
     }
 }
 
@@ -435,8 +445,14 @@ private struct BrosFirstFrameShellView: View {
                 WGJRootHeader("Bros", subtitle: "Private feed and PR updates for your circle.")
 
                 VStack(alignment: .leading, spacing: 12) {
-                    ProgressView()
-                        .progressViewStyle(.circular)
+                    Image(systemName: "person.3.sequence.fill")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(WGJTheme.accentBlue)
+                        .frame(width: 42, height: 42)
+                        .background {
+                            Circle()
+                                .fill(WGJTheme.accentBlue.opacity(0.14))
+                        }
 
                     Text("Loading your bro circle")
                         .font(.headline.weight(.semibold))
@@ -449,13 +465,14 @@ private struct BrosFirstFrameShellView: View {
                 .padding(WGJSpacing.card)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .wgjCardContainer(strong: true)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("bros-first-shell")
             }
             .padding(WGJSpacing.page)
             .padding(.top, 8)
             .padding(.bottom, 12)
         }
         .wgjScreenBackground()
-        .accessibilityIdentifier("bros-first-shell")
     }
 }
 
@@ -470,7 +487,9 @@ private struct LazyTabContainer<Content: View, FirstFrameShell: View>: View {
     @State private var hasLoaded = false
     @State private var isInitialContentMountReady = false
     @State private var hasPresentedFirstFrameShell = false
+    @State private var isSelectionObservationReady = false
     @State private var initialContentMountTask: Task<Void, Never>?
+    @State private var selectionObservationTask: Task<Void, Never>?
 
     var body: some View {
         Group {
@@ -490,23 +509,58 @@ private struct LazyTabContainer<Content: View, FirstFrameShell: View>: View {
             }
         }
         .onAppear {
-            handleSelectionChange()
+            handleAppear()
         }
         .onChange(of: tabState.selectedTab) { _, _ in
-            handleSelectionChange()
+            guard !deferInitialContentMount || isSelectionObservationReady else { return }
+            handleSelectionChange(isSelectionChange: true)
         }
         .onDisappear {
             initialContentMountTask?.cancel()
             initialContentMountTask = nil
+            selectionObservationTask?.cancel()
+            selectionObservationTask = nil
         }
     }
 
-    private func handleSelectionChange() {
+    private func handleAppear() {
+        guard deferInitialContentMount else {
+            handleSelectionChange(isSelectionChange: false)
+            return
+        }
+
+        guard isSelectionObservationReady else {
+            scheduleSelectionObservationReadiness()
+            return
+        }
+
+        handleSelectionChange(isSelectionChange: true)
+    }
+
+    private func scheduleSelectionObservationReadiness() {
+        guard selectionObservationTask == nil else { return }
+        selectionObservationTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            isSelectionObservationReady = true
+            selectionObservationTask = nil
+            handleSelectionChange(isSelectionChange: true)
+        }
+    }
+
+    private func handleSelectionChange(isSelectionChange: Bool) {
         guard tabState.selectedTab == tab else {
             cancelPendingInitialContentMountIfNeeded()
             return
         }
         guard !hasLoaded else { return }
+
+        guard FirstFrameTabContentPolicy.shouldScheduleInitialContentMount(
+            isSelectionChange: isSelectionChange,
+            deferInitialContentMount: deferInitialContentMount
+        ) else {
+            return
+        }
 
         guard deferInitialContentMount else {
             markLoaded()
@@ -524,17 +578,56 @@ private struct LazyTabContainer<Content: View, FirstFrameShell: View>: View {
     private func scheduleInitialContentMount() {
         guard initialContentMountTask == nil else { return }
         initialContentMountTask = Task { @MainActor in
-            await Task.yield()
+            let delayMilliseconds = initialContentMountDelayMilliseconds()
+            if delayMilliseconds > 0 {
+                try? await Task.sleep(for: .milliseconds(delayMilliseconds))
+            } else {
+                await Task.yield()
+            }
             guard !Task.isCancelled, tabState.selectedTab == tab else {
                 initialContentMountTask = nil
                 return
             }
 
-            isInitialContentMountReady = true
-            markLoaded()
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                isInitialContentMountReady = true
+                markLoaded()
+            }
             initialContentMountTask = nil
         }
     }
+
+    private func initialContentMountDelayMilliseconds() -> Int {
+        let defaultDelay = FirstFrameTabContentPolicy.initialContentMountDelayMilliseconds(tab: tab)
+#if DEBUG
+        guard defaultDelay > 0,
+              let rawValue = Self.processOverrideValue(for: "UITEST_FIRST_TAB_CONTENT_MOUNT_DELAY_MS"),
+              let overrideDelay = Int(rawValue),
+              overrideDelay >= 0
+        else {
+            return defaultDelay
+        }
+
+        return overrideDelay
+#else
+        return defaultDelay
+#endif
+    }
+
+#if DEBUG
+    private static func processOverrideValue(for key: String) -> String? {
+        if let environmentValue = ProcessInfo.processInfo.environment[key] {
+            return environmentValue
+        }
+
+        let prefix = "\(key)="
+        return ProcessInfo.processInfo.arguments
+            .first { $0.hasPrefix(prefix) }
+            .map { String($0.dropFirst(prefix.count)) }
+    }
+#endif
 
     private func cancelPendingInitialContentMountIfNeeded() {
         guard !hasLoaded else { return }

@@ -58,7 +58,7 @@ struct ProfileView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .wgjScreenBackground()
-        .accessibilityIdentifier("profile-first-shell")
+        .accessibilityIdentifier("profile-content-root")
         .toolbar(.hidden, for: .navigationBar)
         .task(id: isTabActive) {
             guard isTabActive else { return }

@@ -219,6 +219,31 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
+    func firstFrameTabPolicyKeepsProfileAndBrosContentOutOfTabTransitionWindow() {
+        #expect(FirstFrameTabContentPolicy.initialContentMountDelayMilliseconds(tab: .profile) >= 350)
+        #expect(FirstFrameTabContentPolicy.initialContentMountDelayMilliseconds(tab: .bros) >= 350)
+        #expect(FirstFrameTabContentPolicy.initialContentMountDelayMilliseconds(tab: .history) == 0)
+        #expect(FirstFrameTabContentPolicy.initialContentMountDelayMilliseconds(tab: .startWorkout) == 0)
+        #expect(FirstFrameTabContentPolicy.initialContentMountDelayMilliseconds(tab: .exercises) == 0)
+    }
+
+    @Test
+    func firstFrameTabPolicyDoesNotScheduleDeferredContentFromTabAppear() {
+        #expect(!FirstFrameTabContentPolicy.shouldScheduleInitialContentMount(
+            isSelectionChange: false,
+            deferInitialContentMount: true
+        ))
+        #expect(FirstFrameTabContentPolicy.shouldScheduleInitialContentMount(
+            isSelectionChange: true,
+            deferInitialContentMount: true
+        ))
+        #expect(FirstFrameTabContentPolicy.shouldScheduleInitialContentMount(
+            isSelectionChange: false,
+            deferInitialContentMount: false
+        ))
+    }
+
+    @Test
     func startupWarmupGateWaitsForFastWarmups() async {
         let probe = WarmupGateProbe()
         let profileTask = Task {

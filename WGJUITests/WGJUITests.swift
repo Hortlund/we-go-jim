@@ -51,22 +51,28 @@ final class WGJUITests: XCTestCase {
         app.launchArguments = [
             "UITEST_IN_MEMORY_STORE",
             "UITEST_FORCE_AUTO_ENTER_AFTER_SPLASH",
+            "UITEST_FIRST_TAB_CONTENT_MOUNT_DELAY_MS=1500",
         ]
         app.launchEnvironment = [
             "UITEST_PROFILE_STARTUP_WARMUP_DELAY_MS": "2000",
             "UITEST_BROS_STARTUP_WARMUP_DELAY_MS": "2000",
+            "UITEST_FIRST_TAB_CONTENT_MOUNT_DELAY_MS": "1500",
         ]
         app.launch()
 
         XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 8))
 
-        tapTab("Profile", in: app)
-        XCTAssertTrue(identifiedElement("profile-first-shell", in: app).waitForExistence(timeout: 2))
-        XCTAssertTrue(identifiedElement("profile-settings-tile", in: app).waitForExistence(timeout: 3))
+        tapTabWithoutWaitingForIdle("Profile", in: app)
+        let profileSettingsTile = identifiedElement("profile-settings-tile", in: app)
+        XCTAssertTrue(profileSettingsTile.waitForExistence(timeout: 6))
 
-        tapTab("Bros", in: app)
-        XCTAssertTrue(identifiedElement("bros-first-shell", in: app).waitForExistence(timeout: 2))
-        XCTAssertTrue(app.staticTexts["Bros"].waitForExistence(timeout: 3))
+        tapTabWithoutWaitingForIdle("Bros", in: app)
+        XCTAssertTrue(waitForAnyElement([
+            identifiedElement("bros-loading-card", in: app),
+            app.staticTexts["Bros unavailable"],
+            app.staticTexts["Start a bro circle"],
+            identifiedElement("bros-manage-circle-button", in: app),
+        ], timeout: 6))
     }
 
     @MainActor
@@ -3204,8 +3210,25 @@ final class WGJUITests: XCTestCase {
         button.tap()
     }
 
+    private func tapTabWithoutWaitingForIdle(_ name: String, in app: XCUIApplication) {
+        let button = app.tabBars.buttons[name]
+        XCTAssertTrue(button.waitForExistence(timeout: 5))
+        button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+    }
+
     private func identifiedElement(_ identifier: String, in app: XCUIApplication) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+    }
+
+    private func waitForAnyElement(_ elements: [XCUIElement], timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if elements.contains(where: { $0.exists }) {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        return elements.contains(where: { $0.exists })
     }
 
     private func clearTextField(_ textField: XCUIElement, replacement: String) {

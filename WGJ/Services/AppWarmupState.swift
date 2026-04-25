@@ -139,6 +139,8 @@ nonisolated enum FirstFrameTabPresentation: Equatable, Sendable {
 }
 
 nonisolated enum FirstFrameTabContentPolicy {
+    private static let transitionSafeContentMountDelayMilliseconds = 450
+
     static func shouldDeferInitialContentMount(tab: AppMainTab) -> Bool {
         switch tab {
         case .profile, .bros:
@@ -146,6 +148,19 @@ nonisolated enum FirstFrameTabContentPolicy {
         case .history, .startWorkout, .exercises:
             return false
         }
+    }
+
+    static func initialContentMountDelayMilliseconds(tab: AppMainTab) -> Int {
+        shouldDeferInitialContentMount(tab: tab)
+            ? transitionSafeContentMountDelayMilliseconds
+            : 0
+    }
+
+    static func shouldScheduleInitialContentMount(
+        isSelectionChange: Bool,
+        deferInitialContentMount: Bool
+    ) -> Bool {
+        !deferInitialContentMount || isSelectionChange
     }
 
     static func presentation(
