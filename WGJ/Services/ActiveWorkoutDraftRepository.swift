@@ -608,7 +608,8 @@ nonisolated final class ActiveWorkoutDraftRepository {
         sessionNotes: String,
         dirtyExerciseIDs: Set<UUID>,
         snapshotsByExerciseID: [UUID: ActiveWorkoutExercisePersistenceSnapshot],
-        persistedSnapshotsByExerciseID: [UUID: ActiveWorkoutExercisePersistenceSnapshot]
+        persistedSnapshotsByExerciseID: [UUID: ActiveWorkoutExercisePersistenceSnapshot],
+        cardioCompletionsByPhase: [WorkoutCardioPhase: Bool] = [:]
     ) throws -> ActiveWorkoutCheckpointPersistenceResult {
         guard let session = try session(id: sessionID) else {
             throw WorkoutSessionRepositoryError.sessionNotFound
@@ -685,6 +686,19 @@ nonisolated final class ActiveWorkoutDraftRepository {
 
             guard didMutateExercise else { continue }
             persistedExerciseIDs.insert(exerciseID)
+            shouldSave = true
+        }
+
+        for (phase, isCompleted) in cardioCompletionsByPhase {
+            guard let cardioBlock = try cardioBlock(sessionID: sessionID, phase: phase),
+                  cardioBlock.isCompleted != isCompleted
+            else {
+                continue
+            }
+
+            cardioBlock.isCompleted = isCompleted
+            cardioBlock.updatedAt = now
+            session.updatedAt = now
             shouldSave = true
         }
 

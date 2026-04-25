@@ -54,7 +54,6 @@ struct WorkoutSessionExerciseGridEditor: View {
     @State private var metricInputDraftBuffer = WorkoutMetricInputDraftBuffer()
     @State private var pendingBozarCompletionSetIDs: Set<UUID> = []
     @State private var revealedCompletionGateSetIDs: Set<UUID> = []
-    @State private var pendingInputCommitTask: Task<Void, Never>?
     @State private var pendingDisplayRefreshTask: Task<Void, Never>?
     @State private var pendingCommitTask: Task<Void, Never>?
     @State private var suppressNextSetDraftsDisplayRefresh = false
@@ -62,7 +61,6 @@ struct WorkoutSessionExerciseGridEditor: View {
     @FocusState private var focusedInput: SetInputFocus?
 
     private let restPresets = [10, 15, 20, 30, 45, 60, 75, 90, 105, 120, 150, 180, 210, 240]
-    private let inputCommitDebounce = Duration.milliseconds(240)
     private let displayRefreshDebounce = Duration.milliseconds(90)
     private let commitDebounce = Duration.milliseconds(400)
 
@@ -1472,7 +1470,6 @@ struct WorkoutSessionExerciseGridEditor: View {
                 guard setDrafts.indices.contains(index) else { return }
                 let setID = setDrafts[index].id
                 metricInputDraftBuffer.stage(newValue, for: setID, metric: .reps)
-                scheduleBufferedInputCommit(for: inputFocus(for: index, metric: .reps))
             }
         )
     }
@@ -1497,7 +1494,6 @@ struct WorkoutSessionExerciseGridEditor: View {
                 guard setDrafts.indices.contains(index) else { return }
                 let setID = setDrafts[index].id
                 metricInputDraftBuffer.stage(newValue, for: setID, metric: .weight)
-                scheduleBufferedInputCommit(for: inputFocus(for: index, metric: .weight))
             }
         )
     }
@@ -1723,8 +1719,6 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func flushPendingEditorState() {
         pendingBozarCompletionSetIDs.removeAll()
-        pendingInputCommitTask?.cancel()
-        pendingInputCommitTask = nil
         if commitAllBufferedInput(clearsText: true) {
             requestImmediateCommitForCurrentState()
         }
@@ -2487,8 +2481,6 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func handleFocusedInputChange(_ previousFocus: SetInputFocus?, _ newFocus: SetInputFocus?) {
         guard previousFocus != newFocus else { return }
-        pendingInputCommitTask?.cancel()
-        pendingInputCommitTask = nil
         if let previousFocus {
             _ = commitBufferedInput(for: previousFocus, clearsText: true)
             if suppressNextFocusLossCommit {
@@ -2543,16 +2535,6 @@ struct WorkoutSessionExerciseGridEditor: View {
         let currentDrafts = drafts ?? setDrafts
         let currentRestSeconds = overrideRestSeconds ?? restSeconds
         onCommitRequest?(currentDrafts, currentRestSeconds)
-    }
-
-    private func scheduleBufferedInputCommit(for focus: SetInputFocus) {
-        pendingInputCommitTask?.cancel()
-        pendingInputCommitTask = Task { @MainActor in
-            try? await Task.sleep(for: inputCommitDebounce)
-            guard !Task.isCancelled else { return }
-            pendingInputCommitTask = nil
-            _ = commitBufferedInput(for: focus, clearsText: false)
-        }
     }
 
     @discardableResult

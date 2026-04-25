@@ -62,7 +62,7 @@ struct HistoryDetailView: View {
         let catalogRepository = ExerciseCatalogRepository(modelContext: modelContext)
 
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: WGJSpacing.section) {
+            VStack(alignment: .leading, spacing: WGJSpacing.section) {
                 if let session {
                     headerCard(session)
                     cardioSection
@@ -621,7 +621,7 @@ struct HistoryDetailView: View {
 
         deferredHydrationTask?.cancel()
         deferredHydrationTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(60))
+            try? await Task.sleep(for: .milliseconds(1_200))
             guard !Task.isCancelled, loadedExerciseStateStamp == stamp else { return }
 
             let loadedPersonalRecords: [UUID: HistoryExercisePersonalRecordPresentation]

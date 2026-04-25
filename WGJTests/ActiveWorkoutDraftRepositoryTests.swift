@@ -516,6 +516,41 @@ struct ActiveWorkoutDraftRepositoryTests {
     }
 
     @Test
+    func persistCheckpointCanPersistCardioCompletionWithoutDirtyExerciseWork() throws {
+        let context = try makeInMemoryContext()
+        let repository = ActiveWorkoutDraftRepository(modelContext: context)
+        let session = try repository.createEmptySession(name: "Core Loop")
+
+        try repository.upsertCardioBlock(
+            sessionID: session.id,
+            draft: WorkoutCardioBlockDraft(
+                phase: .preWorkout,
+                catalogExerciseUUID: "cardio-bike-1",
+                exerciseNameSnapshot: "Bike",
+                categorySnapshot: "Cardio",
+                muscleSummarySnapshot: "Warmup",
+                targetDurationSeconds: 300,
+                isCompleted: false
+            )
+        )
+
+        let result = try repository.persistCheckpoint(
+            sessionID: session.id,
+            sessionName: session.name,
+            sessionNotes: session.notes,
+            dirtyExerciseIDs: [],
+            snapshotsByExerciseID: [:],
+            persistedSnapshotsByExerciseID: [:],
+            cardioCompletionsByPhase: [.preWorkout: true]
+        )
+
+        let cardioBlock = try #require(try repository.cardioBlock(sessionID: session.id, phase: .preWorkout))
+        #expect(result.handledExerciseIDs.isEmpty)
+        #expect(result.persistedExerciseIDs.isEmpty)
+        #expect(cardioBlock.isCompleted)
+    }
+
+    @Test
     func cancelSessionRemovesDraftRows() throws {
         let context = try makeInMemoryContext()
         let repository = ActiveWorkoutDraftRepository(modelContext: context)

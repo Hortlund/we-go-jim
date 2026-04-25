@@ -26,8 +26,8 @@ struct ActiveWorkoutView: View {
     @State private var notesByExerciseID: [UUID: String] = [:]
     @State private var lastPersistedExerciseStateByID: [UUID: ActiveWorkoutExercisePersistenceSnapshot] = [:]
     @State private var pendingWrites = ActiveWorkoutPendingWrites()
+    @State private var pendingCardioCompletionsByPhase: [WorkoutCardioPhase: Bool] = [:]
     @State private var rowFlushCoordinator = WorkoutExerciseRowFlushCoordinator()
-    @State private var suppressExerciseCheckpointScheduling = false
 
     @State private var previousResolutionByExerciseID: [UUID: WorkoutPreviousPerformanceResolution] = [:]
     @State private var componentResolutionByExerciseID: [UUID: ExerciseComponentRotationResolution] = [:]
@@ -814,7 +814,6 @@ struct ActiveWorkoutView: View {
         guard setDraftsByExerciseID[exerciseID] != updated else { return }
         setDraftsByExerciseID[exerciseID] = updated
         pendingWrites.markExerciseDirty(exerciseID)
-        scheduleExerciseCheckpointFlushIfNeeded()
         refreshGuidance(for: exerciseID)
     }
 
@@ -824,7 +823,6 @@ struct ActiveWorkoutView: View {
         guard restByExerciseID[exerciseID] != normalized else { return }
         restByExerciseID[exerciseID] = normalized
         pendingWrites.markExerciseDirty(exerciseID)
-        scheduleExerciseCheckpointFlushIfNeeded()
     }
 
     @MainActor
@@ -832,13 +830,6 @@ struct ActiveWorkoutView: View {
         guard notesByExerciseID[exerciseID] != updated else { return }
         notesByExerciseID[exerciseID] = updated
         pendingWrites.markExerciseDirty(exerciseID)
-        scheduleExerciseCheckpointFlushIfNeeded()
-    }
-
-    @MainActor
-    private func scheduleExerciseCheckpointFlushIfNeeded() {
-        guard !suppressExerciseCheckpointScheduling else { return }
-        scheduleCheckpointFlush(checkpoint: .coalesced)
     }
 
     @MainActor
@@ -1345,23 +1336,21 @@ struct ActiveWorkoutView: View {
             return
         }
 
-        do {
-            let updatedCompletion = !cardioBlock.isCompleted
-            try activeWorkoutRepository.setCardioCompletion(
-                sessionID: sessionID,
-                phase: cardioBlock.phase,
-                isCompleted: updatedCompletion
-            )
+        let updatedCompletion = !cardioBlock.isCompleted
+        cardioBlock.isCompleted = updatedCompletion
+        cardioBlock.updatedAt = .now
+        session?.updatedAt = .now
+        pendingCardioCompletionsByPhase[cardioBlock.phase] = updatedCompletion
 
-            if updatedCompletion {
-                WorkoutFeedbackCenter.shared.exerciseCompleted()
+        if updatedCompletion {
+            WorkoutFeedbackCenter.shared.exerciseCompleted()
+            Task { @MainActor in
+                await Task.yield()
                 focusNextPhase(
                     afterCompleting: cardioBlock.phase,
                     scrollProxy: scrollProxy
                 )
             }
-        } catch {
-            showError(error)
         }
     }
 
@@ -1543,9 +1532,6 @@ struct ActiveWorkoutView: View {
         let hasNameChange = !normalizedSessionName.isEmpty && normalizedSessionName != session.name
         let hasNotesChange = notesDraft != session.notes
         pendingWrites.setSessionMetaDirty(hasNameChange || hasNotesChange)
-        if hasNameChange || hasNotesChange {
-            scheduleCheckpointFlush(checkpoint: .coalesced)
-        }
     }
 
     @MainActor
@@ -1764,7 +1750,7 @@ struct ActiveWorkoutView: View {
               let rawValue = ProcessInfo.processInfo.environment["UITEST_ACTIVE_WORKOUT_PREVIOUS_PERFORMANCE_DELAY_MS"],
               let milliseconds = Int(rawValue)
         else {
-            return .milliseconds(80)
+            return .milliseconds(1_500)
         }
 
         return .milliseconds(max(0, milliseconds))
@@ -1815,7 +1801,6 @@ struct ActiveWorkoutView: View {
                 updatedRest: normalizedRest
             )
             pendingWrites.markExerciseDirty(draft.exerciseID)
-            scheduleExerciseCheckpointFlushIfNeeded()
             exerciseSettingsDraft = nil
             refreshGuidance(for: draft.exerciseID)
         } catch {
@@ -2398,13 +2383,12 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func makeCheckpointCommand(for checkpoint: ActiveWorkoutWriteCheckpoint) -> ActiveWorkoutCheckpointCommand? {
-        suppressExerciseCheckpointScheduling = true
         rowFlushCoordinator.flushAll()
-        suppressExerciseCheckpointScheduling = false
 
-        guard pendingWrites.hasDirtyWrites else { return nil }
+        guard pendingWrites.hasDirtyWrites || !pendingCardioCompletionsByPhase.isEmpty else { return nil }
         guard session != nil else {
             pendingWrites = ActiveWorkoutPendingWrites()
+            pendingCardioCompletionsByPhase = [:]
             return nil
         }
 
@@ -2425,7 +2409,8 @@ struct ActiveWorkoutView: View {
             ),
             dirtyExerciseIDs: dirtyExerciseIDs,
             snapshotsByExerciseID: dirtySnapshotsByExerciseID,
-            persistedSnapshotsByExerciseID: lastPersistedExerciseStateByID
+            persistedSnapshotsByExerciseID: lastPersistedExerciseStateByID,
+            cardioCompletionsByPhase: pendingCardioCompletionsByPhase
         )
     }
 
@@ -2440,7 +2425,8 @@ struct ActiveWorkoutView: View {
                 sessionNotes: command.sessionMeta.notes,
                 dirtyExerciseIDs: command.dirtyExerciseIDs,
                 snapshotsByExerciseID: command.snapshotsByExerciseID,
-                persistedSnapshotsByExerciseID: command.persistedSnapshotsByExerciseID
+                persistedSnapshotsByExerciseID: command.persistedSnapshotsByExerciseID,
+                cardioCompletionsByPhase: command.cardioCompletionsByPhase
             )
         }
     }
@@ -2456,6 +2442,15 @@ struct ActiveWorkoutView: View {
         )
         if currentSessionMeta == command.sessionMeta {
             pendingWrites.clearSessionMeta()
+        }
+
+        for (phase, isCompleted) in command.cardioCompletionsByPhase {
+            guard pendingCardioCompletionsByPhase[phase] == isCompleted,
+                  cardioBlock(for: phase)?.isCompleted == isCompleted
+            else {
+                continue
+            }
+            pendingCardioCompletionsByPhase[phase] = nil
         }
 
         for exerciseID in result.handledExerciseIDs {
@@ -3351,6 +3346,7 @@ private struct ActiveWorkoutCheckpointCommand: Sendable {
     let dirtyExerciseIDs: Set<UUID>
     let snapshotsByExerciseID: [UUID: ActiveWorkoutExercisePersistenceSnapshot]
     let persistedSnapshotsByExerciseID: [UUID: ActiveWorkoutExercisePersistenceSnapshot]
+    let cardioCompletionsByPhase: [WorkoutCardioPhase: Bool]
 }
 
 nonisolated private struct ActiveWorkoutTemplateFolderSnapshot: Identifiable, Equatable, Sendable {

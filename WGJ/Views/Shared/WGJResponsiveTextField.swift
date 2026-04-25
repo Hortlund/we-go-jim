@@ -46,10 +46,11 @@ struct WGJResponsiveTextField: View {
     var onSubmit: (() -> Void)?
 
     @State private var draft = WGJResponsiveTextDraft()
-    @State private var commitTask: Task<Void, Never>?
+    @FocusState private var isFocused: Bool
 
     var body: some View {
         textField
+            .focused($isFocused)
             .keyboardType(keyboardType)
             .submitLabel(submitLabel)
             .textInputAutocapitalization(capitalization)
@@ -61,6 +62,10 @@ struct WGJResponsiveTextField: View {
             }
             .onChange(of: text) { _, newValue in
                 draft.syncCommittedText(newValue)
+            }
+            .onChange(of: isFocused) { _, focused in
+                guard !focused else { return }
+                commitNow()
             }
             .onDisappear {
                 commitNow()
@@ -109,24 +114,11 @@ struct WGJResponsiveTextField: View {
             get: { draft.liveText },
             set: { newValue in
                 draft.stageLiveText(newValue)
-                scheduleCommit()
             }
         )
     }
 
-    private func scheduleCommit() {
-        commitTask?.cancel()
-        commitTask = Task { @MainActor in
-            try? await Task.sleep(for: commitDelay)
-            guard !Task.isCancelled else { return }
-            commitTask = nil
-            commitNow()
-        }
-    }
-
     private func commitNow() {
-        commitTask?.cancel()
-        commitTask = nil
         guard let committed = draft.commitLiveText() else { return }
         text = committed
     }
