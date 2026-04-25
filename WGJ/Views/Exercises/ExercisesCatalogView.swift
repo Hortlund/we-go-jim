@@ -15,12 +15,7 @@ struct ExercisesCatalogView: View {
 
     private let mode: ExercisesCatalogMode
 
-    @State private var query = ""
-    @State private var debouncedQuery = ""
-    @State private var selectedPrimaryMuscleID: Int?
-    @State private var selectedCategory: String?
-    @State private var sortDescending = false
-    @State private var queryDebounceTask: Task<Void, Never>?
+    @State private var searchState = ExercisesCatalogSearchState()
     @State private var controller = ExercisesCatalogController()
     @State private var isBootstrappingCatalog = false
     @State private var hasAttemptedBootstrap = false
@@ -82,19 +77,14 @@ struct ExercisesCatalogView: View {
     }
 
     private var shouldShowIndexRail: Bool {
-        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         return horizontalSizeClass == .regular
             && reservesIndexRailSpace
             && !isSearchFieldFocused
-            && trimmedQuery.isEmpty
+            && searchState.debouncedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var hasActiveFilters: Bool {
-        !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || !debouncedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || selectedPrimaryMuscleID != nil
-            || selectedCategory != nil
-            || sortDescending
+        searchState.hasActiveFilters
     }
 
     private var shouldLoadCatalog: Bool {
@@ -194,18 +184,18 @@ struct ExercisesCatalogView: View {
                 .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .onChange(of: debouncedQuery) { _, _ in
+            .onChange(of: searchState.debouncedQuery) { _, _ in
                 applyCurrentFilters()
             }
-            .onChange(of: selectedPrimaryMuscleID) { _, _ in
-                applyCurrentFilters()
-                scrollToTop(using: proxy)
-            }
-            .onChange(of: selectedCategory) { _, _ in
+            .onChange(of: searchState.selectedPrimaryMuscleID) { _, _ in
                 applyCurrentFilters()
                 scrollToTop(using: proxy)
             }
-            .onChange(of: sortDescending) { _, _ in
+            .onChange(of: searchState.selectedCategory) { _, _ in
+                applyCurrentFilters()
+                scrollToTop(using: proxy)
+            }
+            .onChange(of: searchState.sortDescending) { _, _ in
                 applyCurrentFilters()
                 scrollToTop(using: proxy)
             }
@@ -264,12 +254,7 @@ struct ExercisesCatalogView: View {
                 await bootstrapCatalogIfNeeded()
             }
         }
-        .onChange(of: query) { _, newValue in
-            debounceQuery(newValue)
-        }
         .onDisappear {
-            queryDebounceTask?.cancel()
-            queryDebounceTask = nil
             isSearchFieldFocused = false
             WGJKeyboard.dismiss()
         }
@@ -306,14 +291,13 @@ struct ExercisesCatalogView: View {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(WGJTheme.textSecondary)
 
-            WGJAccessoryTextField(
-                "Search",
-                text: $query,
-                isFocused: searchFocusBinding,
-                onDismiss: {
-                    isSearchFieldFocused = false
-                    WGJKeyboard.dismiss()
-                }
+            ExercisesCatalogSearchField(
+                committedQuery: Binding(
+                    get: { searchState.debouncedQuery },
+                    set: { searchState.updateDebouncedQuery($0) }
+                ),
+                resetToken: searchState.resetToken,
+                isFocused: searchFocusBinding
             )
             .frame(height: 22)
         }
@@ -368,16 +352,16 @@ struct ExercisesCatalogView: View {
     private var bodyPartFilter: some View {
         WGJActionMenuButton("Body Part Filter") {
             Button("Any Body Part") {
-                selectedPrimaryMuscleID = nil
+                searchState.selectedPrimaryMuscleID = nil
             }
 
             ForEach(controller.snapshot.availableMuscles, id: \.id) { muscle in
                 Button(muscle.name) {
-                    selectedPrimaryMuscleID = muscle.id
+                    searchState.selectedPrimaryMuscleID = muscle.id
                 }
             }
         } label: {
-            compactFilterPill(controller.snapshot.muscleName(for: selectedPrimaryMuscleID) ?? "Any Body Part")
+            compactFilterPill(controller.snapshot.muscleName(for: searchState.selectedPrimaryMuscleID) ?? "Any Body Part")
         }
         .accessibilityIdentifier("exercises-body-part-filter")
     }
@@ -385,23 +369,23 @@ struct ExercisesCatalogView: View {
     private var categoryFilter: some View {
         WGJActionMenuButton("Category Filter") {
             Button("Any Category") {
-                selectedCategory = nil
+                searchState.selectedCategory = nil
             }
 
             ForEach(controller.snapshot.availableCategories, id: \.self) { category in
                 Button(category) {
-                    selectedCategory = category
+                    searchState.selectedCategory = category
                 }
             }
         } label: {
-            compactFilterPill(selectedCategory ?? "Any Category")
+            compactFilterPill(searchState.selectedCategory ?? "Any Category")
         }
         .accessibilityIdentifier("exercises-category-filter")
     }
 
     private var sortButton: some View {
         Button {
-            sortDescending.toggle()
+            searchState.sortDescending.toggle()
         } label: {
             Image(systemName: "arrow.up.arrow.down")
         }
@@ -522,32 +506,17 @@ struct ExercisesCatalogView: View {
         }
     }
 
-    private func debounceQuery(_ value: String) {
-        queryDebounceTask?.cancel()
-        queryDebounceTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(140))
-            guard !Task.isCancelled else { return }
-            debouncedQuery = value
-        }
-    }
-
     private func applyCurrentFilters() {
         controller.applyFilters(
-            query: debouncedQuery,
-            selectedPrimaryMuscleID: selectedPrimaryMuscleID,
-            selectedCategory: selectedCategory,
-            sortDescending: sortDescending
+            query: searchState.debouncedQuery,
+            selectedPrimaryMuscleID: searchState.selectedPrimaryMuscleID,
+            selectedCategory: searchState.selectedCategory,
+            sortDescending: searchState.sortDescending
         )
     }
 
     private func clearSearchAndFilters() {
-        queryDebounceTask?.cancel()
-        queryDebounceTask = nil
-        query = ""
-        debouncedQuery = ""
-        selectedPrimaryMuscleID = nil
-        selectedCategory = nil
-        sortDescending = false
+        searchState.clearSearchAndFilters()
         isSearchFieldFocused = false
         WGJKeyboard.dismiss()
         applyCurrentFilters()
@@ -700,11 +669,10 @@ struct ExercisesCatalogView: View {
                 return
             }
 
-            selectedPrimaryMuscleID = nil
-            selectedCategory = nil
-            sortDescending = false
-            query = created.displayName
-            debouncedQuery = created.displayName
+            searchState.selectedPrimaryMuscleID = nil
+            searchState.selectedCategory = nil
+            searchState.sortDescending = false
+            searchState.updateDebouncedQuery(created.displayName)
             applyCurrentFilters()
         } catch {
             showError(error)
@@ -714,6 +682,33 @@ struct ExercisesCatalogView: View {
     private func showError(_ error: Error) {
         errorMessage = String(describing: error)
         showingError = true
+    }
+}
+
+struct ExercisesCatalogSearchState: Equatable {
+    private(set) var debouncedQuery = ""
+    private(set) var resetToken = 0
+    var selectedPrimaryMuscleID: Int?
+    var selectedCategory: String?
+    var sortDescending = false
+
+    var hasActiveFilters: Bool {
+        !debouncedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || selectedPrimaryMuscleID != nil
+            || selectedCategory != nil
+            || sortDescending
+    }
+
+    mutating func updateDebouncedQuery(_ query: String) {
+        debouncedQuery = query
+    }
+
+    mutating func clearSearchAndFilters() {
+        debouncedQuery = ""
+        selectedPrimaryMuscleID = nil
+        selectedCategory = nil
+        sortDescending = false
+        resetToken += 1
     }
 }
 
@@ -906,6 +901,67 @@ struct ExercisesSectionSnapshot: Identifiable, Equatable {
     let id: String
     let title: String
     let rows: [ExerciseCatalogRowSnapshot]
+}
+
+private struct ExercisesCatalogSearchField: View {
+    @Binding var committedQuery: String
+    let resetToken: Int
+    @Binding var isFocused: Bool
+
+    @State private var liveQuery = ""
+    @State private var debounceTask: Task<Void, Never>?
+    @State private var observedResetToken: Int?
+
+    var body: some View {
+        WGJAccessoryTextField(
+            "Search",
+            text: $liveQuery,
+            isFocused: $isFocused,
+            onDismiss: {
+                isFocused = false
+                WGJKeyboard.dismiss()
+            }
+        )
+        .onAppear {
+            observedResetToken = resetToken
+            if liveQuery != committedQuery {
+                liveQuery = committedQuery
+            }
+        }
+        .onChange(of: liveQuery) { _, newValue in
+            debounceQuery(newValue)
+        }
+        .onChange(of: committedQuery) { _, newValue in
+            guard liveQuery != newValue else { return }
+            liveQuery = newValue
+        }
+        .onChange(of: resetToken) { _, newValue in
+            guard observedResetToken != newValue else { return }
+            observedResetToken = newValue
+            debounceTask?.cancel()
+            debounceTask = nil
+            if liveQuery != "" {
+                liveQuery = ""
+            }
+            if committedQuery != "" {
+                committedQuery = ""
+            }
+        }
+        .onDisappear {
+            debounceTask?.cancel()
+            debounceTask = nil
+        }
+    }
+
+    private func debounceQuery(_ value: String) {
+        debounceTask?.cancel()
+        guard value != committedQuery else { return }
+        debounceTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(140))
+            guard !Task.isCancelled else { return }
+            committedQuery = value
+        }
+    }
 }
 
 struct ExerciseDetailDestinationView: View {

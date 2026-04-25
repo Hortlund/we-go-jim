@@ -58,6 +58,28 @@ struct ScreenSnapshotTests {
     }
 
     @Test
+    func exercisesCatalogSearchStateClearsCommittedQueryAndFilters() {
+        var state = ExercisesCatalogSearchState()
+        let initialResetToken = state.resetToken
+
+        state.updateDebouncedQuery("bench")
+        state.selectedPrimaryMuscleID = 1
+        state.selectedCategory = "Strength"
+        state.sortDescending = true
+
+        #expect(state.hasActiveFilters)
+
+        state.clearSearchAndFilters()
+
+        #expect(state.debouncedQuery == "")
+        #expect(state.selectedPrimaryMuscleID == nil)
+        #expect(state.selectedCategory == nil)
+        #expect(state.sortDescending == false)
+        #expect(state.hasActiveFilters == false)
+        #expect(state.resetToken == initialResetToken + 1)
+    }
+
+    @Test
     func exercisesCatalogSnapshotLoaderBuildsControllerSnapshotFromContext() throws {
         let context = try makeSnapshotLoaderContext()
         let chest = MuscleGroup(remoteID: 1, name: "Chest", nameEn: "Chest")
