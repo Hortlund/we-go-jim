@@ -2759,18 +2759,23 @@ private struct ActiveWorkoutHeaderCard: View {
                 }
             }
 
-            TextField("Workout name", text: $sessionNameDraft)
-                .textInputAutocapitalization(.words)
-                .wgjPillField()
-                .accessibilityIdentifier("active-workout-name-field")
-                .onSubmit(onSubmit)
+            WGJResponsiveTextField(
+                placeholder: "Workout name",
+                text: $sessionNameDraft,
+                capitalization: .words,
+                accessibilityIdentifier: "active-workout-name-field",
+                onSubmit: onSubmit
+            )
 
-            TextField("Notes", text: $notesDraft, axis: .vertical)
-                .lineLimit(2...4)
-                .textInputAutocapitalization(.sentences)
-                .wgjPillField()
-                .accessibilityIdentifier("active-workout-notes-field")
-                .onSubmit(onSubmit)
+            WGJResponsiveTextField(
+                placeholder: "Notes",
+                text: $notesDraft,
+                axis: .vertical,
+                lineLimit: 2...4,
+                capitalization: .sentences,
+                accessibilityIdentifier: "active-workout-notes-field",
+                onSubmit: onSubmit
+            )
 
             HStack(spacing: 10) {
                 Text("\(exerciseCount) exercises")

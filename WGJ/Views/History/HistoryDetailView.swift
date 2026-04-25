@@ -212,14 +212,19 @@ struct HistoryDetailView: View {
                 )
             }
 
-            TextField("Workout name", text: $sessionNameDraft)
-                .textInputAutocapitalization(.words)
-                .wgjPillField()
+            WGJResponsiveTextField(
+                placeholder: "Workout name",
+                text: $sessionNameDraft,
+                capitalization: .words
+            )
 
-            TextField("Notes", text: $notesDraft, axis: .vertical)
-                .lineLimit(2...5)
-                .textInputAutocapitalization(.sentences)
-                .wgjPillField()
+            WGJResponsiveTextField(
+                placeholder: "Notes",
+                text: $notesDraft,
+                axis: .vertical,
+                lineLimit: 2...5,
+                capitalization: .sentences
+            )
 
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) {

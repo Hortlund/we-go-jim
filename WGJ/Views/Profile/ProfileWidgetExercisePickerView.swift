@@ -83,6 +83,12 @@ struct ProfileWidgetExercisePickerView: View {
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $searchText, prompt: "Search exercise history")
             .task(id: searchText) {
+                guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    refreshFilteredOptions()
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(120))
+                guard !Task.isCancelled else { return }
                 refreshFilteredOptions()
             }
             .toolbar {

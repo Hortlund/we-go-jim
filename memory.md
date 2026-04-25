@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-04-25 - Large-Screen Text Inputs Need Local Drafts
+
+- Date: 2026-04-25
+- Trigger/Problem: Exercise search and workout/history name/notes fields were reviewed for input responsiveness after keyboard/system input warnings and visible typing smoothness concerns.
+- Root Cause: Some text inputs in large SwiftUI screens wrote every keystroke directly into parent-owned state that also drives broad view invalidation, dirty-state checks, or persistence scheduling.
+- Durable Rule: For text fields inside large workout, history, template, exercise, or profile screens, keep keystrokes in field-local draft state and commit to parent/domain state after a short cancellation-aware debounce, submit, or disappearance. Avoid attaching expensive filtering, SwiftData, or broad dirty-state work to every keyboard event.
+- How to Verify Next Time: Search for new `TextField`, `TextEditor`, and `.searchable` bindings; confirm high-risk fields use a local draft/debounced commit path, then run the focused input-state tests plus the relevant UI smoke for the touched flow.
+- Status: active
+
 ## 2026-04-24 - Exercises Header Must Use Safe-Area Layout, Not Manual Offsets
 
 - Date: 2026-04-24

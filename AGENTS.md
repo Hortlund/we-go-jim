@@ -63,6 +63,7 @@
 - Do not create new giant single-file screens. If a file is already big, make it smaller as part of the change when practical.
 - Prefer dedicated subview types over large computed `some View` helpers once a section has branching, state, async work, or reuse potential.
 - Keep view trees stable. Avoid top-level branch swapping, unstable `id` values, and broad observation dependencies that cause avoidable redraws.
+- Keep text input paths local and lightweight in large screens. Do not bind every keystroke directly to broad parent state, SwiftData work, expensive filtering, or persistence scheduling when a field-local draft plus short debounced commit will preserve immediate keyboard responsiveness.
 - Prefer enum- or item-driven navigation, sheets, confirmation dialogs, and alerts for mutually exclusive presentation state. Avoid clusters of booleans for modal routing.
 - Keep button actions and lifecycle modifiers thin. Non-trivial actions should call private methods or coordinators; domain mutations should move into services/repositories.
 - Use `@Query` for simple view-owned SwiftData reads, but move complex fetches, projections, deduping, and write coordination into repositories or services.
