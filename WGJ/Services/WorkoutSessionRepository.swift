@@ -303,6 +303,7 @@ nonisolated final class WorkoutSessionRepository {
             }
 
             exercise.sets = createdSets
+            updateExerciseSetSummary(exercise, sets: createdSets)
             createdExercises.append(exercise)
             if let membership = templateExercise.supersetMembership {
                 supersetMembershipsByExerciseID[exercise.id] = membership
@@ -399,8 +400,16 @@ nonisolated final class WorkoutSessionRepository {
         exerciseIDs: Set<UUID>
     ) throws -> [WorkoutSessionExercise] {
         guard !exerciseIDs.isEmpty else { return [] }
-        return try sessionExercises(sessionID: sessionID)
-            .filter { exerciseIDs.contains($0.id) }
+        var exercises: [WorkoutSessionExercise] = []
+        exercises.reserveCapacity(exerciseIDs.count)
+        for exerciseID in exerciseIDs {
+            guard let exercise = try sessionExercise(id: exerciseID),
+                  exercise.sessionID == sessionID else {
+                continue
+            }
+            exercises.append(exercise)
+        }
+        return exercises.sorted { $0.sortOrder < $1.sortOrder }
     }
 
     func sessionCardioBlocks(sessionID: UUID) throws -> [WorkoutSessionCardioBlock] {
@@ -475,6 +484,7 @@ nonisolated final class WorkoutSessionRepository {
             sessionExercise: created
         )
         created.sets = sets
+        updateExerciseSetSummary(created, sets: sets)
 
         session.updatedAt = .now
         try saveUserDataChanges()
@@ -590,6 +600,7 @@ nonisolated final class WorkoutSessionRepository {
         var sets = exercise.sets ?? []
         sets.append(newSet)
         exercise.sets = sets
+        updateExerciseSetSummary(exercise, sets: sets)
         exercise.updatedAt = .now
         try saveUserDataChanges()
     }
@@ -614,6 +625,7 @@ nonisolated final class WorkoutSessionRepository {
         }
 
         exercise.sets = remaining
+        updateExerciseSetSummary(exercise, sets: remaining)
         exercise.updatedAt = .now
         try saveUserDataChanges()
     }
@@ -665,13 +677,16 @@ nonisolated final class WorkoutSessionRepository {
 
         if didMutateExerciseStructure {
             exercise.sets = updatedSets
-            exercise.updatedAt = now
         }
 
         guard didMutateExerciseStructure || didMutateAnySet else {
             return
         }
 
+        updateExerciseSetSummary(exercise, sets: updatedSets)
+        if didMutateExerciseStructure {
+            exercise.updatedAt = now
+        }
         try saveUserDataChanges()
     }
 
@@ -1040,6 +1055,31 @@ nonisolated final class WorkoutSessionRepository {
         }
 
         return defaults
+    }
+
+    @discardableResult
+    private func updateExerciseSetSummary(
+        _ exercise: WorkoutSessionExercise,
+        sets: [WorkoutSessionSet]
+    ) -> Bool {
+        let totalSetCount = sets.count
+        let completedSetCount = sets.filter { set in
+            guard set.isCompleted else { return false }
+            let dropStages = set.dropStages ?? []
+            return dropStages.allSatisfy(\.isCompleted)
+        }.count
+        let hasDropsets = sets.contains { !($0.dropStages ?? []).isEmpty }
+        guard exercise.totalSetCount != totalSetCount
+                || exercise.completedSetCount != completedSetCount
+                || exercise.hasDropsets != hasDropsets else {
+            return false
+        }
+        exercise.updateSetSummary(
+            totalSetCount: totalSetCount,
+            completedSetCount: completedSetCount,
+            hasDropsets: hasDropsets
+        )
+        return true
     }
 
     private func sanitizedReps(_ reps: Int?) -> Int? {

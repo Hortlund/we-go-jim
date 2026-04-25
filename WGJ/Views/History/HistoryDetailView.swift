@@ -25,7 +25,6 @@ struct HistoryDetailView: View {
     @State private var hydrationPayloadByExerciseID: [UUID: HistoryExerciseHydrationPayload] = [:]
     @State private var personalRecordPresentationByExerciseID: [UUID: HistoryExercisePersonalRecordPresentation] = [:]
     @State private var loadedExerciseStateStamp: HistoryExerciseInteractionStamp?
-    @State private var deferredHydrationTask: Task<Void, Never>?
     @State private var expandedExerciseIDs: [UUID: Bool] = [:]
     @State private var hasPendingSummaryRebuild = false
     @State private var isSavingChanges = false
@@ -148,10 +147,6 @@ struct HistoryDetailView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(errorMessage)
-        }
-        .onDisappear {
-            deferredHydrationTask?.cancel()
-            deferredHydrationTask = nil
         }
         .wgjMinimalKeyboardToolbar()
     }
@@ -321,9 +316,6 @@ struct HistoryDetailView: View {
             return
         }
 
-        deferredHydrationTask?.cancel()
-        deferredHydrationTask = nil
-
         let exerciseIDsToRefresh = previousStamp == nil
             ? currentStamp.exerciseIDs
             : changedExerciseIDs
@@ -337,46 +329,6 @@ struct HistoryDetailView: View {
 
         syncExpandedExerciseState()
 
-        let localStateExerciseIDs = previousStamp == nil
-            ? HistoryExerciseHydrationPlanner.initialLocalStateExerciseIDs(
-                orderedExerciseIDs: sessionExercises.map(\.id),
-                expandedExerciseIDs: expandedExerciseIDs,
-                includeCollapsedRows: appBackgroundStore != nil,
-                limit: appBackgroundStore == nil ? 1 : nil
-            )
-            : exerciseIDsToRefresh
-
-        if !localStateExerciseIDs.isEmpty {
-            do {
-                let localState: HistoryExerciseLocalStateResult
-                if let appBackgroundStore {
-                    localState = try await appBackgroundStore.perform("history-detail.hydrate.local") { backgroundContext in
-                        try Self.loadLocalExerciseState(
-                            modelContext: backgroundContext,
-                            sessionID: sessionID,
-                            exerciseIDs: localStateExerciseIDs
-                        )
-                    }
-                } else {
-                    localState = try Self.loadLocalExerciseState(
-                        modelContext: modelContext,
-                        sessionID: sessionID,
-                        exerciseIDs: localStateExerciseIDs
-                    )
-                }
-
-                setDraftsByExerciseID.merge(localState.setDraftsByExerciseID) { _, new in new }
-                restByExerciseID.merge(localState.restByExerciseID) { _, new in new }
-                notesByExerciseID.merge(localState.notesByExerciseID) { _, new in new }
-                for exerciseID in localStateExerciseIDs {
-                    hydrationPayloadByExerciseID.removeValue(forKey: exerciseID)
-                }
-            } catch {
-                showError(error)
-                return
-            }
-        }
-
         personalRecordPresentationByExerciseID = personalRecordPresentationByExerciseID.filter {
             currentStamp.exerciseIDs.contains($0.key)
         }
@@ -385,10 +337,17 @@ struct HistoryDetailView: View {
         }
 
         loadedExerciseStateStamp = currentStamp
-        scheduleDeferredHydration(
-            for: currentStamp,
-            draftsByExerciseID: setDraftsByExerciseID
-        )
+        let expandedIDsToHydrate = Set<UUID>(expandedExerciseIDs.compactMap { exerciseID, isExpanded -> UUID? in
+            guard isExpanded else { return nil }
+            guard currentStamp.exerciseIDs.contains(exerciseID) else { return nil }
+            guard previousStamp == nil
+                    || exerciseIDsToRefresh.contains(exerciseID)
+                    || setDraftsByExerciseID[exerciseID] == nil
+                    || hydrationPayloadByExerciseID[exerciseID] == nil
+            else { return nil }
+            return exerciseID
+        })
+        await hydrateExpandedExerciseState(exerciseIDs: expandedIDsToHydrate, stamp: currentStamp)
     }
 
     nonisolated private static func resolvedPreviousMap(
@@ -421,7 +380,7 @@ struct HistoryDetailView: View {
         let hydrationPayload = hydrationPayloadByExerciseID[exercise.id]
 
         VStack(alignment: .leading, spacing: 8) {
-            exerciseStructureBadgeRow(for: exercise, drafts: drafts)
+            exerciseStructureBadgeRow(for: exercise)
 
             if isExpanded, hasLoadedLocalState {
                 WorkoutExerciseRowHostView(
@@ -475,8 +434,8 @@ struct HistoryDetailView: View {
                 let collapsedSummary = HistoryExerciseCollapsedSummary(
                     targetRepMin: exercise.targetRepMin,
                     targetRepMax: exercise.targetRepMax,
-                    completedSetCount: hasLoadedLocalState ? drafts.filter(\.isCycleCompleted).count : nil,
-                    totalSetCount: hasLoadedLocalState ? drafts.count : nil,
+                    completedSetCount: exercise.totalSetCount > 0 ? exercise.completedSetCount : nil,
+                    totalSetCount: exercise.totalSetCount > 0 ? exercise.totalSetCount : nil,
                     restSeconds: restSeconds,
                     notes: notesByExerciseID[exercise.id] ?? exercise.notes
                 )
@@ -502,12 +461,20 @@ struct HistoryDetailView: View {
 
     @ViewBuilder
     private func exerciseStructureBadgeRow(
-        for exercise: WorkoutSessionExercise,
-        drafts: [WorkoutSessionSetDraft]
+        for exercise: WorkoutSessionExercise
     ) -> some View {
+        let supersetMembership = exercise.supersetGroupID.flatMap { groupID in
+            exercise.supersetPosition.map { position in
+                ExerciseSupersetMembershipDraft(
+                    groupID: groupID,
+                    position: position,
+                    roundRestSeconds: 0
+                )
+            }
+        }
         let presentation = WorkoutExerciseStructurePresentation(
-            supersetMembership: exercise.supersetMembership,
-            hasDropset: drafts.contains(where: \.hasDropset)
+            supersetMembership: supersetMembership,
+            hasDropset: exercise.hasDropsets
         )
 
         if presentation.isSuperset || presentation.hasDropset {
@@ -542,89 +509,77 @@ struct HistoryDetailView: View {
     }
 
     @MainActor
-    private func scheduleDeferredHydration(
-        for stamp: HistoryExerciseInteractionStamp,
-        draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
-    ) {
-        let exerciseIDsToHydrate = HistoryExerciseHydrationPlanner.pendingExerciseIDs(
-            orderedExerciseIDs: sessionExercises.map(\.id),
-            expandedExerciseIDs: expandedExerciseIDs,
-            hydratedExerciseIDs: Set(hydrationPayloadByExerciseID.keys)
-        )
+    private func hydrateExpandedExerciseState(
+        exerciseIDs: Set<UUID>,
+        stamp: HistoryExerciseInteractionStamp
+    ) async {
+        guard !exerciseIDs.isEmpty else { return }
 
-        guard !exerciseIDsToHydrate.isEmpty else {
-            deferredHydrationTask?.cancel()
-            deferredHydrationTask = nil
-            return
-        }
-
-        deferredHydrationTask?.cancel()
-        deferredHydrationTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(1_200))
-            guard !Task.isCancelled, loadedExerciseStateStamp == stamp else { return }
-
+        do {
+            let localState: HistoryExerciseLocalStateResult
             let loadedPersonalRecords: [UUID: HistoryExercisePersonalRecordPresentation]
-            do {
-                if let appBackgroundStore {
-                    loadedPersonalRecords = try await appBackgroundStore.perform(
-                        "history-detail.hydrate.pr.rows"
-                    ) { backgroundContext in
-                        try Self.loadPersonalRecordPresentationByExerciseID(
-                            modelContext: backgroundContext,
-                            sessionID: sessionID,
-                            exerciseIDs: exerciseIDsToHydrate
-                        )
-                    }
-                } else {
-                    loadedPersonalRecords = try Self.loadPersonalRecordPresentationByExerciseID(
-                        modelContext: modelContext,
+            let loadedPayloads: [UUID: HistoryExerciseHydrationPayload]
+
+            if let appBackgroundStore {
+                localState = try await appBackgroundStore.perform("history-detail.hydrate.expanded.local") { backgroundContext in
+                    try Self.loadLocalExerciseState(
+                        modelContext: backgroundContext,
                         sessionID: sessionID,
-                        exerciseIDs: exerciseIDsToHydrate
+                        exerciseIDs: exerciseIDs
                     )
                 }
-            } catch {
-                guard !Task.isCancelled else { return }
-                showError(error)
-                deferredHydrationTask = nil
-                return
-            }
-
-            let mergedPersonalRecords = personalRecordPresentationByExerciseID.merging(
-                loadedPersonalRecords
-            ) { _, new in new }
-
-            let loadedPayloads: [UUID: HistoryExerciseHydrationPayload]
-            do {
-                if let appBackgroundStore {
-                    loadedPayloads = try await appBackgroundStore.perform("history-detail.hydrate.rows") { backgroundContext in
-                        try Self.loadHydrationPayloadByExerciseID(
-                            modelContext: backgroundContext,
-                            sessionID: sessionID,
-                            exerciseIDs: exerciseIDsToHydrate,
-                            draftsByExerciseID: draftsByExerciseID,
-                            personalRecordPresentationByExerciseID: mergedPersonalRecords
-                        )
-                    }
-                } else {
-                    loadedPayloads = try Self.loadHydrationPayloadByExerciseID(
-                        modelContext: modelContext,
+                loadedPersonalRecords = try await appBackgroundStore.perform(
+                    "history-detail.hydrate.expanded.pr"
+                ) { backgroundContext in
+                    try Self.loadPersonalRecordPresentationByExerciseID(
+                        modelContext: backgroundContext,
                         sessionID: sessionID,
-                        exerciseIDs: exerciseIDsToHydrate,
-                        draftsByExerciseID: draftsByExerciseID,
+                        exerciseIDs: exerciseIDs
+                    )
+                }
+                let mergedPersonalRecords = personalRecordPresentationByExerciseID.merging(
+                    loadedPersonalRecords
+                ) { _, new in new }
+                loadedPayloads = try await appBackgroundStore.perform("history-detail.hydrate.expanded.payload") { backgroundContext in
+                    try Self.loadHydrationPayloadByExerciseID(
+                        modelContext: backgroundContext,
+                        sessionID: sessionID,
+                        exerciseIDs: exerciseIDs,
+                        draftsByExerciseID: localState.setDraftsByExerciseID,
                         personalRecordPresentationByExerciseID: mergedPersonalRecords
                     )
                 }
-            } catch {
-                guard !Task.isCancelled else { return }
-                showError(error)
-                deferredHydrationTask = nil
-                return
+            } else {
+                localState = try Self.loadLocalExerciseState(
+                    modelContext: modelContext,
+                    sessionID: sessionID,
+                    exerciseIDs: exerciseIDs
+                )
+                loadedPersonalRecords = try Self.loadPersonalRecordPresentationByExerciseID(
+                    modelContext: modelContext,
+                    sessionID: sessionID,
+                    exerciseIDs: exerciseIDs
+                )
+                let mergedPersonalRecords = personalRecordPresentationByExerciseID.merging(
+                    loadedPersonalRecords
+                ) { _, new in new }
+                loadedPayloads = try Self.loadHydrationPayloadByExerciseID(
+                    modelContext: modelContext,
+                    sessionID: sessionID,
+                    exerciseIDs: exerciseIDs,
+                    draftsByExerciseID: localState.setDraftsByExerciseID,
+                    personalRecordPresentationByExerciseID: mergedPersonalRecords
+                )
             }
 
-            guard !Task.isCancelled, loadedExerciseStateStamp == stamp else { return }
+            guard loadedExerciseStateStamp == stamp else { return }
+            setDraftsByExerciseID.merge(localState.setDraftsByExerciseID) { _, new in new }
+            restByExerciseID.merge(localState.restByExerciseID) { _, new in new }
+            notesByExerciseID.merge(localState.notesByExerciseID) { _, new in new }
             personalRecordPresentationByExerciseID.merge(loadedPersonalRecords) { _, new in new }
             hydrationPayloadByExerciseID.merge(loadedPayloads) { _, new in new }
-            deferredHydrationTask = nil
+        } catch {
+            showError(error)
         }
     }
 
@@ -829,20 +784,30 @@ struct HistoryDetailView: View {
         guard expandedExerciseIDs[exerciseID] != updated else { return }
         expandedExerciseIDs[exerciseID] = updated
         guard updated, let loadedExerciseStateStamp else { return }
-        scheduleDeferredHydration(
-            for: loadedExerciseStateStamp,
-            draftsByExerciseID: setDraftsByExerciseID
-        )
+        Task { @MainActor in
+            await hydrateExpandedExerciseState(
+                exerciseIDs: [exerciseID],
+                stamp: loadedExerciseStateStamp
+            )
+        }
     }
 
     @MainActor
     private func makeSaveCommand() -> HistorySaveCommand {
-        let snapshots = Dictionary(
-            uniqueKeysWithValues: sessionExercises.map { exercise in
-                (
+        let changedExerciseIDs = Set<UUID>(setDraftsByExerciseID.keys)
+            .union(restByExerciseID.keys)
+            .union(notesByExerciseID.keys)
+        let snapshots = Dictionary<UUID, HistoryExerciseSaveSnapshot>(
+            uniqueKeysWithValues: sessionExercises.compactMap { exercise -> (UUID, HistoryExerciseSaveSnapshot)? in
+                guard changedExerciseIDs.contains(exercise.id),
+                      let drafts = setDraftsByExerciseID[exercise.id] else {
+                    return nil
+                }
+
+                return (
                     exercise.id,
                     HistoryExerciseSaveSnapshot(
-                        setDrafts: setDraftsByExerciseID[exercise.id] ?? Self.makeDrafts(from: exercise),
+                        setDrafts: drafts,
                         restSeconds: restByExerciseID[exercise.id] ?? exercise.restSeconds,
                         notes: notesByExerciseID[exercise.id] ?? exercise.notes
                     )
@@ -926,8 +891,7 @@ struct HistoryDetailView: View {
         }
 
         let exercises = try WorkoutSessionRepository(modelContext: modelContext)
-            .sessionExercises(sessionID: sessionID)
-            .filter { exerciseIDs.contains($0.id) }
+            .sessionExercises(sessionID: sessionID, exerciseIDs: exerciseIDs)
 
         return HistoryExerciseLocalStateResult(
             setDraftsByExerciseID: Dictionary(

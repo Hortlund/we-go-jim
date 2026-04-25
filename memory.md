@@ -356,3 +356,12 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 - Status: active
 
 Promote a lesson here only when it clears the bar above.
+
+## 2026-04-25 - History Collapsed Rows Must Not Build Set Drafts
+
+- Date: 2026-04-25
+- Trigger/Problem: History detail scrolling was still laggy even after PR and previous-performance hydration were scoped down.
+- Root Cause: The first-load path still hydrated local set drafts/rest/notes for every collapsed exercise row when `AppBackgroundStore` was available, and targeted repository fetches loaded all session exercises then filtered in memory.
+- Durable Rule: Collapsed history rows must render from `WorkoutSessionExercise` scalar fields only. Do not build `WorkoutSessionSetDraft`s, traverse set/drop-stage relationships, or run broad session-exercise fetches until a specific row is expanded or saved.
+- How to Verify Next Time: Open a large completed workout and scroll immediately; confirm collapsed rows use denormalized set summary fields, expanded rows hydrate on demand, and targeted exercise fetch helpers fetch by row ID instead of loading the whole session.
+- Status: active

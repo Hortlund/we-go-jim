@@ -1089,6 +1089,15 @@ nonisolated final class ActiveWorkoutDraftRepository {
             }
 
             completedExercise.sets = completedSets
+            completedExercise.updateSetSummary(
+                totalSetCount: completedSets.count,
+                completedSetCount: completedSets.filter { set in
+                    guard set.isCompleted else { return false }
+                    let dropStages = set.dropStages ?? []
+                    return dropStages.allSatisfy(\.isCompleted)
+                }.count,
+                hasDropsets: completedSets.contains { !($0.dropStages ?? []).isEmpty }
+            )
             completedExercises.append(completedExercise)
         }
 

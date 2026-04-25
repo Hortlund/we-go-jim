@@ -1827,6 +1827,9 @@ final class WorkoutSessionExercise {
     var targetRepMin: Int?
     var targetRepMax: Int?
     var restSeconds: Int = 120
+    var totalSetCount: Int = 0
+    var completedSetCount: Int = 0
+    var hasDropsets: Bool = false
     var supersetGroupID: UUID?
     var supersetPositionRaw: String?
     var sortOrder: Int = 0
@@ -1873,6 +1876,9 @@ final class WorkoutSessionExercise {
         targetRepMin: Int? = nil,
         targetRepMax: Int? = nil,
         restSeconds: Int = 120,
+        totalSetCount: Int = 0,
+        completedSetCount: Int = 0,
+        hasDropsets: Bool = false,
         supersetGroupID: UUID? = nil,
         supersetPosition: SupersetExercisePosition? = nil,
         sortOrder: Int = 0,
@@ -1892,6 +1898,9 @@ final class WorkoutSessionExercise {
         self.targetRepMin = targetRepMin
         self.targetRepMax = targetRepMax
         self.restSeconds = max(0, min(3600, restSeconds))
+        self.totalSetCount = max(0, totalSetCount)
+        self.completedSetCount = max(0, min(completedSetCount, max(0, totalSetCount)))
+        self.hasDropsets = hasDropsets
         self.supersetGroupID = supersetGroupID
         self.supersetPositionRaw = supersetPosition?.rawValue
         self.sortOrder = sortOrder
@@ -1900,6 +1909,13 @@ final class WorkoutSessionExercise {
         self.session = session
         self.supersetGroup = supersetGroup
         self.sets = []
+    }
+
+    func updateSetSummary(totalSetCount: Int, completedSetCount: Int, hasDropsets: Bool) {
+        let normalizedTotal = max(0, totalSetCount)
+        self.totalSetCount = normalizedTotal
+        self.completedSetCount = max(0, min(completedSetCount, normalizedTotal))
+        self.hasDropsets = hasDropsets
     }
 }
 
