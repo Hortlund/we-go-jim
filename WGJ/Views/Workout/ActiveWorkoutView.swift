@@ -37,7 +37,9 @@ struct ActiveWorkoutView: View {
     @State private var loadedExerciseStateStamp: ActiveWorkoutExerciseInteractionStamp?
     @State private var exerciseHydrationInvalidation = 0
     @State private var deferredHydrationTask: Task<Void, Never>?
-    @State private var pendingCheckpointScheduleTask: Task<Void, Never>?
+    @State private var pendingGuidanceRefreshTask: Task<Void, Never>?
+    @State private var pendingGuidanceRefreshExerciseIDs: Set<UUID> = []
+    @State private var shouldRefreshAllGuidance = false
     @State private var cardStateController = ActiveWorkoutExerciseCardStateController()
 
     @State private var sessionNameDraft = ""
@@ -62,7 +64,6 @@ struct ActiveWorkoutView: View {
     @State private var saveTemplateFolders: [ActiveWorkoutTemplateFolderSnapshot] = []
     @State private var preferredLoadUnit: TemplateLoadUnit = .kg
     @State private var isKeyboardVisible = false
-    @State private var shouldTrackVisibleScrollTarget = false
     @State private var visibleScrollTarget: ActiveWorkoutScrollTarget?
     @State private var hasConsumedInitialRestoreTarget = false
 
@@ -327,6 +328,8 @@ struct ActiveWorkoutView: View {
             }
             .task {
                 await bootstrapIfNeeded()
+                await Task.yield()
+                restoreScrollTargetIfNeeded(using: scrollProxy)
             }
             .task(id: session?.id) {
                 await reconcileSessionLifecycleIfNeeded()
@@ -345,7 +348,7 @@ struct ActiveWorkoutView: View {
                 syncSessionMetaDirtyState()
             }
             .onChange(of: currentProfile?.isTrainingGuidanceEnabled) { _, _ in
-                refreshGuidanceCache()
+                scheduleGuidanceRefreshForAll()
             }
             .onChange(of: currentProfile?.preferredLoadUnit) { _, newValue in
                 preferredLoadUnit = newValue ?? .kg
@@ -363,7 +366,6 @@ struct ActiveWorkoutView: View {
                 }
             }
             .onDisappear {
-                shouldTrackVisibleScrollTarget = false
                 isCancelArmed = false
                 pendingFinishAfterConfirmation = false
                 pendingCompletionAfterSaveTemplateSheet = false
@@ -371,8 +373,10 @@ struct ActiveWorkoutView: View {
                 pendingTemplateUpdateAfterReviewSheetDismissal = nil
                 deferredHydrationTask?.cancel()
                 deferredHydrationTask = nil
-                pendingCheckpointScheduleTask?.cancel()
-                pendingCheckpointScheduleTask = nil
+                pendingGuidanceRefreshTask?.cancel()
+                pendingGuidanceRefreshTask = nil
+                pendingGuidanceRefreshExerciseIDs = []
+                shouldRefreshAllGuidance = false
                 if scenePhase == .active,
                    activeWorkoutPresentationState.activeSessionID == sessionID,
                    !isEndingSession
@@ -398,7 +402,6 @@ struct ActiveWorkoutView: View {
         Binding(
             get: { visibleScrollTarget },
             set: { newValue in
-                guard shouldTrackVisibleScrollTarget else { return }
                 guard newValue != visibleScrollTarget else { return }
                 visibleScrollTarget = newValue
             }
@@ -858,7 +861,7 @@ struct ActiveWorkoutView: View {
         guard setDraftsByExerciseID[exerciseID] != updated else { return }
         setDraftsByExerciseID[exerciseID] = updated
         pendingWrites.markExerciseDirty(exerciseID)
-        refreshGuidance(for: exerciseID)
+        scheduleGuidanceRefresh(for: exerciseID)
     }
 
     @MainActor
@@ -924,7 +927,6 @@ struct ActiveWorkoutView: View {
         let trace = WGJPerformance.begin("active-workout.hydrate")
         defer { WGJPerformance.end(trace) }
 
-        shouldTrackVisibleScrollTarget = false
         discardRemovedExerciseState(keeping: Set(sessionExercises.map(\.id)))
         let currentStamp = exerciseHydrationStamp
         let changedExerciseIDs = currentStamp.changedExerciseIDs(comparedTo: loadedExerciseStateStamp)
@@ -994,10 +996,7 @@ struct ActiveWorkoutView: View {
 
         let changedExercises = sessionExercises.filter { changedExerciseIDs.contains($0.id) }
         for exercise in changedExercises {
-            guidanceByExerciseID[exercise.id] = guidancePresentation(
-                for: exercise,
-                drafts: setDraftsByExerciseID[exercise.id] ?? resolvedDrafts(for: exercise)
-            )
+            scheduleGuidanceRefresh(for: exercise.id)
         }
 
         let completedExerciseIDs = Set(
@@ -1023,7 +1022,6 @@ struct ActiveWorkoutView: View {
         restoreScrollTargetIfNeeded(using: scrollProxy)
         await Task.yield()
         guard !Task.isCancelled, currentStamp == exerciseHydrationStamp else { return }
-        shouldTrackVisibleScrollTarget = true
         scheduleDeferredHydration(
             for: currentStamp,
             draftsByExerciseID: setDraftsByExerciseID
@@ -1194,12 +1192,6 @@ struct ActiveWorkoutView: View {
             for: loadedExerciseStateStamp,
             draftsByExerciseID: setDraftsByExerciseID
         )
-    }
-
-    @MainActor
-    private func flushDirtyWrites(checkpoint: ActiveWorkoutWriteCheckpoint) {
-        guard checkpoint != .finish, checkpoint != .cancel else { return }
-        scheduleCheckpointFlush(checkpoint: checkpoint)
     }
 
     @MainActor
@@ -1572,6 +1564,52 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
+    private func scheduleGuidanceRefresh(for exerciseID: UUID) {
+        guard isTrainingGuidanceEnabled else {
+            guidanceByExerciseID[exerciseID] = nil
+            return
+        }
+
+        pendingGuidanceRefreshExerciseIDs.insert(exerciseID)
+        pendingGuidanceRefreshTask?.cancel()
+        pendingGuidanceRefreshTask = Task { @MainActor in
+            try? await Task.sleep(for: guidanceRefreshDelay)
+            guard !Task.isCancelled else { return }
+            flushScheduledGuidanceRefresh()
+            pendingGuidanceRefreshTask = nil
+        }
+    }
+
+    @MainActor
+    private func scheduleGuidanceRefreshForAll() {
+        shouldRefreshAllGuidance = true
+        pendingGuidanceRefreshExerciseIDs = []
+        pendingGuidanceRefreshTask?.cancel()
+        pendingGuidanceRefreshTask = Task { @MainActor in
+            try? await Task.sleep(for: guidanceRefreshDelay)
+            guard !Task.isCancelled else { return }
+            flushScheduledGuidanceRefresh()
+            pendingGuidanceRefreshTask = nil
+        }
+    }
+
+    @MainActor
+    private func flushScheduledGuidanceRefresh() {
+        if shouldRefreshAllGuidance {
+            shouldRefreshAllGuidance = false
+            pendingGuidanceRefreshExerciseIDs = []
+            refreshGuidanceCache()
+            return
+        }
+
+        let exerciseIDs = pendingGuidanceRefreshExerciseIDs
+        pendingGuidanceRefreshExerciseIDs = []
+        for exerciseID in exerciseIDs {
+            refreshGuidance(for: exerciseID)
+        }
+    }
+
+    @MainActor
     private func refreshGuidance(for exerciseID: UUID) {
         guard let exercise = sessionExercises.first(where: { $0.id == exerciseID }) else {
             guidanceByExerciseID[exerciseID] = nil
@@ -1701,9 +1739,8 @@ struct ActiveWorkoutView: View {
     @MainActor
     private func restoreScrollTargetIfNeeded(using scrollProxy: ScrollViewProxy) {
         guard !hasConsumedInitialRestoreTarget else { return }
-        hasConsumedInitialRestoreTarget = true
-
         guard let scrollTarget = activeWorkoutPresentationState.scrollTarget else { return }
+        hasConsumedInitialRestoreTarget = true
         guard isValidScrollTarget(scrollTarget) else {
             activeWorkoutPresentationState.scrollTarget = nil
             return
@@ -1711,7 +1748,7 @@ struct ActiveWorkoutView: View {
 
         visibleScrollTarget = scrollTarget
         activeWorkoutPresentationState.scrollTarget = nil
-        scrollProxy.scrollTo(scrollTarget, anchor: .top)
+        scrollProxy.scrollTo(scrollTarget, anchor: .center)
     }
 
     @MainActor
@@ -1732,6 +1769,11 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func bestRestoreScrollTargetForMinimize() -> ActiveWorkoutScrollTarget? {
+        if visibleScrollTarget == .cancelSection,
+           let lastExerciseID = sessionExercises.last?.id {
+            return .exercise(lastExerciseID)
+        }
+
         if let visibleScrollTarget,
            isValidScrollTarget(visibleScrollTarget),
            visibleScrollTarget != .header,
@@ -1782,6 +1824,10 @@ struct ActiveWorkoutView: View {
         return .milliseconds(max(0, milliseconds))
     }
 
+    private var guidanceRefreshDelay: Duration {
+        .milliseconds(450)
+    }
+
     private func showExerciseSettings(for exercise: ActiveWorkoutDraftExercise) {
         dismissKeyboard()
         exerciseSettingsDraft = ActiveWorkoutExerciseSettingsDraft(
@@ -1828,7 +1874,7 @@ struct ActiveWorkoutView: View {
             )
             pendingWrites.markExerciseDirty(draft.exerciseID)
             exerciseSettingsDraft = nil
-            refreshGuidance(for: draft.exerciseID)
+            scheduleGuidanceRefresh(for: draft.exerciseID)
         } catch {
             showError(error)
         }
@@ -1964,6 +2010,7 @@ struct ActiveWorkoutView: View {
         dismissKeyboard()
         isCancelArmed = false
         activeWorkoutPresentationState.scrollTarget = bestRestoreScrollTargetForMinimize()
+        hasConsumedInitialRestoreTarget = false
         performExpiringBackgroundFlush(named: "active-workout.minimize") {
             _ = await flushDirtyWritesNow(checkpoint: .minimize)
         }
@@ -2326,50 +2373,7 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
-    private func scheduleCheckpointFlush(checkpoint: ActiveWorkoutWriteCheckpoint) {
-        guard checkpoint == .coalesced else {
-            pendingCheckpointScheduleTask?.cancel()
-            pendingCheckpointScheduleTask = nil
-            guard let command = makeCheckpointCommand(for: checkpoint) else { return }
-            performScheduledCheckpointFlush(command)
-            return
-        }
-
-        pendingCheckpointScheduleTask?.cancel()
-        pendingCheckpointScheduleTask = Task { @MainActor in
-            try? await Task.sleep(for: checkpointWriteDelay)
-            guard !Task.isCancelled else { return }
-            guard let command = makeCheckpointCommand(for: checkpoint) else { return }
-            performScheduledCheckpointFlush(command)
-        }
-    }
-
-    @MainActor
-    private func performScheduledCheckpointFlush(_ command: ActiveWorkoutCheckpointCommand) {
-        if let appBackgroundStore {
-            Task {
-                await appBackgroundStore.scheduleCoalesced(
-                    key: .session("active-workout.checkpoint", sessionID: command.sessionID),
-                    operationName: "active-workout.persist.checkpoint",
-                    priority: .utility,
-                    cancelExisting: true
-                ) { backgroundContext in
-                    await performCheckpointCommand(command, in: backgroundContext)
-                }
-            }
-            return
-        }
-
-        Task {
-            await performCheckpointCommand(command)
-        }
-    }
-
-    @MainActor
     private func flushDirtyWritesNow(checkpoint: ActiveWorkoutWriteCheckpoint) async -> Bool {
-        pendingCheckpointScheduleTask?.cancel()
-        pendingCheckpointScheduleTask = nil
-
         guard let command = makeCheckpointCommand(for: checkpoint) else {
             return true
         }
@@ -2502,43 +2506,6 @@ struct ActiveWorkoutView: View {
         }
     }
 
-    private func performCheckpointCommand(_ command: ActiveWorkoutCheckpointCommand) async {
-        do {
-            let result: ActiveWorkoutCheckpointPersistenceResult
-            if let appBackgroundStore {
-                result = try await appBackgroundStore.perform("active-workout.persist.checkpoint") { backgroundContext in
-                    try Self.runCheckpointCommand(command, in: backgroundContext)
-                }
-            } else {
-                result = try Self.runCheckpointCommand(command, in: modelContext)
-            }
-
-            await MainActor.run {
-                applyCheckpointResult(result, command: command)
-            }
-        } catch {
-            await MainActor.run {
-                showError(error)
-            }
-        }
-    }
-
-    private func performCheckpointCommand(
-        _ command: ActiveWorkoutCheckpointCommand,
-        in modelContext: ModelContext
-    ) async {
-        do {
-            let result = try Self.runCheckpointCommand(command, in: modelContext)
-            await MainActor.run {
-                applyCheckpointResult(result, command: command)
-            }
-        } catch {
-            await MainActor.run {
-                showError(error)
-            }
-        }
-    }
-
     private func performFinishCommand(notes: String) async throws -> ActiveWorkoutFinishResult {
         try await WGJPerformance.measureAsync("active-workout.finish") {
             if let appBackgroundStore {
@@ -2591,10 +2558,6 @@ struct ActiveWorkoutView: View {
             saveTemplateFolders: folderSnapshots,
             templateUpdatePreview: templateUpdatePreview
         )
-    }
-
-    private var checkpointWriteDelay: Duration {
-        .milliseconds(900)
     }
 
     @MainActor
@@ -3422,8 +3385,6 @@ private struct ActiveWorkoutFinishResult: Sendable {
 }
 
 private enum ActiveWorkoutWriteCheckpoint: Sendable {
-    case coalesced
-    case manual
     case minimize
     case sceneTransition
     case finish

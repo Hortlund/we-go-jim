@@ -70,12 +70,13 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 scheduleResumeCriticalMaintenanceIfNeeded()
-                if deferredMaintenanceState.isPending {
-                    requestDeferredMaintenance(trigger: .sceneActivated)
-                } else {
-                    requestWarmups(trigger: .sceneActivated)
+                if activeWorkoutPresentationState.activeSessionID == nil {
+                    if deferredMaintenanceState.isPending {
+                        requestDeferredMaintenance(trigger: .sceneActivated)
+                    } else {
+                        requestWarmups(trigger: .sceneActivated)
+                    }
                 }
-                appRuntimeState.refreshCloudAvailabilityIfNeeded()
             } else {
                 resetResumeCriticalMaintenanceCycle()
             }
@@ -216,7 +217,6 @@ struct ContentView: View {
     private func handleEnteredMainPhase() {
         scheduleResumeCriticalMaintenanceIfNeeded()
         routePendingTemplateFileIfNeeded()
-        appRuntimeState.refreshCloudAvailabilityIfNeeded()
 
         guard !hasScheduledInitialDeferredMaintenance else { return }
         hasScheduledInitialDeferredMaintenance = true
@@ -281,6 +281,17 @@ struct ContentView: View {
                 !Task.isCancelled && resumeCriticalMaintenanceTracker.isCurrent(runID)
             }
         )
+        guard !Task.isCancelled,
+              resumeCriticalMaintenanceTracker.isCurrent(runID),
+              activeWorkoutPresentationState.activeSessionID == nil
+        else {
+            return
+        }
+
+        appRuntimeState.refreshCloudAvailabilityIfNeeded()
+        if deferredMaintenanceState.isPending {
+            scheduleDeferredMaintenance(trigger: .sceneActivated)
+        }
     }
 
     private func resetResumeCriticalMaintenanceCycle() {
@@ -291,6 +302,10 @@ struct ContentView: View {
 
     @MainActor
     private func scheduleDeferredMaintenanceIfNeeded(trigger: AppMaintenanceTrigger) async {
+        guard !resumeCriticalMaintenanceTracker.isRunning else {
+            return
+        }
+
         guard AppMaintenancePolicy.shouldScheduleDeferred(
             appPhase: appPhase,
             scenePhase: scenePhase,
