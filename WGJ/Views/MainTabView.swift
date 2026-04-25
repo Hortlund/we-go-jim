@@ -35,7 +35,13 @@ struct MainTabView: View {
 
             ZStack(alignment: .bottom) {
                 TabView(selection: $tabState.selectedTab) {
-                    rootTab(.profile, title: "Profile", systemImage: "person.fill") {
+                    deferredRootTab(
+                        .profile,
+                        title: "Profile",
+                        systemImage: "person.fill"
+                    ) {
+                        ProfileFirstFrameShellView()
+                    } content: {
                         NavigationStack {
                             ProfileView()
                         }
@@ -59,7 +65,13 @@ struct MainTabView: View {
                         }
                     }
 
-                    rootTab(.bros, title: "Bros", systemImage: "person.3.fill") {
+                    deferredRootTab(
+                        .bros,
+                        title: "Bros",
+                        systemImage: "person.3.fill"
+                    ) {
+                        BrosFirstFrameShellView()
+                    } content: {
                         NavigationStack {
                             BrosView()
                         }
@@ -152,7 +164,33 @@ struct MainTabView: View {
         systemImage: String,
         @ViewBuilder content: @escaping () -> Content
     ) -> some View {
-        LazyTabContainer(tab: tab, content: content)
+        LazyTabContainer(
+            tab: tab,
+            deferInitialContentMount: false,
+            firstFrameShell: { EmptyView() },
+            content: content
+        )
+        .contentMargins(.bottom, activeWorkoutOverlayBottomInset, for: .scrollContent)
+        .animation(overlayAnimation, value: activeWorkoutOverlayBottomInset)
+        .tabItem {
+            Label(title, systemImage: systemImage)
+        }
+        .tag(tab)
+    }
+
+    private func deferredRootTab<Content: View, FirstFrameShell: View>(
+        _ tab: AppMainTab,
+        title: String,
+        systemImage: String,
+        @ViewBuilder firstFrameShell: @escaping () -> FirstFrameShell,
+        @ViewBuilder content: @escaping () -> Content
+    ) -> some View {
+        LazyTabContainer(
+            tab: tab,
+            deferInitialContentMount: FirstFrameTabContentPolicy.shouldDeferInitialContentMount(tab: tab),
+            firstFrameShell: firstFrameShell,
+            content: content
+        )
             .contentMargins(.bottom, activeWorkoutOverlayBottomInset, for: .scrollContent)
             .animation(overlayAnimation, value: activeWorkoutOverlayBottomInset)
             .tabItem {
@@ -354,43 +392,189 @@ private struct ActiveWorkoutStripHeightPreferenceKey: PreferenceKey {
     }
 }
 
-private struct LazyTabContainer<Content: View>: View {
+private struct ProfileFirstFrameShellView: View {
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 16) {
+                WGJRootHeader("Profile", subtitle: "Your training snapshot, progress, and app controls.")
+
+                placeholderCard(title: "Preparing profile", subtitle: "Loading your profile shell.")
+                placeholderCard(title: "Highlights", subtitle: "Stats will fill in after the first frame.")
+            }
+            .padding(.top, 8)
+            .padding(16)
+        }
+        .wgjScreenBackground()
+        .accessibilityIdentifier("profile-first-shell")
+    }
+
+    private func placeholderCard(title: String, subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            WGJActionHeader(title, subtitle: subtitle) {
+                ProgressView()
+                    .progressViewStyle(.circular)
+            }
+
+            VStack(spacing: 8) {
+                ForEach(0..<3, id: \.self) { index in
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(WGJTheme.rowDivider.opacity(index == 0 ? 0.34 : 0.22))
+                        .frame(height: index == 0 ? 18 : 12)
+                }
+            }
+        }
+        .padding(14)
+        .wgjCardContainer(strong: true)
+    }
+}
+
+private struct BrosFirstFrameShellView: View {
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: WGJSpacing.section) {
+                WGJRootHeader("Bros", subtitle: "Private feed and PR updates for your circle.")
+
+                VStack(alignment: .leading, spacing: 12) {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+
+                    Text("Loading your bro circle")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(WGJTheme.textPrimary)
+
+                    Text("Checking iCloud and preparing your shared feed.")
+                        .font(.subheadline)
+                        .foregroundStyle(WGJTheme.textSecondary)
+                }
+                .padding(WGJSpacing.card)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .wgjCardContainer(strong: true)
+            }
+            .padding(WGJSpacing.page)
+            .padding(.top, 8)
+            .padding(.bottom, 12)
+        }
+        .wgjScreenBackground()
+        .accessibilityIdentifier("bros-first-shell")
+    }
+}
+
+private struct LazyTabContainer<Content: View, FirstFrameShell: View>: View {
     @Environment(AppTabState.self) private var tabState
 
     let tab: AppMainTab
+    let deferInitialContentMount: Bool
+    let firstFrameShell: () -> FirstFrameShell
     let content: () -> Content
 
     @State private var hasLoaded = false
+    @State private var isInitialContentMountReady = false
+    @State private var hasPresentedFirstFrameShell = false
+    @State private var initialContentMountTask: Task<Void, Never>?
 
     var body: some View {
         Group {
-            if shouldLoadContent {
+            switch presentation {
+            case .content:
                 content()
                     .environment(\.isTabActive, tabState.selectedTab == tab)
-            } else {
+            case .shell:
+                firstFrameShell()
+                    .environment(\.isTabActive, false)
+                    .onAppear {
+                        markFirstFrameShellPresented()
+                    }
+            case .empty:
                 Color.clear
                     .environment(\.isTabActive, false)
             }
         }
         .onAppear {
-            markLoadedIfSelected()
+            handleSelectionChange()
         }
         .onChange(of: tabState.selectedTab) { _, _ in
-            markLoadedIfSelected()
+            handleSelectionChange()
+        }
+        .onDisappear {
+            initialContentMountTask?.cancel()
+            initialContentMountTask = nil
         }
     }
 
-    private func markLoadedIfSelected() {
+    private func handleSelectionChange() {
+        guard tabState.selectedTab == tab else {
+            cancelPendingInitialContentMountIfNeeded()
+            return
+        }
+        guard !hasLoaded else { return }
+
+        guard deferInitialContentMount else {
+            markLoaded()
+            return
+        }
+
+        guard !isInitialContentMountReady else {
+            markLoaded()
+            return
+        }
+
+        scheduleInitialContentMount()
+    }
+
+    private func scheduleInitialContentMount() {
+        guard initialContentMountTask == nil else { return }
+        initialContentMountTask = Task { @MainActor in
+            await Task.yield()
+            guard !Task.isCancelled, tabState.selectedTab == tab else {
+                initialContentMountTask = nil
+                return
+            }
+
+            isInitialContentMountReady = true
+            markLoaded()
+            initialContentMountTask = nil
+        }
+    }
+
+    private func cancelPendingInitialContentMountIfNeeded() {
+        guard !hasLoaded else { return }
+        initialContentMountTask?.cancel()
+        initialContentMountTask = nil
+    }
+
+    private func markLoaded() {
         guard !hasLoaded else { return }
         WGJPerformance.measure("main-tab.first-load") {
-            if shouldLoadContent {
-                hasLoaded = true
-            }
+            hasLoaded = true
         }
     }
 
-    private var shouldLoadContent: Bool {
-        hasLoaded || tabState.selectedTab == tab
+    private func markFirstFrameShellPresented() {
+        guard !hasPresentedFirstFrameShell else { return }
+        WGJPerformance.measure(firstFrameShellMeasureName) {
+            hasPresentedFirstFrameShell = true
+        }
+    }
+
+    private var firstFrameShellMeasureName: StaticString {
+        switch tab {
+        case .profile:
+            return "main-tab.first-shell.profile"
+        case .bros:
+            return "main-tab.first-shell.bros"
+        case .history, .startWorkout, .exercises:
+            return "main-tab.first-shell.other"
+        }
+    }
+
+    private var presentation: FirstFrameTabPresentation {
+        FirstFrameTabContentPolicy.presentation(
+            tab: tab,
+            selectedTab: tabState.selectedTab,
+            hasLoaded: hasLoaded,
+            deferInitialContentMount: deferInitialContentMount,
+            isInitialContentMountReady: isInitialContentMountReady
+        )
     }
 }
 

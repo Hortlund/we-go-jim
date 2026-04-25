@@ -52,6 +52,10 @@ final class WGJUITests: XCTestCase {
             "UITEST_IN_MEMORY_STORE",
             "UITEST_FORCE_AUTO_ENTER_AFTER_SPLASH",
         ]
+        app.launchEnvironment = [
+            "UITEST_PROFILE_STARTUP_WARMUP_DELAY_MS": "2000",
+            "UITEST_BROS_STARTUP_WARMUP_DELAY_MS": "2000",
+        ]
         app.launch()
 
         XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 8))

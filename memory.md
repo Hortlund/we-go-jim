@@ -62,8 +62,8 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 - Date: 2026-04-25
 - Trigger/Problem: Keeping the splash up until Profile/Bros were preloaded made launch feel too long and hid the iCloud loading banner, while first Profile/Bros visits still needed to avoid visible tap lag.
-- Root Cause: The user-visible freeze belongs to the tab activation path, not only the data warmup path. Gating main entry behind warmup or mounting hidden tabs shifts the cost instead of guaranteeing that the first tap presents a lightweight frame before hydration.
-- Durable Rule: Startup Profile/Bros warmups may start early through `AppBackgroundStore`, but splash must not wait on them and `MainTabView` must not be covered by a startup overlay. Profile and Bros first activation must render a lightweight shell first, then apply warm snapshots or run hydration after a yield/version change without main-context SwiftData or CloudKit work on the tap frame.
+- Root Cause: The user-visible freeze belongs to the tab activation path, not only the data warmup path. A shell inside `ProfileView`/`BrosView` is too late because the first tap still pays heavy view construction, and async-started warmup can leave a race where the tab misses the active warmup flag.
+- Durable Rule: Startup Profile/Bros warmups may start early through `AppBackgroundStore`, but splash must not wait on them and `MainTabView` must not be covered by a startup overlay. Mark startup warmups active synchronously before main is exposed, render Profile/Bros first-frame shells from `MainTabView` before constructing the heavy tab views, then apply warm snapshots or run hydration after a yield/version change without main-context SwiftData or CloudKit work on the tap frame.
 - How to Verify Next Time: Cold launch without `UITEST_SKIP_SPLASH`, confirm the tab bar and iCloud sync banner can appear after main entry, then tap Profile and Bros immediately. Assert `profile-first-shell` and `bros-first-shell` appear quickly before dashboard/feed hydration completes.
 - Status: active
 

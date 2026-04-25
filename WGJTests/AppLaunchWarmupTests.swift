@@ -150,6 +150,75 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
+    func startupWarmupStarterMarksProfileAndBrosActiveSynchronously() throws {
+        let state = AppWarmupState()
+
+        let runIDs = state.beginStartupWarmups(
+            shouldWarmProfile: true,
+            shouldWarmBros: true
+        )
+
+        let profileRunID = try #require(runIDs.profileRunID)
+        let brosRunID = try #require(runIDs.brosRunID)
+        #expect(runIDs.hasAnyWarmup)
+        #expect(state.isProfileWarmupActive)
+        #expect(state.isBrosWarmupActive)
+        #expect(state.profileCompletionVersion == 0)
+        #expect(state.brosCompletionVersion == 0)
+
+        state.finishProfileWarmup(runID: profileRunID, snapshot: nil)
+        state.finishBrosWarmup(runID: brosRunID, snapshot: nil)
+
+        #expect(!state.isProfileWarmupActive)
+        #expect(!state.isBrosWarmupActive)
+        #expect(state.profileCompletionVersion == 1)
+        #expect(state.brosCompletionVersion == 1)
+    }
+
+    @Test
+    func firstFrameTabPolicyShowsShellBeforeInitialProfileAndBrosContent() {
+        #expect(FirstFrameTabContentPolicy.shouldDeferInitialContentMount(tab: .profile))
+        #expect(FirstFrameTabContentPolicy.shouldDeferInitialContentMount(tab: .bros))
+        #expect(!FirstFrameTabContentPolicy.shouldDeferInitialContentMount(tab: .history))
+
+        #expect(FirstFrameTabContentPolicy.presentation(
+            tab: .profile,
+            selectedTab: .profile,
+            hasLoaded: false,
+            deferInitialContentMount: true,
+            isInitialContentMountReady: false
+        ) == .shell)
+        #expect(FirstFrameTabContentPolicy.presentation(
+            tab: .bros,
+            selectedTab: .bros,
+            hasLoaded: false,
+            deferInitialContentMount: true,
+            isInitialContentMountReady: false
+        ) == .shell)
+        #expect(FirstFrameTabContentPolicy.presentation(
+            tab: .profile,
+            selectedTab: .profile,
+            hasLoaded: false,
+            deferInitialContentMount: true,
+            isInitialContentMountReady: true
+        ) == .content)
+        #expect(FirstFrameTabContentPolicy.presentation(
+            tab: .history,
+            selectedTab: .history,
+            hasLoaded: false,
+            deferInitialContentMount: false,
+            isInitialContentMountReady: false
+        ) == .content)
+        #expect(FirstFrameTabContentPolicy.presentation(
+            tab: .profile,
+            selectedTab: .startWorkout,
+            hasLoaded: false,
+            deferInitialContentMount: true,
+            isInitialContentMountReady: false
+        ) == .empty)
+    }
+
+    @Test
     func startupWarmupGateWaitsForFastWarmups() async {
         let probe = WarmupGateProbe()
         let profileTask = Task {

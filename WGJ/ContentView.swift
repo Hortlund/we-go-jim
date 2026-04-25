@@ -578,23 +578,35 @@ struct ContentView: View {
             return
         }
 
-        if shouldWarmProfile {
+        let runIDs = appWarmupState.beginStartupWarmups(
+            shouldWarmProfile: shouldWarmProfile,
+            shouldWarmBros: shouldWarmBros
+        )
+        guard runIDs.hasAnyWarmup else { return }
+
+        if let profileRunID = runIDs.profileRunID {
             Task { @MainActor in
-                await prepareStartupProfileWarmSnapshotIfNeeded()
+                await prepareStartupProfileWarmSnapshot(runID: profileRunID)
             }
         }
 
-        if shouldWarmBros {
+        if let brosRunID = runIDs.brosRunID {
             Task { @MainActor in
-                await prepareStartupBrosWarmSnapshotIfNeeded()
+                await prepareStartupBrosWarmSnapshot(runID: brosRunID)
             }
         }
     }
 
     @MainActor
-    private func prepareStartupProfileWarmSnapshotIfNeeded() async {
-        guard let appBackgroundStore else { return }
-        guard let runID = appWarmupState.beginProfileWarmup() else { return }
+    private func prepareStartupProfileWarmSnapshot(runID: Int) async {
+        guard let appBackgroundStore else {
+            appWarmupState.finishProfileWarmup(runID: runID, snapshot: nil)
+            return
+        }
+
+        await Self.sleepForUITestStartupWarmupDelayIfNeeded(
+            environmentKey: "UITEST_PROFILE_STARTUP_WARMUP_DELAY_MS"
+        )
 
         let snapshot = try? await appBackgroundStore.performAsync("profile.startup-warmup") { backgroundContext in
             try await Self.buildProfileWarmSnapshot(
@@ -611,9 +623,15 @@ struct ContentView: View {
     }
 
     @MainActor
-    private func prepareStartupBrosWarmSnapshotIfNeeded() async {
-        guard let appBackgroundStore else { return }
-        guard let runID = appWarmupState.beginBrosWarmup() else { return }
+    private func prepareStartupBrosWarmSnapshot(runID: Int) async {
+        guard let appBackgroundStore else {
+            appWarmupState.finishBrosWarmup(runID: runID, snapshot: nil)
+            return
+        }
+
+        await Self.sleepForUITestStartupWarmupDelayIfNeeded(
+            environmentKey: "UITEST_BROS_STARTUP_WARMUP_DELAY_MS"
+        )
 
         let cloudSyncEnabled = appRuntimeState.cloudSyncEnabled
         let cloudSyncErrorDescription = appRuntimeState.cloudSyncErrorDescription
@@ -629,6 +647,21 @@ struct ContentView: View {
             runID: runID,
             snapshot: Task.isCancelled ? nil : snapshot
         )
+    }
+
+    private static func sleepForUITestStartupWarmupDelayIfNeeded(environmentKey: String) async {
+#if DEBUG
+        guard let rawValue = ProcessInfo.processInfo.environment[environmentKey],
+              let delayMilliseconds = Int(rawValue),
+              delayMilliseconds > 0
+        else {
+            return
+        }
+
+        try? await Task.sleep(for: .milliseconds(delayMilliseconds))
+#else
+        _ = environmentKey
+#endif
     }
 
     private func scheduleProfileWarmupIfNeeded(force: Bool) {

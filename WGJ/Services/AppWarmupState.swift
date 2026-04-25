@@ -132,6 +132,36 @@ nonisolated enum BrosInitialActivationPolicy {
     }
 }
 
+nonisolated enum FirstFrameTabPresentation: Equatable, Sendable {
+    case empty
+    case shell
+    case content
+}
+
+nonisolated enum FirstFrameTabContentPolicy {
+    static func shouldDeferInitialContentMount(tab: AppMainTab) -> Bool {
+        switch tab {
+        case .profile, .bros:
+            return true
+        case .history, .startWorkout, .exercises:
+            return false
+        }
+    }
+
+    static func presentation(
+        tab: AppMainTab,
+        selectedTab: AppMainTab,
+        hasLoaded: Bool,
+        deferInitialContentMount: Bool,
+        isInitialContentMountReady: Bool
+    ) -> FirstFrameTabPresentation {
+        guard !hasLoaded else { return .content }
+        guard selectedTab == tab else { return .empty }
+        guard deferInitialContentMount else { return .content }
+        return isInitialContentMountReady ? .content : .shell
+    }
+}
+
 nonisolated struct DeferredMaintenanceRunTracker: Equatable, Sendable {
     private(set) var requestedRunID: Int
     private(set) var completedRunID: Int
@@ -184,6 +214,15 @@ struct BrosWarmSnapshot: Equatable, Sendable {
     let state: BrosWarmStateSnapshot
     let blockedUserRecordNames: Set<String>
     let warmedAt: Date
+}
+
+struct StartupWarmupRunIDs: Equatable, Sendable {
+    let profileRunID: Int?
+    let brosRunID: Int?
+
+    var hasAnyWarmup: Bool {
+        profileRunID != nil || brosRunID != nil
+    }
 }
 
 @MainActor
@@ -282,6 +321,16 @@ final class AppWarmupState {
         activeBrosWarmupRunID = brosWarmupGeneration
         isBrosWarmupActive = true
         return activeBrosWarmupRunID
+    }
+
+    func beginStartupWarmups(
+        shouldWarmProfile: Bool,
+        shouldWarmBros: Bool
+    ) -> StartupWarmupRunIDs {
+        StartupWarmupRunIDs(
+            profileRunID: shouldWarmProfile ? beginProfileWarmup() : nil,
+            brosRunID: shouldWarmBros ? beginBrosWarmup() : nil
+        )
     }
 
     func finishBrosWarmup(runID: Int, snapshot: BrosWarmSnapshot?) {
