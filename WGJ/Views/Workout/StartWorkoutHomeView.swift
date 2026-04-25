@@ -739,10 +739,9 @@ struct StartWorkoutHomeView: View {
             sessionID = try repository.createEmptySession().id
         }
 
-        let previousPerformance = try repository.previousPerformanceResolutionByExerciseID(sessionID: sessionID)
         return ActiveWorkoutStartPreparation(
             sessionID: sessionID,
-            previousPerformanceResolutionByExerciseID: previousPerformance
+            previousPerformanceResolutionByExerciseID: [:]
         )
     }
 

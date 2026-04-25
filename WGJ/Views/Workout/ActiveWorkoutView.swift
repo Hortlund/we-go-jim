@@ -561,7 +561,7 @@ struct ActiveWorkoutView: View {
                 statusText: cardioStatusText(for: cardioBlock),
                 statusTint: cardioStatusTint(for: cardioBlock),
                 footnote: cardioFootnote(for: cardioBlock),
-                isCompleted: cardioBlock.isCompleted,
+                isCompleted: resolvedCardioCompletion(for: cardioBlock),
                 canComplete: canToggleCompletion(for: cardioBlock),
                 completionTitle: "Complete \(cardioBlock.phase.shortTitle)",
                 completionAccessibilityLabel: cardioCompletionAccessibilityLabel(for: cardioBlock),
@@ -603,7 +603,7 @@ struct ActiveWorkoutView: View {
     }
 
     private func cardioHeaderTint(for cardioBlock: ActiveWorkoutDraftCardioBlock) -> Color {
-        if cardioBlock.isCompleted {
+        if resolvedCardioCompletion(for: cardioBlock) {
             return WGJTheme.success
         }
 
@@ -616,7 +616,7 @@ struct ActiveWorkoutView: View {
     }
 
     private func cardioCompletionAccessibilityLabel(for cardioBlock: ActiveWorkoutDraftCardioBlock) -> String {
-        if cardioBlock.isCompleted {
+        if resolvedCardioCompletion(for: cardioBlock) {
             return "Mark \(cardioBlock.phase.shortTitle) Incomplete"
         }
 
@@ -834,7 +834,8 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private var areMainExercisesUnlocked: Bool {
-        preWorkoutCardio?.isCompleted ?? true
+        guard let preWorkoutCardio else { return true }
+        return resolvedCardioCompletion(for: preWorkoutCardio)
     }
 
     @MainActor
@@ -956,52 +957,6 @@ struct ActiveWorkoutView: View {
                 )
                 : nil
         )
-
-        let orderedExerciseIDs = sessionExercises.map(\.id)
-        let expandedExerciseIDs = Set(
-            orderedExerciseIDs.filter { cardStateController.isExpanded(for: $0) }
-        )
-        let exerciseIDsNeedingEagerHydration = Set(
-            expandedExerciseIDs.filter { exerciseID in
-                previousResolutionByExerciseID[exerciseID]?.isLoading != false
-                    || componentResolutionByExerciseID[exerciseID] == nil
-            }
-        )
-        let eagerlyHydratedExerciseIDs = WorkoutExerciseHydrationPlanner.orderedExerciseIDsToHydrate(
-            orderedExerciseIDs: orderedExerciseIDs,
-            eligibleExerciseIDs: exerciseIDsNeedingEagerHydration,
-            limit: 1
-        )
-
-        if !eagerlyHydratedExerciseIDs.isEmpty {
-            do {
-                let eagerHydration: ActiveWorkoutDeferredHydrationResult
-                let eagerDraftsByExerciseID = setDraftsByExerciseID
-                if let appBackgroundStore {
-                    eagerHydration = try await appBackgroundStore.perform("active-workout.hydrate.eager") { backgroundContext in
-                        try Self.loadDeferredHydrationResult(
-                            modelContext: backgroundContext,
-                            sessionID: sessionID,
-                            exerciseIDs: eagerlyHydratedExerciseIDs,
-                            draftsByExerciseID: eagerDraftsByExerciseID
-                        )
-                    }
-                } else {
-                    eagerHydration = try Self.loadDeferredHydrationResult(
-                        modelContext: modelContext,
-                        sessionID: sessionID,
-                        exerciseIDs: eagerlyHydratedExerciseIDs,
-                        draftsByExerciseID: eagerDraftsByExerciseID
-                    )
-                }
-
-                previousResolutionByExerciseID.merge(eagerHydration.previousResolutionByExerciseID) { _, new in new }
-                componentResolutionByExerciseID.merge(eagerHydration.componentResolutionByExerciseID) { _, new in new }
-            } catch {
-                showError(error)
-                return
-            }
-        }
 
         loadedExerciseStateStamp = currentStamp
         seedOrRepairScrollTarget(
@@ -1319,7 +1274,7 @@ struct ActiveWorkoutView: View {
                     categorySnapshot: cardioBlock.categorySnapshot,
                     muscleSummarySnapshot: cardioBlock.muscleSummarySnapshot,
                     targetDurationSeconds: targetDurationSeconds,
-                    isCompleted: cardioBlock.isCompleted
+                    isCompleted: resolvedCardioCompletion(for: cardioBlock)
                 )
             )
         } catch {
@@ -1332,14 +1287,12 @@ struct ActiveWorkoutView: View {
         for cardioBlock: ActiveWorkoutDraftCardioBlock,
         scrollProxy: ScrollViewProxy
     ) {
-        guard canToggleCompletion(for: cardioBlock) || cardioBlock.isCompleted else {
+        let currentCompletion = resolvedCardioCompletion(for: cardioBlock)
+        guard canToggleCompletion(for: cardioBlock) || currentCompletion else {
             return
         }
 
-        let updatedCompletion = !cardioBlock.isCompleted
-        cardioBlock.isCompleted = updatedCompletion
-        cardioBlock.updatedAt = .now
-        session?.updatedAt = .now
+        let updatedCompletion = !currentCompletion
         pendingCardioCompletionsByPhase[cardioBlock.phase] = updatedCompletion
 
         if updatedCompletion {
@@ -1673,7 +1626,7 @@ struct ActiveWorkoutView: View {
     private func preferredInitialScrollTarget(
         draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
     ) -> ActiveWorkoutScrollTarget? {
-        if let preWorkoutCardio, !preWorkoutCardio.isCompleted {
+        if let preWorkoutCardio, !resolvedCardioCompletion(for: preWorkoutCardio) {
             return cardioScrollTarget(for: .preWorkout)
         }
 
@@ -1685,7 +1638,7 @@ struct ActiveWorkoutView: View {
         }
 
         if let postWorkoutCardio,
-           !postWorkoutCardio.isCompleted,
+           !resolvedCardioCompletion(for: postWorkoutCardio),
            allExercisesCompleted(from: sessionExercises, draftsByExerciseID: draftsByExerciseID) {
             return cardioScrollTarget(for: .postWorkout)
         }
@@ -2118,7 +2071,7 @@ struct ActiveWorkoutView: View {
             exerciseDrafts: sessionExercises.map { exercise in
                 setDraftsByExerciseID[exercise.id] ?? []
             },
-            cardioBlocks: orderedCardioBlocks.map(WorkoutCardioBlockDraft.init(model:))
+            cardioBlocks: orderedCardioBlocks.map(resolvedCardioDraft)
         )
     }
 
@@ -2445,9 +2398,7 @@ struct ActiveWorkoutView: View {
         }
 
         for (phase, isCompleted) in command.cardioCompletionsByPhase {
-            guard pendingCardioCompletionsByPhase[phase] == isCompleted,
-                  cardioBlock(for: phase)?.isCompleted == isCompleted
-            else {
+            guard pendingCardioCompletionsByPhase[phase] == isCompleted else {
                 continue
             }
             pendingCardioCompletionsByPhase[phase] = nil
@@ -2647,8 +2598,27 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
+    private func resolvedCardioCompletion(for cardioBlock: ActiveWorkoutDraftCardioBlock) -> Bool {
+        pendingCardioCompletionsByPhase[cardioBlock.phase] ?? cardioBlock.isCompleted
+    }
+
+    @MainActor
+    private func resolvedCardioDraft(for cardioBlock: ActiveWorkoutDraftCardioBlock) -> WorkoutCardioBlockDraft {
+        WorkoutCardioBlockDraft(
+            id: cardioBlock.id,
+            phase: cardioBlock.phase,
+            catalogExerciseUUID: cardioBlock.catalogExerciseUUID,
+            exerciseNameSnapshot: cardioBlock.exerciseNameSnapshot,
+            categorySnapshot: cardioBlock.categorySnapshot,
+            muscleSummarySnapshot: cardioBlock.muscleSummarySnapshot,
+            targetDurationSeconds: cardioBlock.targetDurationSeconds,
+            isCompleted: resolvedCardioCompletion(for: cardioBlock)
+        )
+    }
+
+    @MainActor
     private func cardioStatusText(for cardioBlock: ActiveWorkoutDraftCardioBlock) -> String {
-        if cardioBlock.isCompleted {
+        if resolvedCardioCompletion(for: cardioBlock) {
             return "Complete"
         }
 
@@ -2662,7 +2632,7 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func cardioStatusTint(for cardioBlock: ActiveWorkoutDraftCardioBlock) -> Color {
-        if cardioBlock.isCompleted {
+        if resolvedCardioCompletion(for: cardioBlock) {
             return WGJTheme.success
         }
 
@@ -2696,11 +2666,11 @@ struct ActiveWorkoutView: View {
     private func cardioFootnote(for cardioBlock: ActiveWorkoutDraftCardioBlock) -> String {
         switch cardioBlock.phase {
         case .preWorkout:
-            return cardioBlock.isCompleted
+            return resolvedCardioCompletion(for: cardioBlock)
                 ? "Warmup complete. Main exercise logging is unlocked."
                 : "Finish this warmup block before logging or completing sets."
         case .postWorkout:
-            if cardioBlock.isCompleted {
+            if resolvedCardioCompletion(for: cardioBlock) {
                 return "Cooldown complete. This workout is fully wrapped."
             }
 
