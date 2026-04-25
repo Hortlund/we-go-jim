@@ -58,6 +58,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 - How to Verify Next Time: Run active workout UI smokes for typed set values and minimize/restore scroll position, then review active row rendering for synchronous SwiftData relationship scans, fallback draft creation during `body`, per-keystroke parent draft/persistence mutation, or coalesced save timers firing during normal logging.
 - Status: active
 
+## 2026-04-25 - Active Workout Start Needs Full First-Render Snapshot
+
+- Date: 2026-04-25
+- Trigger/Problem: Staging only previous-performance before presenting Active Workout still allowed the first active render to show exercise loading cards and then catch up through async draft hydration.
+- Root Cause: The presentation handoff lacked set drafts, rest, notes, catalog hints, and persistence baselines, so first input could race the hydration task and the UI could still pay an avoidable first-frame update.
+- Durable Rule: Workout start/resume handoff should stage a full first-render snapshot for active logging: drafts, rest, notes, previous-performance, catalog hints, and the persisted baseline used for checkpoint diffs. Do not present a newly started workout with only previous-performance staged.
+- How to Verify Next Time: Start a template workout with previous values and immediately interact with pre-cardio and the first set field; confirm the first exercise renders from prepared draft data, no loading card is needed for normal starts, and an immediate lifecycle flush still persists typed values.
+- Status: active
+
 ## 2026-04-25 - Cold Tab Smoothness Needs UI Preload, Not Only Data Warmup
 
 - Date: 2026-04-25

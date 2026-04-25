@@ -18,6 +18,7 @@ struct ActiveWorkoutView: View {
     @Query private var sessions: [ActiveWorkoutDraftSession]
     @Query private var sessionCardioBlocks: [ActiveWorkoutDraftCardioBlock]
     @Query private var sessionExercises: [ActiveWorkoutDraftExercise]
+    @Query private var sessionSupersetGroups: [ActiveWorkoutDraftSupersetGroup]
     @Query private var profiles: [UserProfile]
 
     @State private var hasBootstrapped = false
@@ -117,6 +118,11 @@ struct ActiveWorkoutView: View {
                 item.sessionID == sessionID
             },
             sort: [SortDescriptor(\ActiveWorkoutDraftExercise.sortOrder, order: .forward)]
+        )
+        _sessionSupersetGroups = Query(
+            filter: #Predicate { item in
+                item.sessionID == sessionID
+            }
         )
     }
 
@@ -430,9 +436,23 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private var exerciseDisplayGroups: [WorkoutExerciseDisplayGroup<ActiveWorkoutDraftExercise>] {
-        WorkoutExerciseDisplayGrouping.build(
+        let roundRestSecondsByGroupID = Dictionary(
+            uniqueKeysWithValues: sessionSupersetGroups.map { ($0.id, $0.roundRestSeconds) }
+        )
+        return WorkoutExerciseDisplayGrouping.build(
             items: sessionExercises,
-            membership: { $0.supersetMembership }
+            membership: { exercise in
+                guard let groupID = exercise.supersetGroupID,
+                      let position = exercise.supersetPosition else {
+                    return nil
+                }
+
+                return ExerciseSupersetMembershipDraft(
+                    groupID: groupID,
+                    position: position,
+                    roundRestSeconds: roundRestSecondsByGroupID[groupID] ?? 120
+                )
+            }
         )
     }
 
@@ -641,7 +661,7 @@ struct ActiveWorkoutView: View {
         let guidance = guidanceByExerciseID[exerciseID] ?? nil
 
         Group {
-            if let drafts = setDraftsByExerciseID[exerciseID] {
+            if let drafts = renderableDrafts(for: exerciseID) {
                 WorkoutExerciseRowHostView(
                     exerciseID: exerciseID,
                     exerciseAccessibilityIdentifier: "active-workout-exercise-\(exercise.catalogExerciseUUID)",
@@ -781,18 +801,37 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
+    private func renderableDrafts(for exerciseID: UUID) -> [WorkoutSessionSetDraft]? {
+        if let drafts = setDraftsByExerciseID[exerciseID] {
+            return drafts
+        }
+
+        return activeWorkoutPresentationState
+            .preparedFirstRenderSnapshot(for: sessionID)?
+            .draftsByExerciseID[exerciseID]
+    }
+
+    @MainActor
     private func resolvedDrafts(for exercise: ActiveWorkoutDraftExercise) -> [WorkoutSessionSetDraft] {
-        setDraftsByExerciseID[exercise.id] ?? []
+        renderableDrafts(for: exercise.id) ?? []
     }
 
     @MainActor
     private func resolvedRest(for exercise: ActiveWorkoutDraftExercise) -> Int {
-        restByExerciseID[exercise.id] ?? exercise.restSeconds
+        restByExerciseID[exercise.id]
+            ?? activeWorkoutPresentationState
+                .preparedFirstRenderSnapshot(for: sessionID)?
+                .restsByExerciseID[exercise.id]
+            ?? exercise.restSeconds
     }
 
     @MainActor
     private func resolvedNotes(for exercise: ActiveWorkoutDraftExercise) -> String {
-        notesByExerciseID[exercise.id] ?? exercise.notes
+        notesByExerciseID[exercise.id]
+            ?? activeWorkoutPresentationState
+                .preparedFirstRenderSnapshot(for: sessionID)?
+                .notesByExerciseID[exercise.id]
+            ?? exercise.notes
     }
 
     @MainActor
@@ -887,6 +926,25 @@ struct ActiveWorkoutView: View {
 
         shouldTrackVisibleScrollTarget = false
         discardRemovedExerciseState(keeping: Set(sessionExercises.map(\.id)))
+        let currentStamp = exerciseHydrationStamp
+        let changedExerciseIDs = currentStamp.changedExerciseIDs(comparedTo: loadedExerciseStateStamp)
+        guard !changedExerciseIDs.isEmpty else { return }
+        deferredHydrationTask?.cancel()
+        deferredHydrationTask = nil
+
+        var exerciseIDsToLoad = changedExerciseIDs
+        if let preparedSnapshot = activeWorkoutPresentationState.preparedFirstRenderSnapshot(for: sessionID) {
+            let preparedExerciseIDs = exerciseIDsToLoad.intersection(Set(preparedSnapshot.draftsByExerciseID.keys))
+            if !preparedExerciseIDs.isEmpty {
+                applyPreparedFirstRenderSnapshot(preparedSnapshot, exerciseIDs: preparedExerciseIDs)
+                exerciseIDsToLoad.subtract(preparedExerciseIDs)
+            }
+            if exerciseIDsToLoad.isEmpty {
+                activeWorkoutPresentationState.clearPreparedFirstRenderSnapshot(for: sessionID)
+                activeWorkoutPresentationState.clearPreparedPreviousPerformanceResolution(for: sessionID)
+            }
+        }
+
         let preparedPreviousResolutionByExerciseID = activeWorkoutPresentationState.preparedPreviousPerformanceResolution(
             for: sessionID
         )
@@ -894,13 +952,9 @@ struct ActiveWorkoutView: View {
             previousResolutionByExerciseID.merge(preparedPreviousResolutionByExerciseID) { current, _ in current }
             activeWorkoutPresentationState.clearPreparedPreviousPerformanceResolution(for: sessionID)
         }
-        let currentStamp = exerciseHydrationStamp
-        let changedExerciseIDs = currentStamp.changedExerciseIDs(comparedTo: loadedExerciseStateStamp)
-        guard !changedExerciseIDs.isEmpty else { return }
-        deferredHydrationTask?.cancel()
-        deferredHydrationTask = nil
 
-        if !changedExerciseIDs.isEmpty {
+        if !exerciseIDsToLoad.isEmpty {
+            let loadingExerciseIDs = exerciseIDsToLoad
             let result: ActiveWorkoutHydrationResult
             do {
                 if let appBackgroundStore {
@@ -908,14 +962,14 @@ struct ActiveWorkoutView: View {
                         try Self.loadHydrationResult(
                             modelContext: backgroundContext,
                             sessionID: sessionID,
-                            exerciseIDs: changedExerciseIDs
+                            exerciseIDs: loadingExerciseIDs
                         )
                     }
                 } else {
                     result = try Self.loadHydrationResult(
                         modelContext: modelContext,
                         sessionID: sessionID,
-                        exerciseIDs: changedExerciseIDs
+                        exerciseIDs: loadingExerciseIDs
                     )
                 }
             } catch {
@@ -929,19 +983,21 @@ struct ActiveWorkoutView: View {
             lastPersistedExerciseStateByID.merge(result.persistenceStateByExerciseID) { _, new in new }
             catalogMatchesByUUID.merge(result.catalogMatchesByUUID) { _, new in new }
 
-            for exerciseID in changedExerciseIDs {
-                previousResolutionByExerciseID[exerciseID] = nil
+            for exerciseID in loadingExerciseIDs {
+                if previousResolutionByExerciseID[exerciseID] == nil {
+                    previousResolutionByExerciseID[exerciseID] = .loading
+                }
                 componentResolutionByExerciseID[exerciseID] = nil
                 guidanceByExerciseID[exerciseID] = nil
             }
+        }
 
-            let changedExercises = sessionExercises.filter { changedExerciseIDs.contains($0.id) }
-            for exercise in changedExercises {
-                guidanceByExerciseID[exercise.id] = guidancePresentation(
-                    for: exercise,
-                    drafts: result.draftsByExerciseID[exercise.id] ?? resolvedDrafts(for: exercise)
-                )
-            }
+        let changedExercises = sessionExercises.filter { changedExerciseIDs.contains($0.id) }
+        for exercise in changedExercises {
+            guidanceByExerciseID[exercise.id] = guidancePresentation(
+                for: exercise,
+                drafts: setDraftsByExerciseID[exercise.id] ?? resolvedDrafts(for: exercise)
+            )
         }
 
         let completedExerciseIDs = Set(
@@ -991,6 +1047,25 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
+    private func applyPreparedFirstRenderSnapshot(
+        _ snapshot: ActiveWorkoutPreparedFirstRenderSnapshot,
+        exerciseIDs: Set<UUID>
+    ) {
+        guard !exerciseIDs.isEmpty else { return }
+
+        setDraftsByExerciseID.merge(snapshot.draftsByExerciseID.filter { exerciseIDs.contains($0.key) }) { _, new in new }
+        restByExerciseID.merge(snapshot.restsByExerciseID.filter { exerciseIDs.contains($0.key) }) { _, new in new }
+        notesByExerciseID.merge(snapshot.notesByExerciseID.filter { exerciseIDs.contains($0.key) }) { _, new in new }
+        lastPersistedExerciseStateByID.merge(
+            snapshot.persistenceStateByExerciseID.filter { exerciseIDs.contains($0.key) }
+        ) { _, new in new }
+        previousResolutionByExerciseID.merge(
+            snapshot.previousResolutionByExerciseID.filter { exerciseIDs.contains($0.key) }
+        ) { _, new in new }
+        catalogMatchesByUUID.merge(snapshot.catalogMatchesByUUID) { _, new in new }
+    }
+
+    @MainActor
     private func scheduleDeferredHydration(
         for stamp: ActiveWorkoutExerciseInteractionStamp,
         draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
@@ -1001,8 +1076,9 @@ struct ActiveWorkoutView: View {
             return resolution.isLoading
         }
         let componentExerciseIDs = expandedExerciseIDs.filter { componentResolutionByExerciseID[$0] == nil }
+        let hydrationExerciseIDs = previousExerciseIDs.union(componentExerciseIDs)
 
-        guard !previousExerciseIDs.isEmpty || !componentExerciseIDs.isEmpty else {
+        guard !hydrationExerciseIDs.isEmpty else {
             deferredHydrationTask?.cancel()
             deferredHydrationTask = nil
             return
@@ -1020,7 +1096,7 @@ struct ActiveWorkoutView: View {
                         try Self.loadDeferredHydrationResult(
                             modelContext: backgroundContext,
                             sessionID: sessionID,
-                            exerciseIDs: expandedExerciseIDs,
+                            exerciseIDs: hydrationExerciseIDs,
                             draftsByExerciseID: draftsByExerciseID
                         )
                     }
@@ -1028,7 +1104,7 @@ struct ActiveWorkoutView: View {
                     loadedHydration = try Self.loadDeferredHydrationResult(
                         modelContext: modelContext,
                         sessionID: sessionID,
-                        exerciseIDs: expandedExerciseIDs,
+                        exerciseIDs: hydrationExerciseIDs,
                         draftsByExerciseID: draftsByExerciseID
                     )
                 }
@@ -1700,7 +1776,7 @@ struct ActiveWorkoutView: View {
               let rawValue = ProcessInfo.processInfo.environment["UITEST_ACTIVE_WORKOUT_PREVIOUS_PERFORMANCE_DELAY_MS"],
               let milliseconds = Int(rawValue)
         else {
-            return .milliseconds(1_500)
+            return .milliseconds(0)
         }
 
         return .milliseconds(max(0, milliseconds))
@@ -2354,6 +2430,12 @@ struct ActiveWorkoutView: View {
                 currentPersistenceSnapshot(for: exerciseID).map { (exerciseID, $0) }
             }
         )
+        let preparedPersistedState = activeWorkoutPresentationState
+            .preparedFirstRenderSnapshot(for: sessionID)?
+            .persistenceStateByExerciseID ?? [:]
+        let persistedSnapshotsByExerciseID = preparedPersistedState.merging(
+            lastPersistedExerciseStateByID
+        ) { _, current in current }
 
         return ActiveWorkoutCheckpointCommand(
             sessionID: sessionID,
@@ -2364,7 +2446,7 @@ struct ActiveWorkoutView: View {
             ),
             dirtyExerciseIDs: dirtyExerciseIDs,
             snapshotsByExerciseID: dirtySnapshotsByExerciseID,
-            persistedSnapshotsByExerciseID: lastPersistedExerciseStateByID,
+            persistedSnapshotsByExerciseID: persistedSnapshotsByExerciseID,
             cardioCompletionsByPhase: pendingCardioCompletionsByPhase
         )
     }

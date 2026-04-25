@@ -741,7 +741,8 @@ struct StartWorkoutHomeView: View {
             return ActiveWorkoutStartPreparation(
                 sessionID: activeSession.id,
                 isExistingConflict: true,
-                previousPerformanceResolutionByExerciseID: [:]
+                previousPerformanceResolutionByExerciseID: [:],
+                firstRenderSnapshot: nil
             )
         }
 
@@ -752,13 +753,12 @@ struct StartWorkoutHomeView: View {
             sessionID = try repository.createEmptySession().id
         }
 
-        let previousPerformanceResolutionByExerciseID = try repository.previousPerformanceResolutionByExerciseID(
-            sessionID: sessionID
-        )
+        let firstRenderSnapshot = try repository.preparedFirstRenderSnapshot(sessionID: sessionID)
         return ActiveWorkoutStartPreparation(
             sessionID: sessionID,
             isExistingConflict: false,
-            previousPerformanceResolutionByExerciseID: previousPerformanceResolutionByExerciseID
+            previousPerformanceResolutionByExerciseID: firstRenderSnapshot.previousResolutionByExerciseID,
+            firstRenderSnapshot: firstRenderSnapshot
         )
     }
 
@@ -768,10 +768,17 @@ struct StartWorkoutHomeView: View {
             return
         }
 
-        activeWorkoutPresentationState.stagePreparedPreviousPerformanceResolution(
-            preparation.previousPerformanceResolutionByExerciseID,
-            for: preparation.sessionID
-        )
+        if let firstRenderSnapshot = preparation.firstRenderSnapshot {
+            activeWorkoutPresentationState.stagePreparedFirstRenderSnapshot(
+                firstRenderSnapshot,
+                for: preparation.sessionID
+            )
+        } else {
+            activeWorkoutPresentationState.stagePreparedPreviousPerformanceResolution(
+                preparation.previousPerformanceResolutionByExerciseID,
+                for: preparation.sessionID
+            )
+        }
         activeWorkoutPresentationState.present(sessionID: preparation.sessionID)
     }
 
@@ -2043,6 +2050,7 @@ private struct ActiveWorkoutStartPreparation: Sendable {
     let sessionID: UUID
     let isExistingConflict: Bool
     let previousPerformanceResolutionByExerciseID: [UUID: WorkoutPreviousPerformanceResolution]
+    let firstRenderSnapshot: ActiveWorkoutPreparedFirstRenderSnapshot?
 }
 
 #Preview {

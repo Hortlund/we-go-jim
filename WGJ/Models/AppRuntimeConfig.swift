@@ -601,6 +601,24 @@ final class WorkoutCompletionPresentationState {
     }
 }
 
+nonisolated struct ActiveWorkoutPreparedFirstRenderSnapshot: Equatable, Sendable {
+    let draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
+    let restsByExerciseID: [UUID: Int]
+    let notesByExerciseID: [UUID: String]
+    let persistenceStateByExerciseID: [UUID: ActiveWorkoutExercisePersistenceSnapshot]
+    let catalogMatchesByUUID: [String: TrainingGuidanceCatalogSnapshot]
+    let previousResolutionByExerciseID: [UUID: WorkoutPreviousPerformanceResolution]
+
+    static let empty = ActiveWorkoutPreparedFirstRenderSnapshot(
+        draftsByExerciseID: [:],
+        restsByExerciseID: [:],
+        notesByExerciseID: [:],
+        persistenceStateByExerciseID: [:],
+        catalogMatchesByUUID: [:],
+        previousResolutionByExerciseID: [:]
+    )
+}
+
 @MainActor
 @Observable
 final class ActiveWorkoutPresentationState {
@@ -609,11 +627,13 @@ final class ActiveWorkoutPresentationState {
     var isActiveWorkoutStripCollapsed = false
     var scrollTarget: ActiveWorkoutScrollTarget?
     @ObservationIgnored private var preparedPreviousPerformanceResolutionBySessionID: [UUID: [UUID: WorkoutPreviousPerformanceResolution]] = [:]
+    @ObservationIgnored private var preparedFirstRenderSnapshotBySessionID: [UUID: ActiveWorkoutPreparedFirstRenderSnapshot] = [:]
 
     func present(sessionID: UUID) {
         if activeSessionID != sessionID {
             if let activeSessionID {
                 preparedPreviousPerformanceResolutionBySessionID.removeValue(forKey: activeSessionID)
+                preparedFirstRenderSnapshotBySessionID.removeValue(forKey: activeSessionID)
             }
             scrollTarget = nil
         }
@@ -648,6 +668,7 @@ final class ActiveWorkoutPresentationState {
         }
         if let activeSessionID {
             preparedPreviousPerformanceResolutionBySessionID.removeValue(forKey: activeSessionID)
+            preparedFirstRenderSnapshotBySessionID.removeValue(forKey: activeSessionID)
         }
         activeSessionID = nil
         isActiveWorkoutPresented = false
@@ -660,6 +681,20 @@ final class ActiveWorkoutPresentationState {
         for sessionID: UUID
     ) {
         preparedPreviousPerformanceResolutionBySessionID[sessionID] = resolutionByExerciseID
+    }
+
+    func stagePreparedFirstRenderSnapshot(
+        _ snapshot: ActiveWorkoutPreparedFirstRenderSnapshot,
+        for sessionID: UUID
+    ) {
+        preparedFirstRenderSnapshotBySessionID[sessionID] = snapshot
+        preparedPreviousPerformanceResolutionBySessionID[sessionID] = snapshot.previousResolutionByExerciseID
+    }
+
+    func preparedFirstRenderSnapshot(
+        for sessionID: UUID
+    ) -> ActiveWorkoutPreparedFirstRenderSnapshot? {
+        preparedFirstRenderSnapshotBySessionID[sessionID]
     }
 
     func preparedPreviousPerformanceResolution(
@@ -677,6 +712,10 @@ final class ActiveWorkoutPresentationState {
 
     func clearPreparedPreviousPerformanceResolution(for sessionID: UUID) {
         preparedPreviousPerformanceResolutionBySessionID.removeValue(forKey: sessionID)
+    }
+
+    func clearPreparedFirstRenderSnapshot(for sessionID: UUID) {
+        preparedFirstRenderSnapshotBySessionID.removeValue(forKey: sessionID)
     }
 
     func clearActiveWorkout(restTimerState: RestTimerState? = nil) {

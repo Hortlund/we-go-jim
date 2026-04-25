@@ -259,8 +259,16 @@ nonisolated final class ActiveWorkoutDraftRepository {
         exerciseIDs: Set<UUID>
     ) throws -> [ActiveWorkoutDraftExercise] {
         guard !exerciseIDs.isEmpty else { return [] }
-        return try sessionExercises(sessionID: sessionID)
-            .filter { exerciseIDs.contains($0.id) }
+        var exercises: [ActiveWorkoutDraftExercise] = []
+        exercises.reserveCapacity(exerciseIDs.count)
+        for exerciseID in exerciseIDs {
+            guard let exercise = try sessionExercise(id: exerciseID),
+                  exercise.sessionID == sessionID else {
+                continue
+            }
+            exercises.append(exercise)
+        }
+        return exercises.sorted { $0.sortOrder < $1.sortOrder }
     }
 
     func cardioBlocks(sessionID: UUID) throws -> [ActiveWorkoutDraftCardioBlock] {
@@ -762,6 +770,71 @@ nonisolated final class ActiveWorkoutDraftRepository {
                     )
                 )
             }
+        )
+    }
+
+    func preparedFirstRenderSnapshot(sessionID: UUID) throws -> ActiveWorkoutPreparedFirstRenderSnapshot {
+        guard let session = try session(id: sessionID) else {
+            throw WorkoutSessionRepositoryError.sessionNotFound
+        }
+
+        let exercises = try sessionExercises(sessionID: sessionID)
+        guard !exercises.isEmpty else {
+            return .empty
+        }
+
+        let catalogMatchesByUUID = try ExerciseCatalogRepository(modelContext: modelContext)
+            .exerciseSnapshotMap(for: Array(Set(exercises.map(\.catalogExerciseUUID))))
+        let previousMaps = try previousSetMaps(
+            forExercises: Array(Set(exercises.map(\.catalogExerciseUUID))),
+            before: session.startedAt,
+            excludingSessionID: sessionID
+        )
+
+        var draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]] = [:]
+        var restsByExerciseID: [UUID: Int] = [:]
+        var notesByExerciseID: [UUID: String] = [:]
+        var persistenceStateByExerciseID: [UUID: ActiveWorkoutExercisePersistenceSnapshot] = [:]
+        var previousResolutionByExerciseID: [UUID: WorkoutPreviousPerformanceResolution] = [:]
+
+        draftsByExerciseID.reserveCapacity(exercises.count)
+        restsByExerciseID.reserveCapacity(exercises.count)
+        notesByExerciseID.reserveCapacity(exercises.count)
+        persistenceStateByExerciseID.reserveCapacity(exercises.count)
+        previousResolutionByExerciseID.reserveCapacity(exercises.count)
+
+        for exercise in exercises {
+            let drafts = orderedSessionSets(for: exercise)
+                .map(WorkoutSessionSetDraft.init(model:))
+            let normalizedDrafts = Self.normalizedDraftsForActiveLogging(
+                drafts,
+                catalogExercise: catalogMatchesByUUID[exercise.catalogExerciseUUID]
+            )
+            draftsByExerciseID[exercise.id] = normalizedDrafts
+            restsByExerciseID[exercise.id] = exercise.restSeconds
+            notesByExerciseID[exercise.id] = exercise.notes
+            persistenceStateByExerciseID[exercise.id] = ActiveWorkoutExercisePersistenceSnapshot(
+                setDrafts: normalizedDrafts,
+                restSeconds: exercise.restSeconds,
+                notes: exercise.notes,
+                targetRepMin: exercise.targetRepMin,
+                targetRepMax: exercise.targetRepMax
+            )
+            previousResolutionByExerciseID[exercise.id] = .resolved(
+                Self.resolvedPreviousMap(
+                    baseMap: previousMaps[exercise.catalogExerciseUUID] ?? [:],
+                    maxSetCount: normalizedDrafts.count
+                )
+            )
+        }
+
+        return ActiveWorkoutPreparedFirstRenderSnapshot(
+            draftsByExerciseID: draftsByExerciseID,
+            restsByExerciseID: restsByExerciseID,
+            notesByExerciseID: notesByExerciseID,
+            persistenceStateByExerciseID: persistenceStateByExerciseID,
+            catalogMatchesByUUID: catalogMatchesByUUID,
+            previousResolutionByExerciseID: previousResolutionByExerciseID
         )
     }
 
@@ -1288,6 +1361,38 @@ nonisolated final class ActiveWorkoutDraftRepository {
         }
 
         return resolved
+    }
+
+    private static func normalizedDraftsForActiveLogging(
+        _ drafts: [WorkoutSessionSetDraft],
+        catalogExercise: TrainingGuidanceCatalogSnapshot?
+    ) -> [WorkoutSessionSetDraft] {
+        guard TemplateLoadUnit.inferredDefault(
+            fromEquipmentSummary: catalogExercise?.equipmentSummary ?? ""
+        ) == .bodyweight else {
+            return drafts
+        }
+
+        var normalized = drafts
+        var changed = false
+
+        for index in normalized.indices {
+            guard normalized[index].targetWeight == nil, normalized[index].actualWeight == nil else {
+                continue
+            }
+
+            if normalized[index].targetLoadUnit != .bodyweight {
+                normalized[index].targetLoadUnit = .bodyweight
+                changed = true
+            }
+
+            if normalized[index].actualLoadUnit != .bodyweight {
+                normalized[index].actualLoadUnit = .bodyweight
+                changed = true
+            }
+        }
+
+        return changed ? normalized : drafts
     }
 
     private func orderedComponents(for exercise: ActiveWorkoutDraftExercise) -> [ActiveWorkoutDraftExerciseComponent] {
