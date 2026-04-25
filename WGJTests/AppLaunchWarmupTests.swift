@@ -194,6 +194,66 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
+    func startupWarmupGateCanWaitForRequiredWarmupsWithoutTimeout() async {
+        let probe = WarmupGateProbe()
+        let profileTask = Task {
+            await probe.waitForProfileRelease()
+            await probe.finishProfile()
+        }
+        while await probe.isWaitingForProfileRelease == false {
+            await Task.yield()
+        }
+
+        let gateTask = Task {
+            await StartupWarmupGate.waitForRequiredWarmups(
+                profileTask: profileTask,
+                brosTask: nil
+            )
+        }
+
+        await Task.yield()
+        #expect(await probe.didFinishProfile == false)
+
+        await probe.releaseProfile()
+        await gateTask.value
+        #expect(await probe.didFinishProfile)
+    }
+
+    @Test
+    func startupTabPreloadPolicyLoadsCriticalTabsWhileInactive() {
+        #expect(StartupTabPreloadPolicy.shouldLoad(
+            tab: .profile,
+            selectedTab: .startWorkout,
+            hasLoaded: false,
+            shouldPreloadCriticalTabs: true
+        ))
+        #expect(StartupTabPreloadPolicy.shouldLoad(
+            tab: .bros,
+            selectedTab: .startWorkout,
+            hasLoaded: false,
+            shouldPreloadCriticalTabs: true
+        ))
+        #expect(!StartupTabPreloadPolicy.shouldLoad(
+            tab: .history,
+            selectedTab: .startWorkout,
+            hasLoaded: false,
+            shouldPreloadCriticalTabs: true
+        ))
+        #expect(StartupTabPreloadPolicy.shouldLoad(
+            tab: .history,
+            selectedTab: .history,
+            hasLoaded: false,
+            shouldPreloadCriticalTabs: false
+        ))
+        #expect(StartupTabPreloadPolicy.shouldLoad(
+            tab: .exercises,
+            selectedTab: .startWorkout,
+            hasLoaded: true,
+            shouldPreloadCriticalTabs: false
+        ))
+    }
+
+    @Test
     func profileInitialLoadPolicyDefersReloadWhileStartupWarmupIsActive() {
         #expect(ProfileInitialLoadPolicy.shouldDeferInitialReload(
             hasLoadedProfile: false,

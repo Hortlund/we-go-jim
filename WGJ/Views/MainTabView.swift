@@ -356,6 +356,7 @@ private struct ActiveWorkoutStripHeightPreferenceKey: PreferenceKey {
 
 private struct LazyTabContainer<Content: View>: View {
     @Environment(AppTabState.self) private var tabState
+    @Environment(AppWarmupState.self) private var appWarmupState
 
     let tab: AppMainTab
     let content: () -> Content
@@ -364,7 +365,7 @@ private struct LazyTabContainer<Content: View>: View {
 
     var body: some View {
         Group {
-            if hasLoaded || tabState.selectedTab == tab {
+            if shouldLoadContent {
                 content()
                     .environment(\.isTabActive, tabState.selectedTab == tab)
             } else {
@@ -383,10 +384,19 @@ private struct LazyTabContainer<Content: View>: View {
     private func markLoadedIfSelected() {
         guard !hasLoaded else { return }
         WGJPerformance.measure("main-tab.first-load") {
-            if tabState.selectedTab == tab {
+            if shouldLoadContent {
                 hasLoaded = true
             }
         }
+    }
+
+    private var shouldLoadContent: Bool {
+        StartupTabPreloadPolicy.shouldLoad(
+            tab: tab,
+            selectedTab: tabState.selectedTab,
+            hasLoaded: hasLoaded,
+            shouldPreloadCriticalTabs: appWarmupState.shouldPreloadCriticalTabs
+        )
     }
 }
 

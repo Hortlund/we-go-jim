@@ -58,12 +58,17 @@ struct ProfileView: View {
         .scrollDismissesKeyboard(.interactively)
         .wgjScreenBackground()
         .toolbar(.hidden, for: .navigationBar)
+        .task {
+            applyWarmProfileSnapshotIfAvailable()
+        }
         .task(id: isTabActive) {
             guard isTabActive else { return }
             await reloadProfileIfNeeded(force: false)
         }
         .task(id: appWarmupState.profileCompletionVersion) {
-            guard isTabActive, appWarmupState.profileCompletionVersion > 0 else { return }
+            guard appWarmupState.profileCompletionVersion > 0 else { return }
+            applyWarmProfileSnapshotIfAvailable()
+            guard isTabActive else { return }
             await reloadProfileIfNeeded(force: false)
         }
         .onDisappear {

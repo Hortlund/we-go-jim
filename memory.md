@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-04-25 - Cold Tab Smoothness Needs UI Preload, Not Only Data Warmup
+
+- Date: 2026-04-25
+- Trigger/Problem: Profile and Bros could still feel laggy on first menu switch after adding splash-time warm snapshots.
+- Root Cause: The warmup prepared value snapshots, but `MainTabView` still lazily mounted Profile and Bros for the first time on tab selection. That left SwiftUI view construction, inactive-state task setup, and first render scheduling on the user tap path.
+- Durable Rule: For cold-start tab smoothness, mount startup-critical tab roots behind the splash and let them consume warm value snapshots while inactive. Data warmup alone is not enough when the first visible interaction still pays the SwiftUI construction cost.
+- How to Verify Next Time: Cold launch without `UITEST_SKIP_SPLASH`, keep the splash up until required warmups finish, then tap Profile and Bros immediately after the main UI is exposed. Confirm the tabs are already mounted, consume warm state, and do not start main-context SwiftData work on tap.
+- Status: active
+
 ## 2026-04-25 - Large-Screen Text Inputs Need Local Drafts
 
 - Date: 2026-04-25

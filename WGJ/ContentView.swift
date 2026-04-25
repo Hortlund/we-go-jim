@@ -26,6 +26,7 @@ struct ContentView: View {
     @State private var resumeCriticalMaintenanceTask: Task<Void, Never>?
     @State private var enteredMainDeferredMaintenanceTask: Task<Void, Never>?
     @State private var isPreparingMainPhase = false
+    @State private var isStartupSplashOverlayVisible = false
     @State private var hasInstalledUITestPendingTemplate = false
     @State private var hasScheduledInitialDeferredMaintenance = false
     @State private var fallbackCoachWarmupTask: Task<Void, Never>?
@@ -48,6 +49,14 @@ struct ContentView: View {
                 }
             case .main:
                 MainTabView()
+                    .overlay {
+                        if isStartupSplashOverlayVisible {
+                            SplashView()
+                                .transition(.opacity)
+                                .zIndex(1)
+                                .allowsHitTesting(true)
+                        }
+                    }
             }
         }
         .environment(\.cloudSyncEnabled, appRuntimeState.cloudSyncEnabled)
@@ -83,6 +92,7 @@ struct ContentView: View {
         }
         .onChange(of: appPhase) { _, newPhase in
             if newPhase == .main {
+                guard !isPreparingMainPhase, !isStartupSplashOverlayVisible else { return }
                 handleEnteredMainPhase()
             } else {
                 resetResumeCriticalMaintenanceCycle()
@@ -140,13 +150,24 @@ struct ContentView: View {
         isPreparingMainPhase = true
         defer { isPreparingMainPhase = false }
 
+        let shouldShowStartupOverlay = !ProcessInfo.processInfo.arguments.contains(AppStartupRouting.skipSplashArgument)
+        appWarmupState.setShouldPreloadCriticalTabs(true)
+        if appPhase != .main {
+            isStartupSplashOverlayVisible = shouldShowStartupOverlay
+            appPhase = .main
+            await Task.yield()
+        }
+
         await prepareLocalProfileIdentityIfNeeded()
         await prepareStartupWarmSnapshotsIfNeeded()
+        await Task.yield()
 
-        guard appPhase != .main else { return }
-        withAnimation(.easeInOut(duration: 0.2)) {
-            appPhase = .main
+        if isStartupSplashOverlayVisible {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isStartupSplashOverlayVisible = false
+            }
         }
+        handleEnteredMainPhase()
     }
 
     private func handleIncomingTemplateFileURL(_ url: URL) {
@@ -517,6 +538,7 @@ struct ContentView: View {
         resetResumeCriticalMaintenanceCycle()
         enteredMainDeferredMaintenanceTask?.cancel()
         enteredMainDeferredMaintenanceTask = nil
+        isStartupSplashOverlayVisible = false
         fallbackCoachWarmupTask?.cancel()
         fallbackCoachWarmupTask = nil
         activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
@@ -592,7 +614,7 @@ struct ContentView: View {
             brosTask = nil
         }
 
-        await StartupWarmupGate.waitForWarmups(
+        await StartupWarmupGate.waitForRequiredWarmups(
             profileTask: profileTask,
             brosTask: brosTask
         )

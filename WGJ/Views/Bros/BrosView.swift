@@ -867,20 +867,26 @@ struct BrosView: View {
         }
         .wgjScreenBackground()
         .toolbar(.hidden, for: .navigationBar)
+        .task {
+            applyWarmSnapshotIfAvailable()
+        }
         .task(id: isTabActive) {
             guard isTabActive else {
                 cancelActivationRefresh()
                 return
             }
             applyWarmSnapshotIfAvailable()
-            reloadBlockedBros()
+            if appWarmupState.freshBros() == nil {
+                reloadBlockedBros()
+            }
             scheduleActivationRefresh()
             rebuildFilteredSnapshot()
         }
         .task(id: appWarmupState.brosCompletionVersion) {
-            guard isTabActive, appWarmupState.brosCompletionVersion > 0 else { return }
+            guard appWarmupState.brosCompletionVersion > 0 else { return }
             applyWarmSnapshotIfAvailable()
             rebuildFilteredSnapshot()
+            guard isTabActive else { return }
             scheduleActivationRefresh()
         }
         .task(id: notificationRouter.brosRefreshRequestID) {

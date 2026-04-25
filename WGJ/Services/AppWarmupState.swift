@@ -32,6 +32,18 @@ nonisolated enum AppWarmupPolicy {
 nonisolated enum StartupWarmupGate {
     static let defaultTimeout: Duration = .milliseconds(2_500)
 
+    static func waitForRequiredWarmups(
+        profileTask: Task<Void, Never>?,
+        brosTask: Task<Void, Never>?
+    ) async {
+        let warmupTasks = [profileTask, brosTask].compactMap { $0 }
+        guard !warmupTasks.isEmpty else { return }
+
+        for task in warmupTasks {
+            await task.value
+        }
+    }
+
     static func waitForWarmups(
         profileTask: Task<Void, Never>?,
         brosTask: Task<Void, Never>?,
@@ -70,6 +82,28 @@ private actor StartupWarmupCompletion {
 
     func finish() {
         isFinished = true
+    }
+}
+
+nonisolated enum StartupTabPreloadPolicy {
+    static func shouldLoad(
+        tab: AppMainTab,
+        selectedTab: AppMainTab,
+        hasLoaded: Bool,
+        shouldPreloadCriticalTabs: Bool
+    ) -> Bool {
+        hasLoaded
+            || selectedTab == tab
+            || (shouldPreloadCriticalTabs && isCriticalStartupTab(tab))
+    }
+
+    private static func isCriticalStartupTab(_ tab: AppMainTab) -> Bool {
+        switch tab {
+        case .profile, .bros:
+            return true
+        case .history, .startWorkout, .exercises:
+            return false
+        }
     }
 }
 
@@ -153,6 +187,7 @@ final class AppWarmupState {
     private(set) var isBrosWarmupActive = false
     private(set) var profileCompletionVersion = 0
     private(set) var brosCompletionVersion = 0
+    private(set) var shouldPreloadCriticalTabs = false
 
     @ObservationIgnored private var profileWarmupGeneration = 0
     @ObservationIgnored private var brosWarmupGeneration = 0
@@ -165,6 +200,10 @@ final class AppWarmupState {
 
     func storeBros(_ snapshot: BrosWarmSnapshot) {
         latestBros = snapshot
+    }
+
+    func setShouldPreloadCriticalTabs(_ shouldPreload: Bool) {
+        shouldPreloadCriticalTabs = shouldPreload
     }
 
     func freshProfile(
@@ -276,6 +315,7 @@ final class AppWarmupState {
         brosWarmupGeneration = 0
         profileCompletionVersion = 0
         brosCompletionVersion = 0
+        shouldPreloadCriticalTabs = false
     }
 }
 
