@@ -29,6 +29,64 @@ nonisolated enum AppWarmupPolicy {
     }
 }
 
+nonisolated enum StartupWarmupGate {
+    static let defaultTimeout: Duration = .milliseconds(2_500)
+
+    static func waitForWarmups(
+        profileTask: Task<Void, Never>?,
+        brosTask: Task<Void, Never>?,
+        timeout: Duration = defaultTimeout
+    ) async {
+        let warmupTasks = [profileTask, brosTask].compactMap { $0 }
+        guard !warmupTasks.isEmpty else { return }
+
+        let completion = StartupWarmupCompletion()
+        let monitorTask = Task {
+            for task in warmupTasks {
+                await task.value
+            }
+            await completion.finish()
+        }
+        defer { monitorTask.cancel() }
+
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        while !(await completion.isFinished) {
+            guard clock.now < deadline else { return }
+
+            let remaining = clock.now.duration(to: deadline)
+            let sleepDuration: Duration = remaining > .milliseconds(10) ? .milliseconds(10) : remaining
+            do {
+                try await Task.sleep(for: sleepDuration)
+            } catch {
+                return
+            }
+        }
+    }
+}
+
+private actor StartupWarmupCompletion {
+    private(set) var isFinished = false
+
+    func finish() {
+        isFinished = true
+    }
+}
+
+nonisolated enum ProfileInitialLoadPolicy {
+    static func shouldDeferInitialReload(
+        hasLoadedProfile: Bool,
+        hasCurrentProfile: Bool,
+        isProfileWarmupActive: Bool,
+        hasFreshWarmSnapshot: Bool
+    ) -> Bool {
+        !hasLoadedProfile
+            && !hasCurrentProfile
+            && isProfileWarmupActive
+            && !hasFreshWarmSnapshot
+    }
+}
+
 nonisolated struct DeferredMaintenanceRunTracker: Equatable, Sendable {
     private(set) var requestedRunID: Int
     private(set) var completedRunID: Int
@@ -93,6 +151,8 @@ final class AppWarmupState {
     private(set) var latestBros: BrosWarmSnapshot?
     private(set) var isProfileWarmupActive = false
     private(set) var isBrosWarmupActive = false
+    private(set) var profileCompletionVersion = 0
+    private(set) var brosCompletionVersion = 0
 
     @ObservationIgnored private var profileWarmupGeneration = 0
     @ObservationIgnored private var brosWarmupGeneration = 0
@@ -161,6 +221,7 @@ final class AppWarmupState {
         }
         activeProfileWarmupRunID = nil
         isProfileWarmupActive = false
+        profileCompletionVersion += 1
     }
 
     func beginBrosWarmup(
@@ -185,6 +246,7 @@ final class AppWarmupState {
         }
         activeBrosWarmupRunID = nil
         isBrosWarmupActive = false
+        brosCompletionVersion += 1
     }
 
     func invalidateProfile() {
@@ -192,6 +254,7 @@ final class AppWarmupState {
         activeProfileWarmupRunID = nil
         isProfileWarmupActive = false
         profileWarmupGeneration += 1
+        profileCompletionVersion += 1
     }
 
     func invalidateBros() {
@@ -199,6 +262,7 @@ final class AppWarmupState {
         activeBrosWarmupRunID = nil
         isBrosWarmupActive = false
         brosWarmupGeneration += 1
+        brosCompletionVersion += 1
     }
 
     func reset() {
@@ -210,6 +274,8 @@ final class AppWarmupState {
         isBrosWarmupActive = false
         profileWarmupGeneration = 0
         brosWarmupGeneration = 0
+        profileCompletionVersion = 0
+        brosCompletionVersion = 0
     }
 }
 

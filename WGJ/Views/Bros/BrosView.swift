@@ -110,9 +110,9 @@ final class BrosViewModel {
             state = .active(feedSnapshot)
         }
 
-        hasLoaded = false
+        hasLoaded = snapshot.state != .loading
         errorMessage = nil
-        lastSuccessfulSnapshotRefreshAt = nil
+        lastSuccessfulSnapshotRefreshAt = snapshot.state == .loading ? nil : snapshot.warmedAt
     }
 
     func refresh(
@@ -876,6 +876,12 @@ struct BrosView: View {
             reloadBlockedBros()
             scheduleActivationRefresh()
             rebuildFilteredSnapshot()
+        }
+        .task(id: appWarmupState.brosCompletionVersion) {
+            guard isTabActive, appWarmupState.brosCompletionVersion > 0 else { return }
+            applyWarmSnapshotIfAvailable()
+            rebuildFilteredSnapshot()
+            scheduleActivationRefresh()
         }
         .task(id: notificationRouter.brosRefreshRequestID) {
             guard notificationRouter.brosRefreshRequestID != nil else { return }

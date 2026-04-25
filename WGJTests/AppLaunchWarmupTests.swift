@@ -115,6 +115,107 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
+    func appWarmupStateIncrementsCompletionVersionsOnFinishAndInvalidate() throws {
+        let state = AppWarmupState()
+        #expect(state.profileCompletionVersion == 0)
+        #expect(state.brosCompletionVersion == 0)
+
+        let profileRunID = try #require(state.beginProfileWarmup())
+        state.finishProfileWarmup(
+            runID: profileRunID,
+            snapshot: ProfileWarmSnapshot(
+                profile: makeProfileSnapshot(updatedAt: Date(timeIntervalSince1970: 100)),
+                dashboard: .empty,
+                warmedAt: Date(timeIntervalSince1970: 100)
+            )
+        )
+        #expect(state.profileCompletionVersion == 1)
+
+        state.invalidateProfile()
+        #expect(state.profileCompletionVersion == 2)
+
+        let brosRunID = try #require(state.beginBrosWarmup())
+        state.finishBrosWarmup(
+            runID: brosRunID,
+            snapshot: BrosWarmSnapshot(
+                state: .active(makeBrosSnapshot()),
+                blockedUserRecordNames: [],
+                warmedAt: Date(timeIntervalSince1970: 200)
+            )
+        )
+        #expect(state.brosCompletionVersion == 1)
+
+        state.invalidateBros()
+        #expect(state.brosCompletionVersion == 2)
+    }
+
+    @Test
+    func startupWarmupGateWaitsForFastWarmups() async {
+        let probe = WarmupGateProbe()
+        let profileTask = Task {
+            await probe.finishProfile()
+        }
+        let brosTask = Task {
+            await probe.finishBros()
+        }
+
+        await StartupWarmupGate.waitForWarmups(
+            profileTask: profileTask,
+            brosTask: brosTask,
+            timeout: .seconds(1)
+        )
+
+        #expect(await probe.didFinishProfile)
+        #expect(await probe.didFinishBros)
+    }
+
+    @Test
+    func startupWarmupGateReturnsAfterTimeoutWithoutCancellingWarmups() async {
+        let probe = WarmupGateProbe()
+        let profileTask = Task {
+            await probe.waitForProfileRelease()
+            await probe.finishProfile()
+        }
+        while await probe.isWaitingForProfileRelease == false {
+            await Task.yield()
+        }
+
+        await StartupWarmupGate.waitForWarmups(
+            profileTask: profileTask,
+            brosTask: nil,
+            timeout: .milliseconds(20)
+        )
+
+        #expect(await probe.didFinishProfile == false)
+
+        await probe.releaseProfile()
+        await profileTask.value
+        #expect(await probe.didFinishProfile)
+    }
+
+    @Test
+    func profileInitialLoadPolicyDefersReloadWhileStartupWarmupIsActive() {
+        #expect(ProfileInitialLoadPolicy.shouldDeferInitialReload(
+            hasLoadedProfile: false,
+            hasCurrentProfile: false,
+            isProfileWarmupActive: true,
+            hasFreshWarmSnapshot: false
+        ))
+        #expect(!ProfileInitialLoadPolicy.shouldDeferInitialReload(
+            hasLoadedProfile: false,
+            hasCurrentProfile: false,
+            isProfileWarmupActive: true,
+            hasFreshWarmSnapshot: true
+        ))
+        #expect(!ProfileInitialLoadPolicy.shouldDeferInitialReload(
+            hasLoadedProfile: false,
+            hasCurrentProfile: false,
+            isProfileWarmupActive: false,
+            hasFreshWarmSnapshot: false
+        ))
+    }
+
+    @Test
     func userDataSyncTrackerReportsRunningCloudImportAsSyncing() {
         let tracker = UserDataSyncTracker.shared
         var snapshot = tracker.configureForLaunch(isCloudEnabled: true, errorDescription: nil)
@@ -756,6 +857,34 @@ private struct MockAsyncCloudStartupAccountStatusProvider: AsyncCloudStartupAcco
 private struct MockProcessInfo: ProcessInfoProviding {
     let arguments: [String]
     var environment: [String: String] = [:]
+}
+
+private actor WarmupGateProbe {
+    private(set) var didFinishProfile = false
+    private(set) var didFinishBros = false
+    private(set) var isWaitingForProfileRelease = false
+    private var profileReleaseContinuation: CheckedContinuation<Void, Never>?
+
+    func waitForProfileRelease() async {
+        isWaitingForProfileRelease = true
+        await withCheckedContinuation { continuation in
+            profileReleaseContinuation = continuation
+        }
+    }
+
+    func releaseProfile() {
+        profileReleaseContinuation?.resume()
+        profileReleaseContinuation = nil
+        isWaitingForProfileRelease = false
+    }
+
+    func finishProfile() {
+        didFinishProfile = true
+    }
+
+    func finishBros() {
+        didFinishBros = true
+    }
 }
 
 private actor ControlledRuntimeAccountStatusProvider: AccountStatusProviding {

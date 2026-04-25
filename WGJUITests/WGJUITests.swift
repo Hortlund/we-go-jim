@@ -46,6 +46,24 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testColdLaunchProfileAndBrosTabsRespondAfterSplash() throws {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "UITEST_IN_MEMORY_STORE",
+            "UITEST_FORCE_AUTO_ENTER_AFTER_SPLASH",
+        ]
+        app.launch()
+
+        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 8))
+
+        tapTab("Profile", in: app)
+        XCTAssertTrue(identifiedElement("profile-settings-tile", in: app).waitForExistence(timeout: 3))
+
+        tapTab("Bros", in: app)
+        XCTAssertTrue(app.staticTexts["Bros"].waitForExistence(timeout: 3))
+    }
+
+    @MainActor
     func testExercisesSearchAndFilterSmoke() throws {
         let app = launchApp(mode: .localInMemory)
 

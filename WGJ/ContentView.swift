@@ -24,6 +24,7 @@ struct ContentView: View {
     @State private var deferredMaintenanceRunTracker = DeferredMaintenanceRunTracker()
     @State private var resumeCriticalMaintenanceTracker = ResumeCriticalMaintenanceTracker()
     @State private var resumeCriticalMaintenanceTask: Task<Void, Never>?
+    @State private var enteredMainDeferredMaintenanceTask: Task<Void, Never>?
     @State private var isPreparingMainPhase = false
     @State private var hasInstalledUITestPendingTemplate = false
     @State private var hasScheduledInitialDeferredMaintenance = false
@@ -210,14 +211,24 @@ struct ContentView: View {
     }
 
     private func handleEnteredMainPhase() {
-        if !hasScheduledInitialDeferredMaintenance {
-            hasScheduledInitialDeferredMaintenance = true
-        }
-
         scheduleResumeCriticalMaintenanceIfNeeded()
-        requestDeferredMaintenance(trigger: .enteredMain)
         routePendingTemplateFileIfNeeded()
         appRuntimeState.refreshCloudAvailabilityIfNeeded()
+
+        guard !hasScheduledInitialDeferredMaintenance else { return }
+        hasScheduledInitialDeferredMaintenance = true
+        scheduleEnteredMainDeferredMaintenance()
+    }
+
+    private func scheduleEnteredMainDeferredMaintenance() {
+        enteredMainDeferredMaintenanceTask?.cancel()
+        enteredMainDeferredMaintenanceTask = Task { @MainActor in
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled, appPhase == .main else { return }
+            requestDeferredMaintenance(trigger: .enteredMain)
+            enteredMainDeferredMaintenanceTask = nil
+        }
     }
 
     private func scheduleDeferredMaintenance(trigger: AppMaintenanceTrigger) {
@@ -504,6 +515,8 @@ struct ContentView: View {
     private func resetToStartupFlow() {
         socialMaintenanceScheduler.cancel()
         resetResumeCriticalMaintenanceCycle()
+        enteredMainDeferredMaintenanceTask?.cancel()
+        enteredMainDeferredMaintenanceTask = nil
         fallbackCoachWarmupTask?.cancel()
         fallbackCoachWarmupTask = nil
         activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
@@ -554,39 +567,45 @@ struct ContentView: View {
         guard !ProcessInfo.processInfo.arguments.contains(AppStartupRouting.skipSplashArgument) else {
             return
         }
+        guard appBackgroundStore != nil else {
+            return
+        }
         guard appWarmupState.shouldWarmProfile() || appWarmupState.shouldWarmBros() else {
             return
         }
 
+        let profileTask: Task<Void, Never>?
         if appWarmupState.shouldWarmProfile() {
-            Task { @MainActor in
+            profileTask = Task { @MainActor in
                 await prepareStartupProfileWarmSnapshotIfNeeded()
             }
-        }
-        if appWarmupState.shouldWarmBros() {
-            Task { @MainActor in
-                await prepareStartupBrosWarmSnapshotIfNeeded()
-            }
+        } else {
+            profileTask = nil
         }
 
-        try? await Task.sleep(for: .milliseconds(650))
+        let brosTask: Task<Void, Never>?
+        if appWarmupState.shouldWarmBros() {
+            brosTask = Task { @MainActor in
+                await prepareStartupBrosWarmSnapshotIfNeeded()
+            }
+        } else {
+            brosTask = nil
+        }
+
+        await StartupWarmupGate.waitForWarmups(
+            profileTask: profileTask,
+            brosTask: brosTask
+        )
     }
 
     @MainActor
     private func prepareStartupProfileWarmSnapshotIfNeeded() async {
+        guard let appBackgroundStore else { return }
         guard let runID = appWarmupState.beginProfileWarmup() else { return }
 
-        let snapshot: ProfileWarmSnapshot?
-        if let appBackgroundStore {
-            snapshot = try? await appBackgroundStore.performAsync("profile.startup-warmup") { backgroundContext in
-                try await Self.buildProfileWarmSnapshot(
-                    modelContext: backgroundContext,
-                    cloudSyncEnabled: appRuntimeState.cloudSyncEnabled
-                )
-            }
-        } else {
-            snapshot = try? await Self.buildProfileWarmSnapshot(
-                modelContext: modelContext,
+        let snapshot = try? await appBackgroundStore.performAsync("profile.startup-warmup") { backgroundContext in
+            try await Self.buildProfileWarmSnapshot(
+                modelContext: backgroundContext,
                 cloudSyncEnabled: appRuntimeState.cloudSyncEnabled
             )
         }
@@ -600,22 +619,14 @@ struct ContentView: View {
 
     @MainActor
     private func prepareStartupBrosWarmSnapshotIfNeeded() async {
+        guard let appBackgroundStore else { return }
         guard let runID = appWarmupState.beginBrosWarmup() else { return }
 
         let cloudSyncEnabled = appRuntimeState.cloudSyncEnabled
         let cloudSyncErrorDescription = appRuntimeState.cloudSyncErrorDescription
-        let snapshot: BrosWarmSnapshot?
-        if let appBackgroundStore {
-            snapshot = try? await appBackgroundStore.performAsync("bros.startup-warmup") { backgroundContext in
-                try await Self.buildBrosWarmSnapshot(
-                    modelContext: backgroundContext,
-                    cloudSyncEnabled: cloudSyncEnabled,
-                    cloudSyncErrorDescription: cloudSyncErrorDescription
-                )
-            }
-        } else {
-            snapshot = try? await Self.buildBrosWarmSnapshot(
-                modelContext: modelContext,
+        let snapshot = try? await appBackgroundStore.performAsync("bros.startup-warmup") { backgroundContext in
+            try await Self.buildBrosWarmSnapshot(
+                modelContext: backgroundContext,
                 cloudSyncEnabled: cloudSyncEnabled,
                 cloudSyncErrorDescription: cloudSyncErrorDescription
             )
@@ -628,102 +639,72 @@ struct ContentView: View {
     }
 
     private func scheduleProfileWarmupIfNeeded(force: Bool) {
+        guard let appBackgroundStore else { return }
         guard let runID = appWarmupState.beginProfileWarmup(force: force) else { return }
 
         let cloudSyncEnabled = appRuntimeState.cloudSyncEnabled
 
-        if let appBackgroundStore {
-            Task {
-                await appBackgroundStore.scheduleCoalesced(
-                    key: .feature("profile.warmup"),
-                    operationName: "profile.warmup",
-                    priority: .utility,
-                    cancelExisting: force
-                ) { backgroundContext in
-                    let snapshot = Task.isCancelled ? nil : (try? await Self.buildProfileWarmSnapshot(
-                        modelContext: backgroundContext,
-                        cloudSyncEnabled: cloudSyncEnabled
-                    ))
-                    await MainActor.run {
-                        let completedSnapshot = Task.isCancelled ? nil : snapshot
-                        appWarmupState.finishProfileWarmup(runID: runID, snapshot: completedSnapshot)
-                        if let snapshot = completedSnapshot {
-                            AppRuntimeState.shared.updateWorkoutNotificationStyle(snapshot.profile.workoutNotificationStyle)
-                        }
+        Task {
+            await appBackgroundStore.scheduleCoalesced(
+                key: .feature("profile.warmup"),
+                operationName: "profile.warmup",
+                priority: .utility,
+                cancelExisting: force
+            ) { backgroundContext in
+                let snapshot = Task.isCancelled ? nil : (try? await Self.buildProfileWarmSnapshot(
+                    modelContext: backgroundContext,
+                    cloudSyncEnabled: cloudSyncEnabled
+                ))
+                await MainActor.run {
+                    let completedSnapshot = Task.isCancelled ? nil : snapshot
+                    appWarmupState.finishProfileWarmup(runID: runID, snapshot: completedSnapshot)
+                    if let snapshot = completedSnapshot {
+                        AppRuntimeState.shared.updateWorkoutNotificationStyle(snapshot.profile.workoutNotificationStyle)
                     }
                 }
-            }
-            return
-        }
-
-        Task { @MainActor in
-            let snapshot = try? await Self.buildProfileWarmSnapshot(
-                modelContext: modelContext,
-                cloudSyncEnabled: cloudSyncEnabled
-            )
-            appWarmupState.finishProfileWarmup(runID: runID, snapshot: snapshot)
-            if let snapshot {
-                AppRuntimeState.shared.updateWorkoutNotificationStyle(snapshot.profile.workoutNotificationStyle)
             }
         }
     }
 
     private func scheduleBrosWarmupIfNeeded(force: Bool) {
+        guard let appBackgroundStore else { return }
         guard let runID = appWarmupState.beginBrosWarmup(force: force) else { return }
 
         let cloudSyncEnabled = appRuntimeState.cloudSyncEnabled
         let cloudSyncErrorDescription = appRuntimeState.cloudSyncErrorDescription
 
-        if let appBackgroundStore {
-            Task {
-                await appBackgroundStore.scheduleCoalesced(
-                    key: .feature("bros.warmup"),
-                    operationName: "bros.warmup",
-                    priority: .utility,
-                    cancelExisting: force
-                ) { backgroundContext in
-                    let snapshot = Task.isCancelled ? nil : (try? await Self.buildBrosWarmSnapshot(
-                        modelContext: backgroundContext,
-                        cloudSyncEnabled: cloudSyncEnabled,
-                        cloudSyncErrorDescription: cloudSyncErrorDescription
-                    ))
-                    await MainActor.run {
-                        appWarmupState.finishBrosWarmup(
-                            runID: runID,
-                            snapshot: Task.isCancelled ? nil : snapshot
-                        )
-                    }
+        Task {
+            await appBackgroundStore.scheduleCoalesced(
+                key: .feature("bros.warmup"),
+                operationName: "bros.warmup",
+                priority: .utility,
+                cancelExisting: force
+            ) { backgroundContext in
+                let snapshot = Task.isCancelled ? nil : (try? await Self.buildBrosWarmSnapshot(
+                    modelContext: backgroundContext,
+                    cloudSyncEnabled: cloudSyncEnabled,
+                    cloudSyncErrorDescription: cloudSyncErrorDescription
+                ))
+                await MainActor.run {
+                    appWarmupState.finishBrosWarmup(
+                        runID: runID,
+                        snapshot: Task.isCancelled ? nil : snapshot
+                    )
                 }
             }
-            return
-        }
-
-        Task { @MainActor in
-            let snapshot = try? await Self.buildBrosWarmSnapshot(
-                modelContext: modelContext,
-                cloudSyncEnabled: cloudSyncEnabled,
-                cloudSyncErrorDescription: cloudSyncErrorDescription
-            )
-            appWarmupState.finishBrosWarmup(runID: runID, snapshot: snapshot)
         }
     }
 
     private func scheduleCoachWarmupIfNeeded() {
-        if let appBackgroundStore {
-            Task {
-                await appBackgroundStore.scheduleCoalesced(
-                    key: .feature("profile.coach.warmup"),
-                    operationName: "profile.coach.warmup",
-                    priority: .utility
-                ) { backgroundContext in
-                    await Self.warmCoachBriefIfNeeded(modelContext: backgroundContext)
-                }
-            }
-            return
-        }
-
+        guard let appBackgroundStore else { return }
         Task {
-            await Self.warmCoachBriefIfNeeded(modelContext: modelContext)
+            await appBackgroundStore.scheduleCoalesced(
+                key: .feature("profile.coach.warmup"),
+                operationName: "profile.coach.warmup",
+                priority: .utility
+            ) { backgroundContext in
+                await Self.warmCoachBriefIfNeeded(modelContext: backgroundContext)
+            }
         }
     }
 

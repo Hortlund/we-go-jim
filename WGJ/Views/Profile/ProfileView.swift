@@ -62,6 +62,10 @@ struct ProfileView: View {
             guard isTabActive else { return }
             await reloadProfileIfNeeded(force: false)
         }
+        .task(id: appWarmupState.profileCompletionVersion) {
+            guard isTabActive, appWarmupState.profileCompletionVersion > 0 else { return }
+            await reloadProfileIfNeeded(force: false)
+        }
         .onDisappear {
             cancelDashboardRender()
             cancelTrendSeriesLoad()
@@ -654,9 +658,20 @@ struct ProfileView: View {
 
     @MainActor
     private func reloadProfileIfNeeded(force: Bool) async {
+        let warmSnapshot = appWarmupState.freshProfile()
         applyWarmProfileSnapshotIfAvailable()
 
-        let currentProfileUpdatedAt = appWarmupState.freshProfile()?.profile.updatedAt ?? currentProfile?.updatedAt
+        if ProfileInitialLoadPolicy.shouldDeferInitialReload(
+            hasLoadedProfile: hasLoadedProfile,
+            hasCurrentProfile: currentProfile != nil,
+            isProfileWarmupActive: appWarmupState.isProfileWarmupActive,
+            hasFreshWarmSnapshot: warmSnapshot != nil
+        ) {
+            scheduleDashboardRenderIfNeeded()
+            return
+        }
+
+        let currentProfileUpdatedAt = warmSnapshot?.profile.updatedAt ?? currentProfile?.updatedAt
         guard force || ProfileReloadPolicy.shouldReload(
             hasLoadedProfile: hasLoadedProfile,
             needsExplicitRefresh: needsExplicitRefresh,

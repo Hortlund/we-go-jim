@@ -122,6 +122,34 @@ struct BrosViewModelTests {
     }
 
     @Test
+    func applyingWarmSnapshotPreventsImmediateStaleRefresh() async throws {
+        let context = try makeInMemoryContext()
+        let service = StubBrosSocialService()
+        let warmSnapshot = makeSnapshot(displayName: "Atlas")
+        service.snapshot = makeSnapshot(displayName: "Custom Bro")
+
+        let viewModel = BrosViewModel(
+            accountStatusProvider: { .available },
+            serviceFactory: { _ in service }
+        )
+
+        viewModel.applyWarmState(BrosWarmSnapshot(
+            state: .active(warmSnapshot),
+            blockedUserRecordNames: [],
+            warmedAt: .now
+        ))
+
+        await viewModel.refreshIfStale(
+            modelContext: context,
+            cloudSyncEnabled: true,
+            cloudSyncErrorDescription: nil
+        )
+
+        #expect(service.fetchSnapshotCallCount == 0)
+        #expect(viewModel.state == .active(warmSnapshot))
+    }
+
+    @Test
     func toggleReactionAppliesOptimisticStateBeforeCloudKitCompletes() async throws {
         let context = try makeInMemoryContext()
         let service = StubBrosSocialService()
