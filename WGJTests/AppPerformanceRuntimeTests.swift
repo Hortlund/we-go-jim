@@ -191,6 +191,13 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
+    func activeWorkoutSceneTransitionFlushesOnlyWhenBackgrounded() {
+        #expect(!ActiveWorkoutSceneTransitionPolicy.shouldFlushLocalDraft(scenePhase: .active))
+        #expect(!ActiveWorkoutSceneTransitionPolicy.shouldFlushLocalDraft(scenePhase: .inactive))
+        #expect(ActiveWorkoutSceneTransitionPolicy.shouldFlushLocalDraft(scenePhase: .background))
+    }
+
+    @Test
     func activeWorkoutPersistenceChangeSetSkipsUnchangedSnapshots() {
         let snapshots = ActiveWorkoutExercisePersistenceSnapshot(
             setDrafts: [

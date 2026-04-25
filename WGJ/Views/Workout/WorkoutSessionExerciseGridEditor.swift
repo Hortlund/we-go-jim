@@ -2,6 +2,8 @@ import Foundation
 import SwiftUI
 
 struct WorkoutSessionExerciseGridEditor: View {
+    @Environment(\.scenePhase) private var scenePhase
+
     let exerciseName: String
     let muscleSummary: String
     let category: String
@@ -49,10 +51,10 @@ struct WorkoutSessionExerciseGridEditor: View {
     @State private var exerciseSwipeRemoving = false
     @State private var setSwipeOffsets: [UUID: CGFloat] = [:]
     @State private var setSwipeRemoving: [UUID: Bool] = [:]
-    @State private var repsInputTextBySetID: [UUID: String] = [:]
-    @State private var weightInputTextBySetID: [UUID: String] = [:]
+    @State private var metricInputDraftBuffer = WorkoutMetricInputDraftBuffer()
     @State private var pendingBozarCompletionSetIDs: Set<UUID> = []
     @State private var revealedCompletionGateSetIDs: Set<UUID> = []
+    @State private var pendingInputCommitTask: Task<Void, Never>?
     @State private var pendingDisplayRefreshTask: Task<Void, Never>?
     @State private var pendingCommitTask: Task<Void, Never>?
     @State private var suppressNextSetDraftsDisplayRefresh = false
@@ -60,6 +62,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     @FocusState private var focusedInput: SetInputFocus?
 
     private let restPresets = [10, 15, 20, 30, 45, 60, 75, 90, 105, 120, 150, 180, 210, 240]
+    private let inputCommitDebounce = Duration.milliseconds(240)
     private let displayRefreshDebounce = Duration.milliseconds(90)
     private let commitDebounce = Duration.milliseconds(400)
 
@@ -240,6 +243,10 @@ struct WorkoutSessionExerciseGridEditor: View {
             if isEnabled {
                 revealedCompletionGateSetIDs.removeAll()
             }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard ActiveWorkoutSceneTransitionPolicy.shouldFlushLocalDraft(scenePhase: newPhase) else { return }
+            flushPendingEditorState()
         }
     }
 
@@ -867,7 +874,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                         setDrafts[index].actualLoadUnit = unit
                         if unit == .bodyweight {
                             setDrafts[index].actualWeight = nil
-                            weightInputTextBySetID[setID] = ""
+                            metricInputDraftBuffer.stage("", for: setID, metric: .weight)
                         }
                         if unit != .bodyweight || hadWeight {
                             scheduleDisplayRefresh()
@@ -1436,6 +1443,9 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func dismissInputFocus(suppressCommit: Bool) {
+        if let focusedInput {
+            commitBufferedInput(for: focusedInput, clearsText: true)
+        }
         if suppressCommit, focusedInput != nil {
             suppressNextFocusLossCommit = true
         }
@@ -1449,7 +1459,8 @@ struct WorkoutSessionExerciseGridEditor: View {
                     return ""
                 }
                 let setID = setDrafts[index].id
-                if isInputFocused(.reps, at: index), let draft = repsInputTextBySetID[setID] {
+                if isInputFocused(.reps, at: index),
+                   let draft = metricInputDraftBuffer.text(for: setID, metric: .reps) {
                     return draft
                 }
                 guard let value = setDrafts[index].actualReps else {
@@ -1459,25 +1470,9 @@ struct WorkoutSessionExerciseGridEditor: View {
             },
             set: { newValue in
                 guard setDrafts.indices.contains(index) else { return }
-                let previousDrafts = setDrafts
                 let setID = setDrafts[index].id
-                repsInputTextBySetID[setID] = newValue
-                let cleaned = newValue.filter(\.isNumber)
-                let updatedReps = cleaned.isEmpty ? nil : Int(cleaned)
-                suppressNextSetDraftsDisplayRefresh = true
-
-                if setDrafts[index].actualReps != updatedReps {
-                    setDrafts[index].actualReps = updatedReps
-                }
-
-                if !manualCompletionMode {
-                    let isCompleted = (setDrafts[index].actualReps != nil || setDrafts[index].actualWeight != nil)
-                    if setDrafts[index].isCompleted != isCompleted {
-                        setDrafts[index].isCompleted = isCompleted
-                    }
-                }
-
-                handleDraftValueMutation(previousDrafts: previousDrafts)
+                metricInputDraftBuffer.stage(newValue, for: setID, metric: .reps)
+                scheduleBufferedInputCommit(for: inputFocus(for: index, metric: .reps))
             }
         )
     }
@@ -1489,7 +1484,8 @@ struct WorkoutSessionExerciseGridEditor: View {
                     return ""
                 }
                 let setID = setDrafts[index].id
-                if isInputFocused(.weight, at: index), let draft = weightInputTextBySetID[setID] {
+                if isInputFocused(.weight, at: index),
+                   let draft = metricInputDraftBuffer.text(for: setID, metric: .weight) {
                     return draft
                 }
                 guard let value = setDrafts[index].actualWeight else {
@@ -1499,45 +1495,9 @@ struct WorkoutSessionExerciseGridEditor: View {
             },
             set: { newValue in
                 guard setDrafts.indices.contains(index) else { return }
-                let previousDrafts = setDrafts
                 let setID = setDrafts[index].id
-                weightInputTextBySetID[setID] = newValue
-                let normalized = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                let updatedWeight: Double?
-                suppressNextSetDraftsDisplayRefresh = true
-
-                if normalized.isEmpty {
-                    updatedWeight = nil
-                } else if let parsed = WGJFormatters.parseLocalizedDecimal(normalized) {
-                    updatedWeight = max(0, parsed)
-                } else {
-                    updatedWeight = setDrafts[index].actualWeight
-                }
-
-                if setDrafts[index].actualWeight != updatedWeight {
-                    setDrafts[index].actualWeight = updatedWeight
-                }
-
-                let fallbackWeightedUnit = resolvedWeightedLoadUnit(for: setDrafts[index])
-                if let updatedWeight, updatedWeight > 0 {
-                    if setDrafts[index].actualLoadUnit == .bodyweight {
-                        setDrafts[index].actualLoadUnit = fallbackWeightedUnit
-                    }
-                } else if updatedWeight == nil,
-                          setDrafts[index].targetLoadUnit == .bodyweight,
-                          setDrafts[index].actualLoadUnit != .bodyweight
-                {
-                    setDrafts[index].actualLoadUnit = .bodyweight
-                }
-
-                if !manualCompletionMode {
-                    let isCompleted = (setDrafts[index].actualReps != nil || setDrafts[index].actualWeight != nil)
-                    if setDrafts[index].isCompleted != isCompleted {
-                        setDrafts[index].isCompleted = isCompleted
-                    }
-                }
-
-                handleDraftValueMutation(previousDrafts: previousDrafts)
+                metricInputDraftBuffer.stage(newValue, for: setID, metric: .weight)
+                scheduleBufferedInputCommit(for: inputFocus(for: index, metric: .weight))
             }
         )
     }
@@ -1763,6 +1723,11 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func flushPendingEditorState() {
         pendingBozarCompletionSetIDs.removeAll()
+        pendingInputCommitTask?.cancel()
+        pendingInputCommitTask = nil
+        if commitAllBufferedInput(clearsText: true) {
+            requestImmediateCommitForCurrentState()
+        }
         pendingCommitTask?.cancel()
         pendingCommitTask = nil
         flushPendingDisplayRefresh()
@@ -2133,15 +2098,6 @@ struct WorkoutSessionExerciseGridEditor: View {
         }
         notifyChanged()
         onSetCompletionChange?(stageID, restLabel, restSeconds, isCompleted)
-    }
-
-    private func resolvedWeightedLoadUnit(for set: WorkoutSessionSetDraft) -> TemplateLoadUnit {
-        switch set.targetLoadUnit {
-        case .kg, .lb:
-            return set.targetLoadUnit
-        case .bodyweight:
-            return preferredLoadUnit
-        }
     }
 
     private func setCardFill(for set: WorkoutSessionSetDraft, hasPersonalRecord: Bool) -> Color {
@@ -2531,11 +2487,13 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func handleFocusedInputChange(_ previousFocus: SetInputFocus?, _ newFocus: SetInputFocus?) {
         guard previousFocus != newFocus else { return }
+        pendingInputCommitTask?.cancel()
+        pendingInputCommitTask = nil
         if let previousFocus {
+            _ = commitBufferedInput(for: previousFocus, clearsText: true)
             if suppressNextFocusLossCommit {
                 suppressNextFocusLossCommit = false
             } else {
-                clearInputDraft(for: previousFocus)
                 requestImmediateCommitForCurrentState()
             }
         } else {
@@ -2587,6 +2545,68 @@ struct WorkoutSessionExerciseGridEditor: View {
         onCommitRequest?(currentDrafts, currentRestSeconds)
     }
 
+    private func scheduleBufferedInputCommit(for focus: SetInputFocus) {
+        pendingInputCommitTask?.cancel()
+        pendingInputCommitTask = Task { @MainActor in
+            try? await Task.sleep(for: inputCommitDebounce)
+            guard !Task.isCancelled else { return }
+            pendingInputCommitTask = nil
+            _ = commitBufferedInput(for: focus, clearsText: false)
+        }
+    }
+
+    @discardableResult
+    private func commitBufferedInput(
+        for focus: SetInputFocus,
+        clearsText: Bool
+    ) -> Bool {
+        var updatedDrafts = setDrafts
+        let metric = inputDraftMetric(for: focus.metric)
+        let changed = metricInputDraftBuffer.commit(
+            setID: focus.setID,
+            metric: metric,
+            drafts: &updatedDrafts,
+            preferredLoadUnit: preferredLoadUnit,
+            manualCompletionMode: manualCompletionMode,
+            clearsText: clearsText
+        )
+        guard changed else { return false }
+
+        let previousDrafts = setDrafts
+        suppressNextSetDraftsDisplayRefresh = true
+        setDrafts = updatedDrafts
+        handleDraftValueMutation(previousDrafts: previousDrafts)
+        return true
+    }
+
+    @discardableResult
+    private func commitAllBufferedInput(clearsText: Bool) -> Bool {
+        guard !metricInputDraftBuffer.isEmpty else { return false }
+        var updatedDrafts = setDrafts
+        let changed = metricInputDraftBuffer.commitAll(
+            drafts: &updatedDrafts,
+            preferredLoadUnit: preferredLoadUnit,
+            manualCompletionMode: manualCompletionMode,
+            clearsText: clearsText
+        )
+        guard changed else { return false }
+
+        let previousDrafts = setDrafts
+        suppressNextSetDraftsDisplayRefresh = true
+        setDrafts = updatedDrafts
+        handleDraftValueMutation(previousDrafts: previousDrafts)
+        return true
+    }
+
+    private func inputDraftMetric(for metric: SetInputFocus.Metric) -> WorkoutMetricInputDraftBuffer.Metric {
+        switch metric {
+        case .weight:
+            return .weight
+        case .reps:
+            return .reps
+        }
+    }
+
     private func requestImmediateCommitForCurrentState(
         drafts: [WorkoutSessionSetDraft]? = nil,
         restSeconds overrideRestSeconds: Int? = nil
@@ -2619,8 +2639,7 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func pruneInputDrafts() {
         let validSetIDs = Set(setDrafts.map(\.id))
-        repsInputTextBySetID = repsInputTextBySetID.filter { validSetIDs.contains($0.key) }
-        weightInputTextBySetID = weightInputTextBySetID.filter { validSetIDs.contains($0.key) }
+        metricInputDraftBuffer.prune(keeping: validSetIDs)
 
         if let focusedInput, !validSetIDs.contains(focusedInput.setID) {
             self.focusedInput = nil
@@ -2698,23 +2717,14 @@ struct WorkoutSessionExerciseGridEditor: View {
         setCompletion(true, at: index, draftOverride: updatedDrafts)
     }
 
-    private func clearInputDraft(for focus: SetInputFocus) {
-        switch focus.metric {
-        case .weight:
-            weightInputTextBySetID[focus.setID] = nil
-        case .reps:
-            repsInputTextBySetID[focus.setID] = nil
-        }
-    }
-
     private func syncInputDraft(for focus: SetInputFocus, using draft: WorkoutSessionSetDraft) {
         guard focus.setID == draft.id else { return }
 
         switch focus.metric {
         case .weight:
-            weightInputTextBySetID[draft.id] = draft.actualWeight.map(formatWeight) ?? ""
+            metricInputDraftBuffer.sync(setID: draft.id, metric: .weight, draft: draft)
         case .reps:
-            repsInputTextBySetID[draft.id] = draft.actualReps.map(String.init) ?? ""
+            metricInputDraftBuffer.sync(setID: draft.id, metric: .reps, draft: draft)
         }
     }
 

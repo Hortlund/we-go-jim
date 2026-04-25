@@ -343,9 +343,12 @@ struct ActiveWorkoutView: View {
                 handleFinishConfirmationChange(from: oldValue, to: newValue)
             }
             .onChange(of: scenePhase) { _, newPhase in
-                guard newPhase != .active else { return }
-                performExpiringBackgroundFlush(named: "active-workout.scene-transition") {
-                    _ = await flushDirtyWritesNow(checkpoint: .sceneTransition)
+                guard ActiveWorkoutSceneTransitionPolicy.shouldFlushLocalDraft(scenePhase: newPhase) else { return }
+                Task { @MainActor in
+                    await Task.yield()
+                    performExpiringBackgroundFlush(named: "active-workout.scene-transition") {
+                        _ = await flushDirtyWritesNow(checkpoint: .sceneTransition)
+                    }
                 }
             }
             .onDisappear {
