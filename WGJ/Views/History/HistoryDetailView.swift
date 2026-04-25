@@ -13,6 +13,7 @@ struct HistoryDetailView: View {
     @Query private var sessions: [WorkoutSession]
     @Query private var sessionCardioBlocks: [WorkoutSessionCardioBlock]
     @Query private var sessionExercises: [WorkoutSessionExercise]
+    @Query private var profiles: [UserProfile]
 
     @State private var hasBootstrapped = false
     @State private var sessionNameDraft = ""
@@ -37,6 +38,10 @@ struct HistoryDetailView: View {
 
     private var sessionRepository: WorkoutSessionRepository {
         WorkoutSessionRepository(modelContext: modelContext)
+    }
+
+    private var currentProfile: UserProfile? {
+        UserProfileSelection.currentProfile(in: profiles)
     }
 
     init(sessionID: UUID) {
@@ -301,9 +306,7 @@ struct HistoryDetailView: View {
         hasBootstrapped = true
         sessionNameDraft = session?.name ?? ""
         notesDraft = session?.notes ?? ""
-        if let profile = try? ProfileRepository(modelContext: modelContext).currentProfile() {
-            preferredLoadUnit = profile.preferredLoadUnit
-        }
+        preferredLoadUnit = currentProfile?.preferredLoadUnit ?? .kg
     }
 
     @MainActor
@@ -379,70 +382,6 @@ struct HistoryDetailView: View {
         }
         hydrationPayloadByExerciseID = hydrationPayloadByExerciseID.filter {
             currentStamp.exerciseIDs.contains($0.key)
-        }
-
-        let eagerlyHydratedExerciseIDs = WorkoutExerciseHydrationPlanner.orderedExerciseIDsToHydrate(
-            orderedExerciseIDs: sessionExercises.map(\.id),
-            eligibleExerciseIDs: HistoryExerciseHydrationPlanner.pendingExerciseIDs(
-                orderedExerciseIDs: sessionExercises.map(\.id),
-                expandedExerciseIDs: expandedExerciseIDs,
-                hydratedExerciseIDs: Set(hydrationPayloadByExerciseID.keys)
-            ),
-            limit: 1
-        )
-
-        if !eagerlyHydratedExerciseIDs.isEmpty {
-            do {
-                let eagerPersonalRecordPresentations: [UUID: HistoryExercisePersonalRecordPresentation]
-                if let appBackgroundStore {
-                    eagerPersonalRecordPresentations = try await appBackgroundStore.perform(
-                        "history-detail.hydrate.pr.eager"
-                    ) { backgroundContext in
-                        try Self.loadPersonalRecordPresentationByExerciseID(
-                            modelContext: backgroundContext,
-                            sessionID: sessionID,
-                            exerciseIDs: eagerlyHydratedExerciseIDs
-                        )
-                    }
-                } else {
-                    eagerPersonalRecordPresentations = try Self.loadPersonalRecordPresentationByExerciseID(
-                        modelContext: modelContext,
-                        sessionID: sessionID,
-                        exerciseIDs: eagerlyHydratedExerciseIDs
-                    )
-                }
-
-                let eagerPayloads: [UUID: HistoryExerciseHydrationPayload]
-                let eagerDraftsByExerciseID = setDraftsByExerciseID
-                let mergedPersonalRecords = personalRecordPresentationByExerciseID.merging(
-                    eagerPersonalRecordPresentations
-                ) { _, new in new }
-                if let appBackgroundStore {
-                    eagerPayloads = try await appBackgroundStore.perform("history-detail.hydrate.eager") { backgroundContext in
-                        try Self.loadHydrationPayloadByExerciseID(
-                            modelContext: backgroundContext,
-                            sessionID: sessionID,
-                            exerciseIDs: eagerlyHydratedExerciseIDs,
-                            draftsByExerciseID: eagerDraftsByExerciseID,
-                            personalRecordPresentationByExerciseID: mergedPersonalRecords
-                        )
-                    }
-                } else {
-                    eagerPayloads = try Self.loadHydrationPayloadByExerciseID(
-                        modelContext: modelContext,
-                        sessionID: sessionID,
-                        exerciseIDs: eagerlyHydratedExerciseIDs,
-                        draftsByExerciseID: eagerDraftsByExerciseID,
-                        personalRecordPresentationByExerciseID: mergedPersonalRecords
-                    )
-                }
-
-                personalRecordPresentationByExerciseID.merge(eagerPersonalRecordPresentations) { _, new in new }
-                hydrationPayloadByExerciseID.merge(eagerPayloads) { _, new in new }
-            } catch {
-                showError(error)
-                return
-            }
         }
 
         loadedExerciseStateStamp = currentStamp
@@ -703,8 +642,10 @@ struct HistoryDetailView: View {
             throw WorkoutSessionRepositoryError.sessionNotFound
         }
         let startedAt = session.startedAt
-        let targetExercises = try sessionRepository.sessionExercises(sessionID: sessionID)
-            .filter { exerciseIDs.contains($0.id) }
+        let targetExercises = try sessionRepository.sessionExercises(
+            sessionID: sessionID,
+            exerciseIDs: exerciseIDs
+        )
         let requestedExerciseUUIDs = Array(Set(targetExercises.map(\.catalogExerciseUUID)))
         let previousMaps = try sessionRepository.previousSetMaps(
             forExercises: requestedExerciseUUIDs,

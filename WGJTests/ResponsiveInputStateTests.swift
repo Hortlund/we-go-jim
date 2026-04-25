@@ -85,4 +85,43 @@ struct ResponsiveInputStateTests {
         #expect(buffer.text(for: setID, metric: .weight) == nil)
         #expect(buffer.text(for: setID, metric: .reps) == nil)
     }
+
+    @Test
+    func dropStageTypingStaysBufferedUntilCommit() {
+        let setID = UUID()
+        let stageID = UUID()
+        var drafts = [
+            WorkoutSessionSetDraft(
+                id: setID,
+                targetLoadUnit: .kg,
+                isCompleted: true,
+                dropStages: [
+                    WorkoutSessionDropStageDraft(id: stageID, targetLoadUnit: .kg)
+                ]
+            )
+        ]
+        let originalDrafts = drafts
+        var buffer = WorkoutMetricInputDraftBuffer()
+
+        buffer.stage("90", forDropStage: stageID, metric: .weight)
+        buffer.stage("8", forDropStage: stageID, metric: .reps)
+
+        #expect(drafts == originalDrafts)
+        #expect(buffer.text(forDropStage: stageID, metric: .weight) == "90")
+        #expect(buffer.text(forDropStage: stageID, metric: .reps) == "8")
+
+        let changed = buffer.commitDropStage(
+            stageID: stageID,
+            metric: .weight,
+            drafts: &drafts,
+            preferredLoadUnit: .kg,
+            manualCompletionMode: true
+        )
+
+        #expect(changed)
+        #expect(drafts[0].dropStages[0].actualWeight == 90)
+        #expect(drafts[0].dropStages[0].actualReps == nil)
+        #expect(buffer.text(forDropStage: stageID, metric: .weight) == nil)
+        #expect(buffer.text(forDropStage: stageID, metric: .reps) == "8")
+    }
 }

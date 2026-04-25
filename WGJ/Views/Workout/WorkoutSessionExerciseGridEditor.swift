@@ -3,6 +3,7 @@ import SwiftUI
 
 struct WorkoutSessionExerciseGridEditor: View {
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     let exerciseName: String
     let muscleSummary: String
@@ -650,8 +651,8 @@ struct WorkoutSessionExerciseGridEditor: View {
                 setMenu(for: row)
             }
 
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 12) {
+            if horizontalSizeClass == .compact {
+                VStack(alignment: .leading, spacing: 12) {
                     metricField(title: "Weight", supporting: row.targetWeightText) {
                         loadField(at: row.index)
                     }
@@ -660,8 +661,8 @@ struct WorkoutSessionExerciseGridEditor: View {
                         repsField(at: row.index)
                     }
                 }
-
-                VStack(alignment: .leading, spacing: 12) {
+            } else {
+                HStack(alignment: .top, spacing: 12) {
                     metricField(title: "Weight", supporting: row.targetWeightText) {
                         loadField(at: row.index)
                     }
@@ -2731,6 +2732,9 @@ struct WorkoutSessionExerciseGridEditor: View {
 }
 
 private struct WorkoutExerciseDropStageCardView: View, Equatable {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.scenePhase) private var scenePhase
+
     let setIndex: Int
     let stageIndex: Int
     let stage: WorkoutSessionDropStageDraft
@@ -2744,6 +2748,12 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
 
     @State private var repsText: String
     @State private var weightText: String
+    @FocusState private var focusedField: Field?
+
+    private enum Field: Hashable {
+        case weight
+        case reps
+    }
 
     init(
         setIndex: Int,
@@ -2818,13 +2828,13 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
                 }
             }
 
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 10) {
+            if horizontalSizeClass == .compact {
+                VStack(alignment: .leading, spacing: 10) {
                     weightField
                     repsField
                 }
-
-                VStack(alignment: .leading, spacing: 10) {
+            } else {
+                HStack(spacing: 10) {
                     weightField
                     repsField
                 }
@@ -2832,13 +2842,19 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
 
             Group {
                 if stage.isCompleted {
-                    Button(action: onToggleCompletion) {
+                    Button {
+                        commitLocalText()
+                        onToggleCompletion()
+                    } label: {
                         Label("Undo Drop \(stageIndex + 1)", systemImage: "arrow.uturn.backward.circle")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(WGJGhostButtonStyle())
                 } else {
-                    Button(action: onToggleCompletion) {
+                    Button {
+                        commitLocalText()
+                        onToggleCompletion()
+                    } label: {
                         Label("Complete Drop \(stageIndex + 1)", systemImage: "checkmark.circle.fill")
                             .frame(maxWidth: .infinity)
                     }
@@ -2871,6 +2887,17 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
             guard weightText != resolved else { return }
             weightText = resolved
         }
+        .onChange(of: focusedField) { oldValue, newValue in
+            guard oldValue != nil, newValue == nil else { return }
+            commitLocalText()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard ActiveWorkoutSceneTransitionPolicy.shouldFlushLocalDraft(scenePhase: newPhase) else { return }
+            commitLocalText()
+        }
+        .onDisappear {
+            commitLocalText()
+        }
     }
 
     private var weightField: some View {
@@ -2879,15 +2906,14 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
                 .keyboardType(.decimalPad)
                 .multilineTextAlignment(.center)
                 .wgjPillField()
+                .focused($focusedField, equals: .weight)
                 .disabled(!isEditingEnabled)
                 .accessibilityIdentifier("workout-set-\(setIndex)-drop-stage-\(stageIndex)-weight-field")
-                .onChange(of: weightText) { _, newValue in
-                    onWeightChanged(newValue)
-                }
 
             WGJActionMenuButton("Drop Load Unit", titleVisibility: .hidden) {
                 ForEach(TemplateLoadUnit.allCases) { unit in
                     Button(unit.shortLabel) {
+                        commitLocalText()
                         onLoadUnitChanged(unit)
                     }
                 }
@@ -2907,11 +2933,21 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
             .keyboardType(.numberPad)
             .multilineTextAlignment(.center)
             .wgjPillField()
+            .focused($focusedField, equals: .reps)
             .disabled(!isEditingEnabled)
             .accessibilityIdentifier("workout-set-\(setIndex)-drop-stage-\(stageIndex)-reps-field")
-            .onChange(of: repsText) { _, newValue in
-                onRepsChanged(newValue)
-            }
+    }
+
+    private func commitLocalText() {
+        let resolvedWeightText = stage.actualWeight.map(WGJFormatters.decimalString) ?? ""
+        if weightText != resolvedWeightText {
+            onWeightChanged(weightText)
+        }
+
+        let resolvedRepsText = stage.actualReps.map(String.init) ?? ""
+        if repsText != resolvedRepsText {
+            onRepsChanged(repsText)
+        }
     }
 
     private var targetSummary: String? {

@@ -8,9 +8,14 @@ nonisolated struct WorkoutMetricInputDraftBuffer: Equatable, Sendable {
 
     private var weightTextBySetID: [UUID: String] = [:]
     private var repsTextBySetID: [UUID: String] = [:]
+    private var weightTextByDropStageID: [UUID: String] = [:]
+    private var repsTextByDropStageID: [UUID: String] = [:]
 
     var isEmpty: Bool {
-        weightTextBySetID.isEmpty && repsTextBySetID.isEmpty
+        weightTextBySetID.isEmpty
+            && repsTextBySetID.isEmpty
+            && weightTextByDropStageID.isEmpty
+            && repsTextByDropStageID.isEmpty
     }
 
     mutating func stage(_ text: String, for setID: UUID, metric: Metric) {
@@ -31,6 +36,24 @@ nonisolated struct WorkoutMetricInputDraftBuffer: Equatable, Sendable {
         }
     }
 
+    mutating func stage(_ text: String, forDropStage stageID: UUID, metric: Metric) {
+        switch metric {
+        case .weight:
+            weightTextByDropStageID[stageID] = text
+        case .reps:
+            repsTextByDropStageID[stageID] = text
+        }
+    }
+
+    func text(forDropStage stageID: UUID, metric: Metric) -> String? {
+        switch metric {
+        case .weight:
+            weightTextByDropStageID[stageID]
+        case .reps:
+            repsTextByDropStageID[stageID]
+        }
+    }
+
     mutating func clear(for setID: UUID, metric: Metric) {
         switch metric {
         case .weight:
@@ -40,9 +63,23 @@ nonisolated struct WorkoutMetricInputDraftBuffer: Equatable, Sendable {
         }
     }
 
+    mutating func clear(forDropStage stageID: UUID, metric: Metric) {
+        switch metric {
+        case .weight:
+            weightTextByDropStageID[stageID] = nil
+        case .reps:
+            repsTextByDropStageID[stageID] = nil
+        }
+    }
+
     mutating func prune(keeping validSetIDs: Set<UUID>) {
         weightTextBySetID = weightTextBySetID.filter { validSetIDs.contains($0.key) }
         repsTextBySetID = repsTextBySetID.filter { validSetIDs.contains($0.key) }
+    }
+
+    mutating func pruneDropStages(keeping validStageIDs: Set<UUID>) {
+        weightTextByDropStageID = weightTextByDropStageID.filter { validStageIDs.contains($0.key) }
+        repsTextByDropStageID = repsTextByDropStageID.filter { validStageIDs.contains($0.key) }
     }
 
     mutating func sync(setID: UUID, metric: Metric, draft: WorkoutSessionSetDraft) {
@@ -51,6 +88,15 @@ nonisolated struct WorkoutMetricInputDraftBuffer: Equatable, Sendable {
             weightTextBySetID[setID] = draft.actualWeight.map(WGJFormatters.decimalString) ?? ""
         case .reps:
             repsTextBySetID[setID] = draft.actualReps.map(String.init) ?? ""
+        }
+    }
+
+    mutating func sync(dropStageID: UUID, metric: Metric, draft: WorkoutSessionDropStageDraft) {
+        switch metric {
+        case .weight:
+            weightTextByDropStageID[dropStageID] = draft.actualWeight.map(WGJFormatters.decimalString) ?? ""
+        case .reps:
+            repsTextByDropStageID[dropStageID] = draft.actualReps.map(String.init) ?? ""
         }
     }
 
@@ -114,6 +160,77 @@ nonisolated struct WorkoutMetricInputDraftBuffer: Equatable, Sendable {
             ) || changed
             changed = commit(
                 setID: setID,
+                metric: .reps,
+                drafts: &drafts,
+                preferredLoadUnit: preferredLoadUnit,
+                manualCompletionMode: manualCompletionMode,
+                clearsText: clearsText
+            ) || changed
+        }
+
+        return changed
+    }
+
+    @discardableResult
+    mutating func commitDropStage(
+        stageID: UUID,
+        metric: Metric,
+        drafts: inout [WorkoutSessionSetDraft],
+        preferredLoadUnit: TemplateLoadUnit,
+        manualCompletionMode: Bool,
+        clearsText: Bool = true
+    ) -> Bool {
+        guard let location = dropStageLocation(stageID: stageID, drafts: drafts) else {
+            clear(forDropStage: stageID, metric: metric)
+            return false
+        }
+
+        let changed: Bool
+        switch metric {
+        case .weight:
+            guard let text = weightTextByDropStageID[stageID] else { return false }
+            changed = applyWeightText(
+                text,
+                to: &drafts[location.setIndex].dropStages[location.stageIndex],
+                preferredLoadUnit: preferredLoadUnit,
+                manualCompletionMode: manualCompletionMode
+            )
+        case .reps:
+            guard let text = repsTextByDropStageID[stageID] else { return false }
+            changed = applyRepsText(
+                text,
+                to: &drafts[location.setIndex].dropStages[location.stageIndex],
+                manualCompletionMode: manualCompletionMode
+            )
+        }
+
+        if clearsText {
+            clear(forDropStage: stageID, metric: metric)
+        }
+        return changed
+    }
+
+    @discardableResult
+    mutating func commitAllDropStages(
+        drafts: inout [WorkoutSessionSetDraft],
+        preferredLoadUnit: TemplateLoadUnit,
+        manualCompletionMode: Bool,
+        clearsText: Bool = true
+    ) -> Bool {
+        let stageIDs = Set(weightTextByDropStageID.keys).union(repsTextByDropStageID.keys)
+        var changed = false
+
+        for stageID in stageIDs {
+            changed = commitDropStage(
+                stageID: stageID,
+                metric: .weight,
+                drafts: &drafts,
+                preferredLoadUnit: preferredLoadUnit,
+                manualCompletionMode: manualCompletionMode,
+                clearsText: clearsText
+            ) || changed
+            changed = commitDropStage(
+                stageID: stageID,
                 metric: .reps,
                 drafts: &drafts,
                 preferredLoadUnit: preferredLoadUnit,
@@ -197,6 +314,78 @@ nonisolated struct WorkoutMetricInputDraftBuffer: Equatable, Sendable {
         return changed
     }
 
+    private func applyWeightText(
+        _ text: String,
+        to draft: inout WorkoutSessionDropStageDraft,
+        preferredLoadUnit: TemplateLoadUnit,
+        manualCompletionMode: Bool
+    ) -> Bool {
+        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let updatedWeight: Double?
+
+        if normalized.isEmpty {
+            updatedWeight = nil
+        } else if let parsed = Self.parseLocalizedDecimal(normalized) {
+            updatedWeight = max(0, parsed)
+        } else {
+            updatedWeight = draft.actualWeight
+        }
+
+        var changed = false
+        if draft.actualWeight != updatedWeight {
+            draft.actualWeight = updatedWeight
+            changed = true
+        }
+
+        if let updatedWeight, updatedWeight > 0 {
+            if draft.actualLoadUnit == .bodyweight {
+                draft.actualLoadUnit = resolvedWeightedLoadUnit(for: draft, preferredLoadUnit: preferredLoadUnit)
+                changed = true
+            }
+        } else if updatedWeight == nil,
+                  draft.targetLoadUnit == .bodyweight,
+                  draft.actualLoadUnit != .bodyweight
+        {
+            draft.actualLoadUnit = .bodyweight
+            changed = true
+        }
+
+        if !manualCompletionMode {
+            let isCompleted = draft.actualReps != nil || draft.actualWeight != nil
+            if draft.isCompleted != isCompleted {
+                draft.isCompleted = isCompleted
+                changed = true
+            }
+        }
+
+        return changed
+    }
+
+    private func applyRepsText(
+        _ text: String,
+        to draft: inout WorkoutSessionDropStageDraft,
+        manualCompletionMode: Bool
+    ) -> Bool {
+        let cleaned = text.filter(\.isNumber)
+        let updatedReps = cleaned.isEmpty ? nil : Int(cleaned)
+        var changed = false
+
+        if draft.actualReps != updatedReps {
+            draft.actualReps = updatedReps
+            changed = true
+        }
+
+        if !manualCompletionMode {
+            let isCompleted = draft.actualReps != nil || draft.actualWeight != nil
+            if draft.isCompleted != isCompleted {
+                draft.isCompleted = isCompleted
+                changed = true
+            }
+        }
+
+        return changed
+    }
+
     private func resolvedWeightedLoadUnit(
         for draft: WorkoutSessionSetDraft,
         preferredLoadUnit: TemplateLoadUnit
@@ -207,6 +396,31 @@ nonisolated struct WorkoutMetricInputDraftBuffer: Equatable, Sendable {
         case .bodyweight:
             return preferredLoadUnit
         }
+    }
+
+    private func resolvedWeightedLoadUnit(
+        for draft: WorkoutSessionDropStageDraft,
+        preferredLoadUnit: TemplateLoadUnit
+    ) -> TemplateLoadUnit {
+        switch draft.targetLoadUnit {
+        case .kg, .lb:
+            return draft.targetLoadUnit
+        case .bodyweight:
+            return preferredLoadUnit
+        }
+    }
+
+    private func dropStageLocation(
+        stageID: UUID,
+        drafts: [WorkoutSessionSetDraft]
+    ) -> (setIndex: Int, stageIndex: Int)? {
+        for (setIndex, draft) in drafts.enumerated() {
+            if let stageIndex = draft.dropStages.firstIndex(where: { $0.id == stageID }) {
+                return (setIndex, stageIndex)
+            }
+        }
+
+        return nil
     }
 
     private static func parseLocalizedDecimal(_ text: String) -> Double? {

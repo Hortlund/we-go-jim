@@ -30,16 +30,13 @@ struct StartWorkoutHomeView: View {
     @State private var needsExplicitRefresh = true
     @State private var lastLoadedContentUpdatedAt: Date?
     @State private var lastRefreshAt: Date?
+    @State private var isPreparingActiveWorkoutStart = false
 
     @State private var errorMessage = ""
     @State private var showingError = false
 
     private var templateRepository: TemplateRepository {
         TemplateRepository(modelContext: modelContext)
-    }
-
-    private var activeWorkoutRepository: ActiveWorkoutDraftRepository {
-        ActiveWorkoutDraftRepository(modelContext: modelContext)
     }
 
     private var templateTransferService: TemplateTransferService {
@@ -224,10 +221,14 @@ struct StartWorkoutHomeView: View {
         Button {
             requestStartEmptyWorkout()
         } label: {
-            Label("Start Empty", systemImage: "play.fill")
+            Label(
+                isPreparingActiveWorkoutStart ? "Starting" : "Start Empty",
+                systemImage: isPreparingActiveWorkoutStart ? "hourglass" : "play.fill"
+            )
                 .wgjSingleLineText(scale: 0.84)
         }
         .buttonStyle(WGJCompactPrimaryButtonStyle())
+        .disabled(isPreparingActiveWorkoutStart)
         .accessibilityIdentifier("start-workout-empty-button")
     }
 
@@ -674,44 +675,50 @@ struct StartWorkoutHomeView: View {
     }
 
     private func requestStartEmptyWorkout() {
-        guard let activeSessionID = activeSessionIDToResume() else {
-            startEmptyWorkout()
+        guard !isPreparingActiveWorkoutStart else { return }
+        if let activeSessionID = activeWorkoutPresentationState.activeSessionID {
+            presentActiveWorkoutConflict(for: activeSessionID)
             return
         }
 
-        presentActiveWorkoutConflict(for: activeSessionID)
+        startEmptyWorkout()
     }
 
     private func startEmptyWorkout() {
+        isPreparingActiveWorkoutStart = true
         Task { @MainActor in
             do {
                 let preparation = try await prepareActiveWorkoutStart(templateID: nil)
-                presentPreparedActiveWorkout(preparation)
+                handlePreparedActiveWorkoutStart(preparation)
             } catch {
                 showError(error)
             }
+            isPreparingActiveWorkoutStart = false
         }
     }
 
     private func requestStartFromTemplate(templateID: UUID) {
-        guard let activeSessionID = activeSessionIDToResume() else {
-            startFromTemplate(templateID: templateID)
+        guard !isPreparingActiveWorkoutStart else { return }
+        if let activeSessionID = activeWorkoutPresentationState.activeSessionID {
+            selectedTemplatePreview = nil
+            presentActiveWorkoutConflict(for: activeSessionID)
             return
         }
 
-        selectedTemplatePreview = nil
-        presentActiveWorkoutConflict(for: activeSessionID)
+        startFromTemplate(templateID: templateID)
     }
 
     private func startFromTemplate(templateID: UUID) {
+        isPreparingActiveWorkoutStart = true
         Task { @MainActor in
             do {
                 let preparation = try await prepareActiveWorkoutStart(templateID: templateID)
-                presentPreparedActiveWorkout(preparation)
+                handlePreparedActiveWorkoutStart(preparation)
                 selectedTemplatePreview = nil
             } catch {
                 showError(error)
             }
+            isPreparingActiveWorkoutStart = false
         }
     }
 
@@ -730,22 +737,37 @@ struct StartWorkoutHomeView: View {
         modelContext: ModelContext
     ) throws -> ActiveWorkoutStartPreparation {
         let repository = ActiveWorkoutDraftRepository(modelContext: modelContext)
-        let sessionID: UUID
         if let activeSession = try repository.activeSession() {
-            sessionID = activeSession.id
-        } else if let templateID {
+            return ActiveWorkoutStartPreparation(
+                sessionID: activeSession.id,
+                isExistingConflict: true,
+                previousPerformanceResolutionByExerciseID: [:]
+            )
+        }
+
+        let sessionID: UUID
+        if let templateID {
             sessionID = try repository.createSessionFromTemplate(templateID: templateID).id
         } else {
             sessionID = try repository.createEmptySession().id
         }
 
+        let previousPerformanceResolutionByExerciseID = try repository.previousPerformanceResolutionByExerciseID(
+            sessionID: sessionID
+        )
         return ActiveWorkoutStartPreparation(
             sessionID: sessionID,
-            previousPerformanceResolutionByExerciseID: [:]
+            isExistingConflict: false,
+            previousPerformanceResolutionByExerciseID: previousPerformanceResolutionByExerciseID
         )
     }
 
-    private func presentPreparedActiveWorkout(_ preparation: ActiveWorkoutStartPreparation) {
+    private func handlePreparedActiveWorkoutStart(_ preparation: ActiveWorkoutStartPreparation) {
+        if preparation.isExistingConflict {
+            presentActiveWorkoutConflict(for: preparation.sessionID)
+            return
+        }
+
         activeWorkoutPresentationState.stagePreparedPreviousPerformanceResolution(
             preparation.previousPerformanceResolutionByExerciseID,
             for: preparation.sessionID
@@ -837,18 +859,6 @@ struct StartWorkoutHomeView: View {
         } catch {
             showError(error)
         }
-    }
-
-    private func activeSessionIDToResume() -> UUID? {
-        if let activeSessionID = activeWorkoutPresentationState.activeSessionID {
-            return activeSessionID
-        }
-
-        if let activeSession = try? activeWorkoutRepository.activeSession() {
-            return activeSession.id
-        }
-
-        return nil
     }
 
     private func presentActiveWorkoutConflict(for sessionID: UUID) {
@@ -2031,6 +2041,7 @@ private struct PendingTemplateFileTaskKey: Hashable {
 
 private struct ActiveWorkoutStartPreparation: Sendable {
     let sessionID: UUID
+    let isExistingConflict: Bool
     let previousPerformanceResolutionByExerciseID: [UUID: WorkoutPreviousPerformanceResolution]
 }
 

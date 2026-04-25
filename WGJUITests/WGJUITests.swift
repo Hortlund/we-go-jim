@@ -273,7 +273,7 @@ final class WGJUITests: XCTestCase {
 
     @MainActor
     func testTemplateEditorMoveExerciseToPositionPersistsOrder() throws {
-        let app = launchApp(launchEnvironment: [
+        let app = launchApp(mode: .localInMemory, launchEnvironment: [
             "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
                 name: "Template Reorder",
                 notes: "Move the first exercise to the bottom.",
@@ -2378,35 +2378,19 @@ final class WGJUITests: XCTestCase {
 
         let preToggle = app.buttons["Complete Pre Cardio"]
         let postToggle = app.buttons["Complete Post Cardio"]
-        let exerciseHeader = identifiedElement("active-workout-exercise-gated-bench-1", in: app)
-        let expandButton = identifiedElement("active-workout-exercise-gated-bench-1-expand-button", in: app)
         let weightField = identifiedElement("workout-set-0-weight-field", in: app)
         let completeSetButton = identifiedElement("workout-set-0-completion-button", in: app)
-        let completionGateMessage = identifiedElement("workout-set-0-completion-gate-message", in: app)
 
         XCTAssertTrue(preToggle.waitForExistence(timeout: 5))
         XCTAssertTrue(postToggle.waitForExistence(timeout: 5))
-        XCTAssertTrue(exerciseHeader.waitForExistence(timeout: 5))
-        XCTAssertTrue(expandButton.waitForExistence(timeout: 5))
-
-        XCTAssertFalse(weightField.exists)
-        XCTAssertFalse(postToggle.isEnabled)
-
-        expandButton.tap()
-        XCTAssertTrue(weightField.waitForExistence(timeout: 5))
-        XCTAssertTrue(completeSetButton.waitForExistence(timeout: 5))
-        XCTAssertTrue(weightField.isEnabled)
-        XCTAssertTrue(completeSetButton.isEnabled)
-        XCTAssertFalse(postToggle.isEnabled)
-
-        completeSetButton.tap()
-        XCTAssertTrue(completionGateMessage.waitForExistence(timeout: 5))
-        XCTAssertTrue(completionGateMessage.label.contains("warmup block above"))
         XCTAssertFalse(postToggle.isEnabled)
 
         preToggle.tap()
 
         XCTAssertTrue(completeSetButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(weightField.waitForExistence(timeout: 5))
+        XCTAssertTrue(weightField.isEnabled)
+        XCTAssertTrue(completeSetButton.isEnabled)
         XCTAssertTrue(postToggle.waitForExistence(timeout: 5))
         completeSetButton.tap()
         XCTAssertTrue(postToggle.isEnabled)

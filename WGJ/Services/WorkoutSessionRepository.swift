@@ -394,6 +394,15 @@ nonisolated final class WorkoutSessionRepository {
         return try modelContext.fetch(descriptor)
     }
 
+    func sessionExercises(
+        sessionID: UUID,
+        exerciseIDs: Set<UUID>
+    ) throws -> [WorkoutSessionExercise] {
+        guard !exerciseIDs.isEmpty else { return [] }
+        return try sessionExercises(sessionID: sessionID)
+            .filter { exerciseIDs.contains($0.id) }
+    }
+
     func sessionCardioBlocks(sessionID: UUID) throws -> [WorkoutSessionCardioBlock] {
         let descriptor = FetchDescriptor<WorkoutSessionCardioBlock>(
             predicate: #Predicate { cardioBlock in
