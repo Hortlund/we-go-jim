@@ -54,8 +54,17 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 - Date: 2026-04-25
 - Trigger/Problem: Profile and Bros could still feel laggy on first menu switch after adding splash-time warm snapshots.
 - Root Cause: The warmup prepared value snapshots, but `MainTabView` still lazily mounted Profile and Bros for the first time on tab selection. That left SwiftUI view construction, inactive-state task setup, and first render scheduling on the user tap path.
-- Durable Rule: For cold-start tab smoothness, mount startup-critical tab roots behind the splash and let them consume warm value snapshots while inactive. Data warmup alone is not enough when the first visible interaction still pays the SwiftUI construction cost.
-- How to Verify Next Time: Cold launch without `UITEST_SKIP_SPLASH`, keep the splash up until required warmups finish, then tap Profile and Bros immediately after the main UI is exposed. Confirm the tabs are already mounted, consume warm state, and do not start main-context SwiftData work on tap.
+- Durable Rule: Superseded by `2026-04-25 - Cold Profile And Bros Must Render Shell Before Hydration`. Do not keep splash up or mount tabs behind a splash overlay just to hide first-entry work.
+- How to Verify Next Time: Use the replacement entry below.
+- Status: superseded
+
+## 2026-04-25 - Cold Profile And Bros Must Render Shell Before Hydration
+
+- Date: 2026-04-25
+- Trigger/Problem: Keeping the splash up until Profile/Bros were preloaded made launch feel too long and hid the iCloud loading banner, while first Profile/Bros visits still needed to avoid visible tap lag.
+- Root Cause: The user-visible freeze belongs to the tab activation path, not only the data warmup path. Gating main entry behind warmup or mounting hidden tabs shifts the cost instead of guaranteeing that the first tap presents a lightweight frame before hydration.
+- Durable Rule: Startup Profile/Bros warmups may start early through `AppBackgroundStore`, but splash must not wait on them and `MainTabView` must not be covered by a startup overlay. Profile and Bros first activation must render a lightweight shell first, then apply warm snapshots or run hydration after a yield/version change without main-context SwiftData or CloudKit work on the tap frame.
+- How to Verify Next Time: Cold launch without `UITEST_SKIP_SPLASH`, confirm the tab bar and iCloud sync banner can appear after main entry, then tap Profile and Bros immediately. Assert `profile-first-shell` and `bros-first-shell` appear quickly before dashboard/feed hydration completes.
 - Status: active
 
 ## 2026-04-25 - Large-Screen Text Inputs Need Local Drafts

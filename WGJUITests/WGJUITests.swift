@@ -57,9 +57,11 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 8))
 
         tapTab("Profile", in: app)
+        XCTAssertTrue(identifiedElement("profile-first-shell", in: app).waitForExistence(timeout: 2))
         XCTAssertTrue(identifiedElement("profile-settings-tile", in: app).waitForExistence(timeout: 3))
 
         tapTab("Bros", in: app)
+        XCTAssertTrue(identifiedElement("bros-first-shell", in: app).waitForExistence(timeout: 2))
         XCTAssertTrue(app.staticTexts["Bros"].waitForExistence(timeout: 3))
     }
 

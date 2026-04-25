@@ -26,7 +26,6 @@ struct ContentView: View {
     @State private var resumeCriticalMaintenanceTask: Task<Void, Never>?
     @State private var enteredMainDeferredMaintenanceTask: Task<Void, Never>?
     @State private var isPreparingMainPhase = false
-    @State private var isStartupSplashOverlayVisible = false
     @State private var hasInstalledUITestPendingTemplate = false
     @State private var hasScheduledInitialDeferredMaintenance = false
     @State private var fallbackCoachWarmupTask: Task<Void, Never>?
@@ -49,14 +48,6 @@ struct ContentView: View {
                 }
             case .main:
                 MainTabView()
-                    .overlay {
-                        if isStartupSplashOverlayVisible {
-                            SplashView()
-                                .transition(.opacity)
-                                .zIndex(1)
-                                .allowsHitTesting(true)
-                        }
-                    }
             }
         }
         .environment(\.cloudSyncEnabled, appRuntimeState.cloudSyncEnabled)
@@ -92,7 +83,7 @@ struct ContentView: View {
         }
         .onChange(of: appPhase) { _, newPhase in
             if newPhase == .main {
-                guard !isPreparingMainPhase, !isStartupSplashOverlayVisible else { return }
+                guard !isPreparingMainPhase else { return }
                 handleEnteredMainPhase()
             } else {
                 resetResumeCriticalMaintenanceCycle()
@@ -150,21 +141,12 @@ struct ContentView: View {
         isPreparingMainPhase = true
         defer { isPreparingMainPhase = false }
 
-        let shouldShowStartupOverlay = !ProcessInfo.processInfo.arguments.contains(AppStartupRouting.skipSplashArgument)
-        appWarmupState.setShouldPreloadCriticalTabs(true)
-        if appPhase != .main {
-            isStartupSplashOverlayVisible = shouldShowStartupOverlay
-            appPhase = .main
-            await Task.yield()
-        }
-
         await prepareLocalProfileIdentityIfNeeded()
-        await prepareStartupWarmSnapshotsIfNeeded()
-        await Task.yield()
+        startStartupWarmSnapshotsIfNeeded()
 
-        if isStartupSplashOverlayVisible {
+        if appPhase != .main {
             withAnimation(.easeInOut(duration: 0.2)) {
-                isStartupSplashOverlayVisible = false
+                appPhase = .main
             }
         }
         handleEnteredMainPhase()
@@ -538,7 +520,6 @@ struct ContentView: View {
         resetResumeCriticalMaintenanceCycle()
         enteredMainDeferredMaintenanceTask?.cancel()
         enteredMainDeferredMaintenanceTask = nil
-        isStartupSplashOverlayVisible = false
         fallbackCoachWarmupTask?.cancel()
         fallbackCoachWarmupTask = nil
         activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
@@ -585,39 +566,29 @@ struct ContentView: View {
     }
 
     @MainActor
-    private func prepareStartupWarmSnapshotsIfNeeded() async {
-        guard !ProcessInfo.processInfo.arguments.contains(AppStartupRouting.skipSplashArgument) else {
-            return
-        }
-        guard appBackgroundStore != nil else {
-            return
-        }
-        guard appWarmupState.shouldWarmProfile() || appWarmupState.shouldWarmBros() else {
+    private func startStartupWarmSnapshotsIfNeeded() {
+        let shouldWarmProfile = appWarmupState.shouldWarmProfile()
+        let shouldWarmBros = appWarmupState.shouldWarmBros()
+        guard StartupWarmupLaunchPolicy.shouldStartNonblockingWarmups(
+            skipsSplash: ProcessInfo.processInfo.arguments.contains(AppStartupRouting.skipSplashArgument),
+            hasBackgroundStore: appBackgroundStore != nil,
+            shouldWarmProfile: shouldWarmProfile,
+            shouldWarmBros: shouldWarmBros
+        ) else {
             return
         }
 
-        let profileTask: Task<Void, Never>?
-        if appWarmupState.shouldWarmProfile() {
-            profileTask = Task { @MainActor in
+        if shouldWarmProfile {
+            Task { @MainActor in
                 await prepareStartupProfileWarmSnapshotIfNeeded()
             }
-        } else {
-            profileTask = nil
         }
 
-        let brosTask: Task<Void, Never>?
-        if appWarmupState.shouldWarmBros() {
-            brosTask = Task { @MainActor in
+        if shouldWarmBros {
+            Task { @MainActor in
                 await prepareStartupBrosWarmSnapshotIfNeeded()
             }
-        } else {
-            brosTask = nil
         }
-
-        await StartupWarmupGate.waitForRequiredWarmups(
-            profileTask: profileTask,
-            brosTask: brosTask
-        )
     }
 
     @MainActor

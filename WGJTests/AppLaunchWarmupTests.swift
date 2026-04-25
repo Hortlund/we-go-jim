@@ -194,84 +194,81 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
-    func startupWarmupGateCanWaitForRequiredWarmupsWithoutTimeout() async {
-        let probe = WarmupGateProbe()
-        let profileTask = Task {
-            await probe.waitForProfileRelease()
-            await probe.finishProfile()
-        }
-        while await probe.isWaitingForProfileRelease == false {
-            await Task.yield()
-        }
-
-        let gateTask = Task {
-            await StartupWarmupGate.waitForRequiredWarmups(
-                profileTask: profileTask,
-                brosTask: nil
-            )
-        }
-
-        await Task.yield()
-        #expect(await probe.didFinishProfile == false)
-
-        await probe.releaseProfile()
-        await gateTask.value
-        #expect(await probe.didFinishProfile)
-    }
-
-    @Test
-    func startupTabPreloadPolicyLoadsCriticalTabsWhileInactive() {
-        #expect(StartupTabPreloadPolicy.shouldLoad(
-            tab: .profile,
-            selectedTab: .startWorkout,
-            hasLoaded: false,
-            shouldPreloadCriticalTabs: true
+    func startupWarmupLaunchPolicyStartsWarmupsWithoutBlockingMainEntry() {
+        #expect(StartupWarmupLaunchPolicy.shouldStartNonblockingWarmups(
+            skipsSplash: false,
+            hasBackgroundStore: true,
+            shouldWarmProfile: true,
+            shouldWarmBros: false
         ))
-        #expect(StartupTabPreloadPolicy.shouldLoad(
-            tab: .bros,
-            selectedTab: .startWorkout,
-            hasLoaded: false,
-            shouldPreloadCriticalTabs: true
+        #expect(StartupWarmupLaunchPolicy.shouldStartNonblockingWarmups(
+            skipsSplash: false,
+            hasBackgroundStore: true,
+            shouldWarmProfile: false,
+            shouldWarmBros: true
         ))
-        #expect(!StartupTabPreloadPolicy.shouldLoad(
-            tab: .history,
-            selectedTab: .startWorkout,
-            hasLoaded: false,
-            shouldPreloadCriticalTabs: true
+        #expect(!StartupWarmupLaunchPolicy.shouldStartNonblockingWarmups(
+            skipsSplash: true,
+            hasBackgroundStore: true,
+            shouldWarmProfile: true,
+            shouldWarmBros: true
         ))
-        #expect(StartupTabPreloadPolicy.shouldLoad(
-            tab: .history,
-            selectedTab: .history,
-            hasLoaded: false,
-            shouldPreloadCriticalTabs: false
+        #expect(!StartupWarmupLaunchPolicy.shouldStartNonblockingWarmups(
+            skipsSplash: false,
+            hasBackgroundStore: false,
+            shouldWarmProfile: true,
+            shouldWarmBros: true
         ))
-        #expect(StartupTabPreloadPolicy.shouldLoad(
-            tab: .exercises,
-            selectedTab: .startWorkout,
-            hasLoaded: true,
-            shouldPreloadCriticalTabs: false
-        ))
+        #expect(!StartupWarmupLaunchPolicy.shouldWaitForWarmupsBeforeMainEntry)
     }
 
     @Test
     func profileInitialLoadPolicyDefersReloadWhileStartupWarmupIsActive() {
-        #expect(ProfileInitialLoadPolicy.shouldDeferInitialReload(
+        #expect(FirstVisitTabReadiness.shouldDeferProfileHydration(
             hasLoadedProfile: false,
             hasCurrentProfile: false,
             isProfileWarmupActive: true,
             hasFreshWarmSnapshot: false
         ))
-        #expect(!ProfileInitialLoadPolicy.shouldDeferInitialReload(
+        #expect(!FirstVisitTabReadiness.shouldDeferProfileHydration(
             hasLoadedProfile: false,
             hasCurrentProfile: false,
             isProfileWarmupActive: true,
             hasFreshWarmSnapshot: true
         ))
-        #expect(!ProfileInitialLoadPolicy.shouldDeferInitialReload(
+        #expect(!FirstVisitTabReadiness.shouldDeferProfileHydration(
             hasLoadedProfile: false,
             hasCurrentProfile: false,
             isProfileWarmupActive: false,
             hasFreshWarmSnapshot: false
+        ))
+    }
+
+    @Test
+    func brosInitialActivationPolicyDefersRefreshWhileStartupWarmupIsActive() {
+        #expect(BrosInitialActivationPolicy.shouldDeferActivationRefresh(
+            hasCompletedInitialActivationRefresh: false,
+            isBrosWarmupActive: true,
+            hasFreshWarmSnapshot: false,
+            hasNotificationRefreshRequest: false
+        ))
+        #expect(!BrosInitialActivationPolicy.shouldDeferActivationRefresh(
+            hasCompletedInitialActivationRefresh: false,
+            isBrosWarmupActive: true,
+            hasFreshWarmSnapshot: true,
+            hasNotificationRefreshRequest: false
+        ))
+        #expect(!BrosInitialActivationPolicy.shouldDeferActivationRefresh(
+            hasCompletedInitialActivationRefresh: false,
+            isBrosWarmupActive: true,
+            hasFreshWarmSnapshot: false,
+            hasNotificationRefreshRequest: true
+        ))
+        #expect(!BrosInitialActivationPolicy.shouldDeferActivationRefresh(
+            hasCompletedInitialActivationRefresh: true,
+            isBrosWarmupActive: true,
+            hasFreshWarmSnapshot: false,
+            hasNotificationRefreshRequest: false
         ))
     }
 

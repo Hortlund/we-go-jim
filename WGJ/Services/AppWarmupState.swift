@@ -32,18 +32,6 @@ nonisolated enum AppWarmupPolicy {
 nonisolated enum StartupWarmupGate {
     static let defaultTimeout: Duration = .milliseconds(2_500)
 
-    static func waitForRequiredWarmups(
-        profileTask: Task<Void, Never>?,
-        brosTask: Task<Void, Never>?
-    ) async {
-        let warmupTasks = [profileTask, brosTask].compactMap { $0 }
-        guard !warmupTasks.isEmpty else { return }
-
-        for task in warmupTasks {
-            await task.value
-        }
-    }
-
     static func waitForWarmups(
         profileTask: Task<Void, Never>?,
         brosTask: Task<Void, Never>?,
@@ -77,6 +65,21 @@ nonisolated enum StartupWarmupGate {
     }
 }
 
+nonisolated enum StartupWarmupLaunchPolicy {
+    static let shouldWaitForWarmupsBeforeMainEntry = false
+
+    static func shouldStartNonblockingWarmups(
+        skipsSplash: Bool,
+        hasBackgroundStore: Bool,
+        shouldWarmProfile: Bool,
+        shouldWarmBros: Bool
+    ) -> Bool {
+        !skipsSplash
+            && hasBackgroundStore
+            && (shouldWarmProfile || shouldWarmBros)
+    }
+}
+
 private actor StartupWarmupCompletion {
     private(set) var isFinished = false
 
@@ -85,25 +88,17 @@ private actor StartupWarmupCompletion {
     }
 }
 
-nonisolated enum StartupTabPreloadPolicy {
-    static func shouldLoad(
-        tab: AppMainTab,
-        selectedTab: AppMainTab,
-        hasLoaded: Bool,
-        shouldPreloadCriticalTabs: Bool
+nonisolated enum FirstVisitTabReadiness {
+    static func shouldDeferProfileHydration(
+        hasLoadedProfile: Bool,
+        hasCurrentProfile: Bool,
+        isProfileWarmupActive: Bool,
+        hasFreshWarmSnapshot: Bool
     ) -> Bool {
-        hasLoaded
-            || selectedTab == tab
-            || (shouldPreloadCriticalTabs && isCriticalStartupTab(tab))
-    }
-
-    private static func isCriticalStartupTab(_ tab: AppMainTab) -> Bool {
-        switch tab {
-        case .profile, .bros:
-            return true
-        case .history, .startWorkout, .exercises:
-            return false
-        }
+        !hasLoadedProfile
+            && !hasCurrentProfile
+            && isProfileWarmupActive
+            && !hasFreshWarmSnapshot
     }
 }
 
@@ -114,10 +109,26 @@ nonisolated enum ProfileInitialLoadPolicy {
         isProfileWarmupActive: Bool,
         hasFreshWarmSnapshot: Bool
     ) -> Bool {
-        !hasLoadedProfile
-            && !hasCurrentProfile
-            && isProfileWarmupActive
+        FirstVisitTabReadiness.shouldDeferProfileHydration(
+            hasLoadedProfile: hasLoadedProfile,
+            hasCurrentProfile: hasCurrentProfile,
+            isProfileWarmupActive: isProfileWarmupActive,
+            hasFreshWarmSnapshot: hasFreshWarmSnapshot
+        )
+    }
+}
+
+nonisolated enum BrosInitialActivationPolicy {
+    static func shouldDeferActivationRefresh(
+        hasCompletedInitialActivationRefresh: Bool,
+        isBrosWarmupActive: Bool,
+        hasFreshWarmSnapshot: Bool,
+        hasNotificationRefreshRequest: Bool
+    ) -> Bool {
+        !hasCompletedInitialActivationRefresh
+            && isBrosWarmupActive
             && !hasFreshWarmSnapshot
+            && !hasNotificationRefreshRequest
     }
 }
 
@@ -187,7 +198,6 @@ final class AppWarmupState {
     private(set) var isBrosWarmupActive = false
     private(set) var profileCompletionVersion = 0
     private(set) var brosCompletionVersion = 0
-    private(set) var shouldPreloadCriticalTabs = false
 
     @ObservationIgnored private var profileWarmupGeneration = 0
     @ObservationIgnored private var brosWarmupGeneration = 0
@@ -200,10 +210,6 @@ final class AppWarmupState {
 
     func storeBros(_ snapshot: BrosWarmSnapshot) {
         latestBros = snapshot
-    }
-
-    func setShouldPreloadCriticalTabs(_ shouldPreload: Bool) {
-        shouldPreloadCriticalTabs = shouldPreload
     }
 
     func freshProfile(
@@ -315,7 +321,6 @@ final class AppWarmupState {
         brosWarmupGeneration = 0
         profileCompletionVersion = 0
         brosCompletionVersion = 0
-        shouldPreloadCriticalTabs = false
     }
 }
 

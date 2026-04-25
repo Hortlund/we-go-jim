@@ -831,6 +831,7 @@ struct BrosView: View {
     @State private var selectedFeedEvent: BroFeedEvent?
     @State private var activationRefreshTask: Task<Void, Never>?
     @State private var hasCompletedInitialActivationRefresh = false
+    @State private var hasPresentedInitialShell = false
 
     private var blockedRepository: BlockedBroRepository {
         BlockedBroRepository(modelContext: modelContext)
@@ -866,24 +867,20 @@ struct BrosView: View {
             )
         }
         .wgjScreenBackground()
+        .accessibilityIdentifier("bros-first-shell")
         .toolbar(.hidden, for: .navigationBar)
-        .task {
-            applyWarmSnapshotIfAvailable()
-        }
         .task(id: isTabActive) {
             guard isTabActive else {
                 cancelActivationRefresh()
                 return
             }
-            applyWarmSnapshotIfAvailable()
-            if appWarmupState.freshBros() == nil {
-                reloadBlockedBros()
-            }
-            scheduleActivationRefresh()
-            rebuildFilteredSnapshot()
+            await handleCurrentActivation()
         }
         .task(id: appWarmupState.brosCompletionVersion) {
             guard appWarmupState.brosCompletionVersion > 0 else { return }
+            if isTabActive {
+                await presentInitialShellIfNeeded()
+            }
             applyWarmSnapshotIfAvailable()
             rebuildFilteredSnapshot()
             guard isTabActive else { return }
@@ -946,7 +943,45 @@ struct BrosView: View {
     }
 
     @MainActor
+    private func handleCurrentActivation() async {
+        await presentInitialShellIfNeeded()
+        applyWarmSnapshotIfAvailable()
+
+        guard !shouldDeferInitialActivationRefresh() else {
+            cancelActivationRefresh()
+            rebuildFilteredSnapshot()
+            return
+        }
+
+        if appWarmupState.freshBros() == nil {
+            reloadBlockedBros()
+        }
+        scheduleActivationRefresh()
+        rebuildFilteredSnapshot()
+    }
+
+    @MainActor
+    private func presentInitialShellIfNeeded() async {
+        guard !hasPresentedInitialShell else { return }
+        WGJPerformance.measure("bros.first-shell") {
+            hasPresentedInitialShell = true
+        }
+        await Task.yield()
+    }
+
+    @MainActor
+    private func shouldDeferInitialActivationRefresh() -> Bool {
+        BrosInitialActivationPolicy.shouldDeferActivationRefresh(
+            hasCompletedInitialActivationRefresh: hasCompletedInitialActivationRefresh,
+            isBrosWarmupActive: appWarmupState.isBrosWarmupActive,
+            hasFreshWarmSnapshot: appWarmupState.freshBros() != nil,
+            hasNotificationRefreshRequest: notificationRouter.brosRefreshRequestID != nil
+        )
+    }
+
+    @MainActor
     private func reloadForCurrentActivation() async {
+        guard !shouldDeferInitialActivationRefresh() else { return }
         reloadBlockedBros()
 
         if notificationRouter.brosRefreshRequestID != nil {
@@ -974,12 +1009,19 @@ struct BrosView: View {
 
     @MainActor
     private func scheduleActivationRefresh() {
+        guard !shouldDeferInitialActivationRefresh() else {
+            cancelActivationRefresh()
+            return
+        }
+
         activationRefreshTask?.cancel()
         let delay: Duration = hasCompletedInitialActivationRefresh ? .milliseconds(100) : .milliseconds(1_000)
         activationRefreshTask = Task { @MainActor in
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled, isTabActive else { return }
-            await reloadForCurrentActivation()
+            await WGJPerformance.measureAsync("bros.activation-hydration") {
+                await reloadForCurrentActivation()
+            }
             guard !Task.isCancelled, isTabActive else { return }
             hasCompletedInitialActivationRefresh = true
             activationRefreshTask = nil

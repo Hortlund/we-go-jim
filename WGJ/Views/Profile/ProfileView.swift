@@ -36,6 +36,7 @@ struct ProfileView: View {
     @State private var coachFollowUpTasks: [CoachFollowUpKind: Task<Void, Never>] = [:]
     @State private var coachFollowUpTokens: [CoachFollowUpKind: UUID] = [:]
     @State private var hasLoadedProfile = false
+    @State private var hasPresentedInitialShell = false
     @State private var needsExplicitRefresh = true
     @State private var lastLoadedProfileUpdatedAt: Date?
     @State private var lastRefreshAt: Date?
@@ -57,19 +58,20 @@ struct ProfileView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .wgjScreenBackground()
+        .accessibilityIdentifier("profile-first-shell")
         .toolbar(.hidden, for: .navigationBar)
-        .task {
-            applyWarmProfileSnapshotIfAvailable()
-        }
         .task(id: isTabActive) {
             guard isTabActive else { return }
-            await reloadProfileIfNeeded(force: false)
+            await handleInitialActivation()
         }
         .task(id: appWarmupState.profileCompletionVersion) {
             guard appWarmupState.profileCompletionVersion > 0 else { return }
+            if isTabActive {
+                await presentInitialShellIfNeeded()
+            }
             applyWarmProfileSnapshotIfAvailable()
             guard isTabActive else { return }
-            await reloadProfileIfNeeded(force: false)
+            await hydrateProfileIfNeeded(force: false)
         }
         .onDisappear {
             cancelDashboardRender()
@@ -662,11 +664,33 @@ struct ProfileView: View {
     }
 
     @MainActor
+    private func handleInitialActivation() async {
+        await presentInitialShellIfNeeded()
+        await hydrateProfileIfNeeded(force: false)
+    }
+
+    @MainActor
+    private func presentInitialShellIfNeeded() async {
+        guard !hasPresentedInitialShell else { return }
+        WGJPerformance.measure("profile.first-shell") {
+            hasPresentedInitialShell = true
+        }
+        await Task.yield()
+    }
+
+    @MainActor
+    private func hydrateProfileIfNeeded(force: Bool) async {
+        await WGJPerformance.measureAsync("profile.full-hydration") {
+            await reloadProfileIfNeeded(force: force)
+        }
+    }
+
+    @MainActor
     private func reloadProfileIfNeeded(force: Bool) async {
         let warmSnapshot = appWarmupState.freshProfile()
         applyWarmProfileSnapshotIfAvailable()
 
-        if ProfileInitialLoadPolicy.shouldDeferInitialReload(
+        if FirstVisitTabReadiness.shouldDeferProfileHydration(
             hasLoadedProfile: hasLoadedProfile,
             hasCurrentProfile: currentProfile != nil,
             isProfileWarmupActive: appWarmupState.isProfileWarmupActive,

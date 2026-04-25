@@ -356,7 +356,6 @@ private struct ActiveWorkoutStripHeightPreferenceKey: PreferenceKey {
 
 private struct LazyTabContainer<Content: View>: View {
     @Environment(AppTabState.self) private var tabState
-    @Environment(AppWarmupState.self) private var appWarmupState
 
     let tab: AppMainTab
     let content: () -> Content
@@ -391,12 +390,7 @@ private struct LazyTabContainer<Content: View>: View {
     }
 
     private var shouldLoadContent: Bool {
-        StartupTabPreloadPolicy.shouldLoad(
-            tab: tab,
-            selectedTab: tabState.selectedTab,
-            hasLoaded: hasLoaded,
-            shouldPreloadCriticalTabs: appWarmupState.shouldPreloadCriticalTabs
-        )
+        hasLoaded || tabState.selectedTab == tab
     }
 }
 
