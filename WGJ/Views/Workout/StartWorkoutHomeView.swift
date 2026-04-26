@@ -77,6 +77,7 @@ struct StartWorkoutHomeView: View {
         .sheet(item: $selectedTemplatePreview) { preview in
             TemplateStartPreviewSheet(
                 preview: preview,
+                isStarting: isPreparingActiveWorkoutStart,
                 onStart: {
                     requestStartFromTemplate(templateID: preview.templateID)
                 },
@@ -1548,11 +1549,13 @@ struct StartWorkoutTemplatePreview: Identifiable, Equatable {
 
 private struct TemplateStartPreviewSheet: View {
     let preview: StartWorkoutTemplatePreview
+    let isStarting: Bool
     let onStart: () -> Void
     let onEdit: () -> Void
     let onExport: () -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var orderedExercises: [StartWorkoutTemplatePreview.Exercise] {
         preview.exercises
@@ -1605,6 +1608,13 @@ private struct TemplateStartPreviewSheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .accessibilityIdentifier("template-preview-sheet")
+            .overlay {
+                if isStarting {
+                    TemplateStartHandoffOverlay()
+                        .transition(.opacity)
+                }
+            }
+            .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: isStarting)
             .wgjGlassContainer(spacing: 16)
             .wgjSheetSurface()
             .navigationTitle("Template")
@@ -1614,6 +1624,7 @@ private struct TemplateStartPreviewSheet: View {
                     Button("Cancel") {
                         dismiss()
                     }
+                    .disabled(isStarting)
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
@@ -1623,6 +1634,7 @@ private struct TemplateStartPreviewSheet: View {
                     } label: {
                         Label("Export / Share", systemImage: "square.and.arrow.up")
                     }
+                    .disabled(isStarting)
                     .accessibilityIdentifier("template-preview-export-button")
                 }
             }
@@ -2020,13 +2032,21 @@ private struct TemplateStartPreviewSheet: View {
 
     private var startAction: some View {
         Button {
-            dismiss()
             onStart()
         } label: {
-            Text("Start Workout")
+            if isStarting {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("Starting Workout")
+                }
                 .frame(maxWidth: .infinity)
+            } else {
+                Text("Start Workout")
+                    .frame(maxWidth: .infinity)
+            }
         }
         .buttonStyle(WGJPrimaryButtonStyle())
+        .disabled(isStarting)
         .accessibilityIdentifier("template-preview-start-button")
     }
 
@@ -2039,9 +2059,40 @@ private struct TemplateStartPreviewSheet: View {
                 .frame(maxWidth: .infinity)
         }
         .buttonStyle(WGJGhostButtonStyle())
+        .disabled(isStarting)
         .accessibilityIdentifier("template-preview-edit-button")
     }
 
+}
+
+private struct TemplateStartHandoffOverlay: View {
+    var body: some View {
+        ZStack {
+            WGJTheme.bgBase.opacity(0.22)
+                .ignoresSafeArea()
+
+            VStack(spacing: 12) {
+                ProgressView()
+                    .controlSize(.regular)
+
+                Text("Starting workout")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(WGJTheme.textPrimary)
+            }
+            .padding(.horizontal, 22)
+            .padding(.vertical, 18)
+            .background(
+                RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
+                    .fill(WGJTheme.cardStrong.opacity(0.96))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
+                            .stroke(WGJTheme.outline.opacity(0.18), lineWidth: 1)
+                    )
+            )
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("template-preview-starting-overlay")
+        }
+    }
 }
 
 private struct PendingTemplateFileTaskKey: Hashable {
