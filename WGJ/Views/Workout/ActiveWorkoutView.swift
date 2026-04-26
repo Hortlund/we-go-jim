@@ -237,7 +237,7 @@ struct ActiveWorkoutView: View {
                     finishToolbarButton
                 }
             }
-            .overlay(alignment: .bottom) {
+            .safeAreaInset(edge: .bottom, spacing: 0) {
                 ActiveWorkoutKeyboardAwareBottomDock(
                     session: session,
                     isEndingSession: isEndingSession,

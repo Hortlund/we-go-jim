@@ -929,8 +929,12 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(app.buttons["active-workout-finish-button"].waitForExistence(timeout: 5))
 
         reopenedWeightField.tap()
-        XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 2))
-        XCTAssertTrue(app.buttons["keyboard-hide-button"].waitForExistence(timeout: 2))
+        let keyboard = app.keyboards.element
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 2))
+        let hideKeyboardButton = app.buttons["keyboard-hide-button"]
+        XCTAssertTrue(hideKeyboardButton.waitForExistence(timeout: 2))
+        XCTAssertLessThanOrEqual(hideKeyboardButton.frame.maxY, keyboard.frame.minY - 6)
+        XCTAssertGreaterThanOrEqual(hideKeyboardButton.frame.minY, keyboard.frame.minY - 96)
         XCTAssertFalse(identifiedElement("active-workout-elapsed-timer", in: app).exists)
     }
 
@@ -3207,7 +3211,7 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(element.waitForExistence(timeout: 5))
 
         var remainingSwipes = maxSwipes
-        while !element.isHittable && remainingSwipes > 0 {
+        while (!element.isHittable || element.frame.maxY > app.frame.maxY - 120) && remainingSwipes > 0 {
             app.swipeUp()
             remainingSwipes -= 1
         }
