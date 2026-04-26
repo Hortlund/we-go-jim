@@ -63,7 +63,6 @@ struct ActiveWorkoutView: View {
     @State private var templateFolderID: UUID?
     @State private var saveTemplateFolders: [ActiveWorkoutTemplateFolderSnapshot] = []
     @State private var preferredLoadUnit: TemplateLoadUnit = .kg
-    @State private var isKeyboardVisible = false
 
     @State private var errorMessage = ""
     @State private var showingError = false
@@ -237,26 +236,16 @@ struct ActiveWorkoutView: View {
                     finishToolbarButton
                 }
             }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                Group {
-                    if shouldShowBottomDock, let session {
-                        ActiveWorkoutBottomDock(
-                            session: session,
-                            reduceMotion: reduceMotion
-                        )
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
-                }
-                .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: isKeyboardVisible)
-                .animation(
-                    WGJMotion.overlayAnimation(reduceMotion: reduceMotion),
-                    value: restTimerState.restTimerPopup?.id
+            .overlay(alignment: .bottom) {
+                ActiveWorkoutKeyboardAwareBottomDock(
+                    session: session,
+                    isEndingSession: isEndingSession,
+                    restTimerPopupID: restTimerState.restTimerPopup?.id,
+                    reduceMotion: reduceMotion
                 )
             }
-            .wgjTrackKeyboardVisibility($isKeyboardVisible)
             .sheet(item: $pickerTarget, onDismiss: {
                 dismissKeyboard()
-                isKeyboardVisible = false
             }) { target in
                 ExercisePickerView(repository: catalogRepository) { exercise in
                     handlePickedExercise(exercise, target: target)
@@ -329,10 +318,6 @@ struct ActiveWorkoutView: View {
             .task(id: exerciseHydrationStamp) {
                 await loadExerciseStateIfNeeded()
             }
-            .onChange(of: isKeyboardVisible) { _, isVisible in
-                guard isCancelArmed, !isVisible else { return }
-                focusCancelSection(using: scrollProxy)
-            }
             .onChange(of: notesDraft) { _, _ in
                 syncSessionMetaDirtyState()
             }
@@ -386,7 +371,6 @@ struct ActiveWorkoutView: View {
             .background {
                 WorkoutRestTimerExpiryObserver()
             }
-            .wgjMinimalKeyboardToolbar(isKeyboardVisible: $isKeyboardVisible)
         }
     }
 
@@ -463,7 +447,7 @@ struct ActiveWorkoutView: View {
     }
 
     private var shouldShowBottomDock: Bool {
-        guard !isKeyboardVisible, !isEndingSession, session != nil else {
+        guard !isEndingSession, session != nil else {
             return false
         }
 
@@ -1334,6 +1318,15 @@ struct ActiveWorkoutView: View {
 
         if updatedCompletion {
             WorkoutFeedbackCenter.shared.exerciseCompleted()
+            if cardioBlock.phase == .preWorkout {
+                cardStateController.expandFirstIncompleteIfNeeded(
+                    firstIncompleteExerciseID(
+                        from: sessionExercises,
+                        draftsByExerciseID: setDraftsByExerciseID
+                    )
+                )
+                scheduleExpandedExerciseHydrationIfNeeded()
+            }
         }
     }
 
@@ -3335,6 +3328,38 @@ private struct ActiveWorkoutSupersetContext {
 private struct ActiveWorkoutCompletionSourceContext {
     let setIndex: Int
     let completesSetCycle: Bool
+}
+
+private struct ActiveWorkoutKeyboardAwareBottomDock: View {
+    let session: ActiveWorkoutDraftSession?
+    let isEndingSession: Bool
+    let restTimerPopupID: UUID?
+    let reduceMotion: Bool
+
+    @State private var isKeyboardVisible = false
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            Color.clear
+                .frame(width: 0, height: 0)
+                .wgjTrackKeyboardVisibility($isKeyboardVisible)
+
+            if shouldShowDock, let session {
+                ActiveWorkoutBottomDock(
+                    session: session,
+                    reduceMotion: reduceMotion
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .bottom)
+        .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: isKeyboardVisible)
+        .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: restTimerPopupID)
+    }
+
+    private var shouldShowDock: Bool {
+        !isKeyboardVisible && !isEndingSession && session != nil
+    }
 }
 
 private struct ActiveWorkoutSupersetHeader: View {

@@ -451,6 +451,24 @@ struct TrainingGuidanceServiceTests {
         #expect(!controller.isExpanded(for: third))
     }
 
+    @Test
+    func activeWorkoutControllerCanOpenFirstIncompleteAfterGateUnlocks() {
+        let first = UUID()
+        let second = UUID()
+        var controller = ActiveWorkoutExerciseCardStateController()
+
+        controller.sync(
+            exerciseIDs: [first, second],
+            completedExerciseIDs: [],
+            firstIncompleteExerciseID: nil
+        )
+
+        controller.expandFirstIncompleteIfNeeded(first)
+
+        #expect(controller.isExpanded(for: first))
+        #expect(!controller.isExpanded(for: second))
+    }
+
     private func makeWorkoutSet(
         reps: Int?,
         weight: Double?,

@@ -157,6 +157,13 @@ struct ActiveWorkoutExerciseCardStateController: Equatable {
         isExpandedByExerciseID[exerciseID] = isExpanded
     }
 
+    mutating func expandFirstIncompleteIfNeeded(_ exerciseID: UUID?) {
+        guard let exerciseID else { return }
+        guard isExpandedByExerciseID.values.contains(true) == false else { return }
+        guard completedInCurrentCycle.contains(exerciseID) == false else { return }
+        isExpandedByExerciseID[exerciseID] = true
+    }
+
     mutating func updateCompletion(for exerciseID: UUID, isCompleted: Bool) {
         if isCompleted {
             guard !completedInCurrentCycle.contains(exerciseID) else { return }

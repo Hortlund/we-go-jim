@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-04-26 - Active Workout Keyboard State Must Stay Local
+
+- Date: 2026-04-26
+- Trigger/Problem: First input focus in Active Workout felt much worse than later inputs, even after values were already buffered locally and later keyboard reopen was smoother.
+- Root Cause: Active Workout owned keyboard visibility as root view state and used it to hide bottom chrome/toolbars, so the first keyboard notification could invalidate the full workout tree while iOS was also doing one-time text input setup.
+- Durable Rule: Keep active-workout keyboard visibility out of `ActiveWorkoutView` root state. Keyboard-driven dock/accessory chrome should own its own tiny state boundary, and set fields should keep using row-local draft buffers without root persistence or broad view updates on focus.
+- How to Verify Next Time: Start a template workout and immediately tap/type into the first set field, then hide/reopen the keyboard and compare responsiveness. Review active workout changes for root-owned keyboard state, full-screen hit-test overlays, or keyboard notifications that can recompute all exercise rows.
+- Status: active
+
 ## 2026-04-25 - Active Workout Smoothness Needs Stable Rows
 
 - Date: 2026-04-25
