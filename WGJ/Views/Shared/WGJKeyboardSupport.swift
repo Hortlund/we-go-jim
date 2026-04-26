@@ -6,14 +6,17 @@ enum WGJKeyboard {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 
-    static func isVisible(from notification: Notification, viewMaxY: CGFloat) -> Bool {
+    static func isVisible(from notification: Notification, screenMaxY: CGFloat = UIScreen.main.bounds.maxY) -> Bool {
         guard
-            let endFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
+            screenMaxY.isFinite,
+            screenMaxY > 0,
+            let endFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+            endFrame.minY.isFinite
         else {
             return false
         }
 
-        return endFrame.minY < viewMaxY
+        return endFrame.minY < screenMaxY
     }
 }
 
@@ -159,49 +162,24 @@ struct WGJAccessoryTextField: UIViewRepresentable {
     }
 }
 
-private struct WGJKeyboardMaxYPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = UIScreen.main.bounds.maxY
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
 private struct WGJKeyboardVisibilityModifier: ViewModifier {
     @Binding var isVisible: Bool
     let isEnabled: Bool
-    @State private var viewMaxY = UIScreen.main.bounds.maxY
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        let measuredContent = content
-            .background {
-                GeometryReader { proxy in
-                    Color.clear
-                        .preference(
-                            key: WGJKeyboardMaxYPreferenceKey.self,
-                            value: proxy.frame(in: .global).maxY
-                        )
-                }
-            }
-            .onPreferenceChange(WGJKeyboardMaxYPreferenceKey.self) { updatedMaxY in
-                guard updatedMaxY > 0 else { return }
-                guard abs(updatedMaxY - viewMaxY) > 0.5 else { return }
-                viewMaxY = updatedMaxY
-            }
-
         if isEnabled {
-            measuredContent
+            content
                 .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
                     updateVisibility(
-                        WGJKeyboard.isVisible(from: notification, viewMaxY: viewMaxY)
+                        WGJKeyboard.isVisible(from: notification)
                     )
                 }
                 .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
                     updateVisibility(false)
                 }
         } else {
-            measuredContent
+            content
                 .onChange(of: isEnabled) { _, newValue in
                     if !newValue {
                         updateVisibility(false)

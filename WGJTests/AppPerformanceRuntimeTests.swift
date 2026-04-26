@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import Testing
+import UIKit
 @testable import WGJ
 
 struct AppPerformanceRuntimeTests {
@@ -195,6 +196,55 @@ struct AppPerformanceRuntimeTests {
         #expect(!ActiveWorkoutSceneTransitionPolicy.shouldFlushLocalDraft(scenePhase: .active))
         #expect(!ActiveWorkoutSceneTransitionPolicy.shouldFlushLocalDraft(scenePhase: .inactive))
         #expect(ActiveWorkoutSceneTransitionPolicy.shouldFlushLocalDraft(scenePhase: .background))
+    }
+
+    @Test
+    func keyboardVisibilityIgnoresInvalidFrameSignals() {
+        let invalidFrameNotification = Notification(
+            name: UIResponder.keyboardWillChangeFrameNotification,
+            object: nil,
+            userInfo: [
+                UIResponder.keyboardFrameEndUserInfoKey: CGRect(
+                    x: 0,
+                    y: CGFloat.nan,
+                    width: 390,
+                    height: 336
+                ),
+            ]
+        )
+
+        #expect(WGJKeyboard.isVisible(from: invalidFrameNotification, screenMaxY: 844) == false)
+    }
+
+    @Test
+    func keyboardVisibilityUsesKeyboardFrameAgainstScreenBounds() {
+        let visibleKeyboardNotification = Notification(
+            name: UIResponder.keyboardWillChangeFrameNotification,
+            object: nil,
+            userInfo: [
+                UIResponder.keyboardFrameEndUserInfoKey: CGRect(
+                    x: 0,
+                    y: 508,
+                    width: 390,
+                    height: 336
+                ),
+            ]
+        )
+        let hiddenKeyboardNotification = Notification(
+            name: UIResponder.keyboardWillChangeFrameNotification,
+            object: nil,
+            userInfo: [
+                UIResponder.keyboardFrameEndUserInfoKey: CGRect(
+                    x: 0,
+                    y: 844,
+                    width: 390,
+                    height: 336
+                ),
+            ]
+        )
+
+        #expect(WGJKeyboard.isVisible(from: visibleKeyboardNotification, screenMaxY: 844))
+        #expect(WGJKeyboard.isVisible(from: hiddenKeyboardNotification, screenMaxY: 844) == false)
     }
 
     @Test
