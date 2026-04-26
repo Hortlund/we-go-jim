@@ -8,6 +8,11 @@ nonisolated enum UserDataSyncStateKind: String, Equatable, Sendable {
     case degraded
 }
 
+nonisolated enum UserDataSyncTrackerPolicy {
+    static let runningCloudEventVisibleDuration: TimeInterval = 20
+    static let runningCloudEventExpiryWakeupLeeway: TimeInterval = 0.25
+}
+
 nonisolated struct UserDataSyncStatusSnapshot: Equatable, Sendable {
     let state: UserDataSyncStateKind
     let cloudSyncEnabled: Bool
@@ -92,6 +97,7 @@ nonisolated final class UserDataSyncTracker {
     private var latestSuccessfulImportAt: Date?
     private var latestSuccessfulExportAt: Date?
     private var runningCloudEventType: CloudSyncEventType?
+    private var runningCloudEventStartedAt: Date?
     private var latestErrorDescription: String?
 
     private init() { }
@@ -107,16 +113,17 @@ nonisolated final class UserDataSyncTracker {
         latestSuccessfulImportAt = nil
         latestSuccessfulExportAt = nil
         runningCloudEventType = nil
+        runningCloudEventStartedAt = nil
         latestErrorDescription = isCloudEnabled ? errorDescription : nil
-        return makeSnapshotLocked()
+        return makeSnapshotLocked(now: .now)
     }
 
-    func markLocalUserDataMutation(at date: Date = .now) -> UserDataSyncStatusSnapshot {
+    func markLocalUserDataMutation(at date: Date = .now, now: Date = .now) -> UserDataSyncStatusSnapshot {
         lock.lock()
         defer { lock.unlock() }
 
         latestLocalMutationAt = date
-        return makeSnapshotLocked()
+        return makeSnapshotLocked(now: now)
     }
 
     func recordCloudEvent(_ summary: CloudSyncEventSummary) -> UserDataSyncStatusSnapshot {
@@ -129,10 +136,12 @@ nonisolated final class UserDataSyncTracker {
         case .running:
             if summary.type != .unknown {
                 runningCloudEventType = summary.type
+                runningCloudEventStartedAt = summary.startedAt
             }
         case .succeeded:
             if summary.type == runningCloudEventType {
                 runningCloudEventType = nil
+                runningCloudEventStartedAt = nil
             }
             switch summary.type {
             case .setup:
@@ -151,6 +160,7 @@ nonisolated final class UserDataSyncTracker {
         case .failed:
             if summary.type == runningCloudEventType {
                 runningCloudEventType = nil
+                runningCloudEventStartedAt = nil
             }
             if !CloudSyncEventHealthClassifier.suppressesUserVisibleFailure(summary) {
                 latestErrorDescription = CloudSyncEventHealthClassifier.runtimeErrorDescription(for: summary)
@@ -158,16 +168,16 @@ nonisolated final class UserDataSyncTracker {
             }
         }
 
-        return makeSnapshotLocked()
+        return makeSnapshotLocked(now: completedAt)
     }
 
-    func currentSnapshot() -> UserDataSyncStatusSnapshot {
+    func currentSnapshot(now: Date = .now) -> UserDataSyncStatusSnapshot {
         lock.lock()
         defer { lock.unlock() }
-        return makeSnapshotLocked()
+        return makeSnapshotLocked(now: now)
     }
 
-    private func makeSnapshotLocked() -> UserDataSyncStatusSnapshot {
+    private func makeSnapshotLocked(now: Date) -> UserDataSyncStatusSnapshot {
         guard cloudSyncEnabled else {
             return .localOnly(reason: localOnlyReason)
         }
@@ -183,10 +193,11 @@ nonisolated final class UserDataSyncTracker {
             hasPendingExport = false
         }
 
+        let visibleRunningCloudEventType = visibleRunningCloudEventType(now: now)
         let state: UserDataSyncStateKind
         if let latestErrorDescription, !latestErrorDescription.isEmpty {
             state = .degraded
-        } else if runningCloudEventType != nil {
+        } else if visibleRunningCloudEventType != nil {
             state = .syncing
         } else if hasPendingExport {
             state = .pendingExport
@@ -202,10 +213,24 @@ nonisolated final class UserDataSyncTracker {
             latestSuccessfulImportAt: latestSuccessfulImportAt,
             latestSuccessfulExportAt: latestSuccessfulExportAt,
             hasPendingExport: hasPendingExport,
-            runningCloudEventType: runningCloudEventType,
+            runningCloudEventType: visibleRunningCloudEventType,
             latestErrorDescription: latestErrorDescription,
             localOnlyReason: localOnlyReason
         )
+    }
+
+    private func visibleRunningCloudEventType(now: Date) -> CloudSyncEventType? {
+        guard let runningCloudEventType, let runningCloudEventStartedAt else {
+            return nil
+        }
+
+        guard now.timeIntervalSince(runningCloudEventStartedAt)
+            <= UserDataSyncTrackerPolicy.runningCloudEventVisibleDuration
+        else {
+            return nil
+        }
+
+        return runningCloudEventType
     }
 }
 
@@ -231,6 +256,21 @@ nonisolated enum UserDataSyncTrackerBridge {
         let snapshot = UserDataSyncTracker.shared.recordCloudEvent(summary)
         Task { @MainActor in
             AppRuntimeState.shared.updateUserDataSyncStatus(snapshot)
+        }
+        scheduleRunningEventExpiryIfNeeded(for: snapshot)
+    }
+
+    private static func scheduleRunningEventExpiryIfNeeded(for snapshot: UserDataSyncStatusSnapshot) {
+        guard snapshot.state == .syncing else { return }
+
+        Task {
+            let delay = UserDataSyncTrackerPolicy.runningCloudEventVisibleDuration
+                + UserDataSyncTrackerPolicy.runningCloudEventExpiryWakeupLeeway
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            let refreshedSnapshot = UserDataSyncTracker.shared.currentSnapshot()
+            await MainActor.run {
+                AppRuntimeState.shared.updateUserDataSyncStatus(refreshedSnapshot)
+            }
         }
     }
 }

@@ -4,6 +4,7 @@ import Foundation
 import Testing
 @testable import WGJ
 
+@Suite(.serialized)
 struct UserDataSyncTrackerTests {
     @Test
     func cloudStartupPreflightOnlyForcesLocalFallbackForDefinitiveLocalOnlyStatuses() {
@@ -131,6 +132,30 @@ struct UserDataSyncTrackerTests {
         )
         #expect(notAuthenticated.state == .caughtUp)
         #expect(notAuthenticated.latestErrorDescription == nil)
+    }
+
+    @Test
+    func userDataSyncTrackerStopsShowingSyncingForStaleRunningFrameworkEvents() {
+        let tracker = UserDataSyncTracker.shared
+
+        let configured = tracker.configureForLaunch(isCloudEnabled: true, errorDescription: nil)
+        #expect(configured.state == .caughtUp)
+
+        let running = tracker.recordCloudEvent(
+            makeCloudSyncSummary(
+                type: .export,
+                status: .running,
+                startedAt: Date(timeIntervalSinceReferenceDate: 10)
+            )
+        )
+        #expect(running.state == .syncing)
+
+        let stale = tracker.currentSnapshot(
+            now: Date(timeIntervalSinceReferenceDate: 10)
+                .addingTimeInterval(UserDataSyncTrackerPolicy.runningCloudEventVisibleDuration + 1)
+        )
+        #expect(stale.state == .caughtUp)
+        #expect(stale.runningCloudEventType == nil)
     }
 
     private func makeCloudSyncSummary(
