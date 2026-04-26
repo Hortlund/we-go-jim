@@ -51,7 +51,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     @State private var exerciseSwipeRemoving = false
     @State private var setSwipeOffsets: [UUID: CGFloat] = [:]
     @State private var setSwipeRemoving: [UUID: Bool] = [:]
-    @State private var metricInputDraftBuffer = WorkoutMetricInputDraftBuffer()
+    @State private var metricInputDraftBuffer = WorkoutMetricInputDraftStore()
     @State private var pendingBozarCompletionSetIDs: Set<UUID> = []
     @State private var revealedCompletionGateSetIDs: Set<UUID> = []
     @State private var pendingDisplayRefreshTask: Task<Void, Never>?

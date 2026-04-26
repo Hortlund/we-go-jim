@@ -441,3 +441,120 @@ nonisolated struct WorkoutMetricInputDraftBuffer: Equatable, Sendable {
         return Double(trimmed.replacingOccurrences(of: separator, with: "."))
     }
 }
+
+@MainActor
+final class WorkoutMetricInputDraftStore {
+    private var buffer = WorkoutMetricInputDraftBuffer()
+
+    var isEmpty: Bool {
+        buffer.isEmpty
+    }
+
+    func stage(_ text: String, for setID: UUID, metric: WorkoutMetricInputDraftBuffer.Metric) {
+        buffer.stage(text, for: setID, metric: metric)
+    }
+
+    func text(for setID: UUID, metric: WorkoutMetricInputDraftBuffer.Metric) -> String? {
+        buffer.text(for: setID, metric: metric)
+    }
+
+    func stage(_ text: String, forDropStage stageID: UUID, metric: WorkoutMetricInputDraftBuffer.Metric) {
+        buffer.stage(text, forDropStage: stageID, metric: metric)
+    }
+
+    func text(forDropStage stageID: UUID, metric: WorkoutMetricInputDraftBuffer.Metric) -> String? {
+        buffer.text(forDropStage: stageID, metric: metric)
+    }
+
+    func clear(for setID: UUID, metric: WorkoutMetricInputDraftBuffer.Metric) {
+        buffer.clear(for: setID, metric: metric)
+    }
+
+    func clear(forDropStage stageID: UUID, metric: WorkoutMetricInputDraftBuffer.Metric) {
+        buffer.clear(forDropStage: stageID, metric: metric)
+    }
+
+    func prune(keeping validSetIDs: Set<UUID>) {
+        buffer.prune(keeping: validSetIDs)
+    }
+
+    func pruneDropStages(keeping validStageIDs: Set<UUID>) {
+        buffer.pruneDropStages(keeping: validStageIDs)
+    }
+
+    func sync(setID: UUID, metric: WorkoutMetricInputDraftBuffer.Metric, draft: WorkoutSessionSetDraft) {
+        buffer.sync(setID: setID, metric: metric, draft: draft)
+    }
+
+    func sync(dropStageID: UUID, metric: WorkoutMetricInputDraftBuffer.Metric, draft: WorkoutSessionDropStageDraft) {
+        buffer.sync(dropStageID: dropStageID, metric: metric, draft: draft)
+    }
+
+    @discardableResult
+    func commit(
+        setID: UUID,
+        metric: WorkoutMetricInputDraftBuffer.Metric,
+        drafts: inout [WorkoutSessionSetDraft],
+        preferredLoadUnit: TemplateLoadUnit,
+        manualCompletionMode: Bool,
+        clearsText: Bool = true
+    ) -> Bool {
+        buffer.commit(
+            setID: setID,
+            metric: metric,
+            drafts: &drafts,
+            preferredLoadUnit: preferredLoadUnit,
+            manualCompletionMode: manualCompletionMode,
+            clearsText: clearsText
+        )
+    }
+
+    @discardableResult
+    func commitAll(
+        drafts: inout [WorkoutSessionSetDraft],
+        preferredLoadUnit: TemplateLoadUnit,
+        manualCompletionMode: Bool,
+        clearsText: Bool = true
+    ) -> Bool {
+        buffer.commitAll(
+            drafts: &drafts,
+            preferredLoadUnit: preferredLoadUnit,
+            manualCompletionMode: manualCompletionMode,
+            clearsText: clearsText
+        )
+    }
+
+    @discardableResult
+    func commitDropStage(
+        stageID: UUID,
+        metric: WorkoutMetricInputDraftBuffer.Metric,
+        drafts: inout [WorkoutSessionSetDraft],
+        preferredLoadUnit: TemplateLoadUnit,
+        manualCompletionMode: Bool,
+        clearsText: Bool = true
+    ) -> Bool {
+        buffer.commitDropStage(
+            stageID: stageID,
+            metric: metric,
+            drafts: &drafts,
+            preferredLoadUnit: preferredLoadUnit,
+            manualCompletionMode: manualCompletionMode,
+            clearsText: clearsText
+        )
+    }
+
+    @discardableResult
+    func commitAllDropStages(
+        drafts: inout [WorkoutSessionSetDraft],
+        preferredLoadUnit: TemplateLoadUnit,
+        manualCompletionMode: Bool,
+        clearsText: Bool = true
+    ) -> Bool {
+        buffer.commitAllDropStages(
+            drafts: &drafts,
+            preferredLoadUnit: preferredLoadUnit,
+            manualCompletionMode: manualCompletionMode,
+            clearsText: clearsText
+        )
+    }
+}

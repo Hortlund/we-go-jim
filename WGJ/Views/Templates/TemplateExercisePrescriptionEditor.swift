@@ -12,6 +12,67 @@ private enum TemplateEditorInputFocus: Hashable {
     case set(setID: UUID, metric: TemplateEditorInputMetric)
 }
 
+@MainActor
+private final class TemplateExerciseInputDraftStore {
+    private var repMinText: String?
+    private var repMaxText: String?
+    private var repsTextBySetID: [UUID: String] = [:]
+    private var weightTextBySetID: [UUID: String] = [:]
+
+    func text(for focus: TemplateEditorInputFocus) -> String? {
+        switch focus {
+        case .repMin:
+            return repMinText
+        case .repMax:
+            return repMaxText
+        case let .set(setID, metric):
+            switch metric {
+            case .reps:
+                return repsTextBySetID[setID]
+            case .weight:
+                return weightTextBySetID[setID]
+            }
+        }
+    }
+
+    func stage(_ text: String, for focus: TemplateEditorInputFocus) {
+        switch focus {
+        case .repMin:
+            repMinText = text
+        case .repMax:
+            repMaxText = text
+        case let .set(setID, metric):
+            switch metric {
+            case .reps:
+                repsTextBySetID[setID] = text
+            case .weight:
+                weightTextBySetID[setID] = text
+            }
+        }
+    }
+
+    func clear(for focus: TemplateEditorInputFocus) {
+        switch focus {
+        case .repMin:
+            repMinText = nil
+        case .repMax:
+            repMaxText = nil
+        case let .set(setID, metric):
+            switch metric {
+            case .reps:
+                repsTextBySetID[setID] = nil
+            case .weight:
+                weightTextBySetID[setID] = nil
+            }
+        }
+    }
+
+    func prune(keeping validSetIDs: Set<UUID>) {
+        repsTextBySetID = repsTextBySetID.filter { validSetIDs.contains($0.key) }
+        weightTextBySetID = weightTextBySetID.filter { validSetIDs.contains($0.key) }
+    }
+}
+
 struct TemplateExercisePrescriptionEditor: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -43,10 +104,7 @@ struct TemplateExercisePrescriptionEditor: View {
     @State private var localIsExpanded: Bool
     @State private var setSwipeOffsets: [UUID: CGFloat] = [:]
     @State private var setSwipeRemoving: [UUID: Bool] = [:]
-    @State private var repMinInputText: String?
-    @State private var repMaxInputText: String?
-    @State private var repsInputTextBySetID: [UUID: String] = [:]
-    @State private var weightInputTextBySetID: [UUID: String] = [:]
+    @State private var inputDraftStore = TemplateExerciseInputDraftStore()
     @FocusState private var focusedInput: TemplateEditorInputFocus?
 
     private let restPresets = [10, 15, 20, 30, 45, 60, 75, 90, 105, 120, 150, 180, 210, 240]
@@ -135,6 +193,10 @@ struct TemplateExercisePrescriptionEditor: View {
         .padding(16)
         .wgjCardContainer(strong: true)
         .onDisappear {
+            if let focusedInput {
+                commitInputDraft(for: focusedInput)
+                clearInputDraft(for: focusedInput)
+            }
             if shouldCommitOnDisappear?() ?? true {
                 onCommitRequest?()
             }
@@ -145,6 +207,7 @@ struct TemplateExercisePrescriptionEditor: View {
         .onChange(of: focusedInput) { previousFocus, newFocus in
             guard previousFocus != newFocus else { return }
             if let previousFocus {
+                commitInputDraft(for: previousFocus)
                 clearInputDraft(for: previousFocus)
                 onCommitRequest?()
             }
@@ -504,7 +567,8 @@ struct TemplateExercisePrescriptionEditor: View {
             return ""
         }
         let setID = setDrafts[index].id
-        if isInputFocused(.reps, at: index), let draft = repsInputTextBySetID[setID] {
+        if isInputFocused(.reps, at: index),
+           let draft = inputDraftStore.text(for: .set(setID: setID, metric: .reps)) {
             return draft
         }
         guard let reps = setDrafts[index].targetReps else { return "" }
@@ -516,7 +580,8 @@ struct TemplateExercisePrescriptionEditor: View {
             return ""
         }
         let setID = setDrafts[index].id
-        if isInputFocused(.weight, at: index), let draft = weightInputTextBySetID[setID] {
+        if isInputFocused(.weight, at: index),
+           let draft = inputDraftStore.text(for: .set(setID: setID, metric: .weight)) {
             return draft
         }
         guard let weight = setDrafts[index].targetWeight else { return "" }
@@ -792,17 +857,13 @@ struct TemplateExercisePrescriptionEditor: View {
         Binding(
             get: {
                 if focusedInput == .repMin {
-                    return repMinInputText ?? targetRepMin.map(String.init) ?? ""
+                    return inputDraftStore.text(for: .repMin) ?? targetRepMin.map(String.init) ?? ""
                 }
                 guard let targetRepMin else { return "" }
                 return "\(targetRepMin)"
             },
             set: { newValue in
-                repMinInputText = newValue
-                let cleaned = newValue.filter(\.isNumber)
-                let updatedValue = cleaned.isEmpty ? nil : Int(cleaned)
-                guard targetRepMin != updatedValue else { return }
-                targetRepMin = updatedValue
+                inputDraftStore.stage(newValue, for: .repMin)
             }
         )
     }
@@ -811,17 +872,13 @@ struct TemplateExercisePrescriptionEditor: View {
         Binding(
             get: {
                 if focusedInput == .repMax {
-                    return repMaxInputText ?? targetRepMax.map(String.init) ?? ""
+                    return inputDraftStore.text(for: .repMax) ?? targetRepMax.map(String.init) ?? ""
                 }
                 guard let targetRepMax else { return "" }
                 return "\(targetRepMax)"
             },
             set: { newValue in
-                repMaxInputText = newValue
-                let cleaned = newValue.filter(\.isNumber)
-                let updatedValue = cleaned.isEmpty ? nil : Int(cleaned)
-                guard targetRepMax != updatedValue else { return }
-                targetRepMax = updatedValue
+                inputDraftStore.stage(newValue, for: .repMax)
             }
         )
     }
@@ -829,11 +886,7 @@ struct TemplateExercisePrescriptionEditor: View {
     private func updateRepsText(_ newValue: String, at index: Int) {
         guard setDrafts.indices.contains(index) else { return }
         let setID = setDrafts[index].id
-        repsInputTextBySetID[setID] = newValue
-        let cleaned = newValue.filter(\.isNumber)
-        let updatedValue = cleaned.isEmpty ? nil : Int(cleaned)
-        guard setDrafts[index].targetReps != updatedValue else { return }
-        setDrafts[index].targetReps = updatedValue
+        inputDraftStore.stage(newValue, for: .set(setID: setID, metric: .reps))
     }
 
     private func updateRepsText(_ newValue: String, forSetID setID: UUID) {
@@ -844,20 +897,7 @@ struct TemplateExercisePrescriptionEditor: View {
     private func updateWeightText(_ newValue: String, at index: Int) {
         guard setDrafts.indices.contains(index) else { return }
         let setID = setDrafts[index].id
-        weightInputTextBySetID[setID] = newValue
-        let normalized = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let updatedValue: Double?
-        if normalized.isEmpty {
-            updatedValue = nil
-        } else if let parsed = WGJFormatters.parseLocalizedDecimal(normalized) {
-            updatedValue = max(0, parsed)
-        } else {
-            updatedValue = setDrafts[index].targetWeight
-        }
-
-        guard setDrafts[index].targetWeight != updatedValue else { return }
-        setDrafts[index].targetWeight = updatedValue
+        inputDraftStore.stage(newValue, for: .set(setID: setID, metric: .weight))
     }
 
     private func updateWeightText(_ newValue: String, forSetID setID: UUID) {
@@ -1125,6 +1165,9 @@ struct TemplateExercisePrescriptionEditor: View {
     }
 
     private func requestImmediateCommit() {
+        if let focusedInput {
+            commitInputDraft(for: focusedInput)
+        }
         onCommitRequest?()
     }
 
@@ -1134,28 +1177,53 @@ struct TemplateExercisePrescriptionEditor: View {
 
     private func pruneInputDrafts() {
         let validSetIDs = Set(setDrafts.map(\.id))
-        repsInputTextBySetID = repsInputTextBySetID.filter { validSetIDs.contains($0.key) }
-        weightInputTextBySetID = weightInputTextBySetID.filter { validSetIDs.contains($0.key) }
+        inputDraftStore.prune(keeping: validSetIDs)
 
         if case let .set(setID, _)? = focusedInput, !validSetIDs.contains(setID) {
             focusedInput = nil
         }
     }
 
-    private func clearInputDraft(for focus: TemplateEditorInputFocus) {
+    private func commitInputDraft(for focus: TemplateEditorInputFocus) {
+        guard let text = inputDraftStore.text(for: focus) else { return }
+
         switch focus {
         case .repMin:
-            repMinInputText = nil
+            let cleaned = text.filter(\.isNumber)
+            let updatedValue = cleaned.isEmpty ? nil : Int(cleaned)
+            guard targetRepMin != updatedValue else { return }
+            targetRepMin = updatedValue
         case .repMax:
-            repMaxInputText = nil
+            let cleaned = text.filter(\.isNumber)
+            let updatedValue = cleaned.isEmpty ? nil : Int(cleaned)
+            guard targetRepMax != updatedValue else { return }
+            targetRepMax = updatedValue
         case let .set(setID, metric):
+            guard let index = indexForSetID(setID) else { return }
             switch metric {
-            case .weight:
-                weightInputTextBySetID[setID] = nil
             case .reps:
-                repsInputTextBySetID[setID] = nil
+                let cleaned = text.filter(\.isNumber)
+                let updatedValue = cleaned.isEmpty ? nil : Int(cleaned)
+                guard setDrafts[index].targetReps != updatedValue else { return }
+                setDrafts[index].targetReps = updatedValue
+            case .weight:
+                let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                let updatedValue: Double?
+                if normalized.isEmpty {
+                    updatedValue = nil
+                } else if let parsed = WGJFormatters.parseLocalizedDecimal(normalized) {
+                    updatedValue = max(0, parsed)
+                } else {
+                    updatedValue = setDrafts[index].targetWeight
+                }
+                guard setDrafts[index].targetWeight != updatedValue else { return }
+                setDrafts[index].targetWeight = updatedValue
             }
         }
+    }
+
+    private func clearInputDraft(for focus: TemplateEditorInputFocus) {
+        inputDraftStore.clear(for: focus)
     }
 
     private func indexForSetID(_ setID: UUID) -> Int? {
