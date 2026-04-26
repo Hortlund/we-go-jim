@@ -1201,7 +1201,10 @@ enum StartWorkoutHomeSnapshotBuilder {
     }
 
     private static func orderTemplates(_ templates: [WorkoutTemplate], folders: [TemplateFolder]) -> [WorkoutTemplate] {
-        let folderOrderByID = Dictionary(uniqueKeysWithValues: folders.enumerated().map { ($0.element.id, $0.offset) })
+        let folderOrderByID = Dictionary(
+            folders.enumerated().map { ($0.element.id, $0.offset) },
+            uniquingKeysWith: { existing, _ in existing }
+        )
         return templates.sorted {
             let lhsFolderOrder = $0.folderID == TemplateRepository.unfiledFolderID
                 ? -1
@@ -1516,7 +1519,8 @@ struct StartWorkoutTemplatePreview: Identifiable, Equatable {
         let trimmedNotes = template.notes.trimmingCharacters(in: .whitespacesAndNewlines)
         notes = trimmedNotes.isEmpty ? nil : trimmedNotes
         let cardioByPhase = Dictionary(
-            uniqueKeysWithValues: (template.cardioBlocks ?? []).map { ($0.phase, $0) }
+            (template.cardioBlocks ?? []).map { ($0.phase, $0) },
+            uniquingKeysWith: { existing, _ in existing }
         )
         preWorkoutCardio = cardioByPhase[.preWorkout].map(CardioBlock.init(templateCardioBlock:))
         postWorkoutCardio = cardioByPhase[.postWorkout].map(CardioBlock.init(templateCardioBlock:))

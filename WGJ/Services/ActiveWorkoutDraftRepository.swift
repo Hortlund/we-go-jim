@@ -762,7 +762,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
         )
 
         return Dictionary(
-            uniqueKeysWithValues: exercises.map { exercise in
+            exercises.map { exercise in
                 (
                     exercise.id,
                     .resolved(
@@ -772,7 +772,8 @@ nonisolated final class ActiveWorkoutDraftRepository {
                         )
                     )
                 )
-            }
+            },
+            uniquingKeysWith: { existing, _ in existing }
         )
     }
 

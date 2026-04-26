@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-04-26 - Active Start Dictionaries Must Tolerate Duplicate Relationship Rows
+
+- Date: 2026-04-26
+- Trigger/Problem: Active workout start intermittently crashed in the Swift standard library with `Fatal error: Duplicate values for key`, including duplicate UUID keys during template-summary to active-workout handoff.
+- Root Cause: Some active-start and first-render paths used `Dictionary(uniqueKeysWithValues:)` over SwiftData relationship/query results. SwiftData can occasionally surface duplicate relationship rows or duplicate catalog matches for the same logical key, and the unique-key initializer traps before the app can recover.
+- Durable Rule: On active workout start, template preview, active first-render snapshot, and relationship-derived UI grouping paths, do not use `Dictionary(uniqueKeysWithValues:)` unless the source is structurally guaranteed unique in memory. Prefer `Dictionary(_:uniquingKeysWith:)` with an explicit first-value policy for duplicated SwiftData rows.
+- How to Verify Next Time: Search touched active-start paths for `uniqueKeysWithValues`; add or run a duplicate-key regression using the observed UUID, then run the template-preview-to-active-workout UI smoke on the signed-in `iPhone 17` simulator.
+- Status: active
+
 ## 2026-04-26 - Active Workout Keyboard State Must Stay Local
 
 - Date: 2026-04-26

@@ -563,6 +563,18 @@ struct AppPerformanceRuntimeTests {
         #expect(state.preparedPreviousPerformanceResolution(for: sessionID, exerciseID: exerciseID) == nil)
     }
 
+    @Test
+    func activeWorkoutSupersetRestMapKeepsFirstValueForDuplicateGroupIDs() {
+        let duplicateGroupID = UUID(uuidString: "6CC91765-8DBB-4232-9964-8C86C0556359")!
+
+        let restByGroupID = ActiveWorkoutView.supersetRoundRestSecondsByGroupID([
+            (duplicateGroupID, 90),
+            (duplicateGroupID, 180),
+        ])
+
+        #expect(restByGroupID[duplicateGroupID] == 90)
+    }
+
     @MainActor
     @Test
     func presentingCollapsedActiveWorkoutKeepsSameSessionPresentation() {

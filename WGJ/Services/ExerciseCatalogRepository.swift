@@ -159,7 +159,7 @@ nonisolated final class ExerciseCatalogRepository: ExerciseCatalogRepositoryProt
             }
         )
         let matches = try modelContext.fetch(descriptor)
-        return Dictionary(uniqueKeysWithValues: matches.map { ($0.remoteUUID, $0) })
+        return Dictionary(matches.map { ($0.remoteUUID, $0) }, uniquingKeysWith: { existing, _ in existing })
     }
 
     func exerciseSnapshotMap(for remoteUUIDs: [String]) throws -> [String: TrainingGuidanceCatalogSnapshot] {

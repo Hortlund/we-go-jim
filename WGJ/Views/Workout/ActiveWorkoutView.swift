@@ -406,8 +406,8 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private var exerciseDisplayGroups: [WorkoutExerciseDisplayGroup<ActiveWorkoutDraftExercise>] {
-        let roundRestSecondsByGroupID = Dictionary(
-            uniqueKeysWithValues: sessionSupersetGroups.map { ($0.id, $0.roundRestSeconds) }
+        let roundRestSecondsByGroupID = Self.supersetRoundRestSecondsByGroupID(
+            sessionSupersetGroups.map { ($0.id, $0.roundRestSeconds) }
         )
         return WorkoutExerciseDisplayGrouping.build(
             items: sessionExercises,
@@ -424,6 +424,12 @@ struct ActiveWorkoutView: View {
                 )
             }
         )
+    }
+
+    nonisolated static func supersetRoundRestSecondsByGroupID(
+        _ pairs: [(id: UUID, roundRestSeconds: Int)]
+    ) -> [UUID: Int] {
+        Dictionary(pairs.map { ($0.id, $0.roundRestSeconds) }, uniquingKeysWith: { existing, _ in existing })
     }
 
     @MainActor
@@ -2152,7 +2158,8 @@ struct ActiveWorkoutView: View {
         )
         let matches = try modelContext.fetch(descriptor)
         return Dictionary(
-            uniqueKeysWithValues: matches.map { ($0.remoteUUID, TrainingGuidanceCatalogSnapshot(exercise: $0)) }
+            matches.map { ($0.remoteUUID, TrainingGuidanceCatalogSnapshot(exercise: $0)) },
+            uniquingKeysWith: { existing, _ in existing }
         )
     }
 
