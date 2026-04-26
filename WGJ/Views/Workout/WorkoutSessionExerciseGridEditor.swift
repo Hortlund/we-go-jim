@@ -2482,11 +2482,17 @@ struct WorkoutSessionExerciseGridEditor: View {
     private func handleFocusedInputChange(_ previousFocus: SetInputFocus?, _ newFocus: SetInputFocus?) {
         guard previousFocus != newFocus else { return }
         if let previousFocus {
-            _ = commitBufferedInput(for: previousFocus, clearsText: true)
+            let committedBufferedValueChange = commitBufferedInput(for: previousFocus, clearsText: true)
             if suppressNextFocusLossCommit {
                 suppressNextFocusLossCommit = false
             } else {
-                requestImmediateCommitForCurrentState()
+                scheduleCommitRequest(
+                    ActiveWorkoutEditorFocusCommitPolicy.dispositionForMetricFocusChange(
+                        previousHadFocus: true,
+                        newHasFocus: newFocus != nil,
+                        committedBufferedValueChange: committedBufferedValueChange
+                    )
+                )
             }
         } else {
             suppressNextFocusLossCommit = false

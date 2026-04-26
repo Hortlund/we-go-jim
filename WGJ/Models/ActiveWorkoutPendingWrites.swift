@@ -10,6 +10,20 @@ nonisolated enum ActiveWorkoutEditorCommitDisposition: Equatable, Sendable {
     }
 }
 
+nonisolated enum ActiveWorkoutEditorFocusCommitPolicy {
+    static func dispositionForMetricFocusChange(
+        previousHadFocus: Bool,
+        newHasFocus: Bool,
+        committedBufferedValueChange: Bool
+    ) -> ActiveWorkoutEditorCommitDisposition {
+        guard previousHadFocus, committedBufferedValueChange else {
+            return .none
+        }
+
+        return newHasFocus ? .debounced : .immediate
+    }
+}
+
 struct ActiveWorkoutPendingWrites: Equatable {
     private(set) var dirtyExerciseIDs: Set<UUID> = []
     private(set) var isSessionMetaDirty = false

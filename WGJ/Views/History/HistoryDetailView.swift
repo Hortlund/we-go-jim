@@ -66,7 +66,7 @@ struct HistoryDetailView: View {
         let catalogRepository = ExerciseCatalogRepository(modelContext: modelContext)
 
         ScrollView {
-            VStack(alignment: .leading, spacing: WGJSpacing.section) {
+            LazyVStack(alignment: .leading, spacing: WGJSpacing.section) {
                 if let session {
                     headerCard(session)
                     cardioSection

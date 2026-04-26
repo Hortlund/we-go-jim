@@ -417,6 +417,39 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
+    func activeWorkoutMetricFocusMoveKeepsValueCommitDebounced() {
+        #expect(
+            ActiveWorkoutEditorFocusCommitPolicy.dispositionForMetricFocusChange(
+                previousHadFocus: true,
+                newHasFocus: true,
+                committedBufferedValueChange: true
+            ) == .debounced
+        )
+    }
+
+    @Test
+    func activeWorkoutMetricFocusLossImmediatelyCommitsBufferedValue() {
+        #expect(
+            ActiveWorkoutEditorFocusCommitPolicy.dispositionForMetricFocusChange(
+                previousHadFocus: true,
+                newHasFocus: false,
+                committedBufferedValueChange: true
+            ) == .immediate
+        )
+    }
+
+    @Test
+    func activeWorkoutMetricFocusChangeDoesNotCommitWhenBufferedValueIsUnchanged() {
+        #expect(
+            ActiveWorkoutEditorFocusCommitPolicy.dispositionForMetricFocusChange(
+                previousHadFocus: true,
+                newHasFocus: true,
+                committedBufferedValueChange: false
+            ) == .none
+        )
+    }
+
+    @Test
     func historyHydrationPlannerOnlyRequestsExpandedRowsThatStillNeedPayloads() {
         let first = UUID()
         let second = UUID()

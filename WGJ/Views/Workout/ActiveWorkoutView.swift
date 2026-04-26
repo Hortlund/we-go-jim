@@ -64,7 +64,6 @@ struct ActiveWorkoutView: View {
     @State private var saveTemplateFolders: [ActiveWorkoutTemplateFolderSnapshot] = []
     @State private var preferredLoadUnit: TemplateLoadUnit = .kg
     @State private var isKeyboardVisible = false
-    @State private var visibleScrollTarget: ActiveWorkoutScrollTarget?
 
     @State private var errorMessage = ""
     @State private var showingError = false
@@ -219,7 +218,6 @@ struct ActiveWorkoutView: View {
                 .scrollTargetLayout()
                 .padding(16)
             }
-            .scrollPosition(id: scrollPositionBinding, anchor: .top)
             .scrollDismissesKeyboard(.interactively)
             .wgjScreenBackground()
             .wgjNavigationChrome()
@@ -390,16 +388,6 @@ struct ActiveWorkoutView: View {
             }
             .wgjMinimalKeyboardToolbar(isKeyboardVisible: $isKeyboardVisible)
         }
-    }
-
-    private var scrollPositionBinding: Binding<ActiveWorkoutScrollTarget?> {
-        Binding(
-            get: { visibleScrollTarget },
-            set: { newValue in
-                guard newValue != visibleScrollTarget else { return }
-                visibleScrollTarget = newValue
-            }
-        )
     }
 
     private var session: ActiveWorkoutDraftSession? {
@@ -2440,7 +2428,6 @@ struct ActiveWorkoutView: View {
         anchor: UnitPoint = .top,
         animation: Animation? = nil
     ) {
-        visibleScrollTarget = target
         let resolvedAnimation = animation ?? WGJMotion.cardAnimation(reduceMotion: reduceMotion)
         withAnimation(resolvedAnimation) {
             scrollProxy.scrollTo(target, anchor: anchor)
