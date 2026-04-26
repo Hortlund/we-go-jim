@@ -1628,10 +1628,13 @@ struct ActiveWorkoutView: View {
         catalogMatchesByUUID: [String: TrainingGuidanceCatalogSnapshot]
     ) -> [UUID: ActiveWorkoutExerciseGuidancePresentation?] {
         guard isTrainingGuidanceEnabled else {
-            return Dictionary(uniqueKeysWithValues: sessionExercises.map { ($0.id, nil as ActiveWorkoutExerciseGuidancePresentation?) })
+            return Dictionary(
+                sessionExercises.map { ($0.id, nil as ActiveWorkoutExerciseGuidancePresentation?) },
+                uniquingKeysWith: { existing, _ in existing }
+            )
         }
 
-        return Dictionary(uniqueKeysWithValues: sessionExercises.map { exercise in
+        return Dictionary(sessionExercises.map { exercise in
             let drafts = draftsByExerciseID[exercise.id] ?? []
             let guidance: ActiveWorkoutExerciseGuidancePresentation?
             if let catalogExercise = catalogMatchesByUUID[exercise.catalogExerciseUUID] {
@@ -1659,7 +1662,7 @@ struct ActiveWorkoutView: View {
                 }
             }
             return (exercise.id, guidance)
-        })
+        }, uniquingKeysWith: { existing, _ in existing })
     }
 
     @MainActor

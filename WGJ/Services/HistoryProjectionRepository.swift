@@ -135,7 +135,10 @@ nonisolated final class HistoryProjectionRepository {
         to existingFacts: [CompletedSetFact],
         sessionID: UUID
     ) -> Bool {
-        let existingBySessionSetID = Dictionary(uniqueKeysWithValues: existingFacts.map { ($0.sessionSetID, $0) })
+        let existingBySessionSetID = Dictionary(
+            existingFacts.map { ($0.sessionSetID, $0) },
+            uniquingKeysWith: { existing, _ in existing }
+        )
         let incomingIDs = Set(drafts.map(\.sessionSetID))
         var didMutate = false
 
@@ -181,7 +184,10 @@ nonisolated final class HistoryProjectionRepository {
 
     private func factsMatch(_ existingFacts: [CompletedSetFact], drafts: [CompletedSetFactDraft]) -> Bool {
         guard existingFacts.count == drafts.count else { return false }
-        let existingBySessionSetID = Dictionary(uniqueKeysWithValues: existingFacts.map { ($0.sessionSetID, $0) })
+        let existingBySessionSetID = Dictionary(
+            existingFacts.map { ($0.sessionSetID, $0) },
+            uniquingKeysWith: { existing, _ in existing }
+        )
 
         for draft in drafts {
             guard let existing = existingBySessionSetID[draft.sessionSetID], draft.matches(existing) else {

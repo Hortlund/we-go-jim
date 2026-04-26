@@ -6,7 +6,7 @@ nonisolated struct HistoryExerciseInteractionStamp: Hashable, Sendable {
 
     init(entries: [Entry]) {
         self.entries = entries
-        self.entriesByID = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0) })
+        self.entriesByID = Dictionary(entries.map { ($0.id, $0) }, uniquingKeysWith: { existing, _ in existing })
     }
 
     var exerciseIDs: Set<UUID> {
@@ -43,7 +43,7 @@ nonisolated struct ActiveWorkoutExerciseInteractionStamp: Hashable, Sendable {
     init(entries: [Entry], invalidation: Int = 0) {
         self.entries = entries
         self.invalidation = invalidation
-        self.entriesByID = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0) })
+        self.entriesByID = Dictionary(entries.map { ($0.id, $0) }, uniquingKeysWith: { existing, _ in existing })
     }
 
     var exerciseIDs: Set<UUID> {

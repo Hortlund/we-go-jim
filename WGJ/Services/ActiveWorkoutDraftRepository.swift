@@ -658,7 +658,10 @@ nonisolated final class ActiveWorkoutDraftRepository {
                     exercise.sessionID == sessionID && requestedExerciseIDs.contains(exercise.id)
                 }
             )
-            exerciseByID = Dictionary(uniqueKeysWithValues: try modelContext.fetch(descriptor).map { ($0.id, $0) })
+            exerciseByID = Dictionary(
+                try modelContext.fetch(descriptor).map { ($0.id, $0) },
+                uniquingKeysWith: { existing, _ in existing }
+            )
         }
 
         for exerciseID in dirtyExerciseIDs {
@@ -1408,7 +1411,10 @@ nonisolated final class ActiveWorkoutDraftRepository {
     ) {
         let orderedExercises = exercises.sorted { $0.sortOrder < $1.sortOrder }
         let existingGroups = (session.supersetGroups ?? []).filter { $0.modelContext != nil }
-        let existingGroupsByID = Dictionary(uniqueKeysWithValues: existingGroups.map { ($0.id, $0) })
+        let existingGroupsByID = Dictionary(
+            existingGroups.map { ($0.id, $0) },
+            uniquingKeysWith: { existing, _ in existing }
+        )
         let normalized = normalizedSupersetMemberships(
             for: orderedExercises.map(ActiveWorkoutSupersetExerciseSnapshot.init),
             membershipsByExerciseID: membershipsByExerciseID
@@ -1488,7 +1494,10 @@ nonisolated final class ActiveWorkoutDraftRepository {
     ) {
         let orderedExercises = exercises.sorted { $0.sortOrder < $1.sortOrder }
         let existingGroups = (session.supersetGroups ?? []).filter { $0.modelContext != nil }
-        let existingGroupsByID = Dictionary(uniqueKeysWithValues: existingGroups.map { ($0.id, $0) })
+        let existingGroupsByID = Dictionary(
+            existingGroups.map { ($0.id, $0) },
+            uniquingKeysWith: { existing, _ in existing }
+        )
         let normalized = normalizedSupersetMemberships(
             for: orderedExercises.map(ActiveWorkoutSupersetExerciseSnapshot.init),
             membershipsByExerciseID: membershipsByExerciseID
@@ -1689,7 +1698,10 @@ nonisolated final class ActiveWorkoutDraftRepository {
     ) -> Bool {
         let normalizedDrafts = desiredDrafts
         let existingStages = (set.dropStages ?? []).sorted { $0.sortOrder < $1.sortOrder }
-        let existingByID = Dictionary(uniqueKeysWithValues: existingStages.map { ($0.id, $0) })
+        let existingByID = Dictionary(
+            existingStages.map { ($0.id, $0) },
+            uniquingKeysWith: { existing, _ in existing }
+        )
         let incomingIDs = Set(normalizedDrafts.map(\.id))
         let existingOrderedIDs = existingStages.map(\.id)
         let incomingOrderedIDs = normalizedDrafts.map(\.id)
@@ -1784,7 +1796,10 @@ nonisolated final class ActiveWorkoutDraftRepository {
         now: Date
     ) -> (didMutateExerciseStructure: Bool, didMutateAnySet: Bool) {
         let existing = exercise.sets ?? []
-        let existingByID = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
+        let existingByID = Dictionary(
+            existing.map { ($0.id, $0) },
+            uniquingKeysWith: { existing, _ in existing }
+        )
         let incomingIDs = Set(drafts.map(\.id))
         let existingOrderedIDs = orderedSessionSets(for: exercise).map(\.id)
         let incomingOrderedIDs = drafts.map(\.id)

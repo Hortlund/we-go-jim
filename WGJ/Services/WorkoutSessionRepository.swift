@@ -636,7 +636,10 @@ nonisolated final class WorkoutSessionRepository {
         }
 
         let existing = exercise.sets ?? []
-        let existingByID = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
+        let existingByID = Dictionary(
+            existing.map { ($0.id, $0) },
+            uniquingKeysWith: { existing, _ in existing }
+        )
         let incomingIDs = Set(drafts.map(\.id))
         let existingOrderedIDs = existing
             .sorted { $0.sortOrder < $1.sortOrder }
@@ -768,12 +771,12 @@ nonisolated final class WorkoutSessionRepository {
 
         return exercisesByCatalogUUID.mapValues { exercise in
             let orderedSets = (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
-            return Dictionary(uniqueKeysWithValues: orderedSets.map { set in
+            return Dictionary(orderedSets.map { set in
                 (
                     set.sortOrder,
                     previousSnapshot(from: set)
                 )
-            })
+            }, uniquingKeysWith: { existing, _ in existing })
         }
     }
 
@@ -1235,7 +1238,10 @@ nonisolated final class WorkoutSessionRepository {
     ) {
         let orderedExercises = exercises.sorted { $0.sortOrder < $1.sortOrder }
         let existingGroups = (session.supersetGroups ?? []).filter { $0.modelContext != nil }
-        let existingGroupsByID = Dictionary(uniqueKeysWithValues: existingGroups.map { ($0.id, $0) })
+        let existingGroupsByID = Dictionary(
+            existingGroups.map { ($0.id, $0) },
+            uniquingKeysWith: { existing, _ in existing }
+        )
         let normalized = normalizedSupersetMemberships(
             for: orderedExercises,
             membershipsByExerciseID: membershipsByExerciseID
@@ -1414,7 +1420,10 @@ nonisolated final class WorkoutSessionRepository {
     ) -> Bool {
         let normalizedDrafts = desiredDrafts
         let existingStages = (set.dropStages ?? []).sorted { $0.sortOrder < $1.sortOrder }
-        let existingByID = Dictionary(uniqueKeysWithValues: existingStages.map { ($0.id, $0) })
+        let existingByID = Dictionary(
+            existingStages.map { ($0.id, $0) },
+            uniquingKeysWith: { existing, _ in existing }
+        )
         let incomingIDs = Set(normalizedDrafts.map(\.id))
         let existingOrderedIDs = existingStages.map(\.id)
         let incomingOrderedIDs = normalizedDrafts.map(\.id)
