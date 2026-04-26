@@ -20,7 +20,7 @@ enum WGJKeyboard {
     }
 }
 
-private enum WGJKeyboardHideControl {
+enum WGJKeyboardHideControl {
     static let title = "Hide"
     static let systemImage = "keyboard.chevron.compact.down"
     static let accessibilityLabel = "Hide keyboard"

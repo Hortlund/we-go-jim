@@ -43,6 +43,7 @@ struct WorkoutExerciseRowHostView: View {
     let onExerciseMoveToPosition: (() -> Void)?
     let onExerciseDelete: (() -> Void)?
     let flushCoordinator: WorkoutExerciseRowFlushCoordinator?
+    let onInputFocusChange: (Bool) -> Void
 
     @State private var localRestSeconds: Int
     @State private var localSetDrafts: [WorkoutSessionSetDraft]
@@ -91,7 +92,8 @@ struct WorkoutExerciseRowHostView: View {
         onExerciseMoveDown: (() -> Void)? = nil,
         onExerciseMoveToPosition: (() -> Void)? = nil,
         onExerciseDelete: (() -> Void)? = nil,
-        flushCoordinator: WorkoutExerciseRowFlushCoordinator? = nil
+        flushCoordinator: WorkoutExerciseRowFlushCoordinator? = nil,
+        onInputFocusChange: @escaping (Bool) -> Void = { _ in }
     ) {
         self.exerciseID = exerciseID
         self.exerciseAccessibilityIdentifier = exerciseAccessibilityIdentifier
@@ -135,6 +137,7 @@ struct WorkoutExerciseRowHostView: View {
         self.onExerciseMoveToPosition = onExerciseMoveToPosition
         self.onExerciseDelete = onExerciseDelete
         self.flushCoordinator = flushCoordinator
+        self.onInputFocusChange = onInputFocusChange
         self._localRestSeconds = State(initialValue: restSeconds)
         self._localSetDrafts = State(initialValue: setDrafts)
         self._localExerciseNotes = State(initialValue: exerciseNotes)
@@ -223,7 +226,8 @@ struct WorkoutExerciseRowHostView: View {
             onExerciseMoveUp: onExerciseMoveUp,
             onExerciseMoveDown: onExerciseMoveDown,
             onExerciseMoveToPosition: onExerciseMoveToPosition,
-            onExerciseDelete: onExerciseDelete
+            onExerciseDelete: onExerciseDelete,
+            onInputFocusChange: onInputFocusChange
         )
         .onChange(of: restSeconds) { _, newValue in
             editingCoordinator.syncCommittedState(

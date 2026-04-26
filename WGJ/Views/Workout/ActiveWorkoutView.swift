@@ -66,6 +66,7 @@ struct ActiveWorkoutView: View {
 
     @State private var errorMessage = ""
     @State private var showingError = false
+    @State private var isMetricInputFocused = false
 
     private let cancelSectionFocusSpacerHeight: CGFloat = 160
     private let cancelSectionDockClearanceHeight: CGFloat = 96
@@ -241,7 +242,9 @@ struct ActiveWorkoutView: View {
                     session: session,
                     isEndingSession: isEndingSession,
                     restTimerPopupID: restTimerState.restTimerPopup?.id,
-                    reduceMotion: reduceMotion
+                    reduceMotion: reduceMotion,
+                    isMetricInputFocused: isMetricInputFocused,
+                    onDismissKeyboard: dismissKeyboard
                 )
             }
             .sheet(item: $pickerTarget, onDismiss: {
@@ -371,7 +374,6 @@ struct ActiveWorkoutView: View {
             .background {
                 WorkoutRestTimerExpiryObserver()
             }
-            .wgjMinimalKeyboardToolbar(onDismiss: dismissKeyboard)
         }
     }
 
@@ -708,7 +710,10 @@ struct ActiveWorkoutView: View {
                     onExerciseDelete: {
                         removeExercise(exerciseID: exerciseID)
                     },
-                    flushCoordinator: rowFlushCoordinator
+                    flushCoordinator: rowFlushCoordinator,
+                    onInputFocusChange: { isFocused in
+                        isMetricInputFocused = isFocused
+                    }
                 )
             } else {
                 ActiveWorkoutExerciseLoadingCard(
@@ -3340,8 +3345,11 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
     let isEndingSession: Bool
     let restTimerPopupID: UUID?
     let reduceMotion: Bool
+    let isMetricInputFocused: Bool
+    let onDismissKeyboard: () -> Void
 
     @State private var isKeyboardVisible = false
+    @State private var keyboardLift: CGFloat = 0
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -3352,15 +3360,72 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
                 )
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+
+            if shouldShowKeyboardDismissButton {
+                Button(action: onDismissKeyboard) {
+                    HStack(spacing: WGJKeyboardHideControl.imagePadding) {
+                        Image(systemName: WGJKeyboardHideControl.systemImage)
+                            .font(.footnote.weight(.bold))
+
+                        Text(WGJKeyboardHideControl.title)
+                            .font(.footnote.weight(.semibold))
+                    }
+                    .foregroundStyle(WGJKeyboardHideControl.foregroundStyle)
+                    .padding(.horizontal, WGJKeyboardHideControl.horizontalPadding)
+                    .padding(.vertical, WGJKeyboardHideControl.verticalPadding)
+                    .background {
+                        Capsule()
+                            .fill(WGJTheme.cardStrong.opacity(0.96))
+                            .overlay {
+                                Capsule()
+                                    .stroke(WGJTheme.outline.opacity(0.72), lineWidth: 1)
+                            }
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(WGJKeyboardHideControl.accessibilityLabel)
+                .accessibilityIdentifier(WGJKeyboardHideControl.accessibilityIdentifier)
+                .padding(.horizontal, 16)
+                .padding(.bottom, keyboardLift + 8)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .bottom)
-        .wgjTrackKeyboardVisibility($isKeyboardVisible)
-        .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: isKeyboardVisible)
+        .frame(maxWidth: .infinity, alignment: .bottomTrailing)
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
+            updateKeyboardState(from: notification)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            isKeyboardVisible = false
+            keyboardLift = 0
+        }
+        .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: shouldShowKeyboardDismissButton)
         .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: restTimerPopupID)
     }
 
     private var shouldShowDock: Bool {
-        !isKeyboardVisible && !isEndingSession && session != nil
+        !shouldShowKeyboardDismissButton && !isEndingSession && session != nil
+    }
+
+    private var shouldShowKeyboardDismissButton: Bool {
+        isKeyboardVisible || isMetricInputFocused
+    }
+
+    private func updateKeyboardState(from notification: Notification) {
+        let screenMaxY = UIScreen.main.bounds.maxY
+        guard
+            screenMaxY.isFinite,
+            screenMaxY > 0,
+            let endFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+            endFrame.minY.isFinite
+        else {
+            isKeyboardVisible = false
+            keyboardLift = 0
+            return
+        }
+
+        let lift = max(0, screenMaxY - endFrame.minY)
+        isKeyboardVisible = lift > 0
+        keyboardLift = lift
     }
 }
 

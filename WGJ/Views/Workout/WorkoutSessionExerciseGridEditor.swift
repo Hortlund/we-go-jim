@@ -42,6 +42,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     var onExerciseMoveDown: (() -> Void)?
     var onExerciseMoveToPosition: (() -> Void)?
     var onExerciseDelete: (() -> Void)?
+    var onInputFocusChange: (Bool) -> Void
 
     private let externalIsExpanded: Binding<Bool>?
     @State private var localIsExpanded: Bool
@@ -112,7 +113,8 @@ struct WorkoutSessionExerciseGridEditor: View {
         onExerciseMoveUp: (() -> Void)? = nil,
         onExerciseMoveDown: (() -> Void)? = nil,
         onExerciseMoveToPosition: (() -> Void)? = nil,
-        onExerciseDelete: (() -> Void)? = nil
+        onExerciseDelete: (() -> Void)? = nil,
+        onInputFocusChange: @escaping (Bool) -> Void = { _ in }
     ) {
         self.exerciseName = exerciseName
         self.muscleSummary = muscleSummary
@@ -151,6 +153,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.onExerciseMoveDown = onExerciseMoveDown
         self.onExerciseMoveToPosition = onExerciseMoveToPosition
         self.onExerciseDelete = onExerciseDelete
+        self.onInputFocusChange = onInputFocusChange
         self._localIsExpanded = State(initialValue: isExpanded?.wrappedValue ?? initiallyExpanded)
         let startsExpanded = isExpanded?.wrappedValue ?? initiallyExpanded
         let initialRows = startsExpanded
@@ -200,6 +203,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             }
         }
         .onDisappear {
+            onInputFocusChange(false)
             flushPendingEditorState()
         }
         .onChange(of: setDrafts) { previousValue, newValue in
@@ -226,6 +230,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             refreshDisplayRows()
         }
         .onChange(of: focusedInput) { previousFocus, newFocus in
+            onInputFocusChange(newFocus != nil)
             handleFocusedInputChange(previousFocus, newFocus)
         }
         .onChange(of: isExpanded) { _, newValue in
