@@ -3349,7 +3349,6 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
     let onDismissKeyboard: () -> Void
 
     @State private var isKeyboardVisible = false
-    @State private var keyboardLift: CGFloat = 0
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -3386,7 +3385,7 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
                 .accessibilityLabel(WGJKeyboardHideControl.accessibilityLabel)
                 .accessibilityIdentifier(WGJKeyboardHideControl.accessibilityIdentifier)
                 .padding(.horizontal, 16)
-                .padding(.bottom, keyboardLift + 8)
+                .padding(.bottom, 8)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
@@ -3396,7 +3395,6 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             isKeyboardVisible = false
-            keyboardLift = 0
         }
         .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: shouldShowKeyboardDismissButton)
         .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: restTimerPopupID)
@@ -3419,13 +3417,10 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
             endFrame.minY.isFinite
         else {
             isKeyboardVisible = false
-            keyboardLift = 0
             return
         }
 
-        let lift = max(0, screenMaxY - endFrame.minY)
-        isKeyboardVisible = lift > 0
-        keyboardLift = lift
+        isKeyboardVisible = endFrame.minY < screenMaxY
     }
 }
 
