@@ -3350,7 +3350,6 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
     let onDismissKeyboard: () -> Void
 
     @State private var isKeyboardVisible = false
-    @State private var overlayMaxY: CGFloat = 0
     @State private var keyboardMinY: CGFloat = 0
 
     var body: some View {
@@ -3393,17 +3392,6 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .bottomTrailing)
-        .background {
-            GeometryReader { proxy in
-                Color.clear
-                    .onAppear {
-                        updateOverlayMaxY(proxy.frame(in: .global).maxY)
-                    }
-                    .onChange(of: proxy.frame(in: .global).maxY) { _, maxY in
-                        updateOverlayMaxY(maxY)
-                    }
-            }
-        }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
             updateKeyboardState(from: notification)
         }
@@ -3424,21 +3412,17 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
     }
 
     private var keyboardDismissButtonBottomPadding: CGFloat {
+        let screenMaxY = UIScreen.main.bounds.maxY
         guard
             isKeyboardVisible,
-            overlayMaxY.isFinite,
+            screenMaxY.isFinite,
             keyboardMinY.isFinite,
-            overlayMaxY > keyboardMinY
+            screenMaxY > keyboardMinY
         else {
             return 8
         }
 
-        return max(8, overlayMaxY - keyboardMinY + 8)
-    }
-
-    private func updateOverlayMaxY(_ maxY: CGFloat) {
-        guard maxY.isFinite, maxY > 0, overlayMaxY != maxY else { return }
-        overlayMaxY = maxY
+        return max(8, screenMaxY - keyboardMinY + 8)
     }
 
     private func updateKeyboardState(from notification: Notification) {
