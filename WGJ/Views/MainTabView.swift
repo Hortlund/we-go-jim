@@ -325,14 +325,10 @@ private struct WGJTopAttachedSyncBanner: View {
                 .frame(height: max(topSafeAreaInset, 0))
 
             HStack(spacing: 12) {
-                Image(systemName: icon)
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(tint)
-                    .frame(width: 42, height: 42)
-                    .background {
-                        Circle()
-                            .fill(tint.opacity(0.14))
-                    }
+                WGJCloudSyncBannerIcon(
+                    icon: icon,
+                    tint: tint
+                )
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
@@ -394,6 +390,48 @@ private struct WGJTopAttachedSyncBanner: View {
                 .stroke(tint.opacity(0.24), lineWidth: 1)
             }
             .shadow(color: WGJTheme.shadowStrong.opacity(0.55), radius: 18, x: 0, y: 10)
+        }
+    }
+}
+
+private struct WGJCloudSyncBannerIcon: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    let icon: String
+    let tint: Color
+
+    @State private var rotation = Angle.zero
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(tint.opacity(0.14))
+
+            if icon == "arrow.triangle.2.circlepath.icloud.fill" {
+                Image(systemName: "icloud.fill")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(tint)
+
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(WGJTheme.cardStrong)
+                    .rotationEffect(rotation)
+                    .accessibilityHidden(true)
+            } else {
+                Image(systemName: icon)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(tint)
+            }
+        }
+        .frame(width: 42, height: 42)
+        .task {
+            guard icon == "arrow.triangle.2.circlepath.icloud.fill" else { return }
+            guard !reduceMotion else { return }
+            guard rotation == .zero else { return }
+
+            withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) {
+                rotation = .degrees(360)
+            }
         }
     }
 }
