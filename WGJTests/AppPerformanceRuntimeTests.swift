@@ -563,6 +563,12 @@ struct AppPerformanceRuntimeTests {
         #expect(state.preparedPreviousPerformanceResolution(for: sessionID, exerciseID: exerciseID) == nil)
     }
 
+    @Test
+    func activeWorkoutModalMotionUsesVisibleDurationUnlessReduceMotionIsEnabled() {
+        #expect(WGJMotion.activeWorkoutModalAnimationDuration(reduceMotion: false) == 0.30)
+        #expect(WGJMotion.activeWorkoutModalAnimationDuration(reduceMotion: true) == 0.01)
+    }
+
     @MainActor
     @Test
     func presentingCollapsedActiveWorkoutKeepsSameSessionPresentation() {

@@ -79,6 +79,10 @@ enum WGJRadius {
 }
 
 enum WGJMotion {
+    static func activeWorkoutModalAnimationDuration(reduceMotion: Bool) -> TimeInterval {
+        reduceMotion ? 0.01 : 0.30
+    }
+
     static func disclosureAnimation(reduceMotion: Bool) -> Animation {
         reduceMotion ? .easeOut(duration: 0.01) : .smooth(duration: 0.24, extraBounce: 0.02)
     }
@@ -93,6 +97,12 @@ enum WGJMotion {
 
     static func overlayAnimation(reduceMotion: Bool) -> Animation {
         reduceMotion ? .easeOut(duration: 0.01) : .smooth(duration: 0.26, extraBounce: 0.04)
+    }
+
+    static func activeWorkoutModalAnimation(reduceMotion: Bool) -> Animation {
+        reduceMotion
+            ? .easeOut(duration: activeWorkoutModalAnimationDuration(reduceMotion: true))
+            : .smooth(duration: activeWorkoutModalAnimationDuration(reduceMotion: false), extraBounce: 0.02)
     }
 
     static func cardTransition(reduceMotion: Bool) -> AnyTransition {

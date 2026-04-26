@@ -25,6 +25,10 @@ struct MainTabView: View {
         reduceMotion ? .easeOut(duration: 0.01) : .smooth(duration: 0.36, extraBounce: 0.10)
     }
 
+    private var activeWorkoutModalAnimation: Animation {
+        WGJMotion.activeWorkoutModalAnimation(reduceMotion: reduceMotion)
+    }
+
     var body: some View {
         @Bindable var tabState = tabState
         @Bindable var workoutCompletionPresentationState = workoutCompletionPresentationState
@@ -111,8 +115,10 @@ struct MainTabView: View {
                 workoutCompletionPresentationState.presentQueuedIfNeeded()
             }) {
                 if let activeSessionID = activeWorkoutPresentationState.activeSessionID {
-                    NavigationStack {
-                        ActiveWorkoutView(sessionID: activeSessionID)
+                    ActiveWorkoutModalPresentation(animation: activeWorkoutModalAnimation) {
+                        NavigationStack {
+                            ActiveWorkoutView(sessionID: activeSessionID)
+                        }
                     }
                 }
             }
@@ -223,8 +229,9 @@ struct MainTabView: View {
                     }
                 }
                 .padding(.bottom, activeWorkoutStripBottomLift(bottomSafeAreaInset: bottomSafeAreaInset))
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .transition(activeWorkoutStripTransition)
                 .accessibilityIdentifier("active-workout-strip")
+                .zIndex(2)
             }
 
             if let popup = restTimerState.restTimerPopup,
@@ -310,6 +317,39 @@ struct MainTabView: View {
         }
     }
 
+}
+
+private struct ActiveWorkoutModalPresentation<Content: View>: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    let animation: Animation
+    @ViewBuilder var content: () -> Content
+
+    @State private var isVisible = false
+
+    var body: some View {
+        content()
+            .opacity(isVisible ? 1 : 0.88)
+            .scaleEffect(isVisible || reduceMotion ? 1 : 0.985, anchor: .bottom)
+            .task {
+                guard !isVisible else { return }
+                await Task.yield()
+                withAnimation(animation) {
+                    isVisible = true
+                }
+            }
+    }
+}
+
+private var activeWorkoutStripTransition: AnyTransition {
+    .asymmetric(
+        insertion: .move(edge: .bottom)
+            .combined(with: .opacity)
+            .combined(with: .scale(scale: 0.96, anchor: .bottom)),
+        removal: .move(edge: .bottom)
+            .combined(with: .opacity)
+            .combined(with: .scale(scale: 0.98, anchor: .bottom))
+    )
 }
 
 private struct WGJTopAttachedSyncBanner: View {
@@ -413,9 +453,15 @@ private struct WGJCloudSyncBannerIcon: View {
                     .foregroundStyle(tint)
 
                 Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(.caption.weight(.bold))
+                    .font(.caption2.weight(.bold))
                     .foregroundStyle(WGJTheme.cardStrong)
+                    .frame(width: 18, height: 18, alignment: .center)
+                    .background {
+                        Circle()
+                            .fill(tint)
+                    }
                     .rotationEffect(rotation)
+                    .offset(y: -0.5)
                     .accessibilityHidden(true)
             } else {
                 Image(systemName: icon)
