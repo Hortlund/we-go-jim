@@ -3348,10 +3348,6 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            Color.clear
-                .frame(width: 0, height: 0)
-                .wgjTrackKeyboardVisibility($isKeyboardVisible)
-
             if shouldShowDock, let session {
                 ActiveWorkoutBottomDock(
                     session: session,
@@ -3361,6 +3357,7 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .bottom)
+        .wgjTrackKeyboardVisibility($isKeyboardVisible)
         .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: isKeyboardVisible)
         .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: restTimerPopupID)
     }

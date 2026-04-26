@@ -931,6 +931,7 @@ final class WGJUITests: XCTestCase {
         reopenedWeightField.tap()
         XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["keyboard-hide-button"].waitForExistence(timeout: 2))
+        XCTAssertFalse(identifiedElement("active-workout-elapsed-timer", in: app).exists)
     }
 
     @MainActor
