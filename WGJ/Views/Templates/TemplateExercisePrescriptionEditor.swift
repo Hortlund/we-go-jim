@@ -1753,6 +1753,12 @@ private struct TemplateExerciseDropStageCardView: View, Equatable {
 
     @State private var repsText: String
     @State private var weightText: String
+    @FocusState private var focusedField: Field?
+
+    private enum Field: Hashable {
+        case weight
+        case reps
+    }
 
     init(
         index: Int,
@@ -1799,13 +1805,12 @@ private struct TemplateExerciseDropStageCardView: View, Equatable {
                     .keyboardType(.decimalPad)
                     .multilineTextAlignment(.center)
                     .wgjPillField()
-                    .onChange(of: weightText) { _, newValue in
-                        onWeightChanged(newValue)
-                    }
+                    .focused($focusedField, equals: .weight)
 
                 WGJActionMenuButton("Drop Load Unit", titleVisibility: .hidden) {
                     ForEach(TemplateLoadUnit.allCases) { unit in
                         Button(unit.shortLabel) {
+                            commitLocalText()
                             onLoadUnitChanged(unit)
                         }
                     }
@@ -1819,9 +1824,7 @@ private struct TemplateExerciseDropStageCardView: View, Equatable {
                     .keyboardType(.numberPad)
                     .multilineTextAlignment(.center)
                     .wgjPillField()
-                    .onChange(of: repsText) { _, newValue in
-                        onRepsChanged(newValue)
-                    }
+                    .focused($focusedField, equals: .reps)
             }
         }
         .onChange(of: stage.targetReps) { _, newValue in
@@ -1833,6 +1836,25 @@ private struct TemplateExerciseDropStageCardView: View, Equatable {
             let resolved = newValue.map(WGJFormatters.decimalString) ?? ""
             guard weightText != resolved else { return }
             weightText = resolved
+        }
+        .onChange(of: focusedField) { oldValue, newValue in
+            guard oldValue != nil, newValue == nil else { return }
+            commitLocalText()
+        }
+        .onDisappear {
+            commitLocalText()
+        }
+    }
+
+    private func commitLocalText() {
+        let resolvedWeightText = stage.targetWeight.map(WGJFormatters.decimalString) ?? ""
+        if weightText != resolvedWeightText {
+            onWeightChanged(weightText)
+        }
+
+        let resolvedRepsText = stage.targetReps.map(String.init) ?? ""
+        if repsText != resolvedRepsText {
+            onRepsChanged(repsText)
         }
     }
 }

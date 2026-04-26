@@ -1651,18 +1651,11 @@ struct ActiveWorkoutView: View {
     }
 
     private var previousPerformanceHydrationDelay: Duration {
-        guard AppRuntimeConfig.isRunningTests,
-              let rawValue = ProcessInfo.processInfo.environment["UITEST_ACTIVE_WORKOUT_PREVIOUS_PERFORMANCE_DELAY_MS"],
-              let milliseconds = Int(rawValue)
-        else {
-            return .milliseconds(0)
-        }
-
-        return .milliseconds(max(0, milliseconds))
+        ActiveWorkoutInteractionWorkPolicy.previousPerformanceHydrationDelay()
     }
 
     private var guidanceRefreshDelay: Duration {
-        .milliseconds(450)
+        ActiveWorkoutInteractionWorkPolicy.defaultGuidanceRefreshDelay
     }
 
     private func showExerciseSettings(for exercise: ActiveWorkoutDraftExercise) {

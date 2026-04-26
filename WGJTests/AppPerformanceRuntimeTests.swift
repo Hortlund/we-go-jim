@@ -198,6 +198,33 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
+    func activeWorkoutDefersNonCriticalHydrationPastFirstInteractionWindow() {
+        #expect(
+            ActiveWorkoutInteractionWorkPolicy.previousPerformanceHydrationDelay(
+                isRunningTests: false,
+                environment: [:]
+            ) == .milliseconds(650)
+        )
+        #expect(ActiveWorkoutInteractionWorkPolicy.defaultGuidanceRefreshDelay == .milliseconds(900))
+    }
+
+    @Test
+    func activeWorkoutUITestsCanOverridePreviousPerformanceHydrationDelay() {
+        #expect(
+            ActiveWorkoutInteractionWorkPolicy.previousPerformanceHydrationDelay(
+                isRunningTests: true,
+                environment: ["UITEST_ACTIVE_WORKOUT_PREVIOUS_PERFORMANCE_DELAY_MS": "4000"]
+            ) == .milliseconds(4000)
+        )
+        #expect(
+            ActiveWorkoutInteractionWorkPolicy.previousPerformanceHydrationDelay(
+                isRunningTests: true,
+                environment: ["UITEST_ACTIVE_WORKOUT_PREVIOUS_PERFORMANCE_DELAY_MS": "-10"]
+            ) == .milliseconds(0)
+        )
+    }
+
+    @Test
     func activeWorkoutPersistenceChangeSetSkipsUnchangedSnapshots() {
         let snapshots = ActiveWorkoutExercisePersistenceSnapshot(
             setDrafts: [

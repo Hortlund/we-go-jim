@@ -137,14 +137,20 @@ struct TemplateEditorView: View {
         VStack(alignment: .leading, spacing: 12) {
             WGJSectionHeader("Template", subtitle: "Name and notes")
 
-            TextField("Template name", text: $templateName)
-                .textInputAutocapitalization(.words)
-                .wgjPillField()
-                .accessibilityIdentifier("template-editor-name-field")
+            WGJResponsiveTextField(
+                placeholder: "Template name",
+                text: $templateName,
+                capitalization: .words,
+                accessibilityIdentifier: "template-editor-name-field"
+            )
 
-            TextField("Notes (optional)", text: $templateNotes, axis: .vertical)
-                .lineLimit(3...6)
-                .wgjPillField()
+            WGJResponsiveTextField(
+                placeholder: "Notes (optional)",
+                text: $templateNotes,
+                axis: .vertical,
+                lineLimit: 3...6,
+                accessibilityIdentifier: "template-editor-notes-field"
+            )
         }
         .padding(14)
         .wgjCardContainer(strong: true)
