@@ -3349,6 +3349,8 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
     let onDismissKeyboard: () -> Void
 
     @State private var isKeyboardVisible = false
+    @State private var overlayMaxY: CGFloat = 0
+    @State private var keyboardMinY: CGFloat = 0
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -3385,16 +3387,28 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
                 .accessibilityLabel(WGJKeyboardHideControl.accessibilityLabel)
                 .accessibilityIdentifier(WGJKeyboardHideControl.accessibilityIdentifier)
                 .padding(.horizontal, 16)
-                .padding(.bottom, 8)
+                .padding(.bottom, keyboardDismissButtonBottomPadding)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .frame(maxWidth: .infinity, alignment: .bottomTrailing)
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear {
+                        updateOverlayMaxY(proxy.frame(in: .global).maxY)
+                    }
+                    .onChange(of: proxy.frame(in: .global).maxY) { _, maxY in
+                        updateOverlayMaxY(maxY)
+                    }
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
             updateKeyboardState(from: notification)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             isKeyboardVisible = false
+            keyboardMinY = 0
         }
         .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: shouldShowKeyboardDismissButton)
         .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: restTimerPopupID)
@@ -3408,6 +3422,24 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
         isKeyboardVisible || isMetricInputFocused
     }
 
+    private var keyboardDismissButtonBottomPadding: CGFloat {
+        guard
+            isKeyboardVisible,
+            overlayMaxY.isFinite,
+            keyboardMinY.isFinite,
+            overlayMaxY > keyboardMinY
+        else {
+            return 8
+        }
+
+        return max(8, overlayMaxY - keyboardMinY + 8)
+    }
+
+    private func updateOverlayMaxY(_ maxY: CGFloat) {
+        guard maxY.isFinite, maxY > 0, overlayMaxY != maxY else { return }
+        overlayMaxY = maxY
+    }
+
     private func updateKeyboardState(from notification: Notification) {
         let screenMaxY = UIScreen.main.bounds.maxY
         guard
@@ -3417,10 +3449,12 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
             endFrame.minY.isFinite
         else {
             isKeyboardVisible = false
+            keyboardMinY = 0
             return
         }
 
         isKeyboardVisible = endFrame.minY < screenMaxY
+        keyboardMinY = endFrame.minY
     }
 }
 
