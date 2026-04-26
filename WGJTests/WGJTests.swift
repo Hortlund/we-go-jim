@@ -961,6 +961,26 @@ struct WGJTests {
     }
 
     @Test
+    func cloudSyncClassifierTreatsTemporarilyUnavailableAccountAsRuntimeError() {
+        let summary = makeCloudSyncSummary(
+            type: .setup,
+            status: .failed,
+            error: CloudSyncErrorSnapshot(
+                domain: NSCocoaErrorDomain,
+                code: 134400,
+                underlyingDomain: nil,
+                underlyingCode: nil,
+                description: "Unable to initialize without a valid iCloud account (CKAccountStatusTemporarilyUnavailable)."
+            )
+        )
+
+        let resolution = CloudSyncEventHealthClassifier.resolution(for: summary)
+
+        #expect(resolution == .setRuntimeError("CloudKit setup failed. Cloud features are currently unavailable."))
+        #expect(!CloudSyncEventHealthClassifier.suppressesUserVisibleFailure(summary))
+    }
+
+    @Test
     func cloudSyncClassifierSuppressesNotAuthenticatedFailureAsUserVisibleRuntimeError() {
         let summary = makeCloudSyncSummary(
             type: .import,

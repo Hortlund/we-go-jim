@@ -81,8 +81,18 @@ nonisolated enum CloudSyncEventHealthClassifier {
     }
 
     private static func matchesAccountAuthNoise(_ error: CloudSyncErrorSnapshot) -> Bool {
-        matches(error, domain: NSCocoaErrorDomain, codes: [134400])
+        matchesNoAccountSetupNoise(error)
             || matches(error, domain: CKError.errorDomain, codes: [CKError.Code.notAuthenticated.rawValue])
+    }
+
+    private static func matchesNoAccountSetupNoise(_ error: CloudSyncErrorSnapshot) -> Bool {
+        guard matches(error, domain: NSCocoaErrorDomain, codes: [134400]) else {
+            return false
+        }
+
+        let description = error.description.lowercased()
+        return description.contains("ckaccountstatusnoaccount")
+            || description.contains("without an icloud account")
     }
 }
 
