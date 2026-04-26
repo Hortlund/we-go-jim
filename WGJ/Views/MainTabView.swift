@@ -25,10 +25,6 @@ struct MainTabView: View {
         reduceMotion ? .easeOut(duration: 0.01) : .smooth(duration: 0.36, extraBounce: 0.10)
     }
 
-    private var activeWorkoutModalAnimation: Animation {
-        WGJMotion.activeWorkoutModalAnimation(reduceMotion: reduceMotion)
-    }
-
     var body: some View {
         @Bindable var tabState = tabState
         @Bindable var workoutCompletionPresentationState = workoutCompletionPresentationState
@@ -115,10 +111,8 @@ struct MainTabView: View {
                 workoutCompletionPresentationState.presentQueuedIfNeeded()
             }) {
                 if let activeSessionID = activeWorkoutPresentationState.activeSessionID {
-                    ActiveWorkoutModalPresentation(animation: activeWorkoutModalAnimation) {
-                        NavigationStack {
-                            ActiveWorkoutView(sessionID: activeSessionID)
-                        }
+                    NavigationStack {
+                        ActiveWorkoutView(sessionID: activeSessionID)
                     }
                 }
             }
@@ -317,28 +311,6 @@ struct MainTabView: View {
         }
     }
 
-}
-
-private struct ActiveWorkoutModalPresentation<Content: View>: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    let animation: Animation
-    @ViewBuilder var content: () -> Content
-
-    @State private var isVisible = false
-
-    var body: some View {
-        content()
-            .opacity(isVisible ? 1 : 0.88)
-            .scaleEffect(isVisible || reduceMotion ? 1 : 0.985, anchor: .bottom)
-            .task {
-                guard !isVisible else { return }
-                await Task.yield()
-                withAnimation(animation) {
-                    isVisible = true
-                }
-            }
-    }
 }
 
 private var activeWorkoutStripTransition: AnyTransition {

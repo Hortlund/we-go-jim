@@ -371,6 +371,7 @@ struct ActiveWorkoutView: View {
             .background {
                 WorkoutRestTimerExpiryObserver()
             }
+            .wgjMinimalKeyboardToolbar(onDismiss: dismissKeyboard)
         }
     }
 

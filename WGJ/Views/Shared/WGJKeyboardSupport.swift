@@ -196,73 +196,54 @@ private struct WGJKeyboardVisibilityModifier: ViewModifier {
 
 private struct WGJMinimalKeyboardToolbarModifier: ViewModifier {
     let onDismiss: () -> Void
-    private let externalIsKeyboardVisible: Binding<Bool>?
-    @State private var localIsKeyboardVisible = false
 
     init(
         isKeyboardVisible: Binding<Bool>? = nil,
         onDismiss: @escaping () -> Void
     ) {
-        externalIsKeyboardVisible = isKeyboardVisible
         self.onDismiss = onDismiss
     }
 
     func body(content: Content) -> some View {
-        trackedContent(content)
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                if isKeyboardVisible {
-                    HStack {
-                        Spacer()
-
-                        Button(action: onDismiss) {
-                            HStack(spacing: 8) {
-                                Image(systemName: "keyboard.chevron.compact.down")
-                                    .font(.footnote.weight(.bold))
-
-                                Text("Hide")
-                                    .font(.footnote.weight(.semibold))
-                            }
-                            .foregroundStyle(WGJTheme.textPrimary)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 10)
-                            .background(
-                                Capsule()
-                                    .fill(WGJTheme.card.opacity(0.98))
-                                    .overlay(
-                                        Capsule()
-                                            .stroke(WGJTheme.rowDivider.opacity(0.9), lineWidth: 1)
-                                    )
-                                    .wgjCapsuleGlass(
-                                        tint: WGJTheme.accentBlue.opacity(0.08),
-                                        interactive: true
-                                    )
-                            )
-                            .shadow(color: Color.black.opacity(0.12), radius: 12, x: 0, y: 6)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Hide keyboard")
-                        .accessibilityIdentifier("keyboard-hide-button")
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                    .padding(.bottom, 8)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+        content
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    keyboardToolbarButton
                 }
             }
-            .animation(.easeOut(duration: 0.18), value: isKeyboardVisible)
     }
 
     @ViewBuilder
-    private func trackedContent(_ content: Content) -> some View {
-        if externalIsKeyboardVisible == nil {
-            content.wgjTrackKeyboardVisibility($localIsKeyboardVisible)
-        } else {
-            content
-        }
-    }
+    private var keyboardToolbarButton: some View {
+        Spacer()
 
-    private var isKeyboardVisible: Bool {
-        externalIsKeyboardVisible?.wrappedValue ?? localIsKeyboardVisible
+        Button(action: onDismiss) {
+            HStack(spacing: 8) {
+                Image(systemName: "keyboard.chevron.compact.down")
+                    .font(.footnote.weight(.bold))
+
+                Text("Hide")
+                    .font(.footnote.weight(.semibold))
+            }
+            .foregroundStyle(WGJTheme.textPrimary)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(
+                Capsule()
+                    .fill(WGJTheme.card.opacity(0.98))
+                    .overlay(
+                        Capsule()
+                            .stroke(WGJTheme.rowDivider.opacity(0.9), lineWidth: 1)
+                    )
+                    .wgjCapsuleGlass(
+                        tint: WGJTheme.accentBlue.opacity(0.08),
+                        interactive: true
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Hide keyboard")
+        .accessibilityIdentifier("keyboard-hide-button")
     }
 }
 
