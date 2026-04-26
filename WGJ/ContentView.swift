@@ -143,6 +143,7 @@ struct ContentView: View {
         defer { isPreparingMainPhase = false }
 
         await prepareLocalProfileIdentityIfNeeded()
+        await prepareFirstRunLocalBootstrapIfNeeded()
         startStartupWarmSnapshotsIfNeeded()
 
         if appPhase != .main {
@@ -542,6 +543,7 @@ struct ContentView: View {
         deferredMaintenanceState.reset()
         deferredMaintenanceRunTracker.reset()
         appWarmupState.reset()
+        FirstRunLocalBootstrapProgress.reset()
         hasScheduledInitialDeferredMaintenance = false
         updateIdleTimerState()
         withAnimation(.easeInOut(duration: 0.2)) {
@@ -795,6 +797,39 @@ struct ContentView: View {
         }
     }
 
+    @MainActor
+    private func prepareFirstRunLocalBootstrapIfNeeded() async {
+        let skipsSplash = ProcessInfo.processInfo.arguments.contains(AppStartupRouting.skipSplashArgument)
+        guard FirstRunLocalBootstrapPolicy.shouldRunBeforeMainEntry(
+            skipsSplash: skipsSplash,
+            hasBackgroundStore: appBackgroundStore != nil,
+            hasCompletedBootstrap: FirstRunLocalBootstrapProgress.isCompleted()
+        ) else {
+            return
+        }
+
+        guard let appBackgroundStore else { return }
+        let cloudSyncEnabled = appRuntimeState.cloudSyncEnabled
+
+        let result = try? await appBackgroundStore.performAsync("app.first-run.local-bootstrap") { backgroundContext in
+            BrosCleanStartPolicy.applyIfNeeded(modelContext: backgroundContext)
+            try? ExerciseCatalogRepository(modelContext: backgroundContext).ensureSeedImportedIfNeeded()
+            let profileWarmSnapshot = try? await Self.buildProfileWarmSnapshot(
+                modelContext: backgroundContext,
+                cloudSyncEnabled: cloudSyncEnabled
+            )
+            return FirstRunLocalBootstrapResult(profileWarmSnapshot: profileWarmSnapshot)
+        }
+
+        deferredMaintenanceState.markCleanStartApplied()
+        catalogSyncCoordinator.markPrimed()
+        if let profileWarmSnapshot = result?.profileWarmSnapshot {
+            appWarmupState.storeProfile(profileWarmSnapshot)
+            AppRuntimeState.shared.updateWorkoutNotificationStyle(profileWarmSnapshot.profile.workoutNotificationStyle)
+        }
+        FirstRunLocalBootstrapProgress.markCompleted()
+    }
+
     private static func buildProfileWarmSnapshot(
         modelContext: ModelContext,
         cloudSyncEnabled: Bool
@@ -932,6 +967,10 @@ private struct DeferredMaintenanceExecutionOutcome: Sendable {
         didApplyCleanStart: false,
         didPrimeCatalog: false
     )
+}
+
+private struct FirstRunLocalBootstrapResult: Sendable {
+    let profileWarmSnapshot: ProfileWarmSnapshot?
 }
 
 private enum AppStartupRouting {

@@ -313,7 +313,38 @@ struct AppLaunchWarmupTests {
             shouldWarmProfile: true,
             shouldWarmBros: true
         ))
-        #expect(!StartupWarmupLaunchPolicy.shouldWaitForWarmupsBeforeMainEntry)
+    }
+
+    @Test
+    func firstRunLocalBootstrapPolicyBlocksOnlyRealFirstLaunches() {
+        #expect(FirstRunLocalBootstrapPolicy.shouldRunBeforeMainEntry(
+            skipsSplash: false,
+            hasBackgroundStore: true,
+            hasCompletedBootstrap: false
+        ))
+        #expect(!FirstRunLocalBootstrapPolicy.shouldRunBeforeMainEntry(
+            skipsSplash: true,
+            hasBackgroundStore: true,
+            hasCompletedBootstrap: false
+        ))
+        #expect(!FirstRunLocalBootstrapPolicy.shouldRunBeforeMainEntry(
+            skipsSplash: false,
+            hasBackgroundStore: false,
+            hasCompletedBootstrap: false
+        ))
+        #expect(!FirstRunLocalBootstrapPolicy.shouldRunBeforeMainEntry(
+            skipsSplash: false,
+            hasBackgroundStore: true,
+            hasCompletedBootstrap: true
+        ))
+    }
+
+    @Test
+    func firstRunLocalBootstrapProgressIsVersioned() {
+        #expect(FirstRunLocalBootstrapProgress.isCompleted(appliedVersion: 0) == false)
+        #expect(FirstRunLocalBootstrapProgress.isCompleted(
+            appliedVersion: FirstRunLocalBootstrapProgress.currentVersion
+        ))
     }
 
     @Test

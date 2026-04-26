@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-04-26 - First Install Should Pay Local Prep Before Main
+
+- Date: 2026-04-26
+- Trigger/Problem: Fresh install felt slow across Profile, Bros, active workout first input, and pre-cardio, while later launches felt much better.
+- Root Cause: First-run local setup work such as catalog seed import, profile/dashboard preparation, and local bootstrap could be deferred into the user's first fast interactions instead of being paid once during boot.
+- Durable Rule: On real first launch, do bounded local-first preparation before exposing main UI: profile identity, local catalog seed, local clean-start/reset policy, and warm Profile snapshot. Do not block main entry on open-ended CloudKit/Bros feed network work. Persist a versioned completion marker so later startups keep the fast path.
+- How to Verify Next Time: Reset the first-run marker or fresh-install the app, launch without `UITEST_SKIP_SPLASH`, and confirm local bootstrap finishes before main; relaunch and confirm the gate is skipped. Run startup policy tests plus active-workout first-input UI smoke on the signed-in `iPhone 17 / iOS 26.2` simulator.
+- Status: active
+
 ## 2026-04-26 - CloudKit 134400 Can Mean Temporary Runtime Degradation
 
 - Date: 2026-04-26

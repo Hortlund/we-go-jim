@@ -66,8 +66,6 @@ nonisolated enum StartupWarmupGate {
 }
 
 nonisolated enum StartupWarmupLaunchPolicy {
-    static let shouldWaitForWarmupsBeforeMainEntry = false
-
     static func shouldStartNonblockingWarmups(
         skipsSplash: Bool,
         hasBackgroundStore: Bool,
@@ -77,6 +75,39 @@ nonisolated enum StartupWarmupLaunchPolicy {
         !skipsSplash
             && hasBackgroundStore
             && (shouldWarmProfile || shouldWarmBros)
+    }
+}
+
+nonisolated enum FirstRunLocalBootstrapPolicy {
+    static func shouldRunBeforeMainEntry(
+        skipsSplash: Bool,
+        hasBackgroundStore: Bool,
+        hasCompletedBootstrap: Bool
+    ) -> Bool {
+        !skipsSplash
+            && hasBackgroundStore
+            && !hasCompletedBootstrap
+    }
+}
+
+nonisolated enum FirstRunLocalBootstrapProgress {
+    static let currentVersion = 1
+    static let defaultsKey = "firstRunLocalBootstrapVersion"
+
+    static func isCompleted(appliedVersion: Int) -> Bool {
+        appliedVersion >= currentVersion
+    }
+
+    static func isCompleted(defaults: UserDefaults = .standard) -> Bool {
+        isCompleted(appliedVersion: defaults.integer(forKey: defaultsKey))
+    }
+
+    static func markCompleted(defaults: UserDefaults = .standard) {
+        defaults.set(currentVersion, forKey: defaultsKey)
+    }
+
+    static func reset(defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: defaultsKey)
     }
 }
 
