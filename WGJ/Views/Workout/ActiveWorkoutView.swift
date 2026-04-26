@@ -65,7 +65,6 @@ struct ActiveWorkoutView: View {
     @State private var preferredLoadUnit: TemplateLoadUnit = .kg
     @State private var isKeyboardVisible = false
     @State private var visibleScrollTarget: ActiveWorkoutScrollTarget?
-    @State private var hasConsumedInitialRestoreTarget = false
 
     @State private var errorMessage = ""
     @State private var showingError = false
@@ -146,7 +145,7 @@ struct ActiveWorkoutView: View {
                         )
                         .id(ActiveWorkoutScrollTarget.header)
                         if preWorkoutCardio != nil {
-                            cardioSection(for: .preWorkout, scrollProxy: scrollProxy)
+                            cardioSection(for: .preWorkout)
                         }
                         exercisesSectionHeader
                     } else if isEndingSession || completedSessionID != nil {
@@ -180,10 +179,7 @@ struct ActiveWorkoutView: View {
                     }
 
                     ForEach(exerciseDisplayGroups) { group in
-                        exerciseSection(
-                            for: group,
-                            scrollProxy: scrollProxy
-                        )
+                        exerciseSection(for: group)
                     }
 
                     if session != nil && !sessionExercises.isEmpty {
@@ -192,7 +188,7 @@ struct ActiveWorkoutView: View {
                     }
 
                     if postWorkoutCardio != nil {
-                        cardioSection(for: .postWorkout, scrollProxy: scrollProxy)
+                        cardioSection(for: .postWorkout)
                     }
 
                     if session != nil && !isEndingSession {
@@ -328,14 +324,12 @@ struct ActiveWorkoutView: View {
             }
             .task {
                 await bootstrapIfNeeded()
-                await Task.yield()
-                restoreScrollTargetIfNeeded(using: scrollProxy)
             }
             .task(id: session?.id) {
                 await reconcileSessionLifecycleIfNeeded()
             }
             .task(id: exerciseHydrationStamp) {
-                await loadExerciseStateIfNeeded(using: scrollProxy)
+                await loadExerciseStateIfNeeded()
             }
             .onChange(of: isKeyboardVisible) { _, isVisible in
                 guard isCancelArmed, !isVisible else { return }
@@ -574,8 +568,7 @@ struct ActiveWorkoutView: View {
     @MainActor
     @ViewBuilder
     private func cardioSection(
-        for phase: WorkoutCardioPhase,
-        scrollProxy: ScrollViewProxy
+        for phase: WorkoutCardioPhase
     ) -> some View {
         if let cardioBlock = cardioBlock(for: phase) {
             ActiveWorkoutCardioPhaseCard(
@@ -597,7 +590,7 @@ struct ActiveWorkoutView: View {
                 completionAccessibilityIdentifier: "active-workout-\(cardioBlock.phase.rawValue)-toggle-button",
                 accessibilityIdentifier: "active-workout-\(phase.rawValue)-card",
                 onToggleCompletion: {
-                    toggleCardioCompletion(for: cardioBlock, scrollProxy: scrollProxy)
+                    toggleCardioCompletion(for: cardioBlock)
                 }
             ) {
                 cardioSectionActionsButton(for: cardioBlock)
@@ -656,8 +649,7 @@ struct ActiveWorkoutView: View {
     private func exerciseRow(
         for exercise: ActiveWorkoutDraftExercise,
         index: Int,
-        displayTitle: String? = nil,
-        scrollProxy: ScrollViewProxy
+        displayTitle: String? = nil
     ) -> some View {
         let exerciseID = exercise.id
         let exerciseName = exercise.exerciseNameSnapshot
@@ -696,7 +688,7 @@ struct ActiveWorkoutView: View {
                         updateNotesValue(notes, for: exerciseID)
                     },
                     onSetDraftsCommitted: { drafts in
-                        handleDraftsChanged(drafts, for: exercise, scrollProxy: scrollProxy)
+                        handleDraftsChanged(drafts, for: exercise)
                     },
                     onRestCommitted: { rest in
                         updateRestValue(rest, for: exerciseID)
@@ -714,8 +706,7 @@ struct ActiveWorkoutView: View {
                                 sourceID: setID,
                                 setLabel: setLabel,
                                 restSeconds: restSeconds,
-                                exercise: exercise,
-                                scrollProxy: scrollProxy
+                                exercise: exercise
                             )
                         } else {
                             restTimerState.clearRestTimer(sourceSetID: setID)
@@ -759,15 +750,13 @@ struct ActiveWorkoutView: View {
     @MainActor
     @ViewBuilder
     private func exerciseSection(
-        for group: WorkoutExerciseDisplayGroup<ActiveWorkoutDraftExercise>,
-        scrollProxy: ScrollViewProxy
+        for group: WorkoutExerciseDisplayGroup<ActiveWorkoutDraftExercise>
     ) -> some View {
         switch group {
         case .single(let exercise, let index):
             exerciseRow(
                 for: exercise,
-                index: index,
-                scrollProxy: scrollProxy
+                index: index
             )
         case .superset(let superset):
             VStack(alignment: .leading, spacing: 12) {
@@ -778,15 +767,13 @@ struct ActiveWorkoutView: View {
                 exerciseRow(
                     for: superset.first,
                     index: superset.firstIndex,
-                    displayTitle: SupersetExercisePosition.first.label,
-                    scrollProxy: scrollProxy
+                    displayTitle: SupersetExercisePosition.first.label
                 )
 
                 exerciseRow(
                     for: superset.second,
                     index: superset.secondIndex,
-                    displayTitle: SupersetExercisePosition.second.label,
-                    scrollProxy: scrollProxy
+                    displayTitle: SupersetExercisePosition.second.label
                 )
             }
             .padding(14)
@@ -923,7 +910,7 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
-    private func loadExerciseStateIfNeeded(using scrollProxy: ScrollViewProxy) async {
+    private func loadExerciseStateIfNeeded() async {
         let trace = WGJPerformance.begin("active-workout.hydrate")
         defer { WGJPerformance.end(trace) }
 
@@ -1017,9 +1004,6 @@ struct ActiveWorkoutView: View {
         )
 
         loadedExerciseStateStamp = currentStamp
-        await Task.yield()
-        guard !Task.isCancelled, currentStamp == exerciseHydrationStamp else { return }
-        restoreScrollTargetIfNeeded(using: scrollProxy)
         await Task.yield()
         guard !Task.isCancelled, currentStamp == exerciseHydrationStamp else { return }
         scheduleDeferredHydration(
@@ -1351,10 +1335,7 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
-    private func toggleCardioCompletion(
-        for cardioBlock: ActiveWorkoutDraftCardioBlock,
-        scrollProxy: ScrollViewProxy
-    ) {
+    private func toggleCardioCompletion(for cardioBlock: ActiveWorkoutDraftCardioBlock) {
         let currentCompletion = resolvedCardioCompletion(for: cardioBlock)
         guard canToggleCompletion(for: cardioBlock) || currentCompletion else {
             return
@@ -1365,52 +1346,23 @@ struct ActiveWorkoutView: View {
 
         if updatedCompletion {
             WorkoutFeedbackCenter.shared.exerciseCompleted()
-            Task { @MainActor in
-                await Task.yield()
-                focusNextPhase(
-                    afterCompleting: cardioBlock.phase,
-                    scrollProxy: scrollProxy
-                )
-            }
         }
     }
 
     @MainActor
     private func handleDraftsChanged(
         _ drafts: [WorkoutSessionSetDraft],
-        for exercise: ActiveWorkoutDraftExercise,
-        scrollProxy: ScrollViewProxy
+        for exercise: ActiveWorkoutDraftExercise
     ) {
         updateDraftsValue(drafts, for: exercise.id)
         let isCompleted = isExerciseCompleted(drafts)
         let previouslyCompleted = cardStateController.didCompleteCurrentCycle(for: exercise.id)
         if previouslyCompleted != isCompleted {
-            let completedExerciseIDs = completedExerciseIDs(
-                updating: exercise.id,
-                with: drafts
-            )
-            let shouldFocusPostWorkoutCardio =
-                isCompleted
-                && postWorkoutCardio != nil
-                && completedExerciseIDs.count == sessionExercises.count
             withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
-                let nextExerciseID = cardStateController.updateCompletion(
+                cardStateController.updateCompletion(
                     for: exercise.id,
-                    isCompleted: isCompleted,
-                    orderedExerciseIDs: sessionExercises.map(\.id),
-                    completedExerciseIDs: completedExerciseIDs
+                    isCompleted: isCompleted
                 )
-                if shouldFocusPostWorkoutCardio {
-                    scrollToTarget(
-                        cardioScrollTarget(for: .postWorkout),
-                        using: scrollProxy
-                    )
-                } else if let nextExerciseID {
-                    scrollToTarget(
-                        ActiveWorkoutScrollTarget.exercise(nextExerciseID),
-                        using: scrollProxy
-                    )
-                }
             }
             if isCompleted {
                 WorkoutFeedbackCenter.shared.exerciseCompleted()
@@ -1423,8 +1375,7 @@ struct ActiveWorkoutView: View {
         sourceID: UUID,
         setLabel: String?,
         restSeconds: Int,
-        exercise: ActiveWorkoutDraftExercise,
-        scrollProxy: ScrollViewProxy
+        exercise: ActiveWorkoutDraftExercise
     ) {
         let drafts = resolvedDrafts(for: exercise)
         guard let source = completionSourceContext(sourceID: sourceID, drafts: drafts) else {
@@ -1439,31 +1390,6 @@ struct ActiveWorkoutView: View {
 
         guard source.completesSetCycle else {
             restTimerState.clearRestTimer(sourceSetID: sourceID)
-            return
-        }
-
-        if let supersetContext = supersetContextByExerciseID[exercise.id],
-           let route = ActiveWorkoutSupersetNavigationPlanner.routeAfterCompletedSetCycle(
-                position: supersetContext.position,
-                setIndex: source.setIndex,
-                pairedExerciseID: supersetContext.pairedExerciseID,
-                pairedSetCyclesCompleted: setCycleCompletionStates(for: supersetContext.pairedExerciseID)
-           ) {
-            if supersetContext.position == .second {
-                startRestTimer(
-                    seconds: supersetContext.roundRestSeconds,
-                    exerciseName: exercise.exerciseNameSnapshot,
-                    setLabel: setLabel,
-                    sourceSetID: sourceID
-                )
-            } else {
-                restTimerState.clearRestTimer(sourceSetID: sourceID)
-            }
-
-            if case .exercise(let targetExerciseID) = route {
-                cardStateController.setExpanded(true, for: targetExerciseID)
-            }
-            scrollToTarget(route, using: scrollProxy)
             return
         }
 
@@ -1696,25 +1622,6 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
-    private func completedExerciseIDs(
-        updating exerciseID: UUID,
-        with drafts: [WorkoutSessionSetDraft]
-    ) -> Set<UUID> {
-        Set(
-            sessionExercises.compactMap { candidate in
-                let candidateDrafts: [WorkoutSessionSetDraft]
-                if candidate.id == exerciseID {
-                    candidateDrafts = drafts
-                } else {
-                    candidateDrafts = setDraftsByExerciseID[candidate.id] ?? []
-                }
-
-                return isExerciseCompleted(candidateDrafts) ? candidate.id : nil
-            }
-        )
-    }
-
-    @MainActor
     private func firstIncompleteExerciseID(
         from exercises: [ActiveWorkoutDraftExercise],
         draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
@@ -1737,79 +1644,6 @@ struct ActiveWorkoutView: View {
             let drafts = draftsByExerciseID[exercise.id] ?? []
             return isExerciseCompleted(drafts)
         }
-    }
-
-    @MainActor
-    private func restoreScrollTargetIfNeeded(using scrollProxy: ScrollViewProxy) {
-        guard !hasConsumedInitialRestoreTarget else { return }
-        guard let scrollTarget = activeWorkoutPresentationState.scrollTarget else { return }
-        hasConsumedInitialRestoreTarget = true
-        guard isValidScrollTarget(scrollTarget) else {
-            activeWorkoutPresentationState.scrollTarget = nil
-            return
-        }
-
-        visibleScrollTarget = scrollTarget
-        activeWorkoutPresentationState.scrollTarget = nil
-        scrollProxy.scrollTo(scrollTarget, anchor: .center)
-    }
-
-    @MainActor
-    private func isValidScrollTarget(_ target: ActiveWorkoutScrollTarget) -> Bool {
-        switch target {
-        case .header:
-            return session != nil
-        case .preWorkoutCardio:
-            return preWorkoutCardio != nil
-        case .exercise(let exerciseID):
-            return sessionExercises.contains(where: { $0.id == exerciseID })
-        case .postWorkoutCardio:
-            return postWorkoutCardio != nil
-        case .cancelSection:
-            return session != nil && !isEndingSession
-        }
-    }
-
-    @MainActor
-    private func bestRestoreScrollTargetForMinimize() -> ActiveWorkoutScrollTarget? {
-        if visibleScrollTarget == .cancelSection,
-           let lastExerciseID = sessionExercises.last?.id {
-            return .exercise(lastExerciseID)
-        }
-
-        if let visibleScrollTarget,
-           isValidScrollTarget(visibleScrollTarget),
-           visibleScrollTarget != .header,
-           visibleScrollTarget != .cancelSection {
-            return visibleScrollTarget
-        }
-
-        if let expandedIncompleteExerciseID = sessionExercises.first(where: { exercise in
-            cardStateController.isExpanded(for: exercise.id)
-                && !isExerciseCompleted(resolvedDrafts(for: exercise))
-        })?.id {
-            return .exercise(expandedIncompleteExerciseID)
-        }
-
-        if areMainExercisesUnlocked,
-           let firstIncompleteExerciseID = firstIncompleteExerciseID(
-                from: sessionExercises,
-                draftsByExerciseID: setDraftsByExerciseID
-           ) {
-            return .exercise(firstIncompleteExerciseID)
-        }
-
-        if let postWorkoutCardio,
-           !resolvedCardioCompletion(for: postWorkoutCardio),
-           isPostWorkoutCardioUnlocked {
-            return cardioScrollTarget(for: .postWorkout)
-        }
-
-        if let visibleScrollTarget, isValidScrollTarget(visibleScrollTarget) {
-            return visibleScrollTarget
-        }
-
-        return session != nil ? .header : nil
     }
 
     private var exerciseCardTransition: AnyTransition {
@@ -2012,8 +1846,6 @@ struct ActiveWorkoutView: View {
     private func minimizeWorkout() {
         dismissKeyboard()
         isCancelArmed = false
-        activeWorkoutPresentationState.scrollTarget = bestRestoreScrollTargetForMinimize()
-        hasConsumedInitialRestoreTarget = false
         performExpiringBackgroundFlush(named: "active-workout.minimize") {
             _ = await flushDirtyWritesNow(checkpoint: .minimize)
         }
@@ -2605,33 +2437,6 @@ struct ActiveWorkoutView: View {
             return .preWorkoutCardio
         case .postWorkout:
             return .postWorkoutCardio
-        }
-    }
-
-    @MainActor
-    private func focusNextPhase(
-        afterCompleting phase: WorkoutCardioPhase,
-        scrollProxy: ScrollViewProxy
-    ) {
-        switch phase {
-        case .preWorkout:
-            if let firstIncompleteExerciseID = firstIncompleteExerciseID(
-                from: sessionExercises,
-                draftsByExerciseID: setDraftsByExerciseID
-            ) {
-                cardStateController.setExpanded(true, for: firstIncompleteExerciseID)
-                scrollToTarget(
-                    ActiveWorkoutScrollTarget.exercise(firstIncompleteExerciseID),
-                    using: scrollProxy
-                )
-            } else if postWorkoutCardio != nil {
-                scrollToTarget(
-                    cardioScrollTarget(for: .postWorkout),
-                    using: scrollProxy
-                )
-            }
-        case .postWorkout:
-            break
         }
     }
 

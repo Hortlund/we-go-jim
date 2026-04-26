@@ -625,7 +625,6 @@ final class ActiveWorkoutPresentationState {
     var activeSessionID: UUID?
     var isActiveWorkoutPresented = false
     var isActiveWorkoutStripCollapsed = false
-    var scrollTarget: ActiveWorkoutScrollTarget?
     @ObservationIgnored private var preparedPreviousPerformanceResolutionBySessionID: [UUID: [UUID: WorkoutPreviousPerformanceResolution]] = [:]
     @ObservationIgnored private var preparedFirstRenderSnapshotBySessionID: [UUID: ActiveWorkoutPreparedFirstRenderSnapshot] = [:]
 
@@ -635,7 +634,6 @@ final class ActiveWorkoutPresentationState {
                 preparedPreviousPerformanceResolutionBySessionID.removeValue(forKey: activeSessionID)
                 preparedFirstRenderSnapshotBySessionID.removeValue(forKey: activeSessionID)
             }
-            scrollTarget = nil
         }
         guard
             activeSessionID != sessionID
@@ -673,7 +671,6 @@ final class ActiveWorkoutPresentationState {
         activeSessionID = nil
         isActiveWorkoutPresented = false
         isActiveWorkoutStripCollapsed = false
-        scrollTarget = nil
     }
 
     func stagePreparedPreviousPerformanceResolution(

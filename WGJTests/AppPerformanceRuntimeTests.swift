@@ -505,34 +505,30 @@ struct AppPerformanceRuntimeTests {
 
     @MainActor
     @Test
-    func presentingCollapsedActiveWorkoutPreservesScrollTargetForSameSession() {
+    func presentingCollapsedActiveWorkoutKeepsSameSessionPresentation() {
         let sessionID = UUID()
-        let exerciseID = UUID()
         let state = ActiveWorkoutPresentationState()
 
         state.present(sessionID: sessionID)
-        state.scrollTarget = .exercise(exerciseID)
         state.collapseActiveWorkout()
         state.present(sessionID: sessionID)
 
-        #expect(state.scrollTarget == .exercise(exerciseID))
+        #expect(state.activeSessionID == sessionID)
         #expect(state.isActiveWorkoutPresented)
         #expect(!state.isActiveWorkoutStripCollapsed)
     }
 
     @MainActor
     @Test
-    func presentingDifferentActiveWorkoutClearsScrollTarget() {
+    func presentingDifferentActiveWorkoutSwitchesSessionPresentation() {
         let firstSessionID = UUID()
         let secondSessionID = UUID()
-        let exerciseID = UUID()
         let state = ActiveWorkoutPresentationState()
 
         state.present(sessionID: firstSessionID)
-        state.scrollTarget = .exercise(exerciseID)
         state.present(sessionID: secondSessionID)
 
-        #expect(state.scrollTarget == nil)
+        #expect(state.activeSessionID == secondSessionID)
         #expect(state.isActiveWorkoutPresented)
         #expect(!state.isActiveWorkoutStripCollapsed)
     }

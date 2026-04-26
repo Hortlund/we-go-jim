@@ -158,38 +158,12 @@ struct ActiveWorkoutExerciseCardStateController: Equatable {
     }
 
     mutating func updateCompletion(for exerciseID: UUID, isCompleted: Bool) {
-        _ = updateCompletion(
-            for: exerciseID,
-            isCompleted: isCompleted,
-            orderedExerciseIDs: [],
-            completedExerciseIDs: []
-        )
-    }
-
-    mutating func updateCompletion(
-        for exerciseID: UUID,
-        isCompleted: Bool,
-        orderedExerciseIDs: [UUID],
-        completedExerciseIDs: Set<UUID>
-    ) -> UUID? {
         if isCompleted {
-            guard !completedInCurrentCycle.contains(exerciseID) else { return nil }
+            guard !completedInCurrentCycle.contains(exerciseID) else { return }
             completedInCurrentCycle.insert(exerciseID)
             isExpandedByExerciseID[exerciseID] = false
-            guard
-                let nextExerciseID = nextIncompleteExerciseID(
-                    after: exerciseID,
-                    orderedExerciseIDs: orderedExerciseIDs,
-                    completedExerciseIDs: completedExerciseIDs
-                )
-            else {
-                return nil
-            }
-            isExpandedByExerciseID[nextExerciseID] = true
-            return nextExerciseID
         } else {
             completedInCurrentCycle.remove(exerciseID)
-            return nil
         }
     }
 
@@ -201,22 +175,6 @@ struct ActiveWorkoutExerciseCardStateController: Equatable {
         isExpandedByExerciseID[exerciseID] ?? defaultValue
     }
 
-    private func nextIncompleteExerciseID(
-        after exerciseID: UUID,
-        orderedExerciseIDs: [UUID],
-        completedExerciseIDs: Set<UUID>
-    ) -> UUID? {
-        guard let currentIndex = orderedExerciseIDs.firstIndex(of: exerciseID) else { return nil }
-
-        for nextIndex in orderedExerciseIDs.index(after: currentIndex)..<orderedExerciseIDs.endIndex {
-            let nextExerciseID = orderedExerciseIDs[nextIndex]
-            if !completedExerciseIDs.contains(nextExerciseID) {
-                return nextExerciseID
-            }
-        }
-
-        return nil
-    }
 }
 
 nonisolated struct TrainingGuidanceService {

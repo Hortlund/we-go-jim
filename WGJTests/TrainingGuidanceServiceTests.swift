@@ -429,7 +429,7 @@ struct TrainingGuidanceServiceTests {
     }
 
     @Test
-    func activeWorkoutControllerOpensNextIncompleteExerciseWhenCurrentCompletes() {
+    func activeWorkoutControllerDoesNotOpenNextIncompleteExerciseWhenCurrentCompletes() {
         let first = UUID()
         let second = UUID()
         let third = UUID()
@@ -441,17 +441,14 @@ struct TrainingGuidanceServiceTests {
             firstIncompleteExerciseID: first
         )
 
-        let nextExerciseID = controller.updateCompletion(
+        controller.updateCompletion(
             for: first,
-            isCompleted: true,
-            orderedExerciseIDs: [first, second, third],
-            completedExerciseIDs: [first, second]
+            isCompleted: true
         )
 
-        #expect(nextExerciseID == third)
         #expect(!controller.isExpanded(for: first))
         #expect(!controller.isExpanded(for: second))
-        #expect(controller.isExpanded(for: third))
+        #expect(!controller.isExpanded(for: third))
     }
 
     private func makeWorkoutSet(
