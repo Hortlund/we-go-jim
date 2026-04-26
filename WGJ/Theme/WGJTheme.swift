@@ -79,22 +79,34 @@ enum WGJRadius {
 }
 
 enum WGJMotion {
+    static func disclosureAnimation(reduceMotion: Bool) -> Animation {
+        reduceMotion ? .easeOut(duration: 0.01) : .smooth(duration: 0.24, extraBounce: 0.02)
+    }
+
     static func cardAnimation(reduceMotion: Bool) -> Animation {
-        reduceMotion ? .easeOut(duration: 0.01) : .snappy(duration: 0.28, extraBounce: 0.03)
+        reduceMotion ? .easeOut(duration: 0.01) : .smooth(duration: 0.28, extraBounce: 0.03)
     }
 
     static func quickAnimation(reduceMotion: Bool) -> Animation {
-        reduceMotion ? .easeOut(duration: 0.01) : .snappy(duration: 0.22, extraBounce: 0.02)
+        reduceMotion ? .easeOut(duration: 0.01) : .smooth(duration: 0.22, extraBounce: 0.02)
     }
 
     static func overlayAnimation(reduceMotion: Bool) -> Animation {
-        reduceMotion ? .easeOut(duration: 0.01) : .easeInOut(duration: 0.2)
+        reduceMotion ? .easeOut(duration: 0.01) : .smooth(duration: 0.26, extraBounce: 0.04)
     }
 
     static func cardTransition(reduceMotion: Bool) -> AnyTransition {
         .asymmetric(
             insertion: reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity),
             removal: reduceMotion ? .opacity : .move(edge: .trailing).combined(with: .opacity)
+        )
+    }
+
+    static func disclosureTransition(reduceMotion: Bool) -> AnyTransition {
+        guard !reduceMotion else { return .opacity }
+        return .asymmetric(
+            insertion: .opacity.combined(with: .scale(scale: 0.985, anchor: .top)),
+            removal: .opacity.combined(with: .scale(scale: 0.995, anchor: .top))
         )
     }
 }

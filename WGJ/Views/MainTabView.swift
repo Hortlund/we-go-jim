@@ -101,10 +101,10 @@ struct MainTabView: View {
                 set: { newValue in
                     if newValue {
                         if let sessionID = activeWorkoutPresentationState.activeSessionID {
-                            activeWorkoutPresentationState.present(sessionID: sessionID)
+                            presentActiveWorkout(sessionID: sessionID)
                         }
                     } else {
-                        activeWorkoutPresentationState.collapseActiveWorkout()
+                        collapseActiveWorkout()
                     }
                 }
             ), onDismiss: {
@@ -137,7 +137,9 @@ struct MainTabView: View {
                         workoutCompletionPresentationState.presentQueuedIfNeeded()
                     }
                 } else if !activeWorkoutPresentationState.isActiveWorkoutPresented {
-                    activeWorkoutPresentationState.isActiveWorkoutStripCollapsed = true
+                    withAnimation(overlayAnimation) {
+                        activeWorkoutPresentationState.isActiveWorkoutStripCollapsed = true
+                    }
                 }
             }
         }
@@ -210,7 +212,7 @@ struct MainTabView: View {
                !isKeyboardVisible
             {
                 ActiveWorkoutStripView(sessionID: activeSessionID) {
-                    activeWorkoutPresentationState.present(sessionID: activeSessionID)
+                    presentActiveWorkout(sessionID: activeSessionID)
                 }
                 .background {
                     GeometryReader { geometry in
@@ -294,6 +296,18 @@ struct MainTabView: View {
             return activeWorkoutStripBottomLift(bottomSafeAreaInset: bottomSafeAreaInset) + 82
         }
         return bottomSafeAreaInset + 72
+    }
+
+    private func presentActiveWorkout(sessionID: UUID) {
+        withAnimation(overlayAnimation) {
+            activeWorkoutPresentationState.present(sessionID: sessionID)
+        }
+    }
+
+    private func collapseActiveWorkout() {
+        withAnimation(overlayAnimation) {
+            activeWorkoutPresentationState.collapseActiveWorkout()
+        }
     }
 
 }

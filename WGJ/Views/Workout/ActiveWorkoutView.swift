@@ -910,7 +910,7 @@ struct ActiveWorkoutView: View {
     private func bootstrapIfNeeded() async {
         guard !hasBootstrapped else { return }
         hasBootstrapped = true
-        activeWorkoutPresentationState.present(sessionID: sessionID)
+        presentActiveWorkout()
 
         guard let session else { return }
         sessionNameDraft = session.name
@@ -2017,8 +2017,20 @@ struct ActiveWorkoutView: View {
         performExpiringBackgroundFlush(named: "active-workout.minimize") {
             _ = await flushDirtyWritesNow(checkpoint: .minimize)
         }
-        activeWorkoutPresentationState.collapseActiveWorkout()
+        collapseActiveWorkout()
         dismiss()
+    }
+
+    private func presentActiveWorkout() {
+        withAnimation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion)) {
+            activeWorkoutPresentationState.present(sessionID: sessionID)
+        }
+    }
+
+    private func collapseActiveWorkout() {
+        withAnimation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion)) {
+            activeWorkoutPresentationState.collapseActiveWorkout()
+        }
     }
 
     private func cancelWorkout() {

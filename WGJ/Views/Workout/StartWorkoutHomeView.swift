@@ -620,17 +620,14 @@ struct StartWorkoutHomeView: View {
     }
 
     private var folderExpansionAnimation: Animation {
-        reduceMotion ? .easeOut(duration: 0.01) : .easeInOut(duration: 0.24)
+        WGJMotion.disclosureAnimation(reduceMotion: reduceMotion)
     }
 
     private var folderContentTransition: AnyTransition {
         if reduceMotion {
             .opacity
         } else {
-            .asymmetric(
-                insertion: .opacity.combined(with: .scale(scale: 0.985, anchor: .top)),
-                removal: .opacity
-            )
+            WGJMotion.disclosureTransition(reduceMotion: reduceMotion)
         }
     }
 
@@ -779,7 +776,7 @@ struct StartWorkoutHomeView: View {
                 for: preparation.sessionID
             )
         }
-        activeWorkoutPresentationState.present(sessionID: preparation.sessionID)
+        presentActiveWorkout(sessionID: preparation.sessionID)
     }
 
     private func lastPerformedDate(for templateID: UUID) -> Date? {
@@ -878,13 +875,19 @@ struct StartWorkoutHomeView: View {
         clearActiveWorkoutConflict()
         Task { @MainActor in
             await Task.yield()
-            activeWorkoutPresentationState.present(sessionID: sessionID)
+            presentActiveWorkout(sessionID: sessionID)
         }
     }
 
     private func clearActiveWorkoutConflict() {
         conflictingActiveSessionID = nil
         showingActiveWorkoutConflict = false
+    }
+
+    private func presentActiveWorkout(sessionID: UUID) {
+        withAnimation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion)) {
+            activeWorkoutPresentationState.present(sessionID: sessionID)
+        }
     }
 
     private func markHomeDirtyAndReloadIfActive() {

@@ -13,6 +13,8 @@ private enum TemplateEditorInputFocus: Hashable {
 }
 
 struct TemplateExercisePrescriptionEditor: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     let exerciseName: String
     let muscleSummary: String
     let category: String
@@ -751,7 +753,7 @@ struct TemplateExercisePrescriptionEditor: View {
     }
 
     private func toggleExpanded() {
-        withAnimation(.snappy(duration: 0.2, extraBounce: 0.02)) {
+        withAnimation(WGJMotion.disclosureAnimation(reduceMotion: reduceMotion)) {
             expansionBinding.wrappedValue.toggle()
         }
     }
@@ -876,7 +878,7 @@ struct TemplateExercisePrescriptionEditor: View {
     }
 
     private func addSet() {
-        withAnimation(.snappy(duration: 0.24, extraBounce: 0.04)) {
+        withAnimation(WGJMotion.quickAnimation(reduceMotion: reduceMotion)) {
             setDrafts.append(makeSetDraft(copying: setDrafts.last))
         }
         requestImmediateCommit()
@@ -885,7 +887,7 @@ struct TemplateExercisePrescriptionEditor: View {
     private func insertSet(after index: Int) {
         guard setDrafts.indices.contains(index) else { return }
 
-        withAnimation(.snappy(duration: 0.22, extraBounce: 0.04)) {
+        withAnimation(WGJMotion.quickAnimation(reduceMotion: reduceMotion)) {
             setDrafts.insert(makeSetDraft(copying: setDrafts[index]), at: index + 1)
         }
         requestImmediateCommit()
@@ -900,7 +902,7 @@ struct TemplateExercisePrescriptionEditor: View {
         guard setDrafts.indices.contains(index) else { return }
         let removedID = setDrafts[index].id
 
-        withAnimation(.snappy(duration: 0.2, extraBounce: 0.02)) {
+        withAnimation(WGJMotion.quickAnimation(reduceMotion: reduceMotion)) {
             _ = setDrafts.remove(at: index)
         }
 
@@ -939,7 +941,7 @@ struct TemplateExercisePrescriptionEditor: View {
     private func moveSetUp(_ index: Int) {
         guard index > 0 else { return }
 
-        withAnimation(.snappy(duration: 0.2, extraBounce: 0.02)) {
+        withAnimation(WGJMotion.quickAnimation(reduceMotion: reduceMotion)) {
             setDrafts.swapAt(index, index - 1)
         }
         requestImmediateCommit()
@@ -953,7 +955,7 @@ struct TemplateExercisePrescriptionEditor: View {
     private func moveSetDown(_ index: Int) {
         guard index < setDrafts.count - 1 else { return }
 
-        withAnimation(.snappy(duration: 0.2, extraBounce: 0.02)) {
+        withAnimation(WGJMotion.quickAnimation(reduceMotion: reduceMotion)) {
             setDrafts.swapAt(index, index + 1)
         }
         requestImmediateCommit()

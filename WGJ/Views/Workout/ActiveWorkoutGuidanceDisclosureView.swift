@@ -73,9 +73,10 @@ struct ActiveWorkoutGuidanceDisclosureView: View {
                     compact: true
                 )
                 .accessibilityIdentifier(detailAccessibilityIdentifier)
-                .transition(.move(edge: .top).combined(with: .opacity))
+                .transition(WGJMotion.disclosureTransition(reduceMotion: reduceMotion))
             }
         }
+        .animation(WGJMotion.disclosureAnimation(reduceMotion: reduceMotion), value: isExpanded)
         .onChange(of: guidance) { oldValue, newValue in
             guard oldValue != newValue else { return }
             if newValue.tone != .accent {
@@ -128,7 +129,7 @@ struct ActiveWorkoutGuidanceDisclosureView: View {
     }
 
     private func setExpanded(_ expanded: Bool) {
-        withAnimation(WGJMotion.quickAnimation(reduceMotion: reduceMotion)) {
+        withAnimation(WGJMotion.disclosureAnimation(reduceMotion: reduceMotion)) {
             isExpanded = expanded
         }
     }

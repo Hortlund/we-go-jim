@@ -10,6 +10,7 @@ struct ExercisesCatalogView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.isTabActive) private var isTabActive
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(AppTabState.self) private var appTabState
     @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
 
@@ -562,7 +563,7 @@ struct ExercisesCatalogView: View {
             if let activeSession = try activeWorkoutRepository.activeSession() {
                 try activeWorkoutRepository.addExercise(sessionID: activeSession.id, catalogItem: pendingExerciseForAdd)
                 stagePreparedPreviousPerformance(for: activeSession.id)
-                activeWorkoutPresentationState.present(sessionID: activeSession.id)
+                presentActiveWorkout(sessionID: activeSession.id)
                 appTabState.selectedTab = .startWorkout
                 return
             }
@@ -571,13 +572,19 @@ struct ExercisesCatalogView: View {
             createdSessionID = created.id
             try activeWorkoutRepository.addExercise(sessionID: created.id, catalogItem: pendingExerciseForAdd)
             stagePreparedPreviousPerformance(for: created.id)
-            activeWorkoutPresentationState.present(sessionID: created.id)
+            presentActiveWorkout(sessionID: created.id)
             appTabState.selectedTab = .startWorkout
         } catch {
             if let createdSessionID {
                 try? activeWorkoutRepository.cancelSession(sessionID: createdSessionID)
             }
             showError(error)
+        }
+    }
+
+    private func presentActiveWorkout(sessionID: UUID) {
+        withAnimation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion)) {
+            activeWorkoutPresentationState.present(sessionID: sessionID)
         }
     }
 
