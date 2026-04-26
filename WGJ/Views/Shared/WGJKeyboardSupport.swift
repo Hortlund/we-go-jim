@@ -17,6 +17,33 @@ enum WGJKeyboard {
     }
 }
 
+private enum WGJKeyboardHideControl {
+    static let title = "Hide"
+    static let systemImage = "keyboard.chevron.compact.down"
+    static let accessibilityLabel = "Hide keyboard"
+    static let accessibilityIdentifier = "keyboard-hide-button"
+    static let imagePadding: CGFloat = 6
+    static let horizontalPadding: CGFloat = 8
+    static let verticalPadding: CGFloat = 6
+
+    static var foregroundStyle: Color {
+        WGJTheme.textPrimary
+    }
+
+    static var foregroundUIColor: UIColor {
+        UIColor(WGJTheme.textPrimary)
+    }
+
+    static func buttonConfiguration() -> UIButton.Configuration {
+        var configuration = UIButton.Configuration.plain()
+        configuration.image = UIImage(systemName: systemImage)
+        configuration.imagePadding = imagePadding
+        configuration.title = title
+        configuration.baseForegroundColor = foregroundUIColor
+        return configuration
+    }
+}
+
 struct WGJAccessoryTextField: UIViewRepresentable {
     let placeholder: String
     @Binding var text: String
@@ -95,14 +122,9 @@ struct WGJAccessoryTextField: UIViewRepresentable {
             toolbar.barStyle = .default
             toolbar.isTranslucent = true
 
-            var configuration = UIButton.Configuration.bordered()
-            configuration.image = UIImage(systemName: "keyboard.chevron.compact.down")
-            configuration.imagePadding = 6
-            configuration.title = "Hide"
-
-            let button = UIButton(configuration: configuration)
-            button.accessibilityLabel = "Hide keyboard"
-            button.accessibilityIdentifier = "keyboard-hide-button"
+            let button = UIButton(configuration: WGJKeyboardHideControl.buttonConfiguration())
+            button.accessibilityLabel = WGJKeyboardHideControl.accessibilityLabel
+            button.accessibilityIdentifier = WGJKeyboardHideControl.accessibilityIdentifier
             button.addTarget(self, action: #selector(dismissKeyboard), for: .touchUpInside)
 
             toolbar.items = [
@@ -218,32 +240,20 @@ private struct WGJMinimalKeyboardToolbarModifier: ViewModifier {
         Spacer()
 
         Button(action: onDismiss) {
-            HStack(spacing: 8) {
-                Image(systemName: "keyboard.chevron.compact.down")
+            HStack(spacing: WGJKeyboardHideControl.imagePadding) {
+                Image(systemName: WGJKeyboardHideControl.systemImage)
                     .font(.footnote.weight(.bold))
 
-                Text("Hide")
+                Text(WGJKeyboardHideControl.title)
                     .font(.footnote.weight(.semibold))
             }
-            .foregroundStyle(WGJTheme.textPrimary)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(
-                Capsule()
-                    .fill(WGJTheme.card.opacity(0.98))
-                    .overlay(
-                        Capsule()
-                            .stroke(WGJTheme.rowDivider.opacity(0.9), lineWidth: 1)
-                    )
-                    .wgjCapsuleGlass(
-                        tint: WGJTheme.accentBlue.opacity(0.08),
-                        interactive: true
-                    )
-            )
+            .foregroundStyle(WGJKeyboardHideControl.foregroundStyle)
+            .padding(.horizontal, WGJKeyboardHideControl.horizontalPadding)
+            .padding(.vertical, WGJKeyboardHideControl.verticalPadding)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Hide keyboard")
-        .accessibilityIdentifier("keyboard-hide-button")
+        .accessibilityLabel(WGJKeyboardHideControl.accessibilityLabel)
+        .accessibilityIdentifier(WGJKeyboardHideControl.accessibilityIdentifier)
     }
 }
 

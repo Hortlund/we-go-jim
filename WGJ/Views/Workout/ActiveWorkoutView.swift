@@ -529,7 +529,6 @@ struct ActiveWorkoutView: View {
                 onCancel: { showingFinishConfirmation = false }
             )
             .presentationCompactAdaptation(.popover)
-            .presentationBackground(.clear)
         }
     }
 
@@ -2876,8 +2875,6 @@ private struct ActiveWorkoutFinishPopover: View {
         }
         .padding(14)
         .frame(width: 320, alignment: .leading)
-        .wgjCardContainer(strong: true, cornerRadius: 18)
-        .padding(6)
     }
 }
 
