@@ -31,6 +31,11 @@ struct BrosSocialServiceTests {
     }
 
     @Test
+    func brosCloudKitRecordSavesOnlySendChangedKeysByDefault() {
+        #expect(BrosCloudKitOperationExecutor.recordSavePolicy == .changedKeys)
+    }
+
+    @Test
     func memberSummaryConstructionDoesNotPrimeAvatarCache() {
         BrosAvatarCacheService.shared.clear()
 

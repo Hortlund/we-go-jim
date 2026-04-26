@@ -2,6 +2,8 @@ import CloudKit
 import Foundation
 
 enum BrosCloudKitOperationExecutor {
+    nonisolated static let recordSavePolicy: CKModifyRecordsOperation.RecordSavePolicy = .changedKeys
+
     static func queryRecords(
         in database: CKDatabase,
         recordType: String,
@@ -105,7 +107,7 @@ enum BrosCloudKitOperationExecutor {
             }
 
             let operation = CKModifyRecordsOperation(recordsToSave: records, recordIDsToDelete: recordIDs)
-            operation.savePolicy = .allKeys
+            operation.savePolicy = recordSavePolicy
             operation.isAtomic = true
             operation.qualityOfService = .userInitiated
             operation.modifyRecordsResultBlock = { result in
