@@ -458,7 +458,6 @@ struct TemplateExercisePrescriptionEditor: View {
                         .equatable()
                         .fixedSize(horizontal: false, vertical: true)
                     }
-                    .padding(.bottom, row.set.dropStages.isEmpty ? 0 : 6)
                 }
             }
 

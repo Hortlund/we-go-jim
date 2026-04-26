@@ -111,19 +111,19 @@ If you change the bundle identifier from `se.highball.WeGoJim`, update the iClou
 Build the app:
 
 ```bash
-xcodebuild build -project WGJ.xcodeproj -scheme WGJ -destination 'platform=iOS Simulator,name=iPhone 16'
+xcodebuild build -project WGJ.xcodeproj -scheme WGJ -destination 'platform=iOS Simulator,name=<available iPhone simulator>'
 ```
 
 Run the full test suite:
 
 ```bash
-xcodebuild test -project WGJ.xcodeproj -scheme WGJ -destination 'platform=iOS Simulator,name=iPhone 16'
+xcodebuild test -project WGJ.xcodeproj -scheme WGJ -destination 'platform=iOS Simulator,name=<available iPhone simulator>'
 ```
 
 Run UI tests only:
 
 ```bash
-xcodebuild test -project WGJ.xcodeproj -scheme WGJ -destination 'platform=iOS Simulator,name=iPhone 16' -only-testing:WGJUITests
+xcodebuild test -project WGJ.xcodeproj -scheme WGJ -destination 'platform=iOS Simulator,name=<available iPhone simulator>' -only-testing:WGJUITests
 ```
 
 Current automated coverage includes:

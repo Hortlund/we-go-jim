@@ -3,7 +3,6 @@ import SwiftUI
 
 struct WorkoutSessionExerciseGridEditor: View {
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     let exerciseName: String
     let muscleSummary: String
@@ -651,8 +650,8 @@ struct WorkoutSessionExerciseGridEditor: View {
                 setMenu(for: row)
             }
 
-            if horizontalSizeClass == .compact {
-                VStack(alignment: .leading, spacing: 12) {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 12) {
                     metricField(title: "Weight", supporting: row.targetWeightText) {
                         loadField(at: row.index)
                     }
@@ -661,8 +660,8 @@ struct WorkoutSessionExerciseGridEditor: View {
                         repsField(at: row.index)
                     }
                 }
-            } else {
-                HStack(alignment: .top, spacing: 12) {
+
+                VStack(alignment: .leading, spacing: 12) {
                     metricField(title: "Weight", supporting: row.targetWeightText) {
                         loadField(at: row.index)
                     }
