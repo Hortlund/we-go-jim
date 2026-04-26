@@ -774,16 +774,24 @@ struct ExercisesCatalogSnapshot {
     static let empty = ExercisesCatalogSnapshot()
 
     mutating func rebuild(from exercises: [ExerciseCatalogItem], muscleGroups: [MuscleGroup]) {
-        catalogExercises = exercises
+        var seenExerciseUUIDs: Set<String> = []
+        let uniqueExercises = exercises.filter { exercise in
+            seenExerciseUUIDs.insert(exercise.remoteUUID).inserted
+        }
+
+        catalogExercises = uniqueExercises
         self.muscleGroups = muscleGroups
-        exerciseByUUID = Dictionary(uniqueKeysWithValues: exercises.map { ($0.remoteUUID, $0) })
+        exerciseByUUID = Dictionary(
+            uniqueExercises.map { ($0.remoteUUID, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
 
         var muscleNameByID: [Int: String] = [:]
         var categories = Set<String>()
         var rows: [ExerciseCatalogRowSnapshot] = []
-        rows.reserveCapacity(exercises.count)
+        rows.reserveCapacity(uniqueExercises.count)
 
-        for exercise in exercises where !exercise.isHidden {
+        for exercise in uniqueExercises where !exercise.isHidden {
             for muscle in exercise.primaryMuscles {
                 muscleNameByID[muscle.remoteID] = muscle.name
             }

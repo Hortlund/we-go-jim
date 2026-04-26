@@ -387,6 +387,53 @@ struct TemplateRepositoryTests {
     }
 
     @Test
+    func updatingExerciseToleratesDuplicatePersistedComponentIDs() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+
+        let bench = ExerciseCatalogItem(
+            remoteUUID: "template-duplicate-component-bench",
+            displayName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(bench)
+
+        let template = try repository.createTemplate(name: "Push", notes: "")
+        try repository.setExercises(
+            templateID: template.id,
+            drafts: [TemplateExerciseDraft(catalogItem: bench)]
+        )
+
+        let storedExercise = try #require(try repository.exercises(in: template.id).first)
+        let existingComponent = try #require(try repository.components(for: storedExercise.id).first)
+        let duplicateComponent = TemplateExerciseComponent(
+            id: existingComponent.id,
+            templateExerciseID: storedExercise.id,
+            catalogExerciseUUID: existingComponent.catalogExerciseUUID,
+            exerciseNameSnapshot: existingComponent.exerciseNameSnapshot,
+            categorySnapshot: existingComponent.categorySnapshot,
+            muscleSummarySnapshot: existingComponent.muscleSummarySnapshot,
+            sortOrder: existingComponent.sortOrder + 1,
+            templateExercise: storedExercise
+        )
+        context.insert(duplicateComponent)
+        storedExercise.components?.append(duplicateComponent)
+        try context.save()
+
+        var draft = TemplateExerciseDraft(model: storedExercise, preferredLoadUnit: .kg)
+        draft.notes = "Updated without crashing."
+
+        try repository.setExercises(templateID: template.id, drafts: [draft])
+
+        let refreshedExercise = try #require(try repository.exercises(in: template.id).first)
+        #expect(refreshedExercise.notes == "Updated without crashing.")
+        #expect(try repository.components(for: refreshedExercise.id).map(\.id) == [existingComponent.id])
+    }
+
+    @Test
     func setExercisesPersistsSupersetPairsAndDropsetStages() throws {
         let context = try makeInMemoryContext()
         let repository = TemplateRepository(modelContext: context)

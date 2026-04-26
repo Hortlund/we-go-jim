@@ -15,16 +15,20 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
             sessionNotes: session.notes
         )
         let templateCardioByPhase = Dictionary(
-            uniqueKeysWithValues: orderedTemplateCardioBlocks.map { ($0.phase, $0) }
+            orderedTemplateCardioBlocks.map { ($0.phase, $0) },
+            uniquingKeysWith: { first, _ in first }
         )
         let sessionCardioByPhase = Dictionary(
-            uniqueKeysWithValues: orderedSessionCardioBlocks.map { ($0.phase, $0) }
+            orderedSessionCardioBlocks.map { ($0.phase, $0) },
+            uniquingKeysWith: { first, _ in first }
         )
         let templateExercisesByUUID = Dictionary(
-            uniqueKeysWithValues: orderedTemplateExercises.map { ($0.catalogExerciseUUID, $0) }
+            orderedTemplateExercises.map { ($0.catalogExerciseUUID, $0) },
+            uniquingKeysWith: { first, _ in first }
         )
         let templateExercisesByID = Dictionary(
-            uniqueKeysWithValues: orderedTemplateExercises.map { ($0.id, $0) }
+            orderedTemplateExercises.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
         )
         let matchedTemplateIDs = Set<UUID>(
             orderedSessionExercises.compactMap { exercise in
@@ -36,9 +40,10 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
             }
         )
         let sessionExercisesByLegacyCatalogUUID = Dictionary(
-            uniqueKeysWithValues: orderedSessionExercises
+            orderedSessionExercises
                 .filter { $0.templateExerciseID == nil }
-                .map { ($0.catalogExerciseUUID, $0) }
+                .map { ($0.catalogExerciseUUID, $0) },
+            uniquingKeysWith: { first, _ in first }
         )
 
         let addedCardioBlocks = orderedSessionCardioBlocks.compactMap { cardioBlock -> WorkoutTemplateSyncAddedCardioBlock? in
@@ -473,7 +478,10 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
             return []
         }
 
-        let sessionIndexByKey = Dictionary(uniqueKeysWithValues: sharedSessionOrder.enumerated().map { ($1, $0) })
+        let sessionIndexByKey = Dictionary(
+            sharedSessionOrder.enumerated().map { ($1, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
 
         return sharedTemplateOrder.enumerated().compactMap { index, identityKey in
             guard let destinationIndex = sessionIndexByKey[identityKey], destinationIndex != index else {

@@ -897,7 +897,10 @@ nonisolated final class CloudKitBrosSocialService: BrosSocialService, BrosSocial
             }
             return try await memberSummary(from: record)
         }
-        let membersByRecordName = Dictionary(uniqueKeysWithValues: members.map { ($0.userRecordName, $0) })
+        let membersByRecordName = Dictionary(
+            members.map { ($0.userRecordName, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
 
         let feedEventResolution = try await feedEventResolutionTask
         let eventRecords = feedEventResolution.records

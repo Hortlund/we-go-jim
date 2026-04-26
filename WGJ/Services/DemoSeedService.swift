@@ -36,14 +36,20 @@ final class DemoSeedService {
         }
 
         let refreshedFolders = try templateRepository.folders()
-        let foldersByName = Dictionary(uniqueKeysWithValues: refreshedFolders.map { ($0.name.lowercased(), $0) })
+        let foldersByName = Dictionary(
+            refreshedFolders.map { ($0.name.lowercased(), $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
 
         let catalogItems = try modelContext.fetch(
             FetchDescriptor<ExerciseCatalogItem>(
                 sortBy: [SortDescriptor(\.displayName, order: .forward)]
             )
         )
-        let itemsByUUID = Dictionary(uniqueKeysWithValues: catalogItems.map { ($0.remoteUUID, $0) })
+        let itemsByUUID = Dictionary(
+            catalogItems.map { ($0.remoteUUID, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
 
         for seedTemplate in DemoSeedCatalog.templates {
             guard let folder = foldersByName[seedTemplate.folderName.lowercased()] else {

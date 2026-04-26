@@ -314,7 +314,10 @@ struct TemplatesOverviewView: View {
     }
 
     private var folderNameByID: [UUID: String] {
-        Dictionary(uniqueKeysWithValues: folders.map { ($0.id, $0.name) })
+        Dictionary(
+            folders.map { ($0.id, $0.name) },
+            uniquingKeysWith: { first, _ in first }
+        )
     }
 
     private func folderLabel(for template: WorkoutTemplate, folderNameByID: [UUID: String]) -> String {

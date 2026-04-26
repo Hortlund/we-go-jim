@@ -258,7 +258,10 @@ nonisolated final class ExerciseCatalogRepository: ExerciseCatalogRepositoryProt
         }
 
         let muscles = try modelContext.fetch(FetchDescriptor<MuscleGroup>())
-        let musclesByID = Dictionary(uniqueKeysWithValues: muscles.map { ($0.remoteID, $0) })
+        let musclesByID = Dictionary(
+            muscles.map { ($0.remoteID, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
 
         let primaryMuscles = primaryMuscleIDs.compactMap { musclesByID[$0] }
         guard primaryMuscles.count == primaryMuscleIDs.count else {

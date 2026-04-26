@@ -416,9 +416,10 @@ nonisolated final class ActiveWorkoutDraftRepository {
             for: session,
             exercises: ordered,
             membershipsByExerciseID: Dictionary(
-                uniqueKeysWithValues: ordered.compactMap { exercise in
+                ordered.compactMap { exercise in
                     exercise.supersetMembership.map { (exercise.id, $0) }
-                }
+                },
+                uniquingKeysWith: { first, _ in first }
             )
         )
         session.updatedAt = .now
@@ -447,9 +448,10 @@ nonisolated final class ActiveWorkoutDraftRepository {
             for: session,
             exercises: remaining,
             membershipsByExerciseID: Dictionary(
-                uniqueKeysWithValues: remaining.compactMap { exercise in
+                remaining.compactMap { exercise in
                     exercise.supersetMembership.map { (exercise.id, $0) }
-                }
+                },
+                uniquingKeysWith: { first, _ in first }
             )
         )
         session.updatedAt = .now

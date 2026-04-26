@@ -141,7 +141,8 @@ struct TemplateEditorView: View {
                 placeholder: "Template name",
                 text: $templateName,
                 capitalization: .words,
-                accessibilityIdentifier: "template-editor-name-field"
+                accessibilityIdentifier: "template-editor-name-field",
+                commitDelay: .zero
             )
 
             WGJResponsiveTextField(
@@ -585,9 +586,10 @@ struct TemplateEditorView: View {
                 )
             }
             cardioDraftsByPhase = Dictionary(
-                uniqueKeysWithValues: try templateRepository.cardioBlocks(templateID: templateID).map { cardioBlock in
+                try templateRepository.cardioBlocks(templateID: templateID).map { cardioBlock in
                     (cardioBlock.phase, TemplateCardioBlockDraft(model: cardioBlock))
-                }
+                },
+                uniquingKeysWith: { first, _ in first }
             )
         } catch {
             errorMessage = String(describing: error)
@@ -622,7 +624,8 @@ struct TemplateEditorView: View {
     private func loadCatalogMatches() async {
         guard isTrainingGuidanceEnabled else {
             recommendationByExerciseID = Dictionary(
-                uniqueKeysWithValues: exerciseDrafts.map { ($0.id, nil as TemplateExerciseRecommendation?) }
+                exerciseDrafts.map { ($0.id, nil as TemplateExerciseRecommendation?) },
+                uniquingKeysWith: { first, _ in first }
             )
             return
         }
@@ -630,16 +633,20 @@ struct TemplateEditorView: View {
         let requestedCatalogUUIDs = recommendationReloadKey.catalogExerciseUUIDs
         guard !requestedCatalogUUIDs.isEmpty else {
             recommendationByExerciseID = Dictionary(
-                uniqueKeysWithValues: exerciseDrafts.map { ($0.id, nil as TemplateExerciseRecommendation?) }
+                exerciseDrafts.map { ($0.id, nil as TemplateExerciseRecommendation?) },
+                uniquingKeysWith: { first, _ in first }
             )
             return
         }
 
         do {
             let matches = try catalogRepository.exerciseMap(for: requestedCatalogUUIDs)
-            recommendationByExerciseID = Dictionary(uniqueKeysWithValues: exerciseDrafts.map { draftStore in
-                (draftStore.id, templateRecommendation(for: draftStore, catalogByUUID: matches))
-            })
+            recommendationByExerciseID = Dictionary(
+                exerciseDrafts.map { draftStore in
+                    (draftStore.id, templateRecommendation(for: draftStore, catalogByUUID: matches))
+                },
+                uniquingKeysWith: { first, _ in first }
+            )
         } catch {
             errorMessage = String(describing: error)
             showingError = true

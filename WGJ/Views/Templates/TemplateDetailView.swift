@@ -777,7 +777,8 @@ struct TemplateDetailView: View {
     private func loadCatalogMatches() async {
         guard isTrainingGuidanceEnabled else {
             recommendationByExerciseID = Dictionary(
-                uniqueKeysWithValues: templateExercises.map { ($0.id, nil as TemplateExerciseRecommendation?) }
+                templateExercises.map { ($0.id, nil as TemplateExerciseRecommendation?) },
+                uniquingKeysWith: { first, _ in first }
             )
             return
         }
@@ -785,7 +786,8 @@ struct TemplateDetailView: View {
         let requestedCatalogUUIDs = recommendationReloadKey.catalogExerciseUUIDs
         guard !requestedCatalogUUIDs.isEmpty else {
             recommendationByExerciseID = Dictionary(
-                uniqueKeysWithValues: templateExercises.map { ($0.id, nil as TemplateExerciseRecommendation?) }
+                templateExercises.map { ($0.id, nil as TemplateExerciseRecommendation?) },
+                uniquingKeysWith: { first, _ in first }
             )
             return
         }
@@ -793,9 +795,12 @@ struct TemplateDetailView: View {
         do {
             let matches = try ExerciseCatalogRepository(modelContext: modelContext)
                 .exerciseMap(for: requestedCatalogUUIDs)
-            recommendationByExerciseID = Dictionary(uniqueKeysWithValues: templateExercises.map { exercise in
-                (exercise.id, templateRecommendation(for: exercise, catalogByUUID: matches))
-            })
+            recommendationByExerciseID = Dictionary(
+                templateExercises.map { exercise in
+                    (exercise.id, templateRecommendation(for: exercise, catalogByUUID: matches))
+                },
+                uniquingKeysWith: { first, _ in first }
+            )
         } catch {
             showError(error)
         }

@@ -94,7 +94,10 @@ nonisolated final class ProfileWidgetRepository {
     func reorder(kindOrder: [ProfileWidgetKind]) throws {
         try ensureDefaultConfigsIfNeeded()
         let configs = try fetchConfigurations()
-        let map = Dictionary(uniqueKeysWithValues: configs.map { ($0.kind, $0) })
+        let map = Dictionary(
+            configs.map { ($0.kind, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
 
         var next = 0
         for kind in kindOrder {

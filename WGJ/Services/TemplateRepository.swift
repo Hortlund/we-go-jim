@@ -222,7 +222,10 @@ nonisolated struct TemplateExerciseDraft: Identifiable, Equatable, Sendable {
         fallbackMuscleSummarySnapshot: String
     ) -> [TemplateExerciseComponentDraft] {
         if !components.isEmpty {
-            return components
+            var seenIDs: Set<UUID> = []
+            return components.filter { component in
+                seenIDs.insert(component.id).inserted
+            }
         }
 
         guard !fallbackCatalogExerciseUUID.isEmpty else {
@@ -1197,10 +1200,12 @@ nonisolated final class TemplateRepository {
 
         let orderedExistingExercises = (template.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
         let existingByID = Dictionary(
-            uniqueKeysWithValues: orderedExistingExercises.map { ($0.id, $0) }
+            orderedExistingExercises.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
         )
         let existingByCatalogUUID = Dictionary(
-            uniqueKeysWithValues: orderedExistingExercises.map { ($0.catalogExerciseUUID, $0) }
+            orderedExistingExercises.map { ($0.catalogExerciseUUID, $0) },
+            uniquingKeysWith: { first, _ in first }
         )
 
         var updatedExercises: [TemplateExercise] = []
@@ -1271,9 +1276,10 @@ nonisolated final class TemplateRepository {
             for: template,
             exercises: updatedExercises,
             membershipsByExerciseID: Dictionary(
-                uniqueKeysWithValues: zip(updatedExercises, mutations).compactMap { exercise, mutation in
+                zip(updatedExercises, mutations).compactMap { exercise, mutation in
                     mutation.superset.map { (exercise.id, $0) }
-                }
+                },
+                uniquingKeysWith: { first, _ in first }
             )
         )
         syncCardioStructure(
@@ -1368,9 +1374,10 @@ nonisolated final class TemplateRepository {
             for: template,
             exercises: (template.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder },
             membershipsByExerciseID: Dictionary(
-                uniqueKeysWithValues: (template.exercises ?? []).compactMap { exercise in
+                (template.exercises ?? []).compactMap { exercise in
                     exercise.supersetMembership.map { (exercise.id, $0) }
-                }
+                },
+                uniquingKeysWith: { first, _ in first }
             )
         )
         template.updatedAt = .now
@@ -1404,9 +1411,10 @@ nonisolated final class TemplateRepository {
             for: template,
             exercises: ordered,
             membershipsByExerciseID: Dictionary(
-                uniqueKeysWithValues: ordered.compactMap { exercise in
+                ordered.compactMap { exercise in
                     exercise.supersetMembership.map { (exercise.id, $0) }
-                }
+                },
+                uniquingKeysWith: { first, _ in first }
             )
         )
         template.updatedAt = .now
@@ -1486,9 +1494,10 @@ nonisolated final class TemplateRepository {
             for: template,
             exercises: createdExercises,
             membershipsByExerciseID: Dictionary(
-                uniqueKeysWithValues: zip(createdExercises, drafts).compactMap { exercise, draft in
+                zip(createdExercises, drafts).compactMap { exercise, draft in
                     draft.superset.map { (exercise.id, $0) }
-                }
+                },
+                uniquingKeysWith: { first, _ in first }
             )
         )
 
@@ -1684,7 +1693,10 @@ nonisolated final class TemplateRepository {
             fallbackCategorySnapshot: exercise.categorySnapshot,
             fallbackMuscleSummarySnapshot: exercise.muscleSummarySnapshot
         )
-        let existingByID = Dictionary(uniqueKeysWithValues: orderedComponents(for: exercise).map { ($0.id, $0) })
+        let existingByID = Dictionary(
+            orderedComponents(for: exercise).map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
         let incomingIDs = Set(normalizedDrafts.map(\.id))
 
         for component in orderedComponents(for: exercise) where !incomingIDs.contains(component.id) {
@@ -1796,7 +1808,8 @@ nonisolated final class TemplateRepository {
     ) {
         let orderedExisting = orderedCardioBlocks(for: template)
         let existingByPhase = Dictionary(
-            uniqueKeysWithValues: orderedExisting.map { ($0.phase, $0) }
+            orderedExisting.map { ($0.phase, $0) },
+            uniquingKeysWith: { first, _ in first }
         )
         let desiredPhases = Set(desiredDrafts.map(\.phase))
 
@@ -1856,7 +1869,10 @@ nonisolated final class TemplateRepository {
         defaultRestSeconds: Int
     ) {
         let existingSets = (exercise.prescribedSets ?? []).sorted { $0.sortOrder < $1.sortOrder }
-        let existingByID = Dictionary(uniqueKeysWithValues: existingSets.map { ($0.id, $0) })
+        let existingByID = Dictionary(
+            existingSets.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
         let incomingIDs = Set(desiredDrafts.map(\.id))
         var updatedSets: [TemplateExerciseSet] = []
         updatedSets.reserveCapacity(desiredDrafts.count)
@@ -1907,7 +1923,10 @@ nonisolated final class TemplateRepository {
     ) {
         let normalizedDrafts = desiredDrafts
         let existingStages = (set.dropStages ?? []).sorted { $0.sortOrder < $1.sortOrder }
-        let existingByID = Dictionary(uniqueKeysWithValues: existingStages.map { ($0.id, $0) })
+        let existingByID = Dictionary(
+            existingStages.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
         let incomingIDs = Set(normalizedDrafts.map(\.id))
 
         for stage in existingStages where !incomingIDs.contains(stage.id) {
@@ -1951,7 +1970,10 @@ nonisolated final class TemplateRepository {
     ) {
         let orderedExercises = exercises.sorted { $0.sortOrder < $1.sortOrder }
         let existingGroups = (template.supersetGroups ?? []).filter { $0.modelContext != nil }
-        let existingGroupsByID = Dictionary(uniqueKeysWithValues: existingGroups.map { ($0.id, $0) })
+        let existingGroupsByID = Dictionary(
+            existingGroups.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
         let normalized = normalizedSupersetMemberships(
             for: orderedExercises,
             membershipsByExerciseID: membershipsByExerciseID
@@ -2157,7 +2179,10 @@ nonisolated final class TemplateRepository {
 
     private func duplicateSupersetGroupIDMap(from exercises: [TemplateExercise]) -> [UUID: UUID] {
         let sourceGroupIDs = Set(exercises.compactMap(\.supersetGroupID))
-        return Dictionary(uniqueKeysWithValues: sourceGroupIDs.map { ($0, UUID()) })
+        return Dictionary(
+            sourceGroupIDs.map { ($0, UUID()) },
+            uniquingKeysWith: { first, _ in first }
+        )
     }
 
     private func duplicateDraft(

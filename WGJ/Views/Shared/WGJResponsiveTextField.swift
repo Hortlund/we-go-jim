@@ -46,6 +46,7 @@ struct WGJResponsiveTextField: View {
     var onSubmit: (() -> Void)?
 
     @State private var draft = WGJResponsiveTextDraft()
+    @State private var pendingCommitTask: Task<Void, Never>?
     @FocusState private var isFocused: Bool
 
     var body: some View {
@@ -69,6 +70,8 @@ struct WGJResponsiveTextField: View {
             }
             .onDisappear {
                 commitNow()
+                pendingCommitTask?.cancel()
+                pendingCommitTask = nil
             }
     }
 
@@ -114,11 +117,39 @@ struct WGJResponsiveTextField: View {
             get: { draft.liveText },
             set: { newValue in
                 draft.stageLiveText(newValue)
+                scheduleCommit()
             }
         )
     }
 
+    private func scheduleCommit() {
+        pendingCommitTask?.cancel()
+
+        guard draft.hasUncommittedChanges else {
+            pendingCommitTask = nil
+            return
+        }
+
+        if commitDelay == .zero {
+            commitNow()
+            return
+        }
+
+        pendingCommitTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: commitDelay)
+            } catch {
+                return
+            }
+
+            guard !Task.isCancelled else { return }
+            commitNow()
+        }
+    }
+
     private func commitNow() {
+        pendingCommitTask?.cancel()
+        pendingCommitTask = nil
         guard let committed = draft.commitLiveText() else { return }
         text = committed
     }

@@ -471,7 +471,10 @@ nonisolated final class WorkoutTemplateSyncService {
             return []
         }
 
-        let sessionIndexByKey = Dictionary(uniqueKeysWithValues: sharedSessionOrder.enumerated().map { ($1, $0) })
+        let sessionIndexByKey = Dictionary(
+            sharedSessionOrder.enumerated().map { ($1, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
 
         return sharedTemplateOrder.enumerated().compactMap { index, identityKey in
             guard let destinationIndex = sessionIndexByKey[identityKey], destinationIndex != index else {

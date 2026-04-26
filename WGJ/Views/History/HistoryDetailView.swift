@@ -798,7 +798,7 @@ struct HistoryDetailView: View {
             .union(restByExerciseID.keys)
             .union(notesByExerciseID.keys)
         let snapshots = Dictionary<UUID, HistoryExerciseSaveSnapshot>(
-            uniqueKeysWithValues: sessionExercises.compactMap { exercise -> (UUID, HistoryExerciseSaveSnapshot)? in
+            sessionExercises.compactMap { exercise -> (UUID, HistoryExerciseSaveSnapshot)? in
                 guard changedExerciseIDs.contains(exercise.id),
                       let drafts = setDraftsByExerciseID[exercise.id] else {
                     return nil
@@ -812,7 +812,8 @@ struct HistoryDetailView: View {
                         notes: notesByExerciseID[exercise.id] ?? exercise.notes
                     )
                 )
-            }
+            },
+            uniquingKeysWith: { first, _ in first }
         )
 
         return HistorySaveCommand(
@@ -895,13 +896,16 @@ struct HistoryDetailView: View {
 
         return HistoryExerciseLocalStateResult(
             setDraftsByExerciseID: Dictionary(
-                uniqueKeysWithValues: exercises.map { ($0.id, Self.makeDrafts(from: $0)) }
+                exercises.map { ($0.id, Self.makeDrafts(from: $0)) },
+                uniquingKeysWith: { first, _ in first }
             ),
             restByExerciseID: Dictionary(
-                uniqueKeysWithValues: exercises.map { ($0.id, $0.restSeconds) }
+                exercises.map { ($0.id, $0.restSeconds) },
+                uniquingKeysWith: { first, _ in first }
             ),
             notesByExerciseID: Dictionary(
-                uniqueKeysWithValues: exercises.map { ($0.id, $0.notes) }
+                exercises.map { ($0.id, $0.notes) },
+                uniquingKeysWith: { first, _ in first }
             )
         )
     }

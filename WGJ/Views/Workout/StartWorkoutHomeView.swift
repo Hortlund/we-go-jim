@@ -1331,7 +1331,10 @@ enum StartWorkoutFolderExpansionPersistence {
             return
         }
 
-        let payload = Dictionary(uniqueKeysWithValues: expandedFolders.map { ($0.key.uuidString, $0.value) })
+        let payload = Dictionary(
+            expandedFolders.map { ($0.key.uuidString, $0.value) },
+            uniquingKeysWith: { first, _ in first }
+        )
         guard let data = try? JSONEncoder().encode(payload) else { return }
         defaults.set(data, forKey: defaultsKey)
     }

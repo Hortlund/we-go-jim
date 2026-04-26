@@ -54,7 +54,10 @@ nonisolated final class ExerciseCatalogSyncService {
             let now = nowProvider()
             let musclesByID = upsertSeedMuscles(payload.muscles)
             let existing = try modelContext.fetch(FetchDescriptor<ExerciseCatalogItem>())
-            var byUUID = Dictionary(uniqueKeysWithValues: existing.map { ($0.remoteUUID, $0) })
+            var byUUID = Dictionary(
+                existing.map { ($0.remoteUUID, $0) },
+                uniquingKeysWith: { first, _ in first }
+            )
             var seenUUIDs: Set<String> = []
 
             for seed in payload.exercises {
@@ -169,7 +172,10 @@ nonisolated final class ExerciseCatalogSyncService {
 
     private func upsertSeedMuscles(_ muscles: [SeedMuscle]) -> [Int: MuscleGroup] {
         let existing = (try? modelContext.fetch(FetchDescriptor<MuscleGroup>())) ?? []
-        var byID = Dictionary(uniqueKeysWithValues: existing.map { ($0.remoteID, $0) })
+        var byID = Dictionary(
+            existing.map { ($0.remoteID, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
 
         for seedMuscle in muscles {
             if let found = byID[seedMuscle.id] {
@@ -217,7 +223,10 @@ nonisolated final class ExerciseCatalogSyncService {
     private func replaceImages(on exercise: ExerciseCatalogItem, imageURL: String?) {
         let trimmedURL = imageURL?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let desiredURL = trimmedURL.isEmpty ? nil : trimmedURL
-        let existingByURL = Dictionary(uniqueKeysWithValues: exercise.images.map { ($0.remoteURL, $0) })
+        let existingByURL = Dictionary(
+            exercise.images.map { ($0.remoteURL, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
         var nextImages: [ExerciseImageAsset] = []
 
         if let desiredURL {

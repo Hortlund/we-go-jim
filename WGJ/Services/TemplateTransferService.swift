@@ -592,7 +592,10 @@ nonisolated final class TemplateTransferService {
         }
 
         let cardioBlocks = try repository.cardioBlocks(templateID: templateID)
-        let cardioByPhase = Dictionary(uniqueKeysWithValues: cardioBlocks.map { ($0.phase, $0) })
+        let cardioByPhase = Dictionary(
+            cardioBlocks.map { ($0.phase, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
 
         let exercises = try repository.exercises(in: templateID).map { exercise in
             let components = try repository.components(for: exercise.id).map { component in

@@ -2263,9 +2263,10 @@ struct ActiveWorkoutView: View {
         let validExerciseIDs = Set(sessionExercises.map(\.id))
         let dirtyExerciseIDs = pendingWrites.dirtyExerciseIDs(validIDs: validExerciseIDs)
         let dirtySnapshotsByExerciseID = Dictionary(
-            uniqueKeysWithValues: dirtyExerciseIDs.compactMap { exerciseID in
+            dirtyExerciseIDs.compactMap { exerciseID in
                 currentPersistenceSnapshot(for: exerciseID).map { (exerciseID, $0) }
-            }
+            },
+            uniquingKeysWith: { first, _ in first }
         )
         let preparedPersistedState = activeWorkoutPresentationState
             .preparedFirstRenderSnapshot(for: sessionID)?

@@ -512,9 +512,10 @@ nonisolated final class WorkoutSessionRepository {
             for: session,
             exercises: remaining,
             membershipsByExerciseID: Dictionary(
-                uniqueKeysWithValues: remaining.compactMap { exercise in
+                remaining.compactMap { exercise in
                     exercise.supersetMembership.map { (exercise.id, $0) }
-                }
+                },
+                uniquingKeysWith: { first, _ in first }
             )
         )
         session.updatedAt = .now

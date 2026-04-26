@@ -646,7 +646,10 @@ final class BrosViewModel {
             return freshSnapshot
         }
 
-        let currentEventsByID = Dictionary(uniqueKeysWithValues: currentSnapshot.feedEvents.map { ($0.id, $0) })
+        let currentEventsByID = Dictionary(
+            currentSnapshot.feedEvents.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
         let mergedEvents = freshSnapshot.feedEvents.map { event in
             guard pendingReactionEventIDs.contains(event.id), let currentEvent = currentEventsByID[event.id] else {
                 return event

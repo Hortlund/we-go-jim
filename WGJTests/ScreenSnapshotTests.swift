@@ -58,6 +58,30 @@ struct ScreenSnapshotTests {
     }
 
     @Test
+    func exercisesCatalogSnapshotToleratesDuplicateExerciseUUIDs() {
+        let first = ExerciseCatalogItem(
+            remoteUUID: "duplicate-catalog-uuid",
+            displayName: "First Bench",
+            categoryName: "Strength",
+            equipmentSummary: "Barbell",
+            isCurated: true
+        )
+        let duplicate = ExerciseCatalogItem(
+            remoteUUID: "duplicate-catalog-uuid",
+            displayName: "Duplicate Bench",
+            categoryName: "Strength",
+            equipmentSummary: "Barbell",
+            isCurated: true
+        )
+
+        var snapshot = ExercisesCatalogSnapshot.empty
+        snapshot.rebuild(from: [first, duplicate], muscleGroups: [])
+
+        #expect(snapshot.exerciseByUUID["duplicate-catalog-uuid"]?.displayName == "First Bench")
+        #expect(snapshot.sections.first?.rows.map(\.displayName) == ["First Bench"])
+    }
+
+    @Test
     func exercisesCatalogSearchStateClearsCommittedQueryAndFilters() {
         var state = ExercisesCatalogSearchState()
         let initialResetToken = state.resetToken
