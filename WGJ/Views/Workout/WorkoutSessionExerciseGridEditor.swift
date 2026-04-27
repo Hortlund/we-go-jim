@@ -3098,7 +3098,7 @@ struct WorkoutSetInlineHintPresentation: Equatable {
     }
 }
 
-enum WorkoutSetBozarCompletionResolver {
+nonisolated enum WorkoutSetBozarCompletionResolver {
     static func resolve(
         draft: WorkoutSessionSetDraft,
         previous: WorkoutPreviousSetSnapshot?,
@@ -3109,7 +3109,7 @@ enum WorkoutSetBozarCompletionResolver {
 }
 
 private extension WorkoutSessionSetDraft {
-    var showsLoggedPerformance: Bool {
+    nonisolated var showsLoggedPerformance: Bool {
         if actualWeight != nil || actualReps != nil {
             return true
         }
@@ -3117,7 +3117,7 @@ private extension WorkoutSessionSetDraft {
         return actualLoadUnit == .bodyweight && isCompleted
     }
 
-    func applyingPreviousPerformance(
+    nonisolated func applyingPreviousPerformance(
         _ previous: WorkoutPreviousSetSnapshot?,
         mode: WorkoutPreviousPerformanceApplicationMode = .overwriteExisting
     ) -> WorkoutSessionSetDraft {
