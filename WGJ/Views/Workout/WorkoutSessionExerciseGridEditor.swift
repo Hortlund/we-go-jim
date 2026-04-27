@@ -978,41 +978,6 @@ struct WorkoutSessionExerciseGridEditor: View {
                 Label("Reorder", systemImage: "arrow.up.arrow.down")
             }
 
-            Menu {
-                Button("Use exercise default (\(Self.formattedRest(restSeconds)))") {
-                    updateSetRest(restSeconds, forSetID: row.id)
-                }
-                .disabled(!isSetEditingEnabled || isLocked)
-
-                Button("Reduce rest by 15 sec") {
-                    updateSetRestByDelta(-15, forSetID: row.id)
-                }
-                .disabled(!isSetEditingEnabled || isLocked)
-
-                Button("Increase rest by 15 sec") {
-                    updateSetRestByDelta(15, forSetID: row.id)
-                }
-                .disabled(!isSetEditingEnabled || isLocked)
-
-                Button("No rest") {
-                    updateSetRest(0, forSetID: row.id)
-                }
-                .disabled(!isSetEditingEnabled || isLocked)
-
-                Divider()
-
-                Menu("Presets") {
-                    ForEach(restPresets, id: \.self) { value in
-                        Button(Self.formattedRest(value)) {
-                            updateSetRest(value, forSetID: row.id)
-                        }
-                        .disabled(!isSetEditingEnabled || isLocked)
-                    }
-                }
-            } label: {
-                Label("Rest", systemImage: "timer")
-            }
-
             Button {
                 toggleWarmup(setID: row.id)
             } label: {
@@ -1601,23 +1566,6 @@ struct WorkoutSessionExerciseGridEditor: View {
         toggleLock(at: index)
     }
 
-    private func updateSetRest(_ seconds: Int, at index: Int) {
-        guard setDrafts.indices.contains(index) else { return }
-        guard !setDrafts[index].isLocked else { return }
-        setDrafts[index].restSeconds = max(0, min(3600, seconds))
-        notifyChanged()
-    }
-
-    private func updateSetRest(_ seconds: Int, forSetID setID: UUID) {
-        guard let index = indexForSetID(setID) else { return }
-        updateSetRest(seconds, at: index)
-    }
-
-    private func updateSetRestByDelta(_ delta: Int, forSetID setID: UUID) {
-        guard let index = indexForSetID(setID) else { return }
-        updateSetRest(setDrafts[index].restSeconds + delta, at: index)
-    }
-
     private func moveSetUp(_ index: Int) {
         guard index > 0 else { return }
         guard !setDrafts[index].isLocked, !setDrafts[index - 1].isLocked else { return }
@@ -1809,7 +1757,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                         at: index,
                         formatWeight: formatWeight
                     ),
-                    metadataLine: metadataLine(for: draft, restSeconds: restSeconds),
+                    metadataLine: metadataLine(for: draft),
                     targetWeightText: targetWeightText(for: draft, formatWeight: formatWeight),
                     targetRepsText: targetRepsText(for: draft),
                     inlineHintPresentation: WorkoutSetInlineHintPresentation.make(
@@ -1819,7 +1767,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                         targetRepMax: targetRepMax,
                         formatWeight: formatWeight
                     ),
-                    completionButtonTitle: completionButtonTitle(for: draft)
+                    completionButtonTitle: completionButtonTitle(for: draft, restSeconds: restSeconds)
                 )
             )
         }
@@ -1857,15 +1805,11 @@ struct WorkoutSessionExerciseGridEditor: View {
         return "Previous \(previousText)"
     }
 
-    private static func metadataLine(for set: WorkoutSessionSetDraft, restSeconds: Int) -> String? {
+    private static func metadataLine(for set: WorkoutSessionSetDraft) -> String? {
         var parts: [String] = []
 
         if set.isLocked {
             parts.append("Locked")
-        }
-
-        if set.restSeconds != restSeconds {
-            parts.append("Rest \(restLabel(for: set.restSeconds))")
         }
 
         if !set.dropStages.isEmpty {
@@ -1892,11 +1836,10 @@ struct WorkoutSessionExerciseGridEditor: View {
         return "Target \(targetReps)"
     }
 
-    private static func completionButtonTitle(for draft: WorkoutSessionSetDraft) -> String {
+    private static func completionButtonTitle(for draft: WorkoutSessionSetDraft, restSeconds: Int) -> String {
         if !draft.dropStages.isEmpty {
             return "Complete Main Set"
         }
-        let restSeconds = draft.restSeconds
         let restLabel = restSeconds > 0 ? " + Rest \(formattedRest(restSeconds))" : ""
         return "Complete Set\(restLabel)"
     }
@@ -2100,14 +2043,14 @@ struct WorkoutSessionExerciseGridEditor: View {
                     afterCompletingSetAt: setIndex,
                     in: setDrafts
                 )
-                restSeconds = setDrafts[setIndex].restSeconds
+                restSeconds = self.restSeconds
             }
         } else {
             for trailingIndex in setDrafts[setIndex].dropStages.indices where trailingIndex > stageIndex {
                 setDrafts[setIndex].dropStages[trailingIndex].isCompleted = false
             }
             restLabel = "Drop \(stageIndex + 1)"
-            restSeconds = setDrafts[setIndex].restSeconds
+            restSeconds = self.restSeconds
         }
         notifyChanged()
         onSetCompletionChange?(stageID, restLabel, restSeconds, isCompleted)
@@ -2455,7 +2398,8 @@ struct WorkoutSessionExerciseGridEditor: View {
         let dropStageIDs = updatedDrafts[index].dropStages.map(\.id)
         pendingBozarCompletionSetIDs.remove(setID)
         guard updatedDrafts[index].isCompleted != isCompleted else { return }
-        let setRestSeconds = updatedDrafts[index].restSeconds
+        let setRestSeconds = restSeconds
+        updatedDrafts = canonicalizedSetDrafts(updatedDrafts)
         updatedDrafts[index].isCompleted = isCompleted
         if !isCompleted {
             for stageIndex in updatedDrafts[index].dropStages.indices {
@@ -2489,8 +2433,11 @@ struct WorkoutSessionExerciseGridEditor: View {
         pendingCommitTask = nil
         pendingDisplayRefreshTask?.cancel()
         pendingDisplayRefreshTask = nil
-        let currentDrafts = drafts ?? setDrafts
+        let currentDrafts = canonicalizedSetDrafts(drafts ?? setDrafts)
         suppressNextSetDraftsDisplayRefresh = true
+        if setDrafts != currentDrafts {
+            setDrafts = currentDrafts
+        }
         syncCompletedSetCount(using: currentDrafts)
         if isExpanded {
             rebuildDisplayRows(using: currentDrafts, restSeconds: restSeconds)
@@ -2557,9 +2504,18 @@ struct WorkoutSessionExerciseGridEditor: View {
         drafts: [WorkoutSessionSetDraft]? = nil,
         restSeconds overrideRestSeconds: Int? = nil
     ) {
-        let currentDrafts = drafts ?? setDrafts
+        let currentDrafts = canonicalizedSetDrafts(drafts ?? setDrafts)
         let currentRestSeconds = overrideRestSeconds ?? restSeconds
         onCommitRequest?(currentDrafts, currentRestSeconds)
+    }
+
+    private func canonicalizedSetDrafts(_ drafts: [WorkoutSessionSetDraft]) -> [WorkoutSessionSetDraft] {
+        let normalizedRest = max(0, min(3600, restSeconds))
+        return drafts.map { draft in
+            var updated = draft
+            updated.restSeconds = normalizedRest
+            return updated
+        }
     }
 
     @discardableResult

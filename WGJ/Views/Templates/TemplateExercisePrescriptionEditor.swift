@@ -489,8 +489,6 @@ struct TemplateExercisePrescriptionEditor: View {
                     } content: {
                         TemplateExerciseSetCardView(
                             row: row,
-                            defaultRestSeconds: restSeconds,
-                            restPresets: restPresets,
                             canMoveDown: row.index < presentation.rows.count - 1,
                             focusedInput: $focusedInput,
                             repsText: repsText(for: row.index),
@@ -502,7 +500,6 @@ struct TemplateExercisePrescriptionEditor: View {
                             onInsertBelow: { insertSet(afterSetID: row.id) },
                             onMoveUp: { moveSetUp(setID: row.id) },
                             onMoveDown: { moveSetDown(setID: row.id) },
-                            onSetRestChanged: { updateSetRest($0, forSetID: row.id) },
                             onAddDropStage: { addDropStage(toSetID: row.id) },
                             onRemoveDropStage: { stageID in
                                 removeDropStage(stageID, fromSetID: row.id)
@@ -1012,7 +1009,7 @@ struct TemplateExercisePrescriptionEditor: View {
             targetReps: source?.targetReps,
             targetWeight: source?.targetWeight,
             loadUnit: fallbackLoadUnit,
-            restSeconds: source?.restSeconds ?? restSeconds,
+            restSeconds: restSeconds,
             isWarmup: source?.isWarmup ?? false,
             isLocked: false,
             previousTargetReps: source?.previousTargetReps,
@@ -1147,19 +1144,6 @@ struct TemplateExercisePrescriptionEditor: View {
         requestImmediateCommit()
     }
 
-    private func updateSetRest(_ seconds: Int, at index: Int) {
-        guard setDrafts.indices.contains(index) else { return }
-        let normalized = max(0, min(3600, seconds))
-        guard setDrafts[index].restSeconds != normalized else { return }
-        setDrafts[index].restSeconds = normalized
-        requestImmediateCommit()
-    }
-
-    private func updateSetRest(_ seconds: Int, forSetID setID: UUID) {
-        guard let index = indexForSetID(setID) else { return }
-        updateSetRest(seconds, at: index)
-    }
-
     private func restLabel(for seconds: Int) -> String {
         seconds <= 0 ? "No rest" : formattedRest(seconds)
     }
@@ -1168,7 +1152,15 @@ struct TemplateExercisePrescriptionEditor: View {
         if let focusedInput {
             commitInputDraft(for: focusedInput)
         }
+        normalizeSetRestToDefault()
         onCommitRequest?()
+    }
+
+    private func normalizeSetRestToDefault() {
+        let normalized = max(0, min(3600, restSeconds))
+        for index in setDrafts.indices where setDrafts[index].restSeconds != normalized {
+            setDrafts[index].restSeconds = normalized
+        }
     }
 
     private func formatWeight(_ value: Double) -> String {
@@ -1254,7 +1246,6 @@ private extension TemplateExercisePrescriptionEditor {
         WGJPerformance.measure("template-editor.set-presentation") {
             Self.makeSetPresentation(
                 setDrafts: setDrafts,
-                restSeconds: restSeconds,
                 formatWeight: formatWeight
             )
         }
@@ -1279,7 +1270,6 @@ private extension TemplateExercisePrescriptionEditor {
 
     static func makeSetPresentation(
         setDrafts: [TemplateExerciseSetDraft],
-        restSeconds: Int,
         formatWeight: (Double) -> String
     ) -> SetPresentation {
         var rows: [SetRowData] = []
@@ -1303,7 +1293,7 @@ private extension TemplateExercisePrescriptionEditor {
                     title: set.isWarmup ? "Warmup Set" : "Working Set \(workingSetNumber)",
                     badgeTitle: set.isWarmup ? "W" : "\(workingSetNumber)",
                     previousSummary: previousSummary(for: set, formatWeight: formatWeight),
-                    metadataLine: setMetadataLine(for: set, restSeconds: restSeconds),
+                    metadataLine: setMetadataLine(for: set),
                     isLocked: set.isLocked
                 )
             )
@@ -1337,21 +1327,11 @@ private extension TemplateExercisePrescriptionEditor {
         return "-"
     }
 
-    static func setMetadataLine(
-        for set: TemplateExerciseSetDraft,
-        restSeconds: Int
-    ) -> String? {
+    static func setMetadataLine(for set: TemplateExerciseSetDraft) -> String? {
         var parts: [String] = []
 
         if set.isLocked {
             parts.append("Locked")
-        }
-
-        if set.restSeconds != restSeconds {
-            let mins = max(0, set.restSeconds) / 60
-            let secs = max(0, set.restSeconds) % 60
-            let restLabel = set.restSeconds <= 0 ? "No rest" : String(format: "%d:%02d", mins, secs)
-            parts.append("Rest \(restLabel)")
         }
 
         guard !parts.isEmpty else { return nil }
@@ -1384,8 +1364,6 @@ private struct SetRowData: Identifiable, Equatable {
 
 private struct TemplateExerciseSetCardView: View, Equatable {
     let row: SetRowData
-    let defaultRestSeconds: Int
-    let restPresets: [Int]
     let canMoveDown: Bool
     let focusedInput: FocusState<TemplateEditorInputFocus?>.Binding
     let repsText: String
@@ -1398,7 +1376,6 @@ private struct TemplateExerciseSetCardView: View, Equatable {
     let onInsertBelow: () -> Void
     let onMoveUp: () -> Void
     let onMoveDown: () -> Void
-    let onSetRestChanged: (Int) -> Void
     let onAddDropStage: () -> Void
     let onRemoveDropStage: (UUID) -> Void
     let onClearDropStages: () -> Void
@@ -1410,8 +1387,6 @@ private struct TemplateExerciseSetCardView: View, Equatable {
 
     static func == (lhs: TemplateExerciseSetCardView, rhs: TemplateExerciseSetCardView) -> Bool {
         lhs.row == rhs.row
-            && lhs.defaultRestSeconds == rhs.defaultRestSeconds
-            && lhs.restPresets == rhs.restPresets
             && lhs.canMoveDown == rhs.canMoveDown
             && lhs.repsText == rhs.repsText
             && lhs.weightText == rhs.weightText
@@ -1595,36 +1570,6 @@ private struct TemplateExerciseSetCardView: View, Equatable {
                 Label("Reorder", systemImage: "arrow.up.arrow.down")
             }
 
-            Menu {
-                Button("Use exercise default (\(formattedRest(defaultRestSeconds)))") {
-                    onSetRestChanged(defaultRestSeconds)
-                }
-
-                Button("Reduce rest by 15 sec") {
-                    onSetRestChanged(set.restSeconds - 15)
-                }
-
-                Button("Increase rest by 15 sec") {
-                    onSetRestChanged(set.restSeconds + 15)
-                }
-
-                Button("No rest") {
-                    onSetRestChanged(0)
-                }
-
-                Divider()
-
-                Menu("Presets") {
-                    ForEach(restPresets, id: \.self) { value in
-                        Button(formattedRest(value)) {
-                            onSetRestChanged(value)
-                        }
-                    }
-                }
-            } label: {
-                Label("Rest", systemImage: "timer")
-            }
-
             Button {
                 onToggleWarmup()
             } label: {
@@ -1691,12 +1636,6 @@ private struct TemplateExerciseSetCardView: View, Equatable {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func formattedRest(_ seconds: Int) -> String {
-        let mins = max(0, seconds) / 60
-        let secs = max(0, seconds) % 60
-        return String(format: "%d:%02d", mins, secs)
     }
 
     private var dropStagesSection: some View {

@@ -94,6 +94,73 @@ struct ActiveWorkoutRuntimeTests {
     }
 
     @Test
+    func templateStartNormalizesStaleSetRestToExerciseDefault() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+        let template = try repository.createTemplate(name: "Pull Day", notes: "")
+        try repository.setExercises(
+            templateID: template.id,
+            drafts: [
+                TemplateExerciseDraft(
+                    catalogExerciseUUID: "runtime-rest-curl",
+                    exerciseNameSnapshot: "EZ Bar Curl",
+                    categorySnapshot: "Biceps",
+                    muscleSummarySnapshot: "Biceps",
+                    restSeconds: 90,
+                    setDrafts: [
+                        TemplateExerciseSetDraft(targetReps: 8, loadUnit: .kg, restSeconds: 120, isWarmup: true),
+                        TemplateExerciseSetDraft(targetReps: 10, loadUnit: .kg, restSeconds: 120),
+                        TemplateExerciseSetDraft(targetReps: 12, loadUnit: .kg, restSeconds: 120),
+                    ]
+                ),
+            ]
+        )
+
+        let session = try ActiveWorkoutSessionFactory(modelContext: context)
+            .createSessionFromTemplate(templateID: template.id)
+        let exercise = try #require(session.exercises.first)
+
+        #expect(exercise.restSeconds == 90)
+        #expect(exercise.setDrafts.map(\.restSeconds) == [90, 90, 90])
+    }
+
+    @Test
+    func snapshotStoreNormalizesStaleSetRestToExerciseDefault() async throws {
+        let directory = try temporaryDirectory()
+        let store = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        var session = makeRuntimeSession()
+        session.exercises[0].restSeconds = 90
+        for index in session.exercises[0].setDrafts.indices {
+            session.exercises[0].setDrafts[index].restSeconds = 120
+        }
+
+        try await store.save(session)
+
+        let loaded = try #require(try await store.load())
+        #expect(loaded.exercises.first?.setDrafts.map(\.restSeconds) == [90, 90])
+    }
+
+    @Test
+    func completionWriterMaterializesCanonicalExerciseRestForStaleRuntimeSetDrafts() throws {
+        let context = try makeInMemoryContext()
+        let tracker = UserDataSyncTracker.shared
+        _ = tracker.configureForLaunch(isCloudEnabled: true, errorDescription: nil)
+        var session = makeRuntimeSession()
+        session.exercises[0].restSeconds = 90
+        for index in session.exercises[0].setDrafts.indices {
+            session.exercises[0].setDrafts[index].restSeconds = 120
+        }
+
+        let completedID = try ActiveWorkoutCompletionWriter(modelContext: context)
+            .finish(session: session)
+
+        let exercises = try WorkoutSessionRepository(modelContext: context).sessionExercises(sessionID: completedID)
+        let sets = try #require(exercises.first?.sets?.sorted { $0.sortOrder < $1.sortOrder })
+
+        #expect(sets.map(\.restSeconds) == [90, 90])
+    }
+
+    @Test
     func discardDeletesSnapshotWithoutCreatingCompletedWorkoutOrCloudMutation() async throws {
         let context = try makeInMemoryContext()
         let directory = try temporaryDirectory()

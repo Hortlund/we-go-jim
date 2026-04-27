@@ -51,6 +51,14 @@ nonisolated extension ActiveWorkoutRuntimeSession {
                 return updated
             }
     }
+
+    mutating func normalizeSetRestToExerciseDefaults() {
+        exercises = exercises.map { exercise in
+            var updated = exercise
+            updated.normalizeSetRestToExerciseDefault()
+            return updated
+        }
+    }
 }
 
 nonisolated struct ActiveWorkoutRuntimeCardioBlock: Identifiable, Equatable, Codable, Sendable {
@@ -153,7 +161,7 @@ nonisolated struct ActiveWorkoutRuntimeExercise: Identifiable, Equatable, Codabl
         self.restSeconds = max(0, min(3600, restSeconds))
         self.sortOrder = sortOrder
         self.components = components.sorted { $0.sortOrder < $1.sortOrder }
-        self.setDrafts = setDrafts
+        self.setDrafts = Self.setDrafts(setDrafts, normalizedTo: self.restSeconds)
         self.superset = superset
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -222,6 +230,22 @@ nonisolated extension ActiveWorkoutRuntimeExercise {
 
     var supersetPositionRaw: String? {
         superset?.position.rawValue
+    }
+
+    mutating func normalizeSetRestToExerciseDefault() {
+        setDrafts = Self.setDrafts(setDrafts, normalizedTo: restSeconds)
+    }
+
+    private static func setDrafts(
+        _ drafts: [WorkoutSessionSetDraft],
+        normalizedTo restSeconds: Int
+    ) -> [WorkoutSessionSetDraft] {
+        let normalizedRest = max(0, min(3600, restSeconds))
+        return drafts.map { draft in
+            var updated = draft
+            updated.restSeconds = normalizedRest
+            return updated
+        }
     }
 }
 
@@ -310,7 +334,9 @@ actor ActiveWorkoutSnapshotStore {
             return nil
         }
         let data = try Data(contentsOf: url)
-        return try decoder.decode(ActiveWorkoutRuntimeSession.self, from: data)
+        var session = try decoder.decode(ActiveWorkoutRuntimeSession.self, from: data)
+        session.normalizeSetRestToExerciseDefaults()
+        return session
     }
 
     func save(_ session: ActiveWorkoutRuntimeSession) throws {
@@ -318,7 +344,9 @@ actor ActiveWorkoutSnapshotStore {
             at: baseDirectory,
             withIntermediateDirectories: true
         )
-        let data = try encoder.encode(session)
+        var normalizedSession = session
+        normalizedSession.normalizeSetRestToExerciseDefaults()
+        let data = try encoder.encode(normalizedSession)
         try data.write(to: snapshotURL, options: [.atomic])
     }
 
@@ -442,7 +470,7 @@ nonisolated final class ActiveWorkoutSessionFactory {
                     .map { templateSet in
                         WorkoutSessionSetDraft(
                             isWarmup: templateSet.isWarmup,
-                            restSeconds: templateSet.restSeconds,
+                            restSeconds: templateExercise.restSeconds,
                             targetReps: templateSet.targetReps,
                             targetWeight: templateSet.targetWeight,
                             targetLoadUnit: templateSet.loadUnit,
@@ -576,6 +604,8 @@ nonisolated final class ActiveWorkoutCompletionWriter {
 
     @discardableResult
     func finish(session runtimeSession: ActiveWorkoutRuntimeSession, notes: String? = nil) throws -> UUID {
+        var runtimeSession = runtimeSession
+        runtimeSession.normalizeSetRestToExerciseDefaults()
         let completedAt = Date()
         let completedSession = WorkoutSession(
             id: runtimeSession.id,

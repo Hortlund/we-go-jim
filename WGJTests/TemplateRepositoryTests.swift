@@ -805,6 +805,33 @@ struct TemplateRepositoryTests {
         #expect(afterEnsure.updatedAt == originalUpdatedAt)
     }
 
+    @Test
+    func generatedDefaultSetsUseExerciseRestSeconds() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+
+        let template = try repository.createTemplate(name: "Rest Canonical", notes: "")
+        try repository.setExercises(
+            templateID: template.id,
+            drafts: [
+                TemplateExerciseDraft(
+                    catalogExerciseUUID: "template-rest-curl",
+                    exerciseNameSnapshot: "EZ Bar Curl",
+                    categorySnapshot: "Biceps",
+                    muscleSummarySnapshot: "Biceps",
+                    restSeconds: 90,
+                    setDrafts: []
+                ),
+            ]
+        )
+
+        let exercise = try #require(try repository.exercises(in: template.id).first)
+        let drafts = try repository.setDrafts(for: exercise.id)
+
+        #expect(drafts.count == 3)
+        #expect(drafts.allSatisfy { $0.restSeconds == 90 })
+    }
+
     private func makeInMemoryContext() throws -> ModelContext {
         let schema = Schema([
             ExerciseCatalogItem.self,

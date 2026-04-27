@@ -169,7 +169,7 @@ nonisolated struct TemplateExerciseDraft: Identifiable, Equatable, Sendable {
         self.superset = model.supersetMembership
         let orderedSets = (model.prescribedSets ?? []).sorted { $0.sortOrder < $1.sortOrder }
         if orderedSets.isEmpty {
-            self.setDrafts = Self.defaultSetDrafts(loadUnit: preferredLoadUnit)
+            self.setDrafts = Self.defaultSetDrafts(restSeconds: model.restSeconds, loadUnit: preferredLoadUnit)
         } else {
             var drafts: [TemplateExerciseSetDraft] = []
             drafts.reserveCapacity(orderedSets.count)
@@ -180,7 +180,7 @@ nonisolated struct TemplateExerciseDraft: Identifiable, Equatable, Sendable {
                         targetReps: set.targetReps,
                         targetWeight: set.targetWeight,
                         loadUnit: set.loadUnit,
-                        restSeconds: set.restSeconds,
+                        restSeconds: model.restSeconds,
                         isWarmup: set.isWarmup,
                         isLocked: set.isLocked,
                         previousTargetReps: set.previousTargetReps,
@@ -208,6 +208,7 @@ nonisolated struct TemplateExerciseDraft: Identifiable, Equatable, Sendable {
         self.restSeconds = 120
         self.components = [TemplateExerciseComponentDraft(catalogItem: catalogItem)]
         self.setDrafts = Self.defaultSetDrafts(
+            restSeconds: self.restSeconds,
             loadUnit: TemplateLoadUnit.inferredDefault(fromEquipmentSummary: catalogItem.equipmentSummary)
                 ?? preferredLoadUnit
         )
@@ -242,12 +243,17 @@ nonisolated struct TemplateExerciseDraft: Identifiable, Equatable, Sendable {
         ]
     }
 
-    static func defaultSetDrafts(count: Int = 3, loadUnit: TemplateLoadUnit = .kg) -> [TemplateExerciseSetDraft] {
+    static func defaultSetDrafts(
+        count: Int = 3,
+        restSeconds: Int = 120,
+        loadUnit: TemplateLoadUnit = .kg
+    ) -> [TemplateExerciseSetDraft] {
         let safeCount = max(1, count)
+        let normalizedRest = max(0, min(3600, restSeconds))
         return (0..<safeCount).map { index in
             TemplateExerciseSetDraft(
                 loadUnit: loadUnit,
-                restSeconds: 120,
+                restSeconds: normalizedRest,
                 isWarmup: index == 0,
                 previousLoadUnit: loadUnit
             )
@@ -520,7 +526,12 @@ nonisolated final class TemplateRepository {
                 targetRepMin: nil,
                 targetRepMax: nil,
                 restSeconds: exercise.restSeconds,
-                setDrafts: setDrafts.isEmpty ? TemplateExerciseDraft.defaultSetDrafts(loadUnit: preferredLoadUnit()) : setDrafts,
+                setDrafts: setDrafts.isEmpty
+                    ? TemplateExerciseDraft.defaultSetDrafts(
+                        restSeconds: exercise.restSeconds,
+                        loadUnit: preferredLoadUnit()
+                    )
+                    : setDrafts,
                 components: [
                     TemplateExerciseComponentDraft(
                         catalogExerciseUUID: exercise.catalogExerciseUUID,
@@ -1092,9 +1103,15 @@ nonisolated final class TemplateRepository {
             throw TemplateRepositoryError.templateExerciseNotFound
         }
 
+        let defaultRestSeconds = sanitizedRestSeconds(exercise.restSeconds)
+        let canonicalDrafts = drafts.map { draft in
+            var updated = draft
+            updated.restSeconds = defaultRestSeconds
+            return updated
+        }
         let existingSets = exercise.prescribedSets ?? []
         let orderedExistingSets = existingSets.sorted { $0.sortOrder < $1.sortOrder }
-        let incomingSignatures = drafts.enumerated().map { index, draft in
+        let incomingSignatures = canonicalDrafts.enumerated().map { index, draft in
             persistenceSignature(for: draft, at: index)
         }
         let existingSignatures = orderedExistingSets.enumerated().map { index, set in
@@ -1104,14 +1121,14 @@ nonisolated final class TemplateRepository {
             return
         }
 
-        let incomingIDs = Set(drafts.map(\.id))
+        let incomingIDs = Set(canonicalDrafts.map(\.id))
 
         for set in existingSets where !incomingIDs.contains(set.id) {
             modelContext.delete(set)
         }
 
         var updatedSets: [TemplateExerciseSet] = []
-        for (index, draft) in drafts.enumerated() {
+        for (index, draft) in canonicalDrafts.enumerated() {
             let modelSet = existingSets.first(where: { $0.id == draft.id }) ?? TemplateExerciseSet(
                 id: draft.id,
                 templateExerciseID: templateExerciseID,
@@ -1133,7 +1150,7 @@ nonisolated final class TemplateRepository {
             modelSet.targetReps = sanitizedReps(draft.targetReps)
             modelSet.targetWeight = sanitizedWeight(draft.targetWeight)
             modelSet.loadUnit = draft.loadUnit
-            modelSet.restSeconds = sanitizedRestSeconds(draft.restSeconds)
+            modelSet.restSeconds = defaultRestSeconds
             modelSet.isWarmup = draft.isWarmup
             modelSet.isLocked = draft.isLocked
             modelSet.updatedAt = .now
@@ -1311,7 +1328,11 @@ nonisolated final class TemplateRepository {
         for exercise in (template.exercises ?? []) {
             let ordered = (exercise.prescribedSets ?? []).sorted { $0.sortOrder < $1.sortOrder }
             if ordered.isEmpty {
-                let defaults = TemplateExerciseDraft.defaultSetDrafts(count: setCount, loadUnit: defaultLoadUnit)
+                let defaults = TemplateExerciseDraft.defaultSetDrafts(
+                    count: setCount,
+                    restSeconds: exercise.restSeconds,
+                    loadUnit: defaultLoadUnit
+                )
                 var sets: [TemplateExerciseSet] = []
                 for (index, draft) in defaults.enumerated() {
                     let created = TemplateExerciseSet(
@@ -1479,7 +1500,10 @@ nonisolated final class TemplateRepository {
                 desiredDrafts: componentDrafts
             )
             let sets = draft.setDrafts.isEmpty && appliesDefaultSetPlansWhenEmpty
-                ? TemplateExerciseDraft.defaultSetDrafts(loadUnit: preferredLoadUnit())
+                ? TemplateExerciseDraft.defaultSetDrafts(
+                    restSeconds: normalizedRest,
+                    loadUnit: preferredLoadUnit()
+                )
                 : draft.setDrafts
             syncSetStructure(
                 for: exercise,
@@ -1542,7 +1566,10 @@ nonisolated final class TemplateRepository {
         modelContext.insert(created)
         syncComponentStructure(for: created, desiredDrafts: componentDrafts)
         let setDrafts = draft.setDrafts.isEmpty
-            ? TemplateExerciseDraft.defaultSetDrafts(loadUnit: preferredLoadUnit())
+            ? TemplateExerciseDraft.defaultSetDrafts(
+                restSeconds: normalizedRest,
+                loadUnit: preferredLoadUnit()
+            )
             : draft.setDrafts
         syncSetStructure(
             for: created,
@@ -1619,7 +1646,11 @@ nonisolated final class TemplateRepository {
 
     private func orderedSetDrafts(for exercise: TemplateExercise) -> [TemplateExerciseSetDraft] {
         let ordered = (exercise.prescribedSets ?? []).sorted { $0.sortOrder < $1.sortOrder }
-        return ordered.map(TemplateExerciseSetDraft.init(model:))
+        return ordered.map { set in
+            var draft = TemplateExerciseSetDraft(model: set)
+            draft.restSeconds = exercise.restSeconds
+            return draft
+        }
     }
 
     private func orderedComponents(for exercise: TemplateExercise) -> [TemplateExerciseComponent] {
@@ -1902,7 +1933,7 @@ nonisolated final class TemplateRepository {
             modelSet.targetReps = sanitizedReps(draft.targetReps)
             modelSet.targetWeight = sanitizedWeight(draft.targetWeight)
             modelSet.loadUnit = draft.loadUnit
-            modelSet.restSeconds = sanitizedRestSeconds(draft.restSeconds)
+            modelSet.restSeconds = sanitizedRestSeconds(defaultRestSeconds)
             modelSet.isWarmup = draft.isWarmup
             modelSet.isLocked = draft.isLocked
             modelSet.updatedAt = .now
@@ -2209,7 +2240,11 @@ nonisolated final class TemplateRepository {
             restSeconds: exercise.restSeconds,
             setDrafts: (exercise.prescribedSets ?? [])
                 .sorted { $0.sortOrder < $1.sortOrder }
-                .map(duplicateDraft(from:)),
+                .map { set in
+                    var draft = duplicateDraft(from: set)
+                    draft.restSeconds = exercise.restSeconds
+                    return draft
+                },
             components: (exercise.components ?? [])
                 .sorted { $0.sortOrder < $1.sortOrder }
                 .map(duplicateDraft(from:)),

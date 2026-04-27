@@ -58,6 +58,11 @@ struct BrosSocialServiceTests {
     }
 
     @Test
+    func membershipSummaryFieldSetIncludesAvatarAsset() {
+        #expect(BrosCloudKitFieldSets.membershipSummary.contains("avatarAsset"))
+    }
+
+    @Test
     func feedEventConstructionDoesNotPrimeAvatarCache() {
         BrosAvatarCacheService.shared.clear()
 
@@ -646,6 +651,107 @@ struct BrosSocialServiceTests {
         #expect(snapshot.members.map(\.displayName) == ["Local Atlas"])
         #expect(snapshot.feedEvents.first?.actorDisplayName == "Local Atlas")
         #expect(snapshot.feedEvents.first?.actorAvatarCacheKey?.contains("membership-circle-1-user-1") == true)
+    }
+
+    @Test
+    func fetchSnapshotLoadsMemberAvatarAssetFromMembershipSummary() async throws {
+        let context = try makeInMemoryContext()
+        let joinedAt = Date(timeIntervalSince1970: 100)
+        let profile = try ProfileRepository(modelContext: context).loadOrCreateProfile()
+        profile.updateBrosMembership(
+            circleID: "circle-1",
+            membershipID: "membership-circle-1-user-1",
+            userRecordName: "user-1",
+            joinedAt: joinedAt,
+            role: .owner
+        )
+        try context.save()
+
+        let ownerMembership = makeMembershipRecord(
+            recordName: "membership-circle-1-user-1",
+            circleID: "circle-1",
+            userRecordName: "user-1",
+            joinedAt: joinedAt,
+            role: .owner,
+            displayName: "Atlas"
+        )
+        let remoteAvatarData = try #require(makeAvatarData(color: .systemBlue))
+        let remoteMembership = makeMembershipRecord(
+            recordName: "membership-circle-1-user-2",
+            circleID: "circle-1",
+            userRecordName: "user-2",
+            joinedAt: Date(timeIntervalSince1970: 120),
+            role: .member,
+            displayName: "Brody"
+        )
+        remoteMembership["avatarAsset"] = try makeAvatarAsset(data: remoteAvatarData) as CKRecordValue
+
+        let feedEvent = makeWorkoutFeedEventRecord(
+            recordName: "workout-remote-user",
+            circleID: "circle-1",
+            actorUserRecordName: "user-2",
+            actorMembershipID: remoteMembership.recordID.recordName,
+            actorDisplayName: "Brody",
+            createdAt: Date(timeIntervalSince1970: 160),
+            workoutName: "Pull Day"
+        )
+        let circleRecord = makeCircleRecord(
+            circleID: "circle-1",
+            inviteCode: "ABC123",
+            memberLimit: 4,
+            memberRecordNames: [
+                ownerMembership.recordID.recordName,
+                remoteMembership.recordID.recordName,
+            ],
+            feedEventRecordNames: [feedEvent.recordID.recordName]
+        )
+
+        let store = TestBrosCloudStore()
+        store.filtersDesiredKeys = true
+        store.currentUserRecordNameValue = "user-1"
+        store.fetchRecordHandler = { recordType, recordName in
+            switch (recordType, recordName) {
+            case ("BroMembership", ownerMembership.recordID.recordName):
+                return ownerMembership
+            case ("BroCircle", "circle-1"):
+                return circleRecord
+            default:
+                return nil
+            }
+        }
+        store.fetchRecordsHandler = { recordType, recordNames in
+            if recordType == "BroMembership" {
+                return [ownerMembership, remoteMembership].filter { recordNames.contains($0.recordID.recordName) }
+            }
+
+            if recordType == "BroFeedEvent" {
+                return [feedEvent].filter { recordNames.contains($0.recordID.recordName) }
+            }
+
+            return []
+        }
+        store.queryRecordsHandler = { recordType, predicate, _, _ in
+            if recordType == "BroMembership",
+               predicate.predicateFormat.contains("circleID")
+            {
+                return [ownerMembership, remoteMembership]
+            }
+
+            if recordType == "BroFeedEvent",
+               predicate.predicateFormat.contains("circleID")
+            {
+                return [feedEvent]
+            }
+
+            return []
+        }
+
+        let service = CloudKitBrosSocialService(modelContext: context, cloudStore: store)
+        let snapshot = try #require(try await service.fetchSnapshot())
+        let remoteMember = try #require(snapshot.members.first { $0.userRecordName == "user-2" })
+
+        #expect(remoteMember.avatarImageData == remoteAvatarData)
+        #expect(snapshot.feedEvents.first?.actorAvatarImageData == remoteAvatarData)
     }
 
     @Test
@@ -1885,10 +1991,20 @@ struct BrosSocialServiceTests {
         }
         return image.pngData()
     }
+
+    private func makeAvatarAsset(data: Data) throws -> CKAsset {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WGJTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("avatar.png", isDirectory: false)
+        try data.write(to: url, options: .atomic)
+        return CKAsset(fileURL: url)
+    }
 }
 
 private final class TestBrosCloudStore: BrosCloudStore {
     var currentUserRecordNameValue = "user-1"
+    var filtersDesiredKeys = false
     var queryRecordsHandler: (String, NSPredicate, [NSSortDescriptor], Int) async throws -> [CKRecord] = {
         _, _, _, _ in []
     }
@@ -1905,12 +2021,13 @@ private final class TestBrosCloudStore: BrosCloudStore {
         query: BrosCloudRecordQuery,
         request: BrosCloudKitRequestProfile
     ) async throws -> [CKRecord] {
-        try await queryRecordsHandler(
+        let records = try await queryRecordsHandler(
             query.recordType,
             query.makePredicate(),
             query.makeSortDescriptors(),
             request.resultsLimit
         )
+        return filtered(records, request: request)
     }
 
     func fetchRecord(
@@ -1918,8 +2035,10 @@ private final class TestBrosCloudStore: BrosCloudStore {
         recordName: String,
         request: BrosCloudKitRequestProfile
     ) async throws -> CKRecord? {
-        _ = request
-        return try await fetchRecordHandler(recordType, recordName)
+        guard let record = try await fetchRecordHandler(recordType, recordName) else {
+            return nil
+        }
+        return filtered(record, request: request)
     }
 
     func fetchRecords(
@@ -1927,8 +2046,8 @@ private final class TestBrosCloudStore: BrosCloudStore {
         recordNames: [String],
         request: BrosCloudKitRequestProfile
     ) async throws -> [CKRecord] {
-        _ = request
-        return try await fetchRecordsHandler(recordType, recordNames)
+        let records = try await fetchRecordsHandler(recordType, recordNames)
+        return filtered(records, request: request)
     }
 
     func save(records: [CKRecord], deleting recordIDs: [CKRecord.ID]) async throws {
@@ -1937,5 +2056,23 @@ private final class TestBrosCloudStore: BrosCloudStore {
 
     func save(subscriptions: [CKSubscription], deleting subscriptionIDs: [CKSubscription.ID]) async throws {
         try await saveSubscriptionsHandler(subscriptions, subscriptionIDs)
+    }
+
+    private func filtered(_ records: [CKRecord], request: BrosCloudKitRequestProfile) -> [CKRecord] {
+        records.map { filtered($0, request: request) }
+    }
+
+    private func filtered(_ record: CKRecord, request: BrosCloudKitRequestProfile) -> CKRecord {
+        guard filtersDesiredKeys, let desiredKeys = request.desiredKeys else {
+            return record
+        }
+
+        let copy = CKRecord(recordType: record.recordType, recordID: record.recordID)
+        for key in desiredKeys {
+            if let value = record[key] {
+                copy[key] = value
+            }
+        }
+        return copy
     }
 }

@@ -1616,6 +1616,58 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testTemplateExerciseRestOverridesStaleSetRestInActiveWorkout() throws {
+        let app = launchApp(mode: .localInMemory, launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Canonical Rest Workout",
+                notes: "Exercise rest should beat stale set rest payloads.",
+                exercises: [
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "canonical-rest-lateral-raise",
+                        exerciseNameSnapshot: "Dumbbell Lateral Raise",
+                        categorySnapshot: "Shoulders",
+                        muscleSummarySnapshot: "Delts",
+                        targetRepMin: 8,
+                        targetRepMax: 12,
+                        restSeconds: 90,
+                        sets: [
+                            templatePayloadSet(
+                                targetReps: 12,
+                                targetWeight: 8,
+                                loadUnit: "kg",
+                                restSeconds: 120,
+                                isWarmup: true
+                            ),
+                            templatePayloadSet(
+                                targetReps: 12,
+                                targetWeight: 10,
+                                loadUnit: "kg",
+                                restSeconds: 120,
+                                isWarmup: false
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+        ])
+
+        startPreviewedTemplateWorkout(in: app)
+
+        let completeSetButton = identifiedElement("workout-set-0-completion-button", in: app)
+        XCTAssertTrue(completeSetButton.waitForExistence(timeout: 5))
+        revealElement(completeSetButton, in: app)
+        XCTAssertEqual(completeSetButton.label, "Complete Set + Rest 1:30")
+        XCTAssertFalse(app.buttons["Complete Set + Rest 2:00"].exists)
+
+        completeSetButton.tap()
+
+        let restTimer = identifiedElement("active-workout-rest-timer", in: app)
+        XCTAssertTrue(restTimer.waitForExistence(timeout: 5))
+        XCTAssertTrue(restTimer.label.contains("1:"))
+        XCTAssertFalse(restTimer.label.contains("2:"))
+    }
+
+    @MainActor
     func testActiveWorkoutCancelConfirmationKeepsActionsVisible() throws {
         let app = launchApp()
 

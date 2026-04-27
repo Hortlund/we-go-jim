@@ -35,6 +35,7 @@ enum BrosCloudKitFieldSets {
         "userRecordName",
         "displayName",
         "athleteType",
+        "avatarAsset",
         "joinedAt",
         "role",
         "createdAt",
