@@ -385,6 +385,10 @@ struct TemplateExercisePrescriptionEditor: View {
                     .multilineTextAlignment(.center)
                     .wgjPillField()
                     .frame(maxWidth: .infinity)
+                    .accessibilityIdentifier(
+                        exerciseAccessibilityIdentifier.map { "\($0)-rep-min-field" }
+                            ?? "template-editor-rep-min-field"
+                    )
 
                 Text("to")
                     .font(.caption.weight(.bold))
@@ -396,6 +400,10 @@ struct TemplateExercisePrescriptionEditor: View {
                     .multilineTextAlignment(.center)
                     .wgjPillField()
                     .frame(maxWidth: .infinity)
+                    .accessibilityIdentifier(
+                        exerciseAccessibilityIdentifier.map { "\($0)-rep-max-field" }
+                            ?? "template-editor-rep-max-field"
+                    )
             }
         }
     }
@@ -861,6 +869,10 @@ struct TemplateExercisePrescriptionEditor: View {
             },
             set: { newValue in
                 inputDraftStore.stage(newValue, for: .repMin)
+                let updatedValue = parsedOptionalInt(from: newValue)
+                if targetRepMin != updatedValue {
+                    targetRepMin = updatedValue
+                }
             }
         )
     }
@@ -876,8 +888,17 @@ struct TemplateExercisePrescriptionEditor: View {
             },
             set: { newValue in
                 inputDraftStore.stage(newValue, for: .repMax)
+                let updatedValue = parsedOptionalInt(from: newValue)
+                if targetRepMax != updatedValue {
+                    targetRepMax = updatedValue
+                }
             }
         )
+    }
+
+    private func parsedOptionalInt(from text: String) -> Int? {
+        let cleaned = text.filter(\.isNumber)
+        return cleaned.isEmpty ? nil : Int(cleaned)
     }
 
     private func updateRepsText(_ newValue: String, at index: Int) {

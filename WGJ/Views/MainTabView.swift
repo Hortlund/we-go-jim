@@ -128,9 +128,7 @@ struct MainTabView: View {
                         workoutCompletionPresentationState.presentQueuedIfNeeded()
                     }
                 } else if !activeWorkoutPresentationState.isActiveWorkoutPresented {
-                    withAnimation(overlayAnimation) {
-                        activeWorkoutPresentationState.isActiveWorkoutStripCollapsed = true
-                    }
+                    activeWorkoutPresentationState.isActiveWorkoutStripCollapsed = true
                 }
             }
         }
@@ -165,7 +163,6 @@ struct MainTabView: View {
             content: content
         )
         .contentMargins(.bottom, activeWorkoutOverlayBottomInset, for: .scrollContent)
-        .animation(overlayAnimation, value: activeWorkoutOverlayBottomInset)
         .tabItem {
             Label(title, systemImage: systemImage)
         }
@@ -187,7 +184,6 @@ struct MainTabView: View {
             content: content
         )
             .contentMargins(.bottom, activeWorkoutOverlayBottomInset, for: .scrollContent)
-            .animation(overlayAnimation, value: activeWorkoutOverlayBottomInset)
             .tabItem {
                 Label(title, systemImage: systemImage)
             }
@@ -297,15 +293,11 @@ struct MainTabView: View {
     }
 
     private func presentActiveWorkout(sessionID: UUID) {
-        withAnimation(overlayAnimation) {
-            activeWorkoutPresentationState.present(sessionID: sessionID)
-        }
+        activeWorkoutPresentationState.present(sessionID: sessionID)
     }
 
     private func collapseActiveWorkout() {
-        withAnimation(overlayAnimation) {
-            activeWorkoutPresentationState.collapseActiveWorkout()
-        }
+        activeWorkoutPresentationState.collapseActiveWorkout()
     }
 
 }

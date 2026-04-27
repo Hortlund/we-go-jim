@@ -10,6 +10,7 @@ struct TemplateEditorView: View {
 
     private let folderID: UUID?
     private let templateID: UUID?
+    private let onSaved: @MainActor (UUID) -> Void
     private let guidanceService = TrainingGuidanceService()
 
     @State private var templateName = ""
@@ -55,9 +56,14 @@ struct TemplateEditorView: View {
         )
     }
 
-    init(folderID: UUID? = nil, templateID: UUID? = nil) {
+    init(
+        folderID: UUID? = nil,
+        templateID: UUID? = nil,
+        onSaved: @escaping @MainActor (UUID) -> Void = { _ in }
+    ) {
         self.folderID = folderID
         self.templateID = templateID
+        self.onSaved = onSaved
     }
 
     var body: some View {
@@ -549,6 +555,7 @@ struct TemplateEditorView: View {
         do {
             let drafts = exerciseDrafts.map(\.draft)
             let cardioDrafts = WorkoutCardioPhase.allCases.compactMap { cardioDraftsByPhase[$0] }
+            let savedTemplateID: UUID
             if let templateID {
                 try templateRepository.updateTemplateContents(
                     id: templateID,
@@ -557,11 +564,14 @@ struct TemplateEditorView: View {
                     exerciseDrafts: drafts,
                     cardioDrafts: cardioDrafts
                 )
+                savedTemplateID = templateID
             } else {
                 let created = try templateRepository.createTemplate(folderID: folderID, name: templateName, notes: templateNotes)
                 try templateRepository.setExercises(templateID: created.id, drafts: drafts)
                 try templateRepository.setCardioBlocks(templateID: created.id, drafts: cardioDrafts)
+                savedTemplateID = created.id
             }
+            onSaved(savedTemplateID)
             dismiss()
         } catch {
             errorMessage = String(describing: error)
@@ -990,16 +1000,22 @@ private struct TemplateEditorExerciseRow: View {
                 },
                 onTargetRepMinChanged: { value in
                     localTargetRepMin = value
-                    editingCoordinator.scheduleRepRangeCommit(
+                    editingCoordinator.requestImmediateCommit(
+                        notes: localNotes,
                         targetRepMin: value,
-                        targetRepMax: localTargetRepMax
+                        targetRepMax: localTargetRepMax,
+                        restSeconds: localRestSeconds,
+                        setDrafts: localSetDrafts
                     )
                 },
                 onTargetRepMaxChanged: { value in
                     localTargetRepMax = value
-                    editingCoordinator.scheduleRepRangeCommit(
+                    editingCoordinator.requestImmediateCommit(
+                        notes: localNotes,
                         targetRepMin: localTargetRepMin,
-                        targetRepMax: value
+                        targetRepMax: value,
+                        restSeconds: localRestSeconds,
+                        setDrafts: localSetDrafts
                     )
                 },
                 onRestChanged: { value in

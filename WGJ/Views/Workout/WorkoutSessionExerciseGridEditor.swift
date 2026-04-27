@@ -1253,9 +1253,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             dismissInputFocus()
         }
 
-        withAnimation(.snappy(duration: 0.2, extraBounce: 0.02)) {
-            expansionBinding.wrappedValue.toggle()
-        }
+        expansionBinding.wrappedValue.toggle()
     }
 
     private func compactControlCard<Content: View>(
@@ -1688,6 +1686,9 @@ struct WorkoutSessionExerciseGridEditor: View {
         pendingBozarCompletionSetIDs.removeAll()
         if commitAllBufferedInput(clearsText: true) {
             requestImmediateCommitForCurrentState()
+        }
+        if focusedInput != nil {
+            dismissInputFocus(suppressCommit: true)
         }
         pendingCommitTask?.cancel()
         pendingCommitTask = nil

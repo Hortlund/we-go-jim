@@ -95,7 +95,9 @@ struct StartWorkoutHomeView: View {
             }
         }
         .sheet(item: $templateEditorContext, onDismiss: markHomeDirtyAndReloadIfActive) { context in
-            TemplateEditorView(folderID: context.folderID, templateID: context.templateID)
+            TemplateEditorView(folderID: context.folderID, templateID: context.templateID) { savedTemplateID in
+                handleTemplateEditorSaved(templateID: savedTemplateID)
+            }
         }
         .sheet(isPresented: $showingFolderEditor, onDismiss: markHomeDirtyAndReloadIfActive) {
             TemplateFolderEditorSheet(
@@ -919,6 +921,15 @@ struct StartWorkoutHomeView: View {
         }
     }
 
+    private func handleTemplateEditorSaved(templateID: UUID) {
+        needsExplicitRefresh = true
+        guard isTabActive else { return }
+        Task { @MainActor in
+            await reloadHomeSnapshotIfNeeded(force: true)
+            refreshSelectedTemplatePreviewIfNeeded(templateID: templateID)
+        }
+    }
+
     @MainActor
     private func reloadHomeSnapshotIfNeeded(force: Bool) async {
         await Task.yield()
@@ -1062,6 +1073,12 @@ struct StartWorkoutHomeView: View {
         }
 
         selectedTemplatePreview = makeTemplatePreview(for: importedTemplate)
+    }
+
+    @MainActor
+    private func refreshSelectedTemplatePreviewIfNeeded(templateID: UUID) {
+        guard selectedTemplatePreview?.templateID == templateID else { return }
+        selectImportedTemplatePreview(templateID: templateID)
     }
 
     @MainActor

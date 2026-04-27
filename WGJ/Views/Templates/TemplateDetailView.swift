@@ -133,7 +133,9 @@ struct TemplateDetailView: View {
                 let folderID: UUID? = template.folderID == TemplateRepository.unfiledFolderID
                     ? nil
                     : template.folderID
-                TemplateEditorView(folderID: folderID, templateID: template.id)
+                TemplateEditorView(folderID: folderID, templateID: template.id) { savedTemplateID in
+                    handleTemplateEditorSaved(templateID: savedTemplateID)
+                }
                     .wgjSheetSurface()
             }
         }
@@ -161,11 +163,7 @@ struct TemplateDetailView: View {
     }
 
     private var exerciseStateReloadKey: TemplateExerciseStateReloadKey {
-        TemplateExerciseStateReloadKey(
-            exerciseIDs: templateExercises
-                .map(\.id)
-                .sorted { $0.uuidString < $1.uuidString }
-        )
+        TemplateExerciseStateReloadKey(exercises: templateExercises)
     }
 
     private var recommendationReloadKey: TemplateExerciseRecommendationReloadKey {
@@ -390,6 +388,15 @@ struct TemplateDetailView: View {
     }
 
     @MainActor
+    private func handleTemplateEditorSaved(templateID savedTemplateID: UUID) {
+        guard savedTemplateID == templateID else { return }
+        cancelPendingTemplateDetailSaveTasks()
+        Task { @MainActor in
+            await loadSetDraftsIfNeeded(force: true)
+        }
+    }
+
+    @MainActor
     private func setDraftsBinding(for templateExercise: TemplateExercise) -> Binding<[TemplateExerciseSetDraft]> {
         Binding {
             if let cached = setDraftsByExerciseID[templateExercise.id] {
@@ -588,11 +595,11 @@ struct TemplateDetailView: View {
     }
 
     @MainActor
-    private func loadSetDraftsIfNeeded() async {
+    private func loadSetDraftsIfNeeded(force: Bool = false) async {
         let currentIDs = templateExercises.map(\.id)
         let currentIDSet = Set(currentIDs)
         discardRemovedExerciseState(keeping: currentIDSet)
-        guard currentIDSet != Set(loadedTemplateExerciseIDs) else {
+        guard force || currentIDSet != Set(loadedTemplateExerciseIDs) else {
             if !hasLoadedExerciseStateOnce {
                 hasLoadedExerciseStateOnce = true
             }
@@ -640,7 +647,7 @@ struct TemplateDetailView: View {
     }
 
     @MainActor
-    private func flushPendingSaves() async {
+    private func cancelPendingTemplateDetailSaveTasks() {
         for task in pendingSetSaveTasks.values {
             task.cancel()
         }
@@ -660,6 +667,11 @@ struct TemplateDetailView: View {
             task.cancel()
         }
         pendingNotesSaveTasks.removeAll()
+    }
+
+    @MainActor
+    private func flushPendingSaves() async {
+        cancelPendingTemplateDetailSaveTasks()
 
         for (templateExerciseID, drafts) in setDraftsByExerciseID {
             guard lastPersistedSetDraftsByExerciseID[templateExerciseID] != drafts else {
@@ -1057,8 +1069,28 @@ private struct RepRangeDraft: Equatable {
     var max: Int?
 }
 
-private struct TemplateExerciseStateReloadKey: Hashable {
-    let exerciseIDs: [UUID]
+struct TemplateExerciseStateReloadKey: Hashable {
+    struct Entry: Hashable {
+        let id: UUID
+        let updatedAt: Date
+    }
+
+    let entries: [Entry]
+
+    init(entries: [Entry]) {
+        self.entries = entries.sorted { lhs, rhs in
+            lhs.id.uuidString < rhs.id.uuidString
+        }
+    }
+
+    @MainActor
+    init(exercises: [TemplateExercise]) {
+        self.init(
+            entries: exercises.map { exercise in
+                Entry(id: exercise.id, updatedAt: exercise.updatedAt)
+            }
+        )
+    }
 }
 
 private struct TemplateExerciseRecommendationReloadKey: Hashable {

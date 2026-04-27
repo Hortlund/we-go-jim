@@ -244,6 +244,12 @@ struct HistoryDetailView: View {
                     )
 
                     WGJMetricPill(
+                        systemImage: "clock.fill",
+                        value: HistoryWorkoutDurationPresentation.formattedDuration(session)
+                    )
+                    .accessibilityIdentifier("history-detail-duration-pill")
+
+                    WGJMetricPill(
                         systemImage: "list.number",
                         value: "\(sessionExercises.count) exercises"
                     )
@@ -256,6 +262,12 @@ struct HistoryDetailView: View {
                         systemImage: "calendar",
                         value: (session.endedAt ?? session.startedAt).formatted(date: .abbreviated, time: .shortened)
                     )
+
+                    WGJMetricPill(
+                        systemImage: "clock.fill",
+                        value: HistoryWorkoutDurationPresentation.formattedDuration(session)
+                    )
+                    .accessibilityIdentifier("history-detail-duration-pill")
 
                     WGJMetricPill(
                         systemImage: "list.number",
@@ -944,6 +956,47 @@ private struct HistorySaveCommand: Sendable {
     let sessionNotes: String
     let shouldRecalculateSummary: Bool
     let exerciseSnapshotsByID: [UUID: HistoryExerciseSaveSnapshot]
+}
+
+enum HistoryWorkoutDurationPresentation {
+    static func formattedDuration(_ session: WorkoutSession) -> String {
+        formattedDuration(
+            durationSeconds: session.durationSeconds,
+            startedAt: session.startedAt,
+            endedAt: session.endedAt
+        )
+    }
+
+    static func formattedDuration(
+        durationSeconds: Int,
+        startedAt: Date,
+        endedAt: Date?
+    ) -> String {
+        let resolvedSeconds = resolvedDurationSeconds(
+            durationSeconds: durationSeconds,
+            startedAt: startedAt,
+            endedAt: endedAt
+        )
+        let mins = resolvedSeconds / 60
+        let hours = mins / 60
+        let remMins = mins % 60
+        if hours > 0 {
+            return "\(hours)h \(remMins)m"
+        }
+        return "\(remMins)m"
+    }
+
+    private static func resolvedDurationSeconds(
+        durationSeconds: Int,
+        startedAt: Date,
+        endedAt: Date?
+    ) -> Int {
+        if durationSeconds > 0 {
+            return durationSeconds
+        }
+        guard let endedAt else { return 0 }
+        return max(0, Int(endedAt.timeIntervalSince(startedAt)))
+    }
 }
 
 nonisolated struct HistoryExercisePersonalRecordPresentation: Equatable, Sendable {

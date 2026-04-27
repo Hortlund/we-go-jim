@@ -177,6 +177,64 @@ struct ScreenSnapshotTests {
     }
 
     @Test
+    func templateExerciseStateReloadKeyTracksExistingExerciseUpdates() {
+        let exerciseID = UUID()
+        let first = TemplateExerciseStateReloadKey(
+            entries: [
+                TemplateExerciseStateReloadKey.Entry(
+                    id: exerciseID,
+                    updatedAt: Date(timeIntervalSince1970: 100)
+                ),
+            ]
+        )
+        let second = TemplateExerciseStateReloadKey(
+            entries: [
+                TemplateExerciseStateReloadKey.Entry(
+                    id: exerciseID,
+                    updatedAt: Date(timeIntervalSince1970: 200)
+                ),
+            ]
+        )
+
+        #expect(first != second)
+    }
+
+    @Test
+    func historyWorkoutDurationPresentationFormatsStoredAndFallbackDurations() {
+        let startedAt = Date(timeIntervalSince1970: 1_000)
+        let endedAt = startedAt.addingTimeInterval(3_900)
+
+        #expect(
+            HistoryWorkoutDurationPresentation.formattedDuration(
+                durationSeconds: 0,
+                startedAt: startedAt,
+                endedAt: nil
+            ) == "0m"
+        )
+        #expect(
+            HistoryWorkoutDurationPresentation.formattedDuration(
+                durationSeconds: 3_540,
+                startedAt: startedAt,
+                endedAt: endedAt
+            ) == "59m"
+        )
+        #expect(
+            HistoryWorkoutDurationPresentation.formattedDuration(
+                durationSeconds: 3_600,
+                startedAt: startedAt,
+                endedAt: endedAt
+            ) == "1h 0m"
+        )
+        #expect(
+            HistoryWorkoutDurationPresentation.formattedDuration(
+                durationSeconds: 0,
+                startedAt: startedAt,
+                endedAt: endedAt
+            ) == "1h 5m"
+        )
+    }
+
+    @Test
     func startWorkoutHomeSnapshotBuildsGroupedSectionsAndLastCompletedLookup() {
         let folder = TemplateFolder(name: "Push", sortOrder: 0)
         let unfiledTemplate = WorkoutTemplate(

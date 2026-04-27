@@ -1343,15 +1343,6 @@ struct ActiveWorkoutView: View {
 
         if updatedCompletion {
             WorkoutFeedbackCenter.shared.exerciseCompleted()
-            if cardioBlock.phase == .preWorkout {
-                cardStateController.expandFirstIncompleteIfNeeded(
-                    firstIncompleteExerciseID(
-                        from: sessionExercises,
-                        draftsByExerciseID: setDraftsByExerciseID
-                    )
-                )
-                scheduleExpandedExerciseHydrationIfNeeded()
-            }
         }
     }
 
@@ -1364,12 +1355,10 @@ struct ActiveWorkoutView: View {
         let isCompleted = isExerciseCompleted(drafts)
         let previouslyCompleted = cardStateController.didCompleteCurrentCycle(for: exercise.id)
         if previouslyCompleted != isCompleted {
-            withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
-                cardStateController.updateCompletion(
-                    for: exercise.id,
-                    isCompleted: isCompleted
-                )
-            }
+            cardStateController.updateCompletion(
+                for: exercise.id,
+                isCompleted: isCompleted
+            )
             if isCompleted {
                 WorkoutFeedbackCenter.shared.exerciseCompleted()
             }
@@ -1857,15 +1846,11 @@ struct ActiveWorkoutView: View {
     }
 
     private func presentActiveWorkout() {
-        withAnimation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion)) {
-            activeWorkoutPresentationState.present(sessionID: sessionID)
-        }
+        activeWorkoutPresentationState.present(sessionID: sessionID)
     }
 
     private func collapseActiveWorkout() {
-        withAnimation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion)) {
-            activeWorkoutPresentationState.collapseActiveWorkout()
-        }
+        activeWorkoutPresentationState.collapseActiveWorkout()
     }
 
     private func cancelWorkout() {

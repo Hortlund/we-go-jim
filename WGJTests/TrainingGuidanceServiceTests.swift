@@ -400,7 +400,7 @@ struct TrainingGuidanceServiceTests {
     }
 
     @Test
-    func activeWorkoutControllerCollapsesOnCompletionAndAllowsRepeatCycle() {
+    func activeWorkoutControllerKeepsManualExpansionWhenExerciseCompletes() {
         let first = UUID()
         let second = UUID()
         var controller = ActiveWorkoutExerciseCardStateController()
@@ -411,13 +411,11 @@ struct TrainingGuidanceServiceTests {
             firstIncompleteExerciseID: first
         )
 
-        #expect(controller.isExpanded(for: first))
+        #expect(!controller.isExpanded(for: first))
         #expect(!controller.isExpanded(for: second))
 
-        controller.updateCompletion(for: first, isCompleted: true)
-        #expect(!controller.isExpanded(for: first))
-
         controller.setExpanded(true, for: first)
+        controller.updateCompletion(for: first, isCompleted: true)
         #expect(controller.isExpanded(for: first))
 
         controller.updateCompletion(for: first, isCompleted: true)
@@ -425,7 +423,7 @@ struct TrainingGuidanceServiceTests {
 
         controller.updateCompletion(for: first, isCompleted: false)
         controller.updateCompletion(for: first, isCompleted: true)
-        #expect(!controller.isExpanded(for: first))
+        #expect(controller.isExpanded(for: first))
     }
 
     @Test
@@ -452,7 +450,7 @@ struct TrainingGuidanceServiceTests {
     }
 
     @Test
-    func activeWorkoutControllerCanOpenFirstIncompleteAfterGateUnlocks() {
+    func activeWorkoutControllerDoesNotOpenFirstIncompleteAfterGateUnlocks() {
         let first = UUID()
         let second = UUID()
         var controller = ActiveWorkoutExerciseCardStateController()
@@ -465,7 +463,7 @@ struct TrainingGuidanceServiceTests {
 
         controller.expandFirstIncompleteIfNeeded(first)
 
-        #expect(controller.isExpanded(for: first))
+        #expect(!controller.isExpanded(for: first))
         #expect(!controller.isExpanded(for: second))
     }
 
