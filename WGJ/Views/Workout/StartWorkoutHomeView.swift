@@ -721,43 +721,63 @@ struct StartWorkoutHomeView: View {
     }
 
     private func prepareActiveWorkoutStart(templateID: UUID?) async throws -> ActiveWorkoutStartPreparation {
-        if let appBackgroundStore {
-            return try await appBackgroundStore.performWrite("start-workout.prepare-active-session") { backgroundContext in
-                try Self.prepareActiveWorkoutStart(templateID: templateID, modelContext: backgroundContext)
-            }
-        }
-
-        return try Self.prepareActiveWorkoutStart(templateID: templateID, modelContext: modelContext)
-    }
-
-    nonisolated private static func prepareActiveWorkoutStart(
-        templateID: UUID?,
-        modelContext: ModelContext
-    ) throws -> ActiveWorkoutStartPreparation {
-        let repository = ActiveWorkoutDraftRepository(modelContext: modelContext)
-        if let activeSession = try repository.activeSession() {
+        if let snapshot = try await ActiveWorkoutSnapshotStore.shared.load() {
             return ActiveWorkoutStartPreparation(
-                sessionID: activeSession.id,
+                sessionID: snapshot.id,
                 isExistingConflict: true,
                 previousPerformanceResolutionByExerciseID: [:],
                 firstRenderSnapshot: nil
             )
         }
 
-        let sessionID: UUID
-        if let templateID {
-            sessionID = try repository.createSessionFromTemplate(templateID: templateID).id
+        let importedLegacy: ActiveWorkoutRuntimeSession?
+        if let appBackgroundStore {
+            importedLegacy = try await appBackgroundStore.performWrite("start-workout.import-legacy-active-session") { backgroundContext in
+                try ActiveWorkoutSessionFactory(modelContext: backgroundContext)
+                    .importLegacyActiveSessionIfNeeded()
+            }
         } else {
-            sessionID = try repository.createEmptySession().id
+            importedLegacy = try ActiveWorkoutSessionFactory(modelContext: modelContext)
+                .importLegacyActiveSessionIfNeeded()
         }
 
-        let firstRenderSnapshot = try repository.preparedFirstRenderSnapshot(sessionID: sessionID)
+        if let importedLegacy {
+            try await ActiveWorkoutSnapshotStore.shared.save(importedLegacy)
+            return ActiveWorkoutStartPreparation(
+                sessionID: importedLegacy.id,
+                isExistingConflict: true,
+                previousPerformanceResolutionByExerciseID: [:],
+                firstRenderSnapshot: nil
+            )
+        }
+
+        let runtimeSession: ActiveWorkoutRuntimeSession
+        if let appBackgroundStore {
+            runtimeSession = try await appBackgroundStore.perform("start-workout.prepare-runtime-session") { backgroundContext in
+                try Self.prepareActiveWorkoutStart(templateID: templateID, modelContext: backgroundContext)
+            }
+        } else {
+            runtimeSession = try Self.prepareActiveWorkoutStart(templateID: templateID, modelContext: modelContext)
+        }
+
+        try await ActiveWorkoutSnapshotStore.shared.save(runtimeSession)
         return ActiveWorkoutStartPreparation(
-            sessionID: sessionID,
+            sessionID: runtimeSession.id,
             isExistingConflict: false,
-            previousPerformanceResolutionByExerciseID: firstRenderSnapshot.previousResolutionByExerciseID,
-            firstRenderSnapshot: firstRenderSnapshot
+            previousPerformanceResolutionByExerciseID: [:],
+            firstRenderSnapshot: nil
         )
+    }
+
+    nonisolated private static func prepareActiveWorkoutStart(
+        templateID: UUID?,
+        modelContext: ModelContext
+    ) throws -> ActiveWorkoutRuntimeSession {
+        let factory = ActiveWorkoutSessionFactory(modelContext: modelContext)
+        if let templateID {
+            return try factory.createSessionFromTemplate(templateID: templateID)
+        }
+        return factory.createEmptySession()
     }
 
     private func handlePreparedActiveWorkoutStart(_ preparation: ActiveWorkoutStartPreparation) {

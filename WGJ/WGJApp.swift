@@ -70,6 +70,11 @@ struct WGJApp: App {
     }
 
     private static func makeUITestContainer() throws -> ModelContainer {
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT") {
+            ActiveWorkoutSnapshotStore.deleteDefaultSnapshotFileForUITests()
+        }
+#endif
         let appSchema = fullAppSchema()
         let inMemory = ModelConfiguration(
             "UITest",

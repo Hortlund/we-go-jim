@@ -516,7 +516,7 @@ nonisolated struct TemplateExerciseDropStageDraft: Identifiable, Equatable, Coda
     }
 }
 
-nonisolated struct WorkoutSessionDropStageDraft: Identifiable, Equatable, Sendable {
+nonisolated struct WorkoutSessionDropStageDraft: Identifiable, Equatable, Codable, Sendable {
     let id: UUID
     var targetReps: Int?
     var targetWeight: Double?

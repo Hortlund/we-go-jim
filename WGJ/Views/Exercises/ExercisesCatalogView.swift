@@ -58,10 +58,6 @@ struct ExercisesCatalogView: View {
         return nil
     }
 
-    private var activeWorkoutRepository: ActiveWorkoutDraftRepository {
-        ActiveWorkoutDraftRepository(modelContext: modelContext)
-    }
-
     private let indexRailWidth: CGFloat = 28
 
     private var contentTrailingPadding: CGFloat {
@@ -536,49 +532,51 @@ struct ExercisesCatalogView: View {
     }
 
     private func addExerciseToSessionOrPrompt(_ exercise: ExerciseCatalogItem) {
-        if let activeSessionID = resolvedActiveSessionIDForAdd() {
+        Task { @MainActor in
             do {
-                try activeWorkoutRepository.addExercise(sessionID: activeSessionID, catalogItem: exercise)
-                isSearchFieldFocused = false
-                WGJKeyboard.dismiss()
+                let hadActivePresentation = activeWorkoutPresentationState.activeSessionID != nil
+                if let activeSession = try await resolvedActiveRuntimeSessionForAdd() {
+                    try await saveRuntimeSessionByAppending(exercise, to: activeSession)
+                    if !hadActivePresentation {
+                        presentActiveWorkout(sessionID: activeSession.id)
+                    }
+                    isSearchFieldFocused = false
+                    WGJKeyboard.dismiss()
+                    return
+                }
+
+                pendingExerciseForAdd = exercise
+                showingCreateSessionPrompt = true
             } catch {
                 activeWorkoutPresentationState.clearPresentation()
                 showError(error)
             }
-            return
         }
-
-        pendingExerciseForAdd = exercise
-        showingCreateSessionPrompt = true
     }
 
     private func startSessionAndAddPendingExercise() {
-        guard let pendingExerciseForAdd else { return }
-        self.pendingExerciseForAdd = nil
-        isSearchFieldFocused = false
-        WGJKeyboard.dismiss()
+        Task { @MainActor in
+            guard let pendingExerciseForAdd else { return }
+            self.pendingExerciseForAdd = nil
+            isSearchFieldFocused = false
+            WGJKeyboard.dismiss()
 
-        var createdSessionID: UUID?
-        do {
-            if let activeSession = try activeWorkoutRepository.activeSession() {
-                try activeWorkoutRepository.addExercise(sessionID: activeSession.id, catalogItem: pendingExerciseForAdd)
-                stagePreparedPreviousPerformance(for: activeSession.id)
-                presentActiveWorkout(sessionID: activeSession.id)
+            do {
+                if let activeSession = try await resolvedActiveRuntimeSessionForAdd() {
+                    try await saveRuntimeSessionByAppending(pendingExerciseForAdd, to: activeSession)
+                    presentActiveWorkout(sessionID: activeSession.id)
+                    appTabState.selectedTab = .startWorkout
+                    return
+                }
+
+                let createdSession = ActiveWorkoutSessionFactory(modelContext: modelContext)
+                    .createEmptySession()
+                try await saveRuntimeSessionByAppending(pendingExerciseForAdd, to: createdSession)
+                presentActiveWorkout(sessionID: createdSession.id)
                 appTabState.selectedTab = .startWorkout
-                return
+            } catch {
+                showError(error)
             }
-
-            let created = try activeWorkoutRepository.createEmptySession()
-            createdSessionID = created.id
-            try activeWorkoutRepository.addExercise(sessionID: created.id, catalogItem: pendingExerciseForAdd)
-            stagePreparedPreviousPerformance(for: created.id)
-            presentActiveWorkout(sessionID: created.id)
-            appTabState.selectedTab = .startWorkout
-        } catch {
-            if let createdSessionID {
-                try? activeWorkoutRepository.cancelSession(sessionID: createdSessionID)
-            }
-            showError(error)
         }
     }
 
@@ -588,25 +586,41 @@ struct ExercisesCatalogView: View {
         }
     }
 
-    private func resolvedActiveSessionIDForAdd() -> UUID? {
-        if let activeSessionID = activeWorkoutPresentationState.activeSessionID {
-            return activeSessionID
+    @MainActor
+    private func resolvedActiveRuntimeSessionForAdd() async throws -> ActiveWorkoutRuntimeSession? {
+        if let snapshot = try await ActiveWorkoutSnapshotStore.shared.load() {
+            if activeWorkoutPresentationState.activeSessionID != snapshot.id {
+                activeWorkoutPresentationState.activeSessionID = snapshot.id
+            }
+            return snapshot
         }
 
-        return try? activeWorkoutRepository.activeSession()?.id
+        if let importedLegacy = try ActiveWorkoutSessionFactory(modelContext: modelContext)
+            .importLegacyActiveSessionIfNeeded() {
+            try await ActiveWorkoutSnapshotStore.shared.save(importedLegacy)
+            activeWorkoutPresentationState.activeSessionID = importedLegacy.id
+            return importedLegacy
+        }
+
+        if activeWorkoutPresentationState.activeSessionID != nil {
+            activeWorkoutPresentationState.clearPresentation()
+        }
+        return nil
     }
 
-    private func stagePreparedPreviousPerformance(for sessionID: UUID) {
-        guard let resolutionByExerciseID = try? activeWorkoutRepository.previousPerformanceResolutionByExerciseID(
-            sessionID: sessionID
-        ) else {
-            return
-        }
-
-        activeWorkoutPresentationState.stagePreparedPreviousPerformanceResolution(
-            resolutionByExerciseID,
-            for: sessionID
-        )
+    @MainActor
+    private func saveRuntimeSessionByAppending(
+        _ exercise: ExerciseCatalogItem,
+        to session: ActiveWorkoutRuntimeSession
+    ) async throws {
+        var updatedSession = session
+        let sortOrder = updatedSession.exercises.count
+        let runtimeExercise = ActiveWorkoutSessionFactory(modelContext: modelContext)
+            .createExercise(from: exercise, sortOrder: sortOrder)
+        updatedSession.exercises.append(runtimeExercise)
+        updatedSession.normalizeExerciseSortOrder()
+        updatedSession.touch()
+        try await ActiveWorkoutSnapshotStore.shared.save(updatedSession)
     }
 
     private func scrollToTop(using proxy: ScrollViewProxy) {

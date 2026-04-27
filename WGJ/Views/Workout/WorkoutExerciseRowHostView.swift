@@ -227,6 +227,8 @@ struct WorkoutExerciseRowHostView: View {
             onExerciseMoveDown: onExerciseMoveDown,
             onExerciseMoveToPosition: onExerciseMoveToPosition,
             onExerciseDelete: onExerciseDelete,
+            flushCoordinator: flushCoordinator,
+            flushIdentifier: exerciseID,
             onInputFocusChange: onInputFocusChange
         )
         .onChange(of: restSeconds) { _, newValue in
@@ -258,12 +260,6 @@ struct WorkoutExerciseRowHostView: View {
         }
         .onDisappear {
             flushPendingEditsIfNeeded()
-            flushCoordinator?.unregister(exerciseID: exerciseID)
-        }
-        .onAppear {
-            flushCoordinator?.register(exerciseID: exerciseID) {
-                flushPendingEditsIfNeeded()
-            }
         }
     }
 

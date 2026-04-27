@@ -28,10 +28,10 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		C85A32002F39A7B000217B62 /* AppIntents.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppIntents.framework; path = System/Library/Frameworks/AppIntents.framework; sourceTree = SDKROOT; };
 		C85A31C52F367BAE00217B62 /* WGJ.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WGJ.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C85A31D42F367BAF00217B62 /* WGJTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WGJTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C85A31DE2F367BAF00217B62 /* WGJUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WGJUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C85A32002F39A7B000217B62 /* AppIntents.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppIntents.framework; path = System/Library/Frameworks/AppIntents.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -89,14 +89,6 @@
 			);
 			sourceTree = "<group>";
 		};
-		C85A32022F39A7B000217B62 /* Frameworks */ = {
-			isa = PBXGroup;
-			children = (
-				C85A32002F39A7B000217B62 /* AppIntents.framework */,
-			);
-			name = Frameworks;
-			sourceTree = "<group>";
-		};
 		C85A31C62F367BAE00217B62 /* Products */ = {
 			isa = PBXGroup;
 			children = (
@@ -105,6 +97,14 @@
 				C85A31DE2F367BAF00217B62 /* WGJUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		C85A32022F39A7B000217B62 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				C85A32002F39A7B000217B62 /* AppIntents.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */

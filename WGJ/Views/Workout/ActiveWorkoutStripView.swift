@@ -1,96 +1,88 @@
+import Foundation
 import SwiftData
 import SwiftUI
 
 struct ActiveWorkoutStripView: View {
-    @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
     @Environment(RestTimerState.self) private var restTimerState
 
     let sessionID: UUID
     let onExpand: () -> Void
 
-    @Query private var sessions: [ActiveWorkoutDraftSession]
+    @State private var session: ActiveWorkoutRuntimeSession?
 
     init(sessionID: UUID, onExpand: @escaping () -> Void) {
         self.sessionID = sessionID
         self.onExpand = onExpand
-        _sessions = Query(filter: #Predicate { session in
-            session.id == sessionID
-        })
-    }
-
-    private var session: ActiveWorkoutDraftSession? {
-        sessions.first
     }
 
     var body: some View {
-        Group {
-            if let session {
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    let status = statusPresentation(now: context.date)
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let status = statusPresentation(now: context.date)
 
-                    Button(action: onExpand) {
-                        HStack(spacing: 10) {
+            Button(action: onExpand) {
+                HStack(spacing: 10) {
+                    Circle()
+                        .fill(WGJTheme.success)
+                        .frame(width: 12, height: 12)
+                        .overlay {
                             Circle()
-                                .fill(WGJTheme.success)
-                                .frame(width: 12, height: 12)
-                                .overlay {
-                                    Circle()
-                                        .stroke(Color.white.opacity(0.24), lineWidth: 1)
-                                }
-
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(session.name)
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(WGJTheme.textPrimary)
-                                    .wgjSingleLineText(scale: 0.84)
-
-                                Text(status.statusText)
-                                    .font(.caption.weight(.medium))
-                                    .foregroundStyle(status.statusTint)
-                                    .monospacedDigit()
-                                    .wgjSingleLineText(scale: 0.84)
-                            }
-
-                            Spacer()
-
-                            WGJMetricPill(
-                                systemImage: status.pillIcon,
-                                value: status.pillText,
-                                tint: status.pillTint
-                            )
+                                .stroke(Color.white.opacity(0.24), lineWidth: 1)
                         }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .frame(maxWidth: .infinity)
-                        .wgjCardContainer(strong: true, cornerRadius: 22)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(session?.name ?? "Workout in progress")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(WGJTheme.textPrimary)
+                            .wgjSingleLineText(scale: 0.84)
+
+                        Text(status.statusText)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(status.statusTint)
+                            .monospacedDigit()
+                            .wgjSingleLineText(scale: 0.84)
                     }
-                    .buttonStyle(.plain)
-                    .highPriorityGesture(
-                        DragGesture(minimumDistance: 12)
-                            .onEnded { value in
-                                if value.translation.height < -18 {
-                                    onExpand()
-                                }
-                            }
+
+                    Spacer()
+
+                    WGJMetricPill(
+                        systemImage: status.pillIcon,
+                        value: status.pillText,
+                        tint: status.pillTint
                     )
-                    .padding(.horizontal, 12)
                 }
-                .background {
-                    WorkoutRestTimerExpiryObserver()
-                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity)
+                .wgjCardContainer(strong: true, cornerRadius: 22)
             }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("active-workout-strip")
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 12)
+                    .onEnded { value in
+                        if value.translation.height < -18 {
+                            onExpand()
+                        }
+                    }
+            )
+            .padding(.horizontal, 12)
         }
-        .task(id: session?.id) {
-            await reconcileSessionLifecycleIfNeeded()
+        .background {
+            WorkoutRestTimerExpiryObserver()
+        }
+        .task(id: sessionID) {
+            await loadSnapshot()
         }
     }
 
     @MainActor
-    private func reconcileSessionLifecycleIfNeeded() async {
-        guard session != nil else {
-            activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
+    private func loadSnapshot() async {
+        guard let snapshot = try? await ActiveWorkoutSnapshotStore.shared.load(),
+              snapshot.id == sessionID else {
+            session = nil
             return
         }
+        session = snapshot
     }
 
     private func elapsedText(now: Date) -> String {

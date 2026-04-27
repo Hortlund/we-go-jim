@@ -939,6 +939,97 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testActiveWorkoutBackgroundRelaunchResumeAndDiscardRemovesSnapshot() throws {
+        var app = launchApp(mode: .localInMemory, launchArguments: [
+            "UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT",
+        ], launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Relaunch Resume Workout",
+                notes: "Lifecycle snapshot smoke.",
+                exercises: [
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "active-relaunch-resume-bench",
+                        exerciseNameSnapshot: "Bench Press",
+                        categorySnapshot: "Chest",
+                        muscleSummarySnapshot: "Chest",
+                        targetRepMin: 6,
+                        targetRepMax: 8,
+                        restSeconds: 120,
+                        sets: [
+                            templatePayloadSet(
+                                targetReps: 6,
+                                targetWeight: 100,
+                                loadUnit: "kg",
+                                restSeconds: 120,
+                                isWarmup: false
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+        ])
+
+        startPreviewedTemplateWorkout(in: app)
+
+        let weightField = identifiedElement("workout-set-0-weight-field", in: app)
+        XCTAssertTrue(weightField.waitForExistence(timeout: 5))
+        revealElement(weightField, in: app)
+        weightField.tap()
+        if !app.keyboards.element.waitForExistence(timeout: 1) {
+            weightField.tap()
+        }
+        weightField.typeText("92")
+
+        let repsField = identifiedElement("workout-set-0-reps-field", in: app)
+        XCTAssertTrue(repsField.waitForExistence(timeout: 5))
+        revealElement(repsField, in: app)
+        repsField.tap()
+        if !app.keyboards.element.waitForExistence(timeout: 1) {
+            repsField.tap()
+        }
+        repsField.typeText("6")
+
+        let hideKeyboardButton = app.buttons["keyboard-hide-button"]
+        if hideKeyboardButton.waitForExistence(timeout: 1) {
+            hideKeyboardButton.tap()
+        }
+        XCUIDevice.shared.press(.home)
+        RunLoop.current.run(until: Date().addingTimeInterval(1.0))
+
+        app.terminate()
+        app = XCUIApplication()
+        app.launchArguments = LaunchMode.localInMemory.launchArguments
+        app.launch()
+        authenticateIfNeeded(app, mode: .localInMemory)
+
+        tapTab("Start Workout", in: app)
+        let restoredStrip = identifiedElement("active-workout-strip", in: app)
+        if restoredStrip.waitForExistence(timeout: 5) {
+            restoredStrip.tap()
+        }
+
+        let restoredWeightField = identifiedElement("workout-set-0-weight-field", in: app)
+        let restoredRepsField = identifiedElement("workout-set-0-reps-field", in: app)
+        XCTAssertTrue(restoredWeightField.waitForExistence(timeout: 5))
+        XCTAssertTrue(restoredRepsField.waitForExistence(timeout: 5))
+        XCTAssertEqual(restoredWeightField.value as? String, "92")
+        XCTAssertEqual(restoredRepsField.value as? String, "6")
+
+        discardCurrentWorkout(in: app)
+
+        app.terminate()
+        app = XCUIApplication()
+        app.launchArguments = LaunchMode.localInMemory.launchArguments
+        app.launch()
+        authenticateIfNeeded(app, mode: .localInMemory)
+
+        tapTab("Start Workout", in: app)
+        XCTAssertFalse(identifiedElement("active-workout-strip", in: app).waitForExistence(timeout: 2))
+        let startButton = app.buttons["start-workout-empty-button"]
+        XCTAssertTrue(startButton.waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testActiveWorkoutGuidanceBadgeExpandsCoachTip() throws {
         let app = launchApp(launchEnvironment: [
             "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(

@@ -759,14 +759,33 @@ final class ActiveWorkoutPresentationState {
         modelContext: ModelContext,
         backgroundStore: AppBackgroundStore?
     ) async -> UUID? {
-        if let backgroundStore {
-            return (try? await backgroundStore.perform("active-workout.restore.active-session") {
-                backgroundContext in
-                try ActiveWorkoutDraftRepository(modelContext: backgroundContext).activeSession()?.id
-            }) ?? nil
+        do {
+            if let snapshot = try await ActiveWorkoutSnapshotStore.shared.load() {
+                return snapshot.id
+            }
+        } catch {
+            // Fall through to legacy draft import. A bad local snapshot should not block
+            // one-time migration from old active SwiftData rows.
         }
 
-        return (try? ActiveWorkoutDraftRepository(modelContext: modelContext).activeSession()?.id) ?? nil
+        let imported: ActiveWorkoutRuntimeSession?
+        if let backgroundStore {
+            imported = try? await backgroundStore.perform("active-workout.restore.legacy-active-session") {
+                backgroundContext in
+                try ActiveWorkoutSessionFactory(modelContext: backgroundContext)
+                    .importLegacyActiveSessionIfNeeded()
+            }
+        } else {
+            imported = try? ActiveWorkoutSessionFactory(modelContext: modelContext)
+                .importLegacyActiveSessionIfNeeded()
+        }
+
+        if let imported {
+            try? await ActiveWorkoutSnapshotStore.shared.save(imported)
+            return imported.id
+        }
+
+        return nil
     }
 }
 

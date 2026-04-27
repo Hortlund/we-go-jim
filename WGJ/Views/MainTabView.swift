@@ -28,6 +28,7 @@ struct MainTabView: View {
     var body: some View {
         @Bindable var tabState = tabState
         @Bindable var workoutCompletionPresentationState = workoutCompletionPresentationState
+        @Bindable var activeWorkoutPresentationState = activeWorkoutPresentationState
 
         GeometryReader { proxy in
             let bottomSafeAreaInset = proxy.safeAreaInsets.bottom
@@ -94,20 +95,10 @@ struct MainTabView: View {
             .onPreferenceChange(ActiveWorkoutStripHeightPreferenceKey.self) { newValue in
                 activeWorkoutStripHeight = max(newValue, Self.activeWorkoutStripFallbackHeight)
             }
-            .fullScreenCover(isPresented: Binding(
-                get: {
-                    activeWorkoutPresentationState.isActiveWorkoutPresented && activeWorkoutPresentationState.activeSessionID != nil
-                },
-                set: { newValue in
-                    if newValue {
-                        if let sessionID = activeWorkoutPresentationState.activeSessionID {
-                            presentActiveWorkout(sessionID: sessionID)
-                        }
-                    } else {
-                        collapseActiveWorkout()
-                    }
+            .fullScreenCover(isPresented: $activeWorkoutPresentationState.isActiveWorkoutPresented, onDismiss: {
+                if activeWorkoutPresentationState.activeSessionID != nil {
+                    activeWorkoutPresentationState.collapseActiveWorkout()
                 }
-            ), onDismiss: {
                 workoutCompletionPresentationState.presentQueuedIfNeeded()
             }) {
                 if let activeSessionID = activeWorkoutPresentationState.activeSessionID {
@@ -169,6 +160,7 @@ struct MainTabView: View {
         LazyTabContainer(
             tab: tab,
             deferInitialContentMount: false,
+            preloadContent: false,
             firstFrameShell: { EmptyView() },
             content: content
         )
@@ -190,6 +182,7 @@ struct MainTabView: View {
         LazyTabContainer(
             tab: tab,
             deferInitialContentMount: FirstFrameTabContentPolicy.shouldDeferInitialContentMount(tab: tab),
+            preloadContent: shouldPreloadDeferredTab(tab),
             firstFrameShell: firstFrameShell,
             content: content
         )
@@ -199,6 +192,17 @@ struct MainTabView: View {
                 Label(title, systemImage: systemImage)
             }
             .tag(tab)
+    }
+
+    private func shouldPreloadDeferredTab(_ tab: AppMainTab) -> Bool {
+        switch tab {
+        case .profile:
+            return appWarmupState.freshProfile() != nil
+        case .bros:
+            return appWarmupState.freshBros() != nil
+        case .history, .startWorkout, .exercises:
+            return false
+        }
     }
 
     @ViewBuilder
@@ -224,7 +228,6 @@ struct MainTabView: View {
                 }
                 .padding(.bottom, activeWorkoutStripBottomLift(bottomSafeAreaInset: bottomSafeAreaInset))
                 .transition(activeWorkoutStripTransition)
-                .accessibilityIdentifier("active-workout-strip")
                 .zIndex(2)
             }
 
@@ -272,20 +275,14 @@ struct MainTabView: View {
 
     private var shouldShowSyncBanner: Bool {
         userDataSyncStatus.state == .syncing
-            || appWarmupState.isProfileWarmupActive
-            || appWarmupState.isBrosWarmupActive
     }
 
     private var syncBannerTitle: String {
-        userDataSyncStatus.state == .syncing ? "Syncing iCloud data" : "Preparing your data"
+        "Syncing iCloud data"
     }
 
     private var syncBannerMessage: String {
-        if appWarmupState.isProfileWarmupActive || appWarmupState.isBrosWarmupActive {
-            return "Profile, templates, and Bros are catching up."
-        }
-
-        return userDataSyncStatus.detail
+        userDataSyncStatus.detail
     }
 
     private func activeWorkoutStripBottomLift(bottomSafeAreaInset: CGFloat) -> CGFloat {
@@ -551,6 +548,7 @@ private struct LazyTabContainer<Content: View, FirstFrameShell: View>: View {
 
     let tab: AppMainTab
     let deferInitialContentMount: Bool
+    let preloadContent: Bool
     let firstFrameShell: () -> FirstFrameShell
     let content: () -> Content
 
@@ -581,6 +579,10 @@ private struct LazyTabContainer<Content: View, FirstFrameShell: View>: View {
         .onAppear {
             handleAppear()
         }
+        .onChange(of: preloadContent) { _, shouldPreload in
+            guard shouldPreload else { return }
+            markLoaded()
+        }
         .onChange(of: tabState.selectedTab) { _, _ in
             guard !deferInitialContentMount || isSelectionObservationReady else { return }
             handleSelectionChange(isSelectionChange: true)
@@ -594,6 +596,11 @@ private struct LazyTabContainer<Content: View, FirstFrameShell: View>: View {
     }
 
     private func handleAppear() {
+        if preloadContent {
+            markLoaded()
+            return
+        }
+
         guard deferInitialContentMount else {
             handleSelectionChange(isSelectionChange: false)
             return

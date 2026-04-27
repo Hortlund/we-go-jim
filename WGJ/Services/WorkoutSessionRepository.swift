@@ -7,7 +7,7 @@ nonisolated struct WorkoutPreviousSetSnapshot: Equatable, Sendable {
     var unit: TemplateLoadUnit
 }
 
-nonisolated struct WorkoutSessionSetDraft: Identifiable, Equatable, Sendable {
+nonisolated struct WorkoutSessionSetDraft: Identifiable, Equatable, Codable, Sendable {
     let id: UUID
     var isWarmup: Bool
     var restSeconds: Int

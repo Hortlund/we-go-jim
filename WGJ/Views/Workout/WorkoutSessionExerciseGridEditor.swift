@@ -42,6 +42,8 @@ struct WorkoutSessionExerciseGridEditor: View {
     var onExerciseMoveDown: (() -> Void)?
     var onExerciseMoveToPosition: (() -> Void)?
     var onExerciseDelete: (() -> Void)?
+    var flushCoordinator: WorkoutExerciseRowFlushCoordinator?
+    var flushIdentifier: UUID?
     var onInputFocusChange: (Bool) -> Void
 
     private let externalIsExpanded: Binding<Bool>?
@@ -114,6 +116,8 @@ struct WorkoutSessionExerciseGridEditor: View {
         onExerciseMoveDown: (() -> Void)? = nil,
         onExerciseMoveToPosition: (() -> Void)? = nil,
         onExerciseDelete: (() -> Void)? = nil,
+        flushCoordinator: WorkoutExerciseRowFlushCoordinator? = nil,
+        flushIdentifier: UUID? = nil,
         onInputFocusChange: @escaping (Bool) -> Void = { _ in }
     ) {
         self.exerciseName = exerciseName
@@ -153,6 +157,8 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.onExerciseMoveDown = onExerciseMoveDown
         self.onExerciseMoveToPosition = onExerciseMoveToPosition
         self.onExerciseDelete = onExerciseDelete
+        self.flushCoordinator = flushCoordinator
+        self.flushIdentifier = flushIdentifier
         self.onInputFocusChange = onInputFocusChange
         self._localIsExpanded = State(initialValue: isExpanded?.wrappedValue ?? initiallyExpanded)
         let startsExpanded = isExpanded?.wrappedValue ?? initiallyExpanded
@@ -201,10 +207,18 @@ struct WorkoutSessionExerciseGridEditor: View {
             if isExpanded {
                 refreshDisplayRows()
             }
+            if let flushIdentifier {
+                flushCoordinator?.register(exerciseID: flushIdentifier) {
+                    flushPendingEditorState()
+                }
+            }
         }
         .onDisappear {
             onInputFocusChange(false)
             flushPendingEditorState()
+            if let flushIdentifier {
+                flushCoordinator?.unregister(exerciseID: flushIdentifier)
+            }
         }
         .onChange(of: setDrafts) { previousValue, newValue in
             handleSetDraftsChange(previousValue: previousValue, currentValue: newValue)

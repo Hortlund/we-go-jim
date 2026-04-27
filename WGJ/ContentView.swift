@@ -145,6 +145,10 @@ struct ContentView: View {
         await prepareLocalProfileIdentityIfNeeded()
         await prepareFirstRunLocalBootstrapIfNeeded()
         startStartupWarmSnapshotsIfNeeded()
+        await activeWorkoutPresentationState.restoreActiveSessionIfMissing(
+            modelContext: modelContext,
+            backgroundStore: appBackgroundStore
+        )
 
         if appPhase != .main {
             withAnimation(.easeInOut(duration: 0.2)) {
