@@ -167,16 +167,23 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
-    func activeWorkoutSceneTransitionFlushesOnlyWhenBackgrounded() {
+    func activeWorkoutSceneTransitionDoesNotFlushForAppSwitching() {
         #expect(!ActiveWorkoutSceneTransitionPolicy.shouldFlushLocalDraft(scenePhase: .active))
         #expect(!ActiveWorkoutSceneTransitionPolicy.shouldFlushLocalDraft(scenePhase: .inactive))
-        #expect(ActiveWorkoutSceneTransitionPolicy.shouldFlushLocalDraft(scenePhase: .background))
+        #expect(!ActiveWorkoutSceneTransitionPolicy.shouldFlushLocalDraft(scenePhase: .background))
     }
 
     @Test
-    func activeWorkoutDurableSnapshotPolicySkipsInAppMinimize() {
+    func activeWorkoutDurableSnapshotPolicySkipsLifecycleChurn() {
         #expect(!ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: .minimize))
-        #expect(ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: .sceneTransition))
+        #expect(!ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: .sceneTransition))
+    }
+
+    @Test
+    func activeWorkoutKeyboardChromeResetsWhenAppLeavesActiveScene() {
+        #expect(!ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: .active))
+        #expect(ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: .inactive))
+        #expect(ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: .background))
     }
 
     @Test

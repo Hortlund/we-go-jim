@@ -2,7 +2,7 @@ import SwiftUI
 
 nonisolated enum ActiveWorkoutSceneTransitionPolicy {
     static func shouldFlushLocalDraft(scenePhase: ScenePhase) -> Bool {
-        scenePhase == .background
+        false
     }
 }
 
@@ -15,7 +15,13 @@ nonisolated enum ActiveWorkoutLifecycleCheckpoint {
 
 nonisolated enum ActiveWorkoutSnapshotPersistencePolicy {
     static func shouldWriteDurableSnapshot(for checkpoint: ActiveWorkoutLifecycleCheckpoint) -> Bool {
-        checkpoint == .sceneTransition
+        false
+    }
+}
+
+nonisolated enum ActiveWorkoutKeyboardChromePolicy {
+    static func shouldResetKeyboardState(scenePhase: ScenePhase) -> Bool {
+        scenePhase != .active
     }
 }
 

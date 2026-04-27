@@ -7,7 +7,6 @@ import UIKit
 struct ActiveWorkoutView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
-    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(WorkoutCompletionPresentationState.self) private var workoutCompletionPresentationState
     @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
@@ -301,12 +300,6 @@ struct ActiveWorkoutView: View {
             }
             .onChange(of: showingFinishConfirmation) { oldValue, newValue in
                 handleFinishConfirmationChange(from: oldValue, to: newValue)
-            }
-            .onChange(of: scenePhase) { _, newPhase in
-                guard ActiveWorkoutSceneTransitionPolicy.shouldFlushLocalDraft(scenePhase: newPhase) else { return }
-                performExpiringBackgroundFlush(named: "active-workout.scene-transition") {
-                    _ = await flushDirtyWritesNow(checkpoint: .sceneTransition)
-                }
             }
             .onDisappear {
                 isCancelArmed = false
@@ -2153,27 +2146,6 @@ struct ActiveWorkoutView: View {
         }
     }
 
-    private func performExpiringBackgroundFlush(
-        named taskName: String,
-        operation: @escaping @MainActor () async -> Void
-    ) {
-        let application = UIApplication.shared
-        var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
-        backgroundTaskID = application.beginBackgroundTask(withName: taskName) {
-            if backgroundTaskID != .invalid {
-                application.endBackgroundTask(backgroundTaskID)
-                backgroundTaskID = .invalid
-            }
-        }
-
-        Task { @MainActor in
-            await operation()
-            if backgroundTaskID != .invalid {
-                application.endBackgroundTask(backgroundTaskID)
-            }
-        }
-    }
-
     private func performFinishCommand(
         session: ActiveWorkoutRuntimeSession,
         notes: String
@@ -3161,6 +3133,8 @@ private struct ActiveWorkoutCompletionSourceContext {
 }
 
 private struct ActiveWorkoutKeyboardAwareBottomDock: View {
+    @Environment(\.scenePhase) private var scenePhase
+
     let session: ActiveWorkoutRuntimeSession?
     let isEndingSession: Bool
     let restTimerPopupID: UUID?
@@ -3214,6 +3188,10 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
             updateKeyboardState(from: notification)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            isKeyboardVisible = false
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: newPhase) else { return }
             isKeyboardVisible = false
         }
         .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: shouldShowKeyboardDismissButton)

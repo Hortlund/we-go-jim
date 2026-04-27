@@ -3,6 +3,7 @@ import SwiftData
 import SwiftUI
 
 struct ActiveWorkoutStripView: View {
+    @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
     @Environment(RestTimerState.self) private var restTimerState
 
     let sessionID: UUID
@@ -77,6 +78,11 @@ struct ActiveWorkoutStripView: View {
 
     @MainActor
     private func loadSnapshot() async {
+        if let preparedSession = activeWorkoutPresentationState.preparedRuntimeSession(for: sessionID) {
+            session = preparedSession
+            return
+        }
+
         guard let snapshot = try? await ActiveWorkoutSnapshotStore.shared.load(),
               snapshot.id == sessionID else {
             session = nil

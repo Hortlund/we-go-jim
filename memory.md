@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-04-28 - Active Workout App Switch Must Be Memory-Only
+
+- Date: 2026-04-28
+- Trigger/Problem: Pressing Home and reopening the app with an active workout still lagged and could leave the timer dock in a bad position.
+- Root Cause: The active workout scene background path treated app switching like a durability checkpoint: it flushed row editors, built a full runtime snapshot, started a background task, and wrote JSON. That competed with iOS background/foreground layout work even though the active view usually remains alive in memory.
+- Durable Rule: App background/foreground while an active workout is already running must be memory-only. Do not flush rows, rebuild active runtime state, start background tasks, load JSON, save snapshots, or run maintenance on the app-switch path. Keep durable active snapshots to start/restore boundaries and explicit finish/discard behavior; reset only tiny UI chrome flags needed to avoid stale keyboard layout.
+- How to Verify Next Time: Run the active workout Home/back UI smoke on the signed-in `iPhone 17 / iOS 26.2` simulator and confirm typed values remain from in-memory state. Review `ActiveWorkoutView` for any `.scenePhase` background save, `beginBackgroundTask`, row flush, or `ActiveWorkoutSnapshotStore.save` call added to app switching.
+- Status: active
+
 ## 2026-04-26 - First Install Should Pay Local Prep Before Main
 
 - Date: 2026-04-26
@@ -90,8 +99,8 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 - Date: 2026-04-25
 - Trigger/Problem: Active workout and history detail lag work started drifting toward lazy-row and scroll-tracking complexity, while the user correctly pushed back that loading all workout exercises is acceptable if it keeps the UI stable.
 - Root Cause: The expensive part was not the number of visible workout exercise rows; it was synchronous SwiftData relationship scanning and derived draft creation on render/scroll paths. Lazy mounting also fought active-workout scroll restoration because completed rows change height and the visible target can shift.
-- Durable Rule: In active workout, prefer a stable full exercise stack and move expensive hydration/relationship work out of render and input paths. Weight/reps keystrokes should stay in row-local draft buffers and only commit to the workout draft on focus loss, backgrounding, finish, or discard. Do not schedule periodic checkpoint saves while the user is actively logging; keep edits in memory and flush at lifecycle/finish boundaries. Do not introduce lazy-row scroll-state machinery unless profiling shows row count itself is the bottleneck.
-- How to Verify Next Time: Run active workout UI smokes for typed set values and minimize/restore scroll position, then review active row rendering for synchronous SwiftData relationship scans, fallback draft creation during `body`, per-keystroke parent draft/persistence mutation, or coalesced save timers firing during normal logging.
+- Durable Rule: In active workout, prefer a stable full exercise stack and move expensive hydration/relationship work out of render and input paths. Weight/reps keystrokes should stay in row-local draft buffers and only commit to the workout draft on focus loss or explicit finish/discard/in-app minimize actions. App background/foreground is not a commit boundary; see `2026-04-28 - Active Workout App Switch Must Be Memory-Only`. Do not schedule periodic checkpoint saves while the user is actively logging. Do not introduce lazy-row scroll-state machinery unless profiling shows row count itself is the bottleneck.
+- How to Verify Next Time: Run active workout UI smokes for typed set values, Home/back, and minimize/restore scroll position, then review active row rendering for synchronous SwiftData relationship scans, fallback draft creation during `body`, per-keystroke parent draft/persistence mutation, scenePhase background saves, or coalesced save timers firing during normal logging.
 - Status: active
 
 ## 2026-04-25 - Active Workout Start Needs Full First-Render Snapshot
