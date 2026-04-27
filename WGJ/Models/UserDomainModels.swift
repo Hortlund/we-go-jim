@@ -310,7 +310,7 @@ nonisolated enum WorkoutSessionStatus: String, Codable, CaseIterable, Equatable 
     case cancelled
 }
 
-nonisolated enum WorkoutCardioPhase: String, Codable, CaseIterable, Equatable, Identifiable {
+nonisolated enum WorkoutCardioPhase: String, Codable, CaseIterable, Equatable, Identifiable, Sendable {
     case preWorkout
     case postWorkout
 

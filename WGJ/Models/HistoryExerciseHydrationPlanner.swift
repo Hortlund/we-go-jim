@@ -1,5 +1,14 @@
 import Foundation
 
+enum HistoryDetailExpansionPolicy {
+    static func initialExpansionState(orderedExerciseIDs: [UUID]) -> [UUID: Bool] {
+        Dictionary(
+            orderedExerciseIDs.map { ($0, false) },
+            uniquingKeysWith: { first, _ in first }
+        )
+    }
+}
+
 enum HistoryExerciseHydrationPlanner {
     static func initialLocalStateExerciseIDs(
         orderedExerciseIDs: [UUID],

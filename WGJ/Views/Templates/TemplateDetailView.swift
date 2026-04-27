@@ -22,26 +22,15 @@ struct TemplateDetailView: View {
 
     @State private var showingEditor = false
 
-    @State private var setDraftsByExerciseID: [UUID: [TemplateExerciseSetDraft]] = [:]
-    @State private var lastPersistedSetDraftsByExerciseID: [UUID: [TemplateExerciseSetDraft]] = [:]
-    @State private var pendingSetSaveTasks: [UUID: Task<Void, Never>] = [:]
-
-    @State private var repRangeByExerciseID: [UUID: RepRangeDraft] = [:]
-    @State private var lastPersistedRepRangeByExerciseID: [UUID: RepRangeDraft] = [:]
-    @State private var pendingRepRangeSaveTasks: [UUID: Task<Void, Never>] = [:]
-    @State private var restSecondsByExerciseID: [UUID: Int] = [:]
-    @State private var lastPersistedRestSecondsByExerciseID: [UUID: Int] = [:]
-    @State private var pendingRestSaveTasks: [UUID: Task<Void, Never>] = [:]
-    @State private var notesByExerciseID: [UUID: String] = [:]
-    @State private var lastPersistedNotesByExerciseID: [UUID: String] = [:]
-    @State private var pendingNotesSaveTasks: [UUID: Task<Void, Never>] = [:]
-
+    @State private var draftStore = TemplateDetailDraftStore()
     @State private var loadedTemplateExerciseIDs: [UUID] = []
+    @State private var loadedExerciseStateReloadKey: TemplateExerciseStateReloadKey?
     @State private var hasLoadedExerciseStateOnce = false
     @State private var recommendationByExerciseID: [UUID: TemplateExerciseRecommendation?] = [:]
     @State private var isExpandedByExerciseID: [UUID: Bool] = [:]
     @State private var errorMessage = ""
     @State private var showingError = false
+    @State private var isSavingDraftChanges = false
     @State private var exerciseSwipeOffsets: [UUID: CGFloat] = [:]
     @State private var exerciseSwipeRemoving: [UUID: Bool] = [:]
 
@@ -149,11 +138,6 @@ struct TemplateDetailView: View {
         }
         .task(id: recommendationReloadKey) {
             await loadCatalogMatches()
-        }
-        .onDisappear {
-            Task { @MainActor in
-                await flushPendingSaves()
-            }
         }
         .wgjMinimalKeyboardToolbar()
     }
@@ -295,6 +279,26 @@ struct TemplateDetailView: View {
                     .id(row.id)
                     .transition(exerciseCardTransition)
             }
+
+            if draftStore.hasChanges {
+                Button {
+                    saveTemplateDetailChanges()
+                } label: {
+                    if isSavingDraftChanges {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("Saving Changes")
+                        }
+                        .frame(maxWidth: .infinity)
+                    } else {
+                        Text("Save Changes")
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(WGJPrimaryButtonStyle())
+                .disabled(isSavingDraftChanges)
+                .accessibilityIdentifier("template-detail-save-changes-button")
+            }
         }
     }
 
@@ -336,25 +340,7 @@ struct TemplateDetailView: View {
                 targetRepMax: targetRepMaxBinding(for: row.exercise),
                 restSeconds: restSecondsBinding(for: row.exercise),
                 setDrafts: setDraftsBinding(for: row.exercise),
-                onCommitRequest: {
-                    let repRange = repRangeByExerciseID[row.id] ?? RepRangeDraft(
-                        min: row.exercise.targetRepMin,
-                        max: row.exercise.targetRepMax
-                    )
-                    persistSetDrafts(
-                        templateExerciseID: row.id,
-                        drafts: setDraftsByExerciseID[row.id] ?? setDraftsBinding(for: row.exercise).wrappedValue
-                    )
-                    persistRepRange(
-                        templateExerciseID: row.id,
-                        minReps: repRange.min,
-                        maxReps: repRange.max
-                    )
-                    persistRestSeconds(
-                        templateExerciseID: row.id,
-                        restSeconds: restSecondsByExerciseID[row.id] ?? row.exercise.restSeconds
-                    )
-                },
+                onCommitRequest: {},
                 onExerciseDelete: {
                     removeExercise(templateExerciseID: row.id)
                 }
@@ -390,7 +376,6 @@ struct TemplateDetailView: View {
     @MainActor
     private func handleTemplateEditorSaved(templateID savedTemplateID: UUID) {
         guard savedTemplateID == templateID else { return }
-        cancelPendingTemplateDetailSaveTasks()
         Task { @MainActor in
             await loadSetDraftsIfNeeded(force: true)
         }
@@ -399,198 +384,55 @@ struct TemplateDetailView: View {
     @MainActor
     private func setDraftsBinding(for templateExercise: TemplateExercise) -> Binding<[TemplateExerciseSetDraft]> {
         Binding {
-            if let cached = setDraftsByExerciseID[templateExercise.id] {
-                return cached
-            }
-
-            return (templateExercise.prescribedSets ?? [])
-                .sorted { $0.sortOrder < $1.sortOrder }
-                .map(setDraftFromModel(_:))
+            draftStore.setDrafts(for: templateExercise)
         } set: { updated in
-            setDraftsByExerciseID[templateExercise.id] = updated
+            draftStore.updateSetDrafts(exerciseID: templateExercise.id, drafts: updated)
         }
     }
 
     @MainActor
     private func targetRepMinBinding(for templateExercise: TemplateExercise) -> Binding<Int?> {
         Binding {
-            if let draft = repRangeByExerciseID[templateExercise.id] {
-                return draft.min
-            }
-            return templateExercise.targetRepMin
+            draftStore.repRange(for: templateExercise).min
         } set: { updated in
-            let current = repRangeByExerciseID[templateExercise.id] ?? RepRangeDraft(
-                min: templateExercise.targetRepMin,
-                max: templateExercise.targetRepMax
+            let current = draftStore.repRange(for: templateExercise)
+            draftStore.updateRepRange(
+                exerciseID: templateExercise.id,
+                min: updated,
+                max: current.max
             )
-            repRangeByExerciseID[templateExercise.id] = RepRangeDraft(min: updated, max: current.max)
         }
     }
 
     @MainActor
     private func targetRepMaxBinding(for templateExercise: TemplateExercise) -> Binding<Int?> {
         Binding {
-            if let draft = repRangeByExerciseID[templateExercise.id] {
-                return draft.max
-            }
-            return templateExercise.targetRepMax
+            draftStore.repRange(for: templateExercise).max
         } set: { updated in
-            let current = repRangeByExerciseID[templateExercise.id] ?? RepRangeDraft(
-                min: templateExercise.targetRepMin,
-                max: templateExercise.targetRepMax
+            let current = draftStore.repRange(for: templateExercise)
+            draftStore.updateRepRange(
+                exerciseID: templateExercise.id,
+                min: current.min,
+                max: updated
             )
-            repRangeByExerciseID[templateExercise.id] = RepRangeDraft(min: current.min, max: updated)
         }
     }
 
     @MainActor
     private func restSecondsBinding(for templateExercise: TemplateExercise) -> Binding<Int> {
         Binding {
-            if let value = restSecondsByExerciseID[templateExercise.id] {
-                return value
-            }
-            return templateExercise.restSeconds
+            draftStore.restSeconds(for: templateExercise)
         } set: { updated in
-            restSecondsByExerciseID[templateExercise.id] = max(0, min(3600, updated))
+            draftStore.updateRest(exerciseID: templateExercise.id, restSeconds: updated)
         }
     }
 
     @MainActor
     private func notesBinding(for templateExercise: TemplateExercise) -> Binding<String> {
         Binding {
-            if let value = notesByExerciseID[templateExercise.id] {
-                return value
-            }
-            return templateExercise.notes
+            draftStore.notes(for: templateExercise)
         } set: { updated in
-            notesByExerciseID[templateExercise.id] = updated
-            persistNotes(templateExerciseID: templateExercise.id, notes: updated)
-        }
-    }
-
-    @MainActor
-    private func persistSetDrafts(templateExerciseID: UUID, drafts: [TemplateExerciseSetDraft]) {
-        if lastPersistedSetDraftsByExerciseID[templateExerciseID] == drafts {
-            return
-        }
-
-        pendingSetSaveTasks[templateExerciseID]?.cancel()
-
-        pendingSetSaveTasks[templateExerciseID] = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(340))
-            guard !Task.isCancelled else { return }
-
-            let latest = setDraftsByExerciseID[templateExerciseID] ?? drafts
-            guard lastPersistedSetDraftsByExerciseID[templateExerciseID] != latest else {
-                pendingSetSaveTasks[templateExerciseID] = nil
-                return
-            }
-
-            do {
-                try await persistTemplateRepositoryWrite("template-detail.set-drafts") { repository in
-                    try repository.saveSetDrafts(templateExerciseID: templateExerciseID, drafts: latest)
-                }
-                lastPersistedSetDraftsByExerciseID[templateExerciseID] = latest
-                pendingSetSaveTasks[templateExerciseID] = nil
-            } catch {
-                showError(error)
-            }
-        }
-    }
-
-    @MainActor
-    private func persistRepRange(templateExerciseID: UUID, minReps: Int?, maxReps: Int?) {
-        let incoming = RepRangeDraft(min: minReps, max: maxReps)
-        if lastPersistedRepRangeByExerciseID[templateExerciseID] == incoming {
-            return
-        }
-
-        pendingRepRangeSaveTasks[templateExerciseID]?.cancel()
-        pendingRepRangeSaveTasks[templateExerciseID] = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(340))
-            guard !Task.isCancelled else { return }
-
-            let latest = repRangeByExerciseID[templateExerciseID] ?? incoming
-            guard lastPersistedRepRangeByExerciseID[templateExerciseID] != latest else {
-                pendingRepRangeSaveTasks[templateExerciseID] = nil
-                return
-            }
-
-            do {
-                try await persistTemplateRepositoryWrite("template-detail.rep-range") { repository in
-                    try repository.updateExerciseRepRange(
-                        templateExerciseID: templateExerciseID,
-                        minReps: latest.min,
-                        maxReps: latest.max
-                    )
-                }
-                lastPersistedRepRangeByExerciseID[templateExerciseID] = latest
-                pendingRepRangeSaveTasks[templateExerciseID] = nil
-            } catch {
-                showError(error)
-            }
-        }
-    }
-
-    @MainActor
-    private func persistRestSeconds(templateExerciseID: UUID, restSeconds: Int) {
-        let incoming = max(0, min(3600, restSeconds))
-        if lastPersistedRestSecondsByExerciseID[templateExerciseID] == incoming {
-            return
-        }
-
-        pendingRestSaveTasks[templateExerciseID]?.cancel()
-        pendingRestSaveTasks[templateExerciseID] = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(340))
-            guard !Task.isCancelled else { return }
-
-            let latest = restSecondsByExerciseID[templateExerciseID] ?? incoming
-            guard lastPersistedRestSecondsByExerciseID[templateExerciseID] != latest else {
-                pendingRestSaveTasks[templateExerciseID] = nil
-                return
-            }
-
-            do {
-                try await persistTemplateRepositoryWrite("template-detail.rest") { repository in
-                    try repository.updateExerciseRestSeconds(
-                        templateExerciseID: templateExerciseID,
-                        restSeconds: latest
-                    )
-                }
-                lastPersistedRestSecondsByExerciseID[templateExerciseID] = latest
-                pendingRestSaveTasks[templateExerciseID] = nil
-            } catch {
-                showError(error)
-            }
-        }
-    }
-
-    @MainActor
-    private func persistNotes(templateExerciseID: UUID, notes: String) {
-        if lastPersistedNotesByExerciseID[templateExerciseID] == notes {
-            return
-        }
-
-        pendingNotesSaveTasks[templateExerciseID]?.cancel()
-        pendingNotesSaveTasks[templateExerciseID] = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(340))
-            guard !Task.isCancelled else { return }
-
-            let latest = notesByExerciseID[templateExerciseID] ?? notes
-            guard lastPersistedNotesByExerciseID[templateExerciseID] != latest else {
-                pendingNotesSaveTasks[templateExerciseID] = nil
-                return
-            }
-
-            do {
-                try await persistTemplateRepositoryWrite("template-detail.notes") { repository in
-                    try repository.updateExerciseNotes(templateExerciseID: templateExerciseID, notes: latest)
-                }
-                lastPersistedNotesByExerciseID[templateExerciseID] = latest
-                pendingNotesSaveTasks[templateExerciseID] = nil
-            } catch {
-                showError(error)
-            }
+            draftStore.updateNotes(exerciseID: templateExercise.id, notes: updated)
         }
     }
 
@@ -598,8 +440,13 @@ struct TemplateDetailView: View {
     private func loadSetDraftsIfNeeded(force: Bool = false) async {
         let currentIDs = templateExercises.map(\.id)
         let currentIDSet = Set(currentIDs)
+        let currentReloadKey = exerciseStateReloadKey
         discardRemovedExerciseState(keeping: currentIDSet)
-        guard force || currentIDSet != Set(loadedTemplateExerciseIDs) else {
+        guard force
+            || currentIDSet != Set(loadedTemplateExerciseIDs)
+            || loadedExerciseStateReloadKey != currentReloadKey
+            || !hasLoadedExerciseStateOnce
+        else {
             if !hasLoadedExerciseStateOnce {
                 hasLoadedExerciseStateOnce = true
             }
@@ -608,31 +455,8 @@ struct TemplateDetailView: View {
 
         do {
             try repository.ensureDefaultSetPlans(templateID: templateID)
-
-            var loadedSets: [UUID: [TemplateExerciseSetDraft]] = [:]
-            var loadedRanges: [UUID: RepRangeDraft] = [:]
-            var loadedRests: [UUID: Int] = [:]
-            var loadedNotes: [UUID: String] = [:]
-
             let persistedExercises = try repository.exercises(in: templateID)
-            for exercise in persistedExercises {
-                loadedSets[exercise.id] = (exercise.prescribedSets ?? [])
-                    .sorted { $0.sortOrder < $1.sortOrder }
-                    .map(setDraftFromModel(_:))
-
-                loadedRanges[exercise.id] = RepRangeDraft(min: exercise.targetRepMin, max: exercise.targetRepMax)
-                loadedRests[exercise.id] = exercise.restSeconds
-                loadedNotes[exercise.id] = exercise.notes
-            }
-
-            setDraftsByExerciseID = loadedSets
-            lastPersistedSetDraftsByExerciseID = loadedSets
-            repRangeByExerciseID = loadedRanges
-            lastPersistedRepRangeByExerciseID = loadedRanges
-            restSecondsByExerciseID = loadedRests
-            lastPersistedRestSecondsByExerciseID = loadedRests
-            notesByExerciseID = loadedNotes
-            lastPersistedNotesByExerciseID = loadedNotes
+            draftStore.load(exercises: persistedExercises)
             let previousIDs = Set(loadedTemplateExerciseIDs)
             isExpandedByExerciseID = isExpandedByExerciseID.filter { currentIDSet.contains($0.key) }
             for exerciseID in currentIDs where isExpandedByExerciseID[exerciseID] == nil {
@@ -640,6 +464,7 @@ struct TemplateDetailView: View {
                 isExpandedByExerciseID[exerciseID] = hasLoadedExerciseStateOnce && isNewExercise
             }
             loadedTemplateExerciseIDs = currentIDs
+            loadedExerciseStateReloadKey = currentReloadKey
             hasLoadedExerciseStateOnce = true
         } catch {
             showError(error)
@@ -647,108 +472,42 @@ struct TemplateDetailView: View {
     }
 
     @MainActor
-    private func cancelPendingTemplateDetailSaveTasks() {
-        for task in pendingSetSaveTasks.values {
-            task.cancel()
-        }
-        pendingSetSaveTasks.removeAll()
+    private func saveTemplateDetailChanges() {
+        guard !isSavingDraftChanges, draftStore.hasChanges else { return }
+        isSavingDraftChanges = true
 
-        for task in pendingRepRangeSaveTasks.values {
-            task.cancel()
-        }
-        pendingRepRangeSaveTasks.removeAll()
+        let draftStoreToSave = draftStore
+        Task { @MainActor in
+            defer { isSavingDraftChanges = false }
 
-        for task in pendingRestSaveTasks.values {
-            task.cancel()
-        }
-        pendingRestSaveTasks.removeAll()
-
-        for task in pendingNotesSaveTasks.values {
-            task.cancel()
-        }
-        pendingNotesSaveTasks.removeAll()
-    }
-
-    @MainActor
-    private func flushPendingSaves() async {
-        cancelPendingTemplateDetailSaveTasks()
-
-        for (templateExerciseID, drafts) in setDraftsByExerciseID {
-            guard lastPersistedSetDraftsByExerciseID[templateExerciseID] != drafts else {
-                continue
-            }
             do {
-                try await persistTemplateRepositoryWrite("template-detail.flush-set-drafts") { repository in
-                    try repository.saveSetDrafts(templateExerciseID: templateExerciseID, drafts: drafts)
-                }
-                lastPersistedSetDraftsByExerciseID[templateExerciseID] = drafts
-            } catch {
-                showError(error)
-            }
-        }
-
-        for (templateExerciseID, range) in repRangeByExerciseID {
-            guard lastPersistedRepRangeByExerciseID[templateExerciseID] != range else {
-                continue
-            }
-            do {
-                try await persistTemplateRepositoryWrite("template-detail.flush-rep-range") { repository in
-                    try repository.updateExerciseRepRange(
-                        templateExerciseID: templateExerciseID,
-                        minReps: range.min,
-                        maxReps: range.max
+                if let appBackgroundStore {
+                    try await appBackgroundStore.performWrite("template-detail.save-drafts") { backgroundContext in
+                        let backgroundRepository = TemplateRepository(
+                            modelContext: backgroundContext,
+                            autoSaveChanges: false
+                        )
+                        try draftStoreToSave.save(
+                            templateID: templateID,
+                            repository: backgroundRepository
+                        )
+                    }
+                } else {
+                    let deferredRepository = TemplateRepository(
+                        modelContext: modelContext,
+                        autoSaveChanges: false
+                    )
+                    try draftStoreToSave.save(
+                        templateID: templateID,
+                        repository: deferredRepository
                     )
                 }
-                lastPersistedRepRangeByExerciseID[templateExerciseID] = range
+
+                await loadSetDraftsIfNeeded(force: true)
             } catch {
                 showError(error)
             }
         }
-
-        for (templateExerciseID, restSeconds) in restSecondsByExerciseID {
-            guard lastPersistedRestSecondsByExerciseID[templateExerciseID] != restSeconds else {
-                continue
-            }
-            do {
-                try await persistTemplateRepositoryWrite("template-detail.flush-rest") { repository in
-                    try repository.updateExerciseRestSeconds(
-                        templateExerciseID: templateExerciseID,
-                        restSeconds: restSeconds
-                    )
-                }
-                lastPersistedRestSecondsByExerciseID[templateExerciseID] = restSeconds
-            } catch {
-                showError(error)
-            }
-        }
-
-        for (templateExerciseID, notes) in notesByExerciseID {
-            guard lastPersistedNotesByExerciseID[templateExerciseID] != notes else {
-                continue
-            }
-            do {
-                try await persistTemplateRepositoryWrite("template-detail.flush-notes") { repository in
-                    try repository.updateExerciseNotes(templateExerciseID: templateExerciseID, notes: notes)
-                }
-                lastPersistedNotesByExerciseID[templateExerciseID] = notes
-            } catch {
-                showError(error)
-            }
-        }
-    }
-
-    private func persistTemplateRepositoryWrite(
-        _ operationName: StaticString,
-        _ mutation: @Sendable @escaping (TemplateRepository) throws -> Void
-    ) async throws {
-        if let appBackgroundStore {
-            try await appBackgroundStore.performWrite(operationName) { backgroundContext in
-                try mutation(TemplateRepository(modelContext: backgroundContext))
-            }
-            return
-        }
-
-        try mutation(repository)
     }
 
     private func destinationFolders(for template: WorkoutTemplate) -> [TemplateFolder] {
@@ -819,22 +578,6 @@ struct TemplateDetailView: View {
     }
 
     @MainActor
-    private func setDraftFromModel(_ model: TemplateExerciseSet) -> TemplateExerciseSetDraft {
-        TemplateExerciseSetDraft(
-            id: model.id,
-            targetReps: model.targetReps,
-            targetWeight: model.targetWeight,
-            loadUnit: model.loadUnit,
-            restSeconds: model.restSeconds,
-            isWarmup: model.isWarmup,
-            isLocked: model.isLocked,
-            previousTargetReps: model.previousTargetReps,
-            previousTargetWeight: model.previousTargetWeight,
-            previousLoadUnit: model.previousLoadUnit
-        )
-    }
-
-    @MainActor
     private func componentDrafts(for exercise: TemplateExercise) -> [TemplateExerciseComponentDraft] {
         let orderedComponents = (exercise.components ?? [])
             .sorted { $0.sortOrder < $1.sortOrder }
@@ -871,18 +614,7 @@ struct TemplateDetailView: View {
     private func discardRemovedExerciseState(keeping currentIDs: Set<UUID>) {
         let knownIDs =
             Set(loadedTemplateExerciseIDs)
-            .union(setDraftsByExerciseID.keys)
-            .union(lastPersistedSetDraftsByExerciseID.keys)
-            .union(repRangeByExerciseID.keys)
-            .union(lastPersistedRepRangeByExerciseID.keys)
-            .union(restSecondsByExerciseID.keys)
-            .union(lastPersistedRestSecondsByExerciseID.keys)
-            .union(notesByExerciseID.keys)
-            .union(lastPersistedNotesByExerciseID.keys)
-            .union(pendingSetSaveTasks.keys)
-            .union(pendingRepRangeSaveTasks.keys)
-            .union(pendingRestSaveTasks.keys)
-            .union(pendingNotesSaveTasks.keys)
+            .union(draftStore.exerciseIDs)
             .union(recommendationByExerciseID.keys)
             .union(isExpandedByExerciseID.keys)
             .union(exerciseSwipeOffsets.keys)
@@ -895,19 +627,7 @@ struct TemplateDetailView: View {
 
     @MainActor
     private func discardExerciseState(for exerciseID: UUID) {
-        pendingSetSaveTasks.removeValue(forKey: exerciseID)?.cancel()
-        pendingRepRangeSaveTasks.removeValue(forKey: exerciseID)?.cancel()
-        pendingRestSaveTasks.removeValue(forKey: exerciseID)?.cancel()
-        pendingNotesSaveTasks.removeValue(forKey: exerciseID)?.cancel()
-
-        setDraftsByExerciseID[exerciseID] = nil
-        lastPersistedSetDraftsByExerciseID[exerciseID] = nil
-        repRangeByExerciseID[exerciseID] = nil
-        lastPersistedRepRangeByExerciseID[exerciseID] = nil
-        restSecondsByExerciseID[exerciseID] = nil
-        lastPersistedRestSecondsByExerciseID[exerciseID] = nil
-        notesByExerciseID[exerciseID] = nil
-        lastPersistedNotesByExerciseID[exerciseID] = nil
+        draftStore.discardExercise(exerciseID)
         recommendationByExerciseID[exerciseID] = nil
         isExpandedByExerciseID[exerciseID] = nil
         loadedTemplateExerciseIDs.removeAll { $0 == exerciseID }
@@ -1064,7 +784,174 @@ private struct TemplateExerciseDetailDestinationView: View {
     }
 }
 
-private struct RepRangeDraft: Equatable {
+nonisolated struct TemplateDetailDraftStore: Equatable, Sendable {
+    private(set) var setDraftsByExerciseID: [UUID: [TemplateExerciseSetDraft]] = [:]
+    private(set) var repRangeByExerciseID: [UUID: RepRangeDraft] = [:]
+    private(set) var restSecondsByExerciseID: [UUID: Int] = [:]
+    private(set) var notesByExerciseID: [UUID: String] = [:]
+
+    private var persistedSetDraftsByExerciseID: [UUID: [TemplateExerciseSetDraft]] = [:]
+    private var persistedRepRangeByExerciseID: [UUID: RepRangeDraft] = [:]
+    private var persistedRestSecondsByExerciseID: [UUID: Int] = [:]
+    private var persistedNotesByExerciseID: [UUID: String] = [:]
+
+    var exerciseIDs: Set<UUID> {
+        Set(setDraftsByExerciseID.keys)
+            .union(repRangeByExerciseID.keys)
+            .union(restSecondsByExerciseID.keys)
+            .union(notesByExerciseID.keys)
+            .union(persistedSetDraftsByExerciseID.keys)
+            .union(persistedRepRangeByExerciseID.keys)
+            .union(persistedRestSecondsByExerciseID.keys)
+            .union(persistedNotesByExerciseID.keys)
+    }
+
+    var hasChanges: Bool {
+        setDraftsByExerciseID != persistedSetDraftsByExerciseID
+            || repRangeByExerciseID != persistedRepRangeByExerciseID
+            || restSecondsByExerciseID != persistedRestSecondsByExerciseID
+            || notesByExerciseID != persistedNotesByExerciseID
+    }
+
+    mutating func load(exercises: [TemplateExercise]) {
+        var loadedSets: [UUID: [TemplateExerciseSetDraft]] = [:]
+        var loadedRanges: [UUID: RepRangeDraft] = [:]
+        var loadedRests: [UUID: Int] = [:]
+        var loadedNotes: [UUID: String] = [:]
+
+        for exercise in exercises {
+            loadedSets[exercise.id] = (exercise.prescribedSets ?? [])
+                .sorted { $0.sortOrder < $1.sortOrder }
+                .map(TemplateExerciseSetDraft.init(model:))
+            loadedRanges[exercise.id] = RepRangeDraft(
+                min: exercise.targetRepMin,
+                max: exercise.targetRepMax
+            )
+            loadedRests[exercise.id] = max(0, min(3600, exercise.restSeconds))
+            loadedNotes[exercise.id] = exercise.notes
+        }
+
+        setDraftsByExerciseID = loadedSets
+        repRangeByExerciseID = loadedRanges
+        restSecondsByExerciseID = loadedRests
+        notesByExerciseID = loadedNotes
+        persistedSetDraftsByExerciseID = loadedSets
+        persistedRepRangeByExerciseID = loadedRanges
+        persistedRestSecondsByExerciseID = loadedRests
+        persistedNotesByExerciseID = loadedNotes
+    }
+
+    func setDrafts(for exercise: TemplateExercise) -> [TemplateExerciseSetDraft] {
+        setDraftsByExerciseID[exercise.id]
+            ?? (exercise.prescribedSets ?? [])
+                .sorted { $0.sortOrder < $1.sortOrder }
+                .map(TemplateExerciseSetDraft.init(model:))
+    }
+
+    func repRange(for exercise: TemplateExercise) -> RepRangeDraft {
+        repRangeByExerciseID[exercise.id]
+            ?? RepRangeDraft(min: exercise.targetRepMin, max: exercise.targetRepMax)
+    }
+
+    func restSeconds(for exercise: TemplateExercise) -> Int {
+        restSecondsByExerciseID[exercise.id]
+            ?? max(0, min(3600, exercise.restSeconds))
+    }
+
+    func notes(for exercise: TemplateExercise) -> String {
+        notesByExerciseID[exercise.id] ?? exercise.notes
+    }
+
+    mutating func updateSetDrafts(exerciseID: UUID, drafts: [TemplateExerciseSetDraft]) {
+        setDraftsByExerciseID[exerciseID] = drafts
+    }
+
+    mutating func updateRepRange(exerciseID: UUID, min: Int?, max: Int?) {
+        repRangeByExerciseID[exerciseID] = RepRangeDraft(min: min, max: max)
+    }
+
+    mutating func updateRest(exerciseID: UUID, restSeconds: Int) {
+        restSecondsByExerciseID[exerciseID] = max(0, min(3600, restSeconds))
+    }
+
+    mutating func updateNotes(exerciseID: UUID, notes: String) {
+        notesByExerciseID[exerciseID] = notes
+    }
+
+    mutating func discardExercise(_ exerciseID: UUID) {
+        setDraftsByExerciseID[exerciseID] = nil
+        repRangeByExerciseID[exerciseID] = nil
+        restSecondsByExerciseID[exerciseID] = nil
+        notesByExerciseID[exerciseID] = nil
+        persistedSetDraftsByExerciseID[exerciseID] = nil
+        persistedRepRangeByExerciseID[exerciseID] = nil
+        persistedRestSecondsByExerciseID[exerciseID] = nil
+        persistedNotesByExerciseID[exerciseID] = nil
+    }
+
+    func save(templateID: UUID, repository: TemplateRepository) throws {
+        _ = templateID
+
+        for exerciseID in changedSetExerciseIDs {
+            try repository.saveSetDrafts(
+                templateExerciseID: exerciseID,
+                drafts: setDraftsByExerciseID[exerciseID] ?? []
+            )
+        }
+
+        for exerciseID in changedRepRangeExerciseIDs {
+            let range = repRangeByExerciseID[exerciseID] ?? RepRangeDraft(min: nil, max: nil)
+            try repository.updateExerciseRepRange(
+                templateExerciseID: exerciseID,
+                minReps: range.min,
+                maxReps: range.max
+            )
+        }
+
+        for exerciseID in changedRestExerciseIDs {
+            try repository.updateExerciseRestSeconds(
+                templateExerciseID: exerciseID,
+                restSeconds: restSecondsByExerciseID[exerciseID] ?? 0
+            )
+        }
+
+        for exerciseID in changedNotesExerciseIDs {
+            try repository.updateExerciseNotes(
+                templateExerciseID: exerciseID,
+                notes: notesByExerciseID[exerciseID] ?? ""
+            )
+        }
+
+        try repository.finalizeDeferredUserDataChangesIfNeeded()
+    }
+
+    private var changedSetExerciseIDs: [UUID] {
+        sortedChangedIDs(current: setDraftsByExerciseID, persisted: persistedSetDraftsByExerciseID)
+    }
+
+    private var changedRepRangeExerciseIDs: [UUID] {
+        sortedChangedIDs(current: repRangeByExerciseID, persisted: persistedRepRangeByExerciseID)
+    }
+
+    private var changedRestExerciseIDs: [UUID] {
+        sortedChangedIDs(current: restSecondsByExerciseID, persisted: persistedRestSecondsByExerciseID)
+    }
+
+    private var changedNotesExerciseIDs: [UUID] {
+        sortedChangedIDs(current: notesByExerciseID, persisted: persistedNotesByExerciseID)
+    }
+
+    private func sortedChangedIDs<Value: Equatable>(
+        current: [UUID: Value],
+        persisted: [UUID: Value]
+    ) -> [UUID] {
+        Array(Set(current.keys).union(persisted.keys))
+            .filter { current[$0] != persisted[$0] }
+            .sorted { $0.uuidString < $1.uuidString }
+    }
+}
+
+nonisolated struct RepRangeDraft: Equatable, Sendable {
     var min: Int?
     var max: Int?
 }

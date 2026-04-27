@@ -3,6 +3,7 @@ import SwiftData
 import Testing
 @testable import WGJ
 
+@Suite(.serialized)
 @MainActor
 struct TemplateRepositoryTests {
     @Test
@@ -738,6 +739,96 @@ struct TemplateRepositoryTests {
         #expect(refreshedExercise.updatedAt == originalUpdatedAt)
         #expect(try repository.setDrafts(for: exercise.id) == originalSetTimestamps)
         #expect(refreshedSetTimestamps == storedSetUpdatedAt)
+    }
+
+    @Test
+    func updateTemplateContentsSkipsNoOpWithoutTouchingTemplateOrPendingCloudExport() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+        let tracker = UserDataSyncTracker.shared
+        _ = tracker.configureForLaunch(isCloudEnabled: true, errorDescription: nil)
+
+        let bench = ExerciseCatalogItem(
+            remoteUUID: "template-editor-noop-bench",
+            displayName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(bench)
+
+        let template = try repository.createTemplate(name: "Push", notes: "No-op baseline")
+        try repository.addExercise(templateID: template.id, catalogItem: bench)
+        let exportFinishedAt = Date()
+        _ = tracker.recordCloudEvent(
+            CloudSyncEventSummary(
+                type: .export,
+                status: .succeeded,
+                storeIdentifier: "UserData",
+                startedAt: exportFinishedAt.addingTimeInterval(-1),
+                endedAt: exportFinishedAt,
+                error: nil
+            )
+        )
+
+        let storedTemplate = try #require(try repository.template(id: template.id))
+        let originalUpdatedAt = storedTemplate.updatedAt
+        let exerciseDrafts = try repository.exercises(in: template.id).map {
+            TemplateExerciseDraft(model: $0, preferredLoadUnit: .kg)
+        }
+        let cardioDrafts = try repository.cardioBlocks(templateID: template.id).map(TemplateCardioBlockDraft.init(model:))
+
+        try repository.updateTemplateContents(
+            id: template.id,
+            name: storedTemplate.name,
+            notes: storedTemplate.notes,
+            exerciseDrafts: exerciseDrafts,
+            cardioDrafts: cardioDrafts
+        )
+
+        let refreshedTemplate = try #require(try repository.template(id: template.id))
+        #expect(refreshedTemplate.updatedAt == originalUpdatedAt)
+        #expect(tracker.currentSnapshot().state == .caughtUp)
+        #expect(!tracker.currentSnapshot().hasPendingExport)
+    }
+
+    @Test
+    func templateDetailDraftStoreDoesNotPersistUntilExplicitSave() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+
+        let row = ExerciseCatalogItem(
+            remoteUUID: "template-detail-draft-row",
+            displayName: "Barbell Row",
+            categoryName: "Back",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        context.insert(row)
+
+        let template = try repository.createTemplate(name: "Pull", notes: "")
+        try repository.addExercise(templateID: template.id, catalogItem: row)
+        let exercise = try #require(try repository.exercises(in: template.id).first)
+        let originalRange = RepRangeDraft(min: exercise.targetRepMin, max: exercise.targetRepMax)
+        let originalRest = exercise.restSeconds
+
+        var draftStore = TemplateDetailDraftStore()
+        draftStore.load(exercises: try repository.exercises(in: template.id))
+        draftStore.updateRepRange(exerciseID: exercise.id, min: 8, max: 12)
+        draftStore.updateRest(exerciseID: exercise.id, restSeconds: 90)
+
+        let unchangedExercise = try #require(try repository.exercises(in: template.id).first)
+        #expect(RepRangeDraft(min: unchangedExercise.targetRepMin, max: unchangedExercise.targetRepMax) == originalRange)
+        #expect(unchangedExercise.restSeconds == originalRest)
+
+        try draftStore.save(templateID: template.id, repository: repository)
+
+        let refreshedExercise = try #require(try repository.exercises(in: template.id).first)
+        #expect(refreshedExercise.targetRepMin == 8)
+        #expect(refreshedExercise.targetRepMax == 12)
+        #expect(refreshedExercise.restSeconds == 90)
     }
 
     @Test

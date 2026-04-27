@@ -23,8 +23,6 @@ struct ActiveWorkoutView: View {
     @State private var setDraftsByExerciseID: [UUID: [WorkoutSessionSetDraft]] = [:]
     @State private var restByExerciseID: [UUID: Int] = [:]
     @State private var notesByExerciseID: [UUID: String] = [:]
-    @State private var lastPersistedExerciseStateByID: [UUID: ActiveWorkoutExercisePersistenceSnapshot] = [:]
-    @State private var pendingWrites = ActiveWorkoutPendingWrites()
     @State private var pendingCardioCompletionsByPhase: [WorkoutCardioPhase: Bool] = [:]
     @State private var rowFlushCoordinator = WorkoutExerciseRowFlushCoordinator()
 
@@ -113,7 +111,7 @@ struct ActiveWorkoutView: View {
                             exerciseCount: sessionExercises.count,
                             cardioCount: orderedCardioBlocks.count,
                             missingCardioPhases: missingCardioPhases,
-                            onSubmit: persistSessionMeta,
+                            onSubmit: {},
                             onAddCardio: showCardioPicker
                         )
                         .id(ActiveWorkoutScrollTarget.header)
@@ -294,12 +292,6 @@ struct ActiveWorkoutView: View {
             }
             .task(id: exerciseHydrationStamp) {
                 await loadExerciseStateIfNeeded()
-            }
-            .onChange(of: notesDraft) { _, _ in
-                syncSessionMetaDirtyState()
-            }
-            .onChange(of: sessionNameDraft) { _, _ in
-                syncSessionMetaDirtyState()
             }
             .onChange(of: currentProfile?.isTrainingGuidanceEnabled) { _, _ in
                 scheduleGuidanceRefreshForAll()
@@ -772,29 +764,9 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
-    private func currentPersistenceSnapshot(for exercise: ActiveWorkoutRuntimeExercise) -> ActiveWorkoutExercisePersistenceSnapshot {
-        ActiveWorkoutExercisePersistenceSnapshot(
-            setDrafts: resolvedDrafts(for: exercise),
-            restSeconds: resolvedRest(for: exercise),
-            notes: resolvedNotes(for: exercise),
-            targetRepMin: exercise.targetRepMin,
-            targetRepMax: exercise.targetRepMax
-        )
-    }
-
-    @MainActor
-    private func currentPersistenceSnapshot(for exerciseID: UUID) -> ActiveWorkoutExercisePersistenceSnapshot? {
-        guard let exercise = sessionExercises.first(where: { $0.id == exerciseID }) else {
-            return nil
-        }
-        return currentPersistenceSnapshot(for: exercise)
-    }
-
-    @MainActor
     private func updateDraftsValue(_ updated: [WorkoutSessionSetDraft], for exerciseID: UUID) {
         guard setDraftsByExerciseID[exerciseID] != updated else { return }
         setDraftsByExerciseID[exerciseID] = updated
-        pendingWrites.markExerciseDirty(exerciseID)
         scheduleGuidanceRefresh(for: exerciseID)
     }
 
@@ -803,14 +775,12 @@ struct ActiveWorkoutView: View {
         let normalized = max(0, min(3600, updated))
         guard restByExerciseID[exerciseID] != normalized else { return }
         restByExerciseID[exerciseID] = normalized
-        pendingWrites.markExerciseDirty(exerciseID)
     }
 
     @MainActor
     private func updateNotesValue(_ updated: String, for exerciseID: UUID) {
         guard notesByExerciseID[exerciseID] != updated else { return }
         notesByExerciseID[exerciseID] = updated
-        pendingWrites.markExerciseDirty(exerciseID)
     }
 
     @MainActor
@@ -856,29 +826,17 @@ struct ActiveWorkoutView: View {
         notesDraft = session.notes
 
         setDraftsByExerciseID = Dictionary(
-            uniqueKeysWithValues: session.exercises.map { ($0.id, $0.setDrafts) }
+            session.exercises.map { ($0.id, $0.setDrafts) },
+            uniquingKeysWith: { first, _ in first }
         )
         restByExerciseID = Dictionary(
-            uniqueKeysWithValues: session.exercises.map { ($0.id, $0.restSeconds) }
+            session.exercises.map { ($0.id, $0.restSeconds) },
+            uniquingKeysWith: { first, _ in first }
         )
         notesByExerciseID = Dictionary(
-            uniqueKeysWithValues: session.exercises.map { ($0.id, $0.notes) }
+            session.exercises.map { ($0.id, $0.notes) },
+            uniquingKeysWith: { first, _ in first }
         )
-        lastPersistedExerciseStateByID = Dictionary(
-            uniqueKeysWithValues: session.exercises.map { exercise in
-                (
-                    exercise.id,
-                    ActiveWorkoutExercisePersistenceSnapshot(
-                        setDrafts: exercise.setDrafts,
-                        restSeconds: exercise.restSeconds,
-                        notes: exercise.notes,
-                        targetRepMin: exercise.targetRepMin,
-                        targetRepMax: exercise.targetRepMax
-                    )
-                )
-            }
-        )
-        pendingWrites = ActiveWorkoutPendingWrites()
         pendingCardioCompletionsByPhase = [:]
     }
 
@@ -933,7 +891,6 @@ struct ActiveWorkoutView: View {
         guard let session else { return }
         sessionNameDraft = session.name
         notesDraft = session.notes
-        syncSessionMetaDirtyState()
         preferredLoadUnit = currentProfile?.preferredLoadUnit ?? .kg
         if session.templateID == nil {
             templateNameDraft = session.name == "Empty Workout" ? "New Template" : session.name
@@ -1000,7 +957,6 @@ struct ActiveWorkoutView: View {
             setDraftsByExerciseID.merge(result.draftsByExerciseID) { _, new in new }
             restByExerciseID.merge(result.restsByExerciseID) { _, new in new }
             notesByExerciseID.merge(result.notesByExerciseID) { _, new in new }
-            lastPersistedExerciseStateByID.merge(result.persistenceStateByExerciseID) { _, new in new }
             catalogMatchesByUUID.merge(result.catalogMatchesByUUID) { _, new in new }
 
             for exerciseID in loadingExerciseIDs {
@@ -1069,9 +1025,6 @@ struct ActiveWorkoutView: View {
         setDraftsByExerciseID.merge(snapshot.draftsByExerciseID.filter { exerciseIDs.contains($0.key) }) { _, new in new }
         restByExerciseID.merge(snapshot.restsByExerciseID.filter { exerciseIDs.contains($0.key) }) { _, new in new }
         notesByExerciseID.merge(snapshot.notesByExerciseID.filter { exerciseIDs.contains($0.key) }) { _, new in new }
-        lastPersistedExerciseStateByID.merge(
-            snapshot.persistenceStateByExerciseID.filter { exerciseIDs.contains($0.key) }
-        ) { _, new in new }
         previousResolutionByExerciseID.merge(
             snapshot.previousResolutionByExerciseID.filter { exerciseIDs.contains($0.key) }
         ) { _, new in new }
@@ -1211,11 +1164,6 @@ struct ActiveWorkoutView: View {
         )
     }
 
-    @MainActor
-    private func persistSessionMeta() {
-        syncSessionMetaDirtyState()
-    }
-
     private func handlePickedExercise(_ item: ExerciseCatalogItem, target: ActiveWorkoutPickerTarget) {
         switch target {
         case .exercise:
@@ -1243,7 +1191,6 @@ struct ActiveWorkoutView: View {
             setDraftsByExerciseID[exercise.id] = exercise.setDrafts
             restByExerciseID[exercise.id] = exercise.restSeconds
             notesByExerciseID[exercise.id] = exercise.notes
-            pendingWrites.markExerciseDirty(exercise.id)
             loadedExerciseStateStamp = nil
             exerciseHydrationInvalidation += 1
         }
@@ -1461,19 +1408,6 @@ struct ActiveWorkoutView: View {
 
     private var isTrainingGuidanceEnabled: Bool {
         currentProfile?.isTrainingGuidanceEnabled ?? true
-    }
-
-    @MainActor
-    private func syncSessionMetaDirtyState() {
-        guard let session else {
-            pendingWrites.clearSessionMeta()
-            return
-        }
-
-        let normalizedSessionName = sessionNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        let hasNameChange = !normalizedSessionName.isEmpty && normalizedSessionName != session.name
-        let hasNotesChange = notesDraft != session.notes
-        pendingWrites.setSessionMetaDirty(hasNameChange || hasNotesChange)
     }
 
     @MainActor
@@ -1699,7 +1633,6 @@ struct ActiveWorkoutView: View {
             sessionExerciseID: draft.exerciseID,
             updatedRest: normalizedRest
         )
-        pendingWrites.markExerciseDirty(draft.exerciseID)
         exerciseSettingsDraft = nil
         scheduleGuidanceRefresh(for: draft.exerciseID)
     }
@@ -1728,7 +1661,6 @@ struct ActiveWorkoutView: View {
             isCancelArmed = false
             guard !isEndingSession else { return }
             isEndingSession = true
-            syncSessionMetaDirtyState()
             rowFlushCoordinator.flushAll()
             guard let finishingSession = currentRuntimeSnapshot() else {
                 isEndingSession = false
@@ -1859,7 +1791,6 @@ struct ActiveWorkoutView: View {
             isCancelArmed = false
             guard !isEndingSession else { return }
             isEndingSession = true
-            syncSessionMetaDirtyState()
             rowFlushCoordinator.flushAll()
             restTimerState.clearRestTimer()
 
@@ -1934,11 +1865,9 @@ struct ActiveWorkoutView: View {
             Set(setDraftsByExerciseID.keys)
             .union(restByExerciseID.keys)
             .union(notesByExerciseID.keys)
-            .union(lastPersistedExerciseStateByID.keys)
             .union(previousResolutionByExerciseID.keys)
             .union(componentResolutionByExerciseID.keys)
             .union(guidanceByExerciseID.keys)
-            .union(pendingWrites.dirtyExerciseIDs)
 
         for exerciseID in knownIDs where !currentIDs.contains(exerciseID) {
             discardExerciseState(for: exerciseID)
@@ -1952,11 +1881,9 @@ struct ActiveWorkoutView: View {
         setDraftsByExerciseID[exerciseID] = nil
         restByExerciseID[exerciseID] = nil
         notesByExerciseID[exerciseID] = nil
-        lastPersistedExerciseStateByID[exerciseID] = nil
         previousResolutionByExerciseID[exerciseID] = nil
         componentResolutionByExerciseID[exerciseID] = nil
         guidanceByExerciseID[exerciseID] = nil
-        pendingWrites.clearExercise(exerciseID)
 
         if let restTimerSourceSetID = restTimerState.restTimerSourceSetID,
            removedSetIDs.contains(restTimerSourceSetID) {
@@ -2030,7 +1957,6 @@ struct ActiveWorkoutView: View {
                 draftsByExerciseID: [:],
                 restsByExerciseID: [:],
                 notesByExerciseID: [:],
-                persistenceStateByExerciseID: [:],
                 catalogMatchesByUUID: [:]
             )
         }
@@ -2043,7 +1969,6 @@ struct ActiveWorkoutView: View {
         var loadedDrafts: [UUID: [WorkoutSessionSetDraft]] = [:]
         var loadedRests: [UUID: Int] = [:]
         var loadedNotes: [UUID: String] = [:]
-        var loadedPersistenceState: [UUID: ActiveWorkoutExercisePersistenceSnapshot] = [:]
 
         for exercise in exercises {
             let normalizedDrafts = Self.normalizedDraftsForActiveLogging(
@@ -2053,20 +1978,12 @@ struct ActiveWorkoutView: View {
             loadedDrafts[exercise.id] = normalizedDrafts
             loadedRests[exercise.id] = exercise.restSeconds
             loadedNotes[exercise.id] = exercise.notes
-            loadedPersistenceState[exercise.id] = ActiveWorkoutExercisePersistenceSnapshot(
-                setDrafts: normalizedDrafts,
-                restSeconds: exercise.restSeconds,
-                notes: exercise.notes,
-                targetRepMin: exercise.targetRepMin,
-                targetRepMax: exercise.targetRepMax
-            )
         }
 
         return ActiveWorkoutHydrationResult(
             draftsByExerciseID: loadedDrafts,
             restsByExerciseID: loadedRests,
             notesByExerciseID: loadedNotes,
-            persistenceStateByExerciseID: loadedPersistenceState,
             catalogMatchesByUUID: catalogByUUID
         )
     }
@@ -2196,7 +2113,6 @@ struct ActiveWorkoutView: View {
         }
 
         guard let snapshot = currentRuntimeSnapshot() else {
-            pendingWrites = ActiveWorkoutPendingWrites()
             pendingCardioCompletionsByPhase = [:]
             return true
         }
@@ -3041,7 +2957,6 @@ private struct ActiveWorkoutHydrationResult: Sendable {
     let draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
     let restsByExerciseID: [UUID: Int]
     let notesByExerciseID: [UUID: String]
-    let persistenceStateByExerciseID: [UUID: ActiveWorkoutExercisePersistenceSnapshot]
     let catalogMatchesByUUID: [String: TrainingGuidanceCatalogSnapshot]
 }
 

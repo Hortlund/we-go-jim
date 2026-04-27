@@ -129,8 +129,7 @@ struct ExerciseEditingCoordinatorTests {
     }
 
     @Test
-    func workoutCoordinatorOnlyMarksPendingWritesAfterFlush() {
-        let exerciseID = UUID()
+    func workoutCoordinatorOnlyCommitsDraftsAfterFlush() {
         let initialDraft = WorkoutSessionSetDraft(targetReps: 8, targetWeight: 100, targetLoadUnit: .kg)
         let updatedDraft = WorkoutSessionSetDraft(
             id: initialDraft.id,
@@ -142,12 +141,12 @@ struct ExerciseEditingCoordinatorTests {
             actualLoadUnit: .kg
         )
 
-        var pendingWrites = ActiveWorkoutPendingWrites()
+        var committedDrafts: [WorkoutSessionSetDraft]?
         let coordinator = WorkoutExerciseEditingCoordinator(
             setDrafts: [initialDraft],
             restSeconds: 120,
             notes: "",
-            onDraftsCommitted: { _ in pendingWrites.markExerciseDirty(exerciseID) },
+            onDraftsCommitted: { committedDrafts = $0 },
             onRestCommitted: { _ in },
             onNotesCommitted: { _ in },
             onCompletionChanged: { _, _, _, _ in }
@@ -155,12 +154,11 @@ struct ExerciseEditingCoordinatorTests {
 
         coordinator.stageDrafts([updatedDraft])
 
-        #expect(!pendingWrites.hasDirtyWrites)
+        #expect(committedDrafts == nil)
 
         coordinator.flushCommits()
 
-        #expect(pendingWrites.hasDirtyWrites)
-        #expect(pendingWrites.dirtyExerciseIDs(validIDs: Set([exerciseID])) == Set([exerciseID]))
+        #expect(committedDrafts == [updatedDraft])
     }
 
     @Test

@@ -1567,6 +1567,10 @@ final class WGJUITests: XCTestCase {
         workoutCard.tap()
         XCTAssertTrue(identifiedElement("history-detail-duration-pill", in: app).waitForExistence(timeout: 5))
 
+        let expandButton = firstButton(endingWith: "-expand-button", in: app)
+        XCTAssertTrue(expandButton.waitForExistence(timeout: 5))
+        expandButton.tap()
+
         let weightField = identifiedElement("workout-set-0-weight-field", in: app)
         XCTAssertTrue(weightField.waitForExistence(timeout: 5))
         weightField.tap()
@@ -1584,12 +1588,12 @@ final class WGJUITests: XCTestCase {
 
         app.swipeUp()
 
-        let saveChangesButton = app.buttons["Save Changes"]
+        let saveChangesButton = identifiedElement("history-detail-save-changes-button", in: app)
         revealElement(saveChangesButton, in: app)
         XCTAssertTrue(saveChangesButton.waitForExistence(timeout: 5))
-        saveChangesButton.tap()
+        saveChangesButton.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
 
-        XCTAssertTrue(app.buttons["history-calendar-button"].waitForExistence(timeout: 5))
+        XCTAssertTrue(identifiedElement("history-detail-duration-pill", in: app).waitForExistence(timeout: 5))
     }
 
     @MainActor

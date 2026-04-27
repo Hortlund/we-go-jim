@@ -800,13 +800,11 @@ nonisolated final class ActiveWorkoutDraftRepository {
         var draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]] = [:]
         var restsByExerciseID: [UUID: Int] = [:]
         var notesByExerciseID: [UUID: String] = [:]
-        var persistenceStateByExerciseID: [UUID: ActiveWorkoutExercisePersistenceSnapshot] = [:]
         var previousResolutionByExerciseID: [UUID: WorkoutPreviousPerformanceResolution] = [:]
 
         draftsByExerciseID.reserveCapacity(exercises.count)
         restsByExerciseID.reserveCapacity(exercises.count)
         notesByExerciseID.reserveCapacity(exercises.count)
-        persistenceStateByExerciseID.reserveCapacity(exercises.count)
         previousResolutionByExerciseID.reserveCapacity(exercises.count)
 
         for exercise in exercises {
@@ -819,13 +817,6 @@ nonisolated final class ActiveWorkoutDraftRepository {
             draftsByExerciseID[exercise.id] = normalizedDrafts
             restsByExerciseID[exercise.id] = exercise.restSeconds
             notesByExerciseID[exercise.id] = exercise.notes
-            persistenceStateByExerciseID[exercise.id] = ActiveWorkoutExercisePersistenceSnapshot(
-                setDrafts: normalizedDrafts,
-                restSeconds: exercise.restSeconds,
-                notes: exercise.notes,
-                targetRepMin: exercise.targetRepMin,
-                targetRepMax: exercise.targetRepMax
-            )
             previousResolutionByExerciseID[exercise.id] = .resolved(
                 Self.resolvedPreviousMap(
                     baseMap: previousMaps[exercise.catalogExerciseUUID] ?? [:],
@@ -838,7 +829,6 @@ nonisolated final class ActiveWorkoutDraftRepository {
             draftsByExerciseID: draftsByExerciseID,
             restsByExerciseID: restsByExerciseID,
             notesByExerciseID: notesByExerciseID,
-            persistenceStateByExerciseID: persistenceStateByExerciseID,
             catalogMatchesByUUID: catalogMatchesByUUID,
             previousResolutionByExerciseID: previousResolutionByExerciseID
         )

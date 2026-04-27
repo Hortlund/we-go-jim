@@ -1190,12 +1190,6 @@ nonisolated final class TemplateRepository {
             throw TemplateRepositoryError.templateNotFound
         }
 
-        if let templateName {
-            template.name = templateName
-        }
-        template.notes = templateNotes
-        template.updatedAt = .now
-
         try validateUniqueComponentCatalogUUIDs(
             in: mutations.map { mutation in
                 TemplateExerciseDraft(
@@ -1224,6 +1218,28 @@ nonisolated final class TemplateRepository {
             orderedExistingExercises.map { ($0.catalogExerciseUUID, $0) },
             uniquingKeysWith: { first, _ in first }
         )
+        let resolvedTemplateName = templateName ?? template.name
+        let existingSignature = persistenceSignature(
+            for: template,
+            resolvedName: resolvedTemplateName
+        )
+        let incomingSignature = persistenceSignature(
+            templateName: resolvedTemplateName,
+            templateNotes: templateNotes,
+            exercises: mutations,
+            cardioBlocks: cardioMutations,
+            existingByCatalogUUID: existingByCatalogUUID
+        )
+
+        guard existingSignature != incomingSignature else {
+            return
+        }
+
+        if let templateName {
+            template.name = templateName
+        }
+        template.notes = templateNotes
+        template.updatedAt = .now
 
         var updatedExercises: [TemplateExercise] = []
         updatedExercises.reserveCapacity(mutations.count)
@@ -2307,6 +2323,194 @@ nonisolated final class TemplateRepository {
     }
 
     private func persistenceSignature(
+        for template: WorkoutTemplate,
+        resolvedName: String
+    ) -> TemplateContentsPersistenceSignature {
+        let exercises = (template.exercises ?? [])
+            .sorted { $0.sortOrder < $1.sortOrder }
+            .enumerated()
+            .map { index, exercise in
+                persistenceSignature(for: exercise, at: index)
+            }
+        let cardioBlocks = (template.cardioBlocks ?? [])
+            .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
+            .map(persistenceSignature(for:))
+
+        return TemplateContentsPersistenceSignature(
+            name: resolvedName,
+            notes: normalizedTemplateNotes(template.notes),
+            exercises: exercises,
+            cardioBlocks: cardioBlocks
+        )
+    }
+
+    private func persistenceSignature(
+        templateName: String,
+        templateNotes: String,
+        exercises mutations: [WorkoutTemplateSyncExerciseMutation],
+        cardioBlocks cardioMutations: [WorkoutTemplateSyncCardioMutation],
+        existingByCatalogUUID: [String: TemplateExercise]
+    ) -> TemplateContentsPersistenceSignature {
+        let exercises = mutations.enumerated().map { index, mutation in
+            persistenceSignature(
+                for: mutation,
+                at: index,
+                existingByCatalogUUID: existingByCatalogUUID
+            )
+        }
+        let cardioBlocks = cardioMutations
+            .map(persistenceSignature(for:))
+            .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
+
+        return TemplateContentsPersistenceSignature(
+            name: templateName,
+            notes: normalizedTemplateNotes(templateNotes),
+            exercises: exercises,
+            cardioBlocks: cardioBlocks
+        )
+    }
+
+    private func persistenceSignature(
+        for exercise: TemplateExercise,
+        at index: Int
+    ) -> TemplateExercisePersistenceSignature {
+        let orderedComponents = (exercise.components ?? [])
+            .sorted { $0.sortOrder < $1.sortOrder }
+            .map(TemplateExerciseComponentDraft.init(model:))
+        let normalizedComponents = TemplateExerciseDraft.normalizedComponents(
+            from: orderedComponents,
+            fallbackCatalogExerciseUUID: exercise.catalogExerciseUUID,
+            fallbackExerciseNameSnapshot: exercise.exerciseNameSnapshot,
+            fallbackCategorySnapshot: exercise.categorySnapshot,
+            fallbackMuscleSummarySnapshot: exercise.muscleSummarySnapshot
+        )
+        let orderedSets = (exercise.prescribedSets ?? []).sorted { $0.sortOrder < $1.sortOrder }
+
+        return TemplateExercisePersistenceSignature(
+            id: exercise.id,
+            sortOrder: index,
+            catalogExerciseUUID: exercise.catalogExerciseUUID,
+            exerciseNameSnapshot: exercise.exerciseNameSnapshot,
+            categorySnapshot: exercise.categorySnapshot,
+            muscleSummarySnapshot: exercise.muscleSummarySnapshot,
+            notes: exercise.notes,
+            targetRepMin: sanitizedReps(exercise.targetRepMin),
+            targetRepMax: sanitizedReps(exercise.targetRepMax),
+            restSeconds: sanitizedRestSeconds(exercise.restSeconds),
+            setDrafts: orderedSets.enumerated().map { setIndex, set in
+                persistenceSignature(for: set, at: setIndex)
+            },
+            components: normalizedComponents.map(persistenceSignature(for:)),
+            superset: persistenceSignature(forSupersetOf: exercise)
+        )
+    }
+
+    private func persistenceSignature(
+        for mutation: WorkoutTemplateSyncExerciseMutation,
+        at index: Int,
+        existingByCatalogUUID: [String: TemplateExercise]
+    ) -> TemplateExercisePersistenceSignature {
+        let normalizedRange = sanitizedRepRange(min: mutation.targetRepMin, max: mutation.targetRepMax)
+        let normalizedRest = sanitizedRestSeconds(mutation.restSeconds)
+        let normalizedComponents = TemplateExerciseDraft.normalizedComponents(
+            from: mutation.components,
+            fallbackCatalogExerciseUUID: mutation.catalogExerciseUUID,
+            fallbackExerciseNameSnapshot: mutation.exerciseNameSnapshot,
+            fallbackCategorySnapshot: mutation.categorySnapshot,
+            fallbackMuscleSummarySnapshot: mutation.muscleSummarySnapshot
+        )
+        let primaryComponent = normalizedComponents.first
+        let exerciseID = mutation.templateExerciseID
+            ?? existingByCatalogUUID[mutation.catalogExerciseUUID]?.id
+            ?? UUID()
+        let canonicalSetDrafts = mutation.setDrafts.map { draft in
+            var updated = draft
+            updated.restSeconds = normalizedRest
+            return updated
+        }
+
+        return TemplateExercisePersistenceSignature(
+            id: exerciseID,
+            sortOrder: index,
+            catalogExerciseUUID: primaryComponent?.catalogExerciseUUID ?? mutation.catalogExerciseUUID,
+            exerciseNameSnapshot: primaryComponent?.exerciseNameSnapshot ?? mutation.exerciseNameSnapshot,
+            categorySnapshot: primaryComponent?.categorySnapshot ?? mutation.categorySnapshot,
+            muscleSummarySnapshot: primaryComponent?.muscleSummarySnapshot ?? mutation.muscleSummarySnapshot,
+            notes: mutation.notes,
+            targetRepMin: normalizedRange.min,
+            targetRepMax: normalizedRange.max,
+            restSeconds: normalizedRest,
+            setDrafts: canonicalSetDrafts.enumerated().map { setIndex, draft in
+                persistenceSignature(for: draft, at: setIndex)
+            },
+            components: normalizedComponents.map(persistenceSignature(for:)),
+            superset: mutation.superset.map(persistenceSignature(for:))
+        )
+    }
+
+    private func persistenceSignature(
+        for component: TemplateExerciseComponentDraft
+    ) -> TemplateExerciseComponentPersistenceSignature {
+        TemplateExerciseComponentPersistenceSignature(
+            catalogExerciseUUID: component.catalogExerciseUUID,
+            exerciseNameSnapshot: component.exerciseNameSnapshot,
+            categorySnapshot: component.categorySnapshot,
+            muscleSummarySnapshot: component.muscleSummarySnapshot
+        )
+    }
+
+    private func persistenceSignature(
+        for cardioBlock: TemplateCardioBlock
+    ) -> TemplateCardioPersistenceSignature {
+        TemplateCardioPersistenceSignature(
+            phase: cardioBlock.phase,
+            catalogExerciseUUID: cardioBlock.catalogExerciseUUID,
+            exerciseNameSnapshot: cardioBlock.exerciseNameSnapshot,
+            categorySnapshot: cardioBlock.categorySnapshot,
+            muscleSummarySnapshot: cardioBlock.muscleSummarySnapshot,
+            targetDurationSeconds: sanitizedCardioDurationSeconds(cardioBlock.targetDurationSeconds)
+        )
+    }
+
+    private func persistenceSignature(
+        for mutation: WorkoutTemplateSyncCardioMutation
+    ) -> TemplateCardioPersistenceSignature {
+        TemplateCardioPersistenceSignature(
+            phase: mutation.phase,
+            catalogExerciseUUID: mutation.catalogExerciseUUID,
+            exerciseNameSnapshot: mutation.exerciseNameSnapshot,
+            categorySnapshot: mutation.categorySnapshot,
+            muscleSummarySnapshot: mutation.muscleSummarySnapshot,
+            targetDurationSeconds: sanitizedCardioDurationSeconds(mutation.targetDurationSeconds)
+        )
+    }
+
+    private func persistenceSignature(
+        for membership: ExerciseSupersetMembershipDraft
+    ) -> TemplateExerciseSupersetPersistenceSignature {
+        TemplateExerciseSupersetPersistenceSignature(
+            groupID: membership.groupID,
+            position: membership.position,
+            roundRestSeconds: sanitizedRestSeconds(membership.roundRestSeconds)
+        )
+    }
+
+    private func persistenceSignature(
+        forSupersetOf exercise: TemplateExercise
+    ) -> TemplateExerciseSupersetPersistenceSignature? {
+        guard let groupID = exercise.supersetGroupID,
+              let position = exercise.supersetPosition else {
+            return nil
+        }
+
+        return TemplateExerciseSupersetPersistenceSignature(
+            groupID: groupID,
+            position: position,
+            roundRestSeconds: sanitizedRestSeconds(exercise.supersetGroup?.roundRestSeconds ?? 0)
+        )
+    }
+
+    private func persistenceSignature(
         for draft: TemplateExerciseSetDraft,
         at index: Int
     ) -> TemplateExerciseSetPersistenceSignature {
@@ -2404,7 +2608,52 @@ nonisolated final class TemplateRepository {
     }
 }
 
-private struct TemplateExerciseSetPersistenceSignature: Equatable {
+nonisolated private struct TemplateContentsPersistenceSignature: Equatable {
+    let name: String
+    let notes: String
+    let exercises: [TemplateExercisePersistenceSignature]
+    let cardioBlocks: [TemplateCardioPersistenceSignature]
+}
+
+nonisolated private struct TemplateExercisePersistenceSignature: Equatable {
+    let id: UUID
+    let sortOrder: Int
+    let catalogExerciseUUID: String
+    let exerciseNameSnapshot: String
+    let categorySnapshot: String
+    let muscleSummarySnapshot: String
+    let notes: String
+    let targetRepMin: Int?
+    let targetRepMax: Int?
+    let restSeconds: Int
+    let setDrafts: [TemplateExerciseSetPersistenceSignature]
+    let components: [TemplateExerciseComponentPersistenceSignature]
+    let superset: TemplateExerciseSupersetPersistenceSignature?
+}
+
+nonisolated private struct TemplateExerciseComponentPersistenceSignature: Equatable {
+    let catalogExerciseUUID: String
+    let exerciseNameSnapshot: String
+    let categorySnapshot: String
+    let muscleSummarySnapshot: String
+}
+
+nonisolated private struct TemplateExerciseSupersetPersistenceSignature: Equatable {
+    let groupID: UUID
+    let position: SupersetExercisePosition
+    let roundRestSeconds: Int
+}
+
+nonisolated private struct TemplateCardioPersistenceSignature: Equatable {
+    let phase: WorkoutCardioPhase
+    let catalogExerciseUUID: String
+    let exerciseNameSnapshot: String
+    let categorySnapshot: String
+    let muscleSummarySnapshot: String
+    let targetDurationSeconds: Int
+}
+
+nonisolated private struct TemplateExerciseSetPersistenceSignature: Equatable {
     let id: UUID
     let sortOrder: Int
     let targetReps: Int?
@@ -2416,7 +2665,7 @@ private struct TemplateExerciseSetPersistenceSignature: Equatable {
     let dropStages: [TemplateExerciseDropStagePersistenceSignature]
 }
 
-private struct TemplateExerciseDropStagePersistenceSignature: Equatable {
+nonisolated private struct TemplateExerciseDropStagePersistenceSignature: Equatable {
     let id: UUID
     let sortOrder: Int
     let targetReps: Int?

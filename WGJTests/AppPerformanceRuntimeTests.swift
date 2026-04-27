@@ -167,31 +167,6 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
-    func activeWorkoutPendingWritesOnlyFlushesDirtyValidExercises() {
-        let validExerciseID = UUID()
-        let staleExerciseID = UUID()
-        var pendingWrites = ActiveWorkoutPendingWrites()
-
-        pendingWrites.markExerciseDirty(validExerciseID)
-        pendingWrites.markExerciseDirty(staleExerciseID)
-        pendingWrites.setSessionMetaDirty(true)
-
-        #expect(pendingWrites.hasDirtyWrites)
-        #expect(
-            pendingWrites.dirtyExerciseIDs(validIDs: Set([validExerciseID])) == Set([validExerciseID])
-        )
-
-        pendingWrites.clearExercise(validExerciseID)
-        #expect(
-            pendingWrites.dirtyExerciseIDs(validIDs: Set([validExerciseID])) == Set<UUID>()
-        )
-
-        pendingWrites.clearExercise(staleExerciseID)
-        pendingWrites.clearSessionMeta()
-        #expect(pendingWrites.hasDirtyWrites == false)
-    }
-
-    @Test
     func activeWorkoutSceneTransitionFlushesOnlyWhenBackgrounded() {
         #expect(!ActiveWorkoutSceneTransitionPolicy.shouldFlushLocalDraft(scenePhase: .active))
         #expect(!ActiveWorkoutSceneTransitionPolicy.shouldFlushLocalDraft(scenePhase: .inactive))
@@ -512,6 +487,36 @@ struct AppPerformanceRuntimeTests {
         )
 
         #expect(pendingExerciseIDs == Set([first]))
+    }
+
+    @Test
+    func historyDetailInitialExpansionStateStartsEveryExerciseCollapsed() {
+        let first = UUID()
+        let second = UUID()
+        let third = UUID()
+
+        let expansion = HistoryDetailExpansionPolicy.initialExpansionState(
+            orderedExerciseIDs: [first, second, third]
+        )
+
+        #expect(expansion == [first: false, second: false, third: false])
+    }
+
+    @Test
+    func historyDetailInitialHydrationSkipsCollapsedExercises() {
+        let first = UUID()
+        let second = UUID()
+        let third = UUID()
+        let expansion = HistoryDetailExpansionPolicy.initialExpansionState(
+            orderedExerciseIDs: [first, second, third]
+        )
+
+        let exerciseIDs = HistoryExerciseHydrationPlanner.initialLocalStateExerciseIDs(
+            orderedExerciseIDs: [first, second, third],
+            expandedExerciseIDs: expansion
+        )
+
+        #expect(exerciseIDs.isEmpty)
     }
 
     @Test

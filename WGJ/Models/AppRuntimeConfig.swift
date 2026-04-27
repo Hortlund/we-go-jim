@@ -605,7 +605,6 @@ nonisolated struct ActiveWorkoutPreparedFirstRenderSnapshot: Equatable, Sendable
     let draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
     let restsByExerciseID: [UUID: Int]
     let notesByExerciseID: [UUID: String]
-    let persistenceStateByExerciseID: [UUID: ActiveWorkoutExercisePersistenceSnapshot]
     let catalogMatchesByUUID: [String: TrainingGuidanceCatalogSnapshot]
     let previousResolutionByExerciseID: [UUID: WorkoutPreviousPerformanceResolution]
 
@@ -613,7 +612,6 @@ nonisolated struct ActiveWorkoutPreparedFirstRenderSnapshot: Equatable, Sendable
         draftsByExerciseID: [:],
         restsByExerciseID: [:],
         notesByExerciseID: [:],
-        persistenceStateByExerciseID: [:],
         catalogMatchesByUUID: [:],
         previousResolutionByExerciseID: [:]
     )
