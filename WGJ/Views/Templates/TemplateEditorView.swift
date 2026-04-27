@@ -25,6 +25,7 @@ struct TemplateEditorView: View {
     @State private var exerciseReorderRequest: ExerciseReorderRequest?
     @State private var errorMessage = ""
     @State private var showingError = false
+    @State private var keyboardDismissToken = TemplateEditorKeyboardDismissToken()
 
     private var templateRepository: TemplateRepository {
         TemplateRepository(modelContext: modelContext)
@@ -98,6 +99,29 @@ struct TemplateEditorView: View {
                     .disabled(templateName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .accessibilityIdentifier("template-editor-save-button")
                 }
+
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+
+                    Button {
+                        keyboardDismissToken.requestDismiss()
+                        WGJKeyboard.dismiss()
+                    } label: {
+                        HStack(spacing: WGJKeyboardHideControl.imagePadding) {
+                            Image(systemName: WGJKeyboardHideControl.systemImage)
+                                .font(.footnote.weight(.bold))
+
+                            Text(WGJKeyboardHideControl.title)
+                                .font(.footnote.weight(.semibold))
+                        }
+                        .foregroundStyle(WGJKeyboardHideControl.foregroundStyle)
+                        .padding(.horizontal, WGJKeyboardHideControl.horizontalPadding)
+                        .padding(.vertical, WGJKeyboardHideControl.verticalPadding)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(WGJKeyboardHideControl.accessibilityLabel)
+                    .accessibilityIdentifier(WGJKeyboardHideControl.accessibilityIdentifier)
+                }
             }
             .sheet(item: $pickerTarget) { target in
                 ExercisePickerView(repository: catalogRepository) { selected in
@@ -136,7 +160,6 @@ struct TemplateEditorView: View {
                 await loadCatalogMatches()
             }
         }
-        .wgjMinimalKeyboardToolbar()
     }
 
     private var templateMetaCard: some View {
@@ -281,6 +304,7 @@ struct TemplateEditorView: View {
                     presentExerciseReorder(for: row.draftStore)
                 } : nil,
                 preferredLoadUnit: preferredLoadUnit,
+                keyboardDismissToken: keyboardDismissToken,
                 supersetPresentation: row.supersetPresentation,
                 canMakeSupersetWithNext: row.index < rows.count - 1 && row.supersetPresentation == nil && rows[row.index + 1].supersetPresentation == nil,
                 onMoveUp: {
@@ -854,6 +878,7 @@ private struct TemplateEditorExerciseRow: View {
     let canMoveDown: Bool
     let onMoveToPosition: (() -> Void)?
     let preferredLoadUnit: TemplateLoadUnit
+    let keyboardDismissToken: TemplateEditorKeyboardDismissToken
     let supersetPresentation: TemplateEditorSupersetPresentation?
     let canMakeSupersetWithNext: Bool
     let onMoveUp: () -> Void
@@ -884,6 +909,7 @@ private struct TemplateEditorExerciseRow: View {
         canMoveDown: Bool,
         onMoveToPosition: (() -> Void)?,
         preferredLoadUnit: TemplateLoadUnit,
+        keyboardDismissToken: TemplateEditorKeyboardDismissToken,
         supersetPresentation: TemplateEditorSupersetPresentation?,
         canMakeSupersetWithNext: Bool,
         onMoveUp: @escaping () -> Void,
@@ -904,6 +930,7 @@ private struct TemplateEditorExerciseRow: View {
         self.canMoveDown = canMoveDown
         self.onMoveToPosition = onMoveToPosition
         self.preferredLoadUnit = preferredLoadUnit
+        self.keyboardDismissToken = keyboardDismissToken
         self.supersetPresentation = supersetPresentation
         self.canMakeSupersetWithNext = canMakeSupersetWithNext
         self.onMoveUp = onMoveUp
@@ -984,6 +1011,7 @@ private struct TemplateEditorExerciseRow: View {
                 restSeconds: localRestSeconds,
                 setDrafts: localSetDrafts,
                 isExpanded: draftStore.isExpanded,
+                keyboardDismissToken: keyboardDismissToken,
                 onCommitRequest: {
                     editingCoordinator.requestImmediateCommit(
                         notes: localNotes,
@@ -1147,6 +1175,7 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
     let restSeconds: Int
     let setDrafts: [TemplateExerciseSetDraft]
     let isExpanded: Bool
+    let keyboardDismissToken: TemplateEditorKeyboardDismissToken
 
     let onCommitRequest: () -> Void
     let onExpandedChanged: (Bool) -> Void
@@ -1189,6 +1218,7 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
             && lhs.restSeconds == rhs.restSeconds
             && lhs.setDrafts == rhs.setDrafts
             && lhs.isExpanded == rhs.isExpanded
+            && lhs.keyboardDismissToken == rhs.keyboardDismissToken
             && lhs.components == rhs.components
     }
 
@@ -1238,6 +1268,7 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
             canMoveUp: canMoveUp,
             canMoveDown: canMoveDown,
             preferredLoadUnit: preferredLoadUnit,
+            keyboardDismissToken: keyboardDismissToken,
             targetRepMin: Binding(
                 get: { targetRepMin },
                 set: { onTargetRepMinChanged($0) }

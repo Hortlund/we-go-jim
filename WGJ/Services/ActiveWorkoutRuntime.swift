@@ -347,6 +347,11 @@ actor ActiveWorkoutSnapshotStore {
         var normalizedSession = session
         normalizedSession.normalizeSetRestToExerciseDefaults()
         let data = try encoder.encode(normalizedSession)
+        if FileManager.default.fileExists(atPath: snapshotURL.path),
+           let existingData = try? Data(contentsOf: snapshotURL),
+           existingData == data {
+            return
+        }
         try data.write(to: snapshotURL, options: [.atomic])
     }
 
@@ -918,6 +923,110 @@ nonisolated private struct ActiveWorkoutRuntimeSupersetNormalization {
     let membershipsByExerciseID: [UUID: ExerciseSupersetMembershipDraft]
     let standaloneRestSecondsByExerciseID: [UUID: Int]
     let groupsByID: [UUID: WorkoutSessionSupersetGroup]
+}
+
+nonisolated enum ActiveWorkoutRuntimeFirstRenderSnapshotBuilder {
+    static func build(
+        session: ActiveWorkoutRuntimeSession,
+        modelContext: ModelContext
+    ) throws -> ActiveWorkoutPreparedFirstRenderSnapshot {
+        let exercises = session.exercises.sorted { $0.sortOrder < $1.sortOrder }
+        guard !exercises.isEmpty else { return .empty }
+
+        let catalogMatchesByUUID = try ExerciseCatalogRepository(modelContext: modelContext)
+            .exerciseSnapshotMap(for: Array(Set(exercises.map(\.catalogExerciseUUID))))
+        let previousMaps = try WorkoutSessionRepository(modelContext: modelContext).previousSetMaps(
+            forExercises: Array(Set(exercises.map(\.catalogExerciseUUID))),
+            before: session.startedAt,
+            excludingSessionID: session.id
+        )
+
+        var draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]] = [:]
+        var restsByExerciseID: [UUID: Int] = [:]
+        var notesByExerciseID: [UUID: String] = [:]
+        var previousResolutionByExerciseID: [UUID: WorkoutPreviousPerformanceResolution] = [:]
+
+        draftsByExerciseID.reserveCapacity(exercises.count)
+        restsByExerciseID.reserveCapacity(exercises.count)
+        notesByExerciseID.reserveCapacity(exercises.count)
+        previousResolutionByExerciseID.reserveCapacity(exercises.count)
+
+        for exercise in exercises {
+            let drafts = normalizedDraftsForActiveLogging(
+                exercise.setDrafts,
+                catalogExercise: catalogMatchesByUUID[exercise.catalogExerciseUUID]
+            )
+            draftsByExerciseID[exercise.id] = drafts
+            restsByExerciseID[exercise.id] = exercise.restSeconds
+            notesByExerciseID[exercise.id] = exercise.notes
+            previousResolutionByExerciseID[exercise.id] = .resolved(
+                resolvedPreviousMap(
+                    baseMap: previousMaps[exercise.catalogExerciseUUID] ?? [:],
+                    maxSetCount: drafts.count
+                )
+            )
+        }
+
+        return ActiveWorkoutPreparedFirstRenderSnapshot(
+            draftsByExerciseID: draftsByExerciseID,
+            restsByExerciseID: restsByExerciseID,
+            notesByExerciseID: notesByExerciseID,
+            catalogMatchesByUUID: catalogMatchesByUUID,
+            previousResolutionByExerciseID: previousResolutionByExerciseID
+        )
+    }
+
+    private static func normalizedDraftsForActiveLogging(
+        _ drafts: [WorkoutSessionSetDraft],
+        catalogExercise: TrainingGuidanceCatalogSnapshot?
+    ) -> [WorkoutSessionSetDraft] {
+        guard TemplateLoadUnit.inferredDefault(
+            fromEquipmentSummary: catalogExercise?.equipmentSummary ?? ""
+        ) == .bodyweight else {
+            return drafts
+        }
+
+        var normalized = drafts
+        var changed = false
+        for index in normalized.indices {
+            guard normalized[index].targetWeight == nil, normalized[index].actualWeight == nil else {
+                continue
+            }
+
+            if normalized[index].targetLoadUnit != .bodyweight {
+                normalized[index].targetLoadUnit = .bodyweight
+                changed = true
+            }
+
+            if normalized[index].actualLoadUnit != .bodyweight {
+                normalized[index].actualLoadUnit = .bodyweight
+                changed = true
+            }
+        }
+
+        return changed ? normalized : drafts
+    }
+
+    private static func resolvedPreviousMap(
+        baseMap: [Int: WorkoutPreviousSetSnapshot],
+        maxSetCount: Int
+    ) -> [Int: WorkoutPreviousSetSnapshot] {
+        guard maxSetCount > 0, !baseMap.isEmpty else { return [:] }
+
+        let fallback = baseMap[(baseMap.keys.max() ?? 0)]
+        var resolved: [Int: WorkoutPreviousSetSnapshot] = [:]
+        resolved.reserveCapacity(maxSetCount)
+
+        for index in 0..<maxSetCount {
+            if let exact = baseMap[index] {
+                resolved[index] = exact
+            } else if let fallback {
+                resolved[index] = fallback
+            }
+        }
+
+        return resolved
+    }
 }
 
 @MainActor

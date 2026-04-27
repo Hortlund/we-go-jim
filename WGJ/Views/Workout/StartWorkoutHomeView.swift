@@ -753,33 +753,40 @@ struct StartWorkoutHomeView: View {
             )
         }
 
-        let runtimeSession: ActiveWorkoutRuntimeSession
+        let runtimePreparation: ActiveWorkoutStartRuntimePreparation
         if let appBackgroundStore {
-            runtimeSession = try await appBackgroundStore.perform("start-workout.prepare-runtime-session") { backgroundContext in
+            runtimePreparation = try await appBackgroundStore.perform("start-workout.prepare-runtime-session") { backgroundContext in
                 try Self.prepareActiveWorkoutStart(templateID: templateID, modelContext: backgroundContext)
             }
         } else {
-            runtimeSession = try Self.prepareActiveWorkoutStart(templateID: templateID, modelContext: modelContext)
+            runtimePreparation = try Self.prepareActiveWorkoutStart(templateID: templateID, modelContext: modelContext)
         }
 
-        try await ActiveWorkoutSnapshotStore.shared.save(runtimeSession)
+        try await ActiveWorkoutSnapshotStore.shared.save(runtimePreparation.session)
         return ActiveWorkoutStartPreparation(
-            sessionID: runtimeSession.id,
+            sessionID: runtimePreparation.session.id,
             isExistingConflict: false,
             previousPerformanceResolutionByExerciseID: [:],
-            firstRenderSnapshot: nil
+            firstRenderSnapshot: runtimePreparation.firstRenderSnapshot
         )
     }
 
     nonisolated private static func prepareActiveWorkoutStart(
         templateID: UUID?,
         modelContext: ModelContext
-    ) throws -> ActiveWorkoutRuntimeSession {
+    ) throws -> ActiveWorkoutStartRuntimePreparation {
         let factory = ActiveWorkoutSessionFactory(modelContext: modelContext)
-        if let templateID {
-            return try factory.createSessionFromTemplate(templateID: templateID)
-        }
-        return factory.createEmptySession()
+        let session = try templateID.map {
+            try factory.createSessionFromTemplate(templateID: $0)
+        } ?? factory.createEmptySession()
+        let firstRenderSnapshot = try ActiveWorkoutRuntimeFirstRenderSnapshotBuilder.build(
+            session: session,
+            modelContext: modelContext
+        )
+        return ActiveWorkoutStartRuntimePreparation(
+            session: session,
+            firstRenderSnapshot: firstRenderSnapshot
+        )
     }
 
     private func handlePreparedActiveWorkoutStart(_ preparation: ActiveWorkoutStartPreparation) {
@@ -2149,6 +2156,11 @@ private struct ActiveWorkoutStartPreparation: Sendable {
     let isExistingConflict: Bool
     let previousPerformanceResolutionByExerciseID: [UUID: WorkoutPreviousPerformanceResolution]
     let firstRenderSnapshot: ActiveWorkoutPreparedFirstRenderSnapshot?
+}
+
+private struct ActiveWorkoutStartRuntimePreparation: Sendable {
+    let session: ActiveWorkoutRuntimeSession
+    let firstRenderSnapshot: ActiveWorkoutPreparedFirstRenderSnapshot
 }
 
 #Preview {

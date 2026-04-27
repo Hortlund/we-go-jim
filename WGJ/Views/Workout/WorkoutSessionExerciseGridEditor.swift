@@ -2,8 +2,6 @@ import Foundation
 import SwiftUI
 
 struct WorkoutSessionExerciseGridEditor: View {
-    @Environment(\.scenePhase) private var scenePhase
-
     let exerciseName: String
     let muscleSummary: String
     let category: String
@@ -260,10 +258,6 @@ struct WorkoutSessionExerciseGridEditor: View {
             if isEnabled {
                 revealedCompletionGateSetIDs.removeAll()
             }
-        }
-        .onChange(of: scenePhase) { _, newPhase in
-            guard ActiveWorkoutSceneTransitionPolicy.shouldFlushLocalDraft(scenePhase: newPhase) else { return }
-            flushPendingEditorState()
         }
     }
 
@@ -2714,7 +2708,6 @@ struct WorkoutSessionExerciseGridEditor: View {
 
 private struct WorkoutExerciseDropStageCardView: View, Equatable {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @Environment(\.scenePhase) private var scenePhase
 
     let setIndex: Int
     let stageIndex: Int
@@ -2870,10 +2863,6 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
         }
         .onChange(of: focusedField) { oldValue, newValue in
             guard oldValue != nil, newValue == nil else { return }
-            commitLocalText()
-        }
-        .onChange(of: scenePhase) { _, newPhase in
-            guard ActiveWorkoutSceneTransitionPolicy.shouldFlushLocalDraft(scenePhase: newPhase) else { return }
             commitLocalText()
         }
         .onDisappear {

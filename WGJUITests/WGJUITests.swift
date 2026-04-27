@@ -1885,7 +1885,9 @@ final class WGJUITests: XCTestCase {
 
     @MainActor
     func testActiveWorkoutUseLastFillsPreviousPerformance() throws {
-        let app = launchApp()
+        let app = launchApp(mode: .localInMemory, launchArguments: [
+            "UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT",
+        ])
 
         tapTab("Start Workout", in: app)
 
@@ -1905,6 +1907,7 @@ final class WGJUITests: XCTestCase {
         let selectExerciseButton = identifiedElement("exercise-picker-select-button", in: app)
         XCTAssertTrue(selectExerciseButton.waitForExistence(timeout: 15))
         selectExerciseButton.tap()
+        expandFirstActiveWorkoutExerciseIfNeeded(in: app, require: true)
 
         let weightField = identifiedElement("workout-set-0-weight-field", in: app)
         XCTAssertTrue(weightField.waitForExistence(timeout: 5))
@@ -1971,6 +1974,7 @@ final class WGJUITests: XCTestCase {
 
         XCTAssertTrue(selectExerciseButton.waitForExistence(timeout: 15))
         selectExerciseButton.tap()
+        expandFirstActiveWorkoutExerciseIfNeeded(in: app, require: true)
 
         let weightGhost = identifiedElement("workout-set-0-weight-ghost", in: app)
         let repsGhost = identifiedElement("workout-set-0-reps-ghost", in: app)

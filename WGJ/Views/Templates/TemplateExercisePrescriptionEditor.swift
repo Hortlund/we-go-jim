@@ -1,6 +1,14 @@
 import Foundation
 import SwiftUI
 
+nonisolated struct TemplateEditorKeyboardDismissToken: Equatable, Sendable {
+    private(set) var value: Int = 0
+
+    mutating func requestDismiss() {
+        value &+= 1
+    }
+}
+
 private enum TemplateEditorInputMetric: Hashable {
     case weight
     case reps
@@ -88,6 +96,7 @@ struct TemplateExercisePrescriptionEditor: View {
     let structureSummaries: [String]
     let preferredLoadUnit: TemplateLoadUnit
     let supplementaryContent: AnyView?
+    let keyboardDismissToken: TemplateEditorKeyboardDismissToken
 
     @Binding var targetRepMin: Int?
     @Binding var targetRepMax: Int?
@@ -125,6 +134,7 @@ struct TemplateExercisePrescriptionEditor: View {
         canMoveUp: Bool = false,
         canMoveDown: Bool = false,
         preferredLoadUnit: TemplateLoadUnit = .kg,
+        keyboardDismissToken: TemplateEditorKeyboardDismissToken = TemplateEditorKeyboardDismissToken(),
         targetRepMin: Binding<Int?>,
         targetRepMax: Binding<Int?>,
         restSeconds: Binding<Int>,
@@ -148,6 +158,7 @@ struct TemplateExercisePrescriptionEditor: View {
         self.canMoveUp = canMoveUp
         self.canMoveDown = canMoveDown
         self.preferredLoadUnit = preferredLoadUnit
+        self.keyboardDismissToken = keyboardDismissToken
         self._targetRepMin = targetRepMin
         self._targetRepMax = targetRepMax
         self._restSeconds = restSeconds
@@ -212,6 +223,17 @@ struct TemplateExercisePrescriptionEditor: View {
                 onCommitRequest?()
             }
         }
+        .onChange(of: keyboardDismissToken) { _, _ in
+            dismissFocusedInput()
+        }
+    }
+
+    private func dismissFocusedInput() {
+        guard let focusedInput else { return }
+        commitInputDraft(for: focusedInput)
+        clearInputDraft(for: focusedInput)
+        self.focusedInput = nil
+        onCommitRequest?()
     }
 
     private func header(summary: String) -> some View {

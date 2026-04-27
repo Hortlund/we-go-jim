@@ -141,6 +141,105 @@ struct ActiveWorkoutRuntimeTests {
     }
 
     @Test
+    func snapshotStoreSkipsIdenticalLifecycleWrites() async throws {
+        let directory = try temporaryDirectory()
+        let store = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        let session = makeRuntimeSession()
+        let snapshotURL = directory.appendingPathComponent("active-workout-snapshot.json", isDirectory: false)
+
+        try await store.save(session)
+        let firstModifiedAt = try #require(
+            FileManager.default.attributesOfItem(atPath: snapshotURL.path)[.modificationDate] as? Date
+        )
+        try await Task.sleep(for: .milliseconds(25))
+        try await store.save(session)
+        let secondModifiedAt = try #require(
+            FileManager.default.attributesOfItem(atPath: snapshotURL.path)[.modificationDate] as? Date
+        )
+
+        #expect(secondModifiedAt == firstModifiedAt)
+    }
+
+    @Test
+    func runtimeFirstRenderSnapshotIncludesPreviousValuesForEveryExercise() throws {
+        let context = try makeInMemoryContext()
+        let templateRepository = TemplateRepository(modelContext: context)
+        let sessionRepository = WorkoutSessionRepository(modelContext: context)
+        let bench = makeCatalogItem(context: context, remoteUUID: "runtime-first-render-bench")
+        let row = makeCatalogItem(context: context, remoteUUID: "runtime-first-render-row")
+        let previousTemplate = try templateRepository.createTemplate(name: "Previous", notes: "")
+        try templateRepository.setExercises(
+            templateID: previousTemplate.id,
+            drafts: [
+                TemplateExerciseDraft(
+                    catalogExerciseUUID: bench.remoteUUID,
+                    exerciseNameSnapshot: bench.displayName,
+                    categorySnapshot: bench.categoryName,
+                    muscleSummarySnapshot: bench.equipmentSummary,
+                    setDrafts: [TemplateExerciseSetDraft(targetReps: 8, loadUnit: .kg)]
+                ),
+                TemplateExerciseDraft(
+                    catalogExerciseUUID: row.remoteUUID,
+                    exerciseNameSnapshot: row.displayName,
+                    categorySnapshot: row.categoryName,
+                    muscleSummarySnapshot: row.equipmentSummary,
+                    setDrafts: [TemplateExerciseSetDraft(targetReps: 10, loadUnit: .kg)]
+                ),
+            ]
+        )
+        let previousSession = try sessionRepository.createSessionFromTemplate(templateID: previousTemplate.id)
+        for exercise in try sessionRepository.sessionExercises(sessionID: previousSession.id) {
+            var drafts = try sessionRepository.setDrafts(sessionExerciseID: exercise.id)
+            drafts[0].actualWeight = exercise.catalogExerciseUUID == bench.remoteUUID ? 100 : 80
+            drafts[0].actualReps = exercise.catalogExerciseUUID == bench.remoteUUID ? 6 : 10
+            drafts[0].isCompleted = true
+            try sessionRepository.saveSetDrafts(sessionExerciseID: exercise.id, drafts: drafts)
+        }
+        try sessionRepository.finishSession(sessionID: previousSession.id)
+
+        let activeTemplate = try templateRepository.createTemplate(name: "Today", notes: "")
+        try templateRepository.setExercises(
+            templateID: activeTemplate.id,
+            drafts: [
+                TemplateExerciseDraft(
+                    catalogExerciseUUID: bench.remoteUUID,
+                    exerciseNameSnapshot: bench.displayName,
+                    categorySnapshot: bench.categoryName,
+                    muscleSummarySnapshot: bench.equipmentSummary,
+                    setDrafts: [TemplateExerciseSetDraft(targetReps: 8, loadUnit: .kg)]
+                ),
+                TemplateExerciseDraft(
+                    catalogExerciseUUID: row.remoteUUID,
+                    exerciseNameSnapshot: row.displayName,
+                    categorySnapshot: row.categoryName,
+                    muscleSummarySnapshot: row.equipmentSummary,
+                    setDrafts: [TemplateExerciseSetDraft(targetReps: 10, loadUnit: .kg)]
+                ),
+            ]
+        )
+        let runtime = try ActiveWorkoutSessionFactory(modelContext: context)
+            .createSessionFromTemplate(templateID: activeTemplate.id)
+
+        let snapshot = try ActiveWorkoutRuntimeFirstRenderSnapshotBuilder.build(
+            session: runtime,
+            modelContext: context
+        )
+
+        #expect(snapshot.draftsByExerciseID.keys.count == 2)
+        #expect(snapshot.previousResolutionByExerciseID.keys.count == 2)
+        for exercise in runtime.exercises {
+            let previous = try #require(snapshot.previousResolutionByExerciseID[exercise.id]?.previous(at: 0))
+            if exercise.catalogExerciseUUID == bench.remoteUUID {
+                #expect(previous.weight == 100)
+                #expect(previous.reps == 6)
+            } else if exercise.catalogExerciseUUID == row.remoteUUID {
+                #expect(previous.weight == 80)
+                #expect(previous.reps == 10)
+            }
+        }
+    }
+
+    @Test
     func completionWriterMaterializesCanonicalExerciseRestForStaleRuntimeSetDrafts() throws {
         let context = try makeInMemoryContext()
         let tracker = UserDataSyncTracker.shared
@@ -244,11 +343,14 @@ struct ActiveWorkoutRuntimeTests {
         return directory
     }
 
-    private func makeCatalogItem(context: ModelContext) -> ExerciseCatalogItem {
+    private func makeCatalogItem(
+        context: ModelContext,
+        remoteUUID: String = "bench-press"
+    ) -> ExerciseCatalogItem {
         let item = ExerciseCatalogItem(
-            remoteUUID: "bench-press",
-            displayName: "Bench Press",
-            categoryName: "Chest",
+            remoteUUID: remoteUUID,
+            displayName: remoteUUID.contains("row") ? "Barbell Row" : "Bench Press",
+            categoryName: remoteUUID.contains("row") ? "Back" : "Chest",
             equipmentSummary: "Barbell",
             isCurated: true,
             sourceName: "test"

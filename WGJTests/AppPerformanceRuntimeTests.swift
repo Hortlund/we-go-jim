@@ -174,6 +174,22 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
+    func activeWorkoutDurableSnapshotPolicySkipsInAppMinimize() {
+        #expect(!ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: .minimize))
+        #expect(ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: .sceneTransition))
+    }
+
+    @Test
+    func templateKeyboardDismissTokenAdvancesOnExplicitDismiss() {
+        var token = TemplateEditorKeyboardDismissToken()
+        let initialValue = token.value
+
+        token.requestDismiss()
+
+        #expect(token.value == initialValue + 1)
+    }
+
+    @Test
     func keyboardVisibilityIgnoresInvalidFrameSignals() {
         let invalidFrameNotification = Notification(
             name: UIResponder.keyboardWillChangeFrameNotification,

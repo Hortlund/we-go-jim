@@ -320,14 +320,6 @@ struct ActiveWorkoutView: View {
                 pendingGuidanceRefreshTask = nil
                 pendingGuidanceRefreshExerciseIDs = []
                 shouldRefreshAllGuidance = false
-                if scenePhase == .active,
-                   activeWorkoutPresentationState.activeSessionID == sessionID,
-                   !isEndingSession
-                {
-                    performExpiringBackgroundFlush(named: "active-workout.minimize") {
-                        _ = await flushDirtyWritesNow(checkpoint: .minimize)
-                    }
-                }
             }
             .alert("Workout Error", isPresented: $showingError) {
                 Button("OK", role: .cancel) { }
@@ -869,6 +861,18 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
+    private func currentPreparedFirstRenderSnapshot() -> ActiveWorkoutPreparedFirstRenderSnapshot {
+        let currentExerciseIDs = Set(sessionExercises.map(\.id))
+        return ActiveWorkoutPreparedFirstRenderSnapshot(
+            draftsByExerciseID: setDraftsByExerciseID.filter { currentExerciseIDs.contains($0.key) },
+            restsByExerciseID: restByExerciseID.filter { currentExerciseIDs.contains($0.key) },
+            notesByExerciseID: notesByExerciseID.filter { currentExerciseIDs.contains($0.key) },
+            catalogMatchesByUUID: catalogMatchesByUUID,
+            previousResolutionByExerciseID: previousResolutionByExerciseID.filter { currentExerciseIDs.contains($0.key) }
+        )
+    }
+
+    @MainActor
     private func bootstrapIfNeeded() async {
         guard !hasBootstrapped else { return }
         guard !isBootstrapping else { return }
@@ -878,11 +882,16 @@ struct ActiveWorkoutView: View {
         presentActiveWorkout()
 
         do {
-            guard let storedSession = try await ActiveWorkoutSnapshotStore.shared.load(),
-                  storedSession.id == sessionID else {
-                throw WorkoutSessionRepositoryError.sessionNotFound
+            if let preparedSession = activeWorkoutPresentationState.preparedRuntimeSession(for: sessionID) {
+                applyRuntimeSessionState(preparedSession)
+                activeWorkoutPresentationState.clearPreparedRuntimeSession(for: sessionID)
+            } else {
+                guard let storedSession = try await ActiveWorkoutSnapshotStore.shared.load(),
+                      storedSession.id == sessionID else {
+                    throw WorkoutSessionRepositoryError.sessionNotFound
+                }
+                applyRuntimeSessionState(storedSession)
             }
-            applyRuntimeSessionState(storedSession)
         } catch {
             showError(error)
             return
@@ -1036,8 +1045,9 @@ struct ActiveWorkoutView: View {
         for stamp: ActiveWorkoutExerciseInteractionStamp,
         draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
     ) {
-        let expandedExerciseIDs = Set(sessionExercises.map(\.id).filter { cardStateController.isExpanded(for: $0) })
-        let previousExerciseIDs = expandedExerciseIDs.filter { exerciseID in
+        let allExerciseIDs = Set(sessionExercises.map(\.id))
+        let expandedExerciseIDs = allExerciseIDs.filter { cardStateController.isExpanded(for: $0) }
+        let previousExerciseIDs = allExerciseIDs.filter { exerciseID in
             guard let resolution = previousResolutionByExerciseID[exerciseID] else { return true }
             return resolution.isLoading
         }
@@ -1770,11 +1780,22 @@ struct ActiveWorkoutView: View {
     private func minimizeWorkout() {
         dismissKeyboard()
         isCancelArmed = false
-        performExpiringBackgroundFlush(named: "active-workout.minimize") {
-            _ = await flushDirtyWritesNow(checkpoint: .minimize)
-        }
+        stageMinimizedRuntimeState()
         collapseActiveWorkout()
         dismiss()
+    }
+
+    @MainActor
+    private func stageMinimizedRuntimeState() {
+        rowFlushCoordinator.flushAll()
+        guard let snapshot = currentRuntimeSnapshot() else { return }
+        runtimeSession = snapshot
+        pendingCardioCompletionsByPhase = [:]
+        activeWorkoutPresentationState.stageRuntimeSession(snapshot, for: sessionID)
+        activeWorkoutPresentationState.stagePreparedFirstRenderSnapshot(
+            currentPreparedFirstRenderSnapshot(),
+            for: sessionID
+        )
     }
 
     private func presentActiveWorkout() {
@@ -2102,7 +2123,7 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
-    private func flushDirtyWritesNow(checkpoint: ActiveWorkoutWriteCheckpoint) async -> Bool {
+    private func flushDirtyWritesNow(checkpoint: ActiveWorkoutLifecycleCheckpoint) async -> Bool {
         rowFlushCoordinator.flushAll()
 
         switch checkpoint {
@@ -2117,9 +2138,14 @@ struct ActiveWorkoutView: View {
             return true
         }
 
+        runtimeSession = snapshot
+        pendingCardioCompletionsByPhase = [:]
+        guard ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: checkpoint) else {
+            return true
+        }
+
         do {
             try await ActiveWorkoutSnapshotStore.shared.save(snapshot)
-            applyRuntimeSessionState(snapshot)
             return true
         } catch {
             showError(error)
@@ -2986,13 +3012,6 @@ private struct ActiveWorkoutFinishResult: Sendable {
     let completedTemplateID: UUID?
     let saveTemplateFolders: [ActiveWorkoutTemplateFolderSnapshot]
     let templateUpdatePreview: WorkoutTemplateSyncPreview?
-}
-
-private enum ActiveWorkoutWriteCheckpoint: Sendable {
-    case minimize
-    case sceneTransition
-    case finish
-    case cancel
 }
 
 private struct ActiveWorkoutExerciseSettingsSheet: View {

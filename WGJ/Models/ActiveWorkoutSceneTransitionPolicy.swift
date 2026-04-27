@@ -6,6 +6,19 @@ nonisolated enum ActiveWorkoutSceneTransitionPolicy {
     }
 }
 
+nonisolated enum ActiveWorkoutLifecycleCheckpoint {
+    case finish
+    case cancel
+    case minimize
+    case sceneTransition
+}
+
+nonisolated enum ActiveWorkoutSnapshotPersistencePolicy {
+    static func shouldWriteDurableSnapshot(for checkpoint: ActiveWorkoutLifecycleCheckpoint) -> Bool {
+        checkpoint == .sceneTransition
+    }
+}
+
 nonisolated enum ActiveWorkoutInteractionWorkPolicy {
     static let defaultPreviousPerformanceHydrationDelay: Duration = .milliseconds(650)
     static let defaultGuidanceRefreshDelay: Duration = .milliseconds(900)

@@ -623,12 +623,14 @@ final class ActiveWorkoutPresentationState {
     var activeSessionID: UUID?
     var isActiveWorkoutPresented = false
     var isActiveWorkoutStripCollapsed = false
+    @ObservationIgnored private var preparedRuntimeSessionBySessionID: [UUID: ActiveWorkoutRuntimeSession] = [:]
     @ObservationIgnored private var preparedPreviousPerformanceResolutionBySessionID: [UUID: [UUID: WorkoutPreviousPerformanceResolution]] = [:]
     @ObservationIgnored private var preparedFirstRenderSnapshotBySessionID: [UUID: ActiveWorkoutPreparedFirstRenderSnapshot] = [:]
 
     func present(sessionID: UUID) {
         if activeSessionID != sessionID {
             if let activeSessionID {
+                preparedRuntimeSessionBySessionID.removeValue(forKey: activeSessionID)
                 preparedPreviousPerformanceResolutionBySessionID.removeValue(forKey: activeSessionID)
                 preparedFirstRenderSnapshotBySessionID.removeValue(forKey: activeSessionID)
             }
@@ -663,6 +665,7 @@ final class ActiveWorkoutPresentationState {
             return
         }
         if let activeSessionID {
+            preparedRuntimeSessionBySessionID.removeValue(forKey: activeSessionID)
             preparedPreviousPerformanceResolutionBySessionID.removeValue(forKey: activeSessionID)
             preparedFirstRenderSnapshotBySessionID.removeValue(forKey: activeSessionID)
         }
@@ -676,6 +679,23 @@ final class ActiveWorkoutPresentationState {
         for sessionID: UUID
     ) {
         preparedPreviousPerformanceResolutionBySessionID[sessionID] = resolutionByExerciseID
+    }
+
+    func stageRuntimeSession(
+        _ session: ActiveWorkoutRuntimeSession,
+        for sessionID: UUID
+    ) {
+        preparedRuntimeSessionBySessionID[sessionID] = session
+    }
+
+    func preparedRuntimeSession(
+        for sessionID: UUID
+    ) -> ActiveWorkoutRuntimeSession? {
+        preparedRuntimeSessionBySessionID[sessionID]
+    }
+
+    func clearPreparedRuntimeSession(for sessionID: UUID) {
+        preparedRuntimeSessionBySessionID.removeValue(forKey: sessionID)
     }
 
     func stagePreparedFirstRenderSnapshot(
