@@ -12,6 +12,7 @@ struct ActiveWorkoutView: View {
     @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
     @Environment(RestTimerState.self) private var restTimerState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
 
     private let sessionID: UUID
     @Query private var profiles: [UserProfile]
@@ -208,6 +209,9 @@ struct ActiveWorkoutView: View {
             }
             .onChange(of: showingFinishConfirmation) { oldValue, newValue in
                 handleFinishConfirmationChange(from: oldValue, to: newValue)
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                handleScenePhaseChange(newPhase)
             }
             .onDisappear {
                 isCancelArmed = false
@@ -2210,6 +2214,10 @@ struct ActiveWorkoutView: View {
     @MainActor
     private func flushDirtyWritesNow(checkpoint: ActiveWorkoutLifecycleCheckpoint) async -> Bool {
         rowFlushCoordinator.flushAll()
+        let pendingSnapshotTask = pendingUserEditSnapshotTask
+        pendingUserEditSnapshotTask?.cancel()
+        pendingUserEditSnapshotTask = nil
+        await pendingSnapshotTask?.value
 
         switch checkpoint {
         case .finish, .cancel:
@@ -2235,6 +2243,17 @@ struct ActiveWorkoutView: View {
         } catch {
             showError(error)
             return false
+        }
+    }
+
+    @MainActor
+    private func handleScenePhaseChange(_ newPhase: ScenePhase) {
+        guard ActiveWorkoutSceneTransitionPolicy.shouldFlushLocalDraft(scenePhase: newPhase) else {
+            return
+        }
+
+        Task { @MainActor in
+            _ = await flushDirtyWritesNow(checkpoint: .sceneTransition)
         }
     }
 

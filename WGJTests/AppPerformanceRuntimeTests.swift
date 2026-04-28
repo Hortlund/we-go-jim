@@ -173,16 +173,16 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
-    func activeWorkoutSceneTransitionDoesNotFlushForAppSwitching() {
+    func activeWorkoutSceneTransitionFlushesOnlyWhenBackgrounded() {
         #expect(!ActiveWorkoutSceneTransitionPolicy.shouldFlushLocalDraft(scenePhase: .active))
         #expect(!ActiveWorkoutSceneTransitionPolicy.shouldFlushLocalDraft(scenePhase: .inactive))
-        #expect(!ActiveWorkoutSceneTransitionPolicy.shouldFlushLocalDraft(scenePhase: .background))
+        #expect(ActiveWorkoutSceneTransitionPolicy.shouldFlushLocalDraft(scenePhase: .background))
     }
 
     @Test
-    func activeWorkoutDurableSnapshotPolicySkipsLifecycleChurn() {
+    func activeWorkoutDurableSnapshotPolicyWritesBackgroundCheckpoint() {
         #expect(!ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: .minimize))
-        #expect(!ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: .sceneTransition))
+        #expect(ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: .sceneTransition))
     }
 
     @Test
