@@ -6,6 +6,12 @@ import UIKit
 
 struct AppPerformanceRuntimeTests {
     @Test
+    func activeWorkoutOverlayUsesGentleMotionUnlessReduceMotionIsEnabled() {
+        #expect(ActiveWorkoutOverlayPresentationPolicy.transitionProfile(reduceMotion: false) == .gentleSlide)
+        #expect(ActiveWorkoutOverlayPresentationPolicy.transitionProfile(reduceMotion: true) == .fadeOnly)
+    }
+
+    @Test
     func deferredMaintenancePlannerSkipsWarmResumeWorkWhenEverythingIsFresh() {
         let work = AppDeferredMaintenancePlanner.plan(
             hasAppliedCleanStart: true,

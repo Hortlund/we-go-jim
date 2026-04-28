@@ -21,6 +21,15 @@ struct MainTabView: View {
         WGJMotion.overlayAnimation(reduceMotion: reduceMotion)
     }
 
+    private var activeWorkoutOverlayAnimation: Animation {
+        switch ActiveWorkoutOverlayPresentationPolicy.transitionProfile(reduceMotion: reduceMotion) {
+        case .gentleSlide:
+            return .smooth(duration: 0.34, extraBounce: 0.06)
+        case .fadeOnly:
+            return .easeOut(duration: 0.01)
+        }
+    }
+
     private var syncBannerAnimation: Animation {
         reduceMotion ? .easeOut(duration: 0.01) : .smooth(duration: 0.36, extraBounce: 0.10)
     }
@@ -90,22 +99,13 @@ struct MainTabView: View {
                 syncBannerChrome(topSafeAreaInset: topSafeAreaInset)
                     .animation(syncBannerAnimation, value: shouldShowSyncBanner)
                     .animation(syncBannerAnimation, value: isKeyboardVisible)
+
+                activeWorkoutOverlayChrome(size: proxy.size)
+                    .animation(activeWorkoutOverlayAnimation, value: activeWorkoutPresentationState.isActiveWorkoutPresented)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             .onPreferenceChange(ActiveWorkoutStripHeightPreferenceKey.self) { newValue in
                 activeWorkoutStripHeight = max(newValue, Self.activeWorkoutStripFallbackHeight)
-            }
-            .fullScreenCover(isPresented: $activeWorkoutPresentationState.isActiveWorkoutPresented, onDismiss: {
-                if activeWorkoutPresentationState.activeSessionID != nil {
-                    activeWorkoutPresentationState.collapseActiveWorkout()
-                }
-                workoutCompletionPresentationState.presentQueuedIfNeeded()
-            }) {
-                if let activeSessionID = activeWorkoutPresentationState.activeSessionID {
-                    NavigationStack {
-                        ActiveWorkoutView(sessionID: activeSessionID)
-                    }
-                }
             }
             .fullScreenCover(item: $workoutCompletionPresentationState.presentedWorkout) { presentation in
                 WorkoutCompletionSummaryView(sessionID: presentation.sessionID)
@@ -269,6 +269,22 @@ struct MainTabView: View {
         .ignoresSafeArea(.container, edges: .top)
     }
 
+    @ViewBuilder
+    private func activeWorkoutOverlayChrome(size: CGSize) -> some View {
+        if let activeSessionID = activeWorkoutPresentationState.activeSessionID,
+           activeWorkoutPresentationState.isActiveWorkoutPresented
+        {
+            NavigationStack {
+                ActiveWorkoutView(sessionID: activeSessionID)
+            }
+            .frame(width: size.width, height: size.height)
+            .background(WGJTheme.bgBase.ignoresSafeArea())
+            .transition(activeWorkoutOverlayTransition)
+            .zIndex(20)
+            .accessibilityIdentifier("active-workout-overlay")
+        }
+    }
+
     private var shouldShowSyncBanner: Bool {
         userDataSyncStatus.state == .syncing
     }
@@ -293,13 +309,26 @@ struct MainTabView: View {
     }
 
     private func presentActiveWorkout(sessionID: UUID) {
-        activeWorkoutPresentationState.present(sessionID: sessionID)
+        withAnimation(activeWorkoutOverlayAnimation) {
+            activeWorkoutPresentationState.present(sessionID: sessionID)
+        }
     }
 
     private func collapseActiveWorkout() {
-        activeWorkoutPresentationState.collapseActiveWorkout()
+        withAnimation(activeWorkoutOverlayAnimation) {
+            activeWorkoutPresentationState.collapseActiveWorkout()
+        }
     }
 
+}
+
+private var activeWorkoutOverlayTransition: AnyTransition {
+    .asymmetric(
+        insertion: .move(edge: .bottom)
+            .combined(with: .opacity),
+        removal: .move(edge: .bottom)
+            .combined(with: .opacity)
+    )
 }
 
 private var activeWorkoutStripTransition: AnyTransition {
