@@ -165,6 +165,7 @@ struct ActiveWorkoutExerciseCardStateController: Equatable {
         if isCompleted {
             guard !completedInCurrentCycle.contains(exerciseID) else { return }
             completedInCurrentCycle.insert(exerciseID)
+            isExpandedByExerciseID[exerciseID] = false
         } else {
             completedInCurrentCycle.remove(exerciseID)
         }

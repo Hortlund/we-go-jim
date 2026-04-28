@@ -400,7 +400,7 @@ struct TrainingGuidanceServiceTests {
     }
 
     @Test
-    func activeWorkoutControllerKeepsManualExpansionWhenExerciseCompletes() {
+    func activeWorkoutControllerCollapsesExerciseWhenItCompletes() {
         let first = UUID()
         let second = UUID()
         var controller = ActiveWorkoutExerciseCardStateController()
@@ -416,14 +416,16 @@ struct TrainingGuidanceServiceTests {
 
         controller.setExpanded(true, for: first)
         controller.updateCompletion(for: first, isCompleted: true)
-        #expect(controller.isExpanded(for: first))
+        #expect(!controller.isExpanded(for: first))
 
+        controller.setExpanded(true, for: first)
         controller.updateCompletion(for: first, isCompleted: true)
         #expect(controller.isExpanded(for: first))
 
         controller.updateCompletion(for: first, isCompleted: false)
+        controller.setExpanded(true, for: first)
         controller.updateCompletion(for: first, isCompleted: true)
-        #expect(controller.isExpanded(for: first))
+        #expect(!controller.isExpanded(for: first))
     }
 
     @Test
