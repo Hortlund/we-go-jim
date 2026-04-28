@@ -469,6 +469,21 @@ struct TrainingGuidanceServiceTests {
         #expect(!controller.isExpanded(for: second))
     }
 
+    @Test
+    func activeWorkoutCompletionScrollPolicyReanchorsCompletedExerciseOnlyOnNewCompletion() {
+        let exerciseID = UUID()
+
+        #expect(ActiveWorkoutCompletionScrollPolicy.targetAfterAutoCollapse(
+            exerciseID: exerciseID,
+            didTransitionToCompleted: true
+        ) == .exercise(exerciseID))
+
+        #expect(ActiveWorkoutCompletionScrollPolicy.targetAfterAutoCollapse(
+            exerciseID: exerciseID,
+            didTransitionToCompleted: false
+        ) == nil)
+    }
+
     private func makeWorkoutSet(
         reps: Int?,
         weight: Double?,

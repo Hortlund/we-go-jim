@@ -150,7 +150,7 @@ struct ActiveWorkoutView: View {
                     }
 
                     ForEach(exerciseDisplayGroups) { group in
-                        exerciseSection(for: group)
+                        exerciseSection(for: group, scrollProxy: scrollProxy)
                     }
 
                     if session != nil && !sessionExercises.isEmpty {
@@ -571,7 +571,8 @@ struct ActiveWorkoutView: View {
     private func exerciseRow(
         for exercise: ActiveWorkoutRuntimeExercise,
         index: Int,
-        displayTitle: String? = nil
+        displayTitle: String? = nil,
+        scrollProxy: ScrollViewProxy
     ) -> some View {
         let exerciseID = exercise.id
         let exerciseName = exercise.exerciseNameSnapshot
@@ -611,7 +612,7 @@ struct ActiveWorkoutView: View {
                         persistCommittedUserEditSnapshot()
                     },
                     onSetDraftsCommitted: { drafts in
-                        handleDraftsChanged(drafts, for: exercise)
+                        handleDraftsChanged(drafts, for: exercise, scrollProxy: scrollProxy)
                     },
                     onRestCommitted: { rest in
                         updateRestValue(rest, for: exerciseID)
@@ -677,13 +678,15 @@ struct ActiveWorkoutView: View {
     @MainActor
     @ViewBuilder
     private func exerciseSection(
-        for group: WorkoutExerciseDisplayGroup<ActiveWorkoutRuntimeExercise>
+        for group: WorkoutExerciseDisplayGroup<ActiveWorkoutRuntimeExercise>,
+        scrollProxy: ScrollViewProxy
     ) -> some View {
         switch group {
         case .single(let exercise, let index):
             exerciseRow(
                 for: exercise,
-                index: index
+                index: index,
+                scrollProxy: scrollProxy
             )
         case .superset(let superset):
             VStack(alignment: .leading, spacing: 12) {
@@ -694,13 +697,15 @@ struct ActiveWorkoutView: View {
                 exerciseRow(
                     for: superset.first,
                     index: superset.firstIndex,
-                    displayTitle: SupersetExercisePosition.first.label
+                    displayTitle: SupersetExercisePosition.first.label,
+                    scrollProxy: scrollProxy
                 )
 
                 exerciseRow(
                     for: superset.second,
                     index: superset.secondIndex,
-                    displayTitle: SupersetExercisePosition.second.label
+                    displayTitle: SupersetExercisePosition.second.label,
+                    scrollProxy: scrollProxy
                 )
             }
             .padding(14)
@@ -1309,7 +1314,8 @@ struct ActiveWorkoutView: View {
     @MainActor
     private func handleDraftsChanged(
         _ drafts: [WorkoutSessionSetDraft],
-        for exercise: ActiveWorkoutRuntimeExercise
+        for exercise: ActiveWorkoutRuntimeExercise,
+        scrollProxy: ScrollViewProxy
     ) {
         updateDraftsValue(drafts, for: exercise.id)
         let isCompleted = isExerciseCompleted(drafts)
@@ -1322,8 +1328,36 @@ struct ActiveWorkoutView: View {
             if isCompleted {
                 WorkoutFeedbackCenter.shared.exerciseCompleted()
             }
+            reanchorCompletedExerciseIfNeeded(
+                exerciseID: exercise.id,
+                didTransitionToCompleted: isCompleted,
+                using: scrollProxy
+            )
         }
         persistCommittedUserEditSnapshot()
+    }
+
+    @MainActor
+    private func reanchorCompletedExerciseIfNeeded(
+        exerciseID: UUID,
+        didTransitionToCompleted: Bool,
+        using scrollProxy: ScrollViewProxy
+    ) {
+        guard let target = ActiveWorkoutCompletionScrollPolicy.targetAfterAutoCollapse(
+            exerciseID: exerciseID,
+            didTransitionToCompleted: didTransitionToCompleted
+        ) else {
+            return
+        }
+
+        Task { @MainActor in
+            await Task.yield()
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                scrollProxy.scrollTo(target, anchor: .top)
+            }
+        }
     }
 
     @MainActor

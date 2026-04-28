@@ -575,6 +575,15 @@ enum ActiveWorkoutScrollTarget: Hashable {
     case cancelSection
 }
 
+nonisolated enum ActiveWorkoutCompletionScrollPolicy {
+    static func targetAfterAutoCollapse(
+        exerciseID: UUID,
+        didTransitionToCompleted: Bool
+    ) -> ActiveWorkoutScrollTarget? {
+        didTransitionToCompleted ? .exercise(exerciseID) : nil
+    }
+}
+
 @MainActor
 @Observable
 final class WorkoutCompletionPresentationState {
