@@ -72,8 +72,8 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 - Date: 2026-04-26
 - Trigger/Problem: A signed-in iPhone 17 simulator showed Core Data CloudKit setup failing with `NSCocoaErrorDomain Code=134400` and `CKAccountStatusTemporarilyUnavailable`, while WGJ still displayed cloud sync as caught up.
 - Root Cause: The CloudKit event classifier treated every Cocoa `134400` as harmless no-account/auth noise. That suppressed temporary account/runtime failures that should degrade cloud-backed behavior until iCloud is available again.
-- Durable Rule: Do not classify `NSCocoaErrorDomain 134400` by code alone. Suppress only confirmed no-account/not-auth noise, and let `CKAccountStatusTemporarilyUnavailable`, restricted, unavailable, timeout, or uncertain runtime status surface as a cloud runtime error.
-- How to Verify Next Time: Add classifier coverage with the exact CloudKit status text, run `WGJTests`, and on the signed-in `iPhone 17 / iOS 26.2` simulator confirm the diagnostics/login status changes to degraded instead of caught up when setup reports temporary unavailability.
+- Durable Rule: Do not classify `NSCocoaErrorDomain 134400` by code alone. Suppress only confirmed no-account/not-auth noise. At launch, only a positively available iCloud account should use the CloudKit-backed user-data store; `CKAccountStatusTemporarilyUnavailable`, restricted, unavailable, timed-out, error, or uncertain startup/runtime status must degrade to local-only/cloud-unavailable behavior instead of starting or clearing CloudKit work.
+- How to Verify Next Time: Add classifier and startup-preflight coverage with the exact CloudKit status text, run `WGJTests`, and on the signed-in `iPhone 17 / iOS 26.2` simulator confirm the app does not emit WGJ `CloudKit` setup logs when account status is temporary/unknown and that diagnostics/login status shows degraded or local-only instead of caught up.
 - Status: active
 
 ## 2026-04-26 - Active Start Dictionaries Must Tolerate Duplicate Relationship Rows

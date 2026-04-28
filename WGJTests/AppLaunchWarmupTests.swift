@@ -613,14 +613,14 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
-    func asyncCloudStartupPreflightKeepsCloudBackedStoreForTransientStartupStatus() async {
+    func asyncCloudStartupPreflightUsesLocalFallbackForTransientStartupStatus() async {
         let decision = await CloudStartupPreflight.makeDecisionAsync(
             statusProvider: MockAsyncCloudStartupAccountStatusProvider(status: .timedOut)
         )
 
-        #expect(decision.storeMode == .cloudBacked)
-        #expect(decision.cloudSyncEnabled)
-        #expect(decision.cloudSyncErrorDescription == nil)
+        #expect(decision.storeMode == .localFallback)
+        #expect(!decision.cloudSyncEnabled)
+        #expect(decision.cloudSyncErrorDescription?.contains("timed out") == true)
     }
 
     @Test
@@ -661,7 +661,7 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
-    func appLaunchBootstrapResolverKeepsCloudBackedStoreForTimedOutStartupStatus() async throws {
+    func appLaunchBootstrapResolverUsesLocalFallbackForTimedOutStartupStatus() async throws {
         let container = try makeContainer()
         var didRequestCloudContainer = false
         var didRequestLocalFallback = false
@@ -689,10 +689,10 @@ struct AppLaunchWarmupTests {
             describeError: { _ in "unreachable" }
         )
 
-        #expect(bootstrap.cloudSyncEnabled)
-        #expect(bootstrap.cloudSyncErrorDescription == nil)
-        #expect(didRequestCloudContainer)
-        #expect(!didRequestLocalFallback)
+        #expect(bootstrap.cloudSyncEnabled == false)
+        #expect(bootstrap.cloudSyncErrorDescription?.contains("timed out") == true)
+        #expect(!didRequestCloudContainer)
+        #expect(didRequestLocalFallback)
     }
 
     @Test

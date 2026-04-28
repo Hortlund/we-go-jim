@@ -7,14 +7,18 @@ import Testing
 @Suite(.serialized)
 struct UserDataSyncTrackerTests {
     @Test
-    func cloudStartupPreflightOnlyForcesLocalFallbackForDefinitiveLocalOnlyStatuses() {
-        let definitiveStatuses: [CloudStartupAccountStatus] = [
+    func cloudStartupPreflightForcesLocalFallbackUnlessAccountIsAvailable() {
+        let localFallbackStatuses: [CloudStartupAccountStatus] = [
             .noAccount,
             .restricted,
             .containerUnavailable,
+            .temporarilyUnavailable,
+            .couldNotDetermine,
+            .timedOut,
+            .error,
         ]
 
-        for status in definitiveStatuses {
+        for status in localFallbackStatuses {
             let decision = CloudStartupPreflight.makeDecision(
                 statusProvider: MockCloudStartupAccountStatusProvider(status: status)
             )
@@ -22,22 +26,12 @@ struct UserDataSyncTrackerTests {
             #expect(decision.shouldForceLocalFallbackStore)
         }
 
-        let degradedStatuses: [CloudStartupAccountStatus] = [
-            .temporarilyUnavailable,
-            .couldNotDetermine,
-            .timedOut,
-            .error,
-        ]
-
-        for status in degradedStatuses {
-            let decision = CloudStartupPreflight.makeDecision(
-                statusProvider: MockCloudStartupAccountStatusProvider(status: status)
-            )
-
-            #expect(!decision.shouldForceLocalFallbackStore)
-            #expect(decision.storeMode == .cloudBacked)
-            #expect(decision.cloudSyncErrorDescription == nil)
-        }
+        let availableDecision = CloudStartupPreflight.makeDecision(
+            statusProvider: MockCloudStartupAccountStatusProvider(status: .available)
+        )
+        #expect(!availableDecision.shouldForceLocalFallbackStore)
+        #expect(availableDecision.storeMode == .cloudBacked)
+        #expect(availableDecision.cloudSyncErrorDescription == nil)
     }
 
     @Test

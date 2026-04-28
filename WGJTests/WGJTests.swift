@@ -865,9 +865,9 @@ struct WGJTests {
 
         #expect(available == .available)
         #expect(noAccount == .unavailable(.noAccount))
-        #expect(temporary == .available)
-        #expect(unknown == .available)
-        #expect(failed == .available)
+        #expect(temporary == .unavailable(.temporarilyUnavailable))
+        #expect(unknown == .unavailable(.unknown))
+        #expect(failed == .unavailable(.unknown))
     }
 
     @Test
@@ -904,7 +904,7 @@ struct WGJTests {
     }
 
     @Test
-    func cloudStartupPreflightKeepsCloudBackedBootstrapForTransientStartupStatus() {
+    func cloudStartupPreflightChoosesLocalFallbackForTransientStartupStatus() {
         let expectations: [(CloudStartupAccountStatus, String)] = [
             (.temporarilyUnavailable, "temporarily unavailable"),
             (.couldNotDetermine, "could not verify"),
@@ -917,9 +917,9 @@ struct WGJTests {
                 statusProvider: MockCloudStartupAccountStatusProvider(status: status)
             )
 
-            #expect(decision.storeMode == .cloudBacked, "Expected cloud-backed launch for \(expectedMessageFragment).")
-            #expect(decision.cloudSyncEnabled)
-            #expect(decision.cloudSyncErrorDescription == nil)
+            #expect(decision.storeMode == .localFallback, "Expected local fallback launch for \(expectedMessageFragment).")
+            #expect(!decision.cloudSyncEnabled)
+            #expect(decision.cloudSyncErrorDescription?.contains(expectedMessageFragment) == true)
         }
     }
 
