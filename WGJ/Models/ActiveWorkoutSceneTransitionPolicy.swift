@@ -18,6 +18,10 @@ nonisolated enum ActiveWorkoutSnapshotPersistencePolicy {
     static func shouldWriteDurableSnapshot(for checkpoint: ActiveWorkoutLifecycleCheckpoint) -> Bool {
         checkpoint == .userEdit
     }
+
+    static func shouldWriteDurableSnapshot(for summary: ActiveWorkoutSetDraftChangeSummary) -> Bool {
+        summary.hasStructuralChange || summary.hasCompletionChange
+    }
 }
 
 nonisolated enum ActiveWorkoutKeyboardChromePolicy {

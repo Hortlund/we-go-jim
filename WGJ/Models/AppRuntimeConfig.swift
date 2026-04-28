@@ -626,6 +626,11 @@ nonisolated struct ActiveWorkoutPreparedFirstRenderSnapshot: Equatable, Sendable
     )
 }
 
+nonisolated struct ActiveWorkoutPreparedStartState: Equatable, Sendable {
+    let session: ActiveWorkoutRuntimeSession
+    let firstRenderSnapshot: ActiveWorkoutPreparedFirstRenderSnapshot
+}
+
 @MainActor
 @Observable
 final class ActiveWorkoutPresentationState {
@@ -695,6 +700,11 @@ final class ActiveWorkoutPresentationState {
         for sessionID: UUID
     ) {
         preparedRuntimeSessionBySessionID[sessionID] = session
+    }
+
+    func stagePreparedStart(_ preparedStart: ActiveWorkoutPreparedStartState) {
+        stageRuntimeSession(preparedStart.session, for: preparedStart.session.id)
+        stagePreparedFirstRenderSnapshot(preparedStart.firstRenderSnapshot, for: preparedStart.session.id)
     }
 
     func preparedRuntimeSession(

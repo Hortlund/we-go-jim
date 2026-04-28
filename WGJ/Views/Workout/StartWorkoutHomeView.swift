@@ -727,6 +727,7 @@ struct StartWorkoutHomeView: View {
             return ActiveWorkoutStartPreparation(
                 sessionID: snapshot.id,
                 isExistingConflict: true,
+                runtimeSession: nil,
                 previousPerformanceResolutionByExerciseID: [:],
                 firstRenderSnapshot: nil
             )
@@ -748,6 +749,7 @@ struct StartWorkoutHomeView: View {
             return ActiveWorkoutStartPreparation(
                 sessionID: importedLegacy.id,
                 isExistingConflict: true,
+                runtimeSession: nil,
                 previousPerformanceResolutionByExerciseID: [:],
                 firstRenderSnapshot: nil
             )
@@ -766,6 +768,7 @@ struct StartWorkoutHomeView: View {
         return ActiveWorkoutStartPreparation(
             sessionID: runtimePreparation.session.id,
             isExistingConflict: false,
+            runtimeSession: runtimePreparation.session,
             previousPerformanceResolutionByExerciseID: [:],
             firstRenderSnapshot: runtimePreparation.firstRenderSnapshot
         )
@@ -795,10 +798,13 @@ struct StartWorkoutHomeView: View {
             return
         }
 
-        if let firstRenderSnapshot = preparation.firstRenderSnapshot {
-            activeWorkoutPresentationState.stagePreparedFirstRenderSnapshot(
-                firstRenderSnapshot,
-                for: preparation.sessionID
+        if let runtimeSession = preparation.runtimeSession,
+           let firstRenderSnapshot = preparation.firstRenderSnapshot {
+            activeWorkoutPresentationState.stagePreparedStart(
+                ActiveWorkoutPreparedStartState(
+                    session: runtimeSession,
+                    firstRenderSnapshot: firstRenderSnapshot
+                )
             )
         } else {
             activeWorkoutPresentationState.stagePreparedPreviousPerformanceResolution(
@@ -2154,6 +2160,7 @@ private struct PendingTemplateFileTaskKey: Hashable {
 private struct ActiveWorkoutStartPreparation: Sendable {
     let sessionID: UUID
     let isExistingConflict: Bool
+    let runtimeSession: ActiveWorkoutRuntimeSession?
     let previousPerformanceResolutionByExerciseID: [UUID: WorkoutPreviousPerformanceResolution]
     let firstRenderSnapshot: ActiveWorkoutPreparedFirstRenderSnapshot?
 }

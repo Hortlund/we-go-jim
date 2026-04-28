@@ -102,91 +102,7 @@ struct ActiveWorkoutView: View {
             ScrollView {
                 // Exercise cards change height aggressively as sets complete, and a non-lazy
                 // stack keeps the scroll position stable when a completed card collapses.
-                VStack(alignment: .leading, spacing: 16) {
-                    if let session {
-                        ActiveWorkoutHeaderCard(
-                            sessionNameDraft: $sessionNameDraft,
-                            notesDraft: $notesDraft,
-                            session: session,
-                            exerciseCount: sessionExercises.count,
-                            cardioCount: orderedCardioBlocks.count,
-                            missingCardioPhases: missingCardioPhases,
-                            onSubmit: persistCommittedUserEditSnapshot,
-                            onAddCardio: showCardioPicker
-                        )
-                        .id(ActiveWorkoutScrollTarget.header)
-                        if preWorkoutCardio != nil {
-                            cardioSection(for: .preWorkout)
-                        }
-                        exercisesSectionHeader
-                    } else if isEndingSession || completedSessionID != nil {
-                        WGJEmptyStateCard(
-                            title: "Wrapping up workout",
-                            message: "Saving the session and preparing the next step.",
-                            icon: "checkmark.circle"
-                        )
-                    } else {
-                        WGJEmptyStateCard(
-                            title: "Workout session not found",
-                            message: "This active workout could not be loaded.",
-                            icon: "exclamationmark.triangle"
-                        )
-                    }
-
-                    if session != nil && sessionExercises.isEmpty {
-                        WGJEmptyStateCard(
-                            title: "No exercises added",
-                            message: orderedCardioBlocks.isEmpty
-                                ? "Add exercises to start logging sets in this workout."
-                                : "Add exercises to keep building the main section of this workout.",
-                            icon: "list.bullet.rectangle"
-                        ) {
-                            Button("Add Exercise") {
-                                pickerTarget = .exercise
-                            }
-                            .buttonStyle(WGJPrimaryButtonStyle())
-                            .accessibilityIdentifier("active-workout-empty-add-exercise-button")
-                        }
-                    }
-
-                    ForEach(exerciseDisplayGroups) { group in
-                        exerciseSection(for: group, scrollProxy: scrollProxy)
-                    }
-
-                    if session != nil && !sessionExercises.isEmpty {
-                        addExerciseButton(title: "Add another exercise")
-                            .disabled(session == nil)
-                    }
-
-                    if postWorkoutCardio != nil {
-                        cardioSection(for: .postWorkout)
-                    }
-
-                    if session != nil && !isEndingSession {
-                        ActiveWorkoutCancelSection(
-                            isCancelArmed: isCancelArmed,
-                            onCancelConfirmationPresented: {
-                                focusCancelSection(using: scrollProxy)
-                            },
-                            onArmCancel: {
-                                dismissKeyboard()
-                                showingFinishConfirmation = false
-                                isCancelArmed = true
-                            },
-                            onKeepWorkout: {
-                                isCancelArmed = false
-                            },
-                            onDiscardWorkout: {
-                                cancelWorkout()
-                            }
-                        )
-                        .id(cancelSectionScrollTarget)
-
-                        Color.clear
-                            .frame(height: cancelSectionBottomSpacerHeight)
-                            .accessibilityHidden(true)
-                    }
-                }
+                activeWorkoutScrollContent(scrollProxy: scrollProxy)
                 .scrollTargetLayout()
                 .padding(16)
             }
@@ -273,16 +189,7 @@ struct ActiveWorkoutView: View {
                 .interactiveDismissDisabled()
             }
             .sheet(item: $pendingTemplateUpdatePreview, onDismiss: handleTemplateReviewSheetDismissed) { preview in
-                ActiveWorkoutTemplateSyncReviewSheet(
-                    preview: preview,
-                    onKeepTemplate: {
-                        requestCompletionAfterTemplateReviewSheetDismissal()
-                    },
-                    onUpdateTemplate: {
-                        requestTemplateUpdateAfterReviewSheetDismissal(preview)
-                    }
-                )
-                .interactiveDismissDisabled()
+                templateReviewSheet(for: preview)
             }
             .task {
                 await bootstrapIfNeeded()
@@ -318,12 +225,137 @@ struct ActiveWorkoutView: View {
             .alert("Workout Error", isPresented: $showingError) {
                 Button("OK", role: .cancel) { }
             } message: {
-                Text(errorMessage)
+                workoutErrorAlertMessage
             }
             .background {
                 WorkoutRestTimerExpiryObserver()
             }
         }
+    }
+
+    @MainActor
+    private func activeWorkoutScrollContent(scrollProxy: ScrollViewProxy) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            activeWorkoutHeaderContent
+            emptyWorkoutContent
+
+            ForEach(exerciseDisplayGroups) { group in
+                exerciseSection(for: group, scrollProxy: scrollProxy)
+            }
+
+            if session != nil && !sessionExercises.isEmpty {
+                addExerciseButton(title: "Add another exercise")
+                    .disabled(session == nil)
+            }
+
+            if postWorkoutCardio != nil {
+                cardioSection(for: .postWorkout)
+            }
+
+            activeWorkoutCancelContent(scrollProxy: scrollProxy)
+        }
+    }
+
+    @MainActor
+    @ViewBuilder
+    private var activeWorkoutHeaderContent: some View {
+        if let session {
+            ActiveWorkoutHeaderCard(
+                sessionNameDraft: $sessionNameDraft,
+                notesDraft: $notesDraft,
+                session: session,
+                exerciseCount: sessionExercises.count,
+                cardioCount: orderedCardioBlocks.count,
+                missingCardioPhases: missingCardioPhases,
+                onSubmit: {
+                    persistCommittedUserEditSnapshot()
+                },
+                onAddCardio: showCardioPicker
+            )
+            .id(ActiveWorkoutScrollTarget.header)
+            if preWorkoutCardio != nil {
+                cardioSection(for: .preWorkout)
+            }
+            exercisesSectionHeader
+        } else if isEndingSession || completedSessionID != nil {
+            WGJEmptyStateCard(
+                title: "Wrapping up workout",
+                message: "Saving the session and preparing the next step.",
+                icon: "checkmark.circle"
+            )
+        } else {
+            WGJEmptyStateCard(
+                title: "Workout session not found",
+                message: "This active workout could not be loaded.",
+                icon: "exclamationmark.triangle"
+            )
+        }
+    }
+
+    @MainActor
+    @ViewBuilder
+    private var emptyWorkoutContent: some View {
+        if session != nil && sessionExercises.isEmpty {
+            WGJEmptyStateCard(
+                title: "No exercises added",
+                message: orderedCardioBlocks.isEmpty
+                    ? "Add exercises to start logging sets in this workout."
+                    : "Add exercises to keep building the main section of this workout.",
+                icon: "list.bullet.rectangle"
+            ) {
+                Button("Add Exercise") {
+                    pickerTarget = .exercise
+                }
+                .buttonStyle(WGJPrimaryButtonStyle())
+                .accessibilityIdentifier("active-workout-empty-add-exercise-button")
+            }
+        }
+    }
+
+    @MainActor
+    @ViewBuilder
+    private func activeWorkoutCancelContent(scrollProxy: ScrollViewProxy) -> some View {
+        if session != nil && !isEndingSession {
+            ActiveWorkoutCancelSection(
+                isCancelArmed: isCancelArmed,
+                onCancelConfirmationPresented: {
+                    focusCancelSection(using: scrollProxy)
+                },
+                onArmCancel: {
+                    dismissKeyboard()
+                    showingFinishConfirmation = false
+                    isCancelArmed = true
+                },
+                onKeepWorkout: {
+                    isCancelArmed = false
+                },
+                onDiscardWorkout: {
+                    cancelWorkout()
+                }
+            )
+            .id(cancelSectionScrollTarget)
+
+            Color.clear
+                .frame(height: cancelSectionBottomSpacerHeight)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private var workoutErrorAlertMessage: Text {
+        Text(errorMessage)
+    }
+
+    private func templateReviewSheet(for preview: WorkoutTemplateSyncPreview) -> some View {
+        ActiveWorkoutTemplateSyncReviewSheet(
+            preview: preview,
+            onKeepTemplate: {
+                requestCompletionAfterTemplateReviewSheetDismissal()
+            },
+            onUpdateTemplate: {
+                requestTemplateUpdateAfterReviewSheetDismissal(preview)
+            }
+        )
+        .interactiveDismissDisabled()
     }
 
     private var session: ActiveWorkoutRuntimeSession? {
@@ -1317,6 +1349,11 @@ struct ActiveWorkoutView: View {
         for exercise: ActiveWorkoutRuntimeExercise,
         scrollProxy: ScrollViewProxy
     ) {
+        let previousDrafts = resolvedDrafts(for: exercise)
+        let changeSummary = ActiveWorkoutSetDraftChangeSummary.compare(
+            previous: previousDrafts,
+            current: drafts
+        )
         updateDraftsValue(drafts, for: exercise.id)
         let isCompleted = isExerciseCompleted(drafts)
         let previouslyCompleted = cardStateController.didCompleteCurrentCycle(for: exercise.id)
@@ -1334,7 +1371,11 @@ struct ActiveWorkoutView: View {
                 using: scrollProxy
             )
         }
-        persistCommittedUserEditSnapshot()
+        persistCommittedUserEditSnapshot(
+            writeDurableSnapshot: ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(
+                for: changeSummary
+            )
+        )
     }
 
     @MainActor
@@ -2198,11 +2239,8 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
-    private func persistCommittedUserEditSnapshot() {
+    private func persistCommittedUserEditSnapshot(writeDurableSnapshot: Bool = true) {
         guard !isEndingSession else { return }
-        guard ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: .userEdit) else {
-            return
-        }
         guard let snapshot = currentRuntimeSnapshot() else {
             pendingCardioCompletionsByPhase = [:]
             return
@@ -2215,6 +2253,12 @@ struct ActiveWorkoutView: View {
             currentPreparedFirstRenderSnapshot(),
             for: sessionID
         )
+
+        guard writeDurableSnapshot,
+              ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: .userEdit)
+        else {
+            return
+        }
 
         pendingUserEditSnapshotTask?.cancel()
         pendingUserEditSnapshotTask = Task { @MainActor in

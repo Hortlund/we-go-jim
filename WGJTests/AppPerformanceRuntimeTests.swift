@@ -185,6 +185,54 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
+    func activeWorkoutDurableSnapshotPolicySkipsValueOnlySetDraftEdits() {
+        let previous = [
+            WorkoutSessionSetDraft(
+                targetReps: 8,
+                targetWeight: 100,
+                targetLoadUnit: .kg,
+                actualLoadUnit: .kg
+            ),
+        ]
+        var current = previous
+        current[0].actualWeight = 105
+
+        let summary = ActiveWorkoutSetDraftChangeSummary.compare(
+            previous: previous,
+            current: current
+        )
+
+        #expect(summary.hasValueChange)
+        #expect(!ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: summary))
+    }
+
+    @Test
+    func activeWorkoutDurableSnapshotPolicyAllowsSetCompletionAndStructureMilestones() {
+        let previous = [
+            WorkoutSessionSetDraft(
+                targetReps: 8,
+                targetWeight: 100,
+                targetLoadUnit: .kg,
+                actualLoadUnit: .kg
+            ),
+        ]
+        var completed = previous
+        completed[0].isCompleted = true
+        let completionSummary = ActiveWorkoutSetDraftChangeSummary.compare(
+            previous: previous,
+            current: completed
+        )
+
+        let structuralSummary = ActiveWorkoutSetDraftChangeSummary.compare(
+            previous: previous,
+            current: previous + [WorkoutSessionSetDraft(targetLoadUnit: .kg, actualLoadUnit: .kg)]
+        )
+
+        #expect(ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: completionSummary))
+        #expect(ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: structuralSummary))
+    }
+
+    @Test
     func activeWorkoutKeyboardChromeResetsWhenAppLeavesActiveScene() {
         #expect(!ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: .active))
         #expect(ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: .inactive))
@@ -686,5 +734,31 @@ struct AppPerformanceRuntimeTests {
         #expect(state.activeSessionID == secondSessionID)
         #expect(state.isActiveWorkoutPresented)
         #expect(!state.isActiveWorkoutStripCollapsed)
+    }
+
+    @MainActor
+    @Test
+    func activeWorkoutStartStagingKeepsRuntimeAndFirstRenderSnapshotReadyForPresentation() {
+        let session = ActiveWorkoutRuntimeSession(name: "Prepared Push")
+        let exerciseID = UUID()
+        let firstRenderSnapshot = ActiveWorkoutPreparedFirstRenderSnapshot(
+            draftsByExerciseID: [exerciseID: [WorkoutSessionSetDraft(targetLoadUnit: .kg, actualLoadUnit: .kg)]],
+            restsByExerciseID: [exerciseID: 120],
+            notesByExerciseID: [exerciseID: "Keep control"],
+            catalogMatchesByUUID: [:],
+            previousResolutionByExerciseID: [exerciseID: .resolved([:])]
+        )
+        let state = ActiveWorkoutPresentationState()
+
+        state.stagePreparedStart(
+            ActiveWorkoutPreparedStartState(
+                session: session,
+                firstRenderSnapshot: firstRenderSnapshot
+            )
+        )
+
+        #expect(state.preparedRuntimeSession(for: session.id) == session)
+        #expect(state.preparedFirstRenderSnapshot(for: session.id) == firstRenderSnapshot)
+        #expect(state.preparedPreviousPerformanceResolution(for: session.id)[exerciseID] == .resolved([:]))
     }
 }
