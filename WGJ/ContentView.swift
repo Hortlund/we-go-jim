@@ -144,7 +144,16 @@ struct ContentView: View {
 
         await prepareLocalProfileIdentityIfNeeded()
         await prepareFirstRunLocalBootstrapIfNeeded()
-        startStartupWarmSnapshotsIfNeeded()
+        let startupWarmupTasks = startStartupWarmSnapshotsIfNeeded()
+        if StartupWarmupLaunchPolicy.shouldWaitForWarmupsBeforeMainEntry(
+            skipsSplash: ProcessInfo.processInfo.arguments.contains(AppStartupRouting.skipSplashArgument),
+            hasAnyWarmup: startupWarmupTasks.hasAnyWarmup
+        ) {
+            await StartupWarmupGate.waitForWarmups(
+                profileTask: startupWarmupTasks.profileTask,
+                brosTask: startupWarmupTasks.brosTask
+            )
+        }
         await activeWorkoutPresentationState.restoreActiveSessionIfMissing(
             modelContext: modelContext,
             backgroundStore: appBackgroundStore
@@ -587,7 +596,7 @@ struct ContentView: View {
     }
 
     @MainActor
-    private func startStartupWarmSnapshotsIfNeeded() {
+    private func startStartupWarmSnapshotsIfNeeded() -> StartupWarmupTasks {
         let shouldWarmProfile = appWarmupState.shouldWarmProfile()
         let shouldWarmBros = appWarmupState.shouldWarmBros()
         guard StartupWarmupLaunchPolicy.shouldStartNonblockingWarmups(
@@ -596,26 +605,30 @@ struct ContentView: View {
             shouldWarmProfile: shouldWarmProfile,
             shouldWarmBros: shouldWarmBros
         ) else {
-            return
+            return .none
         }
 
         let runIDs = appWarmupState.beginStartupWarmups(
             shouldWarmProfile: shouldWarmProfile,
             shouldWarmBros: shouldWarmBros
         )
-        guard runIDs.hasAnyWarmup else { return }
+        guard runIDs.hasAnyWarmup else { return .none }
 
+        var profileTask: Task<Void, Never>?
+        var brosTask: Task<Void, Never>?
         if let profileRunID = runIDs.profileRunID {
-            Task { @MainActor in
+            profileTask = Task { @MainActor in
                 await prepareStartupProfileWarmSnapshot(runID: profileRunID)
             }
         }
 
         if let brosRunID = runIDs.brosRunID {
-            Task { @MainActor in
+            brosTask = Task { @MainActor in
                 await prepareStartupBrosWarmSnapshot(runID: brosRunID)
             }
         }
+
+        return StartupWarmupTasks(profileTask: profileTask, brosTask: brosTask)
     }
 
     @MainActor

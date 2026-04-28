@@ -288,7 +288,7 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
-    func startupWarmupLaunchPolicyStartsWarmupsWithoutBlockingMainEntry() {
+    func startupWarmupLaunchPolicyStartsWarmupsAndWaitsForNormalStartup() {
         #expect(StartupWarmupLaunchPolicy.shouldStartNonblockingWarmups(
             skipsSplash: false,
             hasBackgroundStore: true,
@@ -312,6 +312,19 @@ struct AppLaunchWarmupTests {
             hasBackgroundStore: false,
             shouldWarmProfile: true,
             shouldWarmBros: true
+        ))
+
+        #expect(StartupWarmupLaunchPolicy.shouldWaitForWarmupsBeforeMainEntry(
+            skipsSplash: false,
+            hasAnyWarmup: true
+        ))
+        #expect(!StartupWarmupLaunchPolicy.shouldWaitForWarmupsBeforeMainEntry(
+            skipsSplash: true,
+            hasAnyWarmup: true
+        ))
+        #expect(!StartupWarmupLaunchPolicy.shouldWaitForWarmupsBeforeMainEntry(
+            skipsSplash: false,
+            hasAnyWarmup: false
         ))
     }
 

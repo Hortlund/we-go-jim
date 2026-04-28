@@ -76,6 +76,13 @@ nonisolated enum StartupWarmupLaunchPolicy {
             && hasBackgroundStore
             && (shouldWarmProfile || shouldWarmBros)
     }
+
+    static func shouldWaitForWarmupsBeforeMainEntry(
+        skipsSplash: Bool,
+        hasAnyWarmup: Bool
+    ) -> Bool {
+        !skipsSplash && hasAnyWarmup
+    }
 }
 
 nonisolated enum FirstRunLocalBootstrapPolicy {
@@ -268,6 +275,17 @@ struct StartupWarmupRunIDs: Equatable, Sendable {
 
     var hasAnyWarmup: Bool {
         profileRunID != nil || brosRunID != nil
+    }
+}
+
+struct StartupWarmupTasks {
+    let profileTask: Task<Void, Never>?
+    let brosTask: Task<Void, Never>?
+
+    static let none = StartupWarmupTasks(profileTask: nil, brosTask: nil)
+
+    var hasAnyWarmup: Bool {
+        profileTask != nil || brosTask != nil
     }
 }
 
