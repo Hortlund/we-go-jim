@@ -180,6 +180,11 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
+    func activeWorkoutDurableSnapshotPolicyAllowsCommittedUserEdits() {
+        #expect(ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: .userEdit))
+    }
+
+    @Test
     func activeWorkoutKeyboardChromeResetsWhenAppLeavesActiveScene() {
         #expect(!ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: .active))
         #expect(ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: .inactive))

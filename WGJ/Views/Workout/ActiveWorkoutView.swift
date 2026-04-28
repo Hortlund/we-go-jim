@@ -33,6 +33,7 @@ struct ActiveWorkoutView: View {
     @State private var exerciseHydrationInvalidation = 0
     @State private var deferredHydrationTask: Task<Void, Never>?
     @State private var pendingGuidanceRefreshTask: Task<Void, Never>?
+    @State private var pendingUserEditSnapshotTask: Task<Void, Never>?
     @State private var pendingGuidanceRefreshExerciseIDs: Set<UUID> = []
     @State private var shouldRefreshAllGuidance = false
     @State private var cardStateController = ActiveWorkoutExerciseCardStateController()
@@ -110,7 +111,7 @@ struct ActiveWorkoutView: View {
                             exerciseCount: sessionExercises.count,
                             cardioCount: orderedCardioBlocks.count,
                             missingCardioPhases: missingCardioPhases,
-                            onSubmit: {},
+                            onSubmit: persistCommittedUserEditSnapshot,
                             onAddCardio: showCardioPicker
                         )
                         .id(ActiveWorkoutScrollTarget.header)
@@ -607,12 +608,14 @@ struct ActiveWorkoutView: View {
                     canMoveExerciseDown: index < sessionExercises.count - 1,
                     onExerciseNotesCommitted: { notes in
                         updateNotesValue(notes, for: exerciseID)
+                        persistCommittedUserEditSnapshot()
                     },
                     onSetDraftsCommitted: { drafts in
                         handleDraftsChanged(drafts, for: exercise)
                     },
                     onRestCommitted: { rest in
                         updateRestValue(rest, for: exerciseID)
+                        persistCommittedUserEditSnapshot()
                     },
                     onExpandedChanged: { isExpanded in
                         cardStateController.setExpanded(isExpanded, for: exerciseID)
@@ -1197,6 +1200,7 @@ struct ActiveWorkoutView: View {
             loadedExerciseStateStamp = nil
             exerciseHydrationInvalidation += 1
         }
+        persistCommittedUserEditSnapshot()
     }
 
     private func moveExerciseUp(_ index: Int) {
@@ -1225,6 +1229,7 @@ struct ActiveWorkoutView: View {
             loadedExerciseStateStamp = nil
             exerciseHydrationInvalidation += 1
         }
+        persistCommittedUserEditSnapshot()
     }
 
     private func presentExerciseReorder(for exercise: ActiveWorkoutRuntimeExercise) {
@@ -1243,6 +1248,7 @@ struct ActiveWorkoutView: View {
             loadedExerciseStateStamp = nil
             exerciseHydrationInvalidation += 1
         }
+        persistCommittedUserEditSnapshot()
     }
 
     private func upsertCardioBlock(phase: WorkoutCardioPhase, catalogItem: ExerciseCatalogItem) {
@@ -1263,6 +1269,7 @@ struct ActiveWorkoutView: View {
             session.cardioBlocks.removeAll { $0.phase == phase }
             session.cardioBlocks.append(updated)
         }
+        persistCommittedUserEditSnapshot()
     }
 
     private func removeCardioBlock(phase: WorkoutCardioPhase) {
@@ -1270,6 +1277,7 @@ struct ActiveWorkoutView: View {
             session.cardioBlocks.removeAll { $0.phase == phase }
         }
         pendingCardioCompletionsByPhase[phase] = nil
+        persistCommittedUserEditSnapshot()
     }
 
     private func saveCardioDuration(phase: WorkoutCardioPhase, targetDurationSeconds: Int) {
@@ -1279,6 +1287,7 @@ struct ActiveWorkoutView: View {
             session.cardioBlocks[index].isCompleted = resolvedCardioCompletion(for: session.cardioBlocks[index])
             session.cardioBlocks[index].updatedAt = .now
         }
+        persistCommittedUserEditSnapshot()
     }
 
     @MainActor
@@ -1294,6 +1303,7 @@ struct ActiveWorkoutView: View {
         if updatedCompletion {
             WorkoutFeedbackCenter.shared.exerciseCompleted()
         }
+        persistCommittedUserEditSnapshot()
     }
 
     @MainActor
@@ -1313,6 +1323,7 @@ struct ActiveWorkoutView: View {
                 WorkoutFeedbackCenter.shared.exerciseCompleted()
             }
         }
+        persistCommittedUserEditSnapshot()
     }
 
     @MainActor
@@ -1638,6 +1649,7 @@ struct ActiveWorkoutView: View {
         )
         exerciseSettingsDraft = nil
         scheduleGuidanceRefresh(for: draft.exerciseID)
+        persistCommittedUserEditSnapshot()
     }
 
     private func saveExerciseComponentSelection(exerciseID: UUID, componentID: UUID) {
@@ -1655,6 +1667,7 @@ struct ActiveWorkoutView: View {
         exerciseComponentPickerDraft = nil
         loadedExerciseStateStamp = nil
         exerciseHydrationInvalidation += 1
+        persistCommittedUserEditSnapshot()
     }
 
     private func finishWorkout() {
@@ -1665,6 +1678,8 @@ struct ActiveWorkoutView: View {
             guard !isEndingSession else { return }
             isEndingSession = true
             rowFlushCoordinator.flushAll()
+            await pendingUserEditSnapshotTask?.value
+            pendingUserEditSnapshotTask = nil
             guard let finishingSession = currentRuntimeSnapshot() else {
                 isEndingSession = false
                 showError(WorkoutSessionRepositoryError.sessionNotFound)
@@ -1806,6 +1821,8 @@ struct ActiveWorkoutView: View {
             guard !isEndingSession else { return }
             isEndingSession = true
             rowFlushCoordinator.flushAll()
+            await pendingUserEditSnapshotTask?.value
+            pendingUserEditSnapshotTask = nil
             restTimerState.clearRestTimer()
 
             do {
@@ -2122,7 +2139,7 @@ struct ActiveWorkoutView: View {
         switch checkpoint {
         case .finish, .cancel:
             return true
-        case .minimize, .sceneTransition:
+        case .minimize, .sceneTransition, .userEdit:
             break
         }
 
@@ -2143,6 +2160,36 @@ struct ActiveWorkoutView: View {
         } catch {
             showError(error)
             return false
+        }
+    }
+
+    @MainActor
+    private func persistCommittedUserEditSnapshot() {
+        guard !isEndingSession else { return }
+        guard ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: .userEdit) else {
+            return
+        }
+        guard let snapshot = currentRuntimeSnapshot() else {
+            pendingCardioCompletionsByPhase = [:]
+            return
+        }
+
+        runtimeSession = snapshot
+        pendingCardioCompletionsByPhase = [:]
+        activeWorkoutPresentationState.stageRuntimeSession(snapshot, for: sessionID)
+        activeWorkoutPresentationState.stagePreparedFirstRenderSnapshot(
+            currentPreparedFirstRenderSnapshot(),
+            for: sessionID
+        )
+
+        pendingUserEditSnapshotTask?.cancel()
+        pendingUserEditSnapshotTask = Task { @MainActor in
+            do {
+                try await ActiveWorkoutSnapshotStore.shared.save(snapshot)
+            } catch {
+                guard !Task.isCancelled else { return }
+                showError(error)
+            }
         }
     }
 

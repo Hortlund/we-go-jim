@@ -11,11 +11,12 @@ nonisolated enum ActiveWorkoutLifecycleCheckpoint {
     case cancel
     case minimize
     case sceneTransition
+    case userEdit
 }
 
 nonisolated enum ActiveWorkoutSnapshotPersistencePolicy {
     static func shouldWriteDurableSnapshot(for checkpoint: ActiveWorkoutLifecycleCheckpoint) -> Bool {
-        false
+        checkpoint == .userEdit
     }
 }
 
