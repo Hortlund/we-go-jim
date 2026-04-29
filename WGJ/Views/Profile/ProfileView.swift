@@ -923,7 +923,9 @@ struct ProfileView: View {
             return
         }
 
-        let delay: Duration = hasLoadedProfile ? .zero : .milliseconds(450)
+        let delay = ProfileDashboardRenderPolicy.renderDelay(
+            hasRenderedDashboardContent: hasRenderedDashboardContent
+        )
         let renderToken = profileReloadToken
         dashboardRenderTask = Task {
             if delay > .zero {

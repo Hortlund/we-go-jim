@@ -168,6 +168,16 @@ nonisolated enum BrosInitialActivationPolicy {
             && !hasFreshWarmSnapshot
             && !hasNotificationRefreshRequest
     }
+
+    static func shouldRunInitialActivationRefresh(
+        hasCompletedInitialActivationRefresh: Bool,
+        hasFreshWarmSnapshot: Bool,
+        hasNotificationRefreshRequest: Bool
+    ) -> Bool {
+        guard !hasNotificationRefreshRequest else { return true }
+        guard !hasCompletedInitialActivationRefresh else { return true }
+        return !hasFreshWarmSnapshot
+    }
 }
 
 nonisolated enum FirstFrameTabPresentation: Equatable, Sendable {
@@ -267,6 +277,11 @@ struct BrosWarmSnapshot: Equatable, Sendable {
     let state: BrosWarmStateSnapshot
     let blockedUserRecordNames: Set<String>
     let warmedAt: Date
+
+    func hasSameRenderableContent(as other: BrosWarmSnapshot) -> Bool {
+        state == other.state
+            && blockedUserRecordNames == other.blockedUserRecordNames
+    }
 }
 
 struct StartupWarmupRunIDs: Equatable, Sendable {
@@ -292,8 +307,8 @@ struct StartupWarmupTasks {
 @MainActor
 @Observable
 final class AppWarmupState {
-    nonisolated static let defaultProfileFreshnessInterval: TimeInterval = 60
-    nonisolated static let defaultBrosFreshnessInterval: TimeInterval = 60
+    nonisolated static let defaultProfileFreshnessInterval: TimeInterval = 300
+    nonisolated static let defaultBrosFreshnessInterval: TimeInterval = 300
 
     private(set) var latestProfile: ProfileWarmSnapshot?
     private(set) var latestBros: BrosWarmSnapshot?
@@ -474,5 +489,13 @@ nonisolated enum ProfileReloadPolicy {
             now: now,
             freshnessInterval: freshnessInterval
         )
+    }
+}
+
+nonisolated enum ProfileDashboardRenderPolicy {
+    static let initialRenderDelay: Duration = .milliseconds(450)
+
+    static func renderDelay(hasRenderedDashboardContent: Bool) -> Duration {
+        hasRenderedDashboardContent ? .zero : initialRenderDelay
     }
 }

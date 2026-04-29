@@ -2,6 +2,44 @@ import Foundation
 import ImageIO
 import UIKit
 
+nonisolated private final class AvatarThumbnailCacheEntry: NSObject {
+    let thumbnail: UIImage?
+    let maxPixelSize: CGFloat
+
+    init(thumbnail: UIImage?, maxPixelSize: CGFloat) {
+        self.thumbnail = thumbnail
+        self.maxPixelSize = maxPixelSize
+    }
+}
+
+nonisolated final class AvatarThumbnailCacheService {
+    static let shared = AvatarThumbnailCacheService()
+
+    private let cache = NSCache<NSString, AvatarThumbnailCacheEntry>()
+
+    private init() {
+        cache.countLimit = 128
+        cache.totalCostLimit = 24 * 1024 * 1024
+    }
+
+    func cachedThumbnail(for fingerprint: String, maxPixelSize: CGFloat) -> UIImage? {
+        guard let entry = cache.object(forKey: fingerprint as NSString),
+              entry.maxPixelSize >= maxPixelSize
+        else {
+            return nil
+        }
+
+        return entry.thumbnail
+    }
+
+    func store(_ thumbnail: UIImage?, for fingerprint: String, maxPixelSize: CGFloat) {
+        cache.setObject(
+            AvatarThumbnailCacheEntry(thumbnail: thumbnail, maxPixelSize: maxPixelSize),
+            forKey: fingerprint as NSString
+        )
+    }
+}
+
 enum AvatarImageCodec {
     static func thumbnail(from data: Data, maxPixelSize: CGFloat) async -> UIImage? {
         await Task.detached(priority: .utility) {

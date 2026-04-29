@@ -316,6 +316,11 @@ struct ProfileManagementView: View {
 }
 
 struct ProfileAvatarView: View {
+    private struct LoadKey: Hashable {
+        let dataFingerprint: String?
+        let pixelSize: Int
+    }
+
     let imageData: Data?
     @State private var image: UIImage?
 
@@ -344,9 +349,16 @@ struct ProfileAvatarView: View {
                     }
             }
         }
-        .task(id: imageData) {
+        .task(id: loadKey) {
             await loadImage()
         }
+    }
+
+    private var loadKey: LoadKey {
+        LoadKey(
+            dataFingerprint: imageData.map { Self.fingerprint(for: $0) },
+            pixelSize: 176
+        )
     }
 
     @MainActor
@@ -356,13 +368,31 @@ struct ProfileAvatarView: View {
             return
         }
 
+        let fingerprint = Self.fingerprint(for: imageData)
+        if let cachedImage = AvatarThumbnailCacheService.shared.cachedThumbnail(
+            for: fingerprint,
+            maxPixelSize: 176
+        ) {
+            image = cachedImage
+            return
+        }
+
         let decodedImage = await AvatarImageCodec.thumbnail(
             from: imageData,
             maxPixelSize: 176
         )
 
         guard !Task.isCancelled else { return }
+        AvatarThumbnailCacheService.shared.store(
+            decodedImage,
+            for: fingerprint,
+            maxPixelSize: 176
+        )
         image = decodedImage
+    }
+
+    private static func fingerprint(for data: Data) -> String {
+        "\(data.count)-\(data.hashValue)"
     }
 }
 

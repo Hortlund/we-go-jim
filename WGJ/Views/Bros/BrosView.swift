@@ -887,7 +887,7 @@ struct BrosView: View {
             applyWarmSnapshotIfAvailable()
             rebuildFilteredSnapshot()
             guard isTabActive else { return }
-            scheduleActivationRefresh()
+            scheduleActivationRefreshIfNeeded()
         }
         .task(id: notificationRouter.brosRefreshRequestID) {
             guard notificationRouter.brosRefreshRequestID != nil else { return }
@@ -902,7 +902,7 @@ struct BrosView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active, isTabActive else { return }
-            scheduleActivationRefresh()
+            scheduleActivationRefreshIfNeeded()
         }
         .onChange(of: viewModel.state) { _, _ in
             rebuildFilteredSnapshot()
@@ -959,7 +959,7 @@ struct BrosView: View {
         if appWarmupState.freshBros() == nil {
             reloadBlockedBros()
         }
-        scheduleActivationRefresh()
+        scheduleActivationRefreshIfNeeded()
         rebuildFilteredSnapshot()
     }
 
@@ -1011,8 +1011,17 @@ struct BrosView: View {
     }
 
     @MainActor
-    private func scheduleActivationRefresh() {
+    private func scheduleActivationRefreshIfNeeded() {
         guard !shouldDeferInitialActivationRefresh() else {
+            cancelActivationRefresh()
+            return
+        }
+        guard BrosInitialActivationPolicy.shouldRunInitialActivationRefresh(
+            hasCompletedInitialActivationRefresh: hasCompletedInitialActivationRefresh,
+            hasFreshWarmSnapshot: appWarmupState.freshBros() != nil,
+            hasNotificationRefreshRequest: notificationRouter.brosRefreshRequestID != nil
+        ) else {
+            hasCompletedInitialActivationRefresh = true
             cancelActivationRefresh()
             return
         }
@@ -1168,13 +1177,17 @@ struct BrosView: View {
             state = .active(snapshot)
         }
 
-        appWarmupState.storeBros(
-            BrosWarmSnapshot(
-                state: state,
-                blockedUserRecordNames: blockedUserRecordNames,
-                warmedAt: .now
-            )
+        let nextSnapshot = BrosWarmSnapshot(
+            state: state,
+            blockedUserRecordNames: blockedUserRecordNames,
+            warmedAt: .now
         )
+        if let existingSnapshot = appWarmupState.freshBros(),
+           nextSnapshot.hasSameRenderableContent(as: existingSnapshot) {
+            return
+        }
+
+        appWarmupState.storeBros(nextSnapshot)
     }
 
     private func activeContent(_ snapshot: BrosFeedSnapshot) -> some View {

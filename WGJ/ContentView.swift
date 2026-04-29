@@ -242,7 +242,7 @@ struct ContentView: View {
         enteredMainDeferredMaintenanceTask?.cancel()
         enteredMainDeferredMaintenanceTask = Task { @MainActor in
             await Task.yield()
-            try? await Task.sleep(for: .milliseconds(400))
+            try? await Task.sleep(for: AppMaintenancePolicy.enteredMainDeferredDelay)
             guard !Task.isCancelled, appPhase == .main else { return }
             requestDeferredMaintenance(trigger: .enteredMain)
             enteredMainDeferredMaintenanceTask = nil

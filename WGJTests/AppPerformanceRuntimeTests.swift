@@ -30,6 +30,11 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
+    func enteredMainDeferredMaintenanceWaitsPastFirstTabInteractionWindow() {
+        #expect(AppMaintenancePolicy.enteredMainDeferredDelay == .milliseconds(2_500))
+    }
+
+    @Test
     func maintenancePolicyDoesNotScheduleDeferredWorkWhileActiveWorkoutExists() {
         let shouldSchedule = AppMaintenancePolicy.shouldScheduleDeferred(
             appPhase: .main,

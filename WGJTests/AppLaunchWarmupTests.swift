@@ -76,6 +76,34 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
+    func appWarmupDefaultsKeepStartupSnapshotsReusableForFirstVisits() {
+        #expect(AppWarmupState.defaultProfileFreshnessInterval == 300)
+        #expect(AppWarmupState.defaultBrosFreshnessInterval == 300)
+    }
+
+    @Test
+    func brosWarmSnapshotsCanCompareRenderableContentWithoutTimestampNoise() {
+        let base = BrosWarmSnapshot(
+            state: .active(makeBrosSnapshot()),
+            blockedUserRecordNames: ["blocked-user"],
+            warmedAt: Date(timeIntervalSince1970: 100)
+        )
+        let refreshedAtOnly = BrosWarmSnapshot(
+            state: base.state,
+            blockedUserRecordNames: base.blockedUserRecordNames,
+            warmedAt: Date(timeIntervalSince1970: 200)
+        )
+        let changedBlockedList = BrosWarmSnapshot(
+            state: base.state,
+            blockedUserRecordNames: ["other-user"],
+            warmedAt: Date(timeIntervalSince1970: 200)
+        )
+
+        #expect(base.hasSameRenderableContent(as: refreshedAtOnly))
+        #expect(!base.hasSameRenderableContent(as: changedBlockedList))
+    }
+
+    @Test
     func appWarmupStateIgnoresLateWarmupResultsAfterInvalidationOrNewerRun() throws {
         let state = AppWarmupState()
         let firstRunID = try #require(state.beginProfileWarmup())
@@ -408,6 +436,36 @@ struct AppLaunchWarmupTests {
             hasFreshWarmSnapshot: false,
             hasNotificationRefreshRequest: false
         ))
+    }
+
+    @Test
+    func brosInitialActivationPolicySkipsFirstRefreshWhenWarmSnapshotExists() {
+        #expect(!BrosInitialActivationPolicy.shouldRunInitialActivationRefresh(
+            hasCompletedInitialActivationRefresh: false,
+            hasFreshWarmSnapshot: true,
+            hasNotificationRefreshRequest: false
+        ))
+        #expect(BrosInitialActivationPolicy.shouldRunInitialActivationRefresh(
+            hasCompletedInitialActivationRefresh: false,
+            hasFreshWarmSnapshot: true,
+            hasNotificationRefreshRequest: true
+        ))
+        #expect(BrosInitialActivationPolicy.shouldRunInitialActivationRefresh(
+            hasCompletedInitialActivationRefresh: false,
+            hasFreshWarmSnapshot: false,
+            hasNotificationRefreshRequest: false
+        ))
+        #expect(BrosInitialActivationPolicy.shouldRunInitialActivationRefresh(
+            hasCompletedInitialActivationRefresh: true,
+            hasFreshWarmSnapshot: true,
+            hasNotificationRefreshRequest: false
+        ))
+    }
+
+    @Test
+    func profileDashboardRenderPolicyDefersOnlyFirstDashboardMount() {
+        #expect(ProfileDashboardRenderPolicy.renderDelay(hasRenderedDashboardContent: false) == .milliseconds(450))
+        #expect(ProfileDashboardRenderPolicy.renderDelay(hasRenderedDashboardContent: true) == .zero)
     }
 
     @Test
