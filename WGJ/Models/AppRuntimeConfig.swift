@@ -651,6 +651,7 @@ final class ActiveWorkoutPresentationState {
     @ObservationIgnored private var preparedRuntimeSessionBySessionID: [UUID: ActiveWorkoutRuntimeSession] = [:]
     @ObservationIgnored private var preparedPreviousPerformanceResolutionBySessionID: [UUID: [UUID: WorkoutPreviousPerformanceResolution]] = [:]
     @ObservationIgnored private var preparedFirstRenderSnapshotBySessionID: [UUID: ActiveWorkoutPreparedFirstRenderSnapshot] = [:]
+    @ObservationIgnored private var preparedScrollTargetBySessionID: [UUID: ActiveWorkoutScrollTarget] = [:]
 
     func present(sessionID: UUID) {
         if activeSessionID != sessionID {
@@ -658,6 +659,7 @@ final class ActiveWorkoutPresentationState {
                 preparedRuntimeSessionBySessionID.removeValue(forKey: activeSessionID)
                 preparedPreviousPerformanceResolutionBySessionID.removeValue(forKey: activeSessionID)
                 preparedFirstRenderSnapshotBySessionID.removeValue(forKey: activeSessionID)
+                preparedScrollTargetBySessionID.removeValue(forKey: activeSessionID)
             }
         }
         guard
@@ -693,6 +695,7 @@ final class ActiveWorkoutPresentationState {
             preparedRuntimeSessionBySessionID.removeValue(forKey: activeSessionID)
             preparedPreviousPerformanceResolutionBySessionID.removeValue(forKey: activeSessionID)
             preparedFirstRenderSnapshotBySessionID.removeValue(forKey: activeSessionID)
+            preparedScrollTargetBySessionID.removeValue(forKey: activeSessionID)
         }
         activeSessionID = nil
         isActiveWorkoutPresented = false
@@ -736,10 +739,26 @@ final class ActiveWorkoutPresentationState {
         preparedPreviousPerformanceResolutionBySessionID[sessionID] = snapshot.previousResolutionByExerciseID
     }
 
+    func stageScrollTarget(
+        _ target: ActiveWorkoutScrollTarget?,
+        for sessionID: UUID
+    ) {
+        guard let target else {
+            preparedScrollTargetBySessionID.removeValue(forKey: sessionID)
+            return
+        }
+
+        preparedScrollTargetBySessionID[sessionID] = target
+    }
+
     func preparedFirstRenderSnapshot(
         for sessionID: UUID
     ) -> ActiveWorkoutPreparedFirstRenderSnapshot? {
         preparedFirstRenderSnapshotBySessionID[sessionID]
+    }
+
+    func preparedScrollTarget(for sessionID: UUID) -> ActiveWorkoutScrollTarget? {
+        preparedScrollTargetBySessionID[sessionID]
     }
 
     func preparedPreviousPerformanceResolution(
@@ -846,9 +865,16 @@ final class RestTimerState {
     var restTimerSourceSetID: UUID?
     var restTimerPopup: RestTimerPopup?
 
+    @ObservationIgnored private var restTimerExpirationTask: Task<Void, Never>?
     @ObservationIgnored private var restTimerPopupDismissTask: Task<Void, Never>?
 
-    func startRestTimer(seconds: Int, exerciseName: String, setLabel: String?, sourceSetID: UUID) {
+    func startRestTimer(
+        seconds: Int,
+        exerciseName: String,
+        setLabel: String?,
+        sourceSetID: UUID,
+        schedulesExpirationTask: Bool = true
+    ) {
         let normalized = max(0, min(3600, seconds))
         guard normalized > 0 else {
             clearRestTimer()
@@ -860,6 +886,7 @@ final class RestTimerState {
         restTimerExerciseName = exerciseName
         restTimerSetLabel = setLabel
         restTimerSourceSetID = sourceSetID
+        scheduleExpirationTask(seconds: normalized, isEnabled: schedulesExpirationTask)
         RestTimerNotificationManager.shared.scheduleRestTimer(
             seconds: normalized,
             style: AppRuntimeState.shared.workoutNotificationStyle
@@ -875,6 +902,8 @@ final class RestTimerState {
         restTimerExerciseName = nil
         restTimerSetLabel = nil
         restTimerSourceSetID = nil
+        restTimerExpirationTask?.cancel()
+        restTimerExpirationTask = nil
         if cancelNotification {
             RestTimerNotificationManager.shared.cancelRestTimerNotification()
         }
@@ -918,6 +947,19 @@ final class RestTimerState {
         restTimerPopupDismissTask?.cancel()
         restTimerPopupDismissTask = nil
         restTimerPopup = nil
+    }
+
+    private func scheduleExpirationTask(seconds: Int, isEnabled: Bool) {
+        restTimerExpirationTask?.cancel()
+        restTimerExpirationTask = nil
+        guard isEnabled, let delay = RestTimerExpiryPolicy.expirationDelay(seconds: seconds) else { return }
+
+        restTimerExpirationTask = Task { @MainActor in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            handleRestTimerExpirationIfNeeded()
+            restTimerExpirationTask = nil
+        }
     }
 
     private func showRestTimerPopup(exerciseName: String?, setLabel: String?) {

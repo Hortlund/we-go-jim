@@ -6,6 +6,14 @@ nonisolated enum ActiveWorkoutSceneTransitionPolicy {
     }
 }
 
+nonisolated enum RestTimerExpiryPolicy {
+    static func expirationDelay(seconds: Int) -> Duration? {
+        let normalized = max(0, min(3600, seconds))
+        guard normalized > 0 else { return nil }
+        return .seconds(normalized)
+    }
+}
+
 nonisolated enum ActiveWorkoutLifecycleCheckpoint {
     case finish
     case cancel

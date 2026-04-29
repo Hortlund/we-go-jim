@@ -229,7 +229,10 @@ struct WorkoutExerciseRowHostView: View {
             onExerciseDelete: onExerciseDelete,
             flushCoordinator: flushCoordinator,
             flushIdentifier: exerciseID,
-            onInputFocusChange: onInputFocusChange
+            onInputFocusChange: onInputFocusChange,
+            onDirtyStateChange: { isDirty in
+                flushCoordinator?.setDirty(isDirty, for: exerciseID)
+            }
         )
         .onChange(of: restSeconds) { _, newValue in
             editingCoordinator.syncCommittedState(

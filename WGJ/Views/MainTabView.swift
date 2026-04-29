@@ -15,7 +15,6 @@ struct MainTabView: View {
     @Environment(\.userDataSyncStatus) private var userDataSyncStatus
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isKeyboardVisible = false
-    @State private var activeWorkoutStripHeight = Self.activeWorkoutStripFallbackHeight
 
     private var overlayAnimation: Animation {
         WGJMotion.overlayAnimation(reduceMotion: reduceMotion)
@@ -104,9 +103,6 @@ struct MainTabView: View {
                     .animation(activeWorkoutOverlayAnimation, value: activeWorkoutPresentationState.isActiveWorkoutPresented)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-            .onPreferenceChange(ActiveWorkoutStripHeightPreferenceKey.self) { newValue in
-                activeWorkoutStripHeight = max(newValue, Self.activeWorkoutStripFallbackHeight)
-            }
             .fullScreenCover(item: $workoutCompletionPresentationState.presentedWorkout) { presentation in
                 WorkoutCompletionSummaryView(sessionID: presentation.sessionID)
                     .interactiveDismissDisabled()
@@ -144,7 +140,7 @@ struct MainTabView: View {
 
         // The minimized strip floats above the tab bar by an additional bottom gap.
         // Scroll content needs clearance for both that lift and the strip itself.
-        return activeWorkoutStripHeight
+        return Self.activeWorkoutStripFallbackHeight
             + Self.activeWorkoutStripBottomGap
             + Self.activeWorkoutScrollClearance
     }
@@ -204,23 +200,12 @@ struct MainTabView: View {
     @ViewBuilder
     private func bottomOverlayChrome(bottomSafeAreaInset: CGFloat) -> some View {
         ZStack(alignment: .bottom) {
-            Color.clear
-                .preference(key: ActiveWorkoutStripHeightPreferenceKey.self, value: 0)
-
             if let activeSessionID = activeWorkoutPresentationState.activeSessionID,
                activeWorkoutPresentationState.isActiveWorkoutStripCollapsed,
                !isKeyboardVisible
             {
                 ActiveWorkoutStripView(sessionID: activeSessionID) {
                     presentActiveWorkout(sessionID: activeSessionID)
-                }
-                .background {
-                    GeometryReader { geometry in
-                        Color.clear.preference(
-                            key: ActiveWorkoutStripHeightPreferenceKey.self,
-                            value: geometry.size.height
-                        )
-                    }
                 }
                 .padding(.bottom, activeWorkoutStripBottomLift(bottomSafeAreaInset: bottomSafeAreaInset))
                 .transition(activeWorkoutStripTransition)
@@ -469,14 +454,6 @@ private struct WGJCloudSyncBannerIcon: View {
                 rotation = .degrees(360)
             }
         }
-    }
-}
-
-private struct ActiveWorkoutStripHeightPreferenceKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
     }
 }
 

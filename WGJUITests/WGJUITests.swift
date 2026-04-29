@@ -1169,6 +1169,7 @@ final class WGJUITests: XCTestCase {
 
         XCTAssertTrue(laterExercise.waitForExistence(timeout: 5))
         XCTAssertTrue(laterExerciseActions.waitForExistence(timeout: 5))
+        revealElement(laterExerciseActions, in: app)
         XCTAssertTrue(laterExerciseActions.isHittable)
         XCTAssertFalse(identifiedElement("active-workout-exercise-scroll-restore-1-actions-button", in: app).isHittable)
     }
@@ -1689,6 +1690,57 @@ final class WGJUITests: XCTestCase {
 
         XCTAssertTrue(
             identifiedElement("active-workout-rest-timer", in: app).waitForExistence(timeout: 5)
+        )
+    }
+
+    @MainActor
+    func testActiveWorkoutRestTimerExpiryOnForegroundKeepsWorkoutInteractive() throws {
+        let app = launchApp(mode: .localInMemory, launchArguments: [
+            "UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT",
+        ], launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Foreground Timer Workout",
+                notes: "Timer should expire without blocking foreground.",
+                exercises: [
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "foreground-timer-bench",
+                        exerciseNameSnapshot: "Bench Press",
+                        categorySnapshot: "Chest",
+                        muscleSummarySnapshot: "Chest",
+                        targetRepMin: 6,
+                        targetRepMax: 8,
+                        restSeconds: 1,
+                        sets: [
+                            templatePayloadSet(
+                                targetReps: 6,
+                                targetWeight: 100,
+                                loadUnit: "kg",
+                                restSeconds: 1,
+                                isWarmup: false
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+        ])
+
+        startPreviewedTemplateWorkout(in: app)
+
+        let completeSetButton = identifiedElement("workout-set-0-completion-button", in: app)
+        XCTAssertTrue(completeSetButton.waitForExistence(timeout: 5))
+        revealElement(completeSetButton, in: app)
+        completeSetButton.tap()
+
+        XCUIDevice.shared.press(.home)
+        sleep(2)
+        app.activate()
+
+        XCTAssertTrue(app.buttons["active-workout-finish-button"].waitForExistence(timeout: 5))
+        XCTAssertTrue(identifiedElement("active-workout-elapsed-timer", in: app).waitForExistence(timeout: 5))
+
+        app.buttons["active-workout-finish-button"].tap()
+        XCTAssertTrue(
+            identifiedElement("active-workout-finish-confirmation-title", in: app).waitForExistence(timeout: 5)
         )
     }
 

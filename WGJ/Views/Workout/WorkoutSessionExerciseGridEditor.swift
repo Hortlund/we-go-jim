@@ -43,6 +43,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     var flushCoordinator: WorkoutExerciseRowFlushCoordinator?
     var flushIdentifier: UUID?
     var onInputFocusChange: (Bool) -> Void
+    var onDirtyStateChange: (Bool) -> Void
 
     private let externalIsExpanded: Binding<Bool>?
     @State private var localIsExpanded: Bool
@@ -116,7 +117,8 @@ struct WorkoutSessionExerciseGridEditor: View {
         onExerciseDelete: (() -> Void)? = nil,
         flushCoordinator: WorkoutExerciseRowFlushCoordinator? = nil,
         flushIdentifier: UUID? = nil,
-        onInputFocusChange: @escaping (Bool) -> Void = { _ in }
+        onInputFocusChange: @escaping (Bool) -> Void = { _ in },
+        onDirtyStateChange: @escaping (Bool) -> Void = { _ in }
     ) {
         self.exerciseName = exerciseName
         self.muscleSummary = muscleSummary
@@ -158,6 +160,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.flushCoordinator = flushCoordinator
         self.flushIdentifier = flushIdentifier
         self.onInputFocusChange = onInputFocusChange
+        self.onDirtyStateChange = onDirtyStateChange
         self._localIsExpanded = State(initialValue: isExpanded?.wrappedValue ?? initiallyExpanded)
         let startsExpanded = isExpanded?.wrappedValue ?? initiallyExpanded
         let initialRows = startsExpanded
@@ -1446,6 +1449,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                 guard setDrafts.indices.contains(index) else { return }
                 let setID = setDrafts[index].id
                 metricInputDraftBuffer.stage(newValue, for: setID, metric: .reps)
+                markEditorDirty()
             }
         )
     }
@@ -1470,6 +1474,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                 guard setDrafts.indices.contains(index) else { return }
                 let setID = setDrafts[index].id
                 metricInputDraftBuffer.stage(newValue, for: setID, metric: .weight)
+                markEditorDirty()
             }
         )
     }
@@ -1687,6 +1692,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         pendingCommitTask?.cancel()
         pendingCommitTask = nil
         flushPendingDisplayRefresh()
+        markEditorClean()
     }
 
     private func handleDraftValueMutation(previousDrafts: [WorkoutSessionSetDraft]) {
@@ -2572,6 +2578,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         pendingCommitTask?.cancel()
         pendingCommitTask = nil
         requestCommitForCurrentState(drafts: drafts, restSeconds: overrideRestSeconds)
+        markEditorClean()
     }
 
     private func scheduleCommitRequest(_ disposition: ActiveWorkoutEditorCommitDisposition) {
@@ -2582,13 +2589,24 @@ struct WorkoutSessionExerciseGridEditor: View {
             requestImmediateCommitForCurrentState()
         case .debounced:
             pendingCommitTask?.cancel()
+            markEditorDirty()
             pendingCommitTask = Task { @MainActor in
                 try? await Task.sleep(for: commitDebounce)
                 guard !Task.isCancelled else { return }
                 pendingCommitTask = nil
                 requestCommitForCurrentState()
+                markEditorClean()
             }
         }
+    }
+
+    private func markEditorDirty() {
+        onDirtyStateChange(true)
+    }
+
+    private func markEditorClean() {
+        guard pendingCommitTask == nil, metricInputDraftBuffer.isEmpty else { return }
+        onDirtyStateChange(false)
     }
 
     private func formatWeight(_ value: Double) -> String {

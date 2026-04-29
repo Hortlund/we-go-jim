@@ -69,6 +69,7 @@ struct ContentView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
+                restTimerState.handleRestTimerExpirationIfNeeded()
                 scheduleResumeCriticalMaintenanceIfNeeded()
                 if activeWorkoutPresentationState.activeSessionID == nil {
                     if deferredMaintenanceState.isPending {

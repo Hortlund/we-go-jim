@@ -180,6 +180,37 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
+    func restTimerExpiryPolicyOnlySchedulesPositiveDurations() {
+        #expect(RestTimerExpiryPolicy.expirationDelay(seconds: 90) == .seconds(90))
+        #expect(RestTimerExpiryPolicy.expirationDelay(seconds: 0) == nil)
+        #expect(RestTimerExpiryPolicy.expirationDelay(seconds: -10) == nil)
+    }
+
+    @MainActor
+    @Test
+    func restTimerForegroundExpiryShowsOnePopup() {
+        let state = RestTimerState()
+        let setID = UUID()
+
+        state.startRestTimer(
+            seconds: 90,
+            exerciseName: "Bench Press",
+            setLabel: "Set 1",
+            sourceSetID: setID,
+            schedulesExpirationTask: false
+        )
+
+        state.handleRestTimerExpirationIfNeeded(at: Date().addingTimeInterval(91))
+        let popup = state.restTimerPopup
+
+        state.handleRestTimerExpirationIfNeeded(at: Date().addingTimeInterval(92))
+
+        #expect(popup != nil)
+        #expect(state.restTimerPopup == popup)
+        #expect(state.restTimerEndsAt == nil)
+    }
+
+    @Test
     func activeWorkoutDurableSnapshotPolicyWritesBackgroundCheckpoint() {
         #expect(!ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: .minimize))
         #expect(ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: .sceneTransition))
@@ -188,6 +219,95 @@ struct AppPerformanceRuntimeTests {
     @Test
     func activeWorkoutDurableSnapshotPolicyAllowsCommittedUserEdits() {
         #expect(ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: .userEdit))
+    }
+
+    @Test
+    func activeWorkoutRenderProjectionPrecomputesStableExerciseAndCardioState() {
+        let firstExerciseID = UUID()
+        let secondExerciseID = UUID()
+        let thirdExerciseID = UUID()
+        let supersetGroupID = UUID()
+        let session = ActiveWorkoutRuntimeSession(
+            name: "Projection Workout",
+            cardioBlocks: [
+                ActiveWorkoutRuntimeCardioBlock(
+                    phase: .postWorkout,
+                    catalogExerciseUUID: "run",
+                    exerciseNameSnapshot: "Run",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Legs",
+                    targetDurationSeconds: 600,
+                    isCompleted: false
+                ),
+                ActiveWorkoutRuntimeCardioBlock(
+                    phase: .preWorkout,
+                    catalogExerciseUUID: "bike",
+                    exerciseNameSnapshot: "Bike",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Legs",
+                    targetDurationSeconds: 300,
+                    isCompleted: true
+                ),
+            ],
+            exercises: [
+                ActiveWorkoutRuntimeExercise(
+                    id: thirdExerciseID,
+                    catalogExerciseUUID: "row",
+                    exerciseNameSnapshot: "Row",
+                    categorySnapshot: "Back",
+                    muscleSummarySnapshot: "Back",
+                    sortOrder: 2,
+                    setDrafts: [WorkoutSessionSetDraft(targetLoadUnit: .kg, actualLoadUnit: .kg)]
+                ),
+                ActiveWorkoutRuntimeExercise(
+                    id: secondExerciseID,
+                    catalogExerciseUUID: "squat",
+                    exerciseNameSnapshot: "Squat",
+                    categorySnapshot: "Legs",
+                    muscleSummarySnapshot: "Legs",
+                    sortOrder: 1,
+                    setDrafts: [WorkoutSessionSetDraft(targetLoadUnit: .kg, actualLoadUnit: .kg)],
+                    superset: ExerciseSupersetMembershipDraft(
+                        groupID: supersetGroupID,
+                        position: .second,
+                        roundRestSeconds: 75
+                    )
+                ),
+                ActiveWorkoutRuntimeExercise(
+                    id: firstExerciseID,
+                    catalogExerciseUUID: "bench",
+                    exerciseNameSnapshot: "Bench",
+                    categorySnapshot: "Chest",
+                    muscleSummarySnapshot: "Chest",
+                    sortOrder: 0,
+                    setDrafts: [WorkoutSessionSetDraft(targetLoadUnit: .kg, actualLoadUnit: .kg)],
+                    superset: ExerciseSupersetMembershipDraft(
+                        groupID: supersetGroupID,
+                        position: .first,
+                        roundRestSeconds: 75
+                    )
+                ),
+            ]
+        )
+
+        let projection = ActiveWorkoutRenderProjectionBuilder.build(
+            session: session,
+            setDraftsByExerciseID: [
+                firstExerciseID: [WorkoutSessionSetDraft(targetLoadUnit: .kg, actualLoadUnit: .kg, isCompleted: true)],
+                secondExerciseID: [WorkoutSessionSetDraft(targetLoadUnit: .kg, actualLoadUnit: .kg)],
+                thirdExerciseID: [WorkoutSessionSetDraft(targetLoadUnit: .kg, actualLoadUnit: .kg)],
+            ],
+            pendingCardioCompletionsByPhase: [:]
+        )
+
+        #expect(projection.exerciseIDs == [firstExerciseID, secondExerciseID, thirdExerciseID])
+        #expect(projection.orderedCardioBlocks.map(\.phase) == [.preWorkout, .postWorkout])
+        #expect(projection.preWorkoutCardio?.phase == .preWorkout)
+        #expect(projection.postWorkoutCardio?.phase == .postWorkout)
+        #expect(projection.exerciseDisplayGroups.count == 2)
+        #expect(projection.areMainExercisesUnlocked)
+        #expect(!projection.areAllMainExercisesCompleted)
+        #expect(!projection.isPostWorkoutCardioUnlocked)
     }
 
     @Test
@@ -554,6 +674,32 @@ struct AppPerformanceRuntimeTests {
                 committedBufferedValueChange: false
             ) == .none
         )
+    }
+
+    @MainActor
+    @Test
+    func workoutRowFlushCoordinatorCanFlushOnlyDirtyRows() {
+        let first = UUID()
+        let second = UUID()
+        let third = UUID()
+        let coordinator = WorkoutExerciseRowFlushCoordinator()
+        var flushed: [UUID] = []
+
+        coordinator.register(exerciseID: first) {
+            flushed.append(first)
+        }
+        coordinator.register(exerciseID: second) {
+            flushed.append(second)
+        }
+        coordinator.register(exerciseID: third) {
+            flushed.append(third)
+        }
+        coordinator.setDirty(true, for: second)
+
+        coordinator.flushDirty()
+
+        #expect(flushed == [second])
+        #expect(coordinator.dirtyExerciseIDs.isEmpty)
     }
 
     @Test

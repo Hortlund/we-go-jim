@@ -15,7 +15,6 @@ struct ActiveWorkoutView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     private let sessionID: UUID
-    @Query private var profiles: [UserProfile]
 
     @State private var runtimeSession: ActiveWorkoutRuntimeSession?
     @State private var hasBootstrapped = false
@@ -38,6 +37,9 @@ struct ActiveWorkoutView: View {
     @State private var pendingGuidanceRefreshExerciseIDs: Set<UUID> = []
     @State private var shouldRefreshAllGuidance = false
     @State private var cardStateController = ActiveWorkoutExerciseCardStateController()
+    @State private var renderProjection = ActiveWorkoutRenderProjection.empty
+    @State private var restoredScrollTarget: ActiveWorkoutScrollTarget?
+    @State private var profilePreferences = ActiveWorkoutProfilePreferences.default
 
     @State private var sessionNameDraft = ""
     @State private var notesDraft = ""
@@ -69,10 +71,6 @@ struct ActiveWorkoutView: View {
     private let cancelSectionDockClearanceHeight: CGFloat = 96
     private let cancelSectionScrollTarget = ActiveWorkoutScrollTarget.cancelSection
     private let guidanceService = TrainingGuidanceService()
-
-    private var currentProfile: UserProfile? {
-        UserProfileSelection.currentProfile(in: profiles)
-    }
 
     private var completedSessionRepository: WorkoutSessionRepository {
         WorkoutSessionRepository(modelContext: modelContext)
@@ -197,21 +195,19 @@ struct ActiveWorkoutView: View {
             }
             .task(id: session?.id) {
                 await reconcileSessionLifecycleIfNeeded()
+                restorePreparedScrollTargetIfNeeded(using: scrollProxy)
             }
             .task(id: exerciseHydrationStamp) {
                 await loadExerciseStateIfNeeded()
-            }
-            .onChange(of: currentProfile?.isTrainingGuidanceEnabled) { _, _ in
-                scheduleGuidanceRefreshForAll()
-            }
-            .onChange(of: currentProfile?.preferredLoadUnit) { _, newValue in
-                preferredLoadUnit = newValue ?? .kg
             }
             .onChange(of: showingFinishConfirmation) { oldValue, newValue in
                 handleFinishConfirmationChange(from: oldValue, to: newValue)
             }
             .onChange(of: scenePhase) { _, newPhase in
                 handleScenePhaseChange(newPhase)
+            }
+            .onAppear {
+                restorePreparedScrollTargetIfNeeded(using: scrollProxy)
             }
             .onDisappear {
                 isCancelArmed = false
@@ -230,9 +226,6 @@ struct ActiveWorkoutView: View {
                 Button("OK", role: .cancel) { }
             } message: {
                 workoutErrorAlertMessage
-            }
-            .background {
-                WorkoutRestTimerExpiryObserver()
             }
         }
     }
@@ -363,47 +356,42 @@ struct ActiveWorkoutView: View {
     }
 
     private var session: ActiveWorkoutRuntimeSession? {
-        runtimeSession
+        renderProjection.session
     }
 
     @MainActor
     private var sessionExercises: [ActiveWorkoutRuntimeExercise] {
-        runtimeSession?.exercises.sorted { $0.sortOrder < $1.sortOrder } ?? []
+        renderProjection.sessionExercises
     }
 
     @MainActor
     private var orderedCardioBlocks: [ActiveWorkoutRuntimeCardioBlock] {
-        runtimeSession?.cardioBlocks.sorted { $0.phase.sortOrder < $1.phase.sortOrder } ?? []
+        renderProjection.orderedCardioBlocks
     }
 
     @MainActor
     private var preWorkoutCardio: ActiveWorkoutRuntimeCardioBlock? {
-        orderedCardioBlocks.first(where: { $0.phase == .preWorkout })
+        renderProjection.preWorkoutCardio
     }
 
     @MainActor
     private var postWorkoutCardio: ActiveWorkoutRuntimeCardioBlock? {
-        orderedCardioBlocks.first(where: { $0.phase == .postWorkout })
+        renderProjection.postWorkoutCardio
     }
 
     @MainActor
     private var hasWorkoutContent: Bool {
-        !sessionExercises.isEmpty || !orderedCardioBlocks.isEmpty
+        renderProjection.hasWorkoutContent
     }
 
     @MainActor
     private var missingCardioPhases: [WorkoutCardioPhase] {
-        WorkoutCardioPhase.allCases.filter { cardioBlock(for: $0) == nil }
+        renderProjection.missingCardioPhases
     }
 
     @MainActor
     private var exerciseDisplayGroups: [WorkoutExerciseDisplayGroup<ActiveWorkoutRuntimeExercise>] {
-        return WorkoutExerciseDisplayGrouping.build(
-            items: sessionExercises,
-            membership: { exercise in
-                exercise.superset
-            }
-        )
+        renderProjection.exerciseDisplayGroups
     }
 
     nonisolated static func supersetRoundRestSecondsByGroupID(
@@ -414,23 +402,7 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private var supersetContextByExerciseID: [UUID: ActiveWorkoutSupersetContext] {
-        var contexts: [UUID: ActiveWorkoutSupersetContext] = [:]
-
-        for group in exerciseDisplayGroups {
-            guard case .superset(let superset) = group else { continue }
-            contexts[superset.first.id] = ActiveWorkoutSupersetContext(
-                position: .first,
-                roundRestSeconds: superset.roundRestSeconds,
-                pairedExerciseID: superset.second.id
-            )
-            contexts[superset.second.id] = ActiveWorkoutSupersetContext(
-                position: .second,
-                roundRestSeconds: superset.roundRestSeconds,
-                pairedExerciseID: superset.first.id
-            )
-        }
-
-        return contexts
+        renderProjection.supersetContextByExerciseID
     }
 
     private var shouldShowBottomDock: Bool {
@@ -451,7 +423,7 @@ struct ActiveWorkoutView: View {
 
     private var exerciseHydrationStamp: ActiveWorkoutExerciseInteractionStamp {
         ActiveWorkoutExerciseInteractionStamp(
-            entries: sessionExercises.map { exercise in
+            entries: renderProjection.sessionExercises.map { exercise in
                 ActiveWorkoutExerciseInteractionStamp.Entry(
                     id: exercise.id,
                     catalogExerciseUUID: exercise.catalogExerciseUUID,
@@ -635,7 +607,7 @@ struct ActiveWorkoutView: View {
                     setDrafts: drafts,
                     isExpanded: cardStateController.isExpanded(for: exerciseID),
                     manualCompletionMode: true,
-                    isBozarModeEnabled: currentProfile?.isBozarModeEnabled ?? false,
+                    isBozarModeEnabled: profilePreferences.isBozarModeEnabled,
                     isSetEditingEnabled: true,
                     isSetCompletionEnabled: areMainExercisesUnlocked,
                     setCompletionGatePresentation: areMainExercisesUnlocked
@@ -797,6 +769,7 @@ struct ActiveWorkoutView: View {
         guard setDraftsByExerciseID[exerciseID] != updated else { return }
         setDraftsByExerciseID[exerciseID] = updated
         scheduleGuidanceRefresh(for: exerciseID)
+        refreshRenderProjection()
     }
 
     @MainActor
@@ -804,6 +777,7 @@ struct ActiveWorkoutView: View {
         let normalized = max(0, min(3600, updated))
         guard restByExerciseID[exerciseID] != normalized else { return }
         restByExerciseID[exerciseID] = normalized
+        refreshRenderProjection()
     }
 
     @MainActor
@@ -813,30 +787,32 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
+    private func refreshRenderProjection() {
+        renderProjection = ActiveWorkoutRenderProjectionBuilder.build(
+            session: runtimeSession,
+            setDraftsByExerciseID: setDraftsByExerciseID,
+            pendingCardioCompletionsByPhase: pendingCardioCompletionsByPhase
+        )
+    }
+
+    @MainActor
     private var areMainExercisesUnlocked: Bool {
-        guard let preWorkoutCardio else { return true }
-        return resolvedCardioCompletion(for: preWorkoutCardio)
+        renderProjection.areMainExercisesUnlocked
     }
 
     @MainActor
     private var areAllMainExercisesCompleted: Bool {
-        guard !sessionExercises.isEmpty else {
-            return true
-        }
-
-        return sessionExercises.allSatisfy { exercise in
-            isExerciseCompleted(resolvedDrafts(for: exercise))
-        }
+        renderProjection.areAllMainExercisesCompleted
     }
 
     @MainActor
     private var isPostWorkoutCardioUnlocked: Bool {
-        areMainExercisesUnlocked && areAllMainExercisesCompleted
+        renderProjection.isPostWorkoutCardioUnlocked
     }
 
     @MainActor
     private func cardioBlock(for phase: WorkoutCardioPhase) -> ActiveWorkoutRuntimeCardioBlock? {
-        orderedCardioBlocks.first(where: { $0.phase == phase })
+        renderProjection.cardioByPhase[phase]
     }
 
     @MainActor
@@ -846,6 +822,7 @@ struct ActiveWorkoutView: View {
         updatedSession.normalizeExerciseSortOrder()
         updatedSession.touch()
         runtimeSession = updatedSession
+        refreshRenderProjection()
     }
 
     @MainActor
@@ -867,6 +844,7 @@ struct ActiveWorkoutView: View {
             uniquingKeysWith: { first, _ in first }
         )
         pendingCardioCompletionsByPhase = [:]
+        refreshRenderProjection()
     }
 
     @MainActor
@@ -937,11 +915,45 @@ struct ActiveWorkoutView: View {
         guard let session else { return }
         sessionNameDraft = session.name
         notesDraft = session.notes
-        preferredLoadUnit = currentProfile?.preferredLoadUnit ?? .kg
+        await loadActiveWorkoutProfilePreferences()
         if session.templateID == nil {
             templateNameDraft = session.name == "Empty Workout" ? "New Template" : session.name
         }
         hasBootstrapped = true
+    }
+
+    @MainActor
+    private func loadActiveWorkoutProfilePreferences() async {
+        let loadedPreferences: ActiveWorkoutProfilePreferences?
+        if let appBackgroundStore {
+            loadedPreferences = try? await appBackgroundStore.perform("active-workout.profile-preferences") { backgroundContext in
+                Self.profilePreferences(modelContext: backgroundContext)
+            }
+        } else {
+            loadedPreferences = Self.profilePreferences(modelContext: modelContext)
+        }
+
+        let resolvedPreferences = loadedPreferences ?? .default
+        guard profilePreferences != resolvedPreferences else {
+            preferredLoadUnit = resolvedPreferences.preferredLoadUnit
+            return
+        }
+
+        profilePreferences = resolvedPreferences
+        preferredLoadUnit = resolvedPreferences.preferredLoadUnit
+        scheduleGuidanceRefreshForAll()
+    }
+
+    nonisolated private static func profilePreferences(modelContext: ModelContext) -> ActiveWorkoutProfilePreferences {
+        guard let profile = try? ProfileRepository(modelContext: modelContext).currentProfile() else {
+            return .default
+        }
+
+        return ActiveWorkoutProfilePreferences(
+            preferredLoadUnit: profile.preferredLoadUnit,
+            isBozarModeEnabled: profile.isBozarModeEnabled,
+            isTrainingGuidanceEnabled: profile.isTrainingGuidanceEnabled
+        )
     }
 
     @MainActor
@@ -1004,6 +1016,7 @@ struct ActiveWorkoutView: View {
             restByExerciseID.merge(result.restsByExerciseID) { _, new in new }
             notesByExerciseID.merge(result.notesByExerciseID) { _, new in new }
             catalogMatchesByUUID.merge(result.catalogMatchesByUUID) { _, new in new }
+            refreshRenderProjection()
 
             for exerciseID in loadingExerciseIDs {
                 if previousResolutionByExerciseID[exerciseID] == nil {
@@ -1071,6 +1084,7 @@ struct ActiveWorkoutView: View {
         setDraftsByExerciseID.merge(snapshot.draftsByExerciseID.filter { exerciseIDs.contains($0.key) }) { _, new in new }
         restByExerciseID.merge(snapshot.restsByExerciseID.filter { exerciseIDs.contains($0.key) }) { _, new in new }
         notesByExerciseID.merge(snapshot.notesByExerciseID.filter { exerciseIDs.contains($0.key) }) { _, new in new }
+        refreshRenderProjection()
         previousResolutionByExerciseID.merge(
             snapshot.previousResolutionByExerciseID.filter { exerciseIDs.contains($0.key) }
         ) { _, new in new }
@@ -1238,6 +1252,7 @@ struct ActiveWorkoutView: View {
             setDraftsByExerciseID[exercise.id] = exercise.setDrafts
             restByExerciseID[exercise.id] = exercise.restSeconds
             notesByExerciseID[exercise.id] = exercise.notes
+            refreshRenderProjection()
             loadedExerciseStateStamp = nil
             exerciseHydrationInvalidation += 1
         }
@@ -1318,6 +1333,7 @@ struct ActiveWorkoutView: View {
             session.cardioBlocks.removeAll { $0.phase == phase }
         }
         pendingCardioCompletionsByPhase[phase] = nil
+        refreshRenderProjection()
         persistCommittedUserEditSnapshot()
     }
 
@@ -1340,6 +1356,7 @@ struct ActiveWorkoutView: View {
 
         let updatedCompletion = !currentCompletion
         pendingCardioCompletionsByPhase[cardioBlock.phase] = updatedCompletion
+        refreshRenderProjection()
 
         if updatedCompletion {
             WorkoutFeedbackCenter.shared.exerciseCompleted()
@@ -1500,7 +1517,7 @@ struct ActiveWorkoutView: View {
     }
 
     private var isTrainingGuidanceEnabled: Bool {
-        currentProfile?.isTrainingGuidanceEnabled ?? true
+        profilePreferences.isTrainingGuidanceEnabled
     }
 
     @MainActor
@@ -1726,6 +1743,7 @@ struct ActiveWorkoutView: View {
             sessionExerciseID: draft.exerciseID,
             updatedRest: normalizedRest
         )
+        refreshRenderProjection()
         exerciseSettingsDraft = nil
         scheduleGuidanceRefresh(for: draft.exerciseID)
         persistCommittedUserEditSnapshot()
@@ -1878,11 +1896,18 @@ struct ActiveWorkoutView: View {
         guard let snapshot = currentRuntimeSnapshot() else { return }
         runtimeSession = snapshot
         pendingCardioCompletionsByPhase = [:]
+        refreshRenderProjection()
         activeWorkoutPresentationState.stageRuntimeSession(snapshot, for: sessionID)
         activeWorkoutPresentationState.stagePreparedFirstRenderSnapshot(
             currentPreparedFirstRenderSnapshot(),
             for: sessionID
         )
+        activeWorkoutPresentationState.stageScrollTarget(minimizedScrollRestoreTarget(), for: sessionID)
+    }
+
+    @MainActor
+    private func minimizedScrollRestoreTarget() -> ActiveWorkoutScrollTarget? {
+        sessionExercises.last.map { .exercise($0.id) }
     }
 
     private func presentActiveWorkout() {
@@ -1999,6 +2024,7 @@ struct ActiveWorkoutView: View {
            removedSetIDs.contains(restTimerSourceSetID) {
             restTimerState.clearRestTimer(sourceSetID: restTimerSourceSetID)
         }
+        refreshRenderProjection()
     }
 
     private func presentFinishConfirmation() {
@@ -2213,7 +2239,12 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func flushDirtyWritesNow(checkpoint: ActiveWorkoutLifecycleCheckpoint) async -> Bool {
-        rowFlushCoordinator.flushAll()
+        switch checkpoint {
+        case .sceneTransition:
+            rowFlushCoordinator.flushDirty()
+        case .finish, .cancel, .minimize, .userEdit:
+            rowFlushCoordinator.flushAll()
+        }
         let pendingSnapshotTask = pendingUserEditSnapshotTask
         pendingUserEditSnapshotTask?.cancel()
         pendingUserEditSnapshotTask = nil
@@ -2233,6 +2264,7 @@ struct ActiveWorkoutView: View {
 
         runtimeSession = snapshot
         pendingCardioCompletionsByPhase = [:]
+        refreshRenderProjection()
         guard ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: checkpoint) else {
             return true
         }
@@ -2267,6 +2299,7 @@ struct ActiveWorkoutView: View {
 
         runtimeSession = snapshot
         pendingCardioCompletionsByPhase = [:]
+        refreshRenderProjection()
         activeWorkoutPresentationState.stageRuntimeSession(snapshot, for: sessionID)
         activeWorkoutPresentationState.stagePreparedFirstRenderSnapshot(
             currentPreparedFirstRenderSnapshot(),
@@ -2390,6 +2423,30 @@ struct ActiveWorkoutView: View {
         let resolvedAnimation = animation ?? WGJMotion.cardAnimation(reduceMotion: reduceMotion)
         withAnimation(resolvedAnimation) {
             scrollProxy.scrollTo(target, anchor: anchor)
+        }
+    }
+
+    @MainActor
+    private func restorePreparedScrollTargetIfNeeded(using scrollProxy: ScrollViewProxy) {
+        guard hasWorkoutContent else { return }
+        guard let target = activeWorkoutPresentationState.preparedScrollTarget(for: sessionID) else { return }
+        guard restoredScrollTarget != target else { return }
+        restoredScrollTarget = target
+
+        var immediateTransaction = Transaction()
+        immediateTransaction.disablesAnimations = true
+        withTransaction(immediateTransaction) {
+            scrollProxy.scrollTo(target, anchor: .top)
+        }
+
+        Task { @MainActor in
+            await Task.yield()
+            await Task.yield()
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                scrollProxy.scrollTo(target, anchor: .top)
+            }
         }
     }
 
@@ -2778,19 +2835,16 @@ private struct ActiveWorkoutCancelSection: View {
     }
 }
 
-struct WorkoutRestTimerExpiryObserver: View {
-    @Environment(RestTimerState.self) private var restTimerState
+private struct ActiveWorkoutProfilePreferences: Equatable {
+    let preferredLoadUnit: TemplateLoadUnit
+    let isBozarModeEnabled: Bool
+    let isTrainingGuidanceEnabled: Bool
 
-    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-
-    var body: some View {
-        Color.clear
-            .frame(width: 0, height: 0)
-            .allowsHitTesting(false)
-            .onReceive(timer) { date in
-                restTimerState.handleRestTimerExpirationIfNeeded(at: date)
-            }
-    }
+    nonisolated static let `default` = ActiveWorkoutProfilePreferences(
+        preferredLoadUnit: .kg,
+        isBozarModeEnabled: false,
+        isTrainingGuidanceEnabled: true
+    )
 }
 
 private struct ActiveWorkoutFinishPopover: View {
@@ -2927,88 +2981,85 @@ private struct ActiveWorkoutActivityTimerDock: View {
     var body: some View {
         let restTimerEndsAt = restTimerState.restTimerEndsAt
         let restTimerContextLabel = restTimerState.restTimerContextLabel()
+        let remaining = restTimerEndsAt.map { restTimerEndsAt in
+            let seconds = Int(ceil(restTimerEndsAt.timeIntervalSince(.now)))
+            return seconds > 0 ? seconds : nil
+        } ?? nil
+        let isResting = remaining != nil
+        let accent = isResting ? WGJTheme.success : WGJTheme.accentCyan
+        let secondaryText = isResting
+            ? restTimerContextLabel ?? "Recover before the next set"
+            : "Workout in progress"
+        let primaryValue = isResting
+            ? formattedRest(remaining ?? 0)
+            : WGJDurationFormatter.elapsedString(since: session.startedAt, now: .now)
 
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            let remaining = restTimerEndsAt.map { restTimerEndsAt in
-                let seconds = Int(ceil(restTimerEndsAt.timeIntervalSince(context.date)))
-                return seconds > 0 ? seconds : nil
-            } ?? nil
-            let isResting = remaining != nil
-            let accent = isResting ? WGJTheme.success : WGJTheme.accentCyan
-            let secondaryText = isResting
-                ? restTimerContextLabel ?? "Recover before the next set"
-                : "Workout in progress"
-            let primaryValue = isResting
-                ? formattedRest(remaining ?? 0)
-                : WGJDurationFormatter.elapsedString(since: session.startedAt, now: context.date)
-
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(isResting ? "Rest Timer" : "Elapsed Time")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(accent)
-
-                    Text(secondaryText)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(WGJTheme.textPrimary)
-                        .wgjSingleLineText(scale: 0.84)
-                }
-                Spacer(minLength: 12)
-                Text(primaryValue)
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(isResting ? "Rest Timer" : "Elapsed Time")
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(accent)
-                    .monospacedDigit()
-                    .wgjSingleLineText(scale: 0.84)
 
-                if isResting {
-                    Button {
-                        restTimerState.clearRestTimer()
-                    } label: {
-                        Image(systemName: "xmark")
-                    }
-                    .buttonStyle(
-                        WGJIconButtonStyle(
-                            tint: WGJTheme.textSecondary,
-                            background: WGJTheme.cardStrong,
-                            outline: WGJTheme.outline
-                        )
-                    )
-                    .accessibilityLabel("Dismiss rest timer")
+                Text(secondaryText)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(WGJTheme.textPrimary)
+                    .wgjSingleLineText(scale: 0.84)
+            }
+            Spacer(minLength: 12)
+            Text(primaryValue)
+                .font(.system(size: 28, weight: .bold, design: .rounded))
+                .foregroundStyle(accent)
+                .monospacedDigit()
+                .wgjSingleLineText(scale: 0.84)
+
+            if isResting {
+                Button {
+                    restTimerState.clearRestTimer()
+                } label: {
+                    Image(systemName: "xmark")
                 }
+                .buttonStyle(
+                    WGJIconButtonStyle(
+                        tint: WGJTheme.textSecondary,
+                        background: WGJTheme.cardStrong,
+                        outline: WGJTheme.outline
+                    )
+                )
+                .accessibilityLabel("Dismiss rest timer")
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(WGJTheme.cardStrong.opacity(0.97))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        accent.opacity(isResting ? 0.16 : 0.12),
-                                        WGJTheme.cardStrong.opacity(0.80),
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                    }
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .stroke(accent.opacity(isResting ? 0.28 : 0.22), lineWidth: 1)
-                    }
-                    .shadow(color: WGJTheme.shadowStrong.opacity(0.08), radius: 8, x: 0, y: 4)
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(
-                isResting
-                    ? "Rest timer \(primaryValue). \(secondaryText)"
-                    : "Elapsed time \(primaryValue)"
-            )
-            .accessibilityIdentifier(isResting ? "active-workout-rest-timer" : "active-workout-elapsed-timer")
-            .allowsHitTesting(isResting)
         }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(WGJTheme.cardStrong.opacity(0.97))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    accent.opacity(isResting ? 0.16 : 0.12),
+                                    WGJTheme.cardStrong.opacity(0.80),
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(accent.opacity(isResting ? 0.28 : 0.22), lineWidth: 1)
+                }
+                .shadow(color: WGJTheme.shadowStrong.opacity(0.08), radius: 8, x: 0, y: 4)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            isResting
+                ? "Rest timer \(primaryValue). \(secondaryText)"
+                : "Elapsed time \(primaryValue)"
+        )
+        .accessibilityIdentifier(isResting ? "active-workout-rest-timer" : "active-workout-elapsed-timer")
+        .allowsHitTesting(isResting)
     }
 
     private func formattedRest(_ seconds: Int) -> String {
@@ -3263,12 +3314,6 @@ private struct ActiveWorkoutExerciseSettingsSheet: View {
         .buttonStyle(.plain)
         .foregroundStyle(WGJTheme.textSecondary)
     }
-}
-
-private struct ActiveWorkoutSupersetContext {
-    let position: SupersetExercisePosition
-    let roundRestSeconds: Int
-    let pairedExerciseID: UUID
 }
 
 private struct ActiveWorkoutCompletionSourceContext {
