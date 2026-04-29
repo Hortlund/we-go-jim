@@ -379,6 +379,26 @@ nonisolated private enum WorkoutMetricsPolicy {
             return BestSetPresentation(displayText: "\(bestBodyweightMetric.reps) reps")
         }
 
+        let repsOnlySets = sets
+            .sorted { $0.sortOrder < $1.sortOrder }
+            .filter { set in
+                guard set.isCompleted, !set.isWarmup, let reps = set.actualReps, reps > 0 else {
+                    return false
+                }
+                return (set.actualWeight ?? 0) <= 0
+            }
+
+        if let bestRepsOnlySet = repsOnlySets.max(by: { lhs, rhs in
+            let lhsReps = lhs.actualReps ?? 0
+            let rhsReps = rhs.actualReps ?? 0
+            if lhsReps != rhsReps {
+                return lhsReps < rhsReps
+            }
+            return lhs.sortOrder > rhs.sortOrder
+        }), let reps = bestRepsOnlySet.actualReps {
+            return BestSetPresentation(displayText: "\(reps) reps")
+        }
+
         return nil
     }
 

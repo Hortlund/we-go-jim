@@ -814,6 +814,14 @@ struct BroReactionBarPresentation: Equatable {
     }
 }
 
+struct BroWorkoutExercisePreviewPresentation: Equatable {
+    let exercises: [String]
+
+    init(workout: BroWorkoutFeedSnapshot) {
+        exercises = workout.exercisePreview
+    }
+}
+
 struct BrosView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AppNotificationRouter.self) private var notificationRouter
@@ -1455,7 +1463,7 @@ struct BrosView: View {
         switch event.kind {
         case .workoutCompleted:
             if let workout = event.workout {
-                let previewExercises = Array(workout.exercisePreview.prefix(4))
+                let previewExercises = BroWorkoutExercisePreviewPresentation(workout: workout).exercises
 
                 VStack(alignment: .leading, spacing: 12) {
                     Text(workout.workoutName)
@@ -1497,11 +1505,6 @@ struct BrosView: View {
                                 }
                             }
 
-                            if workout.exercisePreview.count > previewExercises.count {
-                                Text("+ \(workout.exercisePreview.count - previewExercises.count) more")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(WGJTheme.textSecondary)
-                            }
                         }
                     }
                 }

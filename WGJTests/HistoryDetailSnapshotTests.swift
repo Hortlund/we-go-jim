@@ -6,6 +6,39 @@ import Testing
 @MainActor
 struct HistoryDetailSnapshotTests {
     @Test
+    func overviewSummaryRowsIncludeEveryExercise() {
+        let session = WorkoutSession(name: "Long Session", status: .completed)
+        session.exercises = (0..<8).map { index in
+            let exercise = WorkoutSessionExercise(
+                sessionID: session.id,
+                catalogExerciseUUID: "history-summary-\(index)",
+                exerciseNameSnapshot: "Exercise \(index + 1)",
+                categorySnapshot: "Strength",
+                muscleSummarySnapshot: "Training",
+                sortOrder: index,
+                session: session
+            )
+            exercise.sets = [
+                WorkoutSessionSet(
+                    sessionExerciseID: exercise.id,
+                    sortOrder: 0,
+                    actualReps: 10 + index,
+                    actualWeight: nil,
+                    isCompleted: true,
+                    sessionExercise: exercise
+                ),
+            ]
+            return exercise
+        }
+
+        let rows = HistorySessionSummaryBuilder.rows(for: session)
+
+        #expect(rows.count == 8)
+        #expect(rows.map(\.exercise).last == "1 x Exercise 8")
+        #expect(rows.map(\.bestSet).last == "17 reps")
+    }
+
+    @Test
     func snapshotLoadPreloadsEditableStateForAllExercisesWithoutExpansion() throws {
         let context = try makeInMemoryContext()
         let repository = WorkoutSessionRepository(modelContext: context)

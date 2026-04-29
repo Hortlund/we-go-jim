@@ -1239,6 +1239,33 @@ struct BrosSocialServiceTests {
                 sortOrder: 3,
                 session: session
             ),
+            WorkoutSessionExercise(
+                sessionID: session.id,
+                catalogExerciseUUID: "bros-leg-raise",
+                exerciseNameSnapshot: "Hanging Leg Raise",
+                categorySnapshot: "Core",
+                muscleSummarySnapshot: "Abs",
+                sortOrder: 4,
+                session: session
+            ),
+            WorkoutSessionExercise(
+                sessionID: session.id,
+                catalogExerciseUUID: "bros-curl",
+                exerciseNameSnapshot: "Dumbbell Curl",
+                categorySnapshot: "Arms",
+                muscleSummarySnapshot: "Biceps",
+                sortOrder: 5,
+                session: session
+            ),
+            WorkoutSessionExercise(
+                sessionID: session.id,
+                catalogExerciseUUID: "bros-triceps",
+                exerciseNameSnapshot: "Cable Pushdown",
+                categorySnapshot: "Arms",
+                muscleSummarySnapshot: "Triceps",
+                sortOrder: 6,
+                session: session
+            ),
         ]
         session.exercises = exercises
         context.insert(session)
@@ -1261,6 +1288,9 @@ struct BrosSocialServiceTests {
             "Barbell Row",
             "Back Squat",
             "Pull Up",
+            "Hanging Leg Raise",
+            "Dumbbell Curl",
+            "Cable Pushdown",
         ].joined(separator: "\n"))
     }
 

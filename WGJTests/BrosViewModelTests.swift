@@ -6,6 +6,19 @@ import Testing
 @MainActor
 struct BrosViewModelTests {
     @Test
+    func workoutExercisePreviewPresentationIncludesEveryExercise() {
+        let workout = BroWorkoutFeedSnapshot(
+            workoutName: "Long Session",
+            durationSeconds: 3_600,
+            totalVolume: 0,
+            prCount: 0,
+            exercisePreview: (1...7).map { "Exercise \($0)" }
+        )
+
+        #expect(BroWorkoutExercisePreviewPresentation(workout: workout).exercises == workout.exercisePreview)
+    }
+
+    @Test
     func refreshShowsUnavailableWhenAppCloudSyncBootstrapFallsBackToLocal() async throws {
         let context = try makeInMemoryContext()
         let service = StubBrosSocialService()

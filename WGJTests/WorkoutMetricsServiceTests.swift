@@ -6,6 +6,24 @@ import Testing
 @MainActor
 struct WorkoutMetricsServiceTests {
     @Test
+    func bestSetTextShowsRepsForCompletedNoWeightSets() {
+        let exerciseID = UUID()
+        let sets = [
+            WorkoutSessionSet(
+                sessionExerciseID: exerciseID,
+                sortOrder: 0,
+                isWarmup: false,
+                actualReps: 15,
+                actualWeight: nil,
+                actualLoadUnit: .kg,
+                isCompleted: true
+            ),
+        ]
+
+        #expect(WorkoutMetricsService.bestSetText(for: sets) == "15 reps")
+    }
+
+    @Test
     func estimatedOneRepMaxUsesEpleyFormula() throws {
         let context = try makeInMemoryContext()
         let metrics = WorkoutMetricsService(modelContext: context)

@@ -495,9 +495,9 @@ private struct HistorySessionCardView: View, Equatable {
 }
 
 enum HistorySessionSummaryBuilder {
-    static func rows(for session: WorkoutSession, limit: Int = 6) -> [HistorySessionSummaryRow] {
+    static func rows(for session: WorkoutSession) -> [HistorySessionSummaryRow] {
         let exercises = (session.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
-        return exercises.prefix(limit).enumerated().map { index, exercise in
+        return exercises.enumerated().map { index, exercise in
             let sets = (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
             return HistorySessionSummaryRow(
                 id: index,
