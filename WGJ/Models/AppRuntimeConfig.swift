@@ -258,6 +258,7 @@ final class AppRuntimeState {
     var latestCloudSyncEvent: CloudSyncEventSummary?
     var userDataSyncStatus = UserDataSyncStatusSnapshot.localOnly(reason: nil)
     var workoutNotificationStyle: WorkoutNotificationStyle = .timeSensitive
+    var keepsScreenAwake = false
 
     @ObservationIgnored private var hasResolvedRuntimeCloudAvailability = false
     @ObservationIgnored private var isRefreshingRuntimeCloudAvailability = false
@@ -295,6 +296,14 @@ final class AppRuntimeState {
 
     func updateWorkoutNotificationStyle(_ style: WorkoutNotificationStyle) {
         workoutNotificationStyle = style
+    }
+
+    func updateWorkoutRuntimePreferences(
+        notificationStyle: WorkoutNotificationStyle,
+        keepsScreenAwake: Bool
+    ) {
+        workoutNotificationStyle = notificationStyle
+        self.keepsScreenAwake = keepsScreenAwake
     }
 
     func refreshCloudAvailabilityIfNeeded(
@@ -893,11 +902,16 @@ final class RestTimerState {
         )
     }
 
-    func clearRestTimer(sourceSetID: UUID? = nil, cancelNotification: Bool = true) {
+    @discardableResult
+    func clearRestTimer(sourceSetID: UUID? = nil, cancelNotification: Bool = true) -> Bool {
         if let sourceSetID, restTimerSourceSetID != sourceSetID {
-            return
+            return false
         }
 
+        let didHaveRestTimer = restTimerEndsAt != nil
+            || restTimerExerciseName != nil
+            || restTimerSetLabel != nil
+            || restTimerSourceSetID != nil
         restTimerEndsAt = nil
         restTimerExerciseName = nil
         restTimerSetLabel = nil
@@ -907,6 +921,7 @@ final class RestTimerState {
         if cancelNotification {
             RestTimerNotificationManager.shared.cancelRestTimerNotification()
         }
+        return didHaveRestTimer
     }
 
     func restTimerRemaining(at date: Date = .now) -> Int? {
@@ -926,6 +941,42 @@ final class RestTimerState {
         case (nil, nil):
             return nil
         }
+    }
+
+    func restTimerSnapshot(at date: Date = .now) -> RestTimerSnapshot? {
+        guard let restTimerEndsAt, restTimerEndsAt > date else { return nil }
+        return RestTimerSnapshot(
+            endsAt: restTimerEndsAt,
+            exerciseName: restTimerExerciseName,
+            setLabel: restTimerSetLabel,
+            sourceSetID: restTimerSourceSetID
+        )
+    }
+
+    func restoreRestTimer(from snapshot: RestTimerSnapshot?, at date: Date = .now) {
+        guard let snapshot else {
+            clearRestTimer(cancelNotification: false)
+            return
+        }
+
+        restTimerExpirationTask?.cancel()
+        restTimerExpirationTask = nil
+        restTimerEndsAt = snapshot.endsAt
+        restTimerExerciseName = snapshot.exerciseName
+        restTimerSetLabel = snapshot.setLabel
+        restTimerSourceSetID = snapshot.sourceSetID
+
+        if snapshot.isExpired(at: date) {
+            handleRestTimerExpirationIfNeeded(at: date)
+            return
+        }
+
+        let remainingSeconds = Int(ceil(snapshot.endsAt.timeIntervalSince(date)))
+        scheduleExpirationTask(seconds: remainingSeconds, isEnabled: true)
+        RestTimerNotificationManager.shared.scheduleRestTimer(
+            seconds: remainingSeconds,
+            style: AppRuntimeState.shared.workoutNotificationStyle
+        )
     }
 
     func handleRestTimerExpirationIfNeeded(at date: Date = .now) {
@@ -1181,6 +1232,8 @@ final class RestTimerNotificationManager {
 
             let descriptor = Self.notificationDescriptor(style: style)
             let content = Self.makeNotificationContent(from: descriptor)
+            await self.clearAllRestTimerNotifications(using: center)
+            guard !Task.isCancelled, generation == self.schedulingGeneration else { return }
 
             let trigger = UNTimeIntervalNotificationTrigger(
                 timeInterval: TimeInterval(max(1, seconds)),
@@ -1207,9 +1260,15 @@ final class RestTimerNotificationManager {
 
     func cancelRestTimerNotification() {
         schedulingGeneration += 1
+        let generation = schedulingGeneration
         schedulingTask?.cancel()
         schedulingTask = nil
         clearCurrentRestTimerNotifications()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard generation == self.schedulingGeneration else { return }
+            await self.clearAllRestTimerNotifications(using: UNUserNotificationCenter.current())
+        }
     }
 
     static func notificationDescriptor(
@@ -1250,6 +1309,22 @@ final class RestTimerNotificationManager {
     ) {
         center.removePendingNotificationRequests(withIdentifiers: [identifier])
         center.removeDeliveredNotifications(withIdentifiers: [identifier])
+    }
+
+    private func clearAllRestTimerNotifications(using center: UNUserNotificationCenter) async {
+        let pendingIdentifiers = await center.pendingNotificationRequests()
+            .map(\.identifier)
+            .filter { $0.hasPrefix(notificationIdentifierPrefix) }
+        let deliveredIdentifiers = await center.deliveredNotifications()
+            .map(\.request.identifier)
+            .filter { $0.hasPrefix(notificationIdentifierPrefix) }
+
+        if !pendingIdentifiers.isEmpty {
+            center.removePendingNotificationRequests(withIdentifiers: pendingIdentifiers)
+        }
+        if !deliveredIdentifiers.isEmpty {
+            center.removeDeliveredNotifications(withIdentifiers: deliveredIdentifiers)
+        }
     }
 }
 

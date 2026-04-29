@@ -31,7 +31,10 @@ struct WorkoutExerciseRowFlushCoordinatorTests {
         coordinator.register(exerciseID: exerciseID) {
             flushCount += 1
         }
+        coordinator.setDirty(true, for: exerciseID)
+        #expect(coordinator.hasDirtyRows)
         coordinator.unregister(exerciseID: exerciseID)
+        #expect(!coordinator.hasDirtyRows)
         coordinator.flush(for: exerciseID)
         coordinator.flushAll()
 

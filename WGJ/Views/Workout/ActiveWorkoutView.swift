@@ -131,7 +131,10 @@ struct ActiveWorkoutView: View {
                     restTimerPopupID: restTimerState.restTimerPopup?.id,
                     reduceMotion: reduceMotion,
                     isMetricInputFocused: isMetricInputFocused,
-                    onDismissKeyboard: dismissKeyboard
+                    onDismissKeyboard: dismissKeyboard,
+                    onDismissRestTimer: {
+                        clearRestTimerAndPersist()
+                    }
                 )
             }
             .sheet(item: $pickerTarget, onDismiss: {
@@ -642,7 +645,12 @@ struct ActiveWorkoutView: View {
                                 exercise: exercise
                             )
                         } else {
-                            restTimerState.clearRestTimer(sourceSetID: setID)
+                            startRestTimer(
+                                seconds: 0,
+                                exerciseName: exercise.exerciseNameSnapshot,
+                                setLabel: setLabel,
+                                sourceSetID: setID
+                            )
                         }
                     },
                     onExerciseSettings: {
@@ -1441,7 +1449,7 @@ struct ActiveWorkoutView: View {
         }
 
         guard source.completesSetCycle else {
-            restTimerState.clearRestTimer(sourceSetID: sourceID)
+            clearRestTimerAndPersist(sourceSetID: sourceID)
             return
         }
 
@@ -1507,9 +1515,24 @@ struct ActiveWorkoutView: View {
                 setLabel: setLabel,
                 sourceSetID: sourceSetID
             )
+            persistCommittedUserEditSnapshot()
         } else {
             restTimerState.clearRestTimer(sourceSetID: sourceSetID)
+            persistCommittedUserEditSnapshot()
         }
+    }
+
+    private func clearRestTimerAndPersist(
+        sourceSetID: UUID? = nil,
+        cancelNotification: Bool = true
+    ) {
+        guard restTimerState.clearRestTimer(
+            sourceSetID: sourceSetID,
+            cancelNotification: cancelNotification
+        ) else {
+            return
+        }
+        persistCommittedUserEditSnapshot()
     }
 
     private func isExerciseCompleted(_ drafts: [WorkoutSessionSetDraft]) -> Bool {
@@ -2022,7 +2045,7 @@ struct ActiveWorkoutView: View {
 
         if let restTimerSourceSetID = restTimerState.restTimerSourceSetID,
            removedSetIDs.contains(restTimerSourceSetID) {
-            restTimerState.clearRestTimer(sourceSetID: restTimerSourceSetID)
+            clearRestTimerAndPersist(sourceSetID: restTimerSourceSetID)
         }
         refreshRenderProjection()
     }
@@ -2239,6 +2262,12 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func flushDirtyWritesNow(checkpoint: ActiveWorkoutLifecycleCheckpoint) async -> Bool {
+        if checkpoint == .sceneTransition,
+           !rowFlushCoordinator.hasDirtyRows,
+           pendingUserEditSnapshotTask == nil {
+            return true
+        }
+
         switch checkpoint {
         case .sceneTransition:
             rowFlushCoordinator.flushDirty()
@@ -2246,8 +2275,14 @@ struct ActiveWorkoutView: View {
             rowFlushCoordinator.flushAll()
         }
         let pendingSnapshotTask = pendingUserEditSnapshotTask
-        pendingUserEditSnapshotTask?.cancel()
         pendingUserEditSnapshotTask = nil
+
+        if checkpoint == .sceneTransition {
+            await pendingSnapshotTask?.value
+            return true
+        }
+
+        pendingSnapshotTask?.cancel()
         await pendingSnapshotTask?.value
 
         switch checkpoint {
@@ -2270,7 +2305,11 @@ struct ActiveWorkoutView: View {
         }
 
         do {
-            try await ActiveWorkoutSnapshotStore.shared.save(snapshot)
+            try await ActiveWorkoutSnapshotStore.shared.save(
+                snapshot,
+                restTimer: restTimerState.restTimerSnapshot(),
+                preservesExistingRestTimer: false
+            )
             return true
         } catch {
             showError(error)
@@ -2315,7 +2354,11 @@ struct ActiveWorkoutView: View {
         pendingUserEditSnapshotTask?.cancel()
         pendingUserEditSnapshotTask = Task { @MainActor in
             do {
-                try await ActiveWorkoutSnapshotStore.shared.save(snapshot)
+                try await ActiveWorkoutSnapshotStore.shared.save(
+                    snapshot,
+                    restTimer: restTimerState.restTimerSnapshot(),
+                    preservesExistingRestTimer: false
+                )
             } catch {
                 guard !Task.isCancelled else { return }
                 showError(error)
@@ -2727,6 +2770,7 @@ private struct ActiveWorkoutBottomDock: View {
 
     let session: ActiveWorkoutRuntimeSession?
     let reduceMotion: Bool
+    let onDismissRestTimer: () -> Void
 
     var body: some View {
         VStack(spacing: 8) {
@@ -2741,7 +2785,10 @@ private struct ActiveWorkoutBottomDock: View {
             }
 
             if let session {
-                ActiveWorkoutActivityTimerDock(session: session)
+                ActiveWorkoutActivityTimerDock(
+                    session: session,
+                    onDismissRestTimer: onDismissRestTimer
+                )
             }
         }
         .wgjGlassContainer(spacing: 8)
@@ -2754,6 +2801,11 @@ private struct ActiveWorkoutBottomDock: View {
                 .fill(WGJTheme.accentBlue.opacity(0.18))
                 .frame(height: 1)
         }
+        .accessibilityIdentifier(
+            restTimerState.restTimerEndsAt == nil
+                ? "active-workout-elapsed-timer"
+                : "active-workout-rest-timer"
+        )
     }
 }
 
@@ -2977,56 +3029,62 @@ private struct ActiveWorkoutActivityTimerDock: View {
     @Environment(RestTimerState.self) private var restTimerState
 
     let session: ActiveWorkoutRuntimeSession
+    let onDismissRestTimer: () -> Void
 
     var body: some View {
-        let restTimerEndsAt = restTimerState.restTimerEndsAt
-        let restTimerContextLabel = restTimerState.restTimerContextLabel()
-        let remaining = restTimerEndsAt.map { restTimerEndsAt in
-            let seconds = Int(ceil(restTimerEndsAt.timeIntervalSince(.now)))
-            return seconds > 0 ? seconds : nil
-        } ?? nil
-        let isResting = remaining != nil
-        let accent = isResting ? WGJTheme.success : WGJTheme.accentCyan
-        let secondaryText = isResting
-            ? restTimerContextLabel ?? "Recover before the next set"
-            : "Workout in progress"
-        let primaryValue = isResting
-            ? formattedRest(remaining ?? 0)
-            : WGJDurationFormatter.elapsedString(since: session.startedAt, now: .now)
+        let isRestTimerActive = restTimerState.restTimerEndsAt != nil
+        let dockAccent = isRestTimerActive ? WGJTheme.success : WGJTheme.accentCyan
+        let fillOpacity = isRestTimerActive ? 0.16 : 0.12
+        let strokeOpacity = isRestTimerActive ? 0.28 : 0.22
 
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(isResting ? "Rest Timer" : "Elapsed Time")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(accent)
+        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+            let remaining = restTimerState.restTimerRemaining(at: timeline.date)
+            let isResting = remaining != nil
+            let accent = isResting ? WGJTheme.success : WGJTheme.accentCyan
+            let secondaryText = isResting
+                ? restTimerState.restTimerContextLabel() ?? "Recover before the next set"
+                : "Workout in progress"
+            let primaryValue = isResting
+                ? formattedRest(remaining ?? 0)
+                : WGJDurationFormatter.elapsedString(since: session.startedAt, now: timeline.date)
 
-                Text(secondaryText)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(WGJTheme.textPrimary)
-                    .wgjSingleLineText(scale: 0.84)
-            }
-            Spacer(minLength: 12)
-            Text(primaryValue)
-                .font(.system(size: 28, weight: .bold, design: .rounded))
-                .foregroundStyle(accent)
-                .monospacedDigit()
-                .wgjSingleLineText(scale: 0.84)
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(isResting ? "Rest Timer" : "Elapsed Time")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(accent)
 
-            if isResting {
-                Button {
-                    restTimerState.clearRestTimer()
-                } label: {
-                    Image(systemName: "xmark")
+                    Text(secondaryText)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(WGJTheme.textPrimary)
+                        .wgjSingleLineText(scale: 0.84)
                 }
-                .buttonStyle(
-                    WGJIconButtonStyle(
-                        tint: WGJTheme.textSecondary,
-                        background: WGJTheme.cardStrong,
-                        outline: WGJTheme.outline
+                Spacer(minLength: 12)
+                Text(primaryValue)
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundStyle(accent)
+                    .monospacedDigit()
+                    .wgjSingleLineText(scale: 0.84)
+                    .accessibilityIdentifier(isResting ? "active-workout-rest-timer" : "active-workout-elapsed-timer")
+
+                if isResting {
+                    Button {
+                        onDismissRestTimer()
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .buttonStyle(
+                        WGJIconButtonStyle(
+                            tint: WGJTheme.textSecondary,
+                            background: WGJTheme.cardStrong,
+                            outline: WGJTheme.outline
+                        )
                     )
-                )
-                .accessibilityLabel("Dismiss rest timer")
+                    .accessibilityLabel("Dismiss rest timer")
+                }
             }
+            .accessibilityLabel(accessibilityLabel(isResting: isResting, primaryValue: primaryValue, secondaryText: secondaryText))
+            .allowsHitTesting(isResting)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -3038,7 +3096,7 @@ private struct ActiveWorkoutActivityTimerDock: View {
                         .fill(
                             LinearGradient(
                                 colors: [
-                                    accent.opacity(isResting ? 0.16 : 0.12),
+                                    dockAccent.opacity(fillOpacity),
                                     WGJTheme.cardStrong.opacity(0.80),
                                 ],
                                 startPoint: .topLeading,
@@ -3048,18 +3106,17 @@ private struct ActiveWorkoutActivityTimerDock: View {
                 }
                 .overlay {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(accent.opacity(isResting ? 0.28 : 0.22), lineWidth: 1)
+                        .stroke(dockAccent.opacity(strokeOpacity), lineWidth: 1)
                 }
                 .shadow(color: WGJTheme.shadowStrong.opacity(0.08), radius: 8, x: 0, y: 4)
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(
-            isResting
-                ? "Rest timer \(primaryValue). \(secondaryText)"
-                : "Elapsed time \(primaryValue)"
-        )
-        .accessibilityIdentifier(isResting ? "active-workout-rest-timer" : "active-workout-elapsed-timer")
-        .allowsHitTesting(isResting)
+        .accessibilityElement(children: .contain)
+    }
+
+    private func accessibilityLabel(isResting: Bool, primaryValue: String, secondaryText: String) -> String {
+        isResting
+            ? "Rest timer \(primaryValue). \(secondaryText)"
+            : "Elapsed time \(primaryValue)"
     }
 
     private func formattedRest(_ seconds: Int) -> String {
@@ -3330,6 +3387,7 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
     let reduceMotion: Bool
     let isMetricInputFocused: Bool
     let onDismissKeyboard: () -> Void
+    let onDismissRestTimer: () -> Void
 
     @State private var isKeyboardVisible = false
 
@@ -3338,7 +3396,8 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
             if shouldShowDock, let session {
                 ActiveWorkoutBottomDock(
                     session: session,
-                    reduceMotion: reduceMotion
+                    reduceMotion: reduceMotion,
+                    onDismissRestTimer: onDismissRestTimer
                 )
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }

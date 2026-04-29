@@ -247,7 +247,7 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
-    func firstFrameTabPolicyKeepsProfileAndBrosContentOutOfTabTransitionWindow() {
+    func firstFrameTabPolicyDefersInitialProfileAndBrosMounts() {
         #expect(FirstFrameTabContentPolicy.initialContentMountDelayMilliseconds(tab: .profile) >= 350)
         #expect(FirstFrameTabContentPolicy.initialContentMountDelayMilliseconds(tab: .bros) >= 350)
         #expect(FirstFrameTabContentPolicy.initialContentMountDelayMilliseconds(tab: .history) == 0)
@@ -464,7 +464,7 @@ struct AppLaunchWarmupTests {
 
     @Test
     func profileDashboardRenderPolicyDefersOnlyFirstDashboardMount() {
-        #expect(ProfileDashboardRenderPolicy.renderDelay(hasRenderedDashboardContent: false) == .milliseconds(450))
+        #expect(ProfileDashboardRenderPolicy.renderDelay(hasRenderedDashboardContent: false) == .milliseconds(900))
         #expect(ProfileDashboardRenderPolicy.renderDelay(hasRenderedDashboardContent: true) == .zero)
     }
 

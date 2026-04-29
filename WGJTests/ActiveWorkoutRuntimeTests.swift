@@ -45,6 +45,72 @@ struct ActiveWorkoutRuntimeTests {
     }
 
     @Test
+    func snapshotStorePersistsRestTimerWithActiveWorkout() async throws {
+        let directory = try temporaryDirectory()
+        let store = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        let session = makeRuntimeSession()
+        let setID = UUID()
+        let restTimer = RestTimerSnapshot(
+            endsAt: futureRestTimerDate(),
+            exerciseName: "Bench Press",
+            setLabel: "Set 2",
+            sourceSetID: setID
+        )
+
+        try await store.save(session, restTimer: restTimer)
+
+        let storedSnapshot = try #require(try await store.loadStoredSnapshot())
+        #expect(storedSnapshot.session.id == session.id)
+        #expect(storedSnapshot.restTimer?.exerciseName == restTimer.exerciseName)
+        #expect(storedSnapshot.restTimer?.setLabel == restTimer.setLabel)
+        #expect(storedSnapshot.restTimer?.sourceSetID == restTimer.sourceSetID)
+        #expect(abs((storedSnapshot.restTimer?.endsAt.timeIntervalSince(restTimer.endsAt) ?? 999)) < 0.01)
+    }
+
+    @Test
+    func snapshotStorePreservesRestTimerWhenSessionOnlyCallSitesSave() async throws {
+        let directory = try temporaryDirectory()
+        let store = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        var session = makeRuntimeSession()
+        let restTimer = RestTimerSnapshot(
+            endsAt: futureRestTimerDate(),
+            exerciseName: "Bench Press",
+            setLabel: "Set 2",
+            sourceSetID: UUID()
+        )
+
+        try await store.save(session, restTimer: restTimer)
+        session.notes = "Updated elsewhere"
+        try await store.save(session)
+
+        let storedSnapshot = try #require(try await store.loadStoredSnapshot())
+        #expect(storedSnapshot.session.notes == "Updated elsewhere")
+        #expect(storedSnapshot.restTimer?.exerciseName == restTimer.exerciseName)
+        #expect(storedSnapshot.restTimer?.setLabel == restTimer.setLabel)
+        #expect(storedSnapshot.restTimer?.sourceSetID == restTimer.sourceSetID)
+        #expect(abs((storedSnapshot.restTimer?.endsAt.timeIntervalSince(restTimer.endsAt) ?? 999)) < 0.01)
+    }
+
+    @Test
+    func snapshotStoreCanExplicitlyClearRestTimer() async throws {
+        let directory = try temporaryDirectory()
+        let store = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        let session = makeRuntimeSession()
+        let restTimer = RestTimerSnapshot(
+            endsAt: futureRestTimerDate(),
+            exerciseName: "Bench Press",
+            setLabel: "Set 2",
+            sourceSetID: UUID()
+        )
+
+        try await store.save(session, restTimer: restTimer)
+        try await store.save(session, restTimer: nil, preservesExistingRestTimer: false)
+
+        let storedSnapshot = try #require(try await store.loadStoredSnapshot())
+        #expect(storedSnapshot.restTimer == nil)
+    }
+
+    @Test
     func sessionFactoryImportsLegacyActiveSwiftDataDraftAndRemovesLegacyRows() async throws {
         let context = try makeInMemoryContext()
         let repository = ActiveWorkoutDraftRepository(modelContext: context)
@@ -334,6 +400,10 @@ struct ActiveWorkoutRuntimeTests {
             createdAt: Date(timeIntervalSinceReferenceDate: 10),
             updatedAt: Date(timeIntervalSinceReferenceDate: 10)
         )
+    }
+
+    private func futureRestTimerDate() -> Date {
+        Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970) + 900)
     }
 
     private func temporaryDirectory() throws -> URL {

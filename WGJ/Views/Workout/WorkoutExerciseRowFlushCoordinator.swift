@@ -5,6 +5,10 @@ final class WorkoutExerciseRowFlushCoordinator {
     private var flushHandlersByExerciseID: [UUID: @MainActor () -> Void] = [:]
     private(set) var dirtyExerciseIDs: Set<UUID> = []
 
+    var hasDirtyRows: Bool {
+        !dirtyExerciseIDs.isEmpty
+    }
+
     func register(exerciseID: UUID, handler: @escaping @MainActor () -> Void) {
         flushHandlersByExerciseID[exerciseID] = handler
     }

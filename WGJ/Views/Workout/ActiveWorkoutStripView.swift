@@ -17,55 +17,57 @@ struct ActiveWorkoutStripView: View {
     }
 
     var body: some View {
-        let status = statusPresentation(now: .now)
+        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+            let status = statusPresentation(now: timeline.date)
 
-        Button(action: onExpand) {
-            HStack(spacing: 10) {
-                Circle()
-                    .fill(WGJTheme.success)
-                    .frame(width: 12, height: 12)
-                    .overlay {
-                        Circle()
-                            .stroke(Color.white.opacity(0.24), lineWidth: 1)
+            Button(action: onExpand) {
+                HStack(spacing: 10) {
+                    Circle()
+                        .fill(WGJTheme.success)
+                        .frame(width: 12, height: 12)
+                        .overlay {
+                            Circle()
+                                .stroke(Color.white.opacity(0.24), lineWidth: 1)
+                        }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(session?.name ?? "Workout in progress")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(WGJTheme.textPrimary)
+                            .wgjSingleLineText(scale: 0.84)
+
+                        Text(status.statusText)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(status.statusTint)
+                            .monospacedDigit()
+                            .wgjSingleLineText(scale: 0.84)
                     }
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(session?.name ?? "Workout in progress")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(WGJTheme.textPrimary)
-                        .wgjSingleLineText(scale: 0.84)
+                    Spacer()
 
-                    Text(status.statusText)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(status.statusTint)
-                        .monospacedDigit()
-                        .wgjSingleLineText(scale: 0.84)
+                    WGJMetricPill(
+                        systemImage: status.pillIcon,
+                        value: status.pillText,
+                        tint: status.pillTint
+                    )
                 }
-
-                Spacer()
-
-                WGJMetricPill(
-                    systemImage: status.pillIcon,
-                    value: status.pillText,
-                    tint: status.pillTint
-                )
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity)
+                .wgjCardContainer(strong: true, cornerRadius: 22)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity)
-            .wgjCardContainer(strong: true, cornerRadius: 22)
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("active-workout-strip")
-        .highPriorityGesture(
-            DragGesture(minimumDistance: 12)
-                .onEnded { value in
-                    if value.translation.height < -18 {
-                        onExpand()
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("active-workout-strip")
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 12)
+                    .onEnded { value in
+                        if value.translation.height < -18 {
+                            onExpand()
+                        }
                     }
-                }
-        )
-        .padding(.horizontal, 12)
+            )
+            .padding(.horizontal, 12)
+        }
         .task(id: sessionID) {
             await loadSnapshot()
         }

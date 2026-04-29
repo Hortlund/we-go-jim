@@ -7,9 +7,6 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.appBackgroundStore) private var appBackgroundStore
 
-    @Query(sort: [SortDescriptor(\UserProfile.updatedAt, order: .reverse)])
-    private var storedProfiles: [UserProfile]
-
     @State private var appRuntimeState = AppRuntimeState.shared
     @State private var appPhase: AppPhase = .splash
     @State private var appTabState = AppTabState()
@@ -29,10 +26,6 @@ struct ContentView: View {
     @State private var hasInstalledUITestPendingTemplate = false
     @State private var hasScheduledInitialDeferredMaintenance = false
     @State private var fallbackCoachWarmupTask: Task<Void, Never>?
-
-    private var currentProfile: UserProfile? {
-        UserProfileSelection.currentProfile(in: storedProfiles)
-    }
 
     var body: some View {
         Group {
@@ -64,7 +57,6 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .task {
             installUITestPendingTemplateIfNeeded()
-            syncWorkoutNotificationPreferences()
             updateIdleTimerState()
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -102,11 +94,8 @@ struct ContentView: View {
         .onOpenURL { url in
             handleIncomingTemplateFileURL(url)
         }
-        .onChange(of: currentProfile?.keepsScreenAwake) { _, _ in
+        .onChange(of: appRuntimeState.keepsScreenAwake) { _, _ in
             updateIdleTimerState()
-        }
-        .onChange(of: currentProfile?.workoutNotificationStyleRaw) { _, _ in
-            syncWorkoutNotificationPreferences()
         }
         .onReceive(NotificationCenter.default.publisher(for: .wgjDidDeleteAllUserData)) { _ in
             resetToStartupFlow()
@@ -159,6 +148,7 @@ struct ContentView: View {
             modelContext: modelContext,
             backgroundStore: appBackgroundStore
         )
+        await restoreRestTimerFromStoredActiveWorkoutIfNeeded()
 
         if appPhase != .main {
             withAnimation(.easeInOut(duration: 0.2)) {
@@ -285,7 +275,7 @@ struct ContentView: View {
             }
         }
 
-        restTimerState.clearExpiredRestTimerIfNeeded()
+        restTimerState.handleRestTimerExpirationIfNeeded()
         guard !Task.isCancelled, resumeCriticalMaintenanceTracker.isCurrent(runID) else {
             return
         }
@@ -296,6 +286,7 @@ struct ContentView: View {
                 !Task.isCancelled && resumeCriticalMaintenanceTracker.isCurrent(runID)
             }
         )
+        await restoreRestTimerFromStoredActiveWorkoutIfNeeded()
         guard !Task.isCancelled,
               resumeCriticalMaintenanceTracker.isCurrent(runID),
               activeWorkoutPresentationState.activeSessionID == nil
@@ -307,6 +298,18 @@ struct ContentView: View {
         if deferredMaintenanceState.isPending {
             scheduleDeferredMaintenance(trigger: .sceneActivated)
         }
+    }
+
+    private func restoreRestTimerFromStoredActiveWorkoutIfNeeded() async {
+        guard let activeSessionID = activeWorkoutPresentationState.activeSessionID else { return }
+        guard restTimerState.restTimerEndsAt == nil else { return }
+        guard let storedSnapshot = try? await ActiveWorkoutSnapshotStore.shared.loadStoredSnapshot(),
+              storedSnapshot.session.id == activeSessionID
+        else {
+            return
+        }
+
+        restTimerState.restoreRestTimer(from: storedSnapshot.restTimer)
     }
 
     private func resetResumeCriticalMaintenanceCycle() {
@@ -653,7 +656,10 @@ struct ContentView: View {
         let completedSnapshot = Task.isCancelled ? nil : snapshot
         appWarmupState.finishProfileWarmup(runID: runID, snapshot: completedSnapshot)
         if let completedSnapshot {
-            AppRuntimeState.shared.updateWorkoutNotificationStyle(completedSnapshot.profile.workoutNotificationStyle)
+            AppRuntimeState.shared.updateWorkoutRuntimePreferences(
+                notificationStyle: completedSnapshot.profile.workoutNotificationStyle,
+                keepsScreenAwake: completedSnapshot.profile.keepsScreenAwake
+            )
         }
     }
 
@@ -720,7 +726,10 @@ struct ContentView: View {
                     let completedSnapshot = Task.isCancelled ? nil : snapshot
                     appWarmupState.finishProfileWarmup(runID: runID, snapshot: completedSnapshot)
                     if let snapshot = completedSnapshot {
-                        AppRuntimeState.shared.updateWorkoutNotificationStyle(snapshot.profile.workoutNotificationStyle)
+                        AppRuntimeState.shared.updateWorkoutRuntimePreferences(
+                            notificationStyle: snapshot.profile.workoutNotificationStyle,
+                            keepsScreenAwake: snapshot.profile.keepsScreenAwake
+                        )
                     }
                 }
             }
@@ -801,16 +810,25 @@ struct ContentView: View {
 
                     return ProfileIdentitySnapshot(profile: try repository.loadOrCreateProfile())
                 }
-                AppRuntimeState.shared.updateWorkoutNotificationStyle(snapshot.workoutNotificationStyle)
+                AppRuntimeState.shared.updateWorkoutRuntimePreferences(
+                    notificationStyle: snapshot.workoutNotificationStyle,
+                    keepsScreenAwake: snapshot.keepsScreenAwake
+                )
             } else {
                 let repository = ProfileRepository(modelContext: modelContext)
                 let profile = try repository.currentProfileSnapshot()
                     ?? ProfileIdentitySnapshot(profile: repository.loadOrCreateProfile())
-                AppRuntimeState.shared.updateWorkoutNotificationStyle(profile.workoutNotificationStyle)
+                AppRuntimeState.shared.updateWorkoutRuntimePreferences(
+                    notificationStyle: profile.workoutNotificationStyle,
+                    keepsScreenAwake: profile.keepsScreenAwake
+                )
             }
         } catch {
             if let profile = try? ProfileRepository(modelContext: modelContext).loadOrCreateProfile() {
-                AppRuntimeState.shared.updateWorkoutNotificationStyle(profile.workoutNotificationStyle)
+                AppRuntimeState.shared.updateWorkoutRuntimePreferences(
+                    notificationStyle: profile.workoutNotificationStyle,
+                    keepsScreenAwake: profile.keepsScreenAwake
+                )
             }
         }
     }
@@ -843,7 +861,10 @@ struct ContentView: View {
         catalogSyncCoordinator.markPrimed()
         if let profileWarmSnapshot = result?.profileWarmSnapshot {
             appWarmupState.storeProfile(profileWarmSnapshot)
-            AppRuntimeState.shared.updateWorkoutNotificationStyle(profileWarmSnapshot.profile.workoutNotificationStyle)
+            AppRuntimeState.shared.updateWorkoutRuntimePreferences(
+                notificationStyle: profileWarmSnapshot.profile.workoutNotificationStyle,
+                keepsScreenAwake: profileWarmSnapshot.profile.keepsScreenAwake
+            )
         }
         FirstRunLocalBootstrapProgress.markCompleted()
     }
@@ -962,14 +983,8 @@ struct ContentView: View {
         }
     }
 
-    private func syncWorkoutNotificationPreferences() {
-        AppRuntimeState.shared.updateWorkoutNotificationStyle(
-            currentProfile?.workoutNotificationStyle ?? .timeSensitive
-        )
-    }
-
     private var shouldKeepScreenAwake: Bool {
-        scenePhase == .active && (currentProfile?.keepsScreenAwake ?? false)
+        scenePhase == .active && appRuntimeState.keepsScreenAwake
     }
 
     private func updateIdleTimerState() {

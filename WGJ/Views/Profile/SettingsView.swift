@@ -356,6 +356,7 @@ struct SettingsView: View {
     private func saveKeepsScreenAwakePreference(_ isEnabled: Bool) {
         do {
             try profileRepository.updateKeepsScreenAwake(isEnabled)
+            AppRuntimeState.shared.keepsScreenAwake = isEnabled
         } catch {
             showError(error)
         }

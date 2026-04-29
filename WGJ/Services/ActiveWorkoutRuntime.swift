@@ -36,6 +36,26 @@ nonisolated struct ActiveWorkoutRuntimeSession: Identifiable, Equatable, Codable
     }
 }
 
+nonisolated struct RestTimerSnapshot: Equatable, Codable, Sendable {
+    let endsAt: Date
+    let exerciseName: String?
+    let setLabel: String?
+    let sourceSetID: UUID?
+
+    var isExpired: Bool {
+        isExpired(at: .now)
+    }
+
+    func isExpired(at date: Date) -> Bool {
+        endsAt <= date
+    }
+}
+
+nonisolated struct ActiveWorkoutStoredSnapshot: Equatable, Codable, Sendable {
+    let session: ActiveWorkoutRuntimeSession
+    let restTimer: RestTimerSnapshot?
+}
+
 nonisolated extension ActiveWorkoutRuntimeSession {
     mutating func touch(date: Date = .now) {
         updatedAt = date
@@ -329,24 +349,46 @@ actor ActiveWorkoutSnapshotStore {
 #endif
 
     func load() throws -> ActiveWorkoutRuntimeSession? {
+        try loadStoredSnapshot()?.session
+    }
+
+    func loadStoredSnapshot() throws -> ActiveWorkoutStoredSnapshot? {
         let url = snapshotURL
         guard FileManager.default.fileExists(atPath: url.path) else {
             return nil
         }
         let data = try Data(contentsOf: url)
+        if let storedSnapshot = try? decoder.decode(ActiveWorkoutStoredSnapshot.self, from: data) {
+            var session = storedSnapshot.session
+            session.normalizeSetRestToExerciseDefaults()
+            return ActiveWorkoutStoredSnapshot(session: session, restTimer: storedSnapshot.restTimer)
+        }
+
         var session = try decoder.decode(ActiveWorkoutRuntimeSession.self, from: data)
         session.normalizeSetRestToExerciseDefaults()
-        return session
+        return ActiveWorkoutStoredSnapshot(session: session, restTimer: nil)
     }
 
-    func save(_ session: ActiveWorkoutRuntimeSession) throws {
+    func save(
+        _ session: ActiveWorkoutRuntimeSession,
+        restTimer: RestTimerSnapshot? = nil,
+        preservesExistingRestTimer: Bool = true
+    ) throws {
         try FileManager.default.createDirectory(
             at: baseDirectory,
             withIntermediateDirectories: true
         )
         var normalizedSession = session
         normalizedSession.normalizeSetRestToExerciseDefaults()
-        let data = try encoder.encode(normalizedSession)
+        let existingRestTimer = preservesExistingRestTimer
+            ? (try? loadStoredSnapshot()?.restTimer)
+            : nil
+        let resolvedRestTimer = restTimer ?? existingRestTimer
+        let storedSnapshot = ActiveWorkoutStoredSnapshot(
+            session: normalizedSession,
+            restTimer: resolvedRestTimer?.isExpired == true ? nil : resolvedRestTimer
+        )
+        let data = try encoder.encode(storedSnapshot)
         if FileManager.default.fileExists(atPath: snapshotURL.path),
            let existingData = try? Data(contentsOf: snapshotURL),
            existingData == data {

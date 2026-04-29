@@ -215,6 +215,67 @@ struct AppPerformanceRuntimeTests {
         #expect(state.restTimerEndsAt == nil)
     }
 
+    @MainActor
+    @Test
+    func restTimerRestoreKeepsPendingTimerAndExpiresOnceWhenOverdue() {
+        let state = RestTimerState()
+        let setID = UUID()
+        let reference = Date(timeIntervalSinceReferenceDate: 1_000)
+
+        state.restoreRestTimer(
+            from: RestTimerSnapshot(
+                endsAt: reference.addingTimeInterval(30),
+                exerciseName: "Hanging Leg Raise",
+                setLabel: "Set 1",
+                sourceSetID: setID
+            ),
+            at: reference
+        )
+
+        #expect(state.restTimerRemaining(at: reference.addingTimeInterval(10)) == 20)
+        #expect(state.restTimerContextLabel() == "Hanging Leg Raise · Set 1")
+
+        state.restoreRestTimer(
+            from: RestTimerSnapshot(
+                endsAt: reference.addingTimeInterval(5),
+                exerciseName: "Hanging Leg Raise",
+                setLabel: "Set 1",
+                sourceSetID: setID
+            ),
+            at: reference.addingTimeInterval(10)
+        )
+
+        let popup = state.restTimerPopup
+        state.handleRestTimerExpirationIfNeeded(at: reference.addingTimeInterval(11))
+
+        #expect(popup != nil)
+        #expect(state.restTimerPopup == popup)
+        #expect(state.restTimerEndsAt == nil)
+    }
+
+    @MainActor
+    @Test
+    func restTimerClearReportsWhetherMatchingTimerWasCleared() {
+        let state = RestTimerState()
+        let activeSetID = UUID()
+        let otherSetID = UUID()
+
+        state.startRestTimer(
+            seconds: 90,
+            exerciseName: "Bench Press",
+            setLabel: "Set 1",
+            sourceSetID: activeSetID,
+            schedulesExpirationTask: false
+        )
+
+        #expect(!state.clearRestTimer(sourceSetID: otherSetID))
+        #expect(state.restTimerEndsAt != nil)
+
+        #expect(state.clearRestTimer(sourceSetID: activeSetID))
+        #expect(state.restTimerEndsAt == nil)
+        #expect(!state.clearRestTimer(sourceSetID: activeSetID))
+    }
+
     @Test
     func activeWorkoutDurableSnapshotPolicyWritesBackgroundCheckpoint() {
         #expect(!ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: .minimize))
