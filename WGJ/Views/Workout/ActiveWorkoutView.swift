@@ -32,6 +32,7 @@ struct ActiveWorkoutView: View {
     @State private var loadedExerciseStateStamp: ActiveWorkoutExerciseInteractionStamp?
     @State private var exerciseHydrationInvalidation = 0
     @State private var deferredHydrationTask: Task<Void, Never>?
+    @State private var foregroundNonCriticalInteractionWorkTask: Task<Void, Never>?
     @State private var pendingGuidanceRefreshTask: Task<Void, Never>?
     @State private var pendingUserEditSnapshotTask: Task<Void, Never>?
     @State private var pendingGuidanceRefreshExerciseIDs: Set<UUID> = []
@@ -209,6 +210,10 @@ struct ActiveWorkoutView: View {
             .onChange(of: scenePhase) { _, newPhase in
                 handleScenePhaseChange(newPhase)
             }
+            .onChange(of: isMetricInputFocused) { _, isFocused in
+                guard !isFocused, canRunNonCriticalInteractionWork else { return }
+                scheduleForegroundNonCriticalInteractionWorkResume()
+            }
             .onAppear {
                 restorePreparedScrollTargetIfNeeded(using: scrollProxy)
             }
@@ -220,6 +225,8 @@ struct ActiveWorkoutView: View {
                 pendingTemplateUpdateAfterReviewSheetDismissal = nil
                 deferredHydrationTask?.cancel()
                 deferredHydrationTask = nil
+                foregroundNonCriticalInteractionWorkTask?.cancel()
+                foregroundNonCriticalInteractionWorkTask = nil
                 pendingGuidanceRefreshTask?.cancel()
                 pendingGuidanceRefreshTask = nil
                 pendingGuidanceRefreshExerciseIDs = []
@@ -1104,6 +1111,12 @@ struct ActiveWorkoutView: View {
         for stamp: ActiveWorkoutExerciseInteractionStamp,
         draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
     ) {
+        guard canRunNonCriticalInteractionWork else {
+            deferredHydrationTask?.cancel()
+            deferredHydrationTask = nil
+            return
+        }
+
         let allExerciseIDs = Set(sessionExercises.map(\.id))
         let expandedExerciseIDs = allExerciseIDs.filter { cardStateController.isExpanded(for: $0) }
         let previousExerciseIDs = allExerciseIDs.filter { exerciseID in
@@ -1123,7 +1136,10 @@ struct ActiveWorkoutView: View {
         deferredHydrationTask?.cancel()
         deferredHydrationTask = Task { @MainActor in
             try? await Task.sleep(for: previousPerformanceHydrationDelay)
-            guard !Task.isCancelled, loadedExerciseStateStamp == stamp else { return }
+            guard !Task.isCancelled,
+                  loadedExerciseStateStamp == stamp,
+                  canRunNonCriticalInteractionWork
+            else { return }
 
             let loadedHydration: ActiveWorkoutDeferredHydrationResult
             do {
@@ -1150,7 +1166,10 @@ struct ActiveWorkoutView: View {
                 deferredHydrationTask = nil
                 return
             }
-            guard !Task.isCancelled, loadedExerciseStateStamp == stamp else { return }
+            guard !Task.isCancelled,
+                  loadedExerciseStateStamp == stamp,
+                  canRunNonCriticalInteractionWork
+            else { return }
             previousResolutionByExerciseID.merge(
                 loadedHydration.previousResolutionByExerciseID.filter { previousExerciseIDs.contains($0.key) }
             ) { _, new in new }
@@ -1543,6 +1562,13 @@ struct ActiveWorkoutView: View {
         profilePreferences.isTrainingGuidanceEnabled
     }
 
+    private var canRunNonCriticalInteractionWork: Bool {
+        ActiveWorkoutInteractionWorkPolicy.shouldRunNonCriticalInteractionWork(
+            scenePhase: scenePhase,
+            isMetricInputFocused: isMetricInputFocused
+        )
+    }
+
     @MainActor
     private func refreshGuidanceCache() {
         guidanceByExerciseID = buildGuidanceCache(
@@ -1558,11 +1584,20 @@ struct ActiveWorkoutView: View {
             return
         }
 
+        guard canRunNonCriticalInteractionWork else {
+            pendingGuidanceRefreshExerciseIDs.insert(exerciseID)
+            pendingGuidanceRefreshTask?.cancel()
+            pendingGuidanceRefreshTask = nil
+            return
+        }
+
         pendingGuidanceRefreshExerciseIDs.insert(exerciseID)
         pendingGuidanceRefreshTask?.cancel()
         pendingGuidanceRefreshTask = Task { @MainActor in
             try? await Task.sleep(for: guidanceRefreshDelay)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled,
+                  canRunNonCriticalInteractionWork
+            else { return }
             flushScheduledGuidanceRefresh()
             pendingGuidanceRefreshTask = nil
         }
@@ -1570,12 +1605,22 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func scheduleGuidanceRefreshForAll() {
+        guard canRunNonCriticalInteractionWork else {
+            shouldRefreshAllGuidance = true
+            pendingGuidanceRefreshExerciseIDs = []
+            pendingGuidanceRefreshTask?.cancel()
+            pendingGuidanceRefreshTask = nil
+            return
+        }
+
         shouldRefreshAllGuidance = true
         pendingGuidanceRefreshExerciseIDs = []
         pendingGuidanceRefreshTask?.cancel()
         pendingGuidanceRefreshTask = Task { @MainActor in
             try? await Task.sleep(for: guidanceRefreshDelay)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled,
+                  canRunNonCriticalInteractionWork
+            else { return }
             flushScheduledGuidanceRefresh()
             pendingGuidanceRefreshTask = nil
         }
@@ -2319,12 +2364,58 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func handleScenePhaseChange(_ newPhase: ScenePhase) {
+        if ActiveWorkoutInteractionWorkPolicy.shouldRunNonCriticalInteractionWork(scenePhase: newPhase) {
+            scheduleForegroundNonCriticalInteractionWorkResume()
+        } else {
+            cancelNonCriticalInteractionWorkForSceneTransition()
+        }
+
         guard ActiveWorkoutSceneTransitionPolicy.shouldFlushLocalDraft(scenePhase: newPhase) else {
             return
         }
 
         Task { @MainActor in
             _ = await flushDirtyWritesNow(checkpoint: .sceneTransition)
+        }
+    }
+
+    @MainActor
+    private func cancelNonCriticalInteractionWorkForSceneTransition() {
+        deferredHydrationTask?.cancel()
+        deferredHydrationTask = nil
+        foregroundNonCriticalInteractionWorkTask?.cancel()
+        foregroundNonCriticalInteractionWorkTask = nil
+        pendingGuidanceRefreshTask?.cancel()
+        pendingGuidanceRefreshTask = nil
+    }
+
+    @MainActor
+    private func scheduleForegroundNonCriticalInteractionWorkResume() {
+        guard loadedExerciseStateStamp != nil || shouldRefreshAllGuidance || !pendingGuidanceRefreshExerciseIDs.isEmpty else {
+            return
+        }
+
+        foregroundNonCriticalInteractionWorkTask?.cancel()
+        foregroundNonCriticalInteractionWorkTask = Task { @MainActor in
+            defer {
+                if !Task.isCancelled {
+                    foregroundNonCriticalInteractionWorkTask = nil
+                }
+            }
+            try? await Task.sleep(for: ActiveWorkoutInteractionWorkPolicy.foregroundResumeGraceDelay)
+            guard !Task.isCancelled,
+                  canRunNonCriticalInteractionWork
+            else { return }
+
+            scheduleExpandedExerciseHydrationIfNeeded()
+            if shouldRefreshAllGuidance {
+                scheduleGuidanceRefreshForAll()
+            } else {
+                let pendingExerciseIDs = pendingGuidanceRefreshExerciseIDs
+                for exerciseID in pendingExerciseIDs {
+                    scheduleGuidanceRefresh(for: exerciseID)
+                }
+            }
         }
     }
 

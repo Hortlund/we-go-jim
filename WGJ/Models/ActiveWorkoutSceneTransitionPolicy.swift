@@ -41,6 +41,18 @@ nonisolated enum ActiveWorkoutKeyboardChromePolicy {
 nonisolated enum ActiveWorkoutInteractionWorkPolicy {
     static let defaultPreviousPerformanceHydrationDelay: Duration = .milliseconds(650)
     static let defaultGuidanceRefreshDelay: Duration = .milliseconds(900)
+    static let foregroundResumeGraceDelay: Duration = .milliseconds(2_500)
+
+    static func shouldRunNonCriticalInteractionWork(scenePhase: ScenePhase) -> Bool {
+        scenePhase == .active
+    }
+
+    static func shouldRunNonCriticalInteractionWork(
+        scenePhase: ScenePhase,
+        isMetricInputFocused: Bool
+    ) -> Bool {
+        shouldRunNonCriticalInteractionWork(scenePhase: scenePhase) && !isMetricInputFocused
+    }
 
     static func previousPerformanceHydrationDelay(
         isRunningTests: Bool = AppRuntimeConfig.isRunningTests,

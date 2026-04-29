@@ -502,6 +502,26 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
+    func activeWorkoutNonCriticalInteractionWorkOnlyRunsWhileSceneIsActive() {
+        #expect(ActiveWorkoutInteractionWorkPolicy.shouldRunNonCriticalInteractionWork(scenePhase: .active))
+        #expect(!ActiveWorkoutInteractionWorkPolicy.shouldRunNonCriticalInteractionWork(scenePhase: .inactive))
+        #expect(!ActiveWorkoutInteractionWorkPolicy.shouldRunNonCriticalInteractionWork(scenePhase: .background))
+        #expect(
+            ActiveWorkoutInteractionWorkPolicy.shouldRunNonCriticalInteractionWork(
+                scenePhase: .active,
+                isMetricInputFocused: false
+            )
+        )
+        #expect(
+            !ActiveWorkoutInteractionWorkPolicy.shouldRunNonCriticalInteractionWork(
+                scenePhase: .active,
+                isMetricInputFocused: true
+            )
+        )
+        #expect(ActiveWorkoutInteractionWorkPolicy.foregroundResumeGraceDelay == .milliseconds(2_500))
+    }
+
+    @Test
     func activeWorkoutUITestsCanOverridePreviousPerformanceHydrationDelay() {
         #expect(
             ActiveWorkoutInteractionWorkPolicy.previousPerformanceHydrationDelay(
