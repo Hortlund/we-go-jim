@@ -733,10 +733,7 @@ nonisolated final class CloudKitBrosSocialService: BrosSocialService, BrosSocial
     private let reactionNotificationRegistrar: @MainActor () async -> Bool
 
     nonisolated static func shouldTreatAsEmptyQueryResult(_ error: Error, recordType: String) -> Bool {
-        let nsError = error as NSError
-        if nsError.domain == CKError.errorDomain,
-           nsError.code == CKError.unknownItem.rawValue
-        {
+        if isCloudKitUnknownItemError(error) {
             return true
         }
 
@@ -757,6 +754,12 @@ nonisolated final class CloudKitBrosSocialService: BrosSocialService, BrosSocial
         ]
 
         return schemaSignals.contains { message.contains($0) }
+    }
+
+    nonisolated private static func isCloudKitUnknownItemError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == CKError.errorDomain
+            && nsError.code == CKError.unknownItem.rawValue
     }
 
     @MainActor
@@ -1868,14 +1871,18 @@ nonisolated final class CloudKitBrosSocialService: BrosSocialService, BrosSocial
         var canWriteBackIndex = false
 
         if let indexedRecordNames {
-            let indexedRecords = try await fetchRecords(
-                recordType: RecordType.feedEvent,
-                recordNames: indexedRecordNames
-            )
-            for record in indexedRecords {
-                recordsByRecordName[record.recordID.recordName] = record
+            do {
+                let indexedRecords = try await fetchRecords(
+                    recordType: RecordType.feedEvent,
+                    recordNames: indexedRecordNames
+                )
+                for record in indexedRecords {
+                    recordsByRecordName[record.recordID.recordName] = record
+                }
+                canWriteBackIndex = true
+            } catch where Self.isCloudKitUnknownItemError(error) {
+                canWriteBackIndex = true
             }
-            canWriteBackIndex = true
         }
 
         if !circleID.isEmpty {

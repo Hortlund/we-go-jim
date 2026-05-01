@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-05-01 - Bros Feed Index Must Tolerate Deleted Cloud Records
+
+- Date: 2026-05-01
+- Trigger/Problem: Bros could show "Bros unavailable" with `Error fetching record ... recordName=workout_... Record not found` after a feed-event record had disappeared from CloudKit while the circle still indexed it.
+- Root Cause: `resolvedFeedEventRecords` fetched `feedEventRecordNames` before running the circle-wide feed query. A single `CKError.unknownItem` from a stale indexed workout/PR feed event aborted `fetchSnapshot`, so the existing query fallback never got a chance to rebuild the feed index.
+- Durable Rule: Treat missing indexed Bros feed-event records as stale index entries, not as fatal Bros availability failures. Continue to the circle feed query and write back the rebuilt `feedEventRecordNames` index when possible.
+- How to Verify Next Time: Add or run a `BrosSocialServiceTests` case where indexed `BroFeedEvent` fetch throws `CKError.unknownItem`, the circle feed query returns remaining events, and `fetchSnapshot` returns those events while saving the repaired feed index.
+- Status: active
+
 ## 2026-04-28 - Active Workout Foreground Must Stay Memory-Only
 
 - Date: 2026-04-28

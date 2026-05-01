@@ -951,6 +951,104 @@ struct BrosSocialServiceTests {
     }
 
     @Test
+    func fetchSnapshotRepairsMissingIndexedFeedEventFromCircleFeedQuery() async throws {
+        let context = try makeInMemoryContext()
+        let joinedAt = Date(timeIntervalSince1970: 100)
+        let profile = try ProfileRepository(modelContext: context).loadOrCreateProfile()
+        profile.updateBrosMembership(
+            circleID: "circle-1",
+            membershipID: "membership-circle-1-user-1",
+            userRecordName: "user-1",
+            joinedAt: joinedAt,
+            role: .owner
+        )
+        try context.save()
+
+        let ownerMembership = makeMembershipRecord(
+            recordName: "membership-circle-1-user-1",
+            circleID: "circle-1",
+            userRecordName: "user-1",
+            joinedAt: joinedAt,
+            role: .owner,
+            displayName: "Atlas"
+        )
+        let staleEventRecordName = "workout-deleted"
+        let queriedEvent = makeWorkoutFeedEventRecord(
+            recordName: "workout-queried",
+            circleID: "circle-1",
+            actorUserRecordName: "user-1",
+            actorMembershipID: ownerMembership.recordID.recordName,
+            actorDisplayName: "Atlas",
+            createdAt: Date(timeIntervalSince1970: 160),
+            workoutName: "Pull Day"
+        )
+        let circleRecord = makeCircleRecord(
+            circleID: "circle-1",
+            inviteCode: "ABC123",
+            memberLimit: 4,
+            memberRecordNames: [ownerMembership.recordID.recordName],
+            feedEventRecordNames: [staleEventRecordName]
+        )
+
+        var savedFeedEventRecordNames: [String] = []
+        let store = TestBrosCloudStore()
+        store.currentUserRecordNameValue = "user-1"
+        store.fetchRecordHandler = { recordType, recordName in
+            switch (recordType, recordName) {
+            case ("BroMembership", ownerMembership.recordID.recordName):
+                return ownerMembership
+            case ("BroCircle", "circle-1"):
+                return circleRecord
+            default:
+                return nil
+            }
+        }
+        store.fetchRecordsHandler = { recordType, recordNames in
+            if recordType == "BroMembership",
+               recordNames == [ownerMembership.recordID.recordName]
+            {
+                return [ownerMembership]
+            }
+
+            if recordType == "BroFeedEvent",
+               recordNames == [staleEventRecordName]
+            {
+                throw NSError(domain: CKErrorDomain, code: CKError.unknownItem.rawValue)
+            }
+
+            return []
+        }
+        store.queryRecordsHandler = { recordType, predicate, _, _ in
+            if recordType == "BroMembership",
+               predicate.predicateFormat.contains("circleID")
+            {
+                return [ownerMembership]
+            }
+
+            if recordType == "BroFeedEvent",
+               predicate.predicateFormat.contains("circleID")
+            {
+                return [queriedEvent]
+            }
+
+            return []
+        }
+        store.saveHandler = { records, _ in
+            guard let savedCircle = records.first(where: { $0.recordType == "BroCircle" }) else {
+                return
+            }
+            savedFeedEventRecordNames = (savedCircle["feedEventRecordNames"] as? [String]) ?? []
+        }
+
+        let service = CloudKitBrosSocialService(modelContext: context, cloudStore: store)
+        let snapshot = try await service.fetchSnapshot()
+
+        let resolved = try #require(snapshot)
+        #expect(resolved.feedEvents.map(\.id) == [queriedEvent.recordID.recordName])
+        #expect(savedFeedEventRecordNames == [queriedEvent.recordID.recordName])
+    }
+
+    @Test
     func fetchSnapshotPreservesReactionsForQueriedFeedEventsOutsideStaleIndex() async throws {
         let context = try makeInMemoryContext()
         let joinedAt = Date(timeIntervalSince1970: 100)
