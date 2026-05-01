@@ -24,6 +24,7 @@ struct WorkoutCompletionSummaryView: View {
                     if let snapshot {
                         heroCard(snapshot)
                         statGrid(snapshot)
+                        muscleHeatmapSection(snapshot)
                         personalRecordsSection(snapshot)
                         cardioRecapSection(snapshot)
                         exerciseRecapSection(snapshot)
@@ -275,6 +276,15 @@ struct WorkoutCompletionSummaryView: View {
         }
     }
 
+    private func muscleHeatmapSection(_ snapshot: WorkoutCompletionSnapshot) -> some View {
+        WorkoutMuscleHeatmapCard(
+            title: "Muscle Heatmap",
+            subtitle: "Worked this session",
+            snapshot: snapshot.muscleHeatmap,
+            emptyMessage: "No working-set muscle data was found for this workout."
+        )
+    }
+
     private func exerciseRecapSection(_ snapshot: WorkoutCompletionSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             WGJActionHeader("Exercise Recap", subtitle: "Every exercise you closed out in this session.")
@@ -390,6 +400,7 @@ struct WorkoutCompletionSnapshot: Equatable {
     let prSupportText: String
     let personalRecords: [WorkoutCompletionPersonalRecord]
     let cardioRecap: [WorkoutCompletionCardioRecap]
+    let muscleHeatmap: WorkoutMuscleHeatmapSnapshot
     let exerciseRecap: [WorkoutCompletionExerciseRecap]
 }
 
@@ -437,6 +448,16 @@ enum WorkoutCompletionSnapshotBuilder {
         let completedSetCount = exerciseData.reduce(0) { partialResult, data in
             partialResult + data.completedSetCount
         }
+        let catalogMuscleMappings = try WorkoutMuscleHeatmapBuilder.catalogMappings(modelContext: modelContext)
+        let muscleHeatmapScores = exercises.reduce(into: [ExerciseBodyMapRegion: Double]()) { scores, exercise in
+            let exerciseScores = WorkoutMuscleHeatmapBuilder.scores(
+                for: exercise,
+                catalogMappings: catalogMuscleMappings
+            )
+            for (region, score) in exerciseScores {
+                scores[region, default: 0] += score
+            }
+        }
         let personalRecords = try WorkoutMetricsService(modelContext: modelContext)
             .sessionSetPRAchievements(sessionID: sessionID)
             .map(makePersonalRecord)
@@ -471,6 +492,7 @@ enum WorkoutCompletionSnapshotBuilder {
             prSupportText: prSupportText,
             personalRecords: personalRecords,
             cardioRecap: cardioBlocks.map(makeCardioRecap),
+            muscleHeatmap: WorkoutMuscleHeatmapBuilder.snapshot(scores: muscleHeatmapScores),
             exerciseRecap: exerciseData.map(\.recap)
         )
     }

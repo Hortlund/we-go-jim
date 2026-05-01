@@ -207,18 +207,7 @@ nonisolated struct ProfileWeeklyMuscleHeatmapSnapshot: Equatable, Sendable {
     )
 }
 
-nonisolated struct ProfileWeeklyMuscleHeatmapEntry: Identifiable, Equatable, Sendable {
-    let region: ExerciseBodyMapRegion
-    let score: Double
-    let intensity: Double
-
-    var id: ExerciseBodyMapRegion { region }
-}
-
-nonisolated private struct CatalogExerciseMuscleMapping {
-    let primaryMuscleIDs: Set<Int>
-    let secondaryMuscleIDs: Set<Int>
-}
+typealias ProfileWeeklyMuscleHeatmapEntry = WorkoutMuscleHeatmapEntry
 
 nonisolated private struct WeightedWorkingSetMetric: Equatable {
     let setID: UUID
@@ -997,7 +986,7 @@ nonisolated final class WorkoutMetricsService {
         let sessions = try repository.completedSessions()
         let facts = try historyProjectionRepository.allFacts()
         let factsBySessionID = Dictionary(grouping: facts, by: \.sessionID)
-        let catalogMuscleMappings = try catalogExerciseMuscleMappings()
+        let catalogMuscleMappings = try WorkoutMuscleHeatmapBuilder.catalogMappings(modelContext: modelContext)
 
         var bestPRByExercise: [String: WorkoutPRRecord] = [:]
         var bestBodyweightByExercise: [String: BodyweightExerciseBestRecord] = [:]
@@ -1056,9 +1045,9 @@ nonisolated final class WorkoutMetricsService {
 
                 if fact.reps > 0 {
                     let factWeek = weekStart(for: fact.completedAt)
-                    let scores = muscleRegionScores(
-                        for: fact,
-                        catalogMuscleMappings: catalogMuscleMappings,
+                    let scores = WorkoutMuscleHeatmapBuilder.scores(
+                        forCatalogExerciseUUID: fact.catalogExerciseUUID,
+                        catalogMappings: catalogMuscleMappings,
                         fallbackMuscleSummary: muscleSummariesBySessionExerciseID[fact.sessionExerciseID]
                     )
                     for (region, score) in scores {
@@ -1353,100 +1342,13 @@ nonisolated final class WorkoutMetricsService {
         weekStart: Date,
         scores: [ExerciseBodyMapRegion: Double]
     ) -> ProfileWeeklyMuscleHeatmapSnapshot {
-        let nonZeroScores = scores.filter { $0.value > 0 }
-        guard !nonZeroScores.isEmpty else {
-            return ProfileWeeklyMuscleHeatmapSnapshot(
-                weekStart: weekStart,
-                entries: [],
-                topRegionNames: []
-            )
-        }
-
-        let maxScore = max(nonZeroScores.values.max() ?? 1, 1)
-        let entries = nonZeroScores
-            .map { region, score in
-                ProfileWeeklyMuscleHeatmapEntry(
-                    region: region,
-                    score: score,
-                    intensity: min(max(score / maxScore, 0), 1)
-                )
-            }
-            .sorted { lhs, rhs in
-                if lhs.score != rhs.score {
-                    return lhs.score > rhs.score
-                }
-                return lhs.region.displayName.localizedStandardCompare(rhs.region.displayName) == .orderedAscending
-            }
+        let heatmap = WorkoutMuscleHeatmapBuilder.snapshot(scores: scores)
 
         return ProfileWeeklyMuscleHeatmapSnapshot(
             weekStart: weekStart,
-            entries: entries,
-            topRegionNames: entries.prefix(3).map(\.region.displayName)
+            entries: heatmap.entries,
+            topRegionNames: heatmap.topRegionNames
         )
-    }
-
-    private func catalogExerciseMuscleMappings() throws -> [String: CatalogExerciseMuscleMapping] {
-        let descriptor = FetchDescriptor<ExerciseCatalogItem>()
-        let exercises = try modelContext.fetch(descriptor)
-        return Dictionary(
-            exercises.map { exercise in
-                (
-                    exercise.remoteUUID,
-                    CatalogExerciseMuscleMapping(
-                        primaryMuscleIDs: Set(exercise.primaryMuscles.map(\.remoteID)),
-                        secondaryMuscleIDs: Set(exercise.secondaryMuscles.map(\.remoteID))
-                    )
-                )
-            },
-            uniquingKeysWith: { first, _ in first }
-        )
-    }
-
-    private func muscleRegionScores(
-        for fact: CompletedSetFact,
-        catalogMuscleMappings: [String: CatalogExerciseMuscleMapping],
-        fallbackMuscleSummary: String?
-    ) -> [ExerciseBodyMapRegion: Double] {
-        if let mapping = catalogMuscleMappings[fact.catalogExerciseUUID] {
-            return ExerciseBodyMapRegionMapper.regionScores(
-                primaryMuscleIDs: mapping.primaryMuscleIDs,
-                secondaryMuscleIDs: mapping.secondaryMuscleIDs
-            )
-        }
-
-        let fallbackIDs = muscleIDs(fromSummary: fallbackMuscleSummary)
-        guard !fallbackIDs.isEmpty else { return [:] }
-        return ExerciseBodyMapRegionMapper.regionScores(
-            primaryMuscleIDs: fallbackIDs,
-            secondaryMuscleIDs: []
-        )
-    }
-
-    private func muscleIDs(fromSummary summary: String?) -> Set<Int> {
-        guard let summary else { return [] }
-        let normalized = summary.lowercased()
-        var ids: Set<Int> = []
-        let mappings: [(tokens: [String], id: Int)] = [
-            (["biceps"], 1),
-            (["shoulders", "shoulder", "deltoids", "delts"], 2),
-            (["chest", "pecs", "pectorals"], 3),
-            (["back", "lats", "latissimus", "rhomboids", "lower back", "upper back"], 4),
-            (["quadriceps", "quads"], 5),
-            (["hamstrings", "hamstring"], 6),
-            (["glutes", "gluteal"], 7),
-            (["triceps"], 8),
-            (["calves", "calf"], 9),
-            (["abs", "core", "abdominals", "obliques"], 10),
-            (["forearms", "forearm"], 11),
-            (["traps", "trapezius"], 12),
-            (["adductors", "adductor"], 13),
-            (["abductors", "abductor"], 14),
-        ]
-
-        for mapping in mappings where mapping.tokens.contains(where: { normalized.contains($0) }) {
-            ids.insert(mapping.id)
-        }
-        return ids
     }
 
     private func streakSummary(for workoutDays: [Date]) -> (current: Int, longest: Int) {

@@ -10,6 +10,8 @@ struct WorkoutCompletionSnapshotBuilderTests {
         let context = try makeInMemoryContext()
         let repository = WorkoutSessionRepository(modelContext: context)
 
+        let chest = MuscleGroup(remoteID: 3, name: "Chest", nameEn: "Chest")
+        let triceps = MuscleGroup(remoteID: 8, name: "Triceps", nameEn: "Triceps")
         let bench = ExerciseCatalogItem(
             remoteUUID: "summary-bench",
             displayName: "Bench Press",
@@ -18,6 +20,10 @@ struct WorkoutCompletionSnapshotBuilderTests {
             isCurated: true,
             sourceName: "seed"
         )
+        bench.primaryMuscles = [chest]
+        bench.secondaryMuscles = [triceps]
+        context.insert(chest)
+        context.insert(triceps)
         context.insert(bench)
 
         let session = try repository.createEmptySession(name: "Upper")
@@ -43,6 +49,9 @@ struct WorkoutCompletionSnapshotBuilderTests {
         #expect(snapshot.exerciseRecap.first?.completedSetCount == 2)
         #expect(snapshot.exerciseRecap.first?.totalSetCount == 3)
         #expect(snapshot.exerciseRecap.first?.bestSetText == "80 kg x 8")
+        #expect(snapshot.muscleHeatmap.topRegionNames == ["Chest", "Triceps"])
+        #expect(snapshot.muscleHeatmap.entries.first(where: { $0.region == .chest })?.score == 1)
+        #expect(snapshot.muscleHeatmap.entries.first(where: { $0.region == .triceps })?.score == 0.35)
     }
 
     @Test
