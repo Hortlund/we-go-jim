@@ -174,6 +174,8 @@ struct ProfileWidgetManagerView: View {
             return "trophy.fill"
         case .weeklyGoals:
             return "target"
+        case .weeklyMuscleHeatmap:
+            return "figure.strengthtraining.traditional"
         case .coachBrief:
             return "quote.bubble"
         case .exerciseOneRMTrend:
@@ -195,6 +197,8 @@ struct ProfileWidgetManagerView: View {
             return "Show your strongest logged PRs."
         case .weeklyGoals:
             return "Track progress toward your workout goal."
+        case .weeklyMuscleHeatmap:
+            return "Show the muscle groups trained this week."
         case .coachBrief:
             return "Read a short coach summary of what changed."
         case .exerciseOneRMTrend:

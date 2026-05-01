@@ -251,6 +251,8 @@ struct ProfileView: View {
                         prWidget
                     case .weeklyGoals:
                         weeklyGoalsWidget
+                    case .weeklyMuscleHeatmap:
+                        weeklyMuscleHeatmapWidget
                     case .coachBrief:
                         coachBriefWidget
                     case .exerciseOneRMTrend:
@@ -400,6 +402,10 @@ struct ProfileView: View {
                 .wgjCardContainer()
             }
         }
+    }
+
+    private var weeklyMuscleHeatmapWidget: some View {
+        ProfileWeeklyMuscleHeatmapWidget(snapshot: dashboardContent.weeklyMuscleHeatmap)
     }
 
     private var streaksWidget: some View {
@@ -1196,7 +1202,7 @@ final class ProfileViewController {
                             preferredExerciseName: config.selectedExerciseNameSnapshot,
                             limit: 8
                         )
-                    case .prs, .weeklyGoals, .coachBrief, .streaks, .topExercises, .consistencyCalendar:
+                    case .prs, .weeklyGoals, .weeklyMuscleHeatmap, .coachBrief, .streaks, .topExercises, .consistencyCalendar:
                         continue
                     }
 
@@ -1249,7 +1255,7 @@ final class ProfileViewController {
                         preferredExerciseName: config.selectedExerciseNameSnapshot,
                         limit: 8
                     )
-                case .prs, .weeklyGoals, .coachBrief, .streaks, .topExercises, .consistencyCalendar:
+                case .prs, .weeklyGoals, .weeklyMuscleHeatmap, .coachBrief, .streaks, .topExercises, .consistencyCalendar:
                     continue
                 }
 
@@ -1313,6 +1319,7 @@ nonisolated struct ProfileDashboardContent: Sendable {
     var enabledWidgets: [ProfileWidgetConfigSnapshot]
     var personalRecords: [WorkoutPRRecord]
     var weeklyProgress: [WeeklyWorkoutProgressPoint]
+    var weeklyMuscleHeatmap: ProfileWeeklyMuscleHeatmapSnapshot
     var trendSeriesByKind: [ProfileWidgetKind: ExerciseMetricSeries]
     var coachBrief: ProfileCoachPresentation?
     var weeklyGoal: Int
@@ -1324,6 +1331,7 @@ nonisolated struct ProfileDashboardContent: Sendable {
         enabledWidgets: [],
         personalRecords: [],
         weeklyProgress: [],
+        weeklyMuscleHeatmap: .empty,
         trendSeriesByKind: [:],
         coachBrief: nil,
         weeklyGoal: 4,
@@ -1342,6 +1350,7 @@ nonisolated struct ProfileDashboardContent: Sendable {
             enabledWidgets: enabledWidgets,
             personalRecords: Array(dashboard.personalRecords.prefix(5)),
             weeklyProgress: dashboard.weeklyProgress,
+            weeklyMuscleHeatmap: dashboard.weeklyMuscleHeatmap,
             trendSeriesByKind: trendSeriesByKind,
             coachBrief: coachBrief,
             weeklyGoal: max(1, dashboard.weeklyGoal),

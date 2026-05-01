@@ -1,6 +1,6 @@
 import Foundation
 
-enum ExerciseBodyMapRegion: String, CaseIterable {
+nonisolated enum ExerciseBodyMapRegion: String, CaseIterable, Sendable {
     case abs
     case adductors
     case biceps
@@ -17,6 +17,43 @@ enum ExerciseBodyMapRegion: String, CaseIterable {
     case trapezius
     case triceps
     case upperBack = "upper-back"
+
+    var displayName: String {
+        switch self {
+        case .abs:
+            return "Abs"
+        case .adductors:
+            return "Adductors"
+        case .biceps:
+            return "Biceps"
+        case .calves:
+            return "Calves"
+        case .chest:
+            return "Chest"
+        case .deltoids:
+            return "Shoulders"
+        case .forearm:
+            return "Forearms"
+        case .gluteal:
+            return "Glutes"
+        case .hamstring:
+            return "Hamstrings"
+        case .lowerBack:
+            return "Lower Back"
+        case .obliques:
+            return "Obliques"
+        case .quadriceps:
+            return "Quadriceps"
+        case .rhomboids:
+            return "Rhomboids"
+        case .trapezius:
+            return "Traps"
+        case .triceps:
+            return "Triceps"
+        case .upperBack:
+            return "Upper Back"
+        }
+    }
 }
 
 struct ExerciseBodyMapHighlightSpec: Equatable {
@@ -25,6 +62,9 @@ struct ExerciseBodyMapHighlightSpec: Equatable {
 }
 
 enum ExerciseBodyMapRegionMapper {
+    private nonisolated static let primarySetWeight = 1.0
+    private nonisolated static let secondarySetWeight = 0.35
+
     nonisolated static func highlightSpec(
         primaryMuscleIDs: Set<Int>,
         secondaryMuscleIDs: Set<Int>
@@ -32,6 +72,24 @@ enum ExerciseBodyMapRegionMapper {
         let primary = regions(for: primaryMuscleIDs)
         let secondary = regions(for: secondaryMuscleIDs).subtracting(primary)
         return ExerciseBodyMapHighlightSpec(primaryRegions: primary, secondaryRegions: secondary)
+    }
+
+    nonisolated static func regionScores(
+        primaryMuscleIDs: Set<Int>,
+        secondaryMuscleIDs: Set<Int>
+    ) -> [ExerciseBodyMapRegion: Double] {
+        let spec = highlightSpec(
+            primaryMuscleIDs: primaryMuscleIDs,
+            secondaryMuscleIDs: secondaryMuscleIDs
+        )
+        var scores: [ExerciseBodyMapRegion: Double] = [:]
+        for region in spec.primaryRegions {
+            scores[region, default: 0] += primarySetWeight
+        }
+        for region in spec.secondaryRegions {
+            scores[region, default: 0] += secondarySetWeight
+        }
+        return scores
     }
 
     private nonisolated static func regions(for muscleIDs: Set<Int>) -> Set<ExerciseBodyMapRegion> {

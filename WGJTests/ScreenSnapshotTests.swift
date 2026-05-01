@@ -387,6 +387,17 @@ struct ScreenSnapshotTests {
                     goal: 0
                 ),
             ],
+            weeklyMuscleHeatmap: ProfileWeeklyMuscleHeatmapSnapshot(
+                weekStart: Date(timeIntervalSince1970: 1_736_035_200),
+                entries: [
+                    ProfileWeeklyMuscleHeatmapEntry(
+                        region: .chest,
+                        score: 4,
+                        intensity: 1
+                    ),
+                ],
+                topRegionNames: ["Chest"]
+            ),
             weeklyGoal: 0,
             overviewStats: ProfileOverviewStats(
                 totalWorkouts: 6,
@@ -474,6 +485,7 @@ struct ScreenSnapshotTests {
         #expect(content.enabledWidgets.count == 3)
         #expect(content.personalRecords.map(\.exerciseName) == ["Bench Press"])
         #expect(content.weeklyProgress.first?.completedWorkouts == 3)
+        #expect(content.weeklyMuscleHeatmap.topRegionNames == ["Chest"])
         #expect(content.weeklyGoal == 1)
         #expect(content.overviewStats.totalWorkouts == 6)
         #expect(content.topExercises.first?.sessionCount == 4)

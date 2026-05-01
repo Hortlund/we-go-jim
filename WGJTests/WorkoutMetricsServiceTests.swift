@@ -576,6 +576,73 @@ struct WorkoutMetricsServiceTests {
     }
 
     @Test
+    func profileDashboardSnapshotBuildsCurrentWeekMuscleHeatmap() throws {
+        let context = try makeInMemoryContext()
+        let sessionRepository = WorkoutSessionRepository(modelContext: context)
+        let calendar = Calendar.current
+        let metrics = WorkoutMetricsService(modelContext: context, calendar: calendar)
+
+        let chest = MuscleGroup(remoteID: 3, name: "Chest", nameEn: "Chest")
+        let triceps = MuscleGroup(remoteID: 8, name: "Triceps", nameEn: "Triceps")
+        let quadriceps = MuscleGroup(remoteID: 5, name: "Quadriceps", nameEn: "Quadriceps")
+        context.insert(chest)
+        context.insert(triceps)
+        context.insert(quadriceps)
+
+        let bench = ExerciseCatalogItem(
+            remoteUUID: "heatmap-bench",
+            displayName: "Bench Press",
+            categoryName: "Chest",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        bench.primaryMuscles = [chest]
+        bench.secondaryMuscles = [triceps]
+        context.insert(bench)
+
+        let squat = ExerciseCatalogItem(
+            remoteUUID: "heatmap-squat",
+            displayName: "Back Squat",
+            categoryName: "Legs",
+            equipmentSummary: "Barbell",
+            isCurated: true,
+            sourceName: "seed"
+        )
+        squat.primaryMuscles = [quadriceps]
+        context.insert(squat)
+
+        let thisWeek = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: Date())) ?? Date()
+        let lastWeek = calendar.date(byAdding: .weekOfYear, value: -1, to: thisWeek) ?? thisWeek
+        try makeCompletedSession(
+            named: "Current Push",
+            exercise: bench,
+            start: thisWeek.addingTimeInterval(3_600),
+            durationSeconds: 1_800,
+            prHitsCount: 0,
+            sessionRepository: sessionRepository,
+            context: context
+        )
+        try makeCompletedSession(
+            named: "Old Legs",
+            exercise: squat,
+            start: lastWeek.addingTimeInterval(3_600),
+            durationSeconds: 1_800,
+            prHitsCount: 0,
+            sessionRepository: sessionRepository,
+            context: context
+        )
+
+        let heatmap = try metrics.profileDashboardSnapshot(prLimit: 5, weeks: 4).weeklyMuscleHeatmap
+
+        #expect(heatmap.weekStart == thisWeek)
+        #expect(heatmap.entries.contains { $0.region == .chest && $0.intensity == 1 })
+        #expect(heatmap.entries.contains { $0.region == .triceps && $0.intensity > 0 && $0.intensity < 1 })
+        #expect(!heatmap.entries.contains { $0.region == .quadriceps })
+        #expect(heatmap.topRegionNames.first == "Chest")
+    }
+
+    @Test
     func profileDashboardSnapshotCountsCompletedWorkoutsWithoutProjectedSetFacts() throws {
         let context = try makeInMemoryContext()
         let sessionRepository = WorkoutSessionRepository(modelContext: context)
@@ -765,25 +832,27 @@ struct WorkoutMetricsServiceTests {
         let repository = ProfileWidgetRepository(modelContext: context)
 
         let allConfigs = try repository.configurations()
-        #expect(allConfigs.count == 8)
+        #expect(allConfigs.count == 9)
         #expect(allConfigs.contains { $0.kind == .coachBrief })
+        #expect(allConfigs.contains { $0.kind == .weeklyMuscleHeatmap })
         #expect(allConfigs.contains { $0.kind == .streaks })
         #expect(allConfigs.contains { $0.kind == .topExercises })
         #expect(allConfigs.contains { $0.kind == .consistencyCalendar })
 
         var enabled = try repository.enabledConfigurations()
-        #expect(enabled.count == 3)
+        #expect(enabled.count == 4)
+        #expect(enabled.map(\.kind) == [.prs, .weeklyGoals, .weeklyMuscleHeatmap, .coachBrief])
 
         try repository.setEnabled(kind: .prs, isEnabled: false)
         enabled = try repository.enabledConfigurations()
-        #expect(enabled.count == 2)
-        #expect(enabled.map(\.kind) == [.weeklyGoals, .coachBrief])
+        #expect(enabled.count == 3)
+        #expect(enabled.map(\.kind) == [.weeklyGoals, .weeklyMuscleHeatmap, .coachBrief])
 
         try repository.setEnabled(kind: .prs, isEnabled: true)
         try repository.moveEnabledWidget(fromOffsets: IndexSet(integer: 0), toOffset: 3)
         enabled = try repository.enabledConfigurations()
-        #expect(enabled.count == 3)
-        #expect(enabled.map(\.kind) == [.weeklyGoals, .coachBrief, .prs])
+        #expect(enabled.count == 4)
+        #expect(enabled.map(\.kind) == [.weeklyGoals, .weeklyMuscleHeatmap, .prs, .coachBrief])
     }
 
     @Test

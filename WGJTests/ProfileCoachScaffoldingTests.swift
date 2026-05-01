@@ -12,10 +12,12 @@ struct ProfileCoachScaffoldingTests {
 
         let configurations = try repository.configurations()
 
-        #expect(configurations.count == 8)
-        #expect(ProfileWidgetKind.allCases.count == 8)
+        #expect(configurations.count == 9)
+        #expect(ProfileWidgetKind.allCases.count == 9)
         #expect(configurations.first(where: { $0.kind == .weeklyGoals })?.sortOrder == 1)
-        #expect(configurations.first(where: { $0.kind == .coachBrief })?.sortOrder == 2)
+        #expect(configurations.first(where: { $0.kind == .weeklyMuscleHeatmap })?.sortOrder == 2)
+        #expect(configurations.first(where: { $0.kind == .weeklyMuscleHeatmap })?.isEnabled == true)
+        #expect(configurations.first(where: { $0.kind == .coachBrief })?.sortOrder == 3)
         #expect(configurations.first(where: { $0.kind == .coachBrief })?.isEnabled == true)
         #expect(ProfileWidgetKind.coachBrief.requiresExerciseSelection == false)
         #expect(ProfileWidgetKind.coachBrief.title == "Coach Brief")
@@ -29,10 +31,11 @@ struct ProfileCoachScaffoldingTests {
         let repository = ProfileWidgetRepository(modelContext: context)
         let configurations = try repository.configurations()
 
-        #expect(configurations.count == 8)
+        #expect(configurations.count == 9)
         #expect(configurations.map(\.kind) == [
             .prs,
             .weeklyGoals,
+            .weeklyMuscleHeatmap,
             .coachBrief,
             .exerciseOneRMTrend,
             .exerciseVolumeTrend,
@@ -40,8 +43,9 @@ struct ProfileCoachScaffoldingTests {
             .topExercises,
             .consistencyCalendar,
         ])
-        #expect(configurations.first(where: { $0.kind == .coachBrief })?.sortOrder == 2)
-        #expect(configurations.first(where: { $0.kind == .exerciseOneRMTrend })?.sortOrder == 3)
+        #expect(configurations.first(where: { $0.kind == .weeklyMuscleHeatmap })?.sortOrder == 2)
+        #expect(configurations.first(where: { $0.kind == .coachBrief })?.sortOrder == 3)
+        #expect(configurations.first(where: { $0.kind == .exerciseOneRMTrend })?.sortOrder == 4)
     }
 
     @Test
