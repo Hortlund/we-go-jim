@@ -1139,20 +1139,18 @@ struct ExerciseDetailDestinationView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                ExerciseCatalogThumbnail(exercise: exercise, repository: repository, placeholderPadding: 20)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 220)
-                    .background(WGJTheme.field)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(WGJTheme.accentBlue.opacity(0.25), lineWidth: 1)
-                    )
-
                 Text(exercise.displayName)
-                    .font(.title2.weight(.semibold))
+                    .font(.largeTitle.weight(.bold))
                     .foregroundStyle(WGJTheme.textPrimary)
-                    .wgjSingleLineText(scale: 0.78)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.82)
+                    .accessibilityIdentifier("exercise-detail-title")
+
+                ExerciseBodyMapSection(
+                    primaryMuscleIDs: Set(exercise.primaryMuscles.map(\.remoteID)),
+                    secondaryMuscleIDs: Set(exercise.secondaryMuscles.map(\.remoteID)),
+                    showsTitle: false
+                )
 
                 if !exercise.categoryName.isEmpty {
                     detailInfoRow(title: "Category", value: exercise.categoryName)

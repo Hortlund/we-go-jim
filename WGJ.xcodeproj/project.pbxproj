@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		C85A32012F39A7B000217B62 /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C85A32002F39A7B000217B62 /* AppIntents.framework */; };
+		C85A32112F3AB00100217B62 /* MuscleMap in Frameworks */ = {isa = PBXBuildFile; productRef = C85A32102F3AB00100217B62 /* MuscleMap */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -58,6 +59,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C85A32012F39A7B000217B62 /* AppIntents.framework in Frameworks */,
+				C85A32112F3AB00100217B62 /* MuscleMap in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -127,6 +129,7 @@
 			);
 			name = WGJ;
 			packageProductDependencies = (
+				C85A32102F3AB00100217B62 /* MuscleMap */,
 			);
 			productName = WGJ;
 			productReference = C85A31C52F367BAE00217B62 /* WGJ.app */;
@@ -221,6 +224,9 @@
 			);
 			mainGroup = C85A31BC2F367BAE00217B62;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				C85A320F2F3AB00100217B62 /* XCRemoteSwiftPackageReference "MuscleMap" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = C85A31C62F367BAE00217B62 /* Products */;
 			projectDirPath = "";
@@ -615,6 +621,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		C85A320F2F3AB00100217B62 /* XCRemoteSwiftPackageReference "MuscleMap" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/melihcolpan/MuscleMap";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.6.4;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		C85A32102F3AB00100217B62 /* MuscleMap */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C85A320F2F3AB00100217B62 /* XCRemoteSwiftPackageReference "MuscleMap" */;
+			productName = MuscleMap;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = C85A31BD2F367BAE00217B62 /* Project object */;
 }

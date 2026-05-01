@@ -150,6 +150,28 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testExerciseDetailShowsMuscleMap() throws {
+        let app = launchApp(mode: .localInMemory)
+
+        tapTab("Exercises", in: app)
+
+        let searchField = app.textFields["exercises-search-field"]
+        XCTAssertTrue(searchField.waitForExistence(timeout: 5))
+        searchField.tap()
+        searchField.typeText("barbell back squat")
+
+        let squatRow = app.staticTexts["Barbell Back Squat"]
+        XCTAssertTrue(squatRow.waitForExistence(timeout: 5))
+        squatRow.tap()
+
+        let detailTitle = identifiedElement("exercise-detail-title", in: app)
+        XCTAssertTrue(detailTitle.waitForExistence(timeout: 5))
+        let bodyMap = identifiedElement("exercise-body-map-section", in: app)
+        XCTAssertTrue(bodyMap.waitForExistence(timeout: 5))
+        XCTAssertLessThan(detailTitle.frame.maxY, bodyMap.frame.minY)
+    }
+
+    @MainActor
     func testTemplateAndFolderAddFlow() throws {
         let app = launchApp()
 
@@ -822,6 +844,25 @@ final class WGJUITests: XCTestCase {
 
         XCTAssertTrue(app.navigationBars["Support"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Email Support"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testCatalogCreditsIncludesMuscleMapPackageCredit() throws {
+        let app = launchApp(mode: .localInMemory)
+
+        tapTab("Profile", in: app)
+        let settingsTile = identifiedElement("profile-settings-tile", in: app)
+        XCTAssertTrue(settingsTile.waitForExistence(timeout: 5))
+        settingsTile.tap()
+
+        let catalogCreditsTile = identifiedElement("settings-catalog-credits-tile", in: app)
+        XCTAssertTrue(catalogCreditsTile.waitForExistence(timeout: 5))
+        catalogCreditsTile.tap()
+
+        XCTAssertTrue(app.navigationBars["Catalog Credits"].waitForExistence(timeout: 5))
+        XCTAssertTrue(identifiedElement("catalog-credits-musclemap-card", in: app).waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["MuscleMap"].exists)
+        XCTAssertTrue(app.staticTexts["Author: Melih Colpan"].exists)
     }
 
     @MainActor

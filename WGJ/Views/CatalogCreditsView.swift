@@ -13,6 +13,27 @@ struct CatalogCreditsView: View {
                     icon: "text.book.closed"
                 )
 
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("MuscleMap")
+                        .font(.headline)
+                        .foregroundStyle(WGJTheme.textPrimary)
+
+                    Text("License: MIT")
+                        .font(.subheadline)
+                        .foregroundStyle(WGJTheme.textSecondary)
+
+                    Text("Author: Melih Colpan")
+                        .font(.subheadline)
+                        .foregroundStyle(WGJTheme.textSecondary)
+
+                    Link("Source URL", destination: URL(string: "https://github.com/melihcolpan/MuscleMap")!)
+                    Link("Author GitHub", destination: URL(string: "https://github.com/melihcolpan")!)
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .wgjCardContainer()
+                .accessibilityIdentifier("catalog-credits-musclemap-card")
+
                 ForEach(deduplicatedAttributions, id: \.id) { entry in
                     VStack(alignment: .leading, spacing: 5) {
                         Text(entry.sourceName)
