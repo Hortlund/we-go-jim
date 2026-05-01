@@ -88,8 +88,28 @@ final class WGJUITests: XCTestCase {
         let searchField = app.textFields["exercises-search-field"]
         XCTAssertTrue(searchField.waitForExistence(timeout: 5))
         XCTAssertLessThan(title.frame.maxY, searchField.frame.minY)
+        XCTAssertTrue(identifiedElement("exercise-catalog-add-button", in: app).waitForExistence(timeout: 10))
+        let createButton = app.buttons["exercises-create-button"]
+        XCTAssertTrue(createButton.waitForExistence(timeout: 2))
+        XCTAssertTrue(createButton.isHittable)
+        XCTAssertLessThan(app.buttons["exercises-category-filter"].frame.maxY, createButton.frame.minY)
+        let listDragStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.74))
+        let listDragEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.16))
+        listDragStart.press(forDuration: 0.05, thenDragTo: listDragEnd)
+        listDragStart.press(forDuration: 0.05, thenDragTo: listDragEnd)
+        XCTAssertTrue(searchField.waitForExistence(timeout: 2))
+        XCTAssertTrue(searchField.isHittable)
+        XCTAssertGreaterThanOrEqual(searchField.frame.minY, 72)
+        XCTAssertTrue(title.waitForNonExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["exercises-create-button"].waitForNonExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["exercises-body-part-filter"].waitForNonExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["exercises-category-filter"].waitForNonExistence(timeout: 2))
+
         searchField.tap()
         XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["exercises-create-button"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["exercises-body-part-filter"].exists)
+        XCTAssertTrue(app.buttons["exercises-category-filter"].exists)
         let initialHideKeyboardButton = app.buttons["keyboard-hide-button"]
         XCTAssertTrue(initialHideKeyboardButton.exists)
         XCTAssertTrue(initialHideKeyboardButton.isHittable)

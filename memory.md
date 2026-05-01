@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-05-01 - Exercises Expanded Header Must Reserve Compact Controls Height
+
+- Date: 2026-05-01
+- Trigger/Problem: The Exercises search/header collapse looked better while scrolling, but the expanded compact toolbar clipped the create-exercise control and made the catalog content look cut off.
+- Root Cause: The expanded controls used a hardcoded `112` point height, which was too short for compact layout because compact uses two filter/sort rows plus the create action.
+- Durable Rule: When changing the Exercises header/search toolbar, reserve height from the actual compact vs. regular control layout policy instead of a single magic max height. The expanded compact state must show search, body part, category, sort, and create controls without clipping before scroll collapse starts.
+- How to Verify Next Time: Run `WGJUITests/WGJUITests/testExercisesSearchAndFilterSmoke` on the signed-in `iPhone 17 / iOS 26.2` simulator and confirm the create button is visible below the category filter before scrolling, then confirm scrolling collapses to a hittable search field.
+- Status: active
+
 ## 2026-05-01 - Bros Feed Index Must Tolerate Deleted Cloud Records
 
 - Date: 2026-05-01

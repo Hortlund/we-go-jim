@@ -12,6 +12,21 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
+    func exercisesCatalogHeaderCollapseProgressTracksScrollOffsetGradually() {
+        #expect(ExercisesCatalogHeaderCollapsePolicy.progress(forScrollOffset: 0) == 0)
+        #expect(ExercisesCatalogHeaderCollapsePolicy.progress(forScrollOffset: -18) > 0)
+        #expect(ExercisesCatalogHeaderCollapsePolicy.progress(forScrollOffset: -18) < 1)
+        #expect(ExercisesCatalogHeaderCollapsePolicy.progress(forScrollOffset: -36) == 1)
+        #expect(ExercisesCatalogHeaderCollapsePolicy.progress(forScrollOffset: 16) == 0)
+    }
+
+    @Test
+    func exercisesCatalogExpandedControlsReserveCompactFilterHeight() {
+        #expect(ExercisesCatalogHeaderCollapsePolicy.expandedControlsHeight(usesCompactFilterLayout: true) > 112)
+        #expect(ExercisesCatalogHeaderCollapsePolicy.expandedControlsHeight(usesCompactFilterLayout: false) < ExercisesCatalogHeaderCollapsePolicy.expandedControlsHeight(usesCompactFilterLayout: true))
+    }
+
+    @Test
     func deferredMaintenancePlannerSkipsWarmResumeWorkWhenEverythingIsFresh() {
         let work = AppDeferredMaintenancePlanner.plan(
             hasAppliedCleanStart: true,

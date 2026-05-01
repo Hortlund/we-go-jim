@@ -29,6 +29,9 @@ struct ExercisesCatalogView: View {
 
     @State private var errorMessage = ""
     @State private var showingError = false
+    @State private var catalogScrollOffset: CGFloat = 0
+    @State private var catalogTopMarkerBaseline: CGFloat?
+    @State private var isSearchToolbarExpanded = false
     @FocusState private var isSearchFieldFocused: Bool
 
     private let topAnchorID = "exercises-catalog-top"
@@ -89,11 +92,34 @@ struct ExercisesCatalogView: View {
     }
 
     private var headerSearchSpacing: CGFloat {
-        isPickerMode ? 0 : 30
+        isPickerMode ? 0 : 14
     }
 
     private var controlsSpacing: CGFloat {
         14
+    }
+
+    private var scrollDrivenHeaderCollapseProgress: CGFloat {
+        ExercisesCatalogHeaderCollapsePolicy.progress(forScrollOffset: catalogScrollOffset)
+    }
+
+    private var headerCollapseProgress: CGFloat {
+        guard !isPickerMode && !isSearchFieldFocused && !isSearchToolbarExpanded else { return 0 }
+        return scrollDrivenHeaderCollapseProgress
+    }
+
+    private var shouldRenderHeader: Bool {
+        !isPickerMode && headerCollapseProgress < 0.99
+    }
+
+    private var shouldRenderExpandedControls: Bool {
+        isPickerMode || headerCollapseProgress < 0.99
+    }
+
+    private var expandedControlsHeight: CGFloat {
+        ExercisesCatalogHeaderCollapsePolicy.expandedControlsHeight(
+            usesCompactFilterLayout: shouldUseCompactFilterLayout
+        )
     }
 
     var body: some View {
@@ -108,8 +134,7 @@ struct ExercisesCatalogView: View {
                     ZStack(alignment: .topTrailing) {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 0) {
-                                Color.clear
-                                    .frame(height: 0)
+                                scrollOffsetReader
                                     .id(topAnchorID)
 
                                 if controller.snapshot.sections.isEmpty {
@@ -140,6 +165,9 @@ struct ExercisesCatalogView: View {
                             .padding(.bottom, 16)
                         }
                         .scrollDismissesKeyboard(.interactively)
+                        .modifier(ExercisesCatalogScrollOffsetModifier { offset in
+                            catalogScrollOffset = -offset
+                        })
 
                         if reservesIndexRailSpace {
                             VStack(spacing: 4) {
@@ -195,6 +223,11 @@ struct ExercisesCatalogView: View {
             .onChange(of: searchState.sortDescending) { _, _ in
                 applyCurrentFilters()
                 scrollToTop(using: proxy)
+            }
+            .onPreferenceChange(ExercisesCatalogScrollOffsetPreferenceKey.self) { offset in
+                if #unavailable(iOS 18.0) {
+                    updateCatalogScrollOffset(markerY: offset)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -258,29 +291,58 @@ struct ExercisesCatalogView: View {
     }
 
     private var pinnedSearchControls: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if !isPickerMode {
+        let progress = headerCollapseProgress
+
+        return VStack(alignment: .leading, spacing: 0) {
+            if shouldRenderHeader {
                 WGJRootHeader(
                     "Exercises",
                     subtitle: "Search, filter, and add exercises fast.",
                     titleAccessibilityIdentifier: "exercises-catalog-title"
                 )
+                .opacity(1 - progress)
+                .offset(y: -18 * progress)
+                .frame(height: 66 * (1 - progress), alignment: .top)
+                .clipped()
+                .allowsHitTesting(progress < 0.5)
+                .accessibilityHidden(progress > 0.5)
+
                 Color.clear
-                    .frame(height: headerSearchSpacing)
+                    .frame(height: headerSearchSpacing * (1 - progress))
             }
 
             searchField
-            Color.clear
-                .frame(height: controlsSpacing)
-            filterRow
-            Color.clear
-                .frame(height: controlsSpacing)
-            createExerciseButton
+
+            if shouldRenderExpandedControls {
+                Color.clear
+                    .frame(height: controlsSpacing * (1 - progress))
+
+                VStack(alignment: .leading, spacing: controlsSpacing) {
+                    filterRow
+                    createExerciseButton
+                }
+                .opacity(1 - progress)
+                .offset(y: -16 * progress)
+                .frame(height: expandedControlsHeight * (1 - progress), alignment: .top)
+                .clipped()
+                .allowsHitTesting(progress < 0.5)
+                .accessibilityHidden(progress > 0.5)
+            }
         }
         .padding(.horizontal, 16)
-        .padding(.top, isPickerMode ? 10 : 16)
+        .padding(.top, isPickerMode ? 10 : (16 - (2 * progress)))
         .padding(.bottom, 10)
         .background(WGJTheme.bgBase)
+    }
+
+    private var scrollOffsetReader: some View {
+        GeometryReader { proxy in
+            Color.clear.preference(
+                key: ExercisesCatalogScrollOffsetPreferenceKey.self,
+                value: proxy.frame(in: .global).minY
+            )
+        }
+        .frame(height: 1)
     }
 
     private var searchField: some View {
@@ -299,12 +361,20 @@ struct ExercisesCatalogView: View {
             .frame(height: 22)
         }
         .wgjPillField()
+        .contentShape(Rectangle())
+        .onTapGesture {
+            isSearchToolbarExpanded = true
+            isSearchFieldFocused = true
+        }
     }
 
     private var searchFocusBinding: Binding<Bool> {
         Binding(
             get: { isSearchFieldFocused },
-            set: { isSearchFieldFocused = $0 }
+            set: { isFocused in
+                isSearchFieldFocused = isFocused
+                isSearchToolbarExpanded = isFocused
+            }
         )
     }
 
@@ -504,6 +574,8 @@ struct ExercisesCatalogView: View {
     }
 
     private func applyCurrentFilters() {
+        catalogScrollOffset = 0
+        catalogTopMarkerBaseline = nil
         controller.applyFilters(
             query: searchState.debouncedQuery,
             selectedPrimaryMuscleID: searchState.selectedPrimaryMuscleID,
@@ -512,15 +584,31 @@ struct ExercisesCatalogView: View {
         )
     }
 
+    private func updateCatalogScrollOffset(markerY: CGFloat) {
+        if let baseline = catalogTopMarkerBaseline {
+            if markerY > baseline {
+                catalogTopMarkerBaseline = markerY
+                catalogScrollOffset = 0
+            } else {
+                catalogScrollOffset = markerY - baseline
+            }
+        } else {
+            catalogTopMarkerBaseline = markerY
+            catalogScrollOffset = 0
+        }
+    }
+
     private func clearSearchAndFilters() {
         searchState.clearSearchAndFilters()
         isSearchFieldFocused = false
+        isSearchToolbarExpanded = false
         WGJKeyboard.dismiss()
         applyCurrentFilters()
     }
 
     private func handleSelection(_ exercise: ExerciseCatalogItem) {
         isSearchFieldFocused = false
+        isSearchToolbarExpanded = false
         WGJKeyboard.dismiss()
 
         if let pickerSelectAction {
@@ -541,6 +629,7 @@ struct ExercisesCatalogView: View {
                         presentActiveWorkout(sessionID: activeSession.id)
                     }
                     isSearchFieldFocused = false
+                    isSearchToolbarExpanded = false
                     WGJKeyboard.dismiss()
                     return
                 }
@@ -559,6 +648,7 @@ struct ExercisesCatalogView: View {
             guard let pendingExerciseForAdd else { return }
             self.pendingExerciseForAdd = nil
             isSearchFieldFocused = false
+            isSearchToolbarExpanded = false
             WGJKeyboard.dismiss()
 
             do {
@@ -730,6 +820,43 @@ struct ExercisesCatalogSearchState: Equatable {
         selectedCategory = nil
         sortDescending = false
         resetToken += 1
+    }
+}
+
+enum ExercisesCatalogHeaderCollapsePolicy {
+    static let collapseDistance: CGFloat = 36
+
+    static func progress(forScrollOffset scrollOffset: CGFloat) -> CGFloat {
+        let rawProgress = -scrollOffset / collapseDistance
+        return min(max(rawProgress, 0), 1)
+    }
+
+    static func expandedControlsHeight(usesCompactFilterLayout: Bool) -> CGFloat {
+        usesCompactFilterLayout ? 164 : 120
+    }
+}
+
+private struct ExercisesCatalogScrollOffsetPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct ExercisesCatalogScrollOffsetModifier: ViewModifier {
+    let onOffsetChange: (CGFloat) -> Void
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.onScrollGeometryChange(for: CGFloat.self) { geometry in
+                geometry.contentOffset.y + geometry.contentInsets.top
+            } action: { _, offset in
+                onOffsetChange(max(offset, 0))
+            }
+        } else {
+            content
+        }
     }
 }
 
