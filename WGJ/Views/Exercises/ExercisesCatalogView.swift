@@ -433,12 +433,9 @@ struct ExercisesCatalogView: View {
                     HStack(spacing: 8) {
                         bodyPartFilter
                         categoryFilter
-                    }
-                    activeFilterDropdownPanel
-                    HStack {
-                        Spacer(minLength: 0)
                         sortButton
                     }
+                    activeFilterDropdownPanel
                 }
             } else {
                 VStack(alignment: .leading, spacing: 8) {
@@ -499,8 +496,19 @@ struct ExercisesCatalogView: View {
             searchState.sortDescending.toggle()
         } label: {
             Image(systemName: "arrow.up.arrow.down")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(WGJTheme.textPrimary)
+                .frame(width: 36, height: 36)
+                .background {
+                    RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
+                        .fill(WGJTheme.card.opacity(0.92))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
+                                .stroke(WGJTheme.outline.opacity(0.70), lineWidth: 1)
+                        }
+                }
         }
-        .buttonStyle(WGJIconButtonStyle())
+        .buttonStyle(.plain)
         .accessibilityIdentifier("exercises-sort-button")
     }
 
@@ -516,7 +524,7 @@ struct ExercisesCatalogView: View {
                         isSelected: searchState.selectedPrimaryMuscleID == nil
                     ) {
                         searchState.selectedPrimaryMuscleID = nil
-                        self.activeFilterDropdown = nil
+                        closeFilterDropdownAfterSelection()
                     }
 
                     filterOptionRow(
@@ -539,7 +547,7 @@ struct ExercisesCatalogView: View {
                                     isSelected: searchState.selectedPrimaryMuscleID == muscle.id
                                 ) {
                                     searchState.selectedPrimaryMuscleID = muscle.id
-                                    self.activeFilterDropdown = nil
+                                    closeFilterDropdownAfterSelection()
                                 }
                             }
                         }
@@ -555,7 +563,7 @@ struct ExercisesCatalogView: View {
                         isSelected: searchState.selectedCategory == nil
                     ) {
                         searchState.selectedCategory = nil
-                        self.activeFilterDropdown = nil
+                        closeFilterDropdownAfterSelection()
                     }
 
                     Divider().overlay(WGJTheme.outline.opacity(0.35))
@@ -569,7 +577,7 @@ struct ExercisesCatalogView: View {
                                     isSelected: searchState.selectedCategory == category
                                 ) {
                                     searchState.selectedCategory = category
-                                    self.activeFilterDropdown = nil
+                                    closeFilterDropdownAfterSelection()
                                 }
                             }
                         }
@@ -587,6 +595,12 @@ struct ExercisesCatalogView: View {
             activeFilterDropdown = nextDropdown
         }
         isSearchToolbarExpanded = nextDropdown != nil
+        isSearchFieldFocused = false
+    }
+
+    private func closeFilterDropdownAfterSelection() {
+        activeFilterDropdown = nil
+        isSearchToolbarExpanded = false
         isSearchFieldFocused = false
     }
 
@@ -1063,7 +1077,7 @@ enum ExercisesCatalogHeaderCollapsePolicy {
     }
 
     static func expandedControlsHeight(usesCompactFilterLayout: Bool) -> CGFloat {
-        usesCompactFilterLayout ? 164 : 120
+        120
     }
 }
 

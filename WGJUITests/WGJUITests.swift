@@ -139,7 +139,26 @@ final class WGJUITests: XCTestCase {
         let categoryDropdown = identifiedElement("exercises-category-dropdown", in: app)
         XCTAssertTrue(categoryDropdown.waitForExistence(timeout: 2))
         XCTAssertGreaterThanOrEqual(categoryDropdown.frame.minY, categoryFilter.frame.maxY - 8)
-        categoryDropdown.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.16)).tap()
+        let chestCategory = app.buttons["Chest"]
+        XCTAssertTrue(chestCategory.waitForExistence(timeout: 2))
+        chestCategory.tap()
+        XCTAssertFalse(app.keyboards.element.waitForExistence(timeout: 1))
+
+        let filteredCategoryButton = app.buttons["exercises-category-filter"]
+        let filteredSortButton = app.buttons["exercises-sort-button"]
+        XCTAssertTrue(filteredCategoryButton.waitForExistence(timeout: 2))
+        XCTAssertTrue(filteredSortButton.waitForExistence(timeout: 2))
+        XCTAssertLessThan(abs(filteredSortButton.frame.midY - filteredCategoryButton.frame.midY), 8)
+        XCTAssertLessThanOrEqual(filteredSortButton.frame.height, filteredCategoryButton.frame.height + 2)
+
+        listDragStart.press(forDuration: 0.05, thenDragTo: listDragEnd)
+        listDragStart.press(forDuration: 0.05, thenDragTo: listDragEnd)
+        XCTAssertTrue(searchField.waitForExistence(timeout: 2))
+        XCTAssertTrue(searchField.isHittable)
+        XCTAssertTrue(title.waitForNonExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["exercises-create-button"].waitForNonExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["exercises-body-part-filter"].waitForNonExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["exercises-category-filter"].waitForNonExistence(timeout: 2))
 
         searchField.tap()
         XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 2))
