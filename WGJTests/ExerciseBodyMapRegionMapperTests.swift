@@ -76,4 +76,14 @@ struct ExerciseBodyMapRegionMapperTests {
             ) == 7
         )
     }
+
+    @Test
+    func prefersExactCatalogNameWhenMultipleMusclesShareBodyMapRegion() {
+        let muscles = [
+            ExerciseBodyMapFilterOption(id: 14, name: "Abductors"),
+            ExerciseBodyMapFilterOption(id: 7, name: "Glutes"),
+        ]
+
+        #expect(ExerciseBodyMapRegionMapper.catalogMuscleID(for: .gluteal, availableMuscles: muscles) == 7)
+    }
 }

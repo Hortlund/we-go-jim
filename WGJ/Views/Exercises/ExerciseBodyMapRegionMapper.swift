@@ -101,12 +101,15 @@ enum ExerciseBodyMapRegionMapper {
         for region: ExerciseBodyMapRegion,
         availableMuscles: [ExerciseBodyMapFilterOption]
     ) -> Int? {
-        availableMuscles
+        let matches = availableMuscles
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-            .first { option in
+            .filter { option in
                 regions(for: option.id).contains(region)
-            }?
-            .id
+            }
+
+        return matches.first {
+            $0.name.localizedCaseInsensitiveCompare(region.displayName) == .orderedSame
+        }?.id ?? matches.first?.id
     }
 
     nonisolated static func catalogMuscleID(
