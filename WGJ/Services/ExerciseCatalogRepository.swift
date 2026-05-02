@@ -10,6 +10,7 @@ nonisolated protocol ExerciseCatalogRepositoryProtocol {
     func exerciseSnapshotMap(for remoteUUIDs: [String]) throws -> [String: TrainingGuidanceCatalogSnapshot]
     func createCustomExercise(draft: CustomExerciseDraft) throws -> ExerciseCatalogItem
     func updateCustomExercise(_ exercise: ExerciseCatalogItem, draft: CustomExerciseDraft) throws
+    func deleteCustomExercise(_ exercise: ExerciseCatalogItem) throws
 }
 
 enum ExerciseCatalogRepositoryError: LocalizedError {
@@ -111,6 +112,16 @@ nonisolated final class ExerciseCatalogRepository: ExerciseCatalogRepositoryProt
         replaceAliases(on: exercise, aliases: validated.aliases)
         try refreshTemplateSnapshots(for: exercise)
 
+        try modelContext.save()
+        ExerciseSearchService.invalidateCatalogIndex(for: modelContext)
+    }
+
+    func deleteCustomExercise(_ exercise: ExerciseCatalogItem) throws {
+        guard exercise.isCustomExercise else {
+            throw ExerciseCatalogRepositoryError.nonEditableExercise
+        }
+
+        modelContext.delete(exercise)
         try modelContext.save()
         ExerciseSearchService.invalidateCatalogIndex(for: modelContext)
     }

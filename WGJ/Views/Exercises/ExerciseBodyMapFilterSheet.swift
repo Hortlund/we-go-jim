@@ -143,10 +143,9 @@ struct ExerciseBodyMapFilterSheet: View {
     }
 
     private func select(_ muscle: Muscle) {
-        let resolvedMuscle = muscle.parentGroup ?? muscle
-        guard let region = ExerciseBodyMapRegion(rawValue: resolvedMuscle.rawValue),
-              let muscleID = ExerciseBodyMapRegionMapper.catalogMuscleID(
-                for: region,
+        guard let muscleID = ExerciseBodyMapRegionMapper.catalogMuscleID(
+                muscleMapRawValue: muscle.rawValue,
+                parentMuscleMapRawValue: muscle.parentGroup?.rawValue,
                 availableMuscles: availableMuscles
               )
         else {

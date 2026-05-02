@@ -194,6 +194,7 @@ final class WGJUITests: XCTestCase {
         let bodyMap = identifiedElement("exercise-body-map-section", in: app)
         XCTAssertTrue(bodyMap.waitForExistence(timeout: 5))
         XCTAssertLessThan(detailTitle.frame.maxY, bodyMap.frame.minY)
+        XCTAssertFalse(app.buttons["exercise-detail-delete-button"].exists)
     }
 
     @MainActor

@@ -700,6 +700,9 @@ struct ExercisesCatalogView: View {
                     actionTitle: isPickerMode ? "Add to Template" : "Add to Workout",
                     onSelect: {
                         handleSelection(exercise)
+                    },
+                    onDelete: {
+                        reloadCatalogAfterExerciseDeletion()
                     }
                 )
             } label: {
@@ -1000,6 +1003,15 @@ struct ExercisesCatalogView: View {
             searchState.selectedCategory = nil
             searchState.sortDescending = false
             searchState.updateDebouncedQuery(created.displayName)
+            applyCurrentFilters()
+        } catch {
+            showError(error)
+        }
+    }
+
+    private func reloadCatalogAfterExerciseDeletion() {
+        do {
+            try controller.reload(modelContext: modelContext)
             applyCurrentFilters()
         } catch {
             showError(error)
@@ -1338,6 +1350,7 @@ private struct ExercisesCatalogSearchField: View {
 
 struct ExerciseDetailDestinationView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
 
     let exercise: ExerciseCatalogItem
     let repository: ExerciseCatalogRepository
@@ -1345,9 +1358,11 @@ struct ExerciseDetailDestinationView: View {
     let suggestedCategories: [String]
     var actionTitle: String?
     var onSelect: (() -> Void)?
+    var onDelete: (() -> Void)?
 
     @State private var showingCustomExerciseEditor = false
     @State private var customExerciseDraft = CustomExerciseDraft.empty
+    @State private var showingDeleteConfirmation = false
     @State private var statsSnapshot: ExerciseDetailStatsSnapshot?
     @State private var errorMessage = ""
     @State private var showingError = false
@@ -1429,12 +1444,20 @@ struct ExerciseDetailDestinationView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if exercise.isCustomExercise {
-                ToolbarItem(placement: .primaryAction) {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button(role: .destructive) {
+                        showingDeleteConfirmation = true
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                    .accessibilityIdentifier("exercise-detail-delete-button")
+
                     Button {
                         presentCustomExerciseEditor()
                     } label: {
                         Label("Edit", systemImage: "pencil")
                     }
+                    .accessibilityIdentifier("exercise-detail-edit-button")
                 }
             }
         }
@@ -1459,6 +1482,20 @@ struct ExerciseDetailDestinationView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(errorMessage)
+        }
+        .confirmationDialog(
+            "Delete Exercise?",
+            isPresented: $showingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Exercise", role: .destructive) {
+                deleteCustomExercise()
+            }
+            .accessibilityIdentifier("exercise-detail-confirm-delete-button")
+
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This removes \(exercise.displayName) from your custom exercise library. Bundled exercises cannot be deleted.")
         }
         .task(id: exercise.remoteUUID) {
             loadStatsSnapshot()
@@ -1518,6 +1555,17 @@ struct ExerciseDetailDestinationView: View {
         do {
             try repository.updateCustomExercise(exercise, draft: customExerciseDraft)
             showingCustomExerciseEditor = false
+        } catch {
+            errorMessage = String(describing: error)
+            showingError = true
+        }
+    }
+
+    private func deleteCustomExercise() {
+        do {
+            try repository.deleteCustomExercise(exercise)
+            onDelete?()
+            dismiss()
         } catch {
             errorMessage = String(describing: error)
             showingError = true

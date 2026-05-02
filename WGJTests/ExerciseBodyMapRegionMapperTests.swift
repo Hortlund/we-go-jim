@@ -52,4 +52,28 @@ struct ExerciseBodyMapRegionMapperTests {
         #expect(ExerciseBodyMapRegionMapper.catalogMuscleID(for: .obliques, availableMuscles: muscles) == 10)
         #expect(ExerciseBodyMapRegionMapper.catalogMuscleID(for: .quadriceps, availableMuscles: muscles) == nil)
     }
+
+    @Test
+    func resolvesTappedMuscleMapSubgroupsBeforeParentGroups() {
+        let muscles = [
+            ExerciseBodyMapFilterOption(id: 6, name: "Hamstrings"),
+            ExerciseBodyMapFilterOption(id: 7, name: "Glutes"),
+            ExerciseBodyMapFilterOption(id: 13, name: "Adductors"),
+        ]
+
+        #expect(
+            ExerciseBodyMapRegionMapper.catalogMuscleID(
+                muscleMapRawValue: "adductors",
+                parentMuscleMapRawValue: "hamstring",
+                availableMuscles: muscles
+            ) == 13
+        )
+        #expect(
+            ExerciseBodyMapRegionMapper.catalogMuscleID(
+                muscleMapRawValue: "gluteal",
+                parentMuscleMapRawValue: nil,
+                availableMuscles: muscles
+            ) == 7
+        )
+    }
 }

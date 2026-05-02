@@ -109,6 +109,24 @@ enum ExerciseBodyMapRegionMapper {
             .id
     }
 
+    nonisolated static func catalogMuscleID(
+        muscleMapRawValue: String,
+        parentMuscleMapRawValue: String?,
+        availableMuscles: [ExerciseBodyMapFilterOption]
+    ) -> Int? {
+        if let region = ExerciseBodyMapRegion(rawValue: muscleMapRawValue),
+           let directMatch = catalogMuscleID(for: region, availableMuscles: availableMuscles) {
+            return directMatch
+        }
+
+        guard let parentMuscleMapRawValue,
+              let parentRegion = ExerciseBodyMapRegion(rawValue: parentMuscleMapRawValue)
+        else {
+            return nil
+        }
+        return catalogMuscleID(for: parentRegion, availableMuscles: availableMuscles)
+    }
+
     private nonisolated static func regions(for muscleIDs: Set<Int>) -> Set<ExerciseBodyMapRegion> {
         Set(muscleIDs.flatMap(regions(for:)))
     }

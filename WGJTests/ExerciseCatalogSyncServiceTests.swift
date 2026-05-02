@@ -325,6 +325,58 @@ struct ExerciseCatalogSyncServiceTests {
         }
     }
 
+    @Test
+    func customExerciseDeleteRemovesCustomExerciseFromCatalog() throws {
+        let context = try makeInMemoryContext()
+        let service = ExerciseCatalogSyncService(
+            modelContext: context,
+            seedLoader: StaticSeedLoader(payload: SeedFixtures.initialPayload)
+        )
+        try service.ensureSeedImportedIfNeeded()
+
+        let repository = ExerciseCatalogRepository(
+            modelContext: context,
+            seedLoader: StaticSeedLoader(payload: SeedFixtures.initialPayload)
+        )
+        let created = try repository.createCustomExercise(
+            draft: CustomExerciseDraft(
+                name: "Custom Glute Bridge",
+                categoryName: "Glutes",
+                equipmentSummary: "Barbell",
+                aliases: ["Hip Thrust Variant"],
+                primaryMuscleIDs: [2],
+                secondaryMuscleIDs: [],
+                instructionText: "Drive through the heels."
+            )
+        )
+
+        try repository.deleteCustomExercise(created)
+
+        #expect(try repository.searchExercises(query: "custom glute bridge").isEmpty)
+        #expect(try context.fetch(FetchDescriptor<ExerciseCatalogItem>()).map(\.displayName) == ["Back Squat", "Bench Press"])
+    }
+
+    @Test
+    func seedExercisesCannotBeDeletedThroughCustomDeleteFlow() throws {
+        let context = try makeInMemoryContext()
+        let service = ExerciseCatalogSyncService(
+            modelContext: context,
+            seedLoader: StaticSeedLoader(payload: SeedFixtures.initialPayload)
+        )
+        try service.ensureSeedImportedIfNeeded()
+
+        let repository = ExerciseCatalogRepository(
+            modelContext: context,
+            seedLoader: StaticSeedLoader(payload: SeedFixtures.initialPayload)
+        )
+        let bench = try #require(try repository.searchExercises(query: "bench").first)
+
+        #expect(throws: ExerciseCatalogRepositoryError.self) {
+            try repository.deleteCustomExercise(bench)
+        }
+        #expect(try repository.searchExercises(query: "bench").map(\.displayName) == ["Bench Press"])
+    }
+
     private func makeInMemoryContext() throws -> ModelContext {
         let schema = Schema([
             ExerciseCatalogItem.self,
