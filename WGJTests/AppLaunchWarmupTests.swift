@@ -682,6 +682,21 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
+    func asyncCloudStartupPreflightReturnsWhenAccountStatusNeverCompletes() async {
+        let start = ContinuousClock.now
+
+        let decision = await CloudStartupPreflight.makeDecisionAsync(
+            statusProvider: HangingAsyncCloudStartupAccountStatusProvider(),
+            timeout: .milliseconds(25)
+        )
+
+        let elapsed = start.duration(to: .now)
+        #expect(decision.accountStatus == .timedOut)
+        #expect(decision.storeMode == .localFallback)
+        #expect(elapsed < .seconds(2))
+    }
+
+    @Test
     func appLaunchBootstrapResolverBuildsLocalFallbackWhenStartupDecisionRejectsCloud() async throws {
         let container = try makeContainer()
         var didRequestCloudContainer = false
@@ -1145,6 +1160,12 @@ private struct MockAsyncCloudStartupAccountStatusProvider: AsyncCloudStartupAcco
 
     func currentStatus() async -> CloudStartupAccountStatus {
         status
+    }
+}
+
+private struct HangingAsyncCloudStartupAccountStatusProvider: AsyncCloudStartupAccountStatusProviding {
+    func currentStatus() async -> CloudStartupAccountStatus {
+        await withCheckedContinuation { (_: CheckedContinuation<CloudStartupAccountStatus, Never>) in }
     }
 }
 

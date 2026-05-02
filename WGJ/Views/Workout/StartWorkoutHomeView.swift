@@ -723,7 +723,7 @@ struct StartWorkoutHomeView: View {
     }
 
     private func prepareActiveWorkoutStart(templateID: UUID?) async throws -> ActiveWorkoutStartPreparation {
-        if let snapshot = try await ActiveWorkoutSnapshotStore.shared.load() {
+        if let snapshot = try await ActiveWorkoutSnapshotStore.shared.loadDiscardingCorruptSnapshot() {
             return ActiveWorkoutStartPreparation(
                 sessionID: snapshot.id,
                 isExistingConflict: true,

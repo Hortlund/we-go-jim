@@ -858,7 +858,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
             sessionID: completedSession.id,
             container: modelContext.container
         )
-        try? CloudKitBrosSocialService.makeIfContainerAvailable(modelContext: modelContext)?
+        try? CloudKitBrosSocialService.makeIfUserDataSyncEnabled(modelContext: modelContext)?
             .queueCompletedSessionPublish(sessionID: completedSession.id)
 
         return completedSession.id

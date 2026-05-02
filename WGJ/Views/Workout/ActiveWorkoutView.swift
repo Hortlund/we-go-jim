@@ -1855,7 +1855,11 @@ struct ActiveWorkoutView: View {
 
             do {
                 let result = try await performFinishCommand(session: finishingSession, notes: finalNotes)
-                try await ActiveWorkoutSnapshotStore.shared.delete()
+                do {
+                    try await ActiveWorkoutSnapshotStore.shared.delete()
+                } catch {
+                    NSLog("WGJ active workout snapshot cleanup failed after completion: \(error.localizedDescription)")
+                }
                 handleCompletedSessionTransition(result)
             } catch {
                 isEndingSession = false

@@ -701,6 +701,9 @@ struct ExercisesCatalogView: View {
                     onSelect: {
                         handleSelection(exercise)
                     },
+                    onUpdate: {
+                        reloadCatalogAfterExerciseDeletion()
+                    },
                     onDelete: {
                         reloadCatalogAfterExerciseDeletion()
                     }
@@ -1357,8 +1360,9 @@ struct ExerciseDetailDestinationView: View {
     let availableMuscles: [MuscleGroup]
     let suggestedCategories: [String]
     var actionTitle: String?
-    var onSelect: (() -> Void)?
-    var onDelete: (() -> Void)?
+    var onSelect: (() -> Void)? = nil
+    var onUpdate: (() -> Void)? = nil
+    var onDelete: (() -> Void)? = nil
 
     @State private var showingCustomExerciseEditor = false
     @State private var customExerciseDraft = CustomExerciseDraft.empty
@@ -1554,6 +1558,8 @@ struct ExerciseDetailDestinationView: View {
     private func saveCustomExerciseChanges() {
         do {
             try repository.updateCustomExercise(exercise, draft: customExerciseDraft)
+            onUpdate?()
+            loadStatsSnapshot()
             showingCustomExerciseEditor = false
         } catch {
             errorMessage = String(describing: error)

@@ -1268,14 +1268,32 @@ struct BrosView: View {
 
                 Spacer(minLength: 0)
 
-                if snapshot.isCurrentUserOwner, member.id != snapshot.currentMember.id {
+                if member.id != snapshot.currentMember.id {
                     WGJActionMenuButton("Member Actions", usesPlainButtonStyle: false) {
-                        Button(role: .destructive) {
-                            Task {
-                                await viewModel.removeMember(membershipID: member.id, modelContext: modelContext)
-                            }
+                        Button {
+                            reportMember(snapshot: snapshot, member: member)
                         } label: {
-                            Label("Remove Bro", systemImage: "person.crop.circle.badge.minus")
+                            Label("Report Member", systemImage: "flag.fill")
+                        }
+                        .accessibilityIdentifier("bros-member-report-button")
+
+                        Button(role: .destructive) {
+                            block(member: member)
+                        } label: {
+                            Label("Block Member", systemImage: "hand.raised.fill")
+                        }
+                        .accessibilityIdentifier("bros-member-block-button")
+
+                        if snapshot.isCurrentUserOwner {
+                            Divider()
+
+                            Button(role: .destructive) {
+                                Task {
+                                    await viewModel.removeMember(membershipID: member.id, modelContext: modelContext)
+                                }
+                            } label: {
+                                Label("Remove Bro", systemImage: "person.crop.circle.badge.minus")
+                            }
                         }
                     } label: {
                         Image(systemName: "ellipsis")
@@ -1358,10 +1376,16 @@ struct BrosView: View {
                         await viewModel.removeMember(membershipID: member.id, modelContext: modelContext)
                     }
                 },
+                onReportMember: { member in
+                    reportMember(snapshot: snapshot, member: member)
+                },
                 onUpdateMemberLimit: { memberLimit in
                     Task {
                         await viewModel.updateCircleMemberLimit(memberLimit, modelContext: modelContext)
                     }
+                },
+                onBlockedBrosChanged: {
+                    reloadBlockedBros()
                 }
             )
         } label: {
@@ -1852,7 +1876,9 @@ private struct BroCircleManagementView: View {
     let presentation: BroCircleManagementPresentation
     let onLeaveCircle: () -> Void
     let onRemoveMember: (BroMemberSummary) -> Void
+    let onReportMember: (BroMemberSummary) -> Void
     let onUpdateMemberLimit: (Int) -> Void
+    let onBlockedBrosChanged: () -> Void
 
     @State private var memberLimitDraft: Int
     @State private var showingInviteCodeCopiedNotice = false
@@ -1863,14 +1889,18 @@ private struct BroCircleManagementView: View {
         presentation: BroCircleManagementPresentation,
         onLeaveCircle: @escaping () -> Void,
         onRemoveMember: @escaping (BroMemberSummary) -> Void,
-        onUpdateMemberLimit: @escaping (Int) -> Void
+        onReportMember: @escaping (BroMemberSummary) -> Void,
+        onUpdateMemberLimit: @escaping (Int) -> Void,
+        onBlockedBrosChanged: @escaping () -> Void
     ) {
         self.viewModel = viewModel
         self.snapshot = snapshot
         self.presentation = presentation
         self.onLeaveCircle = onLeaveCircle
         self.onRemoveMember = onRemoveMember
+        self.onReportMember = onReportMember
         self.onUpdateMemberLimit = onUpdateMemberLimit
+        self.onBlockedBrosChanged = onBlockedBrosChanged
         _memberLimitDraft = State(initialValue: snapshot.circle.memberLimit)
     }
 
@@ -2090,7 +2120,7 @@ private struct BroCircleManagementView: View {
             )
 
             NavigationLink {
-                BlockedBrosView()
+                BlockedBrosView(onBlockedBrosChanged: onBlockedBrosChanged)
             } label: {
                 Label("Manage Blocked Bros", systemImage: "person.crop.circle.badge.xmark")
                     .frame(maxWidth: .infinity)
@@ -2152,12 +2182,23 @@ private struct BroCircleManagementView: View {
 
             Spacer(minLength: 12)
 
-            if presentation.allowsMemberRemoval, member.id != snapshot.currentMember.id {
+            if member.id != snapshot.currentMember.id {
                 WGJActionMenuButton("Member Actions", usesPlainButtonStyle: false) {
-                    Button(role: .destructive) {
-                        onRemoveMember(member)
+                    Button {
+                        onReportMember(member)
                     } label: {
-                        Label("Remove Bro", systemImage: "person.crop.circle.badge.minus")
+                        Label("Report Member", systemImage: "flag.fill")
+                    }
+                    .accessibilityIdentifier("bros-management-member-report-button")
+
+                    if presentation.allowsMemberRemoval {
+                        Divider()
+
+                        Button(role: .destructive) {
+                            onRemoveMember(member)
+                        } label: {
+                            Label("Remove Bro", systemImage: "person.crop.circle.badge.minus")
+                        }
                     }
                 } label: {
                     Image(systemName: "ellipsis")

@@ -309,6 +309,7 @@ final class AppRuntimeState {
     func refreshCloudAvailabilityIfNeeded(
         force: Bool = false,
         accountService: (any AccountStatusProviding)? = nil,
+        runtimeTimeout: Duration = .seconds(2),
         now: Date = .now
     ) {
         guard cloudSyncEnabled else { return }
@@ -333,7 +334,10 @@ final class AppRuntimeState {
         let statusProvider = accountService ?? AccountStatusService()
 
         let refreshTask = Task(priority: .utility) { [weak self, statusProvider] in
-            let status = await statusProvider.fetchAccountStatus()
+            let status = await Self.accountStatus(
+                from: statusProvider,
+                timeout: runtimeTimeout
+            )
             guard let self else { return }
             self.finishRuntimeCloudAvailabilityRefresh(
                 refreshGeneration: refreshGeneration,
@@ -366,6 +370,40 @@ final class AppRuntimeState {
             return "iCloud is temporarily unavailable on this device. Cloud features are temporarily unavailable."
         case .unknown:
             return "WGJ could not verify iCloud availability right now. Cloud features are temporarily unavailable."
+        }
+    }
+
+    private static func accountStatus(
+        from statusProvider: any AccountStatusProviding,
+        timeout: Duration
+    ) async -> AccountStatus {
+        await withCheckedContinuation { (continuation: CheckedContinuation<AccountStatus, Never>) in
+            let lock = NSLock()
+            var didResume = false
+            var statusTask: Task<Void, Never>?
+            var timeoutTask: Task<Void, Never>?
+
+            func resumeOnce(_ status: AccountStatus) {
+                lock.lock()
+                guard !didResume else {
+                    lock.unlock()
+                    return
+                }
+                didResume = true
+                lock.unlock()
+                statusTask?.cancel()
+                timeoutTask?.cancel()
+                continuation.resume(returning: status)
+            }
+
+            statusTask = Task {
+                let status = await statusProvider.fetchAccountStatus()
+                resumeOnce(status)
+            }
+            timeoutTask = Task {
+                try? await Task.sleep(for: timeout)
+                resumeOnce(.unavailable(.unknown))
+            }
         }
     }
 

@@ -1093,6 +1093,45 @@ struct WGJTests {
     }
 
     @Test
+    func runtimeCloudAvailabilityTimeoutDoesNotBlockLaterRefresh() async {
+        let runtimeState = AppRuntimeState.makeTestingInstance()
+        runtimeState.updateCloudState(isEnabled: true, errorDescription: nil)
+        let hangingService = HangingRuntimeAccountStatusProvider()
+
+        runtimeState.refreshCloudAvailabilityIfNeeded(
+            accountService: hangingService,
+            runtimeTimeout: .milliseconds(25)
+        )
+        for _ in 0..<50 {
+            if hangingService.fetchCount >= 1,
+               runtimeState.cloudSyncErrorDescription?.contains("could not verify") == true {
+                break
+            }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(hangingService.fetchCount == 1)
+        #expect(runtimeState.cloudSyncErrorDescription?.contains("could not verify") == true)
+
+        let recoveredService = MockRuntimeAccountStatusProvider(statuses: [.available])
+        runtimeState.refreshCloudAvailabilityIfNeeded(
+            force: true,
+            accountService: recoveredService,
+            runtimeTimeout: .milliseconds(25)
+        )
+        for _ in 0..<50 {
+            if recoveredService.fetchCount >= 1,
+               runtimeState.cloudSyncErrorDescription == nil {
+                break
+            }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(runtimeState.cloudSyncErrorDescription == nil)
+        #expect(recoveredService.fetchCount == 1)
+    }
+
+    @Test
     func brosCloudAvailabilityTurnsOffWhenRuntimeErrorIsSet() {
         resetAppRuntimeState()
         defer { resetAppRuntimeState() }
@@ -1282,5 +1321,14 @@ private final class MockRuntimeAccountStatusProvider: AccountStatusProviding {
         }
 
         return statuses.removeFirst()
+    }
+}
+
+private final class HangingRuntimeAccountStatusProvider: AccountStatusProviding {
+    private(set) var fetchCount = 0
+
+    func fetchAccountStatus() async -> AccountStatus {
+        fetchCount += 1
+        return await withCheckedContinuation { (_: CheckedContinuation<AccountStatus, Never>) in }
     }
 }

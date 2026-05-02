@@ -42,16 +42,19 @@ final class AppDataDeletionService {
 
     func deleteAllUserData() async throws {
         var cloudCleanupError: Error?
+        let deleter = socialDataDeleter ?? socialDataDeleterFactory(modelContext)
 
-        if let deleter = socialDataDeleter ?? socialDataDeleterFactory(modelContext) {
+        try deleteLocalData()
+
+        if let deleter {
             do {
                 try await deleter.deleteCurrentUserData()
             } catch {
                 cloudCleanupError = error
             }
-        }
 
-        try deleteLocalData()
+            try deleteLocalData()
+        }
 
         if let cloudCleanupError {
             throw AppDataDeletionError.partialCloudCleanup(cloudCleanupError.localizedDescription)

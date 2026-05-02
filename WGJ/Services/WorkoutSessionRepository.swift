@@ -806,7 +806,7 @@ nonisolated final class WorkoutSessionRepository {
         try saveUserDataChanges()
         invalidateAnalyticsCache()
         scheduleProjectionRebuild(for: sessionID)
-        try? CloudKitBrosSocialService.makeIfContainerAvailable(modelContext: modelContext)?.queueCompletedSessionPublish(sessionID: sessionID)
+        try? CloudKitBrosSocialService.makeIfUserDataSyncEnabled(modelContext: modelContext)?.queueCompletedSessionPublish(sessionID: sessionID)
     }
 
     func archiveSession(id: UUID) throws {
@@ -922,7 +922,7 @@ nonisolated final class WorkoutSessionRepository {
             throw WorkoutSessionRepositoryError.sessionNotFound
         }
 
-        try? CloudKitBrosSocialService.makeIfContainerAvailable(modelContext: modelContext)?.queueDeletedSession(sessionID: id)
+        try? CloudKitBrosSocialService.makeIfUserDataSyncEnabled(modelContext: modelContext)?.queueDeletedSession(sessionID: id)
         try historyProjectionRepository.deleteFacts(forSessionID: id, persistChanges: false)
         modelContext.delete(session)
         try saveUserDataChanges()

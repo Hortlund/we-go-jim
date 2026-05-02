@@ -770,6 +770,13 @@ nonisolated final class CloudKitBrosSocialService: BrosSocialService, BrosSocial
         return CloudKitBrosSocialService(modelContext: modelContext)
     }
 
+    static func makeIfUserDataSyncEnabled(modelContext: ModelContext) -> CloudKitBrosSocialService? {
+        guard UserDataSyncTracker.shared.currentSnapshot().cloudSyncEnabled else {
+            return nil
+        }
+        return CloudKitBrosSocialService(modelContext: modelContext)
+    }
+
     static func makeIfContainerAvailable(modelContext: ModelContext) -> CloudKitBrosSocialService? {
         CloudKitBrosSocialService(modelContext: modelContext)
     }

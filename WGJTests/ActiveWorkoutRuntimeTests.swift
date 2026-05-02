@@ -7,12 +7,10 @@ import Testing
 @MainActor
 struct ActiveWorkoutRuntimeTests {
     @Test
-    func startingRuntimeSessionCreatesOnlyLocalSnapshotWithoutLegacyDraftOrCloudMutation() async throws {
+    func startingRuntimeSessionCreatesOnlyLocalSnapshotWithoutLegacyDraft() async throws {
         let context = try makeInMemoryContext()
         let directory = try temporaryDirectory()
         let store = ActiveWorkoutSnapshotStore(baseDirectory: directory)
-        let tracker = UserDataSyncTracker.shared
-        _ = tracker.configureForLaunch(isCloudEnabled: true, errorDescription: nil)
 
         let session = ActiveWorkoutSessionFactory(modelContext: context)
             .createEmptySession(name: "Local Only")
@@ -20,28 +18,37 @@ struct ActiveWorkoutRuntimeTests {
 
         #expect(try await store.load()?.id == session.id)
         #expect(try context.fetch(FetchDescriptor<ActiveWorkoutDraftSession>()).isEmpty)
-        #expect(tracker.currentSnapshot().state == .caughtUp)
     }
 
     @Test
-    func snapshotStoreSavesLoadsAndDeletesActiveWorkoutWithoutMarkingCloudMutation() async throws {
+    func snapshotStoreSavesLoadsAndDeletesActiveWorkout() async throws {
         let directory = try temporaryDirectory()
         let store = ActiveWorkoutSnapshotStore(baseDirectory: directory)
         let session = makeRuntimeSession()
-        let tracker = UserDataSyncTracker.shared
-        _ = tracker.configureForLaunch(isCloudEnabled: true, errorDescription: nil)
 
         try await store.save(session)
 
         #expect(try await store.hasSnapshot())
         #expect(try await store.load()?.id == session.id)
-        #expect(tracker.currentSnapshot().state == .caughtUp)
 
         try await store.delete()
 
         #expect(try await store.load() == nil)
         #expect(!(try await store.hasSnapshot()))
-        #expect(tracker.currentSnapshot().state == .caughtUp)
+    }
+
+    @Test
+    func snapshotStoreCanDiscardCorruptSnapshotForStartRecovery() async throws {
+        let directory = try temporaryDirectory()
+        let store = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        let snapshotURL = directory.appendingPathComponent("active-workout-snapshot.json", isDirectory: false)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data("not-json".utf8).write(to: snapshotURL)
+
+        let recovered = try await store.loadDiscardingCorruptSnapshot()
+
+        #expect(recovered == nil)
+        #expect(!(try await store.hasSnapshot()))
     }
 
     @Test
@@ -157,6 +164,19 @@ struct ActiveWorkoutRuntimeTests {
         #expect(sets[1].actualWeight == 100)
         #expect(sets[1].actualReps == 5)
         #expect(tracker.currentSnapshot().state == .pendingExport)
+    }
+
+    @Test
+    func brosSocialOutboxFactorySkipsLocalFallbackSessions() throws {
+        let tracker = UserDataSyncTracker.shared
+        _ = tracker.configureForLaunch(isCloudEnabled: false, errorDescription: "Local fallback")
+        defer {
+            _ = tracker.configureForLaunch(isCloudEnabled: false, errorDescription: nil)
+        }
+
+        let context = try makeInMemoryContext()
+
+        #expect(CloudKitBrosSocialService.makeIfUserDataSyncEnabled(modelContext: context) == nil)
     }
 
     @Test
@@ -326,19 +346,16 @@ struct ActiveWorkoutRuntimeTests {
     }
 
     @Test
-    func discardDeletesSnapshotWithoutCreatingCompletedWorkoutOrCloudMutation() async throws {
+    func discardDeletesSnapshotWithoutCreatingCompletedWorkout() async throws {
         let context = try makeInMemoryContext()
         let directory = try temporaryDirectory()
         let store = ActiveWorkoutSnapshotStore(baseDirectory: directory)
-        let tracker = UserDataSyncTracker.shared
-        _ = tracker.configureForLaunch(isCloudEnabled: true, errorDescription: nil)
 
         try await store.save(makeRuntimeSession())
         try await ActiveWorkoutRuntimeController(snapshotStore: store).discard()
 
         #expect(try await store.load() == nil)
         #expect(try context.fetch(FetchDescriptor<WorkoutSession>()).isEmpty)
-        #expect(tracker.currentSnapshot().state == .caughtUp)
     }
 
     private func makeRuntimeSession() -> ActiveWorkoutRuntimeSession {

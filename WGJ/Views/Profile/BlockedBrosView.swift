@@ -4,6 +4,8 @@ import SwiftUI
 struct BlockedBrosView: View {
     @Environment(\.modelContext) private var modelContext
 
+    var onBlockedBrosChanged: (() -> Void)? = nil
+
     @Query(sort: [SortDescriptor(\BlockedBro.blockedAt, order: .reverse)])
     private var blockedBros: [BlockedBro]
 
@@ -70,6 +72,7 @@ struct BlockedBrosView: View {
     private func unblock(_ userRecordName: String) {
         do {
             try blockedRepository.unblock(userRecordName: userRecordName)
+            onBlockedBrosChanged?()
         } catch {
             errorMessage = error.localizedDescription
             showingError = true

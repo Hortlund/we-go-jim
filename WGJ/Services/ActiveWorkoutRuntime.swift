@@ -352,6 +352,15 @@ actor ActiveWorkoutSnapshotStore {
         try loadStoredSnapshot()?.session
     }
 
+    func loadDiscardingCorruptSnapshot() throws -> ActiveWorkoutRuntimeSession? {
+        do {
+            return try load()
+        } catch {
+            try delete()
+            return nil
+        }
+    }
+
     func loadStoredSnapshot() throws -> ActiveWorkoutStoredSnapshot? {
         let url = snapshotURL
         guard FileManager.default.fileExists(atPath: url.path) else {
@@ -761,7 +770,7 @@ nonisolated final class ActiveWorkoutCompletionWriter {
             sessionID: completedSession.id,
             container: modelContext.container
         )
-        try? CloudKitBrosSocialService.makeIfContainerAvailable(modelContext: modelContext)?
+        try? CloudKitBrosSocialService.makeIfUserDataSyncEnabled(modelContext: modelContext)?
             .queueCompletedSessionPublish(sessionID: completedSession.id)
 
         return completedSession.id

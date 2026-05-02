@@ -148,18 +148,33 @@ nonisolated enum CloudStartupPreflight {
         statusProvider: any AsyncCloudStartupAccountStatusProviding = AsyncCloudKitStartupAccountStatusProvider(),
         timeout: Duration = .milliseconds(Int(defaultTimeout * 1_000))
     ) async -> CloudStartupDecision {
-        let status = await withTaskGroup(of: CloudStartupAccountStatus.self) { group in
-            group.addTask {
-                await statusProvider.currentStatus()
-            }
-            group.addTask {
-                try? await Task.sleep(for: timeout)
-                return .timedOut
+        let status = await withCheckedContinuation { (continuation: CheckedContinuation<CloudStartupAccountStatus, Never>) in
+            let lock = NSLock()
+            var didResume = false
+            var statusTask: Task<Void, Never>?
+            var timeoutTask: Task<Void, Never>?
+
+            func resumeOnce(_ status: CloudStartupAccountStatus) {
+                lock.lock()
+                guard !didResume else {
+                    lock.unlock()
+                    return
+                }
+                didResume = true
+                lock.unlock()
+                statusTask?.cancel()
+                timeoutTask?.cancel()
+                continuation.resume(returning: status)
             }
 
-            let resolvedStatus = await group.next() ?? .couldNotDetermine
-            group.cancelAll()
-            return resolvedStatus
+            statusTask = Task {
+                let status = await statusProvider.currentStatus()
+                resumeOnce(status)
+            }
+            timeoutTask = Task {
+                try? await Task.sleep(for: timeout)
+                resumeOnce(.timedOut)
+            }
         }
 
         return decision(for: status)

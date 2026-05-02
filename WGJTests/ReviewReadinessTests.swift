@@ -251,6 +251,62 @@ struct ReviewReadinessTests {
         #expect(try context.fetch(FetchDescriptor<UserProfile>()).isEmpty)
     }
 
+    @Test
+    func deleteAllUserDataClearsLocalRecordsBeforeSlowCloudCleanup() async throws {
+        let context = try makeInMemoryContext()
+        context.insert(UserProfile(displayName: "Demo Lifter"))
+        try context.save()
+
+        let service = AppDataDeletionService(
+            modelContext: context,
+            socialDataDeleter: HangingCloudDataDeleter()
+        )
+
+        let deletionTask = Task {
+            try await service.deleteAllUserData()
+        }
+
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(try context.fetch(FetchDescriptor<UserProfile>()).isEmpty)
+        deletionTask.cancel()
+    }
+
+    @Test
+    func deleteAllUserDataSweepsRecordsRecreatedDuringCloudCleanup() async throws {
+        let context = try makeInMemoryContext()
+        context.insert(UserProfile(displayName: "Demo Lifter"))
+        try context.save()
+
+        let service = AppDataDeletionService(
+            modelContext: context,
+            socialDataDeleter: RecreatingCloudDataDeleter(modelContext: context)
+        )
+
+        try await service.deleteAllUserData()
+
+        #expect(try context.fetch(FetchDescriptor<UserProfile>()).isEmpty)
+    }
+
+    @Test
+    func privacyManifestDeclaresUserDefaultsRequiredReason() throws {
+        let manifestURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("WGJ/PrivacyInfo.xcprivacy")
+        let data = try Data(contentsOf: manifestURL)
+        let plist = try #require(
+            PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        )
+        let accessedAPITypes = try #require(plist["NSPrivacyAccessedAPITypes"] as? [[String: Any]])
+        let userDefaultsEntry = try #require(accessedAPITypes.first {
+            $0["NSPrivacyAccessedAPIType"] as? String == "NSPrivacyAccessedAPICategoryUserDefaults"
+        })
+        let reasons = try #require(userDefaultsEntry["NSPrivacyAccessedAPITypeReasons"] as? [String])
+
+        #expect(reasons.contains("CA92.1"))
+    }
+
     private func makeInMemoryContext() throws -> ModelContext {
         let schema = Schema([
             ExerciseCatalogItem.self,
@@ -319,6 +375,23 @@ struct ReviewReadinessTests {
 @MainActor
 private struct NoopCloudDataDeleter: BrosCloudDataDeleting {
     func deleteCurrentUserData() async throws { }
+}
+
+@MainActor
+private struct HangingCloudDataDeleter: BrosCloudDataDeleting {
+    func deleteCurrentUserData() async throws {
+        try await withCheckedThrowingContinuation { (_: CheckedContinuation<Void, any Error>) in }
+    }
+}
+
+@MainActor
+private struct RecreatingCloudDataDeleter: BrosCloudDataDeleting {
+    let modelContext: ModelContext
+
+    func deleteCurrentUserData() async throws {
+        modelContext.insert(UserProfile(displayName: "Recreated Profile"))
+        try modelContext.save()
+    }
 }
 
 @MainActor

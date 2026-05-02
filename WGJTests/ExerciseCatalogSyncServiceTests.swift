@@ -3,6 +3,7 @@ import SwiftData
 import Testing
 @testable import WGJ
 
+@Suite(.serialized)
 @MainActor
 struct ExerciseCatalogSyncServiceTests {
     @Test
@@ -353,7 +354,10 @@ struct ExerciseCatalogSyncServiceTests {
         try repository.deleteCustomExercise(created)
 
         #expect(try repository.searchExercises(query: "custom glute bridge").isEmpty)
-        #expect(try context.fetch(FetchDescriptor<ExerciseCatalogItem>()).map(\.displayName) == ["Back Squat", "Bench Press"])
+        let remainingExerciseNames = try context.fetch(FetchDescriptor<ExerciseCatalogItem>())
+            .map(\.displayName)
+            .sorted()
+        #expect(remainingExerciseNames == ["Back Squat", "Bench Press"])
     }
 
     @Test
