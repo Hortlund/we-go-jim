@@ -33,15 +33,28 @@ struct WorkoutCompletionPresentationStateTests {
     }
 
     @Test
-    func confettiTapOriginUsesGestureCoordinateDirectly() {
+    func confettiTapOriginUsesGlobalGestureCoordinateDirectly() {
         let tapLocation = CGPoint(x: 184, y: 318)
         let heroFrame = CGRect(x: 16, y: 132, width: 361, height: 190)
 
         #expect(
             WorkoutCompletionConfettiOrigin.tapOrigin(
-                locationInSummarySpace: tapLocation,
+                locationInGlobalSpace: tapLocation,
                 heroFrame: heroFrame
             ) == tapLocation
+        )
+    }
+
+    @Test
+    func confettiOverlayOriginConvertsGlobalTapIntoOverlaySpace() {
+        let tapLocation = CGPoint(x: 184, y: 365)
+        let overlayFrameInGlobalSpace = CGRect(x: 0, y: -47, width: 393, height: 852)
+
+        #expect(
+            WorkoutCompletionConfettiOrigin.overlayOrigin(
+                locationInGlobalSpace: tapLocation,
+                overlayFrameInGlobalSpace: overlayFrameInGlobalSpace
+            ) == CGPoint(x: 184, y: 412)
         )
     }
 }

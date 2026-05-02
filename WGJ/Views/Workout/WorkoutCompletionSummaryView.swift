@@ -3,8 +3,20 @@ import SwiftUI
 import UIKit
 
 nonisolated enum WorkoutCompletionConfettiOrigin {
-    static func tapOrigin(locationInSummarySpace location: CGPoint, heroFrame: CGRect) -> CGPoint {
+    static func tapOrigin(locationInGlobalSpace location: CGPoint, heroFrame: CGRect) -> CGPoint {
         location
+    }
+
+    static func overlayOrigin(
+        locationInGlobalSpace location: CGPoint,
+        overlayFrameInGlobalSpace: CGRect
+    ) -> CGPoint {
+        guard !overlayFrameInGlobalSpace.isEmpty else { return location }
+
+        return CGPoint(
+            x: location.x - overlayFrameInGlobalSpace.minX,
+            y: location.y - overlayFrameInGlobalSpace.minY
+        )
     }
 
     static func defaultOrigin(heroFrame: CGRect, fallbackScreenWidth: CGFloat) -> CGPoint {
@@ -55,7 +67,10 @@ struct WorkoutCompletionSummaryView: View {
             if !confettiBursts.isEmpty && !reduceMotion {
                 ZStack {
                     ForEach(confettiBursts) { burst in
-                        WorkoutCompletionConfettiOverlay(origin: burst.origin, seed: burst.seed)
+                        WorkoutCompletionConfettiOverlay(
+                            originInGlobalSpace: burst.origin,
+                            seed: burst.seed
+                        )
                             .id(burst.id)
                     }
                 }
@@ -192,7 +207,7 @@ struct WorkoutCompletionSummaryView: View {
                     Color.clear
                         .preference(
                             key: WorkoutCompletionHeroFramePreferenceKey.self,
-                            value: geometry.frame(in: .named("workout-completion-summary-space"))
+                            value: geometry.frame(in: .global)
                         )
                 }
             }
@@ -225,7 +240,7 @@ struct WorkoutCompletionSummaryView: View {
             heroCardFrame = frame
         }
         .simultaneousGesture(
-            SpatialTapGesture(coordinateSpace: .named("workout-completion-summary-space"))
+            SpatialTapGesture(coordinateSpace: .global)
                 .onEnded { value in
                     triggerCelebration(origin: confettiOrigin(for: value.location))
                 }
@@ -380,7 +395,7 @@ struct WorkoutCompletionSummaryView: View {
 
     private func confettiOrigin(for location: CGPoint) -> CGPoint {
         WorkoutCompletionConfettiOrigin.tapOrigin(
-            locationInSummarySpace: location,
+            locationInGlobalSpace: location,
             heroFrame: heroCardFrame
         )
     }
@@ -783,7 +798,7 @@ private struct WorkoutCompletionConfettiBurst: Identifiable {
 }
 
 private struct WorkoutCompletionConfettiOverlay: View {
-    let origin: CGPoint
+    let originInGlobalSpace: CGPoint
     let seed: UInt64
 
     @State private var animate = false
@@ -794,6 +809,12 @@ private struct WorkoutCompletionConfettiOverlay: View {
 
     var body: some View {
         GeometryReader { proxy in
+            let overlayFrameInGlobal = proxy.frame(in: .global)
+            let origin = WorkoutCompletionConfettiOrigin.overlayOrigin(
+                locationInGlobalSpace: originInGlobalSpace,
+                overlayFrameInGlobalSpace: overlayFrameInGlobal
+            )
+
             ZStack {
                 ForEach(pieces) { piece in
                     RoundedRectangle(cornerRadius: piece.cornerRadius, style: .continuous)
