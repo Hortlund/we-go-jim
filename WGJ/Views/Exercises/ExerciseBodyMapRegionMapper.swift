@@ -163,7 +163,7 @@ enum ExerciseBodyMapRegionMapper {
         case 13:
             return [.adductors]
         case 14:
-            return [.gluteal]
+            return []
         default:
             return []
         }

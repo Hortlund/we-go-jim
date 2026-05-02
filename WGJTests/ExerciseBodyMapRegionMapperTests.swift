@@ -4,7 +4,7 @@ import Testing
 struct ExerciseBodyMapRegionMapperTests {
     @Test
     func mapsEverySeedMuscleGroupToAtLeastOneBodyMapRegion() {
-        for muscleID in 1...14 {
+        for muscleID in 1...13 {
             let spec = ExerciseBodyMapRegionMapper.highlightSpec(
                 primaryMuscleIDs: [muscleID],
                 secondaryMuscleIDs: []
@@ -12,6 +12,35 @@ struct ExerciseBodyMapRegionMapperTests {
 
             #expect(!spec.primaryRegions.isEmpty)
             #expect(spec.secondaryRegions.isEmpty)
+        }
+    }
+
+    @Test
+    func mapsSeedMuscleGroupsToExpectedBodyMapRegions() {
+        let expectedRegionsByMuscleID: [Int: Set<ExerciseBodyMapRegion>] = [
+            1: [.biceps],
+            2: [.deltoids],
+            3: [.chest],
+            4: [.lowerBack, .rhomboids, .upperBack],
+            5: [.quadriceps],
+            6: [.hamstring],
+            7: [.gluteal],
+            8: [.triceps],
+            9: [.calves],
+            10: [.abs, .obliques],
+            11: [.forearm],
+            12: [.trapezius],
+            13: [.adductors],
+            14: [],
+        ]
+
+        for (muscleID, expectedRegions) in expectedRegionsByMuscleID {
+            let spec = ExerciseBodyMapRegionMapper.highlightSpec(
+                primaryMuscleIDs: [muscleID],
+                secondaryMuscleIDs: []
+            )
+
+            #expect(spec.primaryRegions == expectedRegions)
         }
     }
 
@@ -85,5 +114,16 @@ struct ExerciseBodyMapRegionMapperTests {
         ]
 
         #expect(ExerciseBodyMapRegionMapper.catalogMuscleID(for: .gluteal, availableMuscles: muscles) == 7)
+    }
+
+    @Test
+    func abductorsDoNotPretendToBeGlutesOnBodyMap() {
+        let spec = ExerciseBodyMapRegionMapper.highlightSpec(
+            primaryMuscleIDs: [14],
+            secondaryMuscleIDs: []
+        )
+
+        #expect(spec.primaryRegions.isEmpty)
+        #expect(spec.secondaryRegions.isEmpty)
     }
 }
