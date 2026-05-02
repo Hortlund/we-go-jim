@@ -83,6 +83,54 @@ struct HistoryDetailSnapshotTests {
         }
     }
 
+    @Test
+    func snapshotLoadBuildsWorkoutMuscleHeatmapFromCompletedWorkingSets() throws {
+        let context = try makeInMemoryContext()
+        let repository = WorkoutSessionRepository(modelContext: context)
+        let chest = MuscleGroup(remoteID: 3, name: "Chest", nameEn: "Chest")
+        context.insert(chest)
+        let bench = makeCatalogItem(
+            context: context,
+            remoteUUID: "history-detail-heatmap-bench",
+            displayName: "Bench Press",
+            category: "Chest"
+        )
+        bench.primaryMuscles = [chest]
+        chest.primaryExercises = [bench]
+        try context.save()
+
+        let session = try repository.createEmptySession(name: "Heatmap")
+        try repository.addExercise(sessionID: session.id, catalogItem: bench)
+        let exercise = try #require(repository.sessionExercises(sessionID: session.id).first)
+        var drafts = try repository.setDrafts(sessionExerciseID: exercise.id)
+        drafts[0].isWarmup = false
+        drafts[0].actualWeight = 100
+        drafts[0].actualReps = 8
+        drafts[0].isCompleted = true
+        drafts.append(
+            WorkoutSessionSetDraft(
+                id: UUID(),
+                isWarmup: true,
+                targetReps: nil,
+                targetWeight: nil,
+                actualReps: 12,
+                actualWeight: 40,
+                isCompleted: true
+            )
+        )
+        try repository.saveSetDrafts(sessionExerciseID: exercise.id, drafts: drafts)
+        try repository.finishSession(sessionID: session.id)
+
+        let snapshot = try HistoryDetailSnapshotBuilder.load(
+            modelContext: context,
+            sessionID: session.id
+        )
+
+        #expect(snapshot.muscleHeatmap.topRegionNames == ["Chest"])
+        #expect(snapshot.muscleHeatmap.entries.map(\.region.displayName) == ["Chest"])
+        #expect(snapshot.muscleHeatmap.entries.first?.score == 1)
+    }
+
     private func makeCatalogItem(
         context: ModelContext,
         remoteUUID: String,

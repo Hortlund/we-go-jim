@@ -9,6 +9,7 @@ enum HistoryDetailSnapshotBuilder {
         let preferredLoadUnit: TemplateLoadUnit
         let localState: LocalState
         let hydrationPayloadByExerciseID: [UUID: ExerciseHydrationPayload]
+        let muscleHeatmap: WorkoutMuscleHeatmapSnapshot
     }
 
     nonisolated struct SessionSnapshot: Identifiable, Equatable, Sendable {
@@ -138,6 +139,10 @@ enum HistoryDetailSnapshotBuilder {
             exercises: exercises,
             draftsByExerciseID: localState.setDraftsByExerciseID
         )
+        let muscleHeatmap = try muscleHeatmap(
+            modelContext: modelContext,
+            exercises: exercises
+        )
 
         return Snapshot(
             session: SessionSnapshot(model: session),
@@ -145,7 +150,8 @@ enum HistoryDetailSnapshotBuilder {
             exercises: exercises.map(ExerciseSnapshot.init(model:)),
             preferredLoadUnit: preferredLoadUnit,
             localState: localState,
-            hydrationPayloadByExerciseID: hydrationPayloadByExerciseID
+            hydrationPayloadByExerciseID: hydrationPayloadByExerciseID,
+            muscleHeatmap: muscleHeatmap
         )
     }
 
@@ -212,6 +218,25 @@ enum HistoryDetailSnapshotBuilder {
         }
 
         return payloadByExerciseID
+    }
+
+    nonisolated private static func muscleHeatmap(
+        modelContext: ModelContext,
+        exercises: [WorkoutSessionExercise]
+    ) throws -> WorkoutMuscleHeatmapSnapshot {
+        guard !exercises.isEmpty else { return .empty }
+
+        let catalogMappings = try WorkoutMuscleHeatmapBuilder.catalogMappings(modelContext: modelContext)
+        let scores = exercises.reduce(into: [ExerciseBodyMapRegion: Double]()) { scores, exercise in
+            let exerciseScores = WorkoutMuscleHeatmapBuilder.scores(
+                for: exercise,
+                catalogMappings: catalogMappings
+            )
+            for (region, score) in exerciseScores {
+                scores[region, default: 0] += score
+            }
+        }
+        return WorkoutMuscleHeatmapBuilder.snapshot(scores: scores)
     }
 
     nonisolated private static func resolvedPreviousMap(

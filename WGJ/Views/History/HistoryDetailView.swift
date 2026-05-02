@@ -58,6 +58,7 @@ struct HistoryDetailView: View {
             LazyVStack(alignment: .leading, spacing: WGJSpacing.section) {
                 if let session {
                     headerCard(session)
+                    workoutMuscleHeatmapCard
                     cardioSection
                     exercisesSectionHeader
                 } else if didLoadSnapshot {
@@ -268,6 +269,18 @@ struct HistoryDetailView: View {
         }
         .padding(WGJSpacing.card)
         .wgjCardContainer(strong: true)
+    }
+
+    @ViewBuilder
+    private var workoutMuscleHeatmapCard: some View {
+        if let muscleHeatmap = snapshot?.muscleHeatmap {
+            WorkoutMuscleHeatmapCard(
+                title: "Muscle Map",
+                subtitle: "Heatmap from completed working sets in this workout.",
+                snapshot: muscleHeatmap,
+                emptyMessage: "No completed working sets with muscle data for this workout."
+            )
+        }
     }
 
     @ViewBuilder
