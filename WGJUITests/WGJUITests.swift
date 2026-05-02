@@ -118,6 +118,31 @@ final class WGJUITests: XCTestCase {
 
         searchField.tap()
         XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 2))
+        let bodyPartFilter = app.buttons["exercises-body-part-filter"]
+        XCTAssertTrue(bodyPartFilter.waitForExistence(timeout: 2))
+        bodyPartFilter.tap()
+        let bodyPartDropdown = identifiedElement("exercises-body-part-dropdown", in: app)
+        XCTAssertTrue(bodyPartDropdown.waitForExistence(timeout: 2))
+        XCTAssertGreaterThanOrEqual(bodyPartDropdown.frame.minY, bodyPartFilter.frame.maxY - 8)
+
+        app.buttons["Select on Muscle Map"].tap()
+        let muscleMapSheet = identifiedElement("exercises-muscle-map-filter-sheet", in: app)
+        XCTAssertTrue(muscleMapSheet.waitForExistence(timeout: 2))
+        app.buttons["Done"].tap()
+        XCTAssertFalse(muscleMapSheet.waitForExistence(timeout: 2))
+
+        searchField.tap()
+        XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 2))
+        let categoryFilter = app.buttons["exercises-category-filter"]
+        XCTAssertTrue(categoryFilter.waitForExistence(timeout: 2))
+        categoryFilter.tap()
+        let categoryDropdown = identifiedElement("exercises-category-dropdown", in: app)
+        XCTAssertTrue(categoryDropdown.waitForExistence(timeout: 2))
+        XCTAssertGreaterThanOrEqual(categoryDropdown.frame.minY, categoryFilter.frame.maxY - 8)
+        categoryDropdown.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.16)).tap()
+
+        searchField.tap()
+        XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 2))
         searchField.typeText("bench")
         XCTAssertTrue(searchField.waitForExistence(timeout: 2))
         XCTAssertTrue(searchField.isHittable)

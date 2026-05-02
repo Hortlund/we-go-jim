@@ -40,4 +40,16 @@ struct ExerciseBodyMapRegionMapperTests {
         #expect(back.primaryRegions == [.lowerBack, .rhomboids, .upperBack])
         #expect(abs.primaryRegions == [.abs, .obliques])
     }
+
+    @Test
+    func resolvesBodyMapRegionToAvailableCatalogMuscleID() {
+        let muscles = [
+            ExerciseBodyMapFilterOption(id: 3, name: "Chest"),
+            ExerciseBodyMapFilterOption(id: 10, name: "Abs"),
+        ]
+
+        #expect(ExerciseBodyMapRegionMapper.catalogMuscleID(for: .chest, availableMuscles: muscles) == 3)
+        #expect(ExerciseBodyMapRegionMapper.catalogMuscleID(for: .obliques, availableMuscles: muscles) == 10)
+        #expect(ExerciseBodyMapRegionMapper.catalogMuscleID(for: .quadriceps, availableMuscles: muscles) == nil)
+    }
 }

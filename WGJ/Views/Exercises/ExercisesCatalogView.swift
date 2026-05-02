@@ -32,9 +32,16 @@ struct ExercisesCatalogView: View {
     @State private var catalogScrollOffset: CGFloat = 0
     @State private var catalogTopMarkerBaseline: CGFloat?
     @State private var isSearchToolbarExpanded = false
+    @State private var activeFilterDropdown: ExerciseFilterDropdown?
+    @State private var showingMuscleMapFilterSheet = false
     @FocusState private var isSearchFieldFocused: Bool
 
     private let topAnchorID = "exercises-catalog-top"
+
+    private enum ExerciseFilterDropdown {
+        case bodyPart
+        case category
+    }
 
     private enum CatalogLoadState {
         case idle
@@ -117,9 +124,23 @@ struct ExercisesCatalogView: View {
     }
 
     private var expandedControlsHeight: CGFloat {
-        ExercisesCatalogHeaderCollapsePolicy.expandedControlsHeight(
+        let baseHeight = ExercisesCatalogHeaderCollapsePolicy.expandedControlsHeight(
             usesCompactFilterLayout: shouldUseCompactFilterLayout
         )
+        switch activeFilterDropdown {
+        case .bodyPart:
+            return baseHeight + 292
+        case .category:
+            return baseHeight + 252
+        case nil:
+            return baseHeight
+        }
+    }
+
+    private var bodyMapFilterOptions: [ExerciseBodyMapFilterOption] {
+        controller.snapshot.availableMuscles.map {
+            ExerciseBodyMapFilterOption(id: $0.id, name: $0.name)
+        }
     }
 
     var body: some View {
@@ -168,6 +189,15 @@ struct ExercisesCatalogView: View {
                         .modifier(ExercisesCatalogScrollOffsetModifier { offset in
                             catalogScrollOffset = -offset
                         })
+
+                        if activeFilterDropdown != nil {
+                            Color.clear
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    activeFilterDropdown = nil
+                                }
+                                .accessibilityHidden(true)
+                        }
 
                         if reservesIndexRailSpace {
                             VStack(spacing: 4) {
@@ -266,6 +296,23 @@ struct ExercisesCatalogView: View {
             }
             .wgjSheetSurface()
         }
+        .sheet(isPresented: $showingMuscleMapFilterSheet) {
+            ExerciseBodyMapFilterSheet(
+                availableMuscles: bodyMapFilterOptions,
+                selectedMuscleID: searchState.selectedPrimaryMuscleID,
+                onSelect: { muscleID in
+                    searchState.selectedPrimaryMuscleID = muscleID
+                    activeFilterDropdown = nil
+                    showingMuscleMapFilterSheet = false
+                },
+                onClear: {
+                    searchState.selectedPrimaryMuscleID = nil
+                    activeFilterDropdown = nil
+                    showingMuscleMapFilterSheet = false
+                }
+            )
+            .wgjSheetSurface()
+        }
         .task(id: shouldLoadCatalog) {
             guard shouldLoadCatalog else { return }
             await Task.yield()
@@ -286,6 +333,7 @@ struct ExercisesCatalogView: View {
         }
         .onDisappear {
             isSearchFieldFocused = false
+            activeFilterDropdown = nil
             WGJKeyboard.dismiss()
         }
     }
@@ -373,7 +421,7 @@ struct ExercisesCatalogView: View {
             get: { isSearchFieldFocused },
             set: { isFocused in
                 isSearchFieldFocused = isFocused
-                isSearchToolbarExpanded = isFocused
+                isSearchToolbarExpanded = isFocused || activeFilterDropdown != nil
             }
         )
     }
@@ -386,16 +434,20 @@ struct ExercisesCatalogView: View {
                         bodyPartFilter
                         categoryFilter
                     }
+                    activeFilterDropdownPanel
                     HStack {
                         Spacer(minLength: 0)
                         sortButton
                     }
                 }
             } else {
-                HStack(spacing: 8) {
-                    bodyPartFilter
-                    categoryFilter
-                    sortButton
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        bodyPartFilter
+                        categoryFilter
+                        sortButton
+                    }
+                    activeFilterDropdownPanel
                 }
             }
         }
@@ -417,36 +469,28 @@ struct ExercisesCatalogView: View {
     }
 
     private var bodyPartFilter: some View {
-        WGJActionMenuButton("Body Part Filter") {
-            Button("Any Body Part") {
-                searchState.selectedPrimaryMuscleID = nil
-            }
-
-            ForEach(controller.snapshot.availableMuscles, id: \.id) { muscle in
-                Button(muscle.name) {
-                    searchState.selectedPrimaryMuscleID = muscle.id
-                }
-            }
+        Button {
+            toggleFilterDropdown(.bodyPart)
         } label: {
-            compactFilterPill(controller.snapshot.muscleName(for: searchState.selectedPrimaryMuscleID) ?? "Any Body Part")
+            compactFilterPill(
+                controller.snapshot.muscleName(for: searchState.selectedPrimaryMuscleID) ?? "Any Body Part",
+                isActive: activeFilterDropdown == .bodyPart
+            )
         }
+        .buttonStyle(.plain)
         .accessibilityIdentifier("exercises-body-part-filter")
     }
 
     private var categoryFilter: some View {
-        WGJActionMenuButton("Category Filter") {
-            Button("Any Category") {
-                searchState.selectedCategory = nil
-            }
-
-            ForEach(controller.snapshot.availableCategories, id: \.self) { category in
-                Button(category) {
-                    searchState.selectedCategory = category
-                }
-            }
+        Button {
+            toggleFilterDropdown(.category)
         } label: {
-            compactFilterPill(searchState.selectedCategory ?? "Any Category")
+            compactFilterPill(
+                searchState.selectedCategory ?? "Any Category",
+                isActive: activeFilterDropdown == .category
+            )
         }
+        .buttonStyle(.plain)
         .accessibilityIdentifier("exercises-category-filter")
     }
 
@@ -460,16 +504,186 @@ struct ExercisesCatalogView: View {
         .accessibilityIdentifier("exercises-sort-button")
     }
 
-    private func compactFilterPill(_ title: String) -> some View {
-        Text(title)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(WGJTheme.textPrimary)
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
+    @ViewBuilder
+    private var activeFilterDropdownPanel: some View {
+        if let activeFilterDropdown {
+            switch activeFilterDropdown {
+            case .bodyPart:
+                filterDropdownContainer(accessibilityIdentifier: "exercises-body-part-dropdown") {
+                    filterOptionRow(
+                        title: "Any Body Part",
+                        systemImage: "line.3.horizontal.decrease.circle",
+                        isSelected: searchState.selectedPrimaryMuscleID == nil
+                    ) {
+                        searchState.selectedPrimaryMuscleID = nil
+                        self.activeFilterDropdown = nil
+                    }
+
+                    filterOptionRow(
+                        title: "Select on Muscle Map",
+                        systemImage: "figure.strengthtraining.traditional",
+                        isSelected: false
+                    ) {
+                        self.activeFilterDropdown = nil
+                        showingMuscleMapFilterSheet = true
+                    }
+
+                    Divider().overlay(WGJTheme.outline.opacity(0.35))
+
+                    ScrollView {
+                        VStack(spacing: 2) {
+                            ForEach(controller.snapshot.availableMuscles, id: \.id) { muscle in
+                                filterOptionRow(
+                                    title: muscle.name,
+                                    systemImage: nil,
+                                    isSelected: searchState.selectedPrimaryMuscleID == muscle.id
+                                ) {
+                                    searchState.selectedPrimaryMuscleID = muscle.id
+                                    self.activeFilterDropdown = nil
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 176)
+                }
+
+            case .category:
+                filterDropdownContainer(accessibilityIdentifier: "exercises-category-dropdown") {
+                    filterOptionRow(
+                        title: "Any Category",
+                        systemImage: "line.3.horizontal.decrease.circle",
+                        isSelected: searchState.selectedCategory == nil
+                    ) {
+                        searchState.selectedCategory = nil
+                        self.activeFilterDropdown = nil
+                    }
+
+                    Divider().overlay(WGJTheme.outline.opacity(0.35))
+
+                    ScrollView {
+                        VStack(spacing: 2) {
+                            ForEach(controller.snapshot.availableCategories, id: \.self) { category in
+                                filterOptionRow(
+                                    title: category,
+                                    systemImage: nil,
+                                    isSelected: searchState.selectedCategory == category
+                                ) {
+                                    searchState.selectedCategory = category
+                                    self.activeFilterDropdown = nil
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 196)
+                }
+            }
+        }
+    }
+
+    private func toggleFilterDropdown(_ dropdown: ExerciseFilterDropdown) {
+        let nextDropdown: ExerciseFilterDropdown? = activeFilterDropdown == dropdown ? nil : dropdown
+        WGJKeyboard.dismiss()
+        withAnimation(.easeInOut(duration: 0.16)) {
+            activeFilterDropdown = nextDropdown
+        }
+        isSearchToolbarExpanded = nextDropdown != nil
+        isSearchFieldFocused = false
+    }
+
+    private func compactFilterPill(_ title: String, isActive: Bool) -> some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(WGJTheme.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+
+            Image(systemName: "chevron.down")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(isActive ? WGJTheme.accentBlue : WGJTheme.textSecondary)
+                .rotationEffect(.degrees(isActive ? 180 : 0))
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 36)
+        .frame(maxWidth: .infinity)
+        .background {
+            RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
+                .fill(isActive ? WGJTheme.accentBlue.opacity(0.13) : WGJTheme.cardElevated)
+                .overlay {
+                    RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
+                        .stroke(
+                            isActive ? WGJTheme.accentBlue.opacity(0.62) : WGJTheme.outline.opacity(0.32),
+                            lineWidth: 1
+                        )
+                }
+        }
+    }
+
+    private func filterDropdownContainer<Content: View>(
+        accessibilityIdentifier: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Capsule()
+                .fill(WGJTheme.accentBlue.opacity(0.62))
+                .frame(width: 36, height: 3)
+                .padding(.leading, activeFilterDropdown == .category ? 132 : 18)
+                .padding(.top, 2)
+
+            content()
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(WGJTheme.fieldStrong.opacity(0.98))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(WGJTheme.accentBlue.opacity(0.22), lineWidth: 1)
+                }
+        }
+        .shadow(color: .black.opacity(0.18), radius: 14, y: 8)
+        .accessibilityIdentifier(accessibilityIdentifier)
+    }
+
+    private func filterOptionRow(
+        title: String,
+        systemImage: String?,
+        isSelected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                if let systemImage {
+                    Image(systemName: systemImage)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(isSelected ? WGJTheme.accentBlue : WGJTheme.textSecondary)
+                        .frame(width: 20)
+                }
+
+                Text(title)
+                    .font(.subheadline.weight(isSelected ? .bold : .semibold))
+                    .foregroundStyle(isSelected ? WGJTheme.accentBlue : WGJTheme.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+
+                Spacer(minLength: 8)
+
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(WGJTheme.accentBlue)
+                }
+            }
             .padding(.horizontal, 10)
-            .frame(height: 36)
-            .frame(maxWidth: .infinity)
-            .wgjCardContainer(cornerRadius: WGJRadius.control)
+            .frame(height: 38)
+            .background {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(isSelected ? WGJTheme.accentBlue.opacity(0.12) : Color.clear)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
     }
 
     private func exerciseRow(
@@ -602,6 +816,7 @@ struct ExercisesCatalogView: View {
         searchState.clearSearchAndFilters()
         isSearchFieldFocused = false
         isSearchToolbarExpanded = false
+        activeFilterDropdown = nil
         WGJKeyboard.dismiss()
         applyCurrentFilters()
     }
@@ -609,6 +824,7 @@ struct ExercisesCatalogView: View {
     private func handleSelection(_ exercise: ExerciseCatalogItem) {
         isSearchFieldFocused = false
         isSearchToolbarExpanded = false
+        activeFilterDropdown = nil
         WGJKeyboard.dismiss()
 
         if let pickerSelectAction {

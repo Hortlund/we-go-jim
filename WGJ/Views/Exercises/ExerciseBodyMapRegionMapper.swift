@@ -61,6 +61,11 @@ struct ExerciseBodyMapHighlightSpec: Equatable {
     let secondaryRegions: Set<ExerciseBodyMapRegion>
 }
 
+nonisolated struct ExerciseBodyMapFilterOption: Identifiable, Equatable, Sendable {
+    let id: Int
+    let name: String
+}
+
 enum ExerciseBodyMapRegionMapper {
     private nonisolated static let primarySetWeight = 1.0
     private nonisolated static let secondarySetWeight = 0.35
@@ -90,6 +95,18 @@ enum ExerciseBodyMapRegionMapper {
             scores[region, default: 0] += secondarySetWeight
         }
         return scores
+    }
+
+    nonisolated static func catalogMuscleID(
+        for region: ExerciseBodyMapRegion,
+        availableMuscles: [ExerciseBodyMapFilterOption]
+    ) -> Int? {
+        availableMuscles
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            .first { option in
+                regions(for: option.id).contains(region)
+            }?
+            .id
     }
 
     private nonisolated static func regions(for muscleIDs: Set<Int>) -> Set<ExerciseBodyMapRegion> {
