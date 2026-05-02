@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 import Testing
 @testable import WGJ
 
@@ -29,5 +30,18 @@ struct WorkoutCompletionPresentationStateTests {
         state.presentQueuedIfNeeded()
 
         #expect(state.presentedWorkout == nil)
+    }
+
+    @Test
+    func confettiTapOriginUsesGestureCoordinateDirectly() {
+        let tapLocation = CGPoint(x: 184, y: 318)
+        let heroFrame = CGRect(x: 16, y: 132, width: 361, height: 190)
+
+        #expect(
+            WorkoutCompletionConfettiOrigin.tapOrigin(
+                locationInSummarySpace: tapLocation,
+                heroFrame: heroFrame
+            ) == tapLocation
+        )
     }
 }

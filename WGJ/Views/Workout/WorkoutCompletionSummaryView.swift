@@ -2,6 +2,20 @@ import SwiftData
 import SwiftUI
 import UIKit
 
+nonisolated enum WorkoutCompletionConfettiOrigin {
+    static func tapOrigin(locationInSummarySpace location: CGPoint, heroFrame: CGRect) -> CGPoint {
+        location
+    }
+
+    static func defaultOrigin(heroFrame: CGRect, fallbackScreenWidth: CGFloat) -> CGPoint {
+        guard !heroFrame.isEmpty else {
+            return CGPoint(x: fallbackScreenWidth / 2, y: 140)
+        }
+
+        return CGPoint(x: heroFrame.midX, y: heroFrame.minY + min(96, heroFrame.height * 0.36))
+    }
+}
+
 struct WorkoutCompletionSummaryView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -211,7 +225,7 @@ struct WorkoutCompletionSummaryView: View {
             heroCardFrame = frame
         }
         .simultaneousGesture(
-            SpatialTapGesture()
+            SpatialTapGesture(coordinateSpace: .named("workout-completion-summary-space"))
                 .onEnded { value in
                     triggerCelebration(origin: confettiOrigin(for: value.location))
                 }
@@ -365,19 +379,17 @@ struct WorkoutCompletionSummaryView: View {
     }
 
     private func confettiOrigin(for location: CGPoint) -> CGPoint {
-        guard !heroCardFrame.isEmpty else { return location }
-        return CGPoint(
-            x: heroCardFrame.minX + location.x,
-            y: heroCardFrame.minY + location.y
+        WorkoutCompletionConfettiOrigin.tapOrigin(
+            locationInSummarySpace: location,
+            heroFrame: heroCardFrame
         )
     }
 
     private func defaultConfettiOrigin() -> CGPoint {
-        guard !heroCardFrame.isEmpty else {
-            return CGPoint(x: UIScreen.main.bounds.midX, y: 140)
-        }
-
-        return CGPoint(x: heroCardFrame.midX, y: heroCardFrame.minY + min(96, heroCardFrame.height * 0.36))
+        WorkoutCompletionConfettiOrigin.defaultOrigin(
+            heroFrame: heroCardFrame,
+            fallbackScreenWidth: UIScreen.main.bounds.width
+        )
     }
 
     private func continueToHistory() {
