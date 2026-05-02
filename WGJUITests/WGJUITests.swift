@@ -128,8 +128,22 @@ final class WGJUITests: XCTestCase {
         app.buttons["Select on Muscle Map"].tap()
         let muscleMapSheet = identifiedElement("exercises-muscle-map-filter-sheet", in: app)
         XCTAssertTrue(muscleMapSheet.waitForExistence(timeout: 2))
-        app.buttons["Done"].tap()
+        let muscleMapSelection = identifiedElement("exercises-muscle-map-filter-3", in: app)
+        if !muscleMapSelection.waitForExistence(timeout: 1) {
+            muscleMapSheet.swipeUp()
+        }
+        XCTAssertTrue(muscleMapSelection.waitForExistence(timeout: 2))
+        muscleMapSelection.tap()
         XCTAssertFalse(muscleMapSheet.waitForExistence(timeout: 2))
+
+        listDragStart.press(forDuration: 0.05, thenDragTo: listDragEnd)
+        listDragStart.press(forDuration: 0.05, thenDragTo: listDragEnd)
+        XCTAssertTrue(searchField.waitForExistence(timeout: 2))
+        XCTAssertTrue(searchField.isHittable)
+        XCTAssertTrue(title.waitForNonExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["exercises-create-button"].waitForNonExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["exercises-body-part-filter"].waitForNonExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["exercises-category-filter"].waitForNonExistence(timeout: 2))
 
         searchField.tap()
         XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 2))
@@ -139,7 +153,7 @@ final class WGJUITests: XCTestCase {
         let categoryDropdown = identifiedElement("exercises-category-dropdown", in: app)
         XCTAssertTrue(categoryDropdown.waitForExistence(timeout: 2))
         XCTAssertGreaterThanOrEqual(categoryDropdown.frame.minY, categoryFilter.frame.maxY - 8)
-        let chestCategory = app.buttons["Chest"]
+        let chestCategory = app.scrollViews["exercises-category-dropdown"].buttons["Chest"]
         XCTAssertTrue(chestCategory.waitForExistence(timeout: 2))
         chestCategory.tap()
         XCTAssertFalse(app.keyboards.element.waitForExistence(timeout: 1))

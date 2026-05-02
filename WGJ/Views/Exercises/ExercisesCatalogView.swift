@@ -302,12 +302,12 @@ struct ExercisesCatalogView: View {
                 selectedMuscleID: searchState.selectedPrimaryMuscleID,
                 onSelect: { muscleID in
                     searchState.selectedPrimaryMuscleID = muscleID
-                    activeFilterDropdown = nil
+                    closeFilterDropdownAfterSelection()
                     showingMuscleMapFilterSheet = false
                 },
                 onClear: {
                     searchState.selectedPrimaryMuscleID = nil
-                    activeFilterDropdown = nil
+                    closeFilterDropdownAfterSelection()
                     showingMuscleMapFilterSheet = false
                 }
             )
