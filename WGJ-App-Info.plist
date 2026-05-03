@@ -12,6 +12,8 @@
 	<string>$(WGJ_APP_ENVIRONMENT)</string>
 	<key>WGJCloudKitContainerIdentifier</key>
 	<string>$(WGJ_CLOUDKIT_CONTAINER_IDENTIFIER)</string>
+	<key>WGJRevenueCatAPIKey</key>
+	<string>$(WGJ_REVENUECAT_API_KEY)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>

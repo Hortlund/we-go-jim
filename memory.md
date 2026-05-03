@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-05-03 - RevenueCat Paywall Requires Positive Configuration
+
+- Date: 2026-05-03
+- Trigger/Problem: Tapping Pro actions crashed first from missing `SubscriptionState` in the paywall sheet environment, then from `Purchases has not been configured` when RevenueCat UI instantiated before a successful SDK configuration.
+- Root Cause: Paywall presentation relied on SwiftUI presentation environment propagation and allowed `PaywallView` to build even when RevenueCat configuration had failed or Release/TestFlight had no durable API-key plist path.
+- Durable Rule: Keep subscription state root-owned and pass it explicitly through RevenueCat presentation boundaries. Before setting paywall presentation state, synchronously call the subscription configuration boundary and only present RevenueCat UI after configuration positively succeeds. Release/TestFlight must receive a real production RevenueCat public SDK key through the `WGJRevenueCatAPIKey`/`WGJ_REVENUECAT_API_KEY` path; do not instantiate `PaywallView` after a failed configuration.
+- How to Verify Next Time: Run `WGJTests/SubscriptionStateTests` for configuration-gated paywall behavior, `WGJUITests/WGJUITests/testTemplateLimitProActionKeepsAppRunning` for a Pro tap smoke, and a TestFlight/sandbox paywall check with the real production RevenueCat key set.
+- Status: active
+
 ## 2026-05-03 - Exercises Header Close Paths Must Reset Expansion State
 
 - Date: 2026-05-03

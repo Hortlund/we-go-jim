@@ -9,6 +9,7 @@ final class SubscriptionState {
     private let service: any SubscriptionServicing
     private(set) var customerInfo: SubscriptionCustomerInfoSnapshot?
     private(set) var isLoading = false
+    private(set) var isConfigured = false
     private(set) var errorMessage: String?
     var isPaywallPresented = false
     var isCustomerCenterPresented = false
@@ -24,7 +25,10 @@ final class SubscriptionState {
     func configureIfNeeded() {
         do {
             try service.configureIfNeeded()
+            isConfigured = true
+            errorMessage = nil
         } catch {
+            isConfigured = false
             errorMessage = String(describing: error)
         }
     }
@@ -47,6 +51,8 @@ final class SubscriptionState {
     }
 
     func presentPaywall() {
+        configureIfNeeded()
+        guard isConfigured else { return }
         isPaywallPresented = true
     }
 

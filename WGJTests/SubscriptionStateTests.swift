@@ -60,14 +60,46 @@ struct SubscriptionStateTests {
         #expect(state.isPro == true)
         #expect(state.errorMessage == "offline")
     }
+
+    @MainActor
+    @Test
+    func presentPaywallConfiguresRevenueCatBeforePresentation() {
+        let service = SubscriptionServiceProbe(refreshResult: .failure(SubscriptionTestError.offline))
+        let state = SubscriptionState(service: service)
+
+        state.presentPaywall()
+
+        #expect(service.configureCount == 1)
+        #expect(state.isPaywallPresented == true)
+        #expect(state.errorMessage == nil)
+    }
+
+    @MainActor
+    @Test
+    func presentPaywallStoresConfigurationErrorInsteadOfPresentingUnconfiguredSDK() {
+        let service = SubscriptionServiceProbe(
+            configureResult: .failure(SubscriptionTestError.invalidConfiguration),
+            refreshResult: .failure(SubscriptionTestError.offline)
+        )
+        let state = SubscriptionState(service: service)
+
+        state.presentPaywall()
+
+        #expect(service.configureCount == 1)
+        #expect(state.isPaywallPresented == false)
+        #expect(state.errorMessage == "invalidConfiguration")
+    }
 }
 
 private enum SubscriptionTestError: Error, CustomStringConvertible {
+    case invalidConfiguration
     case offline
     case unexpectedSDKAccess
 
     var description: String {
         switch self {
+        case .invalidConfiguration:
+            return "invalidConfiguration"
         case .offline:
             return "offline"
         case .unexpectedSDKAccess:
@@ -77,14 +109,23 @@ private enum SubscriptionTestError: Error, CustomStringConvertible {
 }
 
 private final class SubscriptionServiceProbe: SubscriptionServicing {
+    var configureCount = 0
     var refreshCount = 0
+    let configureResult: Result<Void, Error>
     let refreshResult: Result<SubscriptionCustomerInfoSnapshot, Error>
 
-    init(refreshResult: Result<SubscriptionCustomerInfoSnapshot, Error>) {
+    init(
+        configureResult: Result<Void, Error> = .success(()),
+        refreshResult: Result<SubscriptionCustomerInfoSnapshot, Error>
+    ) {
+        self.configureResult = configureResult
         self.refreshResult = refreshResult
     }
 
-    func configureIfNeeded() throws { }
+    func configureIfNeeded() throws {
+        configureCount += 1
+        try configureResult.get()
+    }
 
     func customerInfo() async throws -> SubscriptionCustomerInfoSnapshot {
         refreshCount += 1
