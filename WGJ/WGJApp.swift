@@ -11,6 +11,7 @@ struct WGJApp: App {
         Self.configureNavigationTitleAppearance()
         RestTimerNotificationManager.shared.configureNotifications()
         CloudSyncEventMonitor.shared.start()
+        SubscriptionState.shared.configureIfNeeded()
     }
 
     var body: some Scene {

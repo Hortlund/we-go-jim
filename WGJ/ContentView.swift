@@ -8,6 +8,7 @@ struct ContentView: View {
     @Environment(\.appBackgroundStore) private var appBackgroundStore
 
     @State private var appRuntimeState = AppRuntimeState.shared
+    @State private var subscriptionState = SubscriptionState.shared
     @State private var appPhase: AppPhase = .splash
     @State private var appTabState = AppTabState()
     @State private var templateFileOpenState = TemplateFileOpenState()
@@ -22,6 +23,7 @@ struct ContentView: View {
     @State private var resumeCriticalMaintenanceTracker = ResumeCriticalMaintenanceTracker()
     @State private var resumeCriticalMaintenanceTask: Task<Void, Never>?
     @State private var enteredMainDeferredMaintenanceTask: Task<Void, Never>?
+    @State private var subscriptionRefreshTask: Task<Void, Never>?
     @State private var isPreparingMainPhase = false
     @State private var hasInstalledUITestPendingTemplate = false
     @State private var hasScheduledInitialDeferredMaintenance = false
@@ -53,6 +55,7 @@ struct ContentView: View {
         .environment(restTimerState)
         .environment(catalogSyncCoordinator)
         .environment(appWarmupState)
+        .environment(subscriptionState)
         .tint(WGJTheme.accent)
         .preferredColorScheme(.dark)
         .task {
@@ -64,6 +67,7 @@ struct ContentView: View {
                 restTimerState.handleRestTimerExpirationIfNeeded()
                 scheduleResumeCriticalMaintenanceIfNeeded()
                 if activeWorkoutPresentationState.activeSessionID == nil {
+                    scheduleSubscriptionRefreshIfNeeded()
                     if deferredMaintenanceState.isPending {
                         requestDeferredMaintenance(trigger: .sceneActivated)
                     } else {
@@ -85,10 +89,16 @@ struct ContentView: View {
             updateIdleTimerState()
         }
         .onChange(of: activeWorkoutPresentationState.activeSessionID) { oldValue, newValue in
+            if oldValue == nil, newValue != nil {
+                cancelSubscriptionRefresh()
+                return
+            }
+
             guard oldValue != nil, newValue == nil else { return }
             appWarmupState.invalidateProfile()
             appWarmupState.invalidateBros()
             requestNewDeferredMaintenanceRun()
+            scheduleSubscriptionRefreshIfNeeded()
             requestDeferredMaintenance(trigger: .activeWorkoutEnded)
         }
         .onOpenURL { url in
@@ -222,6 +232,7 @@ struct ContentView: View {
     private func handleEnteredMainPhase() {
         scheduleResumeCriticalMaintenanceIfNeeded()
         routePendingTemplateFileIfNeeded()
+        scheduleSubscriptionRefreshIfNeeded()
 
         guard !hasScheduledInitialDeferredMaintenance else { return }
         hasScheduledInitialDeferredMaintenance = true
@@ -553,6 +564,7 @@ struct ContentView: View {
         resetResumeCriticalMaintenanceCycle()
         enteredMainDeferredMaintenanceTask?.cancel()
         enteredMainDeferredMaintenanceTask = nil
+        cancelSubscriptionRefresh()
         fallbackCoachWarmupTask?.cancel()
         fallbackCoachWarmupTask = nil
         activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
@@ -565,6 +577,37 @@ struct ContentView: View {
         updateIdleTimerState()
         withAnimation(.easeInOut(duration: 0.2)) {
             appPhase = .splash
+        }
+    }
+
+    private func cancelSubscriptionRefresh() {
+        subscriptionRefreshTask?.cancel()
+        subscriptionRefreshTask = nil
+    }
+
+    private func scheduleSubscriptionRefreshIfNeeded() {
+        guard appPhase == .main,
+              scenePhase == .active,
+              activeWorkoutPresentationState.activeSessionID == nil
+        else {
+            cancelSubscriptionRefresh()
+            return
+        }
+
+        subscriptionRefreshTask?.cancel()
+        subscriptionRefreshTask = Task { @MainActor in
+            await Task.yield()
+            guard !Task.isCancelled,
+                  appPhase == .main,
+                  scenePhase == .active,
+                  activeWorkoutPresentationState.activeSessionID == nil
+            else {
+                return
+            }
+
+            await subscriptionState.refreshCustomerInfo()
+            guard !Task.isCancelled else { return }
+            subscriptionRefreshTask = nil
         }
     }
 
