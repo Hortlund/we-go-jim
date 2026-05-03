@@ -194,7 +194,7 @@ struct ExercisesCatalogView: View {
                             Color.clear
                                 .contentShape(Rectangle())
                                 .onTapGesture {
-                                    activeFilterDropdown = nil
+                                    closeFilterDropdownAfterSelection()
                                 }
                                 .accessibilityHidden(true)
                         }
@@ -533,6 +533,8 @@ struct ExercisesCatalogView: View {
                         isSelected: false
                     ) {
                         self.activeFilterDropdown = nil
+                        isSearchToolbarExpanded = false
+                        isSearchFieldFocused = false
                         showingMuscleMapFilterSheet = true
                     }
 

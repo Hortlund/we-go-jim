@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-05-03 - Exercises Header Close Paths Must Reset Expansion State
+
+- Date: 2026-05-03
+- Trigger/Problem: Exercise search header collapse stayed disabled after closing body-part filter affordances without choosing a filter, specifically tapping outside the dropdown or opening the muscle map and pressing Done without selecting anything.
+- Root Cause: Some close paths cleared `activeFilterDropdown` or presented/dismissed the muscle-map sheet without clearing `isSearchToolbarExpanded` and focus state, so `headerCollapseProgress` remained pinned at zero even while scrolling.
+- Durable Rule: Every Exercises search/filter close path that leaves the user back in the catalog list must clear the dropdown, toolbar expansion, and search focus together. Do not clear only `activeFilterDropdown` unless the toolbar intentionally remains expanded.
+- How to Verify Next Time: Run `WGJUITests/WGJUITests/testExercisesSearchAndFilterSmoke` on the signed-in `iPhone 17 / iOS 26.2` simulator and confirm scroll collapse works after outside-tapping a filter dropdown, after muscle-map Done with no selection, after selecting from the muscle map, after category selection, and after search text entry.
+- Status: active
+
 ## 2026-05-01 - Exercises Expanded Header Must Reserve Compact Controls Height
 
 - Date: 2026-05-01
