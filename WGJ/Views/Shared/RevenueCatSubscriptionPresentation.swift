@@ -3,7 +3,7 @@ import RevenueCatUI
 import SwiftUI
 
 struct RevenueCatPaywallSheet: View {
-    @Environment(SubscriptionState.self) private var subscriptionState
+    let subscriptionState: SubscriptionState
 
     var body: some View {
         PaywallView(displayCloseButton: true)
@@ -22,6 +22,7 @@ struct RevenueCatPaywallSheet: View {
             .onRequestedDismissal {
                 subscriptionState.isPaywallPresented = false
             }
+            .accessibilityIdentifier("revenuecat-paywall-sheet")
     }
 
     private func apply(_ customerInfo: CustomerInfo) {

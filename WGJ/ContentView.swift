@@ -115,7 +115,7 @@ struct ContentView: View {
             resetToStartupFlow()
         }
         .sheet(isPresented: $subscriptionState.isPaywallPresented) {
-            RevenueCatPaywallSheet()
+            RevenueCatPaywallSheet(subscriptionState: subscriptionState)
         }
         .presentCustomerCenter(
             isPresented: $subscriptionState.isCustomerCenterPresented,

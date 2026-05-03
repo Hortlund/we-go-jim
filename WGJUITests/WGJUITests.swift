@@ -367,6 +367,32 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testTemplateLimitProActionKeepsAppRunning() throws {
+        let app = launchApp(mode: .localInMemory)
+
+        tapTab("Start Workout", in: app)
+
+        for index in 1...4 {
+            app.buttons["start-workout-new-template-button"].tap()
+
+            let templateNameField = app.textFields["template-editor-name-field"]
+            XCTAssertTrue(templateNameField.waitForExistence(timeout: 5))
+            templateNameField.tap()
+            templateNameField.typeText("Free Template \(index)")
+            app.buttons["template-editor-save-button"].tap()
+            XCTAssertTrue(app.staticTexts["Free Template \(index)"].waitForExistence(timeout: 5))
+        }
+
+        app.buttons["start-workout-new-template-button"].tap()
+
+        XCTAssertTrue(identifiedElement("revenuecat-paywall-sheet", in: app).waitForExistence(timeout: 5))
+        let appRemainedForeground = NSPredicate(format: "state == %d", XCUIApplication.State.runningForeground.rawValue)
+        expectation(for: appRemainedForeground, evaluatedWith: app)
+        waitForExpectations(timeout: 2)
+        XCTAssertFalse(app.buttons["template-editor-save-button"].waitForExistence(timeout: 1))
+    }
+
+    @MainActor
     func testTemplateEditorSaveRefreshesPreviewRepRangeImmediately() throws {
         let app = launchApp(mode: .localInMemory, launchArguments: [
             "UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT",
