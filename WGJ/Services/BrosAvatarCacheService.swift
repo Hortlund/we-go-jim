@@ -94,6 +94,30 @@ nonisolated final class BrosAvatarCacheService {
         cache.removeObject(forKey: key as NSString)
     }
 
+    func primeVisibleAvatars(
+        in snapshot: BrosFeedSnapshot,
+        maxPixelSize: CGFloat = 176
+    ) async {
+        var avatarsByKey: [String: Data] = [:]
+
+        func include(key: String?, data: Data?) {
+            guard let key, let data else { return }
+            avatarsByKey[key] = data
+        }
+
+        include(key: snapshot.currentMember.avatarCacheKey, data: snapshot.currentMember.avatarImageData)
+        for member in snapshot.members {
+            include(key: member.avatarCacheKey, data: member.avatarImageData)
+        }
+        for event in snapshot.feedEvents {
+            include(key: event.actorAvatarCacheKey, data: event.actorAvatarImageData)
+        }
+
+        for (key, data) in avatarsByKey {
+            await prime(data: data, for: key, maxPixelSize: maxPixelSize)
+        }
+    }
+
     func clear() {
         cache.removeAllObjects()
     }

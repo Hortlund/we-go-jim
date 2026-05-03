@@ -36,6 +36,12 @@ final class BrosViewModel {
     var isBusy: Bool { pendingAction != nil }
     var isCreatingCircle: Bool { pendingAction == .createCircle }
     var isJoiningCircle: Bool { pendingAction == .joinCircle }
+    var activeSnapshot: BrosFeedSnapshot? {
+        if case .active(let snapshot) = state {
+            return snapshot
+        }
+        return nil
+    }
     var shouldApplyWarmState: Bool {
         guard !hasLoaded else { return false }
         switch state {
@@ -96,6 +102,9 @@ final class BrosViewModel {
         hasLoaded = false
         errorMessage = nil
         lastSuccessfulSnapshotRefreshAt = nil
+        Task {
+            await BrosAvatarCacheService.shared.primeVisibleAvatars(in: snapshot)
+        }
     }
 
     func applyWarmState(_ snapshot: BrosWarmSnapshot) {
@@ -108,6 +117,9 @@ final class BrosViewModel {
             state = .onboarding
         case .active(let feedSnapshot):
             state = .active(feedSnapshot)
+            Task {
+                await BrosAvatarCacheService.shared.primeVisibleAvatars(in: feedSnapshot)
+            }
         }
 
         hasLoaded = snapshot.state != .loading
@@ -200,6 +212,7 @@ final class BrosViewModel {
         await runMutation(.createCircle) { [self] in
             let service = try service(modelContext: modelContext)
             let snapshot = try await service.createCircle(memberLimit: self.circleMemberLimit)
+            await self.primeAvatarThumbnails(in: snapshot)
             self.state = .active(snapshot)
             self.markCurrentSnapshotAuthoritative()
             self.joinCode = ""
@@ -216,6 +229,7 @@ final class BrosViewModel {
         let didUpdate = await runMutation(.updateCircleMemberLimit) { [self] in
             let service = try service(modelContext: modelContext)
             let snapshot = try await service.updateCircleMemberLimit(memberLimit)
+            await self.primeAvatarThumbnails(in: snapshot)
             self.state = .active(snapshot)
             self.markCurrentSnapshotAuthoritative()
         }
@@ -238,6 +252,7 @@ final class BrosViewModel {
             let service = try service(modelContext: modelContext)
             let snapshot = try await service
                 .joinCircle(inviteCode: self.joinCode)
+            await self.primeAvatarThumbnails(in: snapshot)
             self.state = .active(snapshot)
             self.markCurrentSnapshotAuthoritative()
             self.joinCode = ""
@@ -264,14 +279,14 @@ final class BrosViewModel {
             let service = try service(modelContext: modelContext)
             try await service.removeMember(membershipID: membershipID)
             if case .active(let snapshot) = self.state {
-                self.state = .active(
-                    BrosFeedSnapshot(
-                        circle: snapshot.circle,
-                        currentMember: snapshot.currentMember,
-                        members: snapshot.members.filter { $0.id != membershipID },
-                        feedEvents: snapshot.feedEvents
-                    )
+                let updatedSnapshot = BrosFeedSnapshot(
+                    circle: snapshot.circle,
+                    currentMember: snapshot.currentMember,
+                    members: snapshot.members.filter { $0.id != membershipID },
+                    feedEvents: snapshot.feedEvents
                 )
+                await self.primeAvatarThumbnails(in: updatedSnapshot)
+                self.state = .active(updatedSnapshot)
                 self.markCurrentSnapshotAuthoritative()
             }
             self.scheduleBackgroundHydration(modelContext: modelContext)
@@ -508,13 +523,14 @@ final class BrosViewModel {
                case .active(let currentSnapshot) = state,
                !pendingReactionEventIDs.isEmpty
             {
-                state = .active(
-                    snapshotPreservingPendingReactions(
-                        freshSnapshot: snapshot,
-                        currentSnapshot: currentSnapshot
-                    )
+                let mergedSnapshot = snapshotPreservingPendingReactions(
+                    freshSnapshot: snapshot,
+                    currentSnapshot: currentSnapshot
                 )
+                await primeAvatarThumbnails(in: mergedSnapshot)
+                state = .active(mergedSnapshot)
             } else {
+                await primeAvatarThumbnails(in: snapshot)
                 state = .active(snapshot)
             }
         } else {
@@ -524,6 +540,10 @@ final class BrosViewModel {
         }
 
         lastSuccessfulSnapshotRefreshAt = .now
+    }
+
+    private func primeAvatarThumbnails(in snapshot: BrosFeedSnapshot) async {
+        await BrosAvatarCacheService.shared.primeVisibleAvatars(in: snapshot)
     }
 
     private func markCurrentSnapshotAuthoritative() {
@@ -583,6 +603,7 @@ final class BrosViewModel {
                 actorUserRecordName: event.actorUserRecordName,
                 actorMembershipID: event.actorMembershipID,
                 actorDisplayName: event.actorDisplayName,
+                actorAvatarImageData: event.actorAvatarImageData,
                 actorAvatarCacheKey: event.actorAvatarCacheKey,
                 createdAt: event.createdAt,
                 kind: event.kind,
@@ -619,6 +640,7 @@ final class BrosViewModel {
                 actorUserRecordName: event.actorUserRecordName,
                 actorMembershipID: event.actorMembershipID,
                 actorDisplayName: event.actorDisplayName,
+                actorAvatarImageData: event.actorAvatarImageData,
                 actorAvatarCacheKey: event.actorAvatarCacheKey,
                 createdAt: event.createdAt,
                 kind: event.kind,
@@ -661,6 +683,7 @@ final class BrosViewModel {
                 actorUserRecordName: event.actorUserRecordName,
                 actorMembershipID: event.actorMembershipID,
                 actorDisplayName: event.actorDisplayName,
+                actorAvatarImageData: event.actorAvatarImageData,
                 actorAvatarCacheKey: event.actorAvatarCacheKey,
                 createdAt: event.createdAt,
                 kind: event.kind,
@@ -1504,9 +1527,22 @@ struct BrosView: View {
                         ],
                         spacing: 8
                     ) {
-                        WGJMetricPill(systemImage: "clock.fill", value: durationText(workout.durationSeconds))
-                        WGJMetricPill(systemImage: "scalemass.fill", value: volumeText(workout.totalVolume))
-                        WGJMetricPill(systemImage: "trophy.fill", value: "\(workout.prCount) PR", tint: WGJTheme.accentGold)
+                        WGJMetricPill(
+                            systemImage: "clock.fill",
+                            value: durationText(workout.durationSeconds),
+                            allowsTextWrapping: true
+                        )
+                        WGJMetricPill(
+                            systemImage: "scalemass.fill",
+                            value: volumeText(workout.totalVolume),
+                            allowsTextWrapping: true
+                        )
+                        WGJMetricPill(
+                            systemImage: "trophy.fill",
+                            value: "\(workout.prCount) PR",
+                            tint: WGJTheme.accentGold,
+                            allowsTextWrapping: true
+                        )
                     }
 
                     if !previewExercises.isEmpty {
@@ -1545,11 +1581,13 @@ struct BrosView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         WGJMetricPill(
                             systemImage: "chart.line.uptrend.xyaxis",
-                            value: "\(WGJFormatters.oneDecimalString(pr.estimatedOneRepMax)) \(pr.loadUnit.shortLabel)"
+                            value: "\(WGJFormatters.oneDecimalString(pr.estimatedOneRepMax)) \(pr.loadUnit.shortLabel)",
+                            allowsTextWrapping: true
                         )
                         WGJMetricPill(
                             systemImage: "dumbbell.fill",
-                            value: "\(WGJFormatters.decimalString(pr.weight)) \(pr.loadUnit.shortLabel) x \(pr.reps)"
+                            value: "\(WGJFormatters.decimalString(pr.weight)) \(pr.loadUnit.shortLabel) x \(pr.reps)",
+                            allowsTextWrapping: true
                         )
                     }
                 }
@@ -2333,6 +2371,19 @@ private struct BroAvatarView: View {
     let name: String
     let size: CGFloat
     @State private var image: UIImage?
+
+    init(
+        avatarCacheKey: String?,
+        avatarImageData: Data?,
+        name: String,
+        size: CGFloat
+    ) {
+        self.avatarCacheKey = avatarCacheKey
+        self.avatarImageData = avatarImageData
+        self.name = name
+        self.size = size
+        _image = State(initialValue: BrosAvatarCacheService.shared.cachedThumbnail(for: avatarCacheKey))
+    }
 
     var body: some View {
         Group {

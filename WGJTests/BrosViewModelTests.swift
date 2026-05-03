@@ -1,10 +1,29 @@
 import Foundation
 import SwiftData
 import Testing
+import SwiftUI
+import UIKit
 @testable import WGJ
 
 @MainActor
 struct BrosViewModelTests {
+    @Test
+    func brosMetricPillWrapsLongWeightsInsteadOfClippingOnCompactCards() {
+        let host = UIHostingController(
+            rootView: WGJMetricPill(
+                systemImage: "scalemass.fill",
+                value: "123,456 kg",
+                allowsTextWrapping: true
+            )
+            .frame(width: 96)
+        )
+        host.view.bounds = CGRect(x: 0, y: 0, width: 96, height: 160)
+
+        let size = host.sizeThatFits(in: CGSize(width: 96, height: 160))
+
+        #expect(size.height > 40)
+    }
+
     @Test
     func workoutExercisePreviewPresentationIncludesEveryExercise() {
         let workout = BroWorkoutFeedSnapshot(
@@ -114,6 +133,40 @@ struct BrosViewModelTests {
     }
 
     @Test
+    func refreshPrimesVisibleAvatarThumbnailsBeforePublishingActiveSnapshot() async throws {
+        BrosAvatarCacheService.shared.clear()
+        let context = try makeInMemoryContext()
+        let service = StubBrosSocialService()
+        let currentAvatarData = try #require(makeAvatarData(color: .systemBlue))
+        let eventAvatarData = try #require(makeAvatarData(color: .systemRed))
+        let feedEvent = makeReactionEvent(
+            actorUserRecordName: "user-2",
+            actorAvatarImageData: eventAvatarData,
+            reactions: []
+        )
+        service.snapshot = makeSnapshot(
+            displayName: "Atlas",
+            avatarImageData: currentAvatarData,
+            feedEvents: [feedEvent]
+        )
+        let viewModel = BrosViewModel(
+            accountStatusProvider: { .available },
+            serviceFactory: { _ in service }
+        )
+
+        await viewModel.refresh(
+            modelContext: context,
+            cloudSyncEnabled: true,
+            cloudSyncErrorDescription: nil,
+            force: true
+        )
+
+        let snapshot = try #require(viewModel.activeSnapshot)
+        #expect(BrosAvatarCacheService.shared.cachedThumbnail(for: snapshot.currentMember.avatarCacheKey) != nil)
+        #expect(BrosAvatarCacheService.shared.cachedThumbnail(for: snapshot.feedEvents.first?.actorAvatarCacheKey) != nil)
+    }
+
+    @Test
     func warmSnapshotStaysVisibleWhenRefreshSourceIsUnavailable() async throws {
         let context = try makeInMemoryContext()
         let warmSnapshot = makeSnapshot(displayName: "Atlas")
@@ -167,12 +220,17 @@ struct BrosViewModelTests {
         let context = try makeInMemoryContext()
         let service = StubBrosSocialService()
         service.shouldSuspendReaction = true
+        let actorAvatarData = try #require(makeAvatarData(color: .systemGreen))
 
         let initialSnapshot = makeSnapshot(
             displayName: "Brody",
             role: .member,
             feedEvents: [
-                makeReactionEvent(actorUserRecordName: "user-1", reactions: []),
+                makeReactionEvent(
+                    actorUserRecordName: "user-1",
+                    actorAvatarImageData: actorAvatarData,
+                    reactions: []
+                ),
             ]
         )
         let authoritativeSnapshot = makeSnapshot(
@@ -181,6 +239,7 @@ struct BrosViewModelTests {
             feedEvents: [
                 makeReactionEvent(
                     actorUserRecordName: "user-1",
+                    actorAvatarImageData: actorAvatarData,
                     reactions: [
                         BroReactionSummary(userRecordName: "user-2", emoji: .fire, displayName: "Brody"),
                     ]
@@ -207,6 +266,7 @@ struct BrosViewModelTests {
         #expect(service.setReactionKinds == [.fire])
         #expect(service.fetchSnapshotCallCount == 0)
         #expect(viewModel.isReactionPending(eventID: "event-1"))
+        #expect(viewModel.activeSnapshot?.feedEvents.first?.actorAvatarImageData == actorAvatarData)
 
         service.resumeReaction()
         await Task.yield()
@@ -215,6 +275,7 @@ struct BrosViewModelTests {
         #expect(service.fetchSnapshotCallCount == 1)
         #expect(viewModel.state == .active(authoritativeSnapshot))
         #expect(!viewModel.isReactionPending(eventID: "event-1"))
+        #expect(viewModel.activeSnapshot?.feedEvents.first?.actorAvatarImageData == actorAvatarData)
     }
 
     @Test
@@ -454,6 +515,7 @@ struct BrosViewModelTests {
         displayName: String,
         role: BroMembershipRole = .owner,
         memberLimit: Int = 4,
+        avatarImageData: Data? = nil,
         feedEvents: [BroFeedEvent] = []
     ) -> BrosFeedSnapshot {
         let currentMember = BroMemberSummary(
@@ -462,7 +524,7 @@ struct BrosViewModelTests {
             userRecordName: role == .owner ? "user-1" : "user-2",
             displayName: displayName,
             athleteType: nil,
-            avatarImageData: nil,
+            avatarImageData: avatarImageData,
             joinedAt: Date(timeIntervalSince1970: role == .owner ? 100 : 120),
             role: role
         )
@@ -497,6 +559,7 @@ struct BrosViewModelTests {
 
     private func makeReactionEvent(
         actorUserRecordName: String,
+        actorAvatarImageData: Data? = nil,
         reactions: [BroReactionSummary]
     ) -> BroFeedEvent {
         BroFeedEvent(
@@ -505,7 +568,7 @@ struct BrosViewModelTests {
             actorUserRecordName: actorUserRecordName,
             actorMembershipID: "membership-circle-1-\(actorUserRecordName)",
             actorDisplayName: "Atlas",
-            actorAvatarImageData: nil,
+            actorAvatarImageData: actorAvatarImageData,
             createdAt: Date(timeIntervalSince1970: 200),
             kind: .workoutCompleted,
             workout: BroWorkoutFeedSnapshot(
@@ -518,6 +581,15 @@ struct BrosViewModelTests {
             pr: nil,
             reactions: reactions
         )
+    }
+
+    private func makeAvatarData(color: UIColor) -> Data? {
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 24, height: 24))
+        let image = renderer.image { context in
+            color.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 24, height: 24))
+        }
+        return image.pngData()
     }
 }
 

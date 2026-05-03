@@ -56,9 +56,22 @@ struct BroFeedEventDetailSheet: View {
                     ],
                     spacing: 8
                 ) {
-                    WGJMetricPill(systemImage: "clock.fill", value: durationText(workout.durationSeconds))
-                    WGJMetricPill(systemImage: "scalemass.fill", value: volumeText(workout.totalVolume))
-                    WGJMetricPill(systemImage: "trophy.fill", value: "\(workout.prCount) PR", tint: WGJTheme.accentGold)
+                    WGJMetricPill(
+                        systemImage: "clock.fill",
+                        value: durationText(workout.durationSeconds),
+                        allowsTextWrapping: true
+                    )
+                    WGJMetricPill(
+                        systemImage: "scalemass.fill",
+                        value: volumeText(workout.totalVolume),
+                        allowsTextWrapping: true
+                    )
+                    WGJMetricPill(
+                        systemImage: "trophy.fill",
+                        value: "\(workout.prCount) PR",
+                        tint: WGJTheme.accentGold,
+                        allowsTextWrapping: true
+                    )
                 }
             }
             .padding(WGJSpacing.card)
@@ -106,11 +119,13 @@ struct BroFeedEventDetailSheet: View {
                 VStack(alignment: .leading, spacing: 10) {
                     WGJMetricPill(
                         systemImage: "chart.line.uptrend.xyaxis",
-                        value: "\(WGJFormatters.oneDecimalString(pr.estimatedOneRepMax)) \(pr.loadUnit.shortLabel)"
+                        value: "\(WGJFormatters.oneDecimalString(pr.estimatedOneRepMax)) \(pr.loadUnit.shortLabel)",
+                        allowsTextWrapping: true
                     )
                     WGJMetricPill(
                         systemImage: "dumbbell.fill",
-                        value: "\(WGJFormatters.decimalString(pr.weight)) \(pr.loadUnit.shortLabel) x \(pr.reps)"
+                        value: "\(WGJFormatters.decimalString(pr.weight)) \(pr.loadUnit.shortLabel) x \(pr.reps)",
+                        allowsTextWrapping: true
                     )
                 }
             }

@@ -951,6 +951,11 @@ struct ContentView: View {
         }
 
         let snapshot = try await service.fetchSnapshot()
+        if let snapshot {
+            Task.detached(priority: .utility) {
+                await BrosAvatarCacheService.shared.primeVisibleAvatars(in: snapshot)
+            }
+        }
         return BrosWarmSnapshot(
             state: snapshot.map(BrosWarmStateSnapshot.active) ?? .onboarding,
             blockedUserRecordNames: blockedUserRecordNames,

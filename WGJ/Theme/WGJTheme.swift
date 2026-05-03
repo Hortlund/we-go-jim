@@ -536,11 +536,14 @@ struct WGJMetricPill: View {
     let systemImage: String
     let value: String
     var tint: Color = WGJTheme.textSecondary
+    var allowsTextWrapping = false
 
     var body: some View {
         Label {
             Text(value)
-                .lineLimit(1)
+                .lineLimit(allowsTextWrapping ? 2 : 1)
+                .minimumScaleFactor(allowsTextWrapping ? 0.82 : 1)
+                .fixedSize(horizontal: false, vertical: allowsTextWrapping)
         } icon: {
             Image(systemName: systemImage)
         }
