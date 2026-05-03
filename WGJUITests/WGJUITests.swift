@@ -956,6 +956,11 @@ final class WGJUITests: XCTestCase {
 
         tapTab("Profile", in: app)
         let settingsTile = identifiedElement("profile-settings-tile", in: app)
+        if !settingsTile.waitForExistence(timeout: 5) {
+            for _ in 0 ..< 4 where !settingsTile.exists {
+                app.swipeUp()
+            }
+        }
         XCTAssertTrue(settingsTile.waitForExistence(timeout: 5))
         settingsTile.tap()
 
@@ -965,6 +970,31 @@ final class WGJUITests: XCTestCase {
 
         XCTAssertTrue(app.navigationBars["Support"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Email Support"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testSettingsTermsAndSafetyNavigation() throws {
+        let app = launchApp(mode: .localInMemory)
+
+        tapTab("Profile", in: app)
+        let settingsTile = identifiedElement("profile-settings-tile", in: app)
+        if !settingsTile.waitForExistence(timeout: 5) {
+            for _ in 0 ..< 4 where !settingsTile.exists {
+                app.swipeUp()
+            }
+        }
+        XCTAssertTrue(settingsTile.waitForExistence(timeout: 5))
+        settingsTile.tap()
+
+        let termsTile = identifiedElement("settings-terms-safety-tile", in: app)
+        XCTAssertTrue(termsTile.waitForExistence(timeout: 5))
+        termsTile.tap()
+
+        XCTAssertTrue(app.navigationBars["Terms & Safety"].waitForExistence(timeout: 5))
+        let safetyText = app.staticTexts
+            .matching(NSPredicate(format: "label CONTAINS %@", "Train at your own risk"))
+            .firstMatch
+        XCTAssertTrue(safetyText.waitForExistence(timeout: 5))
     }
 
     @MainActor

@@ -14,14 +14,14 @@ struct DeleteMyDataView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                WGJRootHeader("Delete My Data", subtitle: "Remove your local data and your own Bros data from iCloud.")
+                WGJRootHeader("Delete My Data", subtitle: "Remove local app data and request deletion of your own synced Bros data.")
 
                 infoCard(
                     title: "This deletes",
                     lines: [
-                        "Your profile, avatar, workouts, templates, widgets, custom exercises, block list, and pending social outbox items.",
+                        "Your local profile, avatar, workouts, active-workout draft, templates, widgets, custom exercises, block list, and pending social outbox items.",
                         "Cached exercise images stored on-device.",
-                        "Your own Bros membership, reactions, workout events, PR events, and synced profile data when iCloud is available.",
+                        "Your own Bros membership, reactions, workout events, PR events, and synced profile data when iCloud is available and reachable.",
                     ]
                 )
 
@@ -29,7 +29,9 @@ struct DeleteMyDataView: View {
                     title: "What it does not delete",
                     lines: [
                         "Exercise catalog seed data bundled with the app.",
-                        "Other members' data in a Bros circle.",
+                        "Other members' data, posts, reactions, or records in a Bros circle.",
+                        "Data Apple or payment providers keep for account, purchase, refund, tax, security, or legal reasons.",
+                        "Copies already exported, screenshotted, backed up outside WGJ, or retained where deletion is not technically or legally possible.",
                     ]
                 )
 
@@ -66,7 +68,7 @@ struct DeleteMyDataView: View {
             }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("This cannot be undone.")
+            Text("This cannot be undone. Cloud deletion depends on iCloud and network availability.")
         }
         .alert(alertTitle, isPresented: $showingAlert) {
             Button("OK") {

@@ -4,13 +4,13 @@ struct CommunityGuidelinesView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                WGJRootHeader("Community Guidelines", subtitle: "Bros is for private lifting updates, not spam, abuse, or unsafe behavior.")
+                WGJRootHeader("Community Guidelines", subtitle: "Bros is for private training updates, not abuse, spam, or unsafe content.")
 
                 guidelineCard(
                     title: "Keep it training-focused",
                     lines: [
-                        "Use Bros for workouts, PRs, and gym-related updates.",
-                        "Do not use names, workout titles, or custom exercise names for harassment, slurs, or explicit content.",
+                        "Use Bros for workout sessions, PRs, reactions, and gym-related progress.",
+                        "Do not use names, workout titles, custom exercise names, avatars, or posts for harassment, slurs, threats, sexual content, hate, spam, or private information.",
                     ]
                 )
 
@@ -18,15 +18,16 @@ struct CommunityGuidelinesView: View {
                     title: "Respect the circle",
                     lines: [
                         "Do not impersonate other people or post misleading achievements.",
-                        "Do not pressure, threaten, or bully members in your circle.",
+                        "Do not pressure, threaten, bully, shame, stalk, or encourage members to train through unsafe pain or injury.",
+                        "You are responsible for the content you create and share in Bros.",
                     ]
                 )
 
                 guidelineCard(
                     title: "Use moderation tools",
                     lines: [
-                        "Report members or posts that break these rules.",
-                        "Block bros you do not want to see in your circle feed.",
+                        "Report members or posts that break these rules or create a safety concern.",
+                        "Block bros you do not want to see in your circle feed or roster.",
                         "Circle owners can remove members when needed.",
                     ]
                 )
@@ -34,8 +35,8 @@ struct CommunityGuidelinesView: View {
                 guidelineCard(
                     title: "What happens next",
                     lines: [
-                        "Reported content can be reviewed through the support channel configured for the app.",
-                        "Repeated abuse can lead to removal from a circle or future moderation action.",
+                        "Reported content can be reviewed through the configured support channel.",
+                        "Abuse, unsafe content, or repeated rule violations can lead to removal from a circle, support follow-up, or future moderation action.",
                     ]
                 )
             }

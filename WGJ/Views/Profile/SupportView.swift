@@ -11,7 +11,7 @@ struct SupportView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                WGJRootHeader("Support", subtitle: "Contact support, open your hosted support page, or copy details for App Review.")
+                WGJRootHeader("Support", subtitle: "Best-effort support for app issues, privacy questions, purchases, and moderation reports.")
 
                 VStack(alignment: .leading, spacing: 12) {
                     WGJSectionHeader("Support Email", subtitle: AppRuntimeConfig.supportEmail)
@@ -50,18 +50,28 @@ struct SupportView: View {
                 .wgjCardContainer(strong: true)
 
                 infoCard(
-                    title: "What support handles",
+                    title: "Support expectations",
                     lines: [
-                        "Account and iCloud sync issues.",
-                        "Bug reports, crashes, and review follow-up.",
-                        "Abuse and moderation reports from Bros.",
+                        "WGJ is an independent hobby project, so support is provided when practical and response times are not guaranteed.",
+                        "App uptime, iCloud sync, Bros availability, notifications, and external services are not guaranteed.",
+                        "Features may change, be limited, or be discontinued if they cannot be maintained safely or reliably.",
+                    ]
+                )
+
+                infoCard(
+                    title: "What to send",
+                    lines: [
+                        "App bugs, crashes, account state, iCloud sync, and local-only fallback issues.",
+                        "Privacy questions, delete-my-data follow-up, App Review contact, and support URL verification.",
+                        "Bros reports, blocks, abuse, harassment, unsafe content, and moderation concerns.",
+                        "Purchase, restore, subscription, and billing-support questions for We Go Jim Pro.",
                     ]
                 )
 
                 if AppRuntimeConfig.supportURL == nil {
                     WGJEmptyStateCard(
-                        title: "Hosted support URL still needed",
-                        message: "You can ship with in-app support details, but App Store Connect still needs a real support URL before review.",
+                        title: "Support URL needed",
+                        message: "App Store Connect needs a reachable support URL before review. Keep this in-app support channel available too.",
                         icon: "link.badge.plus"
                     )
                 }

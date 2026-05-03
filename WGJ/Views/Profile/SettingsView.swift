@@ -31,7 +31,7 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                WGJRootHeader("Settings", subtitle: "Manage the catalog, training preferences, privacy, and support.")
+                WGJRootHeader("Settings", subtitle: "Manage training preferences, legal details, privacy, and support.")
 
                 VStack(alignment: .leading, spacing: 10) {
                     WGJSectionHeader("Library", subtitle: "Inspect the bundled on-device exercise database.")
@@ -60,14 +60,14 @@ struct SettingsView: View {
                 .wgjCardContainer()
 
                 VStack(alignment: .leading, spacing: 10) {
-                    WGJSectionHeader("Training Guidance", subtitle: "Show overload cues and evidence-informed set, rep, and warmup suggestions.")
+                    WGJSectionHeader("Training Guidance", subtitle: "Show optional cues based on your logged workout history.")
 
                     Toggle(isOn: $isTrainingGuidanceEnabled) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Enable training guidance")
                                 .foregroundStyle(WGJTheme.textPrimary)
 
-                            Text("Advice stays optional everywhere and never rewrites your workout for you.")
+                            Text("Guidance is informational only and never replaces your own judgment, coaching, or medical advice.")
                                 .font(.caption)
                                 .foregroundStyle(WGJTheme.textSecondary)
                         }
@@ -180,12 +180,21 @@ struct SettingsView: View {
                 .wgjCardContainer()
 
                 VStack(alignment: .leading, spacing: 10) {
-                    WGJSectionHeader("Legal & Support", subtitle: "Review privacy details, moderation info, and account deletion controls.")
+                    WGJSectionHeader("Legal & Support", subtitle: "Review terms, privacy, safety, moderation, and data controls.")
+
+                    WGJNavigationTile(
+                        title: "Terms & Safety",
+                        systemImage: "exclamationmark.shield.fill",
+                        subtitle: "Read workout safety, responsibility, warranty, and liability limits.",
+                        accessibilityID: "settings-terms-safety-tile"
+                    ) {
+                        TermsSafetyView()
+                    }
 
                     WGJNavigationTile(
                         title: "Privacy",
                         systemImage: "hand.raised.fill",
-                        subtitle: "Understand what data the app stores and syncs.",
+                        subtitle: "Understand what data the app stores, syncs, and deletes.",
                         accessibilityID: "settings-privacy-tile"
                     ) {
                         PrivacyOverviewView()
@@ -194,7 +203,7 @@ struct SettingsView: View {
                     WGJNavigationTile(
                         title: "Support",
                         systemImage: "envelope.fill",
-                        subtitle: "Contact support and moderation for review or account issues.",
+                        subtitle: "Best-effort contact for app, privacy, purchase, or moderation issues.",
                         accessibilityID: "settings-support-tile"
                     ) {
                         SupportView()
@@ -203,7 +212,7 @@ struct SettingsView: View {
                     WGJNavigationTile(
                         title: "Community Guidelines",
                         systemImage: "person.3.sequence.fill",
-                        subtitle: "Review the expected behavior for Bros.",
+                        subtitle: "Review the content and behavior rules for Bros.",
                         accessibilityID: "settings-community-guidelines-tile"
                     ) {
                         CommunityGuidelinesView()
@@ -221,7 +230,7 @@ struct SettingsView: View {
                     WGJNavigationTile(
                         title: "Delete My Data",
                         systemImage: "trash.fill",
-                        subtitle: "Remove local app data and your owned social records.",
+                        subtitle: "Remove local app data and your own synced Bros records.",
                         accessibilityID: "settings-delete-data-tile"
                     ) {
                         DeleteMyDataView()
