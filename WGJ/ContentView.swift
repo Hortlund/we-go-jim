@@ -1,6 +1,8 @@
 import SwiftData
 import SwiftUI
 import UIKit
+import RevenueCat
+import RevenueCatUI
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
@@ -30,6 +32,8 @@ struct ContentView: View {
     @State private var fallbackCoachWarmupTask: Task<Void, Never>?
 
     var body: some View {
+        @Bindable var subscriptionState = subscriptionState
+
         Group {
             switch appPhase {
             case .splash:
@@ -110,6 +114,18 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .wgjDidDeleteAllUserData)) { _ in
             resetToStartupFlow()
         }
+        .sheet(isPresented: $subscriptionState.isPaywallPresented) {
+            RevenueCatPaywallSheet()
+        }
+        .presentCustomerCenter(
+            isPresented: $subscriptionState.isCustomerCenterPresented,
+            restoreCompleted: { (customerInfo: CustomerInfo) in
+                subscriptionState.applyCustomerInfo(SubscriptionCustomerInfoSnapshot(customerInfo: customerInfo))
+            },
+            restoreFailed: { error in
+                subscriptionState.recordError(error)
+            }
+        )
     }
 
     private func transitionFromSplashIfNeeded() async {

@@ -9,6 +9,13 @@ nonisolated struct SubscriptionCustomerInfoSnapshot: Equatable, Sendable {
         self.activeEntitlementIdentifiers = activeEntitlementIdentifiers
         self.originalAppUserID = originalAppUserID
     }
+
+    init(customerInfo: CustomerInfo) {
+        self.init(
+            activeEntitlementIdentifiers: Set(customerInfo.entitlements.active.keys),
+            originalAppUserID: customerInfo.originalAppUserId
+        )
+    }
 }
 
 nonisolated enum SubscriptionEntitlementPolicy {
@@ -93,9 +100,6 @@ final class RevenueCatSubscriptionService: SubscriptionServicing {
     }
 
     private func snapshot(from customerInfo: CustomerInfo) -> SubscriptionCustomerInfoSnapshot {
-        SubscriptionCustomerInfoSnapshot(
-            activeEntitlementIdentifiers: Set(customerInfo.entitlements.active.keys),
-            originalAppUserID: customerInfo.originalAppUserId
-        )
+        SubscriptionCustomerInfoSnapshot(customerInfo: customerInfo)
     }
 }

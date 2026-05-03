@@ -37,6 +37,15 @@ final class SubscriptionState {
         await load { try await service.restorePurchases() }
     }
 
+    func applyCustomerInfo(_ customerInfo: SubscriptionCustomerInfoSnapshot) {
+        self.customerInfo = customerInfo
+        errorMessage = nil
+    }
+
+    func recordError(_ error: Error) {
+        errorMessage = String(describing: error)
+    }
+
     func presentPaywall() {
         isPaywallPresented = true
     }

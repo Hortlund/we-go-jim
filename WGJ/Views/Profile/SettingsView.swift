@@ -165,6 +165,21 @@ struct SettingsView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 10) {
+                    WGJSectionHeader("Subscription", subtitle: "Manage We Go Jim Pro access and billing support.")
+
+                    WGJNavigationTile(
+                        title: "We Go Jim Pro",
+                        systemImage: "sparkles",
+                        subtitle: "View plans, restore purchases, and open Customer Center.",
+                        accessibilityID: "settings-we-go-jim-pro-tile"
+                    ) {
+                        ProSubscriptionView()
+                    }
+                }
+                .padding(14)
+                .wgjCardContainer()
+
+                VStack(alignment: .leading, spacing: 10) {
                     WGJSectionHeader("Legal & Support", subtitle: "Review privacy details, moderation info, and account deletion controls.")
 
                     WGJNavigationTile(
