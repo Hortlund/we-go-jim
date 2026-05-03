@@ -5,6 +5,7 @@ struct TemplateEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(SubscriptionState.self) private var subscriptionState
 
     @Query private var profiles: [UserProfile]
 
@@ -590,6 +591,14 @@ struct TemplateEditorView: View {
                 )
                 savedTemplateID = templateID
             } else {
+                guard ProAccessPolicy.canCreateTemplate(
+                    currentTemplateCount: try templateRepository.templates().count,
+                    isPro: subscriptionState.isPro
+                ) else {
+                    subscriptionState.presentPaywall()
+                    return
+                }
+
                 let created = try templateRepository.createTemplate(folderID: folderID, name: templateName, notes: templateNotes)
                 try templateRepository.setExercises(templateID: created.id, drafts: drafts)
                 try templateRepository.setCardioBlocks(templateID: created.id, drafts: cardioDrafts)

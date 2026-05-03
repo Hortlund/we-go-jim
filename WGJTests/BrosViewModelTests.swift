@@ -621,7 +621,7 @@ nonisolated private final class StubBrosSocialService: BrosSocialService, BrosSo
     }
 
     @MainActor
-    func joinCircle(inviteCode: String) async throws -> BrosFeedSnapshot {
+    func joinCircle(inviteCode: String, maximumMemberCount: Int?) async throws -> BrosFeedSnapshot {
         return try #require(snapshot)
     }
 

@@ -8,6 +8,7 @@ struct ActiveWorkoutView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(\.appBackgroundStore) private var appBackgroundStore
+    @Environment(SubscriptionState.self) private var subscriptionState
     @Environment(WorkoutCompletionPresentationState.self) private var workoutCompletionPresentationState
     @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
     @Environment(RestTimerState.self) private var restTimerState
@@ -1207,6 +1208,12 @@ struct ActiveWorkoutView: View {
         guard !showingSaveTemplateSheet, pendingTemplateUpdatePreview == nil else { return }
 
         if result.completedTemplateID == nil {
+            guard canCreateTemplateFromCompletedWorkout() else {
+                subscriptionState.presentPaywall()
+                presentWorkoutCompletionSummary()
+                return
+            }
+
             if templateNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 templateNameDraft = result.completedSessionName == "Empty Workout" ? "New Template" : result.completedSessionName
             }
@@ -1871,6 +1878,13 @@ struct ActiveWorkoutView: View {
     private func saveSessionAsTemplate() {
         Task { @MainActor in
             dismissKeyboard()
+            guard canCreateTemplateFromCompletedWorkout() else {
+                showingSaveTemplateSheet = false
+                subscriptionState.presentPaywall()
+                presentWorkoutCompletionSummary()
+                return
+            }
+
             let templateName = templateNameDraft
             let selectedFolderID = templateFolderID
             do {
@@ -1898,6 +1912,18 @@ struct ActiveWorkoutView: View {
             } catch {
                 showError(error)
             }
+        }
+    }
+
+    private func canCreateTemplateFromCompletedWorkout() -> Bool {
+        do {
+            return ProAccessPolicy.canCreateTemplate(
+                currentTemplateCount: try templateRepository.templates().count,
+                isPro: subscriptionState.isPro
+            )
+        } catch {
+            showError(error)
+            return false
         }
     }
 

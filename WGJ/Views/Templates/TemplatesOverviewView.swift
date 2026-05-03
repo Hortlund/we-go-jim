@@ -3,6 +3,7 @@ import SwiftUI
 
 struct TemplatesOverviewView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(SubscriptionState.self) private var subscriptionState
 
     @Query(sort: [
         SortDescriptor(\WorkoutTemplate.sortOrder, order: .forward),
@@ -135,10 +136,7 @@ struct TemplatesOverviewView: View {
 
     private var addTemplateButton: some View {
         Button {
-            templateEditorContext = TemplateEditorContext(
-                folderID: activeFolderIDForCreation,
-                templateID: nil
-            )
+            createTemplate(folderID: activeFolderIDForCreation)
         } label: {
             Label("New Template", systemImage: "doc.badge.plus")
                 .wgjSingleLineText(scale: 0.82)
@@ -357,6 +355,21 @@ struct TemplatesOverviewView: View {
         }
     }
 
+    private func createTemplate(folderID: UUID?) {
+        guard ProAccessPolicy.canCreateTemplate(
+            currentTemplateCount: allTemplates.count,
+            isPro: subscriptionState.isPro
+        ) else {
+            subscriptionState.presentPaywall()
+            return
+        }
+
+        templateEditorContext = TemplateEditorContext(
+            folderID: folderID,
+            templateID: nil
+        )
+    }
+
     private func deleteFolder(_ folderID: UUID) {
         do {
             try repository.deleteFolder(id: folderID)
@@ -382,6 +395,14 @@ struct TemplatesOverviewView: View {
     }
 
     private func duplicateTemplate(_ template: WorkoutTemplate) {
+        guard ProAccessPolicy.canCreateTemplate(
+            currentTemplateCount: allTemplates.count,
+            isPro: subscriptionState.isPro
+        ) else {
+            subscriptionState.presentPaywall()
+            return
+        }
+
         do {
             _ = try repository.duplicateTemplate(id: template.id)
         } catch {

@@ -420,6 +420,24 @@ struct TemplateTransferServiceTests {
     }
 
     @Test
+    func importedTemplateCountReportsFolderTemplateCountWithoutImporting() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+        let service = TemplateTransferService(modelContext: context)
+
+        try repository.createFolder(name: "Push")
+        let sourceFolder = try #require(try repository.folders().first(where: { $0.name == "Push" }))
+        _ = try repository.createTemplate(folderID: sourceFolder.id, name: "Bench Day", notes: "")
+        _ = try repository.createTemplate(folderID: sourceFolder.id, name: "Row Day", notes: "")
+
+        let exportedData = try service.exportData(folderID: sourceFolder.id, format: .bundle)
+
+        #expect(try service.importedTemplateCount(from: exportedData) == 2)
+        #expect(try repository.folders().count == 1)
+        #expect(try repository.templates().count == 2)
+    }
+
+    @Test
     func importFolderKeepsAddingCopySuffixesForRepeatedImports() throws {
         let context = try makeInMemoryContext()
         let repository = TemplateRepository(modelContext: context)

@@ -427,6 +427,35 @@ nonisolated final class TemplateTransferService {
         return try importTransfer(from: data)
     }
 
+    func importedTemplateCount(from fileURL: URL) throws -> Int {
+        try validateSupportedImportFileURL(fileURL)
+
+        let startedAccess = fileURL.startAccessingSecurityScopedResource()
+        defer {
+            if startedAccess {
+                fileURL.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        let data: Data
+        do {
+            data = try Data(contentsOf: fileURL)
+        } catch {
+            throw TemplateTransferError.unreadableFile
+        }
+
+        return try importedTemplateCount(from: data)
+    }
+
+    func importedTemplateCount(from data: Data) throws -> Int {
+        switch try decodedEnvelope(from: data).artifact {
+        case .template:
+            return 1
+        case .folder(let folder):
+            return folder.templates.count
+        }
+    }
+
     func importTransfer(from data: Data) throws -> TemplateTransferImportResult {
         try importTransfer(from: decodedEnvelope(from: data))
     }

@@ -6,6 +6,7 @@ struct HistoryDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(\.appBackgroundStore) private var appBackgroundStore
+    @Environment(SubscriptionState.self) private var subscriptionState
 
     private let sessionID: UUID
 
@@ -274,12 +275,21 @@ struct HistoryDetailView: View {
     @ViewBuilder
     private var workoutMuscleHeatmapCard: some View {
         if let muscleHeatmap = snapshot?.muscleHeatmap {
-            WorkoutMuscleHeatmapCard(
-                title: "Muscle Map",
-                subtitle: "Heatmap from completed working sets in this workout.",
-                snapshot: muscleHeatmap,
-                emptyMessage: "No completed working sets with muscle data for this workout."
-            )
+            if ProAccessPolicy.canShowMuscleMap(isPro: subscriptionState.isPro) {
+                WorkoutMuscleHeatmapCard(
+                    title: "Muscle Map",
+                    subtitle: "Heatmap from completed working sets in this workout.",
+                    snapshot: muscleHeatmap,
+                    emptyMessage: "No completed working sets with muscle data for this workout."
+                )
+            } else {
+                ProLockedCard(
+                    title: "Muscle Map is Pro",
+                    message: "Upgrade to see which muscle groups each completed workout hit.",
+                    systemImage: "figure.strengthtraining.traditional"
+                )
+                .accessibilityIdentifier("history-detail-muscle-map-pro-locked")
+            }
         }
     }
 

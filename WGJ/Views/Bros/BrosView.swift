@@ -246,12 +246,12 @@ final class BrosViewModel {
         }
     }
 
-    func joinCircle(modelContext: ModelContext) async {
+    func joinCircle(modelContext: ModelContext, maximumMemberCount: Int? = nil) async {
         clearMemberLimitSaveFeedback()
         await runMutation(.joinCircle) { [self] in
             let service = try service(modelContext: modelContext)
             let snapshot = try await service
-                .joinCircle(inviteCode: self.joinCode)
+                .joinCircle(inviteCode: self.joinCode, maximumMemberCount: maximumMemberCount)
             await self.primeAvatarThumbnails(in: snapshot)
             self.state = .active(snapshot)
             self.markCurrentSnapshotAuthoritative()
@@ -854,6 +854,7 @@ struct BrosView: View {
     @Environment(\.cloudSyncErrorDescription) private var cloudSyncErrorDescription
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
+    @Environment(SubscriptionState.self) private var subscriptionState
 
     @State private var viewModel = BrosViewModel()
     @State private var filteredActiveSnapshot: BrosFeedSnapshot?
@@ -1113,9 +1114,9 @@ struct BrosView: View {
                 icon: "person.3.fill"
             ) {
                 VStack(alignment: .leading, spacing: 12) {
-                    Stepper(value: circleMemberLimitBinding, in: BrosSocialRules.memberLimitRange) {
+                    Stepper(value: circleMemberLimitBinding, in: onboardingMemberLimitRange) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Member limit: \(viewModel.circleMemberLimit)")
+                            Text("Member limit: \(clampedOnboardingMemberLimit)")
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(WGJTheme.textPrimary)
 
@@ -1127,7 +1128,17 @@ struct BrosView: View {
                     .tint(WGJTheme.accentBlue)
 
                     Button {
+                        guard ProAccessPolicy.canSetBrosMemberLimit(
+                            clampedOnboardingMemberLimit,
+                            currentMemberCount: 1,
+                            isPro: subscriptionState.isPro
+                        ) else {
+                            subscriptionState.presentPaywall()
+                            return
+                        }
+
                         Task {
+                            viewModel.circleMemberLimit = clampedOnboardingMemberLimit
                             await viewModel.createCircle(modelContext: modelContext)
                         }
                     } label: {
@@ -1155,7 +1166,10 @@ struct BrosView: View {
 
                 Button {
                     Task {
-                        await viewModel.joinCircle(modelContext: modelContext)
+                        await viewModel.joinCircle(
+                            modelContext: modelContext,
+                            maximumMemberCount: subscriptionState.isPro ? nil : ProAccessPolicy.freeBrosMemberLimit
+                        )
                     }
                 } label: {
                     Label(
@@ -1169,6 +1183,10 @@ struct BrosView: View {
             }
             .padding(WGJSpacing.card)
             .wgjCardContainer()
+        }
+        .onAppear(perform: clampOnboardingMemberLimitIfNeeded)
+        .onChange(of: subscriptionState.isPro) { _, _ in
+            clampOnboardingMemberLimitIfNeeded()
         }
     }
 
@@ -1221,33 +1239,54 @@ struct BrosView: View {
         appWarmupState.storeBros(nextSnapshot)
     }
 
+    @ViewBuilder
     private func activeContent(_ snapshot: BrosFeedSnapshot) -> some View {
-        return LazyVStack(alignment: .leading, spacing: WGJSpacing.section) {
-            membersCard(snapshot)
+        if ProAccessPolicy.canUseBrosCircle(
+            memberCount: snapshot.members.count,
+            memberLimit: snapshot.circle.memberLimit,
+            isPro: subscriptionState.isPro
+        ) {
+            LazyVStack(alignment: .leading, spacing: WGJSpacing.section) {
+                membersCard(snapshot)
 
-            LazyVStack(alignment: .leading, spacing: 12) {
-                WGJActionHeader("Feed", subtitle: "Newest first") {
-                    WGJMetricPill(systemImage: "bolt.heart.fill", value: "\(snapshot.feedEvents.count)")
-                }
+                LazyVStack(alignment: .leading, spacing: 12) {
+                    WGJActionHeader("Feed", subtitle: "Newest first") {
+                        WGJMetricPill(systemImage: "bolt.heart.fill", value: "\(snapshot.feedEvents.count)")
+                    }
 
-                if snapshot.feedEvents.isEmpty {
-                    WGJEmptyStateCard(
-                        title: "No bro updates yet",
-                        message: blockedUserRecordNames.isEmpty
-                            ? "Complete a workout or hit a PR to start the feed."
-                            : "Nothing visible right now. Blocked bros are hidden from the feed.",
-                        icon: "figure.strengthtraining.traditional"
-                    )
-                } else {
-                    ForEach(snapshot.feedEvents) { event in
-                        feedCard(
-                            event,
-                            snapshot: snapshot,
-                            currentUserRecordName: snapshot.currentMember.userRecordName
+                    if snapshot.feedEvents.isEmpty {
+                        WGJEmptyStateCard(
+                            title: "No bro updates yet",
+                            message: blockedUserRecordNames.isEmpty
+                                ? "Complete a workout or hit a PR to start the feed."
+                                : "Nothing visible right now. Blocked bros are hidden from the feed.",
+                            icon: "figure.strengthtraining.traditional"
                         )
+                    } else {
+                        ForEach(snapshot.feedEvents) { event in
+                            feedCard(
+                                event,
+                                snapshot: snapshot,
+                                currentUserRecordName: snapshot.currentMember.userRecordName
+                            )
+                        }
                     }
                 }
             }
+        } else {
+            lockedBrosCircleContent(snapshot)
+        }
+    }
+
+    private func lockedBrosCircleContent(_ snapshot: BrosFeedSnapshot) -> some View {
+        LazyVStack(alignment: .leading, spacing: WGJSpacing.section) {
+            membersCard(snapshot)
+
+            ProLockedCard(
+                title: "Unlock larger bro circles",
+                message: "Free circles support up to \(ProAccessPolicy.freeBrosMemberLimit) members. Upgrade to keep the shared feed active for bigger circles."
+            )
+            .accessibilityIdentifier("bros-circle-pro-locked")
         }
     }
 
@@ -1403,6 +1442,15 @@ struct BrosView: View {
                     reportMember(snapshot: snapshot, member: member)
                 },
                 onUpdateMemberLimit: { memberLimit in
+                    guard ProAccessPolicy.canSetBrosMemberLimit(
+                        memberLimit,
+                        currentMemberCount: snapshot.members.count,
+                        isPro: subscriptionState.isPro
+                    ) else {
+                        subscriptionState.presentPaywall()
+                        return
+                    }
+
                     Task {
                         await viewModel.updateCircleMemberLimit(memberLimit, modelContext: modelContext)
                     }
@@ -1878,14 +1926,31 @@ struct BrosView: View {
 
     private var circleMemberLimitBinding: Binding<Int> {
         Binding(
-            get: { viewModel.circleMemberLimit },
+            get: { clampedOnboardingMemberLimit },
             set: { newValue in
                 viewModel.circleMemberLimit = min(
                     max(newValue, BrosSocialRules.memberLimitRange.lowerBound),
-                    BrosSocialRules.memberLimitRange.upperBound
+                    onboardingMemberLimitRange.upperBound
                 )
             }
         )
+    }
+
+    private var onboardingMemberLimitRange: ClosedRange<Int> {
+        BrosSocialRules.memberLimitRange.lowerBound ... ProAccessPolicy.maximumBrosMemberLimit(isPro: subscriptionState.isPro)
+    }
+
+    private var clampedOnboardingMemberLimit: Int {
+        min(
+            max(viewModel.circleMemberLimit, onboardingMemberLimitRange.lowerBound),
+            onboardingMemberLimitRange.upperBound
+        )
+    }
+
+    private func clampOnboardingMemberLimitIfNeeded() {
+        let clampedValue = clampedOnboardingMemberLimit
+        guard viewModel.circleMemberLimit != clampedValue else { return }
+        viewModel.circleMemberLimit = clampedValue
     }
 
     private func reloadBlockedBros() {
@@ -1909,6 +1974,8 @@ private struct BroCircleMemberCountPill: View {
 }
 
 private struct BroCircleManagementView: View {
+    @Environment(SubscriptionState.self) private var subscriptionState
+
     @Bindable var viewModel: BrosViewModel
     let snapshot: BrosFeedSnapshot
     let presentation: BroCircleManagementPresentation
@@ -1973,12 +2040,18 @@ private struct BroCircleManagementView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: snapshot.circle.memberLimit) { _, newValue in
             memberLimitDraft = newValue
+            clampMemberLimitDraftIfNeeded()
         }
         .onChange(of: snapshot.members.count) { _, newValue in
             if memberLimitDraft < newValue {
                 memberLimitDraft = newValue
             }
+            clampMemberLimitDraftIfNeeded()
         }
+        .onChange(of: subscriptionState.isPro) { _, _ in
+            clampMemberLimitDraftIfNeeded()
+        }
+        .onAppear(perform: clampMemberLimitDraftIfNeeded)
         .alert("Invite Code Copied", isPresented: $showingInviteCodeCopiedNotice) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -2021,26 +2094,37 @@ private struct BroCircleManagementView: View {
         VStack(alignment: .leading, spacing: 14) {
             WGJSectionHeader("Invite Code", subtitle: "Only owners can invite new bros into this circle.")
 
-            HStack(alignment: .center, spacing: 12) {
-                Text(snapshot.circle.inviteCode)
-                    .font(.title3.monospaced().weight(.bold))
-                    .foregroundStyle(WGJTheme.textPrimary)
-                    .tracking(1.4)
-                    .wgjSingleLineText(scale: 0.72)
+            if canShareInviteCode {
+                HStack(alignment: .center, spacing: 12) {
+                    Text(snapshot.circle.inviteCode)
+                        .font(.title3.monospaced().weight(.bold))
+                        .foregroundStyle(WGJTheme.textPrimary)
+                        .tracking(1.4)
+                        .wgjSingleLineText(scale: 0.72)
 
-                Spacer(minLength: 12)
+                    Spacer(minLength: 12)
 
+                    Button {
+                        copyInviteCode()
+                    } label: {
+                        Label("Copy", systemImage: "doc.on.doc")
+                    }
+                    .buttonStyle(WGJGhostButtonStyle())
+
+                    ShareLink(item: snapshot.circle.inviteCode) {
+                        Label("Share", systemImage: "square.and.arrow.up")
+                    }
+                    .buttonStyle(WGJGhostButtonStyle())
+                }
+            } else {
                 Button {
-                    copyInviteCode()
+                    subscriptionState.presentPaywall()
                 } label: {
-                    Label("Copy", systemImage: "doc.on.doc")
+                    Label("Unlock invites", systemImage: "sparkles")
+                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(WGJGhostButtonStyle())
-
-                ShareLink(item: snapshot.circle.inviteCode) {
-                    Label("Share", systemImage: "square.and.arrow.up")
-                }
-                .buttonStyle(WGJGhostButtonStyle())
+                .accessibilityIdentifier("bros-unlock-invites-button")
             }
         }
         .padding(WGJSpacing.card)
@@ -2072,6 +2156,17 @@ private struct BroCircleManagementView: View {
             }
             .tint(WGJTheme.accentBlue)
             .disabled(viewModel.isBusy)
+
+            if !subscriptionState.isPro {
+                Button {
+                    subscriptionState.presentPaywall()
+                } label: {
+                    Label("Unlock larger circles", systemImage: "sparkles")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(WGJGhostButtonStyle())
+                .accessibilityIdentifier("bros-unlock-circle-size-button")
+            }
 
             memberLimitStatus
 
@@ -2297,12 +2392,35 @@ private struct BroCircleManagementView: View {
     }
 
     private var ownerEditableLimitRange: ClosedRange<Int> {
-        max(BrosSocialRules.minMemberLimit, snapshot.members.count) ... BrosSocialRules.maxMemberLimit
+        let lowerBound = max(BrosSocialRules.minMemberLimit, snapshot.members.count)
+        let upperBound = subscriptionState.isPro
+            ? BrosSocialRules.maxMemberLimit
+            : max(lowerBound, min(snapshot.circle.memberLimit, ProAccessPolicy.freeBrosMemberLimit))
+        return lowerBound ... upperBound
+    }
+
+    private var canShareInviteCode: Bool {
+        subscriptionState.isPro
+            || (
+                snapshot.members.count < ProAccessPolicy.freeBrosMemberLimit
+                    && snapshot.circle.memberLimit <= ProAccessPolicy.freeBrosMemberLimit
+            )
+    }
+
+    private func clampMemberLimitDraftIfNeeded() {
+        let range = ownerEditableLimitRange
+        let clampedValue = min(max(memberLimitDraft, range.lowerBound), range.upperBound)
+        guard memberLimitDraft != clampedValue else { return }
+        memberLimitDraft = clampedValue
     }
 
     private var canSaveMemberLimit: Bool {
         memberLimitDraft != snapshot.circle.memberLimit
-            && BrosSocialRules.canSetMemberLimit(memberLimitDraft, currentMemberCount: snapshot.members.count)
+            && ProAccessPolicy.canSetBrosMemberLimit(
+                memberLimitDraft,
+                currentMemberCount: snapshot.members.count,
+                isPro: subscriptionState.isPro
+            )
             && !viewModel.isBusy
     }
 }

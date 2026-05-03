@@ -9,6 +9,7 @@ struct StartWorkoutHomeView: View {
     @Environment(\.isTabActive) private var isTabActive
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
+    @Environment(SubscriptionState.self) private var subscriptionState
     @Environment(TemplateFileOpenState.self) private var templateFileOpenState
 
     @State private var expandedFolderIDs = StartWorkoutFolderExpansionPersistence.load()
@@ -593,6 +594,15 @@ struct StartWorkoutHomeView: View {
 
     private var importTemplateButton: some View {
         Button {
+            guard ProAccessPolicy.canImportTemplates(
+                currentTemplateCount: controller.snapshot.templates.count,
+                importingCount: 1,
+                isPro: subscriptionState.isPro
+            ) else {
+                subscriptionState.presentPaywall()
+                return
+            }
+
             showingTemplateImporter = true
         } label: {
             StartWorkoutInlineActionLabel(
@@ -635,6 +645,14 @@ struct StartWorkoutHomeView: View {
     }
 
     private func createTemplate(in folderID: UUID?) {
+        guard ProAccessPolicy.canCreateTemplate(
+            currentTemplateCount: controller.snapshot.templates.count,
+            isPro: subscriptionState.isPro
+        ) else {
+            subscriptionState.presentPaywall()
+            return
+        }
+
         templateEditorContext = StartWorkoutTemplateEditorContext(
             folderID: folderID,
             templateID: nil
@@ -1034,6 +1052,16 @@ struct StartWorkoutHomeView: View {
             }
 
             do {
+                let importingCount = try templateTransferService.importedTemplateCount(from: fileURL)
+                guard ProAccessPolicy.canImportTemplates(
+                    currentTemplateCount: controller.snapshot.templates.count,
+                    importingCount: importingCount,
+                    isPro: subscriptionState.isPro
+                ) else {
+                    subscriptionState.presentPaywall()
+                    return
+                }
+
                 let importResult: TemplateTransferImportResult
                 if let appBackgroundStore {
                     importResult = try await appBackgroundStore.performWrite("start-workout.template.import") { backgroundContext in
@@ -1109,6 +1137,11 @@ struct StartWorkoutHomeView: View {
     }
 
     private func presentExportOptions(for target: TemplateTransferShareTarget) {
+        guard ProAccessPolicy.canExportTemplates(isPro: subscriptionState.isPro) else {
+            subscriptionState.presentPaywall()
+            return
+        }
+
         exportRequest = TemplateTransferExportRequest(target: target)
     }
 
@@ -1116,6 +1149,12 @@ struct StartWorkoutHomeView: View {
         guard let request = exportRequest else {
             return
         }
+        guard ProAccessPolicy.canExportTemplates(isPro: subscriptionState.isPro) else {
+            exportRequest = nil
+            subscriptionState.presentPaywall()
+            return
+        }
+
         exportRequest = nil
 
         Task { @MainActor in

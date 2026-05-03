@@ -33,6 +33,7 @@ struct WorkoutCompletionSummaryView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(AppTabState.self) private var appTabState
     @Environment(WorkoutCompletionPresentationState.self) private var workoutCompletionPresentationState
+    @Environment(SubscriptionState.self) private var subscriptionState
 
     let sessionID: UUID
 
@@ -306,12 +307,23 @@ struct WorkoutCompletionSummaryView: View {
     }
 
     private func muscleHeatmapSection(_ snapshot: WorkoutCompletionSnapshot) -> some View {
-        WorkoutMuscleHeatmapCard(
-            title: "Muscle Heatmap",
-            subtitle: "Worked this session",
-            snapshot: snapshot.muscleHeatmap,
-            emptyMessage: "No working-set muscle data was found for this workout."
-        )
+        Group {
+            if ProAccessPolicy.canShowMuscleMap(isPro: subscriptionState.isPro) {
+                WorkoutMuscleHeatmapCard(
+                    title: "Muscle Heatmap",
+                    subtitle: "Worked this session",
+                    snapshot: snapshot.muscleHeatmap,
+                    emptyMessage: "No working-set muscle data was found for this workout."
+                )
+            } else {
+                ProLockedCard(
+                    title: "Muscle Heatmap is Pro",
+                    message: "Upgrade to see the muscle groups you hit in this completed session.",
+                    systemImage: "figure.strengthtraining.traditional"
+                )
+                .accessibilityIdentifier("workout-completion-muscle-map-pro-locked")
+            }
+        }
     }
 
     private func exerciseRecapSection(_ snapshot: WorkoutCompletionSnapshot) -> some View {

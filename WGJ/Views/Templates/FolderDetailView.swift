@@ -4,6 +4,7 @@ import SwiftUI
 struct FolderDetailView: View {
     @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(\.modelContext) private var modelContext
+    @Environment(SubscriptionState.self) private var subscriptionState
 
     private let folderID: UUID
     private let folderName: String
@@ -144,7 +145,7 @@ struct FolderDetailView: View {
 
     private var addTemplateButton: some View {
         Button {
-            templateEditorContext = FolderTemplateEditorContext(folderID: folderID, templateID: nil)
+            createTemplate()
         } label: {
             Label("New Template", systemImage: "doc.badge.plus")
                 .wgjSingleLineText(scale: 0.82)
@@ -164,6 +165,11 @@ struct FolderDetailView: View {
 
     private var exportButton: some View {
         Button {
+            guard ProAccessPolicy.canExportTemplates(isPro: subscriptionState.isPro) else {
+                subscriptionState.presentPaywall()
+                return
+            }
+
             exportRequest = TemplateTransferExportRequest(target: .folder(folderID))
         } label: {
             Label("Export", systemImage: "square.and.arrow.up")
@@ -342,6 +348,18 @@ struct FolderDetailView: View {
             }
     }
 
+    private func createTemplate() {
+        guard ProAccessPolicy.canCreateTemplate(
+            currentTemplateCount: allTemplates.count,
+            isPro: subscriptionState.isPro
+        ) else {
+            subscriptionState.presentPaywall()
+            return
+        }
+
+        templateEditorContext = FolderTemplateEditorContext(folderID: folderID, templateID: nil)
+    }
+
     private func showError(_ error: Error) {
         errorMessage = String(describing: error)
         showingError = true
@@ -351,6 +369,12 @@ struct FolderDetailView: View {
         guard exportRequest != nil else {
             return
         }
+        guard ProAccessPolicy.canExportTemplates(isPro: subscriptionState.isPro) else {
+            exportRequest = nil
+            subscriptionState.presentPaywall()
+            return
+        }
+
         exportRequest = nil
 
         Task { @MainActor in

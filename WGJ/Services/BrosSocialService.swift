@@ -428,7 +428,7 @@ nonisolated enum BrosCloudRecordCoder {
 protocol BrosSocialService {
     func fetchSnapshot() async throws -> BrosFeedSnapshot?
     func createCircle(memberLimit: Int) async throws -> BrosFeedSnapshot
-    func joinCircle(inviteCode: String) async throws -> BrosFeedSnapshot
+    func joinCircle(inviteCode: String, maximumMemberCount: Int?) async throws -> BrosFeedSnapshot
     func updateCircleMemberLimit(_ memberLimit: Int) async throws -> BrosFeedSnapshot
     func leaveCircle() async throws
     func deleteCurrentUserData() async throws
@@ -1093,7 +1093,7 @@ nonisolated final class CloudKitBrosSocialService: BrosSocialService, BrosSocial
     }
 
     @MainActor
-    func joinCircle(inviteCode: String) async throws -> BrosFeedSnapshot {
+    func joinCircle(inviteCode: String, maximumMemberCount: Int? = nil) async throws -> BrosFeedSnapshot {
         let cleanedCode = inviteCode
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .uppercased()
@@ -1128,6 +1128,11 @@ nonisolated final class CloudKitBrosSocialService: BrosSocialService, BrosSocial
         let currentMembers = membershipResolution.records
         guard BrosSocialRules.hasCapacity(currentMemberCount: currentMembers.count, limit: circle.memberLimit) else {
             throw BrosSocialServiceError.circleFull
+        }
+        if let maximumMemberCount {
+            guard currentMembers.count < maximumMemberCount else {
+                throw BrosSocialServiceError.circleFull
+            }
         }
         let existingMembers = try await currentMembers.asyncMap { try await memberSummary(from: $0) }
 

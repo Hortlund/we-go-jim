@@ -14,6 +14,7 @@ struct ProfileView: View {
     @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
     @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(AppWarmupState.self) private var appWarmupState
+    @Environment(SubscriptionState.self) private var subscriptionState
 
     @State private var currentProfile: ProfileIdentitySnapshot?
     @State private var dashboardContent = ProfileDashboardContent.empty
@@ -78,6 +79,9 @@ struct ProfileView: View {
             cancelTrendSeriesLoad()
             cancelCoachBriefLoad()
             cancelCoachFollowUpLoads()
+        }
+        .onChange(of: subscriptionState.isPro) { _, _ in
+            handleSubscriptionAccessChanged()
         }
         .sheet(isPresented: $showingWidgetManager) {
             NavigationStack {
@@ -246,41 +250,59 @@ struct ProfileView: View {
 
             if shouldRenderDashboardContent {
                 ForEach(dashboardContent.enabledWidgets) { config in
-                    switch config.kind {
-                    case .prs:
-                        prWidget
-                    case .weeklyGoals:
-                        weeklyGoalsWidget
-                    case .weeklyMuscleHeatmap:
-                        weeklyMuscleHeatmapWidget
-                    case .coachBrief:
-                        coachBriefWidget
-                    case .exerciseOneRMTrend:
-                        exerciseTrendWidget(
-                            title: "1RM Trend",
-                            subtitle: "Estimated max strength for \(config.selectedExerciseNameSnapshot ?? "your lift")",
-                            accent: WGJTheme.accentCyan,
-                            series: dashboardContent.trendSeriesByKind[config.kind],
-                            emptyMessage: "Log weighted sets for this lift to start the trend."
-                        )
-                    case .exerciseVolumeTrend:
-                        exerciseTrendWidget(
-                            title: "Volume Trend",
-                            subtitle: "Training volume for \(config.selectedExerciseNameSnapshot ?? "your lift")",
-                            accent: WGJTheme.accentBlue,
-                            series: dashboardContent.trendSeriesByKind[config.kind],
-                            emptyMessage: "Log weighted sets for this lift to chart your volume."
-                        )
-                    case .streaks:
-                        streaksWidget
-                    case .topExercises:
-                        topExercisesWidget
-                    case .consistencyCalendar:
-                        consistencyCalendarWidget
-                    }
+                    dashboardWidget(config)
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func dashboardWidget(_ config: ProfileWidgetConfigSnapshot) -> some View {
+        if isProLocked(config.kind) {
+            proLockedWidgetCard(for: config.kind)
+        } else {
+            switch config.kind {
+            case .prs:
+                prWidget
+            case .weeklyGoals:
+                weeklyGoalsWidget
+            case .weeklyMuscleHeatmap:
+                weeklyMuscleHeatmapWidget
+            case .coachBrief:
+                coachBriefWidget
+            case .exerciseOneRMTrend:
+                exerciseTrendWidget(
+                    title: "1RM Trend",
+                    subtitle: "Estimated max strength for \(config.selectedExerciseNameSnapshot ?? "your lift")",
+                    accent: WGJTheme.accentCyan,
+                    series: dashboardContent.trendSeriesByKind[config.kind],
+                    emptyMessage: "Log weighted sets for this lift to start the trend."
+                )
+            case .exerciseVolumeTrend:
+                exerciseTrendWidget(
+                    title: "Volume Trend",
+                    subtitle: "Training volume for \(config.selectedExerciseNameSnapshot ?? "your lift")",
+                    accent: WGJTheme.accentBlue,
+                    series: dashboardContent.trendSeriesByKind[config.kind],
+                    emptyMessage: "Log weighted sets for this lift to chart your volume."
+                )
+            case .streaks:
+                streaksWidget
+            case .topExercises:
+                topExercisesWidget
+            case .consistencyCalendar:
+                consistencyCalendarWidget
+            }
+        }
+    }
+
+    private func proLockedWidgetCard(for kind: ProfileWidgetKind) -> some View {
+        ProLockedCard(
+            title: "\(kind.title) is Pro",
+            message: "Upgrade to customize your dashboard with advanced training trends, heatmaps, streaks, and coach insights.",
+            systemImage: "lock.fill"
+        )
+        .accessibilityIdentifier("profile-dashboard-pro-locked-\(kind.rawValue)")
     }
 
     private var dashboardDeferredPlaceholder: some View {
@@ -808,6 +830,7 @@ struct ProfileView: View {
 
     private func scheduleCoachBriefLoad(enabledWidgets: [ProfileWidgetConfigSnapshot]) {
         cancelCoachBriefLoad()
+        let enabledWidgets = usableDashboardWidgets(enabledWidgets)
         guard shouldRenderDashboardContent else {
             coachBriefLoadState = .idle
             return
@@ -918,6 +941,15 @@ struct ProfileView: View {
         }
     }
 
+    private func handleSubscriptionAccessChanged() {
+        guard shouldRenderDashboardContent else { return }
+        cancelCoachBriefLoad()
+        cancelTrendSeriesLoad()
+        coachBriefLoadState = .idle
+        scheduleCoachBriefLoad(enabledWidgets: dashboardContent.enabledWidgets)
+        scheduleTrendSeriesLoad()
+    }
+
     private func scheduleDashboardRender(enabledWidgets: [ProfileWidgetConfigSnapshot]) {
         cancelDashboardRender()
         cancelTrendSeriesLoad()
@@ -967,7 +999,7 @@ struct ProfileView: View {
     }
 
     private func scheduleTrendSeriesLoad() {
-        let enabledWidgets = dashboardContent.enabledWidgets
+        let enabledWidgets = usableDashboardWidgets(dashboardContent.enabledWidgets)
         guard enabledWidgets.contains(where: { $0.kind.requiresExerciseSelection }) else { return }
 
         let reloadToken = profileReloadToken
@@ -1067,6 +1099,14 @@ struct ProfileView: View {
     private func showError(_ error: Error) {
         errorMessage = String(describing: error)
         showingError = true
+    }
+
+    private func usableDashboardWidgets(_ widgets: [ProfileWidgetConfigSnapshot]) -> [ProfileWidgetConfigSnapshot] {
+        widgets.filter { !isProLocked($0.kind) }
+    }
+
+    private func isProLocked(_ kind: ProfileWidgetKind) -> Bool {
+        ProAccessPolicy.requiresPro(kind) && !subscriptionState.isPro
     }
 }
 
