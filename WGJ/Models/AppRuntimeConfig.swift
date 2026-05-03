@@ -222,6 +222,45 @@ nonisolated enum AppRuntimeConfig {
     }
 }
 
+nonisolated enum RevenueCatConfig {
+    static let entitlementIdentifier = "We Go Jim Pro"
+    static let defaultOfferingIdentifier = "default"
+    static let monthlyProductIdentifier = "monthly"
+    static let yearlyProductIdentifier = "yearly"
+
+    static var apiKey: String {
+        if let override = ProcessInfo.processInfo.environment["WGJ_REVENUECAT_API_KEY"] {
+            let normalizedOverride = override.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !normalizedOverride.isEmpty {
+                return normalizedOverride
+            }
+        }
+
+#if DEBUG
+        return "test_XUFcsPSSOoRjJduGqgMTQirLDjV"
+#else
+        guard let bundleKey = Bundle.main.object(forInfoDictionaryKey: "WGJRevenueCatAPIKey") as? String else {
+            return ""
+        }
+
+        return bundleKey.trimmingCharacters(in: .whitespacesAndNewlines)
+#endif
+    }
+
+    static func validateReleaseAPIKey(_ key: String = apiKey) throws {
+#if !DEBUG
+        let normalizedKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalizedKey.isEmpty || normalizedKey.hasPrefix("test_") {
+            throw RevenueCatConfigurationError.invalidReleaseAPIKey
+        }
+#endif
+    }
+}
+
+nonisolated enum RevenueCatConfigurationError: Error, Equatable {
+    case invalidReleaseAPIKey
+}
+
 nonisolated enum RuntimeCloudAvailabilityRefreshPolicy {
     nonisolated static let unresolvedRetryInterval: TimeInterval = 15
     nonisolated static let resolvedRefreshInterval: TimeInterval = 300
