@@ -109,8 +109,8 @@ nonisolated enum AppRuntimeConfig {
     }
 
     static let supportEmail = "support@wegojim.app"
-    static let privacyPolicyURL = URL(string: "https://wegojim.app/privacy")
-    static let supportURL = URL(string: "https://wegojim.app/support")
+    static let privacyPolicyURL = URL(string: "https://wegojim.app/wgj/privacy/")
+    static let supportURL = URL(string: "https://wegojim.app/wgj/support/")
     static let reviewPolicy = AppReviewPolicy(
         brosEnabled: true,
         syncBrosAvatars: true
