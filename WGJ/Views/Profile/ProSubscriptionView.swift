@@ -1,7 +1,9 @@
+import StoreKit
 import SwiftUI
 
 struct ProSubscriptionView: View {
     @Environment(SubscriptionState.self) private var subscriptionState
+    @State private var showingAppleSubscriptionManagement = false
 
     var body: some View {
         ScrollView {
@@ -24,6 +26,7 @@ struct ProSubscriptionView: View {
         .wgjNavigationChrome()
         .navigationTitle("We Go Jim Pro")
         .navigationBarTitleDisplayMode(.inline)
+        .manageSubscriptionsSheet(isPresented: $showingAppleSubscriptionManagement)
         .task {
             await subscriptionState.refreshCustomerInfo()
         }
@@ -82,8 +85,17 @@ struct ProSubscriptionView: View {
         VStack(alignment: .leading, spacing: 10) {
             WGJSectionHeader(
                 "Subscription Management",
-                subtitle: "Use RevenueCat Customer Center for plan changes, refunds, and billing support when it is enabled in RevenueCat."
+                subtitle: "Use Apple to manage or cancel App Store subscriptions. Customer Center can help with billing support when enabled."
             )
+
+            Button {
+                showingAppleSubscriptionManagement = true
+            } label: {
+                Label("Manage or Cancel Subscription", systemImage: "creditcard")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(WGJGhostButtonStyle())
+            .accessibilityIdentifier("pro-subscription-manage-apple-button")
 
             Button {
                 subscriptionState.isCustomerCenterPresented = true

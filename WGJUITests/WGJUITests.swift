@@ -1002,6 +1002,22 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testProSubscriptionManagementIncludesAppleManageButton() throws {
+        let app = launchApp(mode: .localInMemory)
+
+        tapTab("Profile", in: app)
+        let settingsTile = identifiedElement("profile-settings-tile", in: app)
+        XCTAssertTrue(settingsTile.waitForExistence(timeout: 5))
+        settingsTile.tap()
+
+        let proTile = identifiedElement("settings-we-go-jim-pro-tile", in: app)
+        XCTAssertTrue(proTile.waitForExistence(timeout: 5))
+        proTile.tap()
+
+        XCTAssertTrue(identifiedElement("pro-subscription-manage-apple-button", in: app).waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testProfileCoachBriefOpensAnalysisSheet() throws {
         let app = launchApp()
 
