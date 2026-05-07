@@ -40,7 +40,7 @@ struct SupportView: View {
                         Button {
                             openURL(supportURL)
                         } label: {
-                            Label("Open Support Site", systemImage: "globe")
+                            Label("Open Privacy & Contact", systemImage: "globe")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(WGJGhostButtonStyle())

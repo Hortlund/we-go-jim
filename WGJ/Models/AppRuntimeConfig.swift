@@ -108,9 +108,9 @@ nonisolated enum AppRuntimeConfig {
         static let skipSplash = "UITEST_SKIP_SPLASH"
     }
 
-    static let supportEmail = "support@wegojim.app"
-    static let privacyPolicyURL = URL(string: "https://wegojim.app/wgj/privacy/")
-    static let supportURL = URL(string: "https://wegojim.app/wgj/support/")
+    static let supportEmail = "hortlund.andreas@gmail.com"
+    static let privacyPolicyURL = URL(string: "https://highball.se/wgj/privacy/")
+    static let supportURL = URL(string: "https://highball.se/wgj/privacy/")
     static let reviewPolicy = AppReviewPolicy(
         brosEnabled: true,
         syncBrosAvatars: true
