@@ -2412,9 +2412,8 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func handleScenePhaseChange(_ newPhase: ScenePhase) {
-        if ActiveWorkoutInteractionWorkPolicy.shouldRunNonCriticalInteractionWork(scenePhase: newPhase) {
-            scheduleForegroundNonCriticalInteractionWorkResume()
-        } else {
+        // Foreground return must stay memory-only; non-critical work resumes from explicit user interactions.
+        if ActiveWorkoutInteractionWorkPolicy.shouldCancelNonCriticalInteractionWork(scenePhase: newPhase) {
             cancelNonCriticalInteractionWorkForSceneTransition()
         }
 

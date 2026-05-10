@@ -561,6 +561,9 @@ struct AppPerformanceRuntimeTests {
         #expect(ActiveWorkoutInteractionWorkPolicy.shouldRunNonCriticalInteractionWork(scenePhase: .active))
         #expect(!ActiveWorkoutInteractionWorkPolicy.shouldRunNonCriticalInteractionWork(scenePhase: .inactive))
         #expect(!ActiveWorkoutInteractionWorkPolicy.shouldRunNonCriticalInteractionWork(scenePhase: .background))
+        #expect(!ActiveWorkoutInteractionWorkPolicy.shouldCancelNonCriticalInteractionWork(scenePhase: .active))
+        #expect(ActiveWorkoutInteractionWorkPolicy.shouldCancelNonCriticalInteractionWork(scenePhase: .inactive))
+        #expect(ActiveWorkoutInteractionWorkPolicy.shouldCancelNonCriticalInteractionWork(scenePhase: .background))
         #expect(
             ActiveWorkoutInteractionWorkPolicy.shouldRunNonCriticalInteractionWork(
                 scenePhase: .active,

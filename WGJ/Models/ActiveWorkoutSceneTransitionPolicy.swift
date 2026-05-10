@@ -59,6 +59,10 @@ nonisolated enum ActiveWorkoutInteractionWorkPolicy {
     static let defaultGuidanceRefreshDelay: Duration = .milliseconds(900)
     static let foregroundResumeGraceDelay: Duration = .milliseconds(2_500)
 
+    static func shouldCancelNonCriticalInteractionWork(scenePhase: ScenePhase) -> Bool {
+        scenePhase != .active
+    }
+
     static func shouldRunNonCriticalInteractionWork(scenePhase: ScenePhase) -> Bool {
         scenePhase == .active
     }
