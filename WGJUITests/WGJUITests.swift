@@ -1054,9 +1054,12 @@ final class WGJUITests: XCTestCase {
     func testProSubscriptionManagementIncludesAppleManageButton() throws {
         let app = launchApp(mode: .localInMemory)
 
-        tapTab("Profile", in: app)
+        tapTabWithoutWaitingForIdle("Profile", in: app)
+        XCTAssertTrue(identifiedElement("profile-first-shell", in: app).waitForNonExistence(timeout: 8))
+        XCTAssertTrue(identifiedElement("profile-dashboard-deferred-placeholder", in: app).waitForNonExistence(timeout: 5))
+
         let settingsTile = identifiedElement("profile-settings-tile", in: app)
-        XCTAssertTrue(settingsTile.waitForExistence(timeout: 5))
+        revealLazyElement(settingsTile, in: app, maxSwipes: 8)
         settingsTile.tap()
 
         let proTile = identifiedElement("settings-we-go-jim-pro-tile", in: app)
@@ -1064,6 +1067,7 @@ final class WGJUITests: XCTestCase {
         proTile.tap()
 
         XCTAssertTrue(identifiedElement("pro-subscription-manage-apple-button", in: app).waitForExistence(timeout: 5))
+        XCTAssertTrue(identifiedElement("pro-subscription-redeem-offer-code-button", in: app).exists)
     }
 
     @MainActor

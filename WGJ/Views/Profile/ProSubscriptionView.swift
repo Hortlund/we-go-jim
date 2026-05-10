@@ -107,6 +107,15 @@ struct ProSubscriptionView: View {
             .accessibilityIdentifier("pro-subscription-customer-center-button")
 
             Button {
+                subscriptionState.redeemOfferCode()
+            } label: {
+                Label("Redeem Offer Code", systemImage: "ticket")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(WGJGhostButtonStyle())
+            .accessibilityIdentifier("pro-subscription-redeem-offer-code-button")
+
+            Button {
                 Task {
                     await subscriptionState.restorePurchases()
                 }

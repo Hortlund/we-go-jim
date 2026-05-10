@@ -89,6 +89,35 @@ struct SubscriptionStateTests {
         #expect(state.isPaywallPresented == false)
         #expect(state.errorMessage == "invalidConfiguration")
     }
+
+    @MainActor
+    @Test
+    func redeemOfferCodeConfiguresRevenueCatBeforePresentingSheet() {
+        let service = SubscriptionServiceProbe(refreshResult: .failure(SubscriptionTestError.offline))
+        let state = SubscriptionState(service: service)
+
+        state.redeemOfferCode()
+
+        #expect(service.configureCount == 1)
+        #expect(service.redeemOfferCodeCount == 1)
+        #expect(state.errorMessage == nil)
+    }
+
+    @MainActor
+    @Test
+    func redeemOfferCodeStoresConfigurationErrorInsteadOfPresentingUnconfiguredSDK() {
+        let service = SubscriptionServiceProbe(
+            configureResult: .failure(SubscriptionTestError.invalidConfiguration),
+            refreshResult: .failure(SubscriptionTestError.offline)
+        )
+        let state = SubscriptionState(service: service)
+
+        state.redeemOfferCode()
+
+        #expect(service.configureCount == 1)
+        #expect(service.redeemOfferCodeCount == 0)
+        #expect(state.errorMessage == "invalidConfiguration")
+    }
 }
 
 private enum SubscriptionTestError: Error, CustomStringConvertible {
@@ -111,6 +140,7 @@ private enum SubscriptionTestError: Error, CustomStringConvertible {
 private final class SubscriptionServiceProbe: SubscriptionServicing {
     var configureCount = 0
     var refreshCount = 0
+    var redeemOfferCodeCount = 0
     let configureResult: Result<Void, Error>
     let refreshResult: Result<SubscriptionCustomerInfoSnapshot, Error>
 
@@ -134,5 +164,9 @@ private final class SubscriptionServiceProbe: SubscriptionServicing {
 
     func restorePurchases() async throws -> SubscriptionCustomerInfoSnapshot {
         try await customerInfo()
+    }
+
+    func presentOfferCodeRedemptionSheet() throws {
+        redeemOfferCodeCount += 1
     }
 }

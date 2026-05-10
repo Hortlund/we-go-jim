@@ -41,6 +41,18 @@ final class SubscriptionState {
         await load { try await service.restorePurchases() }
     }
 
+    func redeemOfferCode() {
+        configureIfNeeded()
+        guard isConfigured else { return }
+
+        do {
+            try service.presentOfferCodeRedemptionSheet()
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
     func applyCustomerInfo(_ customerInfo: SubscriptionCustomerInfoSnapshot) {
         self.customerInfo = customerInfo
         errorMessage = nil

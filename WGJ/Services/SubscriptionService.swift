@@ -39,6 +39,7 @@ protocol SubscriptionServicing: AnyObject {
     func configureIfNeeded() throws
     func customerInfo() async throws -> SubscriptionCustomerInfoSnapshot
     func restorePurchases() async throws -> SubscriptionCustomerInfoSnapshot
+    func presentOfferCodeRedemptionSheet() throws
 }
 
 final class RevenueCatSubscriptionService: SubscriptionServicing {
@@ -46,6 +47,7 @@ final class RevenueCatSubscriptionService: SubscriptionServicing {
     private let configurePurchases: (String) throws -> Void
     private let customerInfoProvider: () async throws -> CustomerInfo
     private let restorePurchasesProvider: () async throws -> CustomerInfo
+    private let offerCodeRedemptionPresenter: () -> Void
     private var didConfigure = false
 
     init(
@@ -58,12 +60,16 @@ final class RevenueCatSubscriptionService: SubscriptionServicing {
         },
         restorePurchasesProvider: @escaping () async throws -> CustomerInfo = {
             try await Purchases.shared.restorePurchases()
+        },
+        offerCodeRedemptionPresenter: @escaping () -> Void = {
+            Purchases.shared.presentCodeRedemptionSheet()
         }
     ) {
         self.isConfigured = isConfigured
         configurePurchases = configure
         self.customerInfoProvider = customerInfoProvider
         self.restorePurchasesProvider = restorePurchasesProvider
+        self.offerCodeRedemptionPresenter = offerCodeRedemptionPresenter
     }
 
     func configureIfNeeded() throws {
@@ -93,6 +99,14 @@ final class RevenueCatSubscriptionService: SubscriptionServicing {
         }
 
         return try await snapshot(from: restorePurchasesProvider())
+    }
+
+    func presentOfferCodeRedemptionSheet() throws {
+        guard isConfiguredForRequests else {
+            throw SubscriptionServiceError.notConfigured
+        }
+
+        offerCodeRedemptionPresenter()
     }
 
     private var isConfiguredForRequests: Bool {
