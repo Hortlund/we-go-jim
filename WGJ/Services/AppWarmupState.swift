@@ -498,4 +498,11 @@ nonisolated enum ProfileDashboardRenderPolicy {
     static func renderDelay(hasRenderedDashboardContent: Bool) -> Duration {
         hasRenderedDashboardContent ? .zero : initialRenderDelay
     }
+
+    static func visibilityAfterCancellingRender(
+        hasRenderedDashboardContent: Bool,
+        isTabExit: Bool
+    ) -> Bool {
+        isTabExit && hasRenderedDashboardContent
+    }
 }

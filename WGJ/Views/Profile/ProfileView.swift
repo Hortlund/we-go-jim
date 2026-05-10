@@ -75,7 +75,7 @@ struct ProfileView: View {
             await hydrateProfileIfNeeded(force: false)
         }
         .onDisappear {
-            cancelDashboardRender()
+            cancelDashboardRender(isTabExit: true)
             cancelTrendSeriesLoad()
             cancelCoachBriefLoad()
             cancelCoachFollowUpLoads()
@@ -984,10 +984,13 @@ struct ProfileView: View {
         }
     }
 
-    private func cancelDashboardRender() {
+    private func cancelDashboardRender(isTabExit: Bool = false) {
         dashboardRenderTask?.cancel()
         dashboardRenderTask = nil
-        shouldRenderDashboardContent = false
+        shouldRenderDashboardContent = ProfileDashboardRenderPolicy.visibilityAfterCancellingRender(
+            hasRenderedDashboardContent: hasRenderedDashboardContent,
+            isTabExit: isTabExit
+        )
     }
 
     private func cancelTrendSeriesLoad() {

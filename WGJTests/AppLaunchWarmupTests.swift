@@ -469,6 +469,22 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
+    func profileDashboardRenderPolicyPreservesRenderedContentWhenCancellingForTabExit() {
+        #expect(ProfileDashboardRenderPolicy.visibilityAfterCancellingRender(
+            hasRenderedDashboardContent: true,
+            isTabExit: true
+        ))
+        #expect(!ProfileDashboardRenderPolicy.visibilityAfterCancellingRender(
+            hasRenderedDashboardContent: false,
+            isTabExit: true
+        ))
+        #expect(!ProfileDashboardRenderPolicy.visibilityAfterCancellingRender(
+            hasRenderedDashboardContent: true,
+            isTabExit: false
+        ))
+    }
+
+    @Test
     func userDataSyncTrackerReportsRunningCloudImportAsSyncing() {
         let tracker = UserDataSyncTracker.shared
         var snapshot = tracker.configureForLaunch(isCloudEnabled: true, errorDescription: nil)
