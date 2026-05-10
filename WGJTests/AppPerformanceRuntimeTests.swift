@@ -447,6 +447,46 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
+    func activeWorkoutKeyboardChromeUsesActualKeyboardVisibilityForBottomDock() {
+        #expect(!ActiveWorkoutKeyboardChromePolicy.shouldShowTimerDock(
+            hasSession: true,
+            isEndingSession: false,
+            isKeyboardVisible: false,
+            isMetricInputFocused: true
+        ))
+        #expect(!ActiveWorkoutKeyboardChromePolicy.shouldShowTimerDock(
+            hasSession: true,
+            isEndingSession: false,
+            isKeyboardVisible: true,
+            isMetricInputFocused: false
+        ))
+        #expect(!ActiveWorkoutKeyboardChromePolicy.shouldShowTimerDock(
+            hasSession: false,
+            isEndingSession: false,
+            isKeyboardVisible: false,
+            isMetricInputFocused: false
+        ))
+        #expect(!ActiveWorkoutKeyboardChromePolicy.shouldShowTimerDock(
+            hasSession: true,
+            isEndingSession: true,
+            isKeyboardVisible: false,
+            isMetricInputFocused: false
+        ))
+        #expect(ActiveWorkoutKeyboardChromePolicy.shouldShowKeyboardDismissButton(
+            isKeyboardVisible: true,
+            isMetricInputFocused: false
+        ))
+        #expect(ActiveWorkoutKeyboardChromePolicy.shouldShowKeyboardDismissButton(
+            isKeyboardVisible: false,
+            isMetricInputFocused: true
+        ))
+        #expect(!ActiveWorkoutKeyboardChromePolicy.shouldShowKeyboardDismissButton(
+            isKeyboardVisible: false,
+            isMetricInputFocused: false
+        ))
+    }
+
+    @Test
     func templateKeyboardDismissTokenAdvancesOnExplicitDismiss() {
         var token = TemplateEditorKeyboardDismissToken()
         let initialValue = token.value

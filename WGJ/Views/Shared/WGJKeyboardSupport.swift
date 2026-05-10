@@ -171,11 +171,10 @@ private struct WGJKeyboardVisibilityModifier: ViewModifier {
         if isEnabled {
             content
                 .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
-                    updateVisibility(
-                        WGJKeyboard.isVisible(from: notification)
-                    )
+                    guard WGJKeyboard.isVisible(from: notification) else { return }
+                    updateVisibility(true)
                 }
-                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
                     updateVisibility(false)
                 }
         } else {

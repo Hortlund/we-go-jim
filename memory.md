@@ -455,3 +455,12 @@ Promote a lesson here only when it clears the bar above.
 - Durable Rule: Collapsed history rows must render from `WorkoutSessionExercise` scalar fields only. Do not build `WorkoutSessionSetDraft`s, traverse set/drop-stage relationships, or run broad session-exercise fetches until a specific row is expanded or saved.
 - How to Verify Next Time: Open a large completed workout and scroll immediately; confirm collapsed rows use denormalized set summary fields, expanded rows hydrate on demand, and targeted exercise fetch helpers fetch by row ID instead of loading the whole session.
 - Status: active
+
+## 2026-05-10 - Active Workout Keyboard Chrome Must Wait For Did-Hide
+
+- Date: 2026-05-10
+- Trigger/Problem: The Active Workout elapsed-time dock could appear above the keyboard during dismissal or fail to return cleanly after keyboard hide/resume flows.
+- Root Cause: The bottom dock cleared keyboard-visible state on `keyboardWillHide`, and scene resume could miss a keyboard show frame notification while a metric field was still focused. That made the timer dock depend on transient UIKit timing instead of the actual keyboard-chrome lifecycle.
+- Durable Rule: Active Workout bottom chrome must hide the timer while either the keyboard is visible or a metric input is focused, and it must clear keyboard/focus state from `keyboardDidHide`, not `keyboardWillHide`. Do not show the timer dock during the keyboard dismissal animation.
+- How to Verify Next Time: Run the active-workout UI flow that focuses a set field, backgrounds/returns, confirms the timer is absent while the keyboard is visible, taps `keyboard-hide-button`, waits for the keyboard to disappear, and confirms `active-workout-elapsed-timer` returns.
+- Status: active

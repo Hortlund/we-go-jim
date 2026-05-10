@@ -215,6 +215,9 @@ struct ActiveWorkoutView: View {
                 guard !isFocused, canRunNonCriticalInteractionWork else { return }
                 scheduleForegroundNonCriticalInteractionWorkResume()
             }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
+                isMetricInputFocused = false
+            }
             .onAppear {
                 restorePreparedScrollTargetIfNeeded(using: scrollProxy)
             }
@@ -3556,7 +3559,7 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
             updateKeyboardState(from: notification)
         }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
             isKeyboardVisible = false
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -3568,11 +3571,19 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
     }
 
     private var shouldShowDock: Bool {
-        !shouldShowKeyboardDismissButton && !isEndingSession && session != nil
+        ActiveWorkoutKeyboardChromePolicy.shouldShowTimerDock(
+            hasSession: session != nil,
+            isEndingSession: isEndingSession,
+            isKeyboardVisible: isKeyboardVisible,
+            isMetricInputFocused: isMetricInputFocused
+        )
     }
 
     private var shouldShowKeyboardDismissButton: Bool {
-        isKeyboardVisible || isMetricInputFocused
+        ActiveWorkoutKeyboardChromePolicy.shouldShowKeyboardDismissButton(
+            isKeyboardVisible: isKeyboardVisible,
+            isMetricInputFocused: isMetricInputFocused
+        )
     }
 
     private var keyboardDismissButtonBottomPadding: CGFloat {
@@ -3580,18 +3591,8 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
     }
 
     private func updateKeyboardState(from notification: Notification) {
-        let screenMaxY = UIScreen.main.bounds.maxY
-        guard
-            screenMaxY.isFinite,
-            screenMaxY > 0,
-            let endFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
-            endFrame.minY.isFinite
-        else {
-            isKeyboardVisible = false
-            return
-        }
-
-        isKeyboardVisible = endFrame.minY < screenMaxY
+        guard WGJKeyboard.isVisible(from: notification) else { return }
+        isKeyboardVisible = true
     }
 }
 

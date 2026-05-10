@@ -1244,6 +1244,10 @@ final class WGJUITests: XCTestCase {
         XCTAssertLessThanOrEqual(hideKeyboardButton.frame.maxY, keyboard.frame.minY - 6)
         XCTAssertGreaterThanOrEqual(hideKeyboardButton.frame.minY, keyboard.frame.minY - 96)
         XCTAssertFalse(identifiedElement("active-workout-elapsed-timer", in: app).exists)
+
+        hideKeyboardButton.tap()
+        XCTAssertFalse(keyboard.waitForExistence(timeout: 2))
+        XCTAssertTrue(identifiedElement("active-workout-elapsed-timer", in: app).waitForExistence(timeout: 3))
     }
 
     @MainActor

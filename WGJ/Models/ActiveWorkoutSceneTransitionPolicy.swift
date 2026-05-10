@@ -36,6 +36,22 @@ nonisolated enum ActiveWorkoutKeyboardChromePolicy {
     static func shouldResetKeyboardState(scenePhase: ScenePhase) -> Bool {
         scenePhase != .active
     }
+
+    static func shouldShowTimerDock(
+        hasSession: Bool,
+        isEndingSession: Bool,
+        isKeyboardVisible: Bool,
+        isMetricInputFocused: Bool
+    ) -> Bool {
+        hasSession && !isEndingSession && !isKeyboardVisible && !isMetricInputFocused
+    }
+
+    static func shouldShowKeyboardDismissButton(
+        isKeyboardVisible: Bool,
+        isMetricInputFocused: Bool
+    ) -> Bool {
+        isKeyboardVisible || isMetricInputFocused
+    }
 }
 
 nonisolated enum ActiveWorkoutInteractionWorkPolicy {
