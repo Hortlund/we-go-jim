@@ -2342,14 +2342,15 @@ struct WorkoutSessionExerciseGridEditor: View {
             return
         }
 
-        revealedCompletionGateSetIDs.remove(setDrafts[index].id)
-        let focusedSetInput = focusedInput?.setID == setDrafts[index].id ? focusedInput : nil
+        let targetSetID = setDrafts[index].id
+        revealedCompletionGateSetIDs.remove(targetSetID)
+        let focusedSetInput = focusedInput?.setID == targetSetID ? focusedInput : nil
 
         guard isCompleted else {
             if focusedSetInput != nil {
                 dismissInputFocus(suppressCommit: true)
             }
-            pendingBozarCompletionSetIDs.remove(setDrafts[index].id)
+            pendingBozarCompletionSetIDs.remove(targetSetID)
             setCompletion(false, at: index)
             return
         }
@@ -2358,14 +2359,22 @@ struct WorkoutSessionExerciseGridEditor: View {
             if focusedSetInput != nil {
                 dismissInputFocus(suppressCommit: true)
             }
-            pendingBozarCompletionSetIDs.remove(setDrafts[index].id)
+            pendingBozarCompletionSetIDs.remove(targetSetID)
             setCompletion(true, at: index)
+            return
+        }
+
+        if let focusedSetInput {
+            _ = commitBufferedInput(for: focusedSetInput, clearsText: false)
+        }
+
+        guard let resolvedIndex = setDrafts.firstIndex(where: { $0.id == targetSetID }) else {
             return
         }
 
         guard let decision = WorkoutSetBozarCompletionController.decision(
             drafts: setDrafts,
-            at: index,
+            at: resolvedIndex,
             previousResolution: previousPerformanceResolution
         ) else {
             return
@@ -2378,8 +2387,8 @@ struct WorkoutSessionExerciseGridEditor: View {
             }
             pendingBozarCompletionSetIDs.insert(setID)
         case .completeImmediately(let updatedDrafts):
-            pendingBozarCompletionSetIDs.remove(setDrafts[index].id)
-            completeSetUsingBozar(at: index, draftOverride: updatedDrafts)
+            pendingBozarCompletionSetIDs.remove(targetSetID)
+            completeSetUsingBozar(at: resolvedIndex, draftOverride: updatedDrafts)
         }
     }
 
@@ -2464,6 +2473,9 @@ struct WorkoutSessionExerciseGridEditor: View {
         } else {
             suppressNextFocusLossCommit = false
         }
+        if let newFocus {
+            stageCurrentInputDraftIfNeeded(for: newFocus)
+        }
         if newFocus == nil {
             pendingDisplayRefreshTask?.cancel()
             pendingDisplayRefreshTask = nil
@@ -2471,6 +2483,13 @@ struct WorkoutSessionExerciseGridEditor: View {
                 refreshDisplayRows()
             }
         }
+    }
+
+    private func stageCurrentInputDraftIfNeeded(for focus: SetInputFocus) {
+        guard let index = indexForSetID(focus.setID) else { return }
+        let metric = inputDraftMetric(for: focus.metric)
+        guard metricInputDraftBuffer.text(for: focus.setID, metric: metric) == nil else { return }
+        metricInputDraftBuffer.sync(setID: focus.setID, metric: metric, draft: setDrafts[index])
     }
 
     private func handleSetDraftsChange(
@@ -3008,6 +3027,8 @@ private func metricDisplayText(_ state: MetricFieldDisplayState) -> some View {
         .monospacedDigit()
         .frame(maxWidth: .infinity)
         .allowsHitTesting(false)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(state.text)
         .applyIfLet(state.accessibilityIdentifier) { view, identifier in
             view.accessibilityIdentifier(identifier)
         }

@@ -952,7 +952,7 @@ struct ActiveWorkoutView: View {
             loadedPreferences = Self.profilePreferences(modelContext: modelContext)
         }
 
-        let resolvedPreferences = loadedPreferences ?? .default
+        let resolvedPreferences = Self.resolvedUITestProfilePreferences(loadedPreferences ?? .default)
         guard profilePreferences != resolvedPreferences else {
             preferredLoadUnit = resolvedPreferences.preferredLoadUnit
             return
@@ -968,10 +968,25 @@ struct ActiveWorkoutView: View {
             return .default
         }
 
-        return ActiveWorkoutProfilePreferences(
+        return resolvedUITestProfilePreferences(ActiveWorkoutProfilePreferences(
             preferredLoadUnit: profile.preferredLoadUnit,
             isBozarModeEnabled: profile.isBozarModeEnabled,
             isTrainingGuidanceEnabled: profile.isTrainingGuidanceEnabled
+        ))
+    }
+
+    nonisolated private static func resolvedUITestProfilePreferences(
+        _ preferences: ActiveWorkoutProfilePreferences,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> ActiveWorkoutProfilePreferences {
+        guard environment["UITEST_ENABLE_BOZAR_MODE"] == "1" else {
+            return preferences
+        }
+
+        return ActiveWorkoutProfilePreferences(
+            preferredLoadUnit: preferences.preferredLoadUnit,
+            isBozarModeEnabled: true,
+            isTrainingGuidanceEnabled: preferences.isTrainingGuidanceEnabled
         )
     }
 

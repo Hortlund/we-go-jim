@@ -253,6 +253,11 @@ nonisolated struct WorkoutMetricInputDraftBuffer: Equatable, Sendable {
 
         if normalized.isEmpty {
             updatedWeight = nil
+        } else if let parsed = Self.parseLocalizedDecimal(
+            normalized,
+            droppingTrailingExistingValue: draft.actualWeight
+        ) {
+            updatedWeight = max(0, parsed)
         } else if let parsed = Self.parseLocalizedDecimal(normalized) {
             updatedWeight = max(0, parsed)
         } else {
@@ -325,6 +330,11 @@ nonisolated struct WorkoutMetricInputDraftBuffer: Equatable, Sendable {
 
         if normalized.isEmpty {
             updatedWeight = nil
+        } else if let parsed = Self.parseLocalizedDecimal(
+            normalized,
+            droppingTrailingExistingValue: draft.actualWeight
+        ) {
+            updatedWeight = max(0, parsed)
         } else if let parsed = Self.parseLocalizedDecimal(normalized) {
             updatedWeight = max(0, parsed)
         } else {
@@ -439,6 +449,41 @@ nonisolated struct WorkoutMetricInputDraftBuffer: Equatable, Sendable {
         let trimmed = String(normalized.dropLast(separator.count))
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return Double(trimmed.replacingOccurrences(of: separator, with: "."))
+    }
+
+    private static func parseLocalizedDecimal(
+        _ text: String,
+        droppingTrailingExistingValue existingValue: Double?
+    ) -> Double? {
+        guard let existingValue else { return nil }
+        let existingText = WGJFormatters.decimalString(existingValue)
+
+        let parts = text
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+        if parts.count >= 2,
+           let trailingValue = parseLocalizedDecimal(parts[parts.count - 1]),
+           abs(trailingValue - existingValue) < 0.0001,
+           let leadingValue = parseLocalizedDecimal(parts.dropLast().joined())
+        {
+            return leadingValue
+        }
+
+        if text.hasSuffix(existingText) {
+            let leadingText = String(text.dropLast(existingText.count))
+            if let leadingValue = parseLocalizedDecimal(leadingText) {
+                return leadingValue
+            }
+        }
+
+        if text.hasPrefix(existingText) {
+            let trailingText = String(text.dropFirst(existingText.count))
+            if let trailingValue = parseLocalizedDecimal(trailingText) {
+                return trailingValue
+            }
+        }
+
+        return nil
     }
 }
 

@@ -87,6 +87,46 @@ struct ResponsiveInputStateTests {
     }
 
     @Test
+    func workoutMetricCommitUsesReplacementWhenOldWeightTrailsFocusedInput() {
+        let setID = UUID()
+        var drafts = [WorkoutSessionSetDraft(id: setID, targetLoadUnit: .kg, actualWeight: 100)]
+        var buffer = WorkoutMetricInputDraftBuffer()
+
+        buffer.stage("95 100", for: setID, metric: .weight)
+
+        let changed = buffer.commit(
+            setID: setID,
+            metric: .weight,
+            drafts: &drafts,
+            preferredLoadUnit: .kg,
+            manualCompletionMode: true
+        )
+
+        #expect(changed)
+        #expect(drafts[0].actualWeight == 95)
+    }
+
+    @Test
+    func workoutMetricCommitUsesReplacementWhenOldWeightTrailsFocusedInputWithoutSpacing() {
+        let setID = UUID()
+        var drafts = [WorkoutSessionSetDraft(id: setID, targetLoadUnit: .kg, actualWeight: 100)]
+        var buffer = WorkoutMetricInputDraftBuffer()
+
+        buffer.stage("95100", for: setID, metric: .weight)
+
+        let changed = buffer.commit(
+            setID: setID,
+            metric: .weight,
+            drafts: &drafts,
+            preferredLoadUnit: .kg,
+            manualCompletionMode: true
+        )
+
+        #expect(changed)
+        #expect(drafts[0].actualWeight == 95)
+    }
+
+    @Test
     func dropStageTypingStaysBufferedUntilCommit() {
         let setID = UUID()
         let stageID = UUID()
