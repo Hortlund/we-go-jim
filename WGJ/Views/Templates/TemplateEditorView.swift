@@ -101,28 +101,10 @@ struct TemplateEditorView: View {
                     .accessibilityIdentifier("template-editor-save-button")
                 }
 
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-
-                    Button {
-                        keyboardDismissToken.requestDismiss()
-                        WGJKeyboard.dismiss()
-                    } label: {
-                        HStack(spacing: WGJKeyboardHideControl.imagePadding) {
-                            Image(systemName: WGJKeyboardHideControl.systemImage)
-                                .font(.footnote.weight(.bold))
-
-                            Text(WGJKeyboardHideControl.title)
-                                .font(.footnote.weight(.semibold))
-                        }
-                        .foregroundStyle(WGJKeyboardHideControl.foregroundStyle)
-                        .padding(.horizontal, WGJKeyboardHideControl.horizontalPadding)
-                        .padding(.vertical, WGJKeyboardHideControl.verticalPadding)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(WGJKeyboardHideControl.accessibilityLabel)
-                    .accessibilityIdentifier(WGJKeyboardHideControl.accessibilityIdentifier)
-                }
+            }
+            .wgjMinimalKeyboardToolbar {
+                keyboardDismissToken.requestDismiss()
+                WGJKeyboard.dismiss()
             }
             .sheet(item: $pickerTarget) { target in
                 ExercisePickerView(repository: catalogRepository) { selected in

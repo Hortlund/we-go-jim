@@ -88,6 +88,7 @@ struct MainTabView: View {
                 }
                 .tint(WGJTheme.accentBlue)
                 .wgjTabChrome()
+                .wgjMinimalKeyboardToolbar()
                 .environment(\.activeWorkoutOverlayBottomInset, activeWorkoutOverlayBottomInset)
 
                 bottomOverlayChrome(bottomSafeAreaInset: bottomSafeAreaInset)

@@ -140,7 +140,6 @@ struct HistoryDetailView: View {
         } message: {
             Text(errorMessage)
         }
-        .wgjMinimalKeyboardToolbar()
     }
 
     private var personalRecordSummary: HistoryWorkoutPersonalRecordSummary {

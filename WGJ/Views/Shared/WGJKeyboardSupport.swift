@@ -47,6 +47,28 @@ enum WGJKeyboardHideControl {
     }
 }
 
+struct WGJKeyboardHideButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: WGJKeyboardHideControl.imagePadding) {
+                Image(systemName: WGJKeyboardHideControl.systemImage)
+                    .font(.footnote.weight(.bold))
+
+                Text(WGJKeyboardHideControl.title)
+                    .font(.footnote.weight(.semibold))
+            }
+            .foregroundStyle(WGJKeyboardHideControl.foregroundStyle)
+            .padding(.horizontal, WGJKeyboardHideControl.horizontalPadding)
+            .padding(.vertical, WGJKeyboardHideControl.verticalPadding)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(WGJKeyboardHideControl.accessibilityLabel)
+        .accessibilityIdentifier(WGJKeyboardHideControl.accessibilityIdentifier)
+    }
+}
+
 struct WGJAccessoryTextField: UIViewRepresentable {
     let placeholder: String
     @Binding var text: String
@@ -215,22 +237,7 @@ private struct WGJMinimalKeyboardToolbarModifier: ViewModifier {
     @ViewBuilder
     private var keyboardToolbarButton: some View {
         Spacer()
-
-        Button(action: onDismiss) {
-            HStack(spacing: WGJKeyboardHideControl.imagePadding) {
-                Image(systemName: WGJKeyboardHideControl.systemImage)
-                    .font(.footnote.weight(.bold))
-
-                Text(WGJKeyboardHideControl.title)
-                    .font(.footnote.weight(.semibold))
-            }
-            .foregroundStyle(WGJKeyboardHideControl.foregroundStyle)
-            .padding(.horizontal, WGJKeyboardHideControl.horizontalPadding)
-            .padding(.vertical, WGJKeyboardHideControl.verticalPadding)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(WGJKeyboardHideControl.accessibilityLabel)
-        .accessibilityIdentifier(WGJKeyboardHideControl.accessibilityIdentifier)
+        WGJKeyboardHideButton(action: onDismiss)
     }
 }
 

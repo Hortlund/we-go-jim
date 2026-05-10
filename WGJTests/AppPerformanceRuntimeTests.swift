@@ -472,15 +472,15 @@ struct AppPerformanceRuntimeTests {
             isKeyboardVisible: false,
             isMetricInputFocused: false
         ))
-        #expect(ActiveWorkoutKeyboardChromePolicy.shouldShowKeyboardDismissButton(
+        #expect(!ActiveWorkoutKeyboardChromePolicy.shouldShowFloatingKeyboardDismissButton(
             isKeyboardVisible: true,
             isMetricInputFocused: false
         ))
-        #expect(ActiveWorkoutKeyboardChromePolicy.shouldShowKeyboardDismissButton(
+        #expect(!ActiveWorkoutKeyboardChromePolicy.shouldShowFloatingKeyboardDismissButton(
             isKeyboardVisible: false,
             isMetricInputFocused: true
         ))
-        #expect(!ActiveWorkoutKeyboardChromePolicy.shouldShowKeyboardDismissButton(
+        #expect(!ActiveWorkoutKeyboardChromePolicy.shouldShowFloatingKeyboardDismissButton(
             isKeyboardVisible: false,
             isMetricInputFocused: false
         ))

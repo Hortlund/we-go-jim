@@ -1453,7 +1453,7 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(addButton.waitForExistence(timeout: 15))
         addButton.tap()
 
-        let hideKeyboardButton = app.buttons["Hide"]
+        let hideKeyboardButton = app.buttons["keyboard-hide-button"]
         if hideKeyboardButton.waitForExistence(timeout: 1) {
             hideKeyboardButton.tap()
         }
@@ -1814,7 +1814,7 @@ final class WGJUITests: XCTestCase {
         repsField.tap()
         repsField.typeText("6")
 
-        let hideKeyboardButton = app.buttons["Hide"]
+        let hideKeyboardButton = app.buttons["keyboard-hide-button"]
         if hideKeyboardButton.waitForExistence(timeout: 1) {
             hideKeyboardButton.tap()
         }
@@ -2211,7 +2211,7 @@ final class WGJUITests: XCTestCase {
         }
         repsField.typeText("8")
 
-        let hideKeyboardButton = app.buttons["Hide"]
+        let hideKeyboardButton = app.buttons["keyboard-hide-button"]
         if hideKeyboardButton.waitForExistence(timeout: 1) {
             hideKeyboardButton.tap()
         }
@@ -2665,7 +2665,7 @@ final class WGJUITests: XCTestCase {
         seedRepsField.tap()
         seedRepsField.typeText("8")
 
-        let hideKeyboardButton = app.buttons["Hide"]
+        let hideKeyboardButton = app.buttons["keyboard-hide-button"]
         if hideKeyboardButton.waitForExistence(timeout: 1) {
             hideKeyboardButton.tap()
         }

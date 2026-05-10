@@ -125,7 +125,6 @@ struct TemplateDetailView: View {
                 TemplateEditorView(folderID: folderID, templateID: template.id) { savedTemplateID in
                     handleTemplateEditorSaved(templateID: savedTemplateID)
                 }
-                    .wgjSheetSurface()
             }
         }
         .alert("Template Error", isPresented: $showingError) {
@@ -139,7 +138,6 @@ struct TemplateDetailView: View {
         .task(id: recommendationReloadKey) {
             await loadCatalogMatches()
         }
-        .wgjMinimalKeyboardToolbar()
     }
 
     private var template: WorkoutTemplate? {

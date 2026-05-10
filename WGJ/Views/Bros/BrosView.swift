@@ -974,7 +974,6 @@ struct BrosView: View {
         .onDisappear {
             cancelActivationRefresh()
         }
-        .wgjMinimalKeyboardToolbar()
     }
 
     @MainActor

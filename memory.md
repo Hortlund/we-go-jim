@@ -464,3 +464,12 @@ Promote a lesson here only when it clears the bar above.
 - Durable Rule: Active Workout bottom chrome must hide the timer while either the keyboard is visible or a metric input is focused, and it must clear keyboard/focus state from `keyboardDidHide`, not `keyboardWillHide`. Do not show the timer dock during the keyboard dismissal animation.
 - How to Verify Next Time: Run the active-workout UI flow that focuses a set field, backgrounds/returns, confirms the timer is absent while the keyboard is visible, taps `keyboard-hide-button`, waits for the keyboard to disappear, and confirms `active-workout-elapsed-timer` returns.
 - Status: active
+
+## 2026-05-10 - Keyboard Toolbars Must Attach Near The Focused Surface
+
+- Date: 2026-05-10
+- Trigger/Problem: Centralizing the keyboard hide toolbar on the active-workout overlay wrapper made the active workout metric fields lose the `keyboard-hide-button` even though the same shared modifier existed higher in the view tree.
+- Root Cause: SwiftUI keyboard toolbar items are not reliable when attached outside the focused presentation surface; the active workout full-screen overlay needed the toolbar modifier on `ActiveWorkoutView` itself, not only on the wrapping `NavigationStack`/tab shell.
+- Durable Rule: Share keyboard toolbar rendering through `WGJKeyboardHideButton`/`.wgjMinimalKeyboardToolbar`, but attach the modifier on the screen or sheet that owns the focused fields. Do not assume a parent overlay wrapper will propagate keyboard toolbar items into every focused descendant.
+- How to Verify Next Time: Run an active-workout UI smoke that focuses `workout-set-0-weight-field`, waits for `keyboard-hide-button`, taps it, and confirms the keyboard hides and `active-workout-elapsed-timer` returns.
+- Status: active

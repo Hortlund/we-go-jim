@@ -126,6 +126,7 @@ struct ActiveWorkoutView: View {
                     finishToolbarButton
                 }
             }
+            .wgjMinimalKeyboardToolbar()
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 ActiveWorkoutKeyboardAwareBottomDock(
                     session: session,
@@ -133,7 +134,6 @@ struct ActiveWorkoutView: View {
                     restTimerPopupID: restTimerState.restTimerPopup?.id,
                     reduceMotion: reduceMotion,
                     isMetricInputFocused: isMetricInputFocused,
-                    onDismissKeyboard: dismissKeyboard,
                     onDismissRestTimer: {
                         clearRestTimerAndPersist()
                     }
@@ -3524,7 +3524,6 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
     let restTimerPopupID: UUID?
     let reduceMotion: Bool
     let isMetricInputFocused: Bool
-    let onDismissKeyboard: () -> Void
     let onDismissRestTimer: () -> Void
 
     @State private var isKeyboardVisible = false
@@ -3539,35 +3538,6 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
                 )
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-
-            if shouldShowKeyboardDismissButton {
-                Button(action: onDismissKeyboard) {
-                    HStack(spacing: WGJKeyboardHideControl.imagePadding) {
-                        Image(systemName: WGJKeyboardHideControl.systemImage)
-                            .font(.footnote.weight(.bold))
-
-                        Text(WGJKeyboardHideControl.title)
-                            .font(.footnote.weight(.semibold))
-                    }
-                    .foregroundStyle(WGJKeyboardHideControl.foregroundStyle)
-                    .padding(.horizontal, WGJKeyboardHideControl.horizontalPadding)
-                    .padding(.vertical, WGJKeyboardHideControl.verticalPadding)
-                    .background {
-                        Capsule()
-                            .fill(WGJTheme.cardStrong.opacity(0.96))
-                            .overlay {
-                                Capsule()
-                                    .stroke(WGJTheme.outline.opacity(0.72), lineWidth: 1)
-                            }
-                    }
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(WGJKeyboardHideControl.accessibilityLabel)
-                .accessibilityIdentifier(WGJKeyboardHideControl.accessibilityIdentifier)
-                .padding(.horizontal, 16)
-                .padding(.bottom, keyboardDismissButtonBottomPadding)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
         }
         .frame(maxWidth: .infinity, alignment: .bottomTrailing)
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
@@ -3580,7 +3550,6 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
             guard ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: newPhase) else { return }
             isKeyboardVisible = false
         }
-        .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: shouldShowKeyboardDismissButton)
         .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: restTimerPopupID)
     }
 
@@ -3591,17 +3560,6 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
             isKeyboardVisible: isKeyboardVisible,
             isMetricInputFocused: isMetricInputFocused
         )
-    }
-
-    private var shouldShowKeyboardDismissButton: Bool {
-        ActiveWorkoutKeyboardChromePolicy.shouldShowKeyboardDismissButton(
-            isKeyboardVisible: isKeyboardVisible,
-            isMetricInputFocused: isMetricInputFocused
-        )
-    }
-
-    private var keyboardDismissButtonBottomPadding: CGFloat {
-        8
     }
 
     private func updateKeyboardState(from notification: Notification) {
