@@ -434,8 +434,6 @@ struct TemplateFolderEditorSheet: View {
     let onCancel: () -> Void
     let onSave: () -> Void
 
-    @FocusState private var isNameFieldFocused: Bool
-
     private var trimmedFolderName: String {
         folderNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -459,7 +457,6 @@ struct TemplateFolderEditorSheet: View {
                         TextField("Push / Pull / Legs", text: $folderNameDraft)
                             .textInputAutocapitalization(.words)
                             .autocorrectionDisabled()
-                            .focused($isNameFieldFocused)
                             .submitLabel(.done)
                             .onSubmit(submitIfPossible)
                             .wgjPillField()
@@ -505,9 +502,6 @@ struct TemplateFolderEditorSheet: View {
                     .padding(.bottom, 16)
                 }
                 .background(WGJTheme.bgBase.opacity(0.97))
-            }
-            .onAppear {
-                isNameFieldFocused = true
             }
         }
         .presentationDetents([.medium])

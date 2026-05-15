@@ -287,13 +287,17 @@ final class WGJUITests: XCTestCase {
 
     @MainActor
     func testTemplateAndFolderAddFlow() throws {
-        let app = launchApp()
+        let app = launchApp(mode: .localInMemory)
 
         tapTab("Start Workout", in: app)
 
         app.buttons["start-workout-new-folder-button"].tap()
         let folderNameField = app.textFields["template-folder-name-field"]
         XCTAssertTrue(folderNameField.waitForExistence(timeout: 5))
+        let initialFolderNameFrame = folderNameField.frame
+        RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+        XCTAssertEqual(folderNameField.frame.minY, initialFolderNameFrame.minY, accuracy: 2)
+        XCTAssertEqual(folderNameField.frame.height, initialFolderNameFrame.height, accuracy: 2)
         folderNameField.tap()
         folderNameField.typeText("UI Test Folder")
         app.buttons["template-folder-save-button"].tap()
