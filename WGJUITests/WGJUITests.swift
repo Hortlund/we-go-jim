@@ -307,6 +307,19 @@ final class WGJUITests: XCTestCase {
         let templateNameField = app.textFields["template-editor-name-field"]
         XCTAssertTrue(templateNameField.waitForExistence(timeout: 5))
         templateNameField.tap()
+        XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 2))
+        let hideKeyboardButton = app.buttons["keyboard-hide-button"]
+        XCTAssertTrue(hideKeyboardButton.waitForExistence(timeout: 2))
+        hideKeyboardButton.tap()
+        XCTAssertFalse(app.keyboards.element.waitForExistence(timeout: 2))
+        let templateNotesField = app.textFields["template-editor-notes-field"]
+        XCTAssertTrue(templateNotesField.waitForExistence(timeout: 5))
+        templateNotesField.tap()
+        XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 2))
+        XCTAssertTrue(hideKeyboardButton.waitForExistence(timeout: 2))
+        hideKeyboardButton.tap()
+        XCTAssertFalse(app.keyboards.element.waitForExistence(timeout: 2))
+        templateNameField.tap()
         templateNameField.typeText("UI Test Template")
         app.buttons["template-editor-save-button"].tap()
         XCTAssertTrue(app.staticTexts["UI Test Template"].waitForExistence(timeout: 5))
@@ -462,6 +475,12 @@ final class WGJUITests: XCTestCase {
         let repMinField = firstElement(endingWith: "-rep-min-field", in: app)
         let repMaxField = firstElement(endingWith: "-rep-max-field", in: app)
         revealElement(repMinField, in: app)
+        repMinField.tap()
+        XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 2))
+        let hideKeyboardButton = app.buttons["keyboard-hide-button"]
+        XCTAssertTrue(hideKeyboardButton.waitForExistence(timeout: 2))
+        hideKeyboardButton.tap()
+        XCTAssertFalse(app.keyboards.element.waitForExistence(timeout: 2))
         clearTextField(repMinField, replacement: "10")
         clearTextField(repMaxField, replacement: "12")
 
