@@ -27,6 +27,18 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
+    func profileWeeklyGoalChartKeepsGoalTickBelowTopClipBoundary() {
+        let scale = ProfileWeeklyGoalChartScalePolicy.scale(
+            goal: 4,
+            completedWorkouts: [4, 4, 1, 3]
+        )
+
+        #expect(scale.domainUpperBound == 5)
+        #expect(scale.axisValues.contains(4))
+        #expect(!scale.axisValues.contains(scale.domainUpperBound))
+    }
+
+    @Test
     func deferredMaintenancePlannerSkipsWarmResumeWorkWhenEverythingIsFresh() {
         let work = AppDeferredMaintenancePlanner.plan(
             hasAppliedCleanStart: true,

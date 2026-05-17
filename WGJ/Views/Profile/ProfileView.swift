@@ -2,6 +2,38 @@ import Charts
 import SwiftData
 import SwiftUI
 
+nonisolated struct ProfileWeeklyGoalChartScale: Equatable {
+    let domainUpperBound: Int
+    let axisValues: [Int]
+}
+
+nonisolated enum ProfileWeeklyGoalChartScalePolicy {
+    static func scale(goal: Int, completedWorkouts: [Int]) -> ProfileWeeklyGoalChartScale {
+        let visibleMaximum = max(1, goal, completedWorkouts.max() ?? 0)
+        let domainUpperBound = visibleMaximum + 1
+
+        return ProfileWeeklyGoalChartScale(
+            domainUpperBound: domainUpperBound,
+            axisValues: axisValues(visibleMaximum: visibleMaximum, goal: goal)
+        )
+    }
+
+    private static func axisValues(visibleMaximum: Int, goal: Int) -> [Int] {
+        let maximumTickCount = 5
+        let step = max(1, Int(ceil(Double(visibleMaximum) / Double(maximumTickCount - 1))))
+        var values = Set<Int>()
+
+        for value in stride(from: 0, through: visibleMaximum, by: step) {
+            values.insert(value)
+        }
+
+        values.insert(0)
+        values.insert(visibleMaximum)
+        values.insert(max(1, min(goal, visibleMaximum)))
+        return values.sorted()
+    }
+}
+
 struct ProfileView: View {
     private enum CoachBriefLoadState {
         case idle
@@ -368,6 +400,10 @@ struct ProfileView: View {
                     .foregroundStyle(WGJTheme.textSecondary)
             } else {
                 let goal = self.weeklyGoal
+                let scale = ProfileWeeklyGoalChartScalePolicy.scale(
+                    goal: goal,
+                    completedWorkouts: dashboardContent.weeklyProgress.map(\.completedWorkouts)
+                )
                 Chart {
                     ForEach(dashboardContent.weeklyProgress) { point in
                         BarMark(
@@ -382,8 +418,12 @@ struct ProfileView: View {
                         .foregroundStyle(WGJTheme.accentGold.opacity(0.75))
                 }
                 .chartYAxis {
-                    AxisMarks(position: .leading)
+                    AxisMarks(position: .leading, values: scale.axisValues) {
+                        AxisGridLine()
+                        AxisValueLabel()
+                    }
                 }
+                .chartYScale(domain: 0 ... scale.domainUpperBound)
                 .frame(height: 160)
                 .drawingGroup()
                 .allowsHitTesting(false)
