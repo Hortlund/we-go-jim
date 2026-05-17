@@ -39,6 +39,17 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
+    func profileWeeklyGoalChartUsesContinuousTicksForCommonSmallCounts() {
+        let scale = ProfileWeeklyGoalChartScalePolicy.scale(
+            goal: 4,
+            completedWorkouts: [5, 4, 2, 1]
+        )
+
+        #expect(scale.domainUpperBound == 6)
+        #expect(scale.axisValues == Array(0 ... 5))
+    }
+
+    @Test
     func deferredMaintenancePlannerSkipsWarmResumeWorkWhenEverythingIsFresh() {
         let work = AppDeferredMaintenancePlanner.plan(
             hasAppliedCleanStart: true,

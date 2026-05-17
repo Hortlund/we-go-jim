@@ -8,6 +8,8 @@ nonisolated struct ProfileWeeklyGoalChartScale: Equatable {
 }
 
 nonisolated enum ProfileWeeklyGoalChartScalePolicy {
+    private static let continuousAxisMaximum = 10
+
     static func scale(goal: Int, completedWorkouts: [Int]) -> ProfileWeeklyGoalChartScale {
         let visibleMaximum = max(1, goal, completedWorkouts.max() ?? 0)
         let domainUpperBound = visibleMaximum + 1
@@ -19,6 +21,10 @@ nonisolated enum ProfileWeeklyGoalChartScalePolicy {
     }
 
     private static func axisValues(visibleMaximum: Int, goal: Int) -> [Int] {
+        if visibleMaximum <= continuousAxisMaximum {
+            return Array(0 ... visibleMaximum)
+        }
+
         let maximumTickCount = 5
         let step = max(1, Int(ceil(Double(visibleMaximum) / Double(maximumTickCount - 1))))
         var values = Set<Int>()
