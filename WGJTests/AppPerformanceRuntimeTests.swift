@@ -580,6 +580,12 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
+    func activeWorkoutGuidanceDisclosurePreservesUserExpansionOnGuidanceUpdates() {
+        #expect(!ActiveWorkoutGuidanceDisclosurePolicy.expandedAfterGuidanceChange(currentlyExpanded: false))
+        #expect(ActiveWorkoutGuidanceDisclosurePolicy.expandedAfterGuidanceChange(currentlyExpanded: true))
+    }
+
+    @Test
     func activeWorkoutNonCriticalInteractionWorkOnlyRunsWhileSceneIsActive() {
         #expect(ActiveWorkoutInteractionWorkPolicy.shouldRunNonCriticalInteractionWork(scenePhase: .active))
         #expect(!ActiveWorkoutInteractionWorkPolicy.shouldRunNonCriticalInteractionWork(scenePhase: .inactive))

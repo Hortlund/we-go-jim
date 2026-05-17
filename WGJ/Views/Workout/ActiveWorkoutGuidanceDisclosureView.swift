@@ -1,5 +1,11 @@
 import SwiftUI
 
+nonisolated enum ActiveWorkoutGuidanceDisclosurePolicy {
+    static func expandedAfterGuidanceChange(currentlyExpanded: Bool) -> Bool {
+        currentlyExpanded
+    }
+}
+
 struct ActiveWorkoutGuidanceDisclosureView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -79,9 +85,9 @@ struct ActiveWorkoutGuidanceDisclosureView: View {
         .animation(WGJMotion.disclosureAnimation(reduceMotion: reduceMotion), value: isExpanded)
         .onChange(of: guidance) { oldValue, newValue in
             guard oldValue != newValue else { return }
-            if newValue.tone != .accent {
-                setExpanded(true)
-            }
+            setExpanded(ActiveWorkoutGuidanceDisclosurePolicy.expandedAfterGuidanceChange(
+                currentlyExpanded: isExpanded
+            ))
         }
     }
 
