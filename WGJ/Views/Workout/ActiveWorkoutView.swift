@@ -40,6 +40,7 @@ struct ActiveWorkoutView: View {
     @State private var shouldRefreshAllGuidance = false
     @State private var cardStateController = ActiveWorkoutExerciseCardStateController()
     @State private var renderProjection = ActiveWorkoutRenderProjection.empty
+    @State private var currentScrollTarget: ActiveWorkoutScrollTarget?
     @State private var restoredScrollTarget: ActiveWorkoutScrollTarget?
     @State private var profilePreferences = ActiveWorkoutProfilePreferences.default
 
@@ -107,6 +108,7 @@ struct ActiveWorkoutView: View {
                 .scrollTargetLayout()
                 .padding(16)
             }
+            .scrollPosition(id: $currentScrollTarget, anchor: .top)
             .scrollDismissesKeyboard(.interactively)
             .wgjScreenBackground()
             .wgjNavigationChrome()
@@ -864,6 +866,32 @@ struct ActiveWorkoutView: View {
         )
         pendingCardioCompletionsByPhase = [:]
         refreshRenderProjection()
+        syncExerciseCardState()
+    }
+
+    @MainActor
+    private func syncExerciseCardState() {
+        let completedExerciseIDs = Set(
+            sessionExercises.compactMap { exercise in
+                let drafts = setDraftsByExerciseID[exercise.id] ?? []
+                return isExerciseCompleted(drafts) ? exercise.id : nil
+            }
+        )
+        cardStateController.sync(
+            exerciseIDs: sessionExercises.map(\.id),
+            completedExerciseIDs: completedExerciseIDs,
+            firstIncompleteExerciseID: areMainExercisesUnlocked
+                ? firstIncompleteExerciseID(
+                    from: sessionExercises,
+                    draftsByExerciseID: setDraftsByExerciseID
+                )
+                : nil
+        )
+
+        let preparedExpandedExerciseIDs = activeWorkoutPresentationState.preparedExpandedExerciseIDs(for: sessionID)
+        guard !preparedExpandedExerciseIDs.isEmpty else { return }
+        cardStateController.restoreExpandedExerciseIDs(preparedExpandedExerciseIDs)
+        activeWorkoutPresentationState.clearPreparedExpandedExerciseIDs(for: sessionID)
     }
 
     @MainActor
@@ -1066,22 +1094,7 @@ struct ActiveWorkoutView: View {
             scheduleGuidanceRefresh(for: exercise.id)
         }
 
-        let completedExerciseIDs = Set(
-            sessionExercises.compactMap { exercise in
-                let drafts = setDraftsByExerciseID[exercise.id] ?? []
-                return isExerciseCompleted(drafts) ? exercise.id : nil
-            }
-        )
-        cardStateController.sync(
-            exerciseIDs: sessionExercises.map(\.id),
-            completedExerciseIDs: completedExerciseIDs,
-            firstIncompleteExerciseID: areMainExercisesUnlocked
-                ? firstIncompleteExerciseID(
-                    from: sessionExercises,
-                    draftsByExerciseID: setDraftsByExerciseID
-                )
-                : nil
-        )
+        syncExerciseCardState()
 
         loadedExerciseStateStamp = currentStamp
         await Task.yield()
@@ -2018,12 +2031,22 @@ struct ActiveWorkoutView: View {
             currentPreparedFirstRenderSnapshot(),
             for: sessionID
         )
+        activeWorkoutPresentationState.stageExpandedExerciseIDs(
+            cardStateController.expandedExerciseIDs(),
+            for: sessionID
+        )
         activeWorkoutPresentationState.stageScrollTarget(minimizedScrollRestoreTarget(), for: sessionID)
     }
 
     @MainActor
     private func minimizedScrollRestoreTarget() -> ActiveWorkoutScrollTarget? {
-        sessionExercises.last.map { .exercise($0.id) }
+        ActiveWorkoutMinimizeScrollRestorePolicy.target(
+            currentScrollTarget: currentScrollTarget,
+            expandedExerciseIDs: cardStateController.expandedExerciseIDs(),
+            orderedExerciseIDs: sessionExercises.map(\.id),
+            hasPreWorkoutCardio: preWorkoutCardio != nil,
+            hasPostWorkoutCardio: postWorkoutCardio != nil
+        )
     }
 
     private func presentActiveWorkout() {

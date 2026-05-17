@@ -157,6 +157,20 @@ struct ActiveWorkoutExerciseCardStateController: Equatable {
         isExpandedByExerciseID[exerciseID] = isExpanded
     }
 
+    mutating func restoreExpandedExerciseIDs(_ exerciseIDs: Set<UUID>) {
+        for exerciseID in exerciseIDs {
+            guard isExpandedByExerciseID[exerciseID] != nil else { continue }
+            guard !completedInCurrentCycle.contains(exerciseID) else { continue }
+            isExpandedByExerciseID[exerciseID] = true
+        }
+    }
+
+    func expandedExerciseIDs() -> Set<UUID> {
+        Set(isExpandedByExerciseID.compactMap { exerciseID, isExpanded in
+            isExpanded ? exerciseID : nil
+        })
+    }
+
     mutating func expandFirstIncompleteIfNeeded(_ exerciseID: UUID?) {
         _ = exerciseID
     }

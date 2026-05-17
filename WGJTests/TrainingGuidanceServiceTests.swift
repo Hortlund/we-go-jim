@@ -484,6 +484,66 @@ struct TrainingGuidanceServiceTests {
         ) == nil)
     }
 
+    @Test
+    func activeWorkoutMinimizeRestorePolicyUsesVisibleExerciseInsteadOfLastExercise() {
+        let first = UUID()
+        let middle = UUID()
+        let last = UUID()
+
+        let target = ActiveWorkoutMinimizeScrollRestorePolicy.target(
+            currentScrollTarget: .exercise(middle),
+            expandedExerciseIDs: [],
+            orderedExerciseIDs: [first, middle, last],
+            hasPreWorkoutCardio: false,
+            hasPostWorkoutCardio: false
+        )
+
+        #expect(target == .exercise(middle))
+    }
+
+    @Test
+    func activeWorkoutMinimizeRestorePolicyFallsBackToExpandedExerciseBeforeFirstExercise() {
+        let first = UUID()
+        let expanded = UUID()
+        let last = UUID()
+
+        let target = ActiveWorkoutMinimizeScrollRestorePolicy.target(
+            currentScrollTarget: nil,
+            expandedExerciseIDs: [expanded],
+            orderedExerciseIDs: [first, expanded, last],
+            hasPreWorkoutCardio: false,
+            hasPostWorkoutCardio: false
+        )
+
+        #expect(target == .exercise(expanded))
+    }
+
+    @Test
+    func activeWorkoutControllerRestoresExpandedExercisesAcrossMinimize() {
+        let first = UUID()
+        let second = UUID()
+        var controller = ActiveWorkoutExerciseCardStateController()
+
+        controller.sync(
+            exerciseIDs: [first, second],
+            completedExerciseIDs: [],
+            firstIncompleteExerciseID: first
+        )
+        controller.setExpanded(true, for: second)
+
+        let expandedIDs = controller.expandedExerciseIDs()
+        var restored = ActiveWorkoutExerciseCardStateController()
+        restored.sync(
+            exerciseIDs: [first, second],
+            completedExerciseIDs: [],
+            firstIncompleteExerciseID: first
+        )
+        restored.restoreExpandedExerciseIDs(expandedIDs)
+
+        #expect(!restored.isExpanded(for: first))
+        #expect(restored.isExpanded(for: second))
+    }
+
     private func makeWorkoutSet(
         reps: Int?,
         weight: Double?,

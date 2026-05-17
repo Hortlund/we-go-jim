@@ -670,6 +670,64 @@ nonisolated enum ActiveWorkoutCompletionScrollPolicy {
     }
 }
 
+nonisolated enum ActiveWorkoutMinimizeScrollRestorePolicy {
+    static func target(
+        currentScrollTarget: ActiveWorkoutScrollTarget?,
+        expandedExerciseIDs: Set<UUID>,
+        orderedExerciseIDs: [UUID],
+        hasPreWorkoutCardio: Bool,
+        hasPostWorkoutCardio: Bool
+    ) -> ActiveWorkoutScrollTarget? {
+        if let currentScrollTarget,
+           isRestorable(
+                currentScrollTarget,
+                orderedExerciseIDs: orderedExerciseIDs,
+                hasPreWorkoutCardio: hasPreWorkoutCardio,
+                hasPostWorkoutCardio: hasPostWorkoutCardio
+           ) {
+            return currentScrollTarget
+        }
+
+        if let expandedExerciseID = orderedExerciseIDs.first(where: { expandedExerciseIDs.contains($0) }) {
+            return .exercise(expandedExerciseID)
+        }
+
+        if let firstExerciseID = orderedExerciseIDs.first {
+            return .exercise(firstExerciseID)
+        }
+
+        if hasPreWorkoutCardio {
+            return .preWorkoutCardio
+        }
+
+        if hasPostWorkoutCardio {
+            return .postWorkoutCardio
+        }
+
+        return .header
+    }
+
+    private static func isRestorable(
+        _ target: ActiveWorkoutScrollTarget,
+        orderedExerciseIDs: [UUID],
+        hasPreWorkoutCardio: Bool,
+        hasPostWorkoutCardio: Bool
+    ) -> Bool {
+        switch target {
+        case .header:
+            return true
+        case .preWorkoutCardio:
+            return hasPreWorkoutCardio
+        case .exercise(let exerciseID):
+            return orderedExerciseIDs.contains(exerciseID)
+        case .postWorkoutCardio:
+            return hasPostWorkoutCardio
+        case .cancelSection:
+            return false
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class WorkoutCompletionPresentationState {
@@ -738,6 +796,7 @@ final class ActiveWorkoutPresentationState {
     @ObservationIgnored private var preparedPreviousPerformanceResolutionBySessionID: [UUID: [UUID: WorkoutPreviousPerformanceResolution]] = [:]
     @ObservationIgnored private var preparedFirstRenderSnapshotBySessionID: [UUID: ActiveWorkoutPreparedFirstRenderSnapshot] = [:]
     @ObservationIgnored private var preparedScrollTargetBySessionID: [UUID: ActiveWorkoutScrollTarget] = [:]
+    @ObservationIgnored private var preparedExpandedExerciseIDsBySessionID: [UUID: Set<UUID>] = [:]
 
     func present(sessionID: UUID) {
         if activeSessionID != sessionID {
@@ -746,6 +805,7 @@ final class ActiveWorkoutPresentationState {
                 preparedPreviousPerformanceResolutionBySessionID.removeValue(forKey: activeSessionID)
                 preparedFirstRenderSnapshotBySessionID.removeValue(forKey: activeSessionID)
                 preparedScrollTargetBySessionID.removeValue(forKey: activeSessionID)
+                preparedExpandedExerciseIDsBySessionID.removeValue(forKey: activeSessionID)
             }
         }
         guard
@@ -782,6 +842,7 @@ final class ActiveWorkoutPresentationState {
             preparedPreviousPerformanceResolutionBySessionID.removeValue(forKey: activeSessionID)
             preparedFirstRenderSnapshotBySessionID.removeValue(forKey: activeSessionID)
             preparedScrollTargetBySessionID.removeValue(forKey: activeSessionID)
+            preparedExpandedExerciseIDsBySessionID.removeValue(forKey: activeSessionID)
         }
         activeSessionID = nil
         isActiveWorkoutPresented = false
@@ -835,6 +896,23 @@ final class ActiveWorkoutPresentationState {
         }
 
         preparedScrollTargetBySessionID[sessionID] = target
+    }
+
+    func stageExpandedExerciseIDs(_ exerciseIDs: Set<UUID>, for sessionID: UUID) {
+        guard !exerciseIDs.isEmpty else {
+            preparedExpandedExerciseIDsBySessionID.removeValue(forKey: sessionID)
+            return
+        }
+
+        preparedExpandedExerciseIDsBySessionID[sessionID] = exerciseIDs
+    }
+
+    func preparedExpandedExerciseIDs(for sessionID: UUID) -> Set<UUID> {
+        preparedExpandedExerciseIDsBySessionID[sessionID] ?? []
+    }
+
+    func clearPreparedExpandedExerciseIDs(for sessionID: UUID) {
+        preparedExpandedExerciseIDsBySessionID.removeValue(forKey: sessionID)
     }
 
     func preparedFirstRenderSnapshot(
