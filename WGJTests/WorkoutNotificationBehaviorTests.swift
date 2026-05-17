@@ -76,12 +76,13 @@ struct WorkoutNotificationBehaviorTests {
                 isBrosReactionNotification: false
             ).isEmpty
         )
-        #expect(
-            WGJNotificationCenterDelegate.presentationOptions(
-                isRestTimerNotification: false,
-                isBrosReactionNotification: true
-            ).contains(.sound)
+
+        let reactionOptions = WGJNotificationCenterDelegate.presentationOptions(
+            isRestTimerNotification: false,
+            isBrosReactionNotification: true
         )
+        #expect(reactionOptions.contains(.sound))
+        #expect(!reactionOptions.contains(.badge))
     }
 
     @Test

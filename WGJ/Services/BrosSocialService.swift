@@ -2453,7 +2453,7 @@ nonisolated final class CloudKitBrosSocialService: BrosSocialService, BrosSocial
             alertBody: "A bro reacted to your workout or PR.",
             title: "New Bro Reaction",
             soundName: "default",
-            shouldBadge: true,
+            shouldBadge: false,
             category: AppNotificationManager.brosReactionCategoryIdentifier
         )
         return subscription

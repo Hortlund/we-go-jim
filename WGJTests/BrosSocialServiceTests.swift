@@ -1901,6 +1901,7 @@ struct BrosSocialServiceTests {
         #expect(savedSubscription.subscriptionID == BrosRecordNames.reactionNotificationSubscriptionID(userRecordName: "user-2"))
         #expect(savedSubscription.recordType == "BroReaction")
         #expect(savedSubscription.notificationInfo?.category == AppNotificationManager.brosReactionCategoryIdentifier)
+        #expect(savedSubscription.notificationInfo?.shouldBadge == false)
         #expect(deletedSubscriptionIDs.isEmpty)
 
         profile.clearBrosMembership()

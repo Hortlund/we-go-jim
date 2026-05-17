@@ -68,6 +68,9 @@ struct ContentView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
+                Task {
+                    await AppNotificationManager.shared.clearConsumedBrosReactionNotifications()
+                }
                 restTimerState.handleRestTimerExpirationIfNeeded()
                 scheduleResumeCriticalMaintenanceIfNeeded()
                 if activeWorkoutPresentationState.activeSessionID == nil {

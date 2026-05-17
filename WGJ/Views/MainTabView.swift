@@ -117,6 +117,11 @@ struct MainTabView: View {
                 tabState.selectedTab = requestedTab
                 notificationRouter.consumeRequestedTab()
             }
+            .task(id: notificationRouter.brosReactionBadgeClearRequestID) {
+                guard notificationRouter.brosReactionBadgeClearRequestID != nil else { return }
+                await AppNotificationManager.shared.clearConsumedBrosReactionNotifications()
+                notificationRouter.consumeBrosReactionBadgeClearRequest()
+            }
             .onChange(of: activeWorkoutPresentationState.activeSessionID) { _, newValue in
                 if newValue == nil {
                     activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)

@@ -934,6 +934,9 @@ struct BrosView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active, isTabActive else { return }
+            Task {
+                await AppNotificationManager.shared.clearConsumedBrosReactionNotifications()
+            }
             scheduleActivationRefreshIfNeeded()
         }
         .onChange(of: viewModel.state) { _, _ in
@@ -978,6 +981,7 @@ struct BrosView: View {
 
     @MainActor
     private func handleCurrentActivation() async {
+        await AppNotificationManager.shared.clearConsumedBrosReactionNotifications()
         await presentInitialShellIfNeeded()
         applyWarmSnapshotIfAvailable()
 

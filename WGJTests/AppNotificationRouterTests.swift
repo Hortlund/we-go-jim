@@ -29,6 +29,31 @@ struct AppNotificationRouterTests {
     }
 
     @Test
+    func openBrosRequestsReactionBadgeClear() {
+        let router = AppNotificationRouter.makeTestingInstance()
+
+        router.openBros()
+
+        #expect(router.brosReactionBadgeClearRequestID != nil)
+    }
+
+    @Test
+    func consumeBrosReactionBadgeClearRequestClearsOnlyBadgeClearRequest() {
+        let router = AppNotificationRouter.makeTestingInstance()
+
+        router.openBros()
+
+        #expect(router.requestedTab == AppMainTab.bros)
+        #expect(router.brosRefreshRequestID != nil)
+
+        router.consumeBrosReactionBadgeClearRequest()
+
+        #expect(router.requestedTab == AppMainTab.bros)
+        #expect(router.brosRefreshRequestID != nil)
+        #expect(router.brosReactionBadgeClearRequestID == nil)
+    }
+
+    @Test
     func consumeBrosRefreshRequestClearsOnlyRefreshRequest() {
         let router = AppNotificationRouter.makeTestingInstance()
 

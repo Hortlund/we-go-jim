@@ -616,11 +616,13 @@ final class AppNotificationRouter {
     var requestedTab: AppMainTab?
     var routeRequestID: UUID?
     var brosRefreshRequestID: UUID?
+    var brosReactionBadgeClearRequestID: UUID?
 
     private init() { }
 
     func openBros() {
         requestBrosRefresh(openTab: true)
+        requestBrosReactionBadgeClear()
     }
 
     func requestBrosRefresh(openTab: Bool = false) {
@@ -632,12 +634,20 @@ final class AppNotificationRouter {
         brosRefreshRequestID = UUID()
     }
 
+    func requestBrosReactionBadgeClear() {
+        brosReactionBadgeClearRequestID = UUID()
+    }
+
     func consumeRequestedTab() {
         requestedTab = nil
     }
 
     func consumeBrosRefreshRequest() {
         brosRefreshRequestID = nil
+    }
+
+    func consumeBrosReactionBadgeClearRequest() {
+        brosReactionBadgeClearRequestID = nil
     }
 
 #if DEBUG
@@ -1518,7 +1528,7 @@ final class AppNotificationManager {
         case .authorized, .provisional, .ephemeral:
             return true
         case .notDetermined:
-            return (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+            return (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
         case .denied:
             return false
         @unknown default:
@@ -1541,6 +1551,23 @@ final class AppNotificationManager {
     func isBrosReactionNotification(_ notification: UNNotification) -> Bool {
         notification.request.content.categoryIdentifier == Self.brosReactionCategoryIdentifier
     }
+
+    func clearConsumedBrosReactionNotifications() async {
+        guard !AppRuntimeConfig.isRunningTests else {
+            return
+        }
+
+        let center = UNUserNotificationCenter.current()
+        let deliveredIdentifiers = await center.deliveredNotifications()
+            .filter { isBrosReactionNotification($0) }
+            .map(\.request.identifier)
+
+        if !deliveredIdentifiers.isEmpty {
+            center.removeDeliveredNotifications(withIdentifiers: deliveredIdentifiers)
+        }
+
+        try? await center.setBadgeCount(0)
+    }
 }
 
 final class WGJNotificationCenterDelegate: NSObject, UNUserNotificationCenterDelegate {
@@ -1555,7 +1582,7 @@ final class WGJNotificationCenterDelegate: NSObject, UNUserNotificationCenterDel
         }
 
         if isBrosReactionNotification {
-            return [.banner, .list, .sound, .badge]
+            return [.banner, .list, .sound]
         }
 
         return [.banner, .list, .sound, .badge]
@@ -1587,6 +1614,7 @@ final class WGJNotificationCenterDelegate: NSObject, UNUserNotificationCenterDel
         }
 
         Task { @MainActor in
+            await AppNotificationManager.shared.clearConsumedBrosReactionNotifications()
             AppNotificationRouter.shared.openBros()
             completionHandler()
         }
