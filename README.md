@@ -145,11 +145,14 @@ CloudKit-adjacent simulator verification should use the signed-in `iPhone 17` on
 
 ### RevenueCat Testing
 
-- Debug builds use the RevenueCat Test Store public key by default for fast local paywall and entitlement checks.
-- Release, TestFlight, and App Store builds use the platform iOS public key in `WGJ_REVENUECAT_API_KEY`.
+- Use the shared `WGJ Dev` scheme for local simulator or device runs against RevenueCat Test Store. It runs the app in Debug, uses the `test_` public key, and uses the `.dev` bundle identifier on physical devices.
+- Use the shared `WGJ` scheme for Release, TestFlight, and App Store builds. It uses the platform iOS public key in `WGJ_REVENUECAT_API_KEY`.
 - TestFlight purchases are still Apple sandbox purchases; RevenueCat detects sandbox receipts automatically when the app uses the platform public key.
 - To test App Store Connect products from a local build, override `WGJ_REVENUECAT_API_KEY` with the `appl_` key and use an Apple sandbox tester account.
+- Do not ship a TestFlight or App Store build with a RevenueCat `test_` key. Test Store is only for local development.
 - Offer-code redemption is exposed from the Pro subscription screen. Apple does not provide a direct success callback for the redemption sheet, so WGJ listens for RevenueCat `CustomerInfo` updates and shows the Pro thank-you flow only after the entitlement is active.
+
+If a Release device build logs `None of the products registered in the RevenueCat dashboard could be fetched from App Store Connect`, treat it as an Apple/RevenueCat store-configuration issue first. Verify the App Store Connect paid-app agreement, banking, tax, bundle id, subscription product ids, product availability, sandbox tester sign-in, and that the first subscriptions are selected on the app version before submitting the version for review. Also confirm the RevenueCat `default` offering packages have the App Store products attached and do not point at Test Store products.
 
 Current automated coverage includes:
 
