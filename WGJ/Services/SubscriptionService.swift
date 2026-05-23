@@ -40,6 +40,9 @@ protocol SubscriptionServicing: AnyObject {
     func customerInfo() async throws -> SubscriptionCustomerInfoSnapshot
     func restorePurchases() async throws -> SubscriptionCustomerInfoSnapshot
     func presentOfferCodeRedemptionSheet() throws
+    func observeCustomerInfoUpdates(
+        _ handler: @escaping @Sendable (SubscriptionCustomerInfoSnapshot) async -> Void
+    ) -> Task<Void, Never>
 }
 
 final class RevenueCatSubscriptionService: SubscriptionServicing {
@@ -107,6 +110,20 @@ final class RevenueCatSubscriptionService: SubscriptionServicing {
         }
 
         offerCodeRedemptionPresenter()
+    }
+
+    func observeCustomerInfoUpdates(
+        _ handler: @escaping @Sendable (SubscriptionCustomerInfoSnapshot) async -> Void
+    ) -> Task<Void, Never> {
+        guard isConfiguredForRequests else {
+            return Task {}
+        }
+
+        return Task {
+            for await customerInfo in Purchases.shared.customerInfoStream {
+                await handler(SubscriptionCustomerInfoSnapshot(customerInfo: customerInfo))
+            }
+        }
     }
 
     private var isConfiguredForRequests: Bool {

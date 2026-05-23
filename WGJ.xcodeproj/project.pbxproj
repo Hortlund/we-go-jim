@@ -503,7 +503,7 @@
 				WGJ_APP_DISPLAY_NAME = "We Go Jim";
 				WGJ_APP_ENVIRONMENT = production;
 				WGJ_CLOUDKIT_CONTAINER_IDENTIFIER = iCloud.se.highball.WeGoJim;
-				WGJ_REVENUECAT_API_KEY = "";
+				WGJ_REVENUECAT_API_KEY = appl_hLQVEpwIIHRMWePRAvutzpdrJcn;
 			};
 			name = Release;
 		};

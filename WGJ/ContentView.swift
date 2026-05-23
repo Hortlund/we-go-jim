@@ -120,6 +120,11 @@ struct ContentView: View {
         .sheet(isPresented: $subscriptionState.isPaywallPresented) {
             RevenueCatPaywallSheet(subscriptionState: subscriptionState)
         }
+        .sheet(isPresented: $subscriptionState.isPurchaseThankYouPresented) {
+            SubscriptionPurchaseThankYouSheet {
+                subscriptionState.dismissPurchaseThankYou()
+            }
+        }
         .presentCustomerCenter(
             isPresented: $subscriptionState.isCustomerCenterPresented,
             restoreCompleted: { (customerInfo: CustomerInfo) in

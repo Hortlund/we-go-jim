@@ -143,6 +143,14 @@ xcodebuild test -project WGJ.xcodeproj -scheme WGJ -destination 'platform=iOS Si
 
 CloudKit-adjacent simulator verification should use the signed-in `iPhone 17` on iOS 26.2 when available. If CloudKit behavior is not part of the change, a normal available iPhone simulator is enough.
 
+### RevenueCat Testing
+
+- Debug builds use the RevenueCat Test Store public key by default for fast local paywall and entitlement checks.
+- Release, TestFlight, and App Store builds use the platform iOS public key in `WGJ_REVENUECAT_API_KEY`.
+- TestFlight purchases are still Apple sandbox purchases; RevenueCat detects sandbox receipts automatically when the app uses the platform public key.
+- To test App Store Connect products from a local build, override `WGJ_REVENUECAT_API_KEY` with the `appl_` key and use an Apple sandbox tester account.
+- Offer-code redemption is exposed from the Pro subscription screen. Apple does not provide a direct success callback for the redemption sheet, so WGJ listens for RevenueCat `CustomerInfo` updates and shows the Pro thank-you flow only after the entitlement is active.
+
 Current automated coverage includes:
 
 - Workout, template, history, profile, and exercise service tests

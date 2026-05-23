@@ -12,6 +12,30 @@ struct SubscriptionStateTests {
     }
 
     @Test
+    func productionAPIKeyPolicyAcceptsOnlyPlatformPublicKeys() {
+        #expect(RevenueCatAPIKeyPolicy.isValidReleaseKey("appl_hLQVEpwIIHRMWePRAvutzpdrJcn") == true)
+        #expect(RevenueCatAPIKeyPolicy.isValidReleaseKey("") == false)
+        #expect(RevenueCatAPIKeyPolicy.isValidReleaseKey(" test_XUFcsPSSOoRjJduGqgMTQirLDjV ") == false)
+    }
+
+    @Test
+    func apiKeyDescriptionIdentifiesBillingModeWithoutLeakingFullKey() {
+        #expect(
+            RevenueCatAPIKeyPolicy.diagnosticDescription(for: "test_XUFcsPSSOoRjJduGqgMTQirLDjV")
+            == "RevenueCat Test Store (test_...LDjV)"
+        )
+        #expect(
+            RevenueCatAPIKeyPolicy.diagnosticDescription(for: "appl_hLQVEpwIIHRMWePRAvutzpdrJcn")
+            == "App Store/TestFlight (appl_...rJcn)"
+        )
+        #expect(
+            RevenueCatAPIKeyPolicy.diagnosticDescription(for: "")
+            == "Not configured"
+        )
+    }
+
+    @MainActor
+    @Test
     func revenueCatServiceThrowsBeforeSuccessfulConfiguration() async {
         let service = RevenueCatSubscriptionService(
             isConfigured: { false },
@@ -45,7 +69,41 @@ struct SubscriptionStateTests {
 
         #expect(state.isPro == true)
         #expect(state.errorMessage == nil)
+        #expect(service.configureCount == 1)
         #expect(service.refreshCount == 1)
+    }
+
+    @MainActor
+    @Test
+    func stateRefreshStoresConfigurationErrorInsteadOfRequestingUnconfiguredSDK() async {
+        let service = SubscriptionServiceProbe(
+            configureResult: .failure(SubscriptionTestError.invalidConfiguration),
+            refreshResult: .success(SubscriptionCustomerInfoSnapshot(activeEntitlementIdentifiers: ["We Go Jim Pro"]))
+        )
+        let state = SubscriptionState(service: service)
+
+        await state.refreshCustomerInfo()
+
+        #expect(state.isPro == false)
+        #expect(service.configureCount == 1)
+        #expect(service.refreshCount == 0)
+        #expect(state.errorMessage == "invalidConfiguration")
+    }
+
+    @MainActor
+    @Test
+    func restorePurchasesConfiguresRevenueCatBeforeRequestingRestore() async {
+        let service = SubscriptionServiceProbe(
+            refreshResult: .success(SubscriptionCustomerInfoSnapshot(activeEntitlementIdentifiers: ["We Go Jim Pro"]))
+        )
+        let state = SubscriptionState(service: service)
+
+        await state.restorePurchases()
+
+        #expect(state.isPro == true)
+        #expect(service.configureCount == 1)
+        #expect(service.restoreCount == 1)
+        #expect(state.errorMessage == nil)
     }
 
     @MainActor
@@ -118,6 +176,65 @@ struct SubscriptionStateTests {
         #expect(service.redeemOfferCodeCount == 0)
         #expect(state.errorMessage == "invalidConfiguration")
     }
+
+    @MainActor
+    @Test
+    func verifiedPurchaseCompletionPresentsThankYouOnlyWhenProIsActive() {
+        let service = SubscriptionServiceProbe(refreshResult: .failure(SubscriptionTestError.offline))
+        let state = SubscriptionState(service: service)
+
+        state.applyVerifiedPurchaseCompletion(
+            SubscriptionCustomerInfoSnapshot(activeEntitlementIdentifiers: ["We Go Jim Pro"])
+        )
+
+        #expect(state.isPro == true)
+        #expect(state.isPaywallPresented == false)
+        #expect(state.isPurchaseThankYouPresented == true)
+    }
+
+    @MainActor
+    @Test
+    func offerCodeCustomerInfoUpdatePresentsThankYouAfterProAccessArrives() {
+        let service = SubscriptionServiceProbe(refreshResult: .failure(SubscriptionTestError.offline))
+        let state = SubscriptionState(service: service)
+
+        state.redeemOfferCode()
+        state.applyCustomerInfoUpdate(
+            SubscriptionCustomerInfoSnapshot(activeEntitlementIdentifiers: ["We Go Jim Pro"])
+        )
+
+        #expect(state.isPro == true)
+        #expect(state.isPurchaseThankYouPresented == true)
+    }
+
+    @MainActor
+    @Test
+    func offerCodeRefreshPresentsThankYouAfterProAccessArrives() async {
+        let service = SubscriptionServiceProbe(
+            refreshResult: .success(SubscriptionCustomerInfoSnapshot(activeEntitlementIdentifiers: ["We Go Jim Pro"]))
+        )
+        let state = SubscriptionState(service: service)
+
+        state.redeemOfferCode()
+        await state.refreshCustomerInfo()
+
+        #expect(state.isPro == true)
+        #expect(state.isPurchaseThankYouPresented == true)
+    }
+
+    @MainActor
+    @Test
+    func normalRefreshToExistingProDoesNotPresentPurchaseThankYou() async {
+        let service = SubscriptionServiceProbe(
+            refreshResult: .success(SubscriptionCustomerInfoSnapshot(activeEntitlementIdentifiers: ["We Go Jim Pro"]))
+        )
+        let state = SubscriptionState(service: service)
+
+        await state.refreshCustomerInfo()
+
+        #expect(state.isPro == true)
+        #expect(state.isPurchaseThankYouPresented == false)
+    }
 }
 
 private enum SubscriptionTestError: Error, CustomStringConvertible {
@@ -140,7 +257,9 @@ private enum SubscriptionTestError: Error, CustomStringConvertible {
 private final class SubscriptionServiceProbe: SubscriptionServicing {
     var configureCount = 0
     var refreshCount = 0
+    var restoreCount = 0
     var redeemOfferCodeCount = 0
+    var observeCustomerInfoUpdatesCount = 0
     let configureResult: Result<Void, Error>
     let refreshResult: Result<SubscriptionCustomerInfoSnapshot, Error>
 
@@ -163,10 +282,18 @@ private final class SubscriptionServiceProbe: SubscriptionServicing {
     }
 
     func restorePurchases() async throws -> SubscriptionCustomerInfoSnapshot {
-        try await customerInfo()
+        restoreCount += 1
+        return try await customerInfo()
     }
 
     func presentOfferCodeRedemptionSheet() throws {
         redeemOfferCodeCount += 1
+    }
+
+    func observeCustomerInfoUpdates(
+        _ handler: @escaping @Sendable (SubscriptionCustomerInfoSnapshot) async -> Void
+    ) -> Task<Void, Never> {
+        observeCustomerInfoUpdatesCount += 1
+        return Task {}
     }
 }

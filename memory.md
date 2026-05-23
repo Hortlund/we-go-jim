@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-05-23 - RevenueCat TestFlight Uses Platform Public Key With Sandbox Receipts
+
+- Date: 2026-05-23
+- Trigger/Problem: Wiring final RevenueCat testing raised confusion over whether TestFlight should use RevenueCat's Test Store key or the production iOS public SDK key.
+- Root Cause: RevenueCat Test Store keys are for local/development purchase simulation, while TestFlight is an Apple hybrid environment: the distributed app should use the platform iOS public SDK key and Apple still processes purchases as sandbox receipts.
+- Durable Rule: Keep Debug/local development on the RevenueCat Test Store key by default, but Release/TestFlight/App Store builds must use the `appl_` platform public SDK key. To test App Store Connect products locally, override `WGJ_REVENUECAT_API_KEY` with the `appl_` key and use an Apple sandbox tester; do not ship a `test_` key in Release.
+- How to Verify Next Time: Build Release and inspect the built app `Info.plist` for `WGJRevenueCatAPIKey => appl_...`, run `WGJTests/SubscriptionStateTests`, and confirm offer-code/customer-info updates are observed before showing Pro thank-you UI.
+- Status: active
+
 ## 2026-05-23 - Template Sync Must Preserve Template-Owned Set Identity
 
 - Date: 2026-05-23

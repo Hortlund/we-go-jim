@@ -40,6 +40,10 @@ struct SettingsDiagnosticsSection: View {
 
             infoRow("App environment", value: AppRuntimeConfig.appEnvironment.displayName)
             infoRow("Bundle ID", value: Bundle.main.bundleIdentifier ?? "Unknown")
+            infoRow(
+                "RevenueCat",
+                value: RevenueCatAPIKeyPolicy.diagnosticDescription(for: RevenueCatConfig.apiKey)
+            )
             infoRow("Cloud mode", value: cloudSyncEnabled ? "CloudKit enabled" : "Local fallback")
             infoRow("User data sync", value: userDataSyncStatus.title)
             infoRow("CloudKit environment", value: AppRuntimeConfig.cloudKitConsoleEnvironmentName)

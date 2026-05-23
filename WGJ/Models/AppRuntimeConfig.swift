@@ -249,11 +249,38 @@ nonisolated enum RevenueCatConfig {
 
     static func validateReleaseAPIKey(_ key: String = apiKey) throws {
 #if !DEBUG
-        let normalizedKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        if normalizedKey.isEmpty || normalizedKey.hasPrefix("test_") {
+        if !RevenueCatAPIKeyPolicy.isValidReleaseKey(key) {
             throw RevenueCatConfigurationError.invalidReleaseAPIKey
         }
 #endif
+    }
+}
+
+nonisolated enum RevenueCatAPIKeyPolicy {
+    static func isValidReleaseKey(_ key: String) -> Bool {
+        let normalizedKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalizedKey.hasPrefix("appl_") && normalizedKey.count > "appl_".count
+    }
+
+    static func diagnosticDescription(for key: String) -> String {
+        let normalizedKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedKey.isEmpty else { return "Not configured" }
+
+        if normalizedKey.hasPrefix("test_") {
+            return "RevenueCat Test Store (\(maskedKey(normalizedKey)))"
+        }
+
+        if normalizedKey.hasPrefix("appl_") {
+            return "App Store/TestFlight (\(maskedKey(normalizedKey)))"
+        }
+
+        return "Unknown RevenueCat key (\(maskedKey(normalizedKey)))"
+    }
+
+    private static func maskedKey(_ key: String) -> String {
+        let prefix = String(key.prefix(5))
+        let suffix = String(key.suffix(4))
+        return "\(prefix)...\(suffix)"
     }
 }
 

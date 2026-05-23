@@ -28,6 +28,22 @@ nonisolated enum WorkoutCompletionConfettiOrigin {
     }
 }
 
+nonisolated enum WorkoutCompletionConfettiIntensity {
+    case completedWorkout
+    case manualTap
+}
+
+nonisolated enum WorkoutCompletionConfettiPolicy {
+    static func pieceCount(for intensity: WorkoutCompletionConfettiIntensity) -> Int {
+        switch intensity {
+        case .completedWorkout:
+            return 64
+        case .manualTap:
+            return 28
+        }
+    }
+}
+
 struct WorkoutCompletionSummaryView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -70,6 +86,7 @@ struct WorkoutCompletionSummaryView: View {
                     ForEach(confettiBursts) { burst in
                         WorkoutCompletionConfettiOverlay(
                             originInGlobalSpace: burst.origin,
+                            pieceCount: burst.pieceCount,
                             seed: burst.seed
                         )
                             .id(burst.id)
@@ -243,11 +260,11 @@ struct WorkoutCompletionSummaryView: View {
         .simultaneousGesture(
             SpatialTapGesture(coordinateSpace: .global)
                 .onEnded { value in
-                    triggerCelebration(origin: confettiOrigin(for: value.location))
+                    triggerCelebration(origin: confettiOrigin(for: value.location), intensity: .manualTap)
                 }
         )
         .accessibilityAction {
-            triggerCelebration(origin: defaultConfettiOrigin())
+            triggerCelebration(origin: defaultConfettiOrigin(), intensity: .manualTap)
         }
         .accessibilityIdentifier("workout-completion-hero-card")
         .accessibilityLabel("Workout completion celebration")
@@ -383,16 +400,22 @@ struct WorkoutCompletionSummaryView: View {
     private func triggerCelebrationIfNeeded() {
         guard !hasTriggeredCelebration else { return }
         hasTriggeredCelebration = true
-        triggerCelebration(origin: defaultConfettiOrigin())
+        triggerCelebration(origin: defaultConfettiOrigin(), intensity: .completedWorkout)
     }
 
-    private func triggerCelebration(origin: CGPoint) {
+    private func triggerCelebration(
+        origin: CGPoint,
+        intensity: WorkoutCompletionConfettiIntensity
+    ) {
         celebrationBurstCount += 1
 
         WorkoutFeedbackCenter.shared.workoutCompleted()
 
         guard !reduceMotion else { return }
-        let burst = WorkoutCompletionConfettiBurst(origin: origin)
+        let burst = WorkoutCompletionConfettiBurst(
+            origin: origin,
+            pieceCount: WorkoutCompletionConfettiPolicy.pieceCount(for: intensity)
+        )
         confettiBursts.append(burst)
         confettiDismissTasks[burst.id]?.cancel()
         confettiDismissTasks[burst.id] = Task { @MainActor in
@@ -806,17 +829,19 @@ private struct WorkoutCompletionHeroFramePreferenceKey: PreferenceKey {
 private struct WorkoutCompletionConfettiBurst: Identifiable {
     let id = UUID()
     let origin: CGPoint
+    let pieceCount: Int
     let seed = UInt64.random(in: 1...UInt64.max)
 }
 
 private struct WorkoutCompletionConfettiOverlay: View {
     let originInGlobalSpace: CGPoint
+    let pieceCount: Int
     let seed: UInt64
 
     @State private var animate = false
 
     private var pieces: [WorkoutCompletionConfettiPiece] {
-        WorkoutCompletionConfettiPiece.random(seed: seed, count: 28)
+        WorkoutCompletionConfettiPiece.random(seed: seed, count: pieceCount)
     }
 
     var body: some View {

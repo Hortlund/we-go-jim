@@ -13,6 +13,10 @@ final class SubscriptionState {
     private(set) var errorMessage: String?
     var isPaywallPresented = false
     var isCustomerCenterPresented = false
+    var isPurchaseThankYouPresented = false
+    private var isAwaitingOfferCodeVerification = false
+    private var customerInfoObservationTask: Task<Void, Never>?
+    private var purchaseThankYouPresentationTask: Task<Void, Never>?
 
     var isPro: Bool {
         SubscriptionEntitlementPolicy.isPro(customerInfo)
@@ -26,6 +30,7 @@ final class SubscriptionState {
         do {
             try service.configureIfNeeded()
             isConfigured = true
+            startCustomerInfoObservationIfNeeded()
             errorMessage = nil
         } catch {
             isConfigured = false
@@ -34,10 +39,12 @@ final class SubscriptionState {
     }
 
     func refreshCustomerInfo() async {
+        guard configureForRequest() else { return }
         await load { try await service.customerInfo() }
     }
 
     func restorePurchases() async {
+        guard configureForRequest() else { return }
         await load { try await service.restorePurchases() }
     }
 
@@ -47,6 +54,7 @@ final class SubscriptionState {
 
         do {
             try service.presentOfferCodeRedemptionSheet()
+            isAwaitingOfferCodeVerification = true
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -56,6 +64,33 @@ final class SubscriptionState {
     func applyCustomerInfo(_ customerInfo: SubscriptionCustomerInfoSnapshot) {
         self.customerInfo = customerInfo
         errorMessage = nil
+    }
+
+    func applyCustomerInfoUpdate(_ customerInfo: SubscriptionCustomerInfoSnapshot) {
+        let wasPro = isPro
+        applyCustomerInfo(customerInfo)
+
+        let isNewlyPro = !wasPro && SubscriptionEntitlementPolicy.isPro(customerInfo)
+        if isNewlyPro && isAwaitingOfferCodeVerification {
+            isAwaitingOfferCodeVerification = false
+            presentPurchaseThankYou(afterPaywallDismissal: false)
+        }
+    }
+
+    func applyVerifiedPurchaseCompletion(_ customerInfo: SubscriptionCustomerInfoSnapshot) {
+        applyCustomerInfo(customerInfo)
+        guard SubscriptionEntitlementPolicy.isPro(customerInfo) else { return }
+
+        let shouldDelayThankYou = isPaywallPresented
+        isPaywallPresented = false
+        isAwaitingOfferCodeVerification = false
+        presentPurchaseThankYou(afterPaywallDismissal: shouldDelayThankYou)
+    }
+
+    func dismissPurchaseThankYou() {
+        purchaseThankYouPresentationTask?.cancel()
+        purchaseThankYouPresentationTask = nil
+        isPurchaseThankYouPresented = false
     }
 
     func recordError(_ error: Error) {
@@ -75,10 +110,38 @@ final class SubscriptionState {
         defer { isLoading = false }
 
         do {
-            customerInfo = try await operation()
+            applyCustomerInfoUpdate(try await operation())
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
+        }
+    }
+
+    private func configureForRequest() -> Bool {
+        configureIfNeeded()
+        return isConfigured
+    }
+
+    private func startCustomerInfoObservationIfNeeded() {
+        guard customerInfoObservationTask == nil else { return }
+
+        customerInfoObservationTask = service.observeCustomerInfoUpdates { [weak self] customerInfo in
+            await self?.applyCustomerInfoUpdate(customerInfo)
+        }
+    }
+
+    private func presentPurchaseThankYou(afterPaywallDismissal shouldDelay: Bool) {
+        purchaseThankYouPresentationTask?.cancel()
+        guard shouldDelay else {
+            isPurchaseThankYouPresented = true
+            return
+        }
+
+        purchaseThankYouPresentationTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            isPurchaseThankYouPresented = true
+            purchaseThankYouPresentationTask = nil
         }
     }
 

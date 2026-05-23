@@ -57,4 +57,13 @@ struct WorkoutCompletionPresentationStateTests {
             ) == CGPoint(x: 184, y: 412)
         )
     }
+
+    @Test
+    func completedWorkoutConfettiUsesMorePiecesThanManualTap() {
+        #expect(WorkoutCompletionConfettiPolicy.pieceCount(for: .manualTap) == 28)
+        #expect(
+            WorkoutCompletionConfettiPolicy.pieceCount(for: .completedWorkout)
+            > WorkoutCompletionConfettiPolicy.pieceCount(for: .manualTap)
+        )
+    }
 }
