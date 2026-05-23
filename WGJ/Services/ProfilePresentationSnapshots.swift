@@ -36,6 +36,7 @@ struct ProfileWidgetConfigSnapshot: Identifiable, Equatable, Sendable {
     let sortOrder: Int
     let selectedCatalogExerciseUUID: String?
     let selectedExerciseNameSnapshot: String?
+    let exerciseTrendMetric: ProfileExerciseTrendMetric
     let updatedAt: Date
 
     nonisolated init(config: ProfileWidgetConfig) {
@@ -45,6 +46,7 @@ struct ProfileWidgetConfigSnapshot: Identifiable, Equatable, Sendable {
         sortOrder = config.sortOrder
         selectedCatalogExerciseUUID = config.selectedCatalogExerciseUUID
         selectedExerciseNameSnapshot = config.selectedExerciseNameSnapshot
+        exerciseTrendMetric = config.exerciseTrendMetric
         updatedAt = config.updatedAt
     }
 }

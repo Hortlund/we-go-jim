@@ -308,21 +308,13 @@ struct ProfileView: View {
                 weeklyMuscleHeatmapWidget
             case .coachBrief:
                 coachBriefWidget
-            case .exerciseOneRMTrend:
+            case .exerciseOneRMTrend, .exerciseVolumeTrend:
                 exerciseTrendWidget(
-                    title: "1RM Trend",
-                    subtitle: "Estimated max strength for \(config.selectedExerciseNameSnapshot ?? "your lift")",
-                    accent: WGJTheme.accentCyan,
-                    series: dashboardContent.trendSeriesByKind[config.kind],
-                    emptyMessage: "Log weighted sets for this lift to start the trend."
-                )
-            case .exerciseVolumeTrend:
-                exerciseTrendWidget(
-                    title: "Volume Trend",
-                    subtitle: "Training volume for \(config.selectedExerciseNameSnapshot ?? "your lift")",
-                    accent: WGJTheme.accentBlue,
-                    series: dashboardContent.trendSeriesByKind[config.kind],
-                    emptyMessage: "Log weighted sets for this lift to chart your volume."
+                    title: trendTitle(for: config.exerciseTrendMetric),
+                    subtitle: trendSubtitle(for: config),
+                    accent: trendAccent(for: config.exerciseTrendMetric),
+                    series: dashboardContent.trendSeriesByWidgetID[config.id],
+                    emptyMessage: trendEmptyMessage(for: config.exerciseTrendMetric)
                 )
             case .streaks:
                 streaksWidget
@@ -1066,7 +1058,7 @@ struct ProfileView: View {
             guard isTabStillActive else { return }
 
             do {
-                let trendSeriesByKind = try await controller.loadTrendSeries(
+                let trendSeriesByWidgetID = try await controller.loadTrendSeries(
                     modelContext: modelContext,
                     enabledWidgets: enabledWidgets,
                     cacheOwner: loadToken,
@@ -1076,7 +1068,7 @@ struct ProfileView: View {
                 await MainActor.run {
                     guard profileReloadToken == reloadToken else { return }
                     guard trendSeriesLoadToken == loadToken else { return }
-                    dashboardContent.trendSeriesByKind = trendSeriesByKind
+                    dashboardContent.trendSeriesByWidgetID = trendSeriesByWidgetID
                     persistWarmProfileSnapshotIfNeeded()
                 }
             } catch {
@@ -1145,6 +1137,59 @@ struct ProfileView: View {
         return "\(formatWeight(abs(delta))) \(series.loadUnit.shortLabel) \(direction) across your last \(series.points.count) logged workouts."
     }
 
+    private func trendTitle(for metric: ProfileExerciseTrendMetric) -> String {
+        switch metric {
+        case .oneRepMax:
+            return "1RM Trend"
+        case .maxWeight:
+            return "Max Weight Trend"
+        case .volume:
+            return "Volume Trend"
+        case .maxReps:
+            return "Max Reps Trend"
+        }
+    }
+
+    private func trendSubtitle(for config: ProfileWidgetConfigSnapshot) -> String {
+        let exerciseName = config.selectedExerciseNameSnapshot ?? "your lift"
+        switch config.exerciseTrendMetric {
+        case .oneRepMax:
+            return "Estimated max strength for \(exerciseName)"
+        case .maxWeight:
+            return "Best logged load for \(exerciseName)"
+        case .volume:
+            return "Training volume for \(exerciseName)"
+        case .maxReps:
+            return "Best completed reps for \(exerciseName)"
+        }
+    }
+
+    private func trendAccent(for metric: ProfileExerciseTrendMetric) -> Color {
+        switch metric {
+        case .oneRepMax:
+            return WGJTheme.accentCyan
+        case .maxWeight:
+            return WGJTheme.accentGold
+        case .volume:
+            return WGJTheme.accentBlue
+        case .maxReps:
+            return WGJTheme.success
+        }
+    }
+
+    private func trendEmptyMessage(for metric: ProfileExerciseTrendMetric) -> String {
+        switch metric {
+        case .oneRepMax:
+            return "Log weighted sets for this lift to start the trend."
+        case .maxWeight:
+            return "Log weighted sets for this lift to chart your best load."
+        case .volume:
+            return "Log weighted sets for this lift to chart your volume."
+        case .maxReps:
+            return "Log completed sets for this exercise to chart your reps."
+        }
+    }
+
     private func showError(_ error: Error) {
         errorMessage = String(describing: error)
         showingError = true
@@ -1163,12 +1208,12 @@ struct ProfileView: View {
 @Observable
 final class ProfileViewController {
     nonisolated private struct TrendSeriesCacheKey: Hashable, Sendable {
-        let kind: ProfileWidgetKind
+        let metric: ProfileExerciseTrendMetric
         let catalogExerciseUUID: String
     }
 
     nonisolated private struct TrendSeriesLoadResult: Sendable {
-        let trendSeriesByKind: [ProfileWidgetKind: ExerciseMetricSeries]
+        let trendSeriesByWidgetID: [UUID: ExerciseMetricSeries]
         let cache: [TrendSeriesCacheKey: ExerciseMetricSeries]
     }
 
@@ -1226,7 +1271,7 @@ final class ProfileViewController {
                 var nextContent = ProfileDashboardContent.make(
                     enabledWidgets: enabled,
                     dashboard: dashboard,
-                    trendSeriesByKind: [:]
+                    trendSeriesByWidgetID: [:]
                 )
                 nextContent.weeklyGoal = profile.weeklyWorkoutGoal
                 return nextContent
@@ -1241,7 +1286,7 @@ final class ProfileViewController {
             var nextContent = ProfileDashboardContent.make(
                 enabledWidgets: enabled,
                 dashboard: dashboard,
-                trendSeriesByKind: [:]
+                trendSeriesByWidgetID: [:]
             )
             nextContent.weeklyGoal = profile.weeklyWorkoutGoal
             return nextContent
@@ -1253,116 +1298,99 @@ final class ProfileViewController {
         enabledWidgets: [ProfileWidgetConfigSnapshot],
         cacheOwner: UUID,
         backgroundStore: AppBackgroundStore?
-    ) async throws -> [ProfileWidgetKind: ExerciseMetricSeries] {
+    ) async throws -> [UUID: ExerciseMetricSeries] {
         if let backgroundStore {
             let cachedSeries = trendSeriesCache
             let result = try await backgroundStore.perform("profile.trends") { backgroundContext in
                 let metricsService = WorkoutMetricsService(modelContext: backgroundContext)
-                var trendSeriesByKind: [ProfileWidgetKind: ExerciseMetricSeries] = [:]
+                var trendSeriesByWidgetID: [UUID: ExerciseMetricSeries] = [:]
                 var nextCache = cachedSeries
                 var currentCacheKeys: Set<TrendSeriesCacheKey> = []
 
                 for config in enabledWidgets {
+                    guard config.kind.isExerciseTrend else { continue }
                     guard let selectedExerciseUUID = config.selectedCatalogExerciseUUID else { continue }
                     let cacheKey = TrendSeriesCacheKey(
-                        kind: config.kind,
+                        metric: config.exerciseTrendMetric,
                         catalogExerciseUUID: selectedExerciseUUID
                     )
                     currentCacheKeys.insert(cacheKey)
 
                     if let cachedSeries = nextCache[cacheKey] {
-                        trendSeriesByKind[config.kind] = cachedSeries.withPreferredName(
+                        trendSeriesByWidgetID[config.id] = cachedSeries.withPreferredName(
                             config.selectedExerciseNameSnapshot
                         )
                         continue
                     }
 
-                    let series: ExerciseMetricSeries
-                    switch config.kind {
-                    case .exerciseOneRMTrend:
-                        series = try metricsService.exerciseOneRepMaxTrend(
-                            for: selectedExerciseUUID,
-                            preferredExerciseName: config.selectedExerciseNameSnapshot,
-                            limit: 8
-                        )
-                    case .exerciseVolumeTrend:
-                        series = try metricsService.exerciseVolumeTrend(
-                            for: selectedExerciseUUID,
-                            preferredExerciseName: config.selectedExerciseNameSnapshot,
-                            limit: 8
-                        )
-                    case .prs, .weeklyGoals, .weeklyMuscleHeatmap, .coachBrief, .streaks, .topExercises, .consistencyCalendar:
-                        continue
-                    }
+                    let series = try metricsService.exerciseMetricTrend(
+                        for: selectedExerciseUUID,
+                        metric: config.exerciseTrendMetric,
+                        preferredExerciseName: config.selectedExerciseNameSnapshot,
+                        limit: 8
+                    )
 
                     nextCache[cacheKey] = series
-                    trendSeriesByKind[config.kind] = series
+                    trendSeriesByWidgetID[config.id] = series
                 }
 
                 nextCache = nextCache.filter { currentCacheKeys.contains($0.key) }
                 return TrendSeriesLoadResult(
-                    trendSeriesByKind: trendSeriesByKind,
+                    trendSeriesByWidgetID: trendSeriesByWidgetID,
                     cache: nextCache
                 )
             }
             if trendSeriesCacheOwner == cacheOwner {
                 trendSeriesCache = result.cache
             }
-            return result.trendSeriesByKind
+            return result.trendSeriesByWidgetID
         }
 
         let cachedSeries = trendSeriesCache
         let result = try WGJPerformance.measure("profile.trends") {
             let metricsService = WorkoutMetricsService(modelContext: modelContext)
-            var trendSeriesByKind: [ProfileWidgetKind: ExerciseMetricSeries] = [:]
+            var trendSeriesByWidgetID: [UUID: ExerciseMetricSeries] = [:]
             var nextCache = cachedSeries
             var currentCacheKeys: Set<TrendSeriesCacheKey> = []
 
             for config in enabledWidgets {
+                guard config.kind.isExerciseTrend else { continue }
                 guard let selectedExerciseUUID = config.selectedCatalogExerciseUUID else { continue }
-                let cacheKey = TrendSeriesCacheKey(kind: config.kind, catalogExerciseUUID: selectedExerciseUUID)
+                let cacheKey = TrendSeriesCacheKey(
+                    metric: config.exerciseTrendMetric,
+                    catalogExerciseUUID: selectedExerciseUUID
+                )
                 currentCacheKeys.insert(cacheKey)
 
                 if let cachedSeries = nextCache[cacheKey] {
-                    trendSeriesByKind[config.kind] = cachedSeries.withPreferredName(
+                    trendSeriesByWidgetID[config.id] = cachedSeries.withPreferredName(
                         config.selectedExerciseNameSnapshot
                     )
                     continue
                 }
 
-                let series: ExerciseMetricSeries
-                switch config.kind {
-                case .exerciseOneRMTrend:
-                    series = try metricsService.exerciseOneRepMaxTrend(
-                        for: selectedExerciseUUID,
-                        preferredExerciseName: config.selectedExerciseNameSnapshot,
-                        limit: 8
-                    )
-                case .exerciseVolumeTrend:
-                    series = try metricsService.exerciseVolumeTrend(
-                        for: selectedExerciseUUID,
-                        preferredExerciseName: config.selectedExerciseNameSnapshot,
-                        limit: 8
-                    )
-                case .prs, .weeklyGoals, .weeklyMuscleHeatmap, .coachBrief, .streaks, .topExercises, .consistencyCalendar:
-                    continue
-                }
+                let series = try metricsService.exerciseMetricTrend(
+                    for: selectedExerciseUUID,
+                    metric: config.exerciseTrendMetric,
+                    preferredExerciseName: config.selectedExerciseNameSnapshot,
+                    limit: 8
+                )
 
                 nextCache[cacheKey] = series
-                trendSeriesByKind[config.kind] = series
+                trendSeriesByWidgetID[config.id] = series
             }
 
             nextCache = nextCache.filter { currentCacheKeys.contains($0.key) }
 
             return TrendSeriesLoadResult(
-                trendSeriesByKind: trendSeriesByKind,
+                trendSeriesByWidgetID: trendSeriesByWidgetID,
                 cache: nextCache
             )
         }
         if trendSeriesCacheOwner == cacheOwner {
             trendSeriesCache = result.cache
         }
-        return result.trendSeriesByKind
+        return result.trendSeriesByWidgetID
     }
 
     func loadCoachBriefPresentation(
@@ -1409,7 +1437,7 @@ nonisolated struct ProfileDashboardContent: Sendable {
     var personalRecords: [WorkoutPRRecord]
     var weeklyProgress: [WeeklyWorkoutProgressPoint]
     var weeklyMuscleHeatmap: ProfileWeeklyMuscleHeatmapSnapshot
-    var trendSeriesByKind: [ProfileWidgetKind: ExerciseMetricSeries]
+    var trendSeriesByWidgetID: [UUID: ExerciseMetricSeries]
     var coachBrief: ProfileCoachPresentation?
     var weeklyGoal: Int
     var overviewStats: ProfileOverviewStats
@@ -1421,7 +1449,7 @@ nonisolated struct ProfileDashboardContent: Sendable {
         personalRecords: [],
         weeklyProgress: [],
         weeklyMuscleHeatmap: .empty,
-        trendSeriesByKind: [:],
+        trendSeriesByWidgetID: [:],
         coachBrief: nil,
         weeklyGoal: 4,
         overviewStats: .empty,
@@ -1432,7 +1460,7 @@ nonisolated struct ProfileDashboardContent: Sendable {
     nonisolated static func make(
         enabledWidgets: [ProfileWidgetConfigSnapshot],
         dashboard: ProfileDashboardSnapshot,
-        trendSeriesByKind: [ProfileWidgetKind: ExerciseMetricSeries],
+        trendSeriesByWidgetID: [UUID: ExerciseMetricSeries],
         coachBrief: ProfileCoachPresentation? = nil
     ) -> ProfileDashboardContent {
         ProfileDashboardContent(
@@ -1440,7 +1468,7 @@ nonisolated struct ProfileDashboardContent: Sendable {
             personalRecords: Array(dashboard.personalRecords.prefix(5)),
             weeklyProgress: dashboard.weeklyProgress,
             weeklyMuscleHeatmap: dashboard.weeklyMuscleHeatmap,
-            trendSeriesByKind: trendSeriesByKind,
+            trendSeriesByWidgetID: trendSeriesByWidgetID,
             coachBrief: coachBrief,
             weeklyGoal: max(1, dashboard.weeklyGoal),
             overviewStats: dashboard.overviewStats,

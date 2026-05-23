@@ -945,7 +945,7 @@ struct ContentView: View {
         var content = ProfileDashboardContent.make(
             enabledWidgets: enabledWidgets,
             dashboard: dashboard,
-            trendSeriesByKind: [:]
+            trendSeriesByWidgetID: [:]
         )
         content.weeklyGoal = profile.weeklyWorkoutGoal
         return ProfileWarmSnapshot(

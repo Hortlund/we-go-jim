@@ -361,10 +361,19 @@ struct ScreenSnapshotTests {
 
     @Test
     func profileDashboardContentBuildsStableSnapshot() {
+        let trendConfig = ProfileWidgetConfig(
+            kind: .exerciseOneRMTrend,
+            selectedCatalogExerciseUUID: "bench",
+            selectedExerciseNameSnapshot: "Bench Press",
+            exerciseTrendMetric: .oneRepMax,
+            sortOrder: 3
+        )
+        let trendConfigSnapshot = ProfileWidgetConfigSnapshot(config: trendConfig)
         let widgetConfigs: [ProfileWidgetConfigSnapshot] = [
             ProfileWidgetConfigSnapshot(config: ProfileWidgetConfig(kind: .prs, sortOrder: 0)),
             ProfileWidgetConfigSnapshot(config: ProfileWidgetConfig(kind: .weeklyGoals, sortOrder: 1)),
             ProfileWidgetConfigSnapshot(config: ProfileWidgetConfig(kind: .coachBrief, sortOrder: 2)),
+            trendConfigSnapshot,
         ]
         let dashboard = ProfileDashboardSnapshot(
             personalRecords: [
@@ -460,8 +469,8 @@ struct ScreenSnapshotTests {
             )
         )
 
-        let trendSeries: [ProfileWidgetKind: ExerciseMetricSeries] = [
-            ProfileWidgetKind.exerciseOneRMTrend: ExerciseMetricSeries(
+        let trendSeries: [UUID: ExerciseMetricSeries] = [
+            trendConfigSnapshot.id: ExerciseMetricSeries(
                 catalogExerciseUUID: "bench",
                 exerciseName: "Bench Press",
                 loadUnit: .kg,
@@ -478,11 +487,11 @@ struct ScreenSnapshotTests {
         let content = ProfileDashboardContent.make(
             enabledWidgets: widgetConfigs,
             dashboard: dashboard,
-            trendSeriesByKind: trendSeries,
+            trendSeriesByWidgetID: trendSeries,
             coachBrief: coachBrief
         )
 
-        #expect(content.enabledWidgets.count == 3)
+        #expect(content.enabledWidgets.count == 4)
         #expect(content.personalRecords.map(\.exerciseName) == ["Bench Press"])
         #expect(content.weeklyProgress.first?.completedWorkouts == 3)
         #expect(content.weeklyMuscleHeatmap.topRegionNames == ["Chest"])
@@ -490,7 +499,7 @@ struct ScreenSnapshotTests {
         #expect(content.overviewStats.totalWorkouts == 6)
         #expect(content.topExercises.first?.sessionCount == 4)
         #expect(content.activityDays.first?.workoutCount == 1)
-        #expect(content.trendSeriesByKind[.exerciseOneRMTrend]?.points.first?.value == 105)
+        #expect(content.trendSeriesByWidgetID[trendConfigSnapshot.id]?.points.first?.value == 105)
         #expect(content.coachBrief?.recap.headline == "Bench Press Led The Week")
         #expect(content.coachBrief?.snapshot.topRisingSignals.map(\.exerciseName) == ["Bench Press"])
         #expect(content.coachBrief?.snapshot.followUpKinds == [.whatImproved, .whatChanged, .whyFlat])
