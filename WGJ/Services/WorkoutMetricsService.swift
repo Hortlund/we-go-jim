@@ -811,6 +811,116 @@ nonisolated final class WorkoutMetricsService {
         )
     }
 
+    func exerciseMaxWeightTrend(
+        for catalogExerciseUUID: String,
+        preferredExerciseName: String? = nil,
+        limit: Int = 8
+    ) throws -> ExerciseMetricSeries {
+        let safeLimit = max(1, limit)
+        var recentPoints: [CollectedExerciseMetricPoint] = []
+        var exerciseName = preferredExerciseName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if exerciseName?.isEmpty == true {
+            exerciseName = nil
+        }
+
+        let entries = try metricsSnapshot().exerciseHistoryByUUID[catalogExerciseUUID] ?? []
+        for entry in entries {
+            guard let maxWeightInKilograms = entry.maxWeightInKilograms else { continue }
+            if exerciseName == nil {
+                exerciseName = entry.exerciseName
+            }
+            recentPoints.append(
+                CollectedExerciseMetricPoint(
+                    completedAt: entry.completedAt,
+                    normalizedValue: maxWeightInKilograms,
+                    sourceUnit: entry.maxWeightUnit
+                )
+            )
+
+            if recentPoints.count == safeLimit {
+                break
+            }
+        }
+
+        return buildExerciseMetricSeries(
+            catalogExerciseUUID: catalogExerciseUUID,
+            exerciseName: exerciseName ?? "Exercise",
+            points: recentPoints
+        )
+    }
+
+    func exerciseMaxRepsTrend(
+        for catalogExerciseUUID: String,
+        preferredExerciseName: String? = nil,
+        limit: Int = 8
+    ) throws -> ExerciseMetricSeries {
+        let safeLimit = max(1, limit)
+        var recentPoints: [CollectedExerciseMetricPoint] = []
+        var exerciseName = preferredExerciseName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if exerciseName?.isEmpty == true {
+            exerciseName = nil
+        }
+
+        let entries = try metricsSnapshot().exerciseHistoryByUUID[catalogExerciseUUID] ?? []
+        for entry in entries {
+            guard let maxReps = entry.maxReps else { continue }
+            if exerciseName == nil {
+                exerciseName = entry.exerciseName
+            }
+            recentPoints.append(
+                CollectedExerciseMetricPoint(
+                    completedAt: entry.completedAt,
+                    normalizedValue: Double(maxReps),
+                    sourceUnit: .bodyweight
+                )
+            )
+
+            if recentPoints.count == safeLimit {
+                break
+            }
+        }
+
+        return buildExerciseMetricSeries(
+            catalogExerciseUUID: catalogExerciseUUID,
+            exerciseName: exerciseName ?? "Exercise",
+            points: recentPoints
+        )
+    }
+
+    func exerciseMetricTrend(
+        for catalogExerciseUUID: String,
+        metric: ProfileExerciseTrendMetric,
+        preferredExerciseName: String? = nil,
+        limit: Int = 8
+    ) throws -> ExerciseMetricSeries {
+        switch metric {
+        case .oneRepMax:
+            return try exerciseOneRepMaxTrend(
+                for: catalogExerciseUUID,
+                preferredExerciseName: preferredExerciseName,
+                limit: limit
+            )
+        case .maxWeight:
+            return try exerciseMaxWeightTrend(
+                for: catalogExerciseUUID,
+                preferredExerciseName: preferredExerciseName,
+                limit: limit
+            )
+        case .volume:
+            return try exerciseVolumeTrend(
+                for: catalogExerciseUUID,
+                preferredExerciseName: preferredExerciseName,
+                limit: limit
+            )
+        case .maxReps:
+            return try exerciseMaxRepsTrend(
+                for: catalogExerciseUUID,
+                preferredExerciseName: preferredExerciseName,
+                limit: limit
+            )
+        }
+    }
+
     func exerciseDetailStats(
         for catalogExerciseUUID: String,
         preferredExerciseName: String? = nil,
@@ -1068,9 +1178,14 @@ nonisolated final class WorkoutMetricsService {
                 historyEntry.exerciseName = fact.exerciseNameSnapshot
                 historyEntry.completedAt = fact.completedAt
 
+                if fact.reps > 0 {
+                    historyEntry.maxReps = max(historyEntry.maxReps ?? 0, fact.reps)
+                }
+
                 if fact.isWeightedMetric,
                    let weight = fact.weight,
-                   let weightedOneRepMaxInKilograms = fact.estimatedOneRepMaxKg
+                   let weightedOneRepMaxInKilograms = fact.estimatedOneRepMaxKg,
+                   let normalizedWeightInKilograms = fact.normalizedWeightKg
                 {
                     historyEntry.comparisonOneRepMax = max(
                         historyEntry.comparisonOneRepMax ?? 0,
@@ -1105,6 +1220,16 @@ nonisolated final class WorkoutMetricsService {
                         historyEntry.weightedOneRepMaxInKilograms = weightedOneRepMaxInKilograms
                         historyEntry.weightedOneRepMaxUnit = fact.loadUnit
                     }
+
+                    if let currentMaxWeight = historyEntry.maxWeightInKilograms {
+                        if normalizedWeightInKilograms > currentMaxWeight {
+                            historyEntry.maxWeightInKilograms = normalizedWeightInKilograms
+                            historyEntry.maxWeightUnit = fact.loadUnit
+                        }
+                    } else {
+                        historyEntry.maxWeightInKilograms = normalizedWeightInKilograms
+                        historyEntry.maxWeightUnit = fact.loadUnit
+                    }
                 }
 
                 if fact.loadUnit == .bodyweight && fact.reps > 0 {
@@ -1136,7 +1261,7 @@ nonisolated final class WorkoutMetricsService {
 
         var exerciseHistoryEntriesByUUID: [String: [CompletedExerciseHistoryEntry]] = [:]
         for (key, historyEntry) in perSessionHistory
-            where historyEntry.comparisonOneRepMax != nil || historyEntry.hasWeightedMetrics
+            where historyEntry.comparisonOneRepMax != nil || historyEntry.hasWeightedMetrics || historyEntry.maxReps != nil
         {
             exerciseHistoryEntriesByUUID[key.catalogExerciseUUID, default: []].append(
                 CompletedExerciseHistoryEntry(
@@ -1149,7 +1274,10 @@ nonisolated final class WorkoutMetricsService {
                     totalWeightedVolumeInKilograms: historyEntry.hasWeightedMetrics
                         ? historyEntry.totalWeightedVolumeInKilograms
                         : nil,
-                    weightedVolumeUnit: historyEntry.weightedVolumeUnit ?? .kg
+                    weightedVolumeUnit: historyEntry.weightedVolumeUnit ?? .kg,
+                    maxWeightInKilograms: historyEntry.maxWeightInKilograms,
+                    maxWeightUnit: historyEntry.maxWeightUnit ?? .kg,
+                    maxReps: historyEntry.maxReps
                 )
             )
         }
@@ -1575,6 +1703,9 @@ nonisolated struct CompletedExerciseHistoryEntry {
     let weightedOneRepMaxUnit: TemplateLoadUnit
     let totalWeightedVolumeInKilograms: Double?
     let weightedVolumeUnit: TemplateLoadUnit
+    let maxWeightInKilograms: Double?
+    let maxWeightUnit: TemplateLoadUnit
+    let maxReps: Int?
 }
 
 nonisolated private struct WorkingExerciseHistoryEntry {
@@ -1585,6 +1716,9 @@ nonisolated private struct WorkingExerciseHistoryEntry {
     var weightedOneRepMaxUnit: TemplateLoadUnit?
     var totalWeightedVolumeInKilograms: Double = 0
     var weightedVolumeUnit: TemplateLoadUnit?
+    var maxWeightInKilograms: Double?
+    var maxWeightUnit: TemplateLoadUnit?
+    var maxReps: Int?
     var hasWeightedMetrics = false
 }
 
