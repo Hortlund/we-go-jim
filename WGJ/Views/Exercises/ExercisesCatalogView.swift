@@ -3,7 +3,7 @@ import SwiftUI
 
 enum ExercisesCatalogMode {
     case browse
-    case pick(onSelect: (ExerciseCatalogItem) -> Void)
+    case pick(actionTitle: String, onSelect: (ExerciseCatalogItem) -> Void)
 }
 
 struct ExercisesCatalogView: View {
@@ -62,10 +62,17 @@ struct ExercisesCatalogView: View {
     }
 
     private var pickerSelectAction: ((ExerciseCatalogItem) -> Void)? {
-        if case .pick(let onSelect) = mode {
+        if case .pick(_, let onSelect) = mode {
             return onSelect
         }
         return nil
+    }
+
+    private var pickerActionTitle: String {
+        if case .pick(let actionTitle, _) = mode {
+            return actionTitle
+        }
+        return "Select Exercise"
     }
 
     private let indexRailWidth: CGFloat = 28
@@ -713,7 +720,7 @@ struct ExercisesCatalogView: View {
                     repository: repository,
                     availableMuscles: controller.snapshot.muscleGroups,
                     suggestedCategories: controller.snapshot.availableCategories,
-                    actionTitle: isPickerMode ? "Add to Template" : "Add to Workout",
+                    actionTitle: isPickerMode ? pickerActionTitle : "Add to Workout",
                     onSelect: {
                         handleSelection(exercise)
                     },

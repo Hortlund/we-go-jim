@@ -107,6 +107,7 @@ struct TemplateExercisePrescriptionEditor: View {
     var onMoveUp: (() -> Void)?
     var onMoveDown: (() -> Void)?
     var onMoveToPosition: (() -> Void)?
+    var onExerciseReplace: (() -> Void)?
     var onExerciseDelete: (() -> Void)?
 
     private let externalIsExpanded: Binding<Bool>?
@@ -144,6 +145,7 @@ struct TemplateExercisePrescriptionEditor: View {
         onMoveUp: (() -> Void)? = nil,
         onMoveDown: (() -> Void)? = nil,
         onMoveToPosition: (() -> Void)? = nil,
+        onExerciseReplace: (() -> Void)? = nil,
         onExerciseDelete: (() -> Void)? = nil
     ) {
         self.exerciseName = exerciseName
@@ -169,6 +171,7 @@ struct TemplateExercisePrescriptionEditor: View {
         self.onMoveUp = onMoveUp
         self.onMoveDown = onMoveDown
         self.onMoveToPosition = onMoveToPosition
+        self.onExerciseReplace = onExerciseReplace
         self.onExerciseDelete = onExerciseDelete
         self._localIsExpanded = State(initialValue: isExpanded?.wrappedValue ?? initiallyExpanded)
     }
@@ -643,6 +646,15 @@ struct TemplateExercisePrescriptionEditor: View {
                 }
             }
 
+            if let onExerciseReplace {
+                Button {
+                    onExerciseReplace()
+                } label: {
+                    Label("Replace exercise", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .accessibilityIdentifier("template-editor-replace-exercise-button")
+            }
+
             if let onExerciseDelete {
                 Button(role: .destructive) {
                     onExerciseDelete()
@@ -660,7 +672,11 @@ struct TemplateExercisePrescriptionEditor: View {
     }
 
     private var hasHeaderMenu: Bool {
-        onMoveUp != nil || onMoveDown != nil || onMoveToPosition != nil || onExerciseDelete != nil
+        onMoveUp != nil
+            || onMoveDown != nil
+            || onMoveToPosition != nil
+            || onExerciseReplace != nil
+            || onExerciseDelete != nil
     }
 
     private func headerSummaryChips(summary: String) -> some View {

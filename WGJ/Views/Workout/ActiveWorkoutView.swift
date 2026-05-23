@@ -144,7 +144,11 @@ struct ActiveWorkoutView: View {
             .sheet(item: $pickerTarget, onDismiss: {
                 dismissKeyboard()
             }) { target in
-                ExercisePickerView(repository: catalogRepository) { exercise in
+                ExercisePickerView(
+                    repository: catalogRepository,
+                    title: target.pickerTitle,
+                    actionTitle: target.pickerActionTitle
+                ) { exercise in
                     handlePickedExercise(exercise, target: target)
                 }
                 .wgjSheetSurface()
@@ -681,6 +685,9 @@ struct ActiveWorkoutView: View {
                     onExerciseMoveToPosition: sessionExercises.count > 1 ? {
                         presentExerciseReorder(for: exercise)
                     } : nil,
+                    onExerciseReplace: {
+                        showExerciseReplacementPicker(for: exerciseID)
+                    },
                     onExerciseDelete: {
                         removeExercise(exerciseID: exerciseID)
                     },
@@ -1294,6 +1301,8 @@ struct ActiveWorkoutView: View {
         switch target {
         case .exercise:
             addExercise(item)
+        case .replaceExercise(let exerciseID):
+            replaceExercise(exerciseID: exerciseID, with: item)
         case .cardio(let phase):
             upsertCardioBlock(phase: phase, catalogItem: item)
         }
@@ -1302,6 +1311,11 @@ struct ActiveWorkoutView: View {
     private func showCardioPicker(for phase: WorkoutCardioPhase) {
         dismissKeyboard()
         pickerTarget = .cardio(phase)
+    }
+
+    private func showExerciseReplacementPicker(for exerciseID: UUID) {
+        dismissKeyboard()
+        pickerTarget = .replaceExercise(exerciseID)
     }
 
     private func addExercise(_ item: ExerciseCatalogItem) {
@@ -1321,6 +1335,44 @@ struct ActiveWorkoutView: View {
             loadedExerciseStateStamp = nil
             exerciseHydrationInvalidation += 1
         }
+        persistCommittedUserEditSnapshot()
+    }
+
+    private func replaceExercise(exerciseID: UUID, with item: ExerciseCatalogItem) {
+        guard let existingExercise = sessionExercises.first(where: { $0.id == exerciseID }) else { return }
+        guard !sessionExercises.contains(where: { $0.id != exerciseID && $0.catalogExerciseUUID == item.remoteUUID }) else {
+            return
+        }
+
+        let removedSetIDs = Set((setDraftsByExerciseID[exerciseID] ?? existingExercise.setDrafts).map(\.id))
+        let replacement = existingExercise.replacingExercise(
+            with: item,
+            preferredLoadUnit: preferredLoadUnit
+        )
+
+        withAnimation(WGJMotion.quickAnimation(reduceMotion: reduceMotion)) {
+            updateRuntimeSession { session in
+                guard let index = session.exercises.firstIndex(where: { $0.id == exerciseID }) else { return }
+                session.exercises[index] = replacement
+            }
+            setDraftsByExerciseID[exerciseID] = replacement.setDrafts
+            restByExerciseID[exerciseID] = replacement.restSeconds
+            notesByExerciseID[exerciseID] = replacement.notes
+            previousResolutionByExerciseID[exerciseID] = nil
+            componentResolutionByExerciseID[exerciseID] = nil
+            guidanceByExerciseID[exerciseID] = nil
+            rowFlushCoordinator.setDirty(false, for: exerciseID)
+
+            if let restTimerSourceSetID = restTimerState.restTimerSourceSetID,
+               removedSetIDs.contains(restTimerSourceSetID) {
+                clearRestTimerAndPersist(sourceSetID: restTimerSourceSetID)
+            }
+
+            refreshRenderProjection()
+            loadedExerciseStateStamp = nil
+            exerciseHydrationInvalidation += 1
+        }
+        scheduleGuidanceRefresh(for: exerciseID)
         persistCommittedUserEditSnapshot()
     }
 
@@ -3342,14 +3394,39 @@ private struct ActiveWorkoutSaveTemplateSheet: View {
 
 private enum ActiveWorkoutPickerTarget: Identifiable {
     case exercise
+    case replaceExercise(UUID)
     case cardio(WorkoutCardioPhase)
 
     var id: String {
         switch self {
         case .exercise:
             return "exercise"
+        case .replaceExercise(let exerciseID):
+            return "replace-exercise-\(exerciseID.uuidString.lowercased())"
         case .cardio(let phase):
             return "cardio-\(phase.rawValue)"
+        }
+    }
+
+    var pickerTitle: String {
+        switch self {
+        case .replaceExercise:
+            return "Replace Exercise"
+        case .exercise:
+            return "Add Exercise"
+        case .cardio:
+            return "Choose Cardio"
+        }
+    }
+
+    var pickerActionTitle: String {
+        switch self {
+        case .replaceExercise:
+            return "Replace Exercise"
+        case .exercise:
+            return "Add Exercise"
+        case .cardio:
+            return "Choose Exercise"
         }
     }
 }

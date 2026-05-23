@@ -107,7 +107,11 @@ struct TemplateEditorView: View {
                 WGJKeyboard.dismiss()
             }
             .sheet(item: $pickerTarget) { target in
-                ExercisePickerView(repository: catalogRepository) { selected in
+                ExercisePickerView(
+                    repository: catalogRepository,
+                    title: target.pickerTitle,
+                    actionTitle: target.pickerActionTitle
+                ) { selected in
                     handlePickedExercise(selected, target: target)
                 }
                 .wgjSheetSurface()
@@ -308,6 +312,9 @@ struct TemplateEditorView: View {
                 onExerciseDelete: {
                     removeExercise(withID: row.id)
                 },
+                onExerciseReplace: {
+                    pickerTarget = .replaceExercise(row.id)
+                },
                 onAddComponent: {
                     pickerTarget = .component(row.id)
                 },
@@ -347,11 +354,32 @@ struct TemplateEditorView: View {
         switch target {
         case .exercise:
             appendExercise(catalogItem: item)
+        case .replaceExercise(let exerciseID):
+            replaceExercise(with: item, exerciseID: exerciseID)
         case .component(let exerciseID):
             appendComponent(catalogItem: item, to: exerciseID)
         case .cardio(let phase):
             upsertCardioBlock(phase: phase, catalogItem: item)
         }
+    }
+
+    private func replaceExercise(with catalogItem: ExerciseCatalogItem, exerciseID: UUID) {
+        guard !containsComponentCatalogUUID(catalogItem.remoteUUID, excluding: exerciseID) else {
+            return
+        }
+        guard let draftStore = exerciseDrafts.first(where: { $0.id == exerciseID }) else {
+            return
+        }
+
+        let replacement = draftStore.draft.replacingExercise(
+            with: catalogItem,
+            preferredLoadUnit: preferredLoadUnit
+        )
+        withAnimation(WGJMotion.quickAnimation(reduceMotion: reduceMotion)) {
+            draftStore.replace(with: replacement)
+            draftStore.isExpanded = true
+        }
+        recommendationByExerciseID[exerciseID] = nil
     }
 
     private func appendComponent(catalogItem: ExerciseCatalogItem, to exerciseID: UUID) {
@@ -552,9 +580,13 @@ struct TemplateEditorView: View {
         )
     }
 
-    private func containsComponentCatalogUUID(_ catalogExerciseUUID: String) -> Bool {
+    private func containsComponentCatalogUUID(
+        _ catalogExerciseUUID: String,
+        excluding exerciseID: UUID? = nil
+    ) -> Bool {
         exerciseDrafts.contains { draftStore in
-            draftStore.components.contains { $0.catalogExerciseUUID == catalogExerciseUUID }
+            guard draftStore.id != exerciseID else { return false }
+            return draftStore.components.contains { $0.catalogExerciseUUID == catalogExerciseUUID }
         }
     }
 
@@ -786,6 +818,7 @@ struct TemplateEditorView: View {
 
 private enum TemplateEditorPickerTarget: Identifiable {
     case exercise
+    case replaceExercise(UUID)
     case component(UUID)
     case cardio(WorkoutCardioPhase)
 
@@ -793,10 +826,34 @@ private enum TemplateEditorPickerTarget: Identifiable {
         switch self {
         case .exercise:
             return "exercise"
+        case .replaceExercise(let exerciseID):
+            return "replace-exercise-\(exerciseID.uuidString.lowercased())"
         case .component(let exerciseID):
             return "component-\(exerciseID.uuidString.lowercased())"
         case .cardio(let phase):
             return "cardio-\(phase.rawValue)"
+        }
+    }
+
+    var pickerTitle: String {
+        switch self {
+        case .replaceExercise:
+            return "Replace Exercise"
+        case .exercise, .component:
+            return "Add Exercise"
+        case .cardio:
+            return "Choose Cardio"
+        }
+    }
+
+    var pickerActionTitle: String {
+        switch self {
+        case .replaceExercise:
+            return "Replace Exercise"
+        case .exercise, .component:
+            return "Add Exercise"
+        case .cardio:
+            return "Choose Exercise"
         }
     }
 }
@@ -858,6 +915,16 @@ private final class TemplateExerciseDraftStore: Identifiable {
             superset: superset
         )
     }
+
+    func replace(with draft: TemplateExerciseDraft) {
+        notes = draft.notes
+        targetRepMin = draft.targetRepMin
+        targetRepMax = draft.targetRepMax
+        restSeconds = draft.restSeconds
+        setDrafts = draft.setDrafts
+        components = draft.components
+        superset = draft.superset
+    }
 }
 
 private struct TemplateEditorExerciseRow: View {
@@ -878,6 +945,7 @@ private struct TemplateEditorExerciseRow: View {
     let onUnpairSuperset: (UUID) -> Void
     let onSupersetRoundRestChanged: (UUID, Int) -> Void
     let onExerciseDelete: () -> Void
+    let onExerciseReplace: () -> Void
     let onAddComponent: () -> Void
     let onMoveComponentUp: (Int) -> Void
     let onMoveComponentDown: (Int) -> Void
@@ -909,6 +977,7 @@ private struct TemplateEditorExerciseRow: View {
         onUnpairSuperset: @escaping (UUID) -> Void,
         onSupersetRoundRestChanged: @escaping (UUID, Int) -> Void,
         onExerciseDelete: @escaping () -> Void,
+        onExerciseReplace: @escaping () -> Void,
         onAddComponent: @escaping () -> Void,
         onMoveComponentUp: @escaping (Int) -> Void,
         onMoveComponentDown: @escaping (Int) -> Void,
@@ -930,6 +999,7 @@ private struct TemplateEditorExerciseRow: View {
         self.onUnpairSuperset = onUnpairSuperset
         self.onSupersetRoundRestChanged = onSupersetRoundRestChanged
         self.onExerciseDelete = onExerciseDelete
+        self.onExerciseReplace = onExerciseReplace
         self.onAddComponent = onAddComponent
         self.onMoveComponentUp = onMoveComponentUp
         self.onMoveComponentDown = onMoveComponentDown
@@ -1051,6 +1121,7 @@ private struct TemplateEditorExerciseRow: View {
                 onUnpairSuperset: onUnpairSuperset,
                 onSupersetRoundRestChanged: onSupersetRoundRestChanged,
                 onMoveToPosition: onMoveToPosition,
+                onExerciseReplace: onExerciseReplace,
                 onExerciseDelete: onExerciseDelete,
                 components: draftStore.components,
                 componentAccessibilityIDPrefix: "template-editor-component-\(draftStore.id.uuidString.lowercased())",
@@ -1181,6 +1252,7 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
     let onUnpairSuperset: (UUID) -> Void
     let onSupersetRoundRestChanged: (UUID, Int) -> Void
     let onMoveToPosition: (() -> Void)?
+    let onExerciseReplace: () -> Void
     let onExerciseDelete: () -> Void
     let components: [TemplateExerciseComponentDraft]
     let componentAccessibilityIDPrefix: String
@@ -1281,6 +1353,7 @@ private struct TemplateEditorExerciseCardView: View, Equatable {
             onMoveUp: onMoveUp,
             onMoveDown: onMoveDown,
             onMoveToPosition: onMoveToPosition,
+            onExerciseReplace: onExerciseReplace,
             onExerciseDelete: onExerciseDelete
         )
     }

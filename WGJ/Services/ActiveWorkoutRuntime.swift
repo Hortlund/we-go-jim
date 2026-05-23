@@ -267,6 +267,58 @@ nonisolated extension ActiveWorkoutRuntimeExercise {
             return updated
         }
     }
+
+    func replacingExercise(
+        with catalogItem: ExerciseCatalogItem,
+        preferredLoadUnit: TemplateLoadUnit,
+        date: Date = .now
+    ) -> ActiveWorkoutRuntimeExercise {
+        let restSeconds = 120
+        let loadUnit = TemplateLoadUnit.inferredDefault(fromEquipmentSummary: catalogItem.equipmentSummary)
+            ?? preferredLoadUnit
+
+        return ActiveWorkoutRuntimeExercise(
+            id: id,
+            templateExerciseID: templateExerciseID,
+            catalogExerciseUUID: catalogItem.remoteUUID,
+            exerciseNameSnapshot: catalogItem.displayName,
+            categorySnapshot: catalogItem.categoryName,
+            muscleSummarySnapshot: catalogItem.primaryMuscleNames,
+            notes: "",
+            targetRepMin: nil,
+            targetRepMax: nil,
+            restSeconds: restSeconds,
+            sortOrder: sortOrder,
+            components: [
+                ActiveWorkoutRuntimeExerciseComponent(
+                    catalogExerciseUUID: catalogItem.remoteUUID,
+                    exerciseNameSnapshot: catalogItem.displayName,
+                    categorySnapshot: catalogItem.categoryName,
+                    muscleSummarySnapshot: catalogItem.primaryMuscleNames,
+                    createdAt: date,
+                    updatedAt: date
+                ),
+            ],
+            setDrafts: Self.defaultSetDrafts(restSeconds: restSeconds, loadUnit: loadUnit),
+            superset: superset,
+            createdAt: createdAt,
+            updatedAt: date
+        )
+    }
+
+    private static func defaultSetDrafts(
+        restSeconds: Int,
+        loadUnit: TemplateLoadUnit
+    ) -> [WorkoutSessionSetDraft] {
+        [0, 1, 2].map { index in
+            WorkoutSessionSetDraft(
+                isWarmup: index == 0,
+                restSeconds: restSeconds,
+                targetLoadUnit: loadUnit,
+                actualLoadUnit: loadUnit
+            )
+        }
+    }
 }
 
 nonisolated struct ActiveWorkoutRuntimeExerciseComponent: Identifiable, Equatable, Codable, Sendable {

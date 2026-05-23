@@ -62,6 +62,73 @@ struct WGJTests {
     }
 
     @Test
+    func templateExerciseDraftReplacementKeepsSlotAndResetsPrescriptionDefaults() {
+        let originalID = UUID()
+        let superset = ExerciseSupersetMembershipDraft(
+            groupID: UUID(),
+            position: .first,
+            roundRestSeconds: 90
+        )
+        let original = TemplateExerciseDraft(
+            id: originalID,
+            catalogExerciseUUID: "seed-bench-press",
+            exerciseNameSnapshot: "Bench Press",
+            categorySnapshot: "Chest",
+            muscleSummarySnapshot: "Chest, Triceps",
+            notes: "Keep one rep in reserve.",
+            targetRepMin: 6,
+            targetRepMax: 8,
+            restSeconds: 180,
+            setDrafts: [
+                TemplateExerciseSetDraft(
+                    targetReps: 8,
+                    targetWeight: 100,
+                    loadUnit: .kg,
+                    restSeconds: 180,
+                    isWarmup: false,
+                    isLocked: true
+                ),
+            ],
+            components: [
+                TemplateExerciseComponentDraft(
+                    catalogExerciseUUID: "seed-bench-press",
+                    exerciseNameSnapshot: "Bench Press",
+                    categorySnapshot: "Chest",
+                    muscleSummarySnapshot: "Chest, Triceps"
+                ),
+            ],
+            superset: superset
+        )
+        let replacement = ExerciseCatalogItem(
+            remoteUUID: "seed-pull-up",
+            displayName: "Pull Up",
+            categoryName: "Back",
+            equipmentSummary: "Bodyweight",
+            isCurated: true,
+            sourceName: "seed"
+        )
+
+        let updated = original.replacingExercise(with: replacement, preferredLoadUnit: .kg)
+
+        #expect(updated.id == originalID)
+        #expect(updated.catalogExerciseUUID == replacement.remoteUUID)
+        #expect(updated.exerciseNameSnapshot == replacement.displayName)
+        #expect(updated.categorySnapshot == replacement.categoryName)
+        #expect(updated.muscleSummarySnapshot == replacement.primaryMuscleNames)
+        #expect(updated.notes.isEmpty)
+        #expect(updated.targetRepMin == nil)
+        #expect(updated.targetRepMax == nil)
+        #expect(updated.restSeconds == 120)
+        #expect(updated.setDrafts.count == 3)
+        #expect(updated.setDrafts.first?.isWarmup == true)
+        #expect(updated.setDrafts.dropFirst().allSatisfy { !$0.isWarmup })
+        #expect(updated.setDrafts.allSatisfy { $0.loadUnit == .bodyweight })
+        #expect(updated.setDrafts.allSatisfy { $0.targetReps == nil && $0.targetWeight == nil })
+        #expect(updated.components.map(\.catalogExerciseUUID) == [replacement.remoteUUID])
+        #expect(updated.superset == superset)
+    }
+
+    @Test
     func durationFormatterBuildsElapsedLabels() {
         let reference = Date(timeIntervalSinceReferenceDate: 1_000)
         let oneMinuteFive = Date(timeIntervalSinceReferenceDate: 1_065)

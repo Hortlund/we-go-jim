@@ -259,6 +259,31 @@ nonisolated struct TemplateExerciseDraft: Identifiable, Equatable, Sendable {
             )
         }
     }
+
+    func replacingExercise(
+        with catalogItem: ExerciseCatalogItem,
+        preferredLoadUnit: TemplateLoadUnit
+    ) -> TemplateExerciseDraft {
+        let replacement = TemplateExerciseDraft(
+            catalogItem: catalogItem,
+            preferredLoadUnit: preferredLoadUnit
+        )
+
+        return TemplateExerciseDraft(
+            id: id,
+            catalogExerciseUUID: replacement.catalogExerciseUUID,
+            exerciseNameSnapshot: replacement.exerciseNameSnapshot,
+            categorySnapshot: replacement.categorySnapshot,
+            muscleSummarySnapshot: replacement.muscleSummarySnapshot,
+            notes: "",
+            targetRepMin: nil,
+            targetRepMax: nil,
+            restSeconds: replacement.restSeconds,
+            setDrafts: replacement.setDrafts,
+            components: replacement.components,
+            superset: superset
+        )
+    }
 }
 
 nonisolated enum TemplateRepositoryError: Error {

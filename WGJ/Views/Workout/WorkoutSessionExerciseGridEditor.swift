@@ -39,6 +39,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     var onExerciseMoveUp: (() -> Void)?
     var onExerciseMoveDown: (() -> Void)?
     var onExerciseMoveToPosition: (() -> Void)?
+    var onExerciseReplace: (() -> Void)?
     var onExerciseDelete: (() -> Void)?
     var flushCoordinator: WorkoutExerciseRowFlushCoordinator?
     var flushIdentifier: UUID?
@@ -114,6 +115,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         onExerciseMoveUp: (() -> Void)? = nil,
         onExerciseMoveDown: (() -> Void)? = nil,
         onExerciseMoveToPosition: (() -> Void)? = nil,
+        onExerciseReplace: (() -> Void)? = nil,
         onExerciseDelete: (() -> Void)? = nil,
         flushCoordinator: WorkoutExerciseRowFlushCoordinator? = nil,
         flushIdentifier: UUID? = nil,
@@ -156,6 +158,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.onExerciseMoveUp = onExerciseMoveUp
         self.onExerciseMoveDown = onExerciseMoveDown
         self.onExerciseMoveToPosition = onExerciseMoveToPosition
+        self.onExerciseReplace = onExerciseReplace
         self.onExerciseDelete = onExerciseDelete
         self.flushCoordinator = flushCoordinator
         self.flushIdentifier = flushIdentifier
@@ -356,6 +359,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                     || onExerciseMoveUp != nil
                     || onExerciseMoveDown != nil
                     || onExerciseMoveToPosition != nil
+                    || onExerciseReplace != nil
                     || onExerciseDelete != nil {
                     WGJActionMenuButton("Exercise Actions") {
                         if let onExerciseComponentPicker {
@@ -373,6 +377,15 @@ struct WorkoutSessionExerciseGridEditor: View {
                             } label: {
                                 Label("Exercise Settings", systemImage: "slider.horizontal.3")
                             }
+                        }
+
+                        if let onExerciseReplace {
+                            Button {
+                                onExerciseReplace()
+                            } label: {
+                                Label("Replace exercise", systemImage: "arrow.triangle.2.circlepath")
+                            }
+                            .accessibilityIdentifier("active-workout-replace-exercise-button")
                         }
 
                         if let onExerciseMoveUp {

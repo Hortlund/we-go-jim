@@ -75,6 +75,82 @@ struct ActiveWorkoutRuntimeTests {
     }
 
     @Test
+    func runtimeExerciseReplacementKeepsSlotAndResetsLoggedDefaults() {
+        let exerciseID = UUID()
+        let templateExerciseID = UUID()
+        let superset = ExerciseSupersetMembershipDraft(
+            groupID: UUID(),
+            position: .second,
+            roundRestSeconds: 75
+        )
+        let original = ActiveWorkoutRuntimeExercise(
+            id: exerciseID,
+            templateExerciseID: templateExerciseID,
+            catalogExerciseUUID: "seed-bench-press",
+            exerciseNameSnapshot: "Bench Press",
+            categorySnapshot: "Chest",
+            muscleSummarySnapshot: "Chest, Triceps",
+            notes: "Paused reps.",
+            targetRepMin: 5,
+            targetRepMax: 7,
+            restSeconds: 180,
+            sortOrder: 2,
+            components: [
+                ActiveWorkoutRuntimeExerciseComponent(
+                    catalogExerciseUUID: "seed-bench-press",
+                    exerciseNameSnapshot: "Bench Press",
+                    categorySnapshot: "Chest",
+                    muscleSummarySnapshot: "Chest, Triceps"
+                ),
+            ],
+            setDrafts: [
+                WorkoutSessionSetDraft(
+                    isWarmup: false,
+                    restSeconds: 180,
+                    targetReps: 5,
+                    targetWeight: 120,
+                    targetLoadUnit: .kg,
+                    actualReps: 5,
+                    actualWeight: 120,
+                    actualLoadUnit: .kg,
+                    isCompleted: true,
+                    isLocked: true
+                ),
+            ],
+            superset: superset
+        )
+        let replacement = ExerciseCatalogItem(
+            remoteUUID: "seed-hanging-leg-raise",
+            displayName: "Hanging Leg Raise",
+            categoryName: "Abs",
+            equipmentSummary: "Bodyweight",
+            isCurated: true,
+            sourceName: "seed"
+        )
+
+        let updated = original.replacingExercise(with: replacement, preferredLoadUnit: .kg)
+
+        #expect(updated.id == exerciseID)
+        #expect(updated.templateExerciseID == templateExerciseID)
+        #expect(updated.catalogExerciseUUID == replacement.remoteUUID)
+        #expect(updated.exerciseNameSnapshot == replacement.displayName)
+        #expect(updated.categorySnapshot == replacement.categoryName)
+        #expect(updated.muscleSummarySnapshot == replacement.primaryMuscleNames)
+        #expect(updated.notes.isEmpty)
+        #expect(updated.targetRepMin == nil)
+        #expect(updated.targetRepMax == nil)
+        #expect(updated.restSeconds == 120)
+        #expect(updated.sortOrder == 2)
+        #expect(updated.setDrafts.count == 3)
+        #expect(updated.setDrafts.first?.isWarmup == true)
+        #expect(updated.setDrafts.dropFirst().allSatisfy { !$0.isWarmup })
+        #expect(updated.setDrafts.allSatisfy { $0.targetLoadUnit == .bodyweight && $0.actualLoadUnit == .bodyweight })
+        #expect(updated.setDrafts.allSatisfy { $0.actualReps == nil && $0.actualWeight == nil && !$0.isCompleted })
+        #expect(updated.components.map(\.catalogExerciseUUID) == [replacement.remoteUUID])
+        #expect(updated.superset == superset)
+    }
+
+    @Test
     func snapshotStorePreservesRestTimerWhenSessionOnlyCallSitesSave() async throws {
         let directory = try temporaryDirectory()
         let store = ActiveWorkoutSnapshotStore(baseDirectory: directory)

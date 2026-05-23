@@ -41,6 +41,7 @@ struct WorkoutExerciseRowHostView: View {
     let onExerciseMoveUp: (() -> Void)?
     let onExerciseMoveDown: (() -> Void)?
     let onExerciseMoveToPosition: (() -> Void)?
+    let onExerciseReplace: (() -> Void)?
     let onExerciseDelete: (() -> Void)?
     let flushCoordinator: WorkoutExerciseRowFlushCoordinator?
     let onInputFocusChange: (Bool) -> Void
@@ -91,6 +92,7 @@ struct WorkoutExerciseRowHostView: View {
         onExerciseMoveUp: (() -> Void)? = nil,
         onExerciseMoveDown: (() -> Void)? = nil,
         onExerciseMoveToPosition: (() -> Void)? = nil,
+        onExerciseReplace: (() -> Void)? = nil,
         onExerciseDelete: (() -> Void)? = nil,
         flushCoordinator: WorkoutExerciseRowFlushCoordinator? = nil,
         onInputFocusChange: @escaping (Bool) -> Void = { _ in }
@@ -135,6 +137,7 @@ struct WorkoutExerciseRowHostView: View {
         self.onExerciseMoveUp = onExerciseMoveUp
         self.onExerciseMoveDown = onExerciseMoveDown
         self.onExerciseMoveToPosition = onExerciseMoveToPosition
+        self.onExerciseReplace = onExerciseReplace
         self.onExerciseDelete = onExerciseDelete
         self.flushCoordinator = flushCoordinator
         self.onInputFocusChange = onInputFocusChange
@@ -226,6 +229,7 @@ struct WorkoutExerciseRowHostView: View {
             onExerciseMoveUp: onExerciseMoveUp,
             onExerciseMoveDown: onExerciseMoveDown,
             onExerciseMoveToPosition: onExerciseMoveToPosition,
+            onExerciseReplace: onExerciseReplace,
             onExerciseDelete: onExerciseDelete,
             flushCoordinator: flushCoordinator,
             flushIdentifier: exerciseID,
