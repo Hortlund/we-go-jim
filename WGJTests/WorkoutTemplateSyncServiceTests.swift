@@ -572,7 +572,19 @@ struct WorkoutTemplateSyncServiceTests {
             repository: templateRepository
         )
 
+        let originalTemplateExercise = try #require(try templateRepository.exercises(in: template.id).first)
+        let originalSetDrafts = try templateRepository.setDrafts(for: originalTemplateExercise.id)
+        #expect(originalSetDrafts.count > 1)
+        let originalWorkingSetID = originalSetDrafts[1].id
+        try templateRepository.upsertSet(
+            templateExerciseID: originalTemplateExercise.id,
+            setID: originalWorkingSetID,
+            reps: 4,
+            weight: 155,
+            unit: .kg
+        )
         let session = try sessionRepository.createSessionFromTemplate(templateID: template.id)
+        let templateSetBeforeSync = try templateRepository.setDrafts(for: originalTemplateExercise.id)[1]
         let exercise = try #require(try sessionRepository.sessionExercises(sessionID: session.id).first)
         try sessionRepository.updateExerciseRest(sessionExerciseID: exercise.id, restSeconds: 210)
         try sessionRepository.updateExerciseNotes(
@@ -587,6 +599,8 @@ struct WorkoutTemplateSyncServiceTests {
         try sessionRepository.finishSession(sessionID: session.id)
 
         let preview = try #require(try syncService.previewTemplateUpdate(forSessionID: session.id))
+        let mutation = try #require(preview.mutation.exercises.first)
+        #expect(mutation.setDrafts[1].id == templateSetBeforeSync.id)
         try syncService.applyTemplateUpdate(preview)
 
         let templateExercise = try #require(try templateRepository.exercises(in: template.id).first)
@@ -594,8 +608,11 @@ struct WorkoutTemplateSyncServiceTests {
 
         #expect(templateExercise.restSeconds == 210)
         #expect(templateExercise.notes == "Sit back into the heels before each rep.")
-        #expect(updatedSetDrafts[1].targetWeight == 160)
-        #expect(updatedSetDrafts[1].targetReps == 5)
+        #expect(updatedSetDrafts[1].id == templateSetBeforeSync.id)
+        #expect(updatedSetDrafts[1].targetWeight == 155)
+        #expect(updatedSetDrafts[1].targetReps == 4)
+        #expect(updatedSetDrafts[1].previousTargetWeight == 160)
+        #expect(updatedSetDrafts[1].previousTargetReps == 5)
     }
 
     @Test

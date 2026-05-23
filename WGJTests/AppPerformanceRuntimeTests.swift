@@ -734,6 +734,44 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
+    func activeWorkoutSetDraftChangeSummaryTracksDropStageValueChanges() {
+        let stageID = UUID()
+        let previous = [
+            WorkoutSessionSetDraft(
+                targetReps: 8,
+                targetWeight: 100,
+                targetLoadUnit: .kg,
+                isCompleted: true,
+                dropStages: [
+                    WorkoutSessionDropStageDraft(
+                        id: stageID,
+                        targetReps: 8,
+                        targetWeight: 80,
+                        targetLoadUnit: .kg,
+                        actualReps: nil,
+                        actualWeight: nil,
+                        actualLoadUnit: .kg,
+                        isCompleted: false
+                    ),
+                ]
+            ),
+        ]
+        var current = previous
+        current[0].dropStages[0].actualWeight = 82.5
+
+        let summary = ActiveWorkoutSetDraftChangeSummary.compare(
+            previous: previous,
+            current: current
+        )
+
+        #expect(!summary.hasStructuralChange)
+        #expect(!summary.hasCompletionChange)
+        #expect(summary.hasValueChange)
+        #expect(!summary.hasMeaningfulChange)
+        #expect(summary.commitDisposition == .debounced)
+    }
+
+    @Test
     func activeWorkoutSetDraftChangeSummaryImmediatelyCommitsCompletionChanges() {
         let setID = UUID()
         let previous = [
@@ -774,6 +812,44 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
+    func activeWorkoutSetDraftChangeSummaryImmediatelyCommitsDropStageCompletionChanges() {
+        let stageID = UUID()
+        let previous = [
+            WorkoutSessionSetDraft(
+                targetReps: 8,
+                targetWeight: 100,
+                targetLoadUnit: .kg,
+                isCompleted: true,
+                dropStages: [
+                    WorkoutSessionDropStageDraft(
+                        id: stageID,
+                        targetReps: 8,
+                        targetWeight: 80,
+                        targetLoadUnit: .kg,
+                        actualReps: 8,
+                        actualWeight: 80,
+                        actualLoadUnit: .kg,
+                        isCompleted: false
+                    ),
+                ]
+            ),
+        ]
+        var current = previous
+        current[0].dropStages[0].isCompleted = true
+
+        let summary = ActiveWorkoutSetDraftChangeSummary.compare(
+            previous: previous,
+            current: current
+        )
+
+        #expect(!summary.hasStructuralChange)
+        #expect(summary.hasCompletionChange)
+        #expect(!summary.hasValueChange)
+        #expect(summary.hasMeaningfulChange)
+        #expect(summary.commitDisposition == .immediate)
+    }
+
+    @Test
     func activeWorkoutSetDraftChangeSummaryImmediatelyCommitsStructuralChanges() {
         let previous = [
             WorkoutSessionSetDraft(
@@ -789,6 +865,41 @@ struct AppPerformanceRuntimeTests {
                 targetLoadUnit: .kg
             ),
         ]
+
+        let summary = ActiveWorkoutSetDraftChangeSummary.compare(
+            previous: previous,
+            current: current
+        )
+
+        #expect(summary.hasStructuralChange)
+        #expect(summary.hasMeaningfulChange)
+        #expect(summary.commitDisposition == .immediate)
+    }
+
+    @Test
+    func activeWorkoutSetDraftChangeSummaryImmediatelyCommitsDropStageStructureChanges() {
+        let previous = [
+            WorkoutSessionSetDraft(
+                targetReps: 8,
+                targetWeight: 100,
+                targetLoadUnit: .kg,
+                dropStages: [
+                    WorkoutSessionDropStageDraft(
+                        targetReps: 8,
+                        targetWeight: 80,
+                        targetLoadUnit: .kg
+                    ),
+                ]
+            ),
+        ]
+        var current = previous
+        current[0].dropStages.append(
+            WorkoutSessionDropStageDraft(
+                targetReps: 10,
+                targetWeight: 70,
+                targetLoadUnit: .kg
+            )
+        )
 
         let summary = ActiveWorkoutSetDraftChangeSummary.compare(
             previous: previous,
