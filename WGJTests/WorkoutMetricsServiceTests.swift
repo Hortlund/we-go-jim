@@ -958,6 +958,34 @@ struct WorkoutMetricsServiceTests {
     }
 
     @Test
+    func widgetRepositorySnapshotsPreserveTwoTrendWidgetIDsForDashboardLoading() throws {
+        let context = try makeInMemoryContext()
+        let repository = ProfileWidgetRepository(modelContext: context)
+
+        let bench = try repository.createExerciseTrendConfig(
+            metric: .oneRepMax,
+            catalogExerciseUUID: "bench-history",
+            exerciseName: "Bench Press",
+            isEnabled: true
+        )
+        let squat = try repository.createExerciseTrendConfig(
+            metric: .volume,
+            catalogExerciseUUID: "squat-history",
+            exerciseName: "Back Squat",
+            isEnabled: true
+        )
+
+        let trendSnapshots = try repository.enabledConfigurationSnapshots()
+            .filter(\.kind.isExerciseTrend)
+
+        #expect(trendSnapshots.map(\.id).contains(bench.id))
+        #expect(trendSnapshots.map(\.id).contains(squat.id))
+        #expect(Set(trendSnapshots.map(\.id)).count == 2)
+        #expect(trendSnapshots.first { $0.id == bench.id }?.exerciseTrendMetric == .oneRepMax)
+        #expect(trendSnapshots.first { $0.id == squat.id }?.exerciseTrendMetric == .volume)
+    }
+
+    @Test
     func exerciseOneRepMaxTrendReturnsLastEightPointsOldestToNewest() throws {
         let context = try makeInMemoryContext()
         let sessionRepository = WorkoutSessionRepository(modelContext: context)
