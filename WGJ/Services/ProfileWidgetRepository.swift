@@ -3,11 +3,14 @@ import SwiftData
 
 enum ProfileWidgetRepositoryError: LocalizedError {
     case missingExerciseSelection(ProfileWidgetKind)
+    case missingWidgetConfig(UUID)
 
     var errorDescription: String? {
         switch self {
         case .missingExerciseSelection(let kind):
             return "\(kind.title) needs an exercise before it can be enabled."
+        case .missingWidgetConfig:
+            return "That widget is no longer available."
         }
     }
 }
@@ -39,9 +42,16 @@ nonisolated final class ProfileWidgetRepository {
     func setEnabled(kind: ProfileWidgetKind, isEnabled: Bool) throws {
         try ensureDefaultConfigsIfNeeded()
         let config = try config(for: kind)
-        if isEnabled, kind.requiresExerciseSelection, config.selectedCatalogExerciseUUID == nil {
-            throw ProfileWidgetRepositoryError.missingExerciseSelection(kind)
-        }
+        try validateCanEnable(config: config, isEnabled: isEnabled)
+        config.isEnabled = isEnabled
+        config.updatedAt = .now
+        try modelContext.save()
+    }
+
+    func setEnabled(id: UUID, isEnabled: Bool) throws {
+        try ensureDefaultConfigsIfNeeded()
+        let config = try config(id: id)
+        try validateCanEnable(config: config, isEnabled: isEnabled)
         config.isEnabled = isEnabled
         config.updatedAt = .now
         try modelContext.save()
@@ -57,6 +67,56 @@ nonisolated final class ProfileWidgetRepository {
         config.selectedCatalogExerciseUUID = catalogExerciseUUID
         config.selectedExerciseNameSnapshot = exerciseName
         config.updatedAt = .now
+        try modelContext.save()
+    }
+
+    @discardableResult
+    func createExerciseTrendConfig(
+        metric: ProfileExerciseTrendMetric,
+        catalogExerciseUUID: String,
+        exerciseName: String,
+        isEnabled: Bool
+    ) throws -> ProfileWidgetConfig {
+        try ensureDefaultConfigsIfNeeded()
+        let normalizedExerciseUUID = catalogExerciseUUID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedExerciseName = exerciseName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let configs = try fetchConfigurations()
+        let config = ProfileWidgetConfig(
+            kind: .exerciseOneRMTrend,
+            isEnabled: isEnabled,
+            selectedCatalogExerciseUUID: normalizedExerciseUUID.nonEmpty,
+            selectedExerciseNameSnapshot: normalizedExerciseName.nonEmpty,
+            exerciseTrendMetric: metric,
+            sortOrder: (configs.map(\.sortOrder).max() ?? -1) + 1
+        )
+        try validateCanEnable(config: config, isEnabled: isEnabled)
+        modelContext.insert(config)
+        try modelContext.save()
+        return config
+    }
+
+    func updateExerciseTrendConfig(
+        id: UUID,
+        metric: ProfileExerciseTrendMetric,
+        catalogExerciseUUID: String,
+        exerciseName: String
+    ) throws {
+        try ensureDefaultConfigsIfNeeded()
+        let config = try config(id: id)
+        config.kind = .exerciseOneRMTrend
+        config.exerciseTrendMetric = metric
+        config.selectedCatalogExerciseUUID = catalogExerciseUUID.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+        config.selectedExerciseNameSnapshot = exerciseName.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+        try validateCanEnable(config: config, isEnabled: config.isEnabled)
+        config.updatedAt = .now
+        try modelContext.save()
+    }
+
+    func removeConfig(id: UUID) throws {
+        try ensureDefaultConfigsIfNeeded()
+        let config = try config(id: id)
+        modelContext.delete(config)
+        try normalizeSortOrder()
         try modelContext.save()
     }
 
@@ -123,7 +183,9 @@ nonisolated final class ProfileWidgetRepository {
         var normalizedConfigs: [ProfileWidgetConfig] = []
 
         for config in existing {
-            if seen.insert(config.kind).inserted {
+            if config.kind.isExerciseTrend {
+                normalizedConfigs.append(config)
+            } else if seen.insert(config.kind).inserted {
                 normalizedConfigs.append(config)
             } else {
                 modelContext.delete(config)
@@ -157,6 +219,7 @@ nonisolated final class ProfileWidgetRepository {
             let created = ProfileWidgetConfig(
                 kind: kind,
                 isEnabled: kind.defaultEnabled,
+                exerciseTrendMetric: kind.defaultExerciseTrendMetric,
                 sortOrder: insertSortOrder
             )
             modelContext.insert(created)
@@ -178,6 +241,7 @@ nonisolated final class ProfileWidgetRepository {
         let created = ProfileWidgetConfig(
             kind: kind,
             isEnabled: kind.defaultEnabled,
+            exerciseTrendMetric: kind.defaultExerciseTrendMetric,
             sortOrder: (configs.map(\.sortOrder).max() ?? -1) + 1
         )
         modelContext.insert(created)
@@ -185,11 +249,41 @@ nonisolated final class ProfileWidgetRepository {
         return created
     }
 
+    private func config(id: UUID) throws -> ProfileWidgetConfig {
+        let configs = try fetchConfigurations()
+        guard let found = configs.first(where: { $0.id == id }) else {
+            throw ProfileWidgetRepositoryError.missingWidgetConfig(id)
+        }
+        return found
+    }
+
+    private func validateCanEnable(config: ProfileWidgetConfig, isEnabled: Bool) throws {
+        guard isEnabled, config.kind.requiresExerciseSelection else { return }
+        if config.selectedCatalogExerciseUUID == nil {
+            throw ProfileWidgetRepositoryError.missingExerciseSelection(config.kind)
+        }
+    }
+
+    private func normalizeSortOrder() throws {
+        let configs = try fetchConfigurations()
+        for (index, config) in configs.enumerated() {
+            guard config.sortOrder != index else { continue }
+            config.sortOrder = index
+            config.updatedAt = .now
+        }
+    }
+
     private func fetchConfigurations() throws -> [ProfileWidgetConfig] {
         let descriptor = FetchDescriptor<ProfileWidgetConfig>(
             sortBy: [SortDescriptor(\.sortOrder, order: .forward)]
         )
         return try modelContext.fetch(descriptor)
+    }
+}
+
+private extension String {
+    nonisolated var nonEmpty: String? {
+        isEmpty ? nil : self
     }
 }
 

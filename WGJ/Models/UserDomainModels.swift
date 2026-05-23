@@ -670,6 +670,28 @@ nonisolated struct WorkoutCardioBlockDraft: Identifiable, Equatable {
     }
 }
 
+nonisolated enum ProfileExerciseTrendMetric: String, Codable, CaseIterable, Equatable, Hashable, Identifiable, Sendable {
+    case oneRepMax
+    case maxWeight
+    case volume
+    case maxReps
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .oneRepMax:
+            return "1RM"
+        case .maxWeight:
+            return "Max Weight"
+        case .volume:
+            return "Volume"
+        case .maxReps:
+            return "Max Reps"
+        }
+    }
+}
+
 nonisolated enum ProfileWidgetKind: String, Codable, CaseIterable, Equatable, Hashable, Identifiable, Sendable {
     case prs
     case weeklyGoals
@@ -707,11 +729,26 @@ nonisolated enum ProfileWidgetKind: String, Codable, CaseIterable, Equatable, Ha
     }
 
     var requiresExerciseSelection: Bool {
+        isExerciseTrend
+    }
+
+    var isExerciseTrend: Bool {
         switch self {
         case .exerciseOneRMTrend, .exerciseVolumeTrend:
             return true
         case .prs, .weeklyGoals, .weeklyMuscleHeatmap, .coachBrief, .streaks, .topExercises, .consistencyCalendar:
             return false
+        }
+    }
+
+    var defaultExerciseTrendMetric: ProfileExerciseTrendMetric? {
+        switch self {
+        case .exerciseOneRMTrend:
+            return .oneRepMax
+        case .exerciseVolumeTrend:
+            return .volume
+        case .prs, .weeklyGoals, .weeklyMuscleHeatmap, .coachBrief, .streaks, .topExercises, .consistencyCalendar:
+            return nil
         }
     }
 }
@@ -927,6 +964,7 @@ final class ProfileWidgetConfig {
     var isEnabled: Bool = true
     var selectedCatalogExerciseUUID: String?
     var selectedExerciseNameSnapshot: String?
+    var exerciseTrendMetricRaw: String?
     var sortOrder: Int = 0
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
@@ -936,12 +974,24 @@ final class ProfileWidgetConfig {
         set { kindRaw = newValue.rawValue }
     }
 
+    var exerciseTrendMetric: ProfileExerciseTrendMetric {
+        get {
+            if let exerciseTrendMetricRaw,
+               let metric = ProfileExerciseTrendMetric(rawValue: exerciseTrendMetricRaw) {
+                return metric
+            }
+            return kind.defaultExerciseTrendMetric ?? .oneRepMax
+        }
+        set { exerciseTrendMetricRaw = newValue.rawValue }
+    }
+
     init(
         id: UUID = UUID(),
         kind: ProfileWidgetKind,
         isEnabled: Bool = true,
         selectedCatalogExerciseUUID: String? = nil,
         selectedExerciseNameSnapshot: String? = nil,
+        exerciseTrendMetric: ProfileExerciseTrendMetric? = nil,
         sortOrder: Int = 0,
         createdAt: Date = .now,
         updatedAt: Date = .now
@@ -951,6 +1001,7 @@ final class ProfileWidgetConfig {
         self.isEnabled = isEnabled
         self.selectedCatalogExerciseUUID = selectedCatalogExerciseUUID
         self.selectedExerciseNameSnapshot = selectedExerciseNameSnapshot
+        self.exerciseTrendMetricRaw = exerciseTrendMetric?.rawValue
         self.sortOrder = sortOrder
         self.createdAt = createdAt
         self.updatedAt = updatedAt

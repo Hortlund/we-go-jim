@@ -900,6 +900,64 @@ struct WorkoutMetricsServiceTests {
     }
 
     @Test
+    func widgetRepositoryAllowsMultipleExerciseTrendConfigs() throws {
+        let context = try makeInMemoryContext()
+        let repository = ProfileWidgetRepository(modelContext: context)
+
+        let bench = try repository.createExerciseTrendConfig(
+            metric: .oneRepMax,
+            catalogExerciseUUID: "bench-history",
+            exerciseName: "Bench Press",
+            isEnabled: true
+        )
+        let squat = try repository.createExerciseTrendConfig(
+            metric: .oneRepMax,
+            catalogExerciseUUID: "squat-history",
+            exerciseName: "Back Squat",
+            isEnabled: true
+        )
+
+        let enabled = try repository.enabledConfigurationSnapshots()
+        #expect(enabled.contains { $0.id == bench.id && $0.exerciseTrendMetric == .oneRepMax })
+        #expect(enabled.contains { $0.id == squat.id && $0.exerciseTrendMetric == .oneRepMax })
+        #expect(enabled.filter(\.kind.isExerciseTrend).count == 2)
+    }
+
+    @Test
+    func widgetRepositoryUpdatesOneExerciseTrendConfigWithoutMutatingAnother() throws {
+        let context = try makeInMemoryContext()
+        let repository = ProfileWidgetRepository(modelContext: context)
+
+        let bench = try repository.createExerciseTrendConfig(
+            metric: .oneRepMax,
+            catalogExerciseUUID: "bench-history",
+            exerciseName: "Bench Press",
+            isEnabled: true
+        )
+        let squat = try repository.createExerciseTrendConfig(
+            metric: .volume,
+            catalogExerciseUUID: "squat-history",
+            exerciseName: "Back Squat",
+            isEnabled: true
+        )
+
+        try repository.updateExerciseTrendConfig(
+            id: bench.id,
+            metric: .maxWeight,
+            catalogExerciseUUID: "deadlift-history",
+            exerciseName: "Deadlift"
+        )
+
+        let snapshots = try repository.configurationSnapshots()
+        let updatedBench = try #require(snapshots.first { $0.id == bench.id })
+        let untouchedSquat = try #require(snapshots.first { $0.id == squat.id })
+        #expect(updatedBench.exerciseTrendMetric == .maxWeight)
+        #expect(updatedBench.selectedCatalogExerciseUUID == "deadlift-history")
+        #expect(untouchedSquat.exerciseTrendMetric == .volume)
+        #expect(untouchedSquat.selectedCatalogExerciseUUID == "squat-history")
+    }
+
+    @Test
     func exerciseOneRepMaxTrendReturnsLastEightPointsOldestToNewest() throws {
         let context = try makeInMemoryContext()
         let sessionRepository = WorkoutSessionRepository(modelContext: context)
