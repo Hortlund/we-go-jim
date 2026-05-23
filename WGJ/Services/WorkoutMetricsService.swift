@@ -711,12 +711,12 @@ nonisolated final class WorkoutMetricsService {
         try profileDashboardSnapshot(prLimit: 1, weeks: weeks).weeklyProgress
     }
 
-    func exerciseHistoryOptions() throws -> [ExerciseHistoryOption] {
+    func exerciseHistoryOptions(metric: ProfileExerciseTrendMetric? = nil) throws -> [ExerciseHistoryOption] {
         let exerciseHistoryByUUID = try metricsSnapshot().exerciseHistoryByUUID
         var latestByExercise: [String: ExerciseHistoryOption] = [:]
 
         for (catalogExerciseUUID, entries) in exerciseHistoryByUUID {
-            guard let latestEntry = entries.first(where: { $0.weightedOneRepMaxInKilograms != nil || $0.totalWeightedVolumeInKilograms != nil }) else {
+            guard let latestEntry = entries.first(where: { $0.supportsExerciseTrendMetric(metric) }) else {
                 continue
             }
 
@@ -1706,6 +1706,25 @@ nonisolated struct CompletedExerciseHistoryEntry {
     let maxWeightInKilograms: Double?
     let maxWeightUnit: TemplateLoadUnit
     let maxReps: Int?
+}
+
+private extension CompletedExerciseHistoryEntry {
+    nonisolated func supportsExerciseTrendMetric(_ metric: ProfileExerciseTrendMetric?) -> Bool {
+        guard let metric else {
+            return weightedOneRepMaxInKilograms != nil || totalWeightedVolumeInKilograms != nil
+        }
+
+        switch metric {
+        case .oneRepMax:
+            return weightedOneRepMaxInKilograms != nil
+        case .maxWeight:
+            return maxWeightInKilograms != nil
+        case .volume:
+            return totalWeightedVolumeInKilograms != nil
+        case .maxReps:
+            return maxReps != nil
+        }
+    }
 }
 
 nonisolated private struct WorkingExerciseHistoryEntry {

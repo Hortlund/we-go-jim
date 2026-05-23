@@ -8,10 +8,45 @@ struct ProfileWidgetManagerView: View {
 
     @State private var configs: [ProfileWidgetConfig] = []
     @State private var exerciseOptions: [ExerciseHistoryOption] = []
-    @State private var selectingKind: ProfileWidgetKind?
-    @State private var enableAfterSelection = false
+    @State private var selectingExerciseTarget: ExerciseSelectionTarget?
+    @State private var newTrendMetric: ProfileExerciseTrendMetric = .oneRepMax
     @State private var errorMessage = ""
     @State private var showingError = false
+
+    private enum ExerciseSelectionTarget: Identifiable {
+        case singleton(kind: ProfileWidgetKind, enableAfterSelection: Bool)
+        case existingTrend(id: UUID, metric: ProfileExerciseTrendMetric)
+        case newTrend(metric: ProfileExerciseTrendMetric)
+
+        var id: String {
+            switch self {
+            case .singleton(let kind, let enableAfterSelection):
+                return "singleton-\(kind.rawValue)-\(enableAfterSelection)"
+            case .existingTrend(let id, let metric):
+                return "trend-\(id.uuidString)-\(metric.rawValue)"
+            case .newTrend(let metric):
+                return "new-trend-\(metric.rawValue)"
+            }
+        }
+
+        var metric: ProfileExerciseTrendMetric? {
+            switch self {
+            case .singleton(let kind, _):
+                return kind.defaultExerciseTrendMetric
+            case .existingTrend(_, let metric), .newTrend(let metric):
+                return metric
+            }
+        }
+
+        var pickerTitle: String {
+            switch self {
+            case .singleton(let kind, _):
+                return kind.title
+            case .existingTrend(_, let metric), .newTrend(let metric):
+                return "\(metric.title) Trend"
+            }
+        }
+    }
 
     private var repository: ProfileWidgetRepository {
         ProfileWidgetRepository(modelContext: modelContext)
@@ -23,13 +58,13 @@ struct ProfileWidgetManagerView: View {
 
     private var enabledConfigs: [ProfileWidgetConfig] {
         configs
-            .filter { $0.isEnabled && canUseWidget($0.kind) }
+            .filter { $0.isEnabled && canUseWidget($0.kind) && shouldShowConfig($0) }
             .sorted { $0.sortOrder < $1.sortOrder }
     }
 
     private var disabledConfigs: [ProfileWidgetConfig] {
         configs
-            .filter { !$0.isEnabled || !canUseWidget($0.kind) }
+            .filter { (!$0.isEnabled || !canUseWidget($0.kind)) && shouldShowConfig($0) }
             .sorted { $0.sortOrder < $1.sortOrder }
     }
 
@@ -67,6 +102,8 @@ struct ProfileWidgetManagerView: View {
             }
 
             Section {
+                addExerciseTrendRow
+
                 ForEach(disabledConfigs) { config in
                     widgetRow(config)
                 }
@@ -95,12 +132,12 @@ struct ProfileWidgetManagerView: View {
             loadConfigs()
             loadExerciseOptions()
         }
-        .sheet(item: $selectingKind) { kind in
+        .sheet(item: $selectingExerciseTarget) { target in
             ProfileWidgetExercisePickerView(
-                title: kind.title,
+                title: target.pickerTitle,
                 options: exerciseOptions,
                 onSelect: { option in
-                    saveExerciseSelection(option, for: kind, enableWidget: enableAfterSelection)
+                    saveExerciseSelection(option, for: target)
                 }
             )
             .wgjSheetSurface()
@@ -147,11 +184,11 @@ struct ProfileWidgetManagerView: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(config.kind.title)
+                    Text(title(for: config))
                         .font(.headline)
                         .foregroundStyle(WGJTheme.textPrimary)
 
-                    Text(description(for: config.kind))
+                    Text(description(for: config))
                         .font(.caption)
                         .foregroundStyle(WGJTheme.textSecondary)
                 }
@@ -167,7 +204,7 @@ struct ProfileWidgetManagerView: View {
                 HStack(spacing: 8) {
                     if config.kind.requiresExerciseSelection && !isLocked {
                         Button(config.selectedCatalogExerciseUUID == nil ? "Choose Exercise" : "Change") {
-                            presentExercisePicker(for: config.kind, enableWidgetAfterSelection: false)
+                            presentExercisePicker(for: selectionTarget(for: config, enableAfterSelection: false))
                         }
                         .buttonStyle(WGJCompactGhostButtonStyle())
                     }
@@ -176,10 +213,10 @@ struct ProfileWidgetManagerView: View {
 
                     if isLocked && config.isEnabled {
                         Button("Remove") {
-                            toggleConfig(config)
+                            removeOrToggleConfig(config)
                         }
                         .buttonStyle(WGJCompactGhostButtonStyle())
-                        .accessibilityIdentifier("profile-widget-remove-\(config.kind.rawValue)")
+                        .accessibilityIdentifier("profile-widget-remove-\(accessibilityIDToken(for: config))")
 
                         Button {
                             subscriptionState.presentPaywall()
@@ -198,18 +235,84 @@ struct ProfileWidgetManagerView: View {
                         .accessibilityIdentifier("profile-widget-unlock-pro-\(config.kind.rawValue)")
                     } else if config.isEnabled {
                         Button("Remove") {
-                            toggleConfig(config)
+                            removeOrToggleConfig(config)
                         }
                         .buttonStyle(WGJCompactGhostButtonStyle())
-                        .accessibilityIdentifier("profile-widget-remove-\(config.kind.rawValue)")
+                        .accessibilityIdentifier("profile-widget-remove-\(accessibilityIDToken(for: config))")
                     } else {
                         Button("Add") {
                             enableConfig(config)
                         }
                         .buttonStyle(WGJCompactPrimaryButtonStyle())
-                        .accessibilityIdentifier("profile-widget-add-\(config.kind.rawValue)")
+                        .accessibilityIdentifier("profile-widget-add-\(accessibilityIDToken(for: config))")
                     }
                 }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .wgjCardContainer(cornerRadius: WGJRadius.control)
+        .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+    }
+
+    private var addExerciseTrendRow: some View {
+        let isLocked = isProLocked(.exerciseOneRMTrend)
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "chart.line.uptrend.xyaxis")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(isLocked ? WGJTheme.textSecondary : WGJTheme.accentCyan)
+                    .frame(width: 42, height: 42)
+                    .background {
+                        Circle()
+                            .fill(WGJTheme.cardElevated.opacity(0.88))
+                    }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Exercise Trend")
+                        .font(.headline)
+                        .foregroundStyle(WGJTheme.textPrimary)
+
+                    Text("Add another exercise metric card to your profile.")
+                        .font(.caption)
+                        .foregroundStyle(WGJTheme.textSecondary)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            if isLocked {
+                HStack {
+                    Text("Pro widget")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(WGJTheme.accentGold)
+                    Spacer(minLength: 0)
+                    Button {
+                        subscriptionState.presentPaywall()
+                    } label: {
+                        Label("Unlock Pro", systemImage: "sparkles")
+                    }
+                    .buttonStyle(WGJCompactPrimaryButtonStyle())
+                    .accessibilityIdentifier("profile-widget-unlock-pro-exerciseTrend")
+                }
+            } else {
+                Picker("Metric", selection: $newTrendMetric) {
+                    ForEach(ProfileExerciseTrendMetric.allCases) { metric in
+                        Text(metric.title).tag(metric)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("profile-widget-new-trend-metric-picker")
+
+                Button {
+                    presentExercisePicker(for: .newTrend(metric: newTrendMetric))
+                } label: {
+                    Label("Add Exercise Trend", systemImage: "plus")
+                }
+                .buttonStyle(WGJCompactPrimaryButtonStyle())
+                .accessibilityIdentifier("profile-widget-add-exerciseTrend")
             }
         }
         .padding(12)
@@ -266,6 +369,34 @@ struct ProfileWidgetManagerView: View {
         }
     }
 
+    private func title(for config: ProfileWidgetConfig) -> String {
+        guard config.kind.isExerciseTrend else {
+            return config.kind.title
+        }
+
+        if let selectedName = config.selectedExerciseNameSnapshot, !selectedName.isEmpty {
+            return "\(selectedName) - \(config.exerciseTrendMetric.title)"
+        }
+        return "\(config.exerciseTrendMetric.title) Trend"
+    }
+
+    private func description(for config: ProfileWidgetConfig) -> String {
+        guard config.kind.isExerciseTrend else {
+            return description(for: config.kind)
+        }
+
+        switch config.exerciseTrendMetric {
+        case .oneRepMax:
+            return "Chart estimated max strength across recent workouts."
+        case .maxWeight:
+            return "Track the best load you logged across recent workouts."
+        case .volume:
+            return "Track weighted training volume over time for one exercise."
+        case .maxReps:
+            return "Track the best completed reps across recent workouts."
+        }
+    }
+
     @ViewBuilder
     private func exerciseSelectionBadge(_ config: ProfileWidgetConfig) -> some View {
         if let selectedName = config.selectedExerciseNameSnapshot, !selectedName.isEmpty {
@@ -306,7 +437,24 @@ struct ProfileWidgetManagerView: View {
         }
 
         do {
-            try repository.setEnabled(kind: config.kind, isEnabled: !config.isEnabled)
+            if config.kind.isExerciseTrend {
+                try repository.setEnabled(id: config.id, isEnabled: !config.isEnabled)
+            } else {
+                try repository.setEnabled(kind: config.kind, isEnabled: !config.isEnabled)
+            }
+            loadConfigs()
+        } catch {
+            showError(error)
+        }
+    }
+
+    private func removeOrToggleConfig(_ config: ProfileWidgetConfig) {
+        do {
+            if config.kind.isExerciseTrend {
+                try repository.removeConfig(id: config.id)
+            } else {
+                try repository.setEnabled(kind: config.kind, isEnabled: false)
+            }
             loadConfigs()
         } catch {
             showError(error)
@@ -320,7 +468,7 @@ struct ProfileWidgetManagerView: View {
         }
 
         if config.kind.requiresExerciseSelection, config.selectedCatalogExerciseUUID == nil {
-            presentExercisePicker(for: config.kind, enableWidgetAfterSelection: true)
+            presentExercisePicker(for: selectionTarget(for: config, enableAfterSelection: true))
             return
         }
 
@@ -335,43 +483,94 @@ struct ProfileWidgetManagerView: View {
         }
     }
 
-    private func loadExerciseOptions() {
+    private func loadExerciseOptions(metric: ProfileExerciseTrendMetric? = nil) {
         do {
-            exerciseOptions = try metricsService.exerciseHistoryOptions()
+            exerciseOptions = try metricsService.exerciseHistoryOptions(metric: metric)
         } catch {
             showError(error)
         }
     }
 
-    private func presentExercisePicker(for kind: ProfileWidgetKind, enableWidgetAfterSelection: Bool) {
-        loadExerciseOptions()
+    private func presentExercisePicker(for target: ExerciseSelectionTarget) {
+        loadExerciseOptions(metric: target.metric)
         guard !exerciseOptions.isEmpty else {
-            errorMessage = "Log a weighted exercise first, then you can add a graph widget for it."
+            errorMessage = emptyExerciseMessage(for: target.metric)
             showingError = true
             return
         }
 
-        enableAfterSelection = enableWidgetAfterSelection
-        selectingKind = kind
+        selectingExerciseTarget = target
     }
 
     private func saveExerciseSelection(
         _ option: ExerciseHistoryOption,
-        for kind: ProfileWidgetKind,
-        enableWidget: Bool
+        for target: ExerciseSelectionTarget
     ) {
         do {
-            try repository.updateExerciseSelection(
-                kind: kind,
-                catalogExerciseUUID: option.catalogExerciseUUID,
-                exerciseName: option.exerciseName
-            )
-            if enableWidget {
-                try repository.setEnabled(kind: kind, isEnabled: true)
+            switch target {
+            case .singleton(let kind, let enableWidget):
+                try repository.updateExerciseSelection(
+                    kind: kind,
+                    catalogExerciseUUID: option.catalogExerciseUUID,
+                    exerciseName: option.exerciseName
+                )
+                if enableWidget {
+                    try repository.setEnabled(kind: kind, isEnabled: true)
+                }
+            case .existingTrend(let id, let metric):
+                try repository.updateExerciseTrendConfig(
+                    id: id,
+                    metric: metric,
+                    catalogExerciseUUID: option.catalogExerciseUUID,
+                    exerciseName: option.exerciseName
+                )
+            case .newTrend(let metric):
+                try repository.createExerciseTrendConfig(
+                    metric: metric,
+                    catalogExerciseUUID: option.catalogExerciseUUID,
+                    exerciseName: option.exerciseName,
+                    isEnabled: true
+                )
             }
             loadConfigs()
         } catch {
             showError(error)
+        }
+    }
+
+    private func selectionTarget(for config: ProfileWidgetConfig, enableAfterSelection: Bool) -> ExerciseSelectionTarget {
+        if config.kind.isExerciseTrend {
+            return .existingTrend(id: config.id, metric: config.exerciseTrendMetric)
+        }
+        return .singleton(kind: config.kind, enableAfterSelection: enableAfterSelection)
+    }
+
+    private func shouldShowConfig(_ config: ProfileWidgetConfig) -> Bool {
+        guard config.kind.isExerciseTrend else { return true }
+        return config.selectedCatalogExerciseUUID != nil
+    }
+
+    private func accessibilityIDToken(for config: ProfileWidgetConfig) -> String {
+        if config.kind.isExerciseTrend {
+            return "exerciseTrend-\(config.id.uuidString)"
+        }
+        return config.kind.rawValue
+    }
+
+    private func emptyExerciseMessage(for metric: ProfileExerciseTrendMetric?) -> String {
+        guard let metric else {
+            return "Log a weighted exercise first, then you can add a graph widget for it."
+        }
+
+        switch metric {
+        case .oneRepMax:
+            return "Log weighted sets first, then you can add a 1RM trend."
+        case .maxWeight:
+            return "Log weighted sets first, then you can add a max weight trend."
+        case .volume:
+            return "Log weighted sets first, then you can add a volume trend."
+        case .maxReps:
+            return "Log completed sets first, then you can add a max reps trend."
         }
     }
 
