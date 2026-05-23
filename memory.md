@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-05-23 - Template Sync Must Preserve Template-Owned Set Identity
+
+- Date: 2026-05-23
+- Trigger/Problem: Auditing Bozar-related template rewrite concerns found that applying a finished workout back onto its source template could replace existing template set rows and drop template-only previous-target metadata when sync mutations used session-owned set IDs.
+- Root Cause: The template update preview mapped session set and drop-stage drafts directly into template mutations, so `TemplateRepository` matched by session IDs instead of the existing template-owned set/drop-stage IDs.
+- Durable Rule: When a completed session is synced back to an existing template, map matched prescription rows by template exercise/set/drop-stage position and preserve the template-owned IDs plus previous-target history. Session actuals can inform workout history, but reusable template sync must keep prescription identity separate from completed-session identity.
+- How to Verify Next Time: Run `WGJTests/WorkoutTemplateSyncServiceTests`, especially `applyTemplateUpdateKeepsActualLogsOutOfTemplateTargets`, and assert template set IDs, drop-stage IDs, target values, and previous-target metadata survive note/rest/template-owned updates with actual logs present.
+- Status: active
+
 ## 2026-05-03 - RevenueCat Paywall Requires Positive Configuration
 
 - Date: 2026-05-03

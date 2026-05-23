@@ -230,7 +230,7 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
             targetRepMin: sessionExercise.targetRepMin,
             targetRepMax: sessionExercise.targetRepMax,
             restSeconds: normalizedRest(sessionExercise.restSeconds),
-            setDrafts: mappedSetDrafts(from: sessionExercise),
+            setDrafts: mappedSetDrafts(from: sessionExercise, templateExercise: templateExercise),
             components: componentDrafts,
             superset: sessionExercise.supersetMembership
         )
@@ -247,20 +247,32 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
         )
     }
 
-    nonisolated private static func mappedSetDrafts(from sessionExercise: WorkoutSessionExercise) -> [TemplateExerciseSetDraft] {
-        orderedSets(for: sessionExercise).map { sessionSet in
-            TemplateExerciseSetDraft(
+    nonisolated private static func mappedSetDrafts(
+        from sessionExercise: WorkoutSessionExercise,
+        templateExercise: TemplateExercise?
+    ) -> [TemplateExerciseSetDraft] {
+        let templateSets = templateExercise.map(orderedSets(for:)) ?? []
+        return orderedSets(for: sessionExercise).enumerated().map { index, sessionSet in
+            let templateSet = templateSets.indices.contains(index) ? templateSets[index] : nil
+            let templateStages = (templateSet?.dropStages ?? []).sorted { $0.sortOrder < $1.sortOrder }
+            return TemplateExerciseSetDraft(
+                id: templateSet?.id ?? sessionSet.id,
                 targetReps: sessionSet.targetReps,
                 targetWeight: sessionSet.targetWeight,
                 loadUnit: sessionSet.targetLoadUnit,
                 restSeconds: normalizedRest(sessionExercise.restSeconds),
                 isWarmup: sessionSet.isWarmup,
                 isLocked: sessionSet.isLocked,
+                previousTargetReps: templateSet?.previousTargetReps,
+                previousTargetWeight: templateSet?.previousTargetWeight,
+                previousLoadUnit: templateSet?.previousLoadUnit ?? sessionSet.targetLoadUnit,
                 dropStages: (sessionSet.dropStages ?? [])
                     .sorted { $0.sortOrder < $1.sortOrder }
-                    .map { stage in
-                        TemplateExerciseDropStageDraft(
-                            id: stage.id,
+                    .enumerated()
+                    .map { stageIndex, stage in
+                        let templateStage = templateStages.indices.contains(stageIndex) ? templateStages[stageIndex] : nil
+                        return TemplateExerciseDropStageDraft(
+                            id: templateStage?.id ?? stage.id,
                             targetReps: stage.targetReps,
                             targetWeight: stage.targetWeight,
                             loadUnit: stage.targetLoadUnit

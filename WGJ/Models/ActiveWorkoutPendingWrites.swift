@@ -61,7 +61,10 @@ nonisolated struct ActiveWorkoutSetDraftChangeSummary: Equatable, Sendable {
             if previousDraft.id != currentDraft.id {
                 hasStructuralChange = true
             }
-            if previousDraft.isCompleted != currentDraft.isCompleted {
+            if previousDraft.dropStages.map(\.id) != currentDraft.dropStages.map(\.id) {
+                hasStructuralChange = true
+            }
+            if completionChanged(previous: previousDraft, current: currentDraft) {
                 hasCompletionChange = true
             }
             if valueChanged(previous: previousDraft, current: currentDraft) {
@@ -85,11 +88,29 @@ nonisolated struct ActiveWorkoutSetDraftChangeSummary: Equatable, Sendable {
         current: [WorkoutSessionSetDraft]
     ) -> Bool {
         for (previousDraft, currentDraft) in zip(previous, current) {
-            if previousDraft.isCompleted != currentDraft.isCompleted {
+            if completionChanged(previous: previousDraft, current: currentDraft) {
                 return true
             }
         }
         return false
+    }
+
+    private static func completionChanged(
+        previous: WorkoutSessionSetDraft,
+        current: WorkoutSessionSetDraft
+    ) -> Bool {
+        if previous.isCompleted != current.isCompleted {
+            return true
+        }
+
+        guard previous.dropStages.count == current.dropStages.count else {
+            return true
+        }
+
+        return zip(previous.dropStages, current.dropStages).contains { previousStage, currentStage in
+            previousStage.id != currentStage.id
+                || previousStage.isCompleted != currentStage.isCompleted
+        }
     }
 
     private static func valueChanged(
@@ -105,5 +126,28 @@ nonisolated struct ActiveWorkoutSetDraftChangeSummary: Equatable, Sendable {
             || previous.actualWeight != current.actualWeight
             || previous.actualLoadUnit != current.actualLoadUnit
             || previous.isLocked != current.isLocked
+            || dropStageValuesChanged(previous: previous.dropStages, current: current.dropStages)
+    }
+
+    private static func dropStageValuesChanged(
+        previous: [WorkoutSessionDropStageDraft],
+        current: [WorkoutSessionDropStageDraft]
+    ) -> Bool {
+        guard previous.count == current.count else {
+            return false
+        }
+
+        return zip(previous, current).contains { previousStage, currentStage in
+            guard previousStage.id == currentStage.id else {
+                return false
+            }
+
+            return previousStage.targetReps != currentStage.targetReps
+                || previousStage.targetWeight != currentStage.targetWeight
+                || previousStage.targetLoadUnit != currentStage.targetLoadUnit
+                || previousStage.actualReps != currentStage.actualReps
+                || previousStage.actualWeight != currentStage.actualWeight
+                || previousStage.actualLoadUnit != currentStage.actualLoadUnit
+        }
     }
 }
