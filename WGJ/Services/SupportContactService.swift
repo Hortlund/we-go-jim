@@ -20,19 +20,6 @@ struct SupportContactDraft: Equatable {
 }
 
 enum SupportContactService {
-    static func generalSupportDraft() -> SupportContactDraft {
-        SupportContactDraft(
-            recipient: AppRuntimeConfig.supportEmail,
-            subject: "WGJ Support Request",
-            body: """
-            Please describe the issue or question.
-
-            App: We Go Jim
-            Date: \(Date().formatted(date: .abbreviated, time: .shortened))
-            """
-        )
-    }
-
     static func reportMemberDraft(
         snapshot: BrosFeedSnapshot,
         reportedMember: BroMemberSummary

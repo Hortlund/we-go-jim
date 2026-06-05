@@ -109,6 +109,8 @@ nonisolated enum AppRuntimeConfig {
     }
 
     static let supportEmail = "hortlund.andreas@gmail.com"
+    static let supportXHandle = "@AndreasHortlund"
+    static let supportXURL = URL(string: "https://x.com/AndreasHortlund")
     static let privacyPolicyURL = URL(string: "https://highball.se/wgj/privacy/")
     static let supportURL = URL(string: "https://highball.se/wgj/privacy/")
     static let reviewPolicy = AppReviewPolicy(

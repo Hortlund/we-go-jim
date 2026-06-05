@@ -1011,7 +1011,9 @@ final class WGJUITests: XCTestCase {
         supportTile.tap()
 
         XCTAssertTrue(app.navigationBars["Support"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["Email Support"].waitForExistence(timeout: 5))
+        XCTAssertTrue(identifiedElement("support-open-x-button", in: app).waitForExistence(timeout: 5))
+        XCTAssertTrue(identifiedElement("support-copy-x-link-button", in: app).waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Email Support"].exists)
     }
 
     @MainActor

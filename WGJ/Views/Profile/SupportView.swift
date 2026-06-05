@@ -14,27 +14,31 @@ struct SupportView: View {
                 WGJRootHeader("Support", subtitle: "Best-effort support for app issues, privacy questions, purchases, and moderation reports.")
 
                 VStack(alignment: .leading, spacing: 12) {
-                    WGJSectionHeader("Support Email", subtitle: AppRuntimeConfig.supportEmail)
+                    WGJSectionHeader("Support on X", subtitle: AppRuntimeConfig.supportXHandle)
 
-                    Button {
-                        contactSupport()
-                    } label: {
-                        Label("Email Support", systemImage: "envelope.fill")
-                            .frame(maxWidth: .infinity)
+                    if let supportXURL = AppRuntimeConfig.supportXURL {
+                        Button {
+                            openURL(supportXURL)
+                        } label: {
+                            Label("Open \(AppRuntimeConfig.supportXHandle) on X", systemImage: "at")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(WGJPrimaryButtonStyle())
+                        .accessibilityIdentifier("support-open-x-button")
                     }
-                    .buttonStyle(WGJPrimaryButtonStyle())
 
                     Button {
-                        UIPasteboard.general.string = AppRuntimeConfig.supportEmail
+                        UIPasteboard.general.string = AppRuntimeConfig.supportXURL?.absoluteString
                         showAlert(
                             title: "Copied",
-                            message: "The support email address is on your clipboard."
+                            message: "The X support profile link is on your clipboard."
                         )
                     } label: {
-                        Label("Copy Support Email", systemImage: "doc.on.doc")
+                        Label("Copy X Profile Link", systemImage: "doc.on.doc")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(WGJGhostButtonStyle())
+                    .accessibilityIdentifier("support-copy-x-link-button")
 
                     if let supportURL = AppRuntimeConfig.supportURL {
                         Button {
@@ -44,6 +48,7 @@ struct SupportView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(WGJGhostButtonStyle())
+                        .accessibilityIdentifier("support-open-privacy-contact-button")
                     }
                 }
                 .padding(14)
@@ -87,27 +92,6 @@ struct SupportView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(alertMessage)
-        }
-    }
-
-    private func contactSupport() {
-        let draft = SupportContactService.generalSupportDraft()
-        guard let url = draft.mailtoURL else {
-            UIPasteboard.general.string = draft.body
-            showAlert(
-                title: "Mail unavailable",
-                message: "Support details were copied to your clipboard instead."
-            )
-            return
-        }
-
-        openURL(url) { accepted in
-            guard !accepted else { return }
-            UIPasteboard.general.string = draft.body
-            showAlert(
-                title: "Mail unavailable",
-                message: "The support message was copied to your clipboard. Send it to \(AppRuntimeConfig.supportEmail)."
-            )
         }
     }
 

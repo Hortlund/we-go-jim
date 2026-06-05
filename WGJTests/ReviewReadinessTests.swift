@@ -307,6 +307,15 @@ struct ReviewReadinessTests {
         #expect(reasons.contains("CA92.1"))
     }
 
+    @Test
+    func supportChannelUsesConfiguredXProfile() throws {
+        #expect(AppRuntimeConfig.supportXHandle == "@AndreasHortlund")
+        let supportXURL = try #require(AppRuntimeConfig.supportXURL)
+        #expect(supportXURL.absoluteString == "https://x.com/AndreasHortlund")
+        #expect(supportXURL.scheme == "https")
+        #expect(supportXURL.host() == "x.com")
+    }
+
     private func makeInMemoryContext() throws -> ModelContext {
         let schema = Schema([
             ExerciseCatalogItem.self,
