@@ -1,6 +1,20 @@
 import Foundation
 import Observation
 
+nonisolated enum SubscriptionLifecycleRefreshPolicy {
+    static func shouldRefresh(
+        isPaywallPresented: Bool,
+        isCustomerCenterPresented: Bool,
+        isPurchaseThankYouPresented: Bool,
+        isLoading: Bool
+    ) -> Bool {
+        !isPaywallPresented
+            && !isCustomerCenterPresented
+            && !isPurchaseThankYouPresented
+            && !isLoading
+    }
+}
+
 @MainActor
 @Observable
 final class SubscriptionState {
@@ -20,6 +34,15 @@ final class SubscriptionState {
 
     var isPro: Bool {
         SubscriptionEntitlementPolicy.isPro(customerInfo)
+    }
+
+    var shouldRefreshOnLifecycleActivation: Bool {
+        SubscriptionLifecycleRefreshPolicy.shouldRefresh(
+            isPaywallPresented: isPaywallPresented,
+            isCustomerCenterPresented: isCustomerCenterPresented,
+            isPurchaseThankYouPresented: isPurchaseThankYouPresented,
+            isLoading: isLoading
+        )
     }
 
     init(service: any SubscriptionServicing) {

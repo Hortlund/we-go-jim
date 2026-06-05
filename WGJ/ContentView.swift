@@ -612,7 +612,8 @@ struct ContentView: View {
     private func scheduleSubscriptionRefreshIfNeeded() {
         guard appPhase == .main,
               scenePhase == .active,
-              activeWorkoutPresentationState.activeSessionID == nil
+              activeWorkoutPresentationState.activeSessionID == nil,
+              subscriptionState.shouldRefreshOnLifecycleActivation
         else {
             cancelSubscriptionRefresh()
             return
@@ -624,7 +625,8 @@ struct ContentView: View {
             guard !Task.isCancelled,
                   appPhase == .main,
                   scenePhase == .active,
-                  activeWorkoutPresentationState.activeSessionID == nil
+                  activeWorkoutPresentationState.activeSessionID == nil,
+                  subscriptionState.shouldRefreshOnLifecycleActivation
             else {
                 return
             }

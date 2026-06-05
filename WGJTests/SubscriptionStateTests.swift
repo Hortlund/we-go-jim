@@ -235,6 +235,50 @@ struct SubscriptionStateTests {
         #expect(state.isPro == true)
         #expect(state.isPurchaseThankYouPresented == false)
     }
+
+    @Test
+    func lifecycleRefreshSkipsWhileRevenueCatPresentationIsActive() {
+        #expect(
+            !SubscriptionLifecycleRefreshPolicy.shouldRefresh(
+                isPaywallPresented: true,
+                isCustomerCenterPresented: false,
+                isPurchaseThankYouPresented: false,
+                isLoading: false
+            )
+        )
+        #expect(
+            !SubscriptionLifecycleRefreshPolicy.shouldRefresh(
+                isPaywallPresented: false,
+                isCustomerCenterPresented: true,
+                isPurchaseThankYouPresented: false,
+                isLoading: false
+            )
+        )
+        #expect(
+            !SubscriptionLifecycleRefreshPolicy.shouldRefresh(
+                isPaywallPresented: false,
+                isCustomerCenterPresented: false,
+                isPurchaseThankYouPresented: true,
+                isLoading: false
+            )
+        )
+        #expect(
+            !SubscriptionLifecycleRefreshPolicy.shouldRefresh(
+                isPaywallPresented: false,
+                isCustomerCenterPresented: false,
+                isPurchaseThankYouPresented: false,
+                isLoading: true
+            )
+        )
+        #expect(
+            SubscriptionLifecycleRefreshPolicy.shouldRefresh(
+                isPaywallPresented: false,
+                isCustomerCenterPresented: false,
+                isPurchaseThankYouPresented: false,
+                isLoading: false
+            )
+        )
+    }
 }
 
 private enum SubscriptionTestError: Error, CustomStringConvertible {
