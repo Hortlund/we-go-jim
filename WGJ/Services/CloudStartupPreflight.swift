@@ -226,14 +226,6 @@ nonisolated enum CloudStartupPreflight {
         }
     }
 
-    private static func cloudBackedDecision(_ accountStatus: CloudStartupAccountStatus) -> CloudStartupDecision {
-        CloudStartupDecision(
-            accountStatus: accountStatus,
-            storeMode: .cloudBacked,
-            cloudSyncErrorDescription: nil
-        )
-    }
-
     private static func localFallbackDecision(
         _ accountStatus: CloudStartupAccountStatus,
         _ description: String

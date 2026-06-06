@@ -269,8 +269,7 @@ struct BrosViewModelTests {
         #expect(viewModel.activeSnapshot?.feedEvents.first?.actorAvatarImageData == actorAvatarData)
 
         service.resumeReaction()
-        await Task.yield()
-        await Task.yield()
+        await waitForReactionPendingState(viewModel, eventID: "event-1", isPending: false)
 
         #expect(service.fetchSnapshotCallCount == 1)
         #expect(viewModel.state == .active(authoritativeSnapshot))
@@ -398,8 +397,7 @@ struct BrosViewModelTests {
 
         service.reactionError = BrosSocialServiceError.unavailable
         service.resumeReaction()
-        await Task.yield()
-        await Task.yield()
+        await waitForReactionPendingState(viewModel, eventID: "event-1", isPending: false)
 
         #expect(viewModel.state == .active(initialSnapshot))
         #expect(viewModel.errorMessage == BrosSocialServiceError.unavailable.localizedDescription)
@@ -590,6 +588,24 @@ struct BrosViewModelTests {
             context.fill(CGRect(x: 0, y: 0, width: 24, height: 24))
         }
         return image.pngData()
+    }
+
+    private func waitForReactionPendingState(
+        _ viewModel: BrosViewModel,
+        eventID: String,
+        isPending expectedPendingState: Bool,
+        timeout: Duration = .seconds(1)
+    ) async {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        while viewModel.isReactionPending(eventID: eventID) != expectedPendingState {
+            guard clock.now < deadline else {
+                Issue.record("Timed out waiting for reaction pending state \(expectedPendingState).")
+                return
+            }
+
+            try? await Task.sleep(for: .milliseconds(10))
+        }
     }
 }
 

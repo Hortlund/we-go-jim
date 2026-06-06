@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-06-06 - Active Workout Minimize Snapshot Writes Must Be Ordered
+
+- Date: 2026-06-06
+- Trigger/Problem: Adding a durable snapshot on active-workout minimize initially used an untracked fire-and-forget save, which could race with finish/cancel snapshot deletion or a quick reopen edit.
+- Root Cause: Minimize is a UI dismissal path, but its durability write still touches the same local active-workout snapshot file as foreground edit, background, finish, and cancel flows. Untracked snapshot tasks can recreate stale recovery files after a workout has ended.
+- Durable Rule: Any active-workout minimize durability checkpoint must be tracked and ordered with `pendingUserEditSnapshotTask`, finish, cancel, scene-transition, and later user-edit snapshot writes. Finish/cancel must cancel or await pending minimize writes before deleting the active snapshot.
+- How to Verify Next Time: Review `ActiveWorkoutView` for every `ActiveWorkoutSnapshotStore.shared.save/delete` path, then run `WGJTests/ActiveWorkoutRuntimeTests` and `WGJTests/AppPerformanceRuntimeTests`; if changing minimize/reopen, include a collapse/reopen and finish/cancel recovery smoke.
+- Status: active
+
 ## 2026-05-23 - RevenueCat TestFlight Uses Platform Public Key With Sandbox Receipts
 
 - Date: 2026-05-23

@@ -316,7 +316,7 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
-    func startupWarmupLaunchPolicyStartsWarmupsAndWaitsForNormalStartup() {
+    func startupWarmupLaunchPolicyStartsWarmupsWithoutBlockingMainEntry() {
         #expect(StartupWarmupLaunchPolicy.shouldStartNonblockingWarmups(
             skipsSplash: false,
             hasBackgroundStore: true,
@@ -342,7 +342,7 @@ struct AppLaunchWarmupTests {
             shouldWarmBros: true
         ))
 
-        #expect(StartupWarmupLaunchPolicy.shouldWaitForWarmupsBeforeMainEntry(
+        #expect(!StartupWarmupLaunchPolicy.shouldWaitForWarmupsBeforeMainEntry(
             skipsSplash: false,
             hasAnyWarmup: true
         ))
@@ -442,12 +442,22 @@ struct AppLaunchWarmupTests {
     func brosInitialActivationPolicySkipsFirstRefreshWhenWarmSnapshotExists() {
         #expect(!BrosInitialActivationPolicy.shouldRunInitialActivationRefresh(
             hasCompletedInitialActivationRefresh: false,
-            hasFreshWarmSnapshot: true,
+            hasFreshWarmSnapshot: BrosWarmStateSnapshot.active(makeBrosSnapshot()).canSkipInitialActivationRefresh,
             hasNotificationRefreshRequest: false
         ))
         #expect(BrosInitialActivationPolicy.shouldRunInitialActivationRefresh(
             hasCompletedInitialActivationRefresh: false,
-            hasFreshWarmSnapshot: true,
+            hasFreshWarmSnapshot: BrosWarmStateSnapshot.unavailable("iCloud is temporarily unavailable.").canSkipInitialActivationRefresh,
+            hasNotificationRefreshRequest: false
+        ))
+        #expect(BrosInitialActivationPolicy.shouldRunInitialActivationRefresh(
+            hasCompletedInitialActivationRefresh: false,
+            hasFreshWarmSnapshot: BrosWarmStateSnapshot.loading.canSkipInitialActivationRefresh,
+            hasNotificationRefreshRequest: false
+        ))
+        #expect(BrosInitialActivationPolicy.shouldRunInitialActivationRefresh(
+            hasCompletedInitialActivationRefresh: false,
+            hasFreshWarmSnapshot: BrosWarmStateSnapshot.onboarding.canSkipInitialActivationRefresh,
             hasNotificationRefreshRequest: true
         ))
         #expect(BrosInitialActivationPolicy.shouldRunInitialActivationRefresh(

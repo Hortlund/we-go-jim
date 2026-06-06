@@ -36,6 +36,7 @@ struct ActiveWorkoutView: View {
     @State private var foregroundNonCriticalInteractionWorkTask: Task<Void, Never>?
     @State private var pendingGuidanceRefreshTask: Task<Void, Never>?
     @State private var pendingUserEditSnapshotTask: Task<Void, Never>?
+    @State private var pendingMinimizedSnapshotTask: Task<Void, Never>?
     @State private var pendingGuidanceRefreshExerciseIDs: Set<UUID> = []
     @State private var shouldRefreshAllGuidance = false
     @State private var cardStateController = ActiveWorkoutExerciseCardStateController()
@@ -1955,8 +1956,7 @@ struct ActiveWorkoutView: View {
             guard !isEndingSession else { return }
             isEndingSession = true
             rowFlushCoordinator.flushAll()
-            await pendingUserEditSnapshotTask?.value
-            pendingUserEditSnapshotTask = nil
+            await awaitPendingSnapshotWrites(cancelMinimizedWrite: true)
             guard let finishingSession = currentRuntimeSnapshot() else {
                 isEndingSession = false
                 showError(WorkoutSessionRepositoryError.sessionNotFound)
@@ -2110,6 +2110,32 @@ struct ActiveWorkoutView: View {
             for: sessionID
         )
         activeWorkoutPresentationState.stageScrollTarget(minimizedScrollRestoreTarget(), for: sessionID)
+        scheduleMinimizedDurableSnapshotSave(snapshot)
+    }
+
+    @MainActor
+    private func scheduleMinimizedDurableSnapshotSave(_ snapshot: ActiveWorkoutRuntimeSession) {
+        guard ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: .minimize) else {
+            return
+        }
+
+        let restTimerSnapshot = restTimerState.restTimerSnapshot()
+        pendingMinimizedSnapshotTask?.cancel()
+        pendingMinimizedSnapshotTask = Task(priority: .utility) {
+            guard !Task.isCancelled else { return }
+            do {
+                try await ActiveWorkoutSnapshotStore.shared.save(
+                    snapshot,
+                    restTimer: restTimerSnapshot,
+                    preservesExistingRestTimer: false
+                )
+            } catch {
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    showError(error)
+                }
+            }
+        }
     }
 
     @MainActor
@@ -2138,8 +2164,7 @@ struct ActiveWorkoutView: View {
             guard !isEndingSession else { return }
             isEndingSession = true
             rowFlushCoordinator.flushAll()
-            await pendingUserEditSnapshotTask?.value
-            pendingUserEditSnapshotTask = nil
+            await awaitPendingSnapshotWrites(cancelMinimizedWrite: true)
             restTimerState.clearRestTimer()
 
             do {
@@ -2454,7 +2479,8 @@ struct ActiveWorkoutView: View {
     private func flushDirtyWritesNow(checkpoint: ActiveWorkoutLifecycleCheckpoint) async -> Bool {
         if checkpoint == .sceneTransition,
            !rowFlushCoordinator.hasDirtyRows,
-           pendingUserEditSnapshotTask == nil {
+           pendingUserEditSnapshotTask == nil,
+           pendingMinimizedSnapshotTask == nil {
             return true
         }
 
@@ -2478,10 +2504,14 @@ struct ActiveWorkoutView: View {
 
         let pendingSnapshotTask = pendingUserEditSnapshotTask
         pendingUserEditSnapshotTask = nil
+        let pendingMinimizedSnapshotTask = pendingMinimizedSnapshotTask
+        self.pendingMinimizedSnapshotTask = nil
 
         if checkpoint == .sceneTransition {
             pendingSnapshotTask?.cancel()
+            pendingMinimizedSnapshotTask?.cancel()
             await pendingSnapshotTask?.value
+            await pendingMinimizedSnapshotTask?.value
 
             guard let snapshot = currentRuntimeSnapshot() else {
                 pendingCardioCompletionsByPhase = [:]
@@ -2506,7 +2536,9 @@ struct ActiveWorkoutView: View {
         }
 
         pendingSnapshotTask?.cancel()
+        pendingMinimizedSnapshotTask?.cancel()
         await pendingSnapshotTask?.value
+        await pendingMinimizedSnapshotTask?.value
 
         switch checkpoint {
         case .finish, .cancel:
@@ -2636,6 +2668,21 @@ struct ActiveWorkoutView: View {
                 showError(error)
             }
         }
+    }
+
+    @MainActor
+    private func awaitPendingSnapshotWrites(cancelMinimizedWrite: Bool) async {
+        let pendingUserEditSnapshotTask = pendingUserEditSnapshotTask
+        self.pendingUserEditSnapshotTask = nil
+        let pendingMinimizedSnapshotTask = pendingMinimizedSnapshotTask
+        self.pendingMinimizedSnapshotTask = nil
+
+        pendingUserEditSnapshotTask?.cancel()
+        if cancelMinimizedWrite {
+            pendingMinimizedSnapshotTask?.cancel()
+        }
+        await pendingUserEditSnapshotTask?.value
+        await pendingMinimizedSnapshotTask?.value
     }
 
     private func performFinishCommand(

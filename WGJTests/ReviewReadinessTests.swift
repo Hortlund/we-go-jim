@@ -316,6 +316,21 @@ struct ReviewReadinessTests {
         #expect(supportXURL.host() == "x.com")
     }
 
+    @Test
+    func hostedPrivacyAndSupportURLsAreConfiguredForReview() throws {
+        let privacyPolicyURL = try #require(AppRuntimeConfig.privacyPolicyURL)
+        let supportURL = try #require(AppRuntimeConfig.supportURL)
+
+        #expect(privacyPolicyURL.scheme == "https")
+        #expect(supportURL.scheme == "https")
+        #expect(privacyPolicyURL.host() == "highball.se")
+        #expect(supportURL.host() == "highball.se")
+        #expect(!privacyPolicyURL.path().isEmpty)
+        #expect(!supportURL.path().isEmpty)
+        #expect(privacyPolicyURL.path() != supportURL.path())
+        #expect(supportURL.path() == "/wgj/index.html")
+    }
+
     private func makeInMemoryContext() throws -> ModelContext {
         let schema = Schema([
             ExerciseCatalogItem.self,

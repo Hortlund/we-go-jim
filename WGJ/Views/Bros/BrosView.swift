@@ -1065,7 +1065,7 @@ struct BrosView: View {
         }
         guard BrosInitialActivationPolicy.shouldRunInitialActivationRefresh(
             hasCompletedInitialActivationRefresh: hasCompletedInitialActivationRefresh,
-            hasFreshWarmSnapshot: appWarmupState.freshBros() != nil,
+            hasFreshWarmSnapshot: appWarmupState.freshBros()?.state.canSkipInitialActivationRefresh == true,
             hasNotificationRefreshRequest: notificationRouter.brosRefreshRequestID != nil
         ) else {
             hasCompletedInitialActivationRefresh = true

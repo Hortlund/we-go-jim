@@ -918,7 +918,7 @@ struct ContentView: View {
 
         let result = try? await appBackgroundStore.performAsync("app.first-run.local-bootstrap") { backgroundContext in
             BrosCleanStartPolicy.applyIfNeeded(modelContext: backgroundContext)
-            try? ExerciseCatalogRepository(modelContext: backgroundContext).ensureSeedImportedIfNeeded()
+            try ExerciseCatalogRepository(modelContext: backgroundContext).ensureSeedImportedIfNeeded()
             let profileWarmSnapshot = try? await Self.buildProfileWarmSnapshot(
                 modelContext: backgroundContext,
                 cloudSyncEnabled: cloudSyncEnabled
@@ -926,9 +926,10 @@ struct ContentView: View {
             return FirstRunLocalBootstrapResult(profileWarmSnapshot: profileWarmSnapshot)
         }
 
+        guard let result else { return }
         deferredMaintenanceState.markCleanStartApplied()
         catalogSyncCoordinator.markPrimed()
-        if let profileWarmSnapshot = result?.profileWarmSnapshot {
+        if let profileWarmSnapshot = result.profileWarmSnapshot {
             appWarmupState.storeProfile(profileWarmSnapshot)
             AppRuntimeState.shared.updateWorkoutRuntimePreferences(
                 notificationStyle: profileWarmSnapshot.profile.workoutNotificationStyle,

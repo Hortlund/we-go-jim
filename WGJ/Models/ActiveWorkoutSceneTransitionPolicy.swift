@@ -24,7 +24,7 @@ nonisolated enum ActiveWorkoutLifecycleCheckpoint {
 
 nonisolated enum ActiveWorkoutSnapshotPersistencePolicy {
     static func shouldWriteDurableSnapshot(for checkpoint: ActiveWorkoutLifecycleCheckpoint) -> Bool {
-        checkpoint == .userEdit || checkpoint == .sceneTransition
+        checkpoint == .userEdit || checkpoint == .sceneTransition || checkpoint == .minimize
     }
 
     static func shouldWriteDurableSnapshot(for summary: ActiveWorkoutSetDraftChangeSummary) -> Bool {

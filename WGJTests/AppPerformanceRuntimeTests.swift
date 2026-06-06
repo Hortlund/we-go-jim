@@ -316,7 +316,7 @@ struct AppPerformanceRuntimeTests {
 
     @Test
     func activeWorkoutDurableSnapshotPolicyWritesBackgroundCheckpoint() {
-        #expect(!ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: .minimize))
+        #expect(ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: .minimize))
         #expect(ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: .sceneTransition))
     }
 

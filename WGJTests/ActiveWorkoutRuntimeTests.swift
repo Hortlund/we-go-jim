@@ -256,6 +256,23 @@ struct ActiveWorkoutRuntimeTests {
     }
 
     @Test
+    func profileRepositoryDoesNotQueueBrosSyncDuringLocalFallback() async throws {
+        let tracker = UserDataSyncTracker.shared
+        _ = tracker.configureForLaunch(isCloudEnabled: false, errorDescription: "Local fallback")
+        defer {
+            _ = tracker.configureForLaunch(isCloudEnabled: false, errorDescription: nil)
+        }
+
+        let context = try makeInMemoryContext()
+        let repository = ProfileRepository(modelContext: context)
+
+        try repository.saveProfile(name: "Local Bro", athleteType: nil, avatarImageData: nil)
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(try context.fetch(FetchDescriptor<SocialOutboxItem>()).isEmpty)
+    }
+
+    @Test
     func templateStartNormalizesStaleSetRestToExerciseDefault() throws {
         let context = try makeInMemoryContext()
         let repository = TemplateRepository(modelContext: context)

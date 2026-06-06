@@ -112,7 +112,7 @@ nonisolated enum AppRuntimeConfig {
     static let supportXHandle = "@AndreasHortlund"
     static let supportXURL = URL(string: "https://x.com/AndreasHortlund")
     static let privacyPolicyURL = URL(string: "https://highball.se/wgj/privacy/")
-    static let supportURL = URL(string: "https://highball.se/wgj/privacy/")
+    static let supportURL = URL(string: "https://highball.se/wgj/index.html")
     static let reviewPolicy = AppReviewPolicy(
         brosEnabled: true,
         syncBrosAvatars: true
