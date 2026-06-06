@@ -629,14 +629,13 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
-    func keyboardHideControlUsesSharedProminentAccessoryStyle() {
+    func keyboardHideControlUsesSystemBarItemAccessoryStyle() {
         let configuration = WGJKeyboardHideControl.buttonConfiguration()
 
+        #expect(WGJKeyboardHideControl.title.isEmpty)
         #expect(configuration.image == UIImage(systemName: WGJKeyboardHideControl.systemImage))
-        #expect(configuration.imagePadding == WGJKeyboardHideControl.imagePadding)
-        #expect(configuration.title == WGJKeyboardHideControl.title)
-        #expect(configuration.cornerStyle == .capsule)
-        #expect(configuration.baseBackgroundColor == WGJKeyboardHideControl.backgroundUIColor)
+        #expect(configuration.title == nil)
+        #expect(configuration.baseBackgroundColor == nil)
     }
 
     @Test
