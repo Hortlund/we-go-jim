@@ -409,9 +409,82 @@ struct AppPerformanceRuntimeTests {
         #expect(projection.preWorkoutCardio?.phase == .preWorkout)
         #expect(projection.postWorkoutCardio?.phase == .postWorkout)
         #expect(projection.exerciseDisplayGroups.count == 2)
-        #expect(projection.areMainExercisesUnlocked)
         #expect(!projection.areAllMainExercisesCompleted)
-        #expect(!projection.isPostWorkoutCardioUnlocked)
+    }
+
+    @Test
+    func activeWorkoutCardioProjectionDoesNotRequirePreCardioForExerciseState() {
+        let exerciseID = UUID()
+        let session = ActiveWorkoutRuntimeSession(
+            name: "Flexible Order Workout",
+            cardioBlocks: [
+                ActiveWorkoutRuntimeCardioBlock(
+                    phase: .preWorkout,
+                    catalogExerciseUUID: "bike",
+                    exerciseNameSnapshot: "Bike",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Legs",
+                    targetDurationSeconds: 300,
+                    isCompleted: false
+                ),
+                ActiveWorkoutRuntimeCardioBlock(
+                    phase: .postWorkout,
+                    catalogExerciseUUID: "walk",
+                    exerciseNameSnapshot: "Walk",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Legs",
+                    targetDurationSeconds: 600,
+                    isCompleted: false
+                ),
+            ],
+            exercises: [
+                ActiveWorkoutRuntimeExercise(
+                    id: exerciseID,
+                    catalogExerciseUUID: "bench",
+                    exerciseNameSnapshot: "Bench",
+                    categorySnapshot: "Chest",
+                    muscleSummarySnapshot: "Chest",
+                    sortOrder: 0,
+                    setDrafts: [WorkoutSessionSetDraft(targetLoadUnit: .kg, actualLoadUnit: .kg)]
+                ),
+            ]
+        )
+
+        let projection = ActiveWorkoutRenderProjectionBuilder.build(
+            session: session,
+            setDraftsByExerciseID: [
+                exerciseID: [WorkoutSessionSetDraft(targetLoadUnit: .kg, actualLoadUnit: .kg, isCompleted: false)],
+            ],
+            pendingCardioCompletionsByPhase: [:]
+        )
+
+        #expect(projection.preWorkoutCardio?.isCompleted == false)
+        #expect(projection.areAllMainExercisesCompleted == false)
+    }
+
+    @Test
+    func activeWorkoutCardioCompletionCanToggleInAnyOrder() {
+        #expect(
+            WorkoutCardioCompletionPolicy.canToggleCompletion(
+                phase: .preWorkout,
+                isCurrentlyCompleted: false,
+                areMainExercisesCompleted: false
+            )
+        )
+        #expect(
+            WorkoutCardioCompletionPolicy.canToggleCompletion(
+                phase: .postWorkout,
+                isCurrentlyCompleted: false,
+                areMainExercisesCompleted: false
+            )
+        )
+        #expect(
+            WorkoutCardioCompletionPolicy.canToggleCompletion(
+                phase: .postWorkout,
+                isCurrentlyCompleted: true,
+                areMainExercisesCompleted: false
+            )
+        )
     }
 
     @Test

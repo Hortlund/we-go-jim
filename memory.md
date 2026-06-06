@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-06-06 - Workout Cardio Must Stay Free Order
+
+- Date: 2026-06-06
+- Trigger/Problem: The user clarified that pre-cardio and post-cardio should not be locked; people should be able to do a workout in any order.
+- Root Cause: Active workout projection and UI copy treated pre-cardio as a gate for main set completion and post-cardio as gated by completed main exercises.
+- Durable Rule: Pre-workout and post-workout cardio are optional ordered sections for display only; they must not block set logging, set completion, or each other. Do not reintroduce "locked", "unlock", or gate copy for cardio ordering. Finish warnings may still mention unfinished cardio.
+- How to Verify Next Time: Run `WGJTests/AppPerformanceRuntimeTests` and search active/template workout views for cardio lock/gate wording before shipping cardio changes.
+- Status: active
+
 ## 2026-06-06 - First Visit Profile And Bros Must Not Preload Heavy Content
 
 - Date: 2026-06-06

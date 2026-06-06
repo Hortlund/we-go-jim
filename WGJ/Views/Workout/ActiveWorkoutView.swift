@@ -69,6 +69,7 @@ struct ActiveWorkoutView: View {
     @State private var saveTemplateFolders: [ActiveWorkoutTemplateFolderSnapshot] = []
     @State private var preferredLoadUnit: TemplateLoadUnit = .kg
 
+    @State private var duplicateExerciseNotice: ExerciseSelectionDuplicateNotice?
     @State private var errorMessage = ""
     @State private var showingError = false
     @State private var isMetricInputFocused = false
@@ -249,6 +250,13 @@ struct ActiveWorkoutView: View {
                 Button("OK", role: .cancel) { }
             } message: {
                 workoutErrorAlertMessage
+            }
+            .alert(item: $duplicateExerciseNotice) { notice in
+                Alert(
+                    title: Text(notice.title),
+                    message: Text(notice.message),
+                    dismissButton: .default(Text("OK"))
+                )
             }
         }
     }
@@ -466,16 +474,12 @@ struct ActiveWorkoutView: View {
             if sessionExercises.isEmpty {
                 WGJActionHeader(
                     "Exercises",
-                    subtitle: areMainExercisesUnlocked
-                        ? "Add exercises and log each set inline."
-                        : "Complete the pre-workout cardio block to unlock set logging."
+                    subtitle: "Add exercises and log each set inline."
                 )
             } else {
                 WGJActionHeader(
                     "Exercises",
-                    subtitle: areMainExercisesUnlocked
-                        ? "Swipe the exercise header to delete an exercise, or use exercise actions to move it anywhere in the workout."
-                        : "Main exercises stay visible, but set logging unlocks after the pre-workout cardio block."
+                    subtitle: "Swipe the exercise header to delete an exercise, or use exercise actions to move it anywhere in the workout."
                 ) {
                     Button {
                         pickerTarget = .exercise
@@ -632,10 +636,8 @@ struct ActiveWorkoutView: View {
                     manualCompletionMode: true,
                     isBozarModeEnabled: profilePreferences.isBozarModeEnabled,
                     isSetEditingEnabled: true,
-                    isSetCompletionEnabled: areMainExercisesUnlocked,
-                    setCompletionGatePresentation: areMainExercisesUnlocked
-                        ? nil
-                        : .preWorkoutCardioRequired,
+                    isSetCompletionEnabled: true,
+                    setCompletionGatePresentation: nil,
                     canMoveExerciseUp: index > 0,
                     canMoveExerciseDown: index < sessionExercises.count - 1,
                     onExerciseNotesCommitted: { notes in
@@ -843,18 +845,8 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
-    private var areMainExercisesUnlocked: Bool {
-        renderProjection.areMainExercisesUnlocked
-    }
-
-    @MainActor
     private var areAllMainExercisesCompleted: Bool {
         renderProjection.areAllMainExercisesCompleted
-    }
-
-    @MainActor
-    private var isPostWorkoutCardioUnlocked: Bool {
-        renderProjection.isPostWorkoutCardioUnlocked
     }
 
     @MainActor
@@ -906,12 +898,10 @@ struct ActiveWorkoutView: View {
         cardStateController.sync(
             exerciseIDs: sessionExercises.map(\.id),
             completedExerciseIDs: completedExerciseIDs,
-            firstIncompleteExerciseID: areMainExercisesUnlocked
-                ? firstIncompleteExerciseID(
-                    from: sessionExercises,
-                    draftsByExerciseID: setDraftsByExerciseID
-                )
-                : nil
+            firstIncompleteExerciseID: firstIncompleteExerciseID(
+                from: sessionExercises,
+                draftsByExerciseID: setDraftsByExerciseID
+            )
         )
 
         let preparedExpandedExerciseIDs = activeWorkoutPresentationState.preparedExpandedExerciseIDs(for: sessionID)
@@ -1342,9 +1332,13 @@ struct ActiveWorkoutView: View {
     }
 
     private func addExercise(_ item: ExerciseCatalogItem) {
+        guard runtimeSession != nil else { return }
+        guard !sessionExercises.contains(where: { $0.catalogExerciseUUID == item.remoteUUID }) else {
+            presentDuplicateExerciseNotice(for: item)
+            return
+        }
+
         withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
-            guard runtimeSession != nil else { return }
-            guard !sessionExercises.contains(where: { $0.catalogExerciseUUID == item.remoteUUID }) else { return }
             let nextIndex = (sessionExercises.map(\.sortOrder).max() ?? -1) + 1
             let exercise = ActiveWorkoutSessionFactory(modelContext: modelContext)
                 .createExercise(from: item, sortOrder: nextIndex)
@@ -1364,6 +1358,7 @@ struct ActiveWorkoutView: View {
     private func replaceExercise(exerciseID: UUID, with item: ExerciseCatalogItem) {
         guard let existingExercise = sessionExercises.first(where: { $0.id == exerciseID }) else { return }
         guard !sessionExercises.contains(where: { $0.id != exerciseID && $0.catalogExerciseUUID == item.remoteUUID }) else {
+            presentDuplicateExerciseNotice(for: item)
             return
         }
 
@@ -2814,12 +2809,11 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func canToggleCompletion(for cardioBlock: ActiveWorkoutRuntimeCardioBlock) -> Bool {
-        switch cardioBlock.phase {
-        case .preWorkout:
-            return true
-        case .postWorkout:
-            return isPostWorkoutCardioUnlocked
-        }
+        WorkoutCardioCompletionPolicy.canToggleCompletion(
+            phase: cardioBlock.phase,
+            isCurrentlyCompleted: resolvedCardioCompletion(for: cardioBlock),
+            areMainExercisesCompleted: areAllMainExercisesCompleted
+        )
     }
 
     @MainActor
@@ -2851,7 +2845,7 @@ struct ActiveWorkoutView: View {
         case .preWorkout:
             return "Ready"
         case .postWorkout:
-            return isPostWorkoutCardioUnlocked ? "Ready" : "Locked"
+            return "Ready"
         }
     }
 
@@ -2865,16 +2859,16 @@ struct ActiveWorkoutView: View {
         case .preWorkout:
             return WGJTheme.accentBlue
         case .postWorkout:
-            return isPostWorkoutCardioUnlocked ? WGJTheme.accentGold : WGJTheme.textSecondary
+            return WGJTheme.accentGold
         }
     }
 
     private func cardioSectionSubtitle(for phase: WorkoutCardioPhase) -> String {
         switch phase {
         case .preWorkout:
-            return "Separate warmup cardio that gates the main exercise roster."
+            return "Optional warmup cardio you can complete whenever it fits the session."
         case .postWorkout:
-            return "Separate cooldown cardio that unlocks after the exercises are done."
+            return "Optional cooldown cardio you can complete whenever it fits the session."
         }
     }
 
@@ -2892,17 +2886,22 @@ struct ActiveWorkoutView: View {
         switch cardioBlock.phase {
         case .preWorkout:
             return resolvedCardioCompletion(for: cardioBlock)
-                ? "Warmup complete. Main exercise logging is unlocked."
-                : "Finish this warmup block before logging or completing sets."
+                ? "Warmup complete."
+                : "You can log this before, during, or after the main sets."
         case .postWorkout:
             if resolvedCardioCompletion(for: cardioBlock) {
                 return "Cooldown complete. This workout is fully wrapped."
             }
 
-            return isPostWorkoutCardioUnlocked
-                ? "Main exercises are complete. Finish this cooldown block when you're done."
-                : "This cooldown block unlocks after every main exercise is complete."
+            return "You can log this before, during, or after the main sets."
         }
+    }
+
+    private func presentDuplicateExerciseNotice(for item: ExerciseCatalogItem) {
+        duplicateExerciseNotice = ExerciseSelectionDuplicateNotice(
+            exerciseName: item.displayName,
+            destination: .activeWorkout
+        )
     }
 
     private func cardioDescriptor(category: String, muscleSummary: String) -> String? {

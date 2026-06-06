@@ -16,9 +16,7 @@ nonisolated struct ActiveWorkoutRenderProjection {
     var postWorkoutCardio: ActiveWorkoutRuntimeCardioBlock?
     var cardioByPhase: [WorkoutCardioPhase: ActiveWorkoutRuntimeCardioBlock]
     var missingCardioPhases: [WorkoutCardioPhase]
-    var areMainExercisesUnlocked: Bool
     var areAllMainExercisesCompleted: Bool
-    var isPostWorkoutCardioUnlocked: Bool
     var hasWorkoutContent: Bool
     var supersetContextByExerciseID: [UUID: ActiveWorkoutSupersetContext]
 
@@ -32,9 +30,7 @@ nonisolated struct ActiveWorkoutRenderProjection {
         postWorkoutCardio: nil,
         cardioByPhase: [:],
         missingCardioPhases: WorkoutCardioPhase.allCases,
-        areMainExercisesUnlocked: true,
         areAllMainExercisesCompleted: true,
-        isPostWorkoutCardioUnlocked: true,
         hasWorkoutContent: false,
         supersetContextByExerciseID: [:]
     )
@@ -66,7 +62,6 @@ nonisolated enum ActiveWorkoutRenderProjectionBuilder {
         )
         let preWorkoutCardio = cardioByPhase[.preWorkout]
         let postWorkoutCardio = cardioByPhase[.postWorkout]
-        let areMainExercisesUnlocked = preWorkoutCardio?.isCompleted ?? true
         let areAllMainExercisesCompleted = exercises.allSatisfy { exercise in
             let drafts = setDraftsByExerciseID[exercise.id] ?? exercise.setDrafts
             return isExerciseCompleted(drafts)
@@ -88,9 +83,7 @@ nonisolated enum ActiveWorkoutRenderProjectionBuilder {
             postWorkoutCardio: postWorkoutCardio,
             cardioByPhase: cardioByPhase,
             missingCardioPhases: WorkoutCardioPhase.allCases.filter { cardioByPhase[$0] == nil },
-            areMainExercisesUnlocked: areMainExercisesUnlocked,
             areAllMainExercisesCompleted: areAllMainExercisesCompleted,
-            isPostWorkoutCardioUnlocked: areMainExercisesUnlocked && areAllMainExercisesCompleted,
             hasWorkoutContent: !exercises.isEmpty || !cardioBlocks.isEmpty,
             supersetContextByExerciseID: supersetContextByExerciseID(from: displayGroups)
         )
@@ -120,5 +113,15 @@ nonisolated enum ActiveWorkoutRenderProjectionBuilder {
         }
 
         return contexts
+    }
+}
+
+nonisolated enum WorkoutCardioCompletionPolicy {
+    static func canToggleCompletion(
+        phase _: WorkoutCardioPhase,
+        isCurrentlyCompleted _: Bool,
+        areMainExercisesCompleted _: Bool
+    ) -> Bool {
+        true
     }
 }

@@ -157,7 +157,7 @@ struct WorkoutCardioPhaseCard<Actions: View>: View {
     }
 
     private var phaseStatusIcon: String {
-        statusTint == WGJTheme.success ? "checkmark.circle.fill" : "lock.fill"
+        statusTint == WGJTheme.success ? "checkmark.circle.fill" : "clock.fill"
     }
 }
 

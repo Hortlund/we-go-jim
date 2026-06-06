@@ -3085,12 +3085,6 @@ struct WorkoutSetCompletionGatePresentation: Equatable {
     let title: String
     let detail: String
     let iconSystemName: String
-
-    static let preWorkoutCardioRequired = WorkoutSetCompletionGatePresentation(
-        title: "Finish pre-workout cardio before completing sets",
-        detail: "Complete the warmup block above before you mark any main-work sets done.",
-        iconSystemName: "lock.fill"
-    )
 }
 
 struct WorkoutSetInlineHintPresentation: Equatable {

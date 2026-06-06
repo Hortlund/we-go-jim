@@ -24,6 +24,7 @@ struct TemplateEditorView: View {
     @State private var pickerTarget: TemplateEditorPickerTarget?
     @State private var cardioSettingsDraft: WorkoutCardioSettingsDraft?
     @State private var exerciseReorderRequest: ExerciseReorderRequest?
+    @State private var duplicateExerciseNotice: ExerciseSelectionDuplicateNotice?
     @State private var errorMessage = ""
     @State private var showingError = false
     @State private var keyboardDismissToken = TemplateEditorKeyboardDismissToken()
@@ -139,6 +140,13 @@ struct TemplateEditorView: View {
                 Button("OK", role: .cancel) { }
             } message: {
                 Text(errorMessage)
+            }
+            .alert(item: $duplicateExerciseNotice) { notice in
+                Alert(
+                    title: Text(notice.title),
+                    message: Text(notice.message),
+                    dismissButton: .default(Text("OK"))
+                )
             }
             .task {
                 await loadInitialDataIfNeeded()
@@ -335,6 +343,7 @@ struct TemplateEditorView: View {
 
     private func appendExercise(catalogItem: ExerciseCatalogItem) {
         guard !containsComponentCatalogUUID(catalogItem.remoteUUID) else {
+            presentDuplicateExerciseNotice(for: catalogItem)
             return
         }
 
@@ -365,6 +374,7 @@ struct TemplateEditorView: View {
 
     private func replaceExercise(with catalogItem: ExerciseCatalogItem, exerciseID: UUID) {
         guard !containsComponentCatalogUUID(catalogItem.remoteUUID, excluding: exerciseID) else {
+            presentDuplicateExerciseNotice(for: catalogItem)
             return
         }
         guard let draftStore = exerciseDrafts.first(where: { $0.id == exerciseID }) else {
@@ -384,6 +394,7 @@ struct TemplateEditorView: View {
 
     private func appendComponent(catalogItem: ExerciseCatalogItem, to exerciseID: UUID) {
         guard !containsComponentCatalogUUID(catalogItem.remoteUUID) else {
+            presentDuplicateExerciseNotice(for: catalogItem)
             return
         }
         guard let draftStore = exerciseDrafts.first(where: { $0.id == exerciseID }) else {
@@ -588,6 +599,13 @@ struct TemplateEditorView: View {
             guard draftStore.id != exerciseID else { return false }
             return draftStore.components.contains { $0.catalogExerciseUUID == catalogExerciseUUID }
         }
+    }
+
+    private func presentDuplicateExerciseNotice(for catalogItem: ExerciseCatalogItem) {
+        duplicateExerciseNotice = ExerciseSelectionDuplicateNotice(
+            exerciseName: catalogItem.displayName,
+            destination: .template
+        )
     }
 
     private func saveTemplate() {

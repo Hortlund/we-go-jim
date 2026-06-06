@@ -671,9 +671,9 @@ struct TemplateDetailView: View {
     private func cardioFootnote(for phase: WorkoutCardioPhase) -> String {
         switch phase {
         case .preWorkout:
-            return "Runs before the first exercise in every session."
+            return "Warmup cardio saved with this template."
         case .postWorkout:
-            return "Unlocks after the main exercise roster is done."
+            return "Cooldown cardio saved with this template."
         }
     }
 
