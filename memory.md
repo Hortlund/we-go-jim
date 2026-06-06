@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-06-06 - Unreleased Features Do Not Need Internal Backward Compatibility
+
+- Date: 2026-06-06
+- Trigger/Problem: The weekly goal widget kept legacy snapshot decoding and v1 storage-key compatibility even though the feature had not shipped, and the user called out that this was unnecessary.
+- Root Cause: The implementation applied production migration habits to an unreleased feature, adding compatibility code that could keep stale widget data alive and made the feature harder to reason about.
+- Durable Rule: For unreleased app surfaces, prefer a clean internal schema/key reset over compatibility layers. Only preserve backward compatibility when the feature has shipped to users, migrated data is user-owned, or the user explicitly asks for compatibility.
+- How to Verify Next Time: Check whether the feature has shipped before adding legacy decode/migration tests. For unreleased widget/shared snapshot changes, use a new defaults key or strict schema and verify stale keys are cleared on save/clear.
+- Status: active
+
 ## 2026-06-06 - Exercise Picker Duplicate Feedback Stays In Picker
 
 - Date: 2026-06-06

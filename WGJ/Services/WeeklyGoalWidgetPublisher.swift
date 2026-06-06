@@ -6,24 +6,24 @@ nonisolated final class WeeklyGoalWidgetPublisher {
     static let widgetKind = WeeklyGoalWidgetDescriptor.kind
 
     private let store: WeeklyGoalWidgetStore
-    private let reloadTimeline: (String) -> Void
+    private let reloadTimelines: () -> Void
 
     convenience init?() {
         guard let store = WeeklyGoalWidgetStore() else {
             return nil
         }
 
-        self.init(store: store) { kind in
-            WidgetCenter.shared.reloadTimelines(ofKind: kind)
+        self.init(store: store) {
+            WidgetCenter.shared.reloadAllTimelines()
         }
     }
 
     init(
         store: WeeklyGoalWidgetStore,
-        reloadTimeline: @escaping (String) -> Void
+        reloadTimelines: @escaping () -> Void
     ) {
         self.store = store
-        self.reloadTimeline = reloadTimeline
+        self.reloadTimelines = reloadTimelines
     }
 
     func publish(modelContext: ModelContext, generatedAt: Date = .now) throws {
@@ -47,11 +47,11 @@ nonisolated final class WeeklyGoalWidgetPublisher {
         )
 
         try store.save(snapshot)
-        reloadTimeline(Self.widgetKind)
+        reloadTimelines()
     }
 
     func clear() {
         store.clear()
-        reloadTimeline(Self.widgetKind)
+        reloadTimelines()
     }
 }

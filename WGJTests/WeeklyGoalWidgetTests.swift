@@ -129,7 +129,7 @@ struct WeeklyGoalWidgetTests {
     }
 
     @Test
-    func storeDecodesLegacySnapshotWithoutRecentWeeks() throws {
+    func storeTreatsLegacySnapshotWithoutRecentWeeksAsMissing() throws {
         let suiteName = defaultsSuiteName()
         let defaults = try temporaryDefaults(suiteName: suiteName)
         defer {
@@ -149,13 +149,7 @@ struct WeeklyGoalWidgetTests {
         """
         defaults.set(Data(payload.utf8), forKey: WeeklyGoalWidgetStore.snapshotDefaultsKey)
 
-        let snapshot = try #require(try store.load())
-
-        #expect(snapshot.completedWorkouts == 2)
-        #expect(snapshot.weeklyGoal == 4)
-        #expect(snapshot.recentWeeks.count == 1)
-        #expect(snapshot.recentWeeks[0].completedWorkouts == 2)
-        #expect(snapshot.recentWeeks[0].goal == 4)
+        #expect(try store.load() == nil)
     }
 
     @MainActor
@@ -178,9 +172,9 @@ struct WeeklyGoalWidgetTests {
             defaults.removePersistentDomain(forName: suiteName)
         }
         let store = WeeklyGoalWidgetStore(defaults: defaults)
-        var reloads: [String] = []
-        let publisher = WeeklyGoalWidgetPublisher(store: store) { kind in
-            reloads.append(kind)
+        var reloadCount = 0
+        let publisher = WeeklyGoalWidgetPublisher(store: store) {
+            reloadCount += 1
         }
 
         try publisher.publish(modelContext: context, generatedAt: Date(timeIntervalSince1970: 1_800_010_000))
@@ -189,7 +183,7 @@ struct WeeklyGoalWidgetTests {
         #expect(snapshot.completedWorkouts == 1)
         #expect(snapshot.weeklyGoal == 3)
         #expect(snapshot.hasActiveWorkout)
-        #expect(reloads == [WeeklyGoalWidgetPublisher.widgetKind])
+        #expect(reloadCount == 1)
     }
 
     @MainActor
@@ -222,7 +216,7 @@ struct WeeklyGoalWidgetTests {
             defaults.removePersistentDomain(forName: suiteName)
         }
         let store = WeeklyGoalWidgetStore(defaults: defaults)
-        let publisher = WeeklyGoalWidgetPublisher(store: store) { _ in }
+        let publisher = WeeklyGoalWidgetPublisher(store: store) {}
 
         try publisher.publish(modelContext: context, generatedAt: Date(timeIntervalSince1970: 1_800_010_000))
 
@@ -249,15 +243,15 @@ struct WeeklyGoalWidgetTests {
                 weekStart: Date(timeIntervalSince1970: 1_800_000_000)
             )
         )
-        var reloads: [String] = []
-        let publisher = WeeklyGoalWidgetPublisher(store: store) { kind in
-            reloads.append(kind)
+        var reloadCount = 0
+        let publisher = WeeklyGoalWidgetPublisher(store: store) {
+            reloadCount += 1
         }
 
         publisher.clear()
 
         #expect(try store.load() == nil)
-        #expect(reloads == [WeeklyGoalWidgetPublisher.widgetKind])
+        #expect(reloadCount == 1)
     }
 
     @MainActor

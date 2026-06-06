@@ -72,32 +72,36 @@ struct WeeklyGoalWidgetView: View {
     }
 
     private var systemSmall: some View {
-        ZStack(alignment: .topTrailing) {
+        VStack(spacing: 8) {
+            HStack(spacing: 6) {
+                Text("WGJ")
+                    .font(.caption.weight(.black))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                WGJWidgetLogoBadge(size: 32)
+            }
+
             if let snapshot = entry.snapshot {
-                VStack(spacing: 8) {
-                    Spacer(minLength: 0)
-                    ZStack {
-                        progressRing(snapshot: snapshot, lineWidth: 9)
-                            .frame(width: 78, height: 78)
-                        Text(snapshot.progressText)
-                            .font(.title3.weight(.bold))
-                            .minimumScaleFactor(0.65)
-                    }
-                    VStack(spacing: 2) {
-                        Text("Weekly Goal")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Text(snapshot.statusText)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: 0)
+                Spacer(minLength: 0)
+                ZStack {
+                    progressRing(snapshot: snapshot, lineWidth: 9)
+                        .frame(width: 80, height: 80)
+                    Text(snapshot.progressText)
+                        .font(.title3.weight(.bold))
+                        .minimumScaleFactor(0.65)
                 }
+                VStack(spacing: 2) {
+                    Text("Weekly Goal")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(snapshot.statusText)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
             } else {
                 emptyState
             }
-
-            WGJWidgetLogoBadge(size: 28)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(2)

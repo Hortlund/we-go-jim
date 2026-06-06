@@ -42,43 +42,7 @@ nonisolated struct WeeklyGoalWidgetSnapshot: Codable, Equatable, Sendable {
         self.weekEnd = weekEnd
         self.generatedAt = generatedAt
         self.hasActiveWorkout = hasActiveWorkout
-        self.recentWeeks = recentWeeks.isEmpty
-            ? [WeeklyGoalWidgetWeek(weekStart: weekStart, completedWorkouts: completedWorkouts, goal: weeklyGoal)]
-            : recentWeeks
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case schemaVersion
-        case completedWorkouts
-        case weeklyGoal
-        case weekStart
-        case weekEnd
-        case generatedAt
-        case hasActiveWorkout
-        case recentWeeks
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        let schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
-        let completedWorkouts = try container.decode(Int.self, forKey: .completedWorkouts)
-        let weeklyGoal = try container.decode(Int.self, forKey: .weeklyGoal)
-        let weekStart = try container.decode(Date.self, forKey: .weekStart)
-        let weekEnd = try container.decode(Date.self, forKey: .weekEnd)
-        let generatedAt = try container.decode(Date.self, forKey: .generatedAt)
-        let hasActiveWorkout = try container.decodeIfPresent(Bool.self, forKey: .hasActiveWorkout) ?? false
-        let recentWeeks = try container.decodeIfPresent([WeeklyGoalWidgetWeek].self, forKey: .recentWeeks) ?? []
-
-        self.init(
-            schemaVersion: schemaVersion,
-            completedWorkouts: completedWorkouts,
-            weeklyGoal: weeklyGoal,
-            weekStart: weekStart,
-            weekEnd: weekEnd,
-            generatedAt: generatedAt,
-            hasActiveWorkout: hasActiveWorkout,
-            recentWeeks: recentWeeks
-        )
+        self.recentWeeks = recentWeeks
     }
 
     var remainingWorkouts: Int {
@@ -135,6 +99,15 @@ nonisolated enum WeeklyGoalWidgetContentPolicy {
                 goal: WeeklyGoalWidgetContentPolicy.normalizedGoal(week.goal)
             )
         }
+        let resolvedWeeks = normalizedWeeks.isEmpty
+            ? [
+                WeeklyGoalWidgetWeek(
+                    weekStart: weekStart,
+                    completedWorkouts: normalizedCompleted,
+                    goal: normalizedGoal
+                ),
+            ]
+            : normalizedWeeks
 
         return WeeklyGoalWidgetSnapshot(
             completedWorkouts: normalizedCompleted,
@@ -143,7 +116,7 @@ nonisolated enum WeeklyGoalWidgetContentPolicy {
             weekEnd: resolvedWeekEnd,
             generatedAt: generatedAt,
             hasActiveWorkout: hasActiveWorkout,
-            recentWeeks: normalizedWeeks
+            recentWeeks: resolvedWeeks
         )
     }
 
@@ -185,7 +158,8 @@ nonisolated enum WeeklyGoalWidgetDescriptor {
 
 nonisolated struct WeeklyGoalWidgetStore {
     static let appGroupIdentifier = "group.se.highball.WeGoJim"
-    static let snapshotDefaultsKey = "weeklyGoalWidget.snapshot.v1"
+    static let snapshotDefaultsKey = "weeklyGoalWidget.snapshot.v2"
+    static let legacySnapshotDefaultsKey = "weeklyGoalWidget.snapshot.v1"
 
     private let defaults: UserDefaults
 
@@ -211,10 +185,12 @@ nonisolated struct WeeklyGoalWidgetStore {
     func save(_ snapshot: WeeklyGoalWidgetSnapshot) throws {
         let data = try encoder.encode(snapshot)
         defaults.set(data, forKey: Self.snapshotDefaultsKey)
+        defaults.removeObject(forKey: Self.legacySnapshotDefaultsKey)
     }
 
     func clear() {
         defaults.removeObject(forKey: Self.snapshotDefaultsKey)
+        defaults.removeObject(forKey: Self.legacySnapshotDefaultsKey)
     }
 
     private var encoder: JSONEncoder {
