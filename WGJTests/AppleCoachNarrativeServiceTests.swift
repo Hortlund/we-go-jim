@@ -4,6 +4,7 @@ import Testing
 @testable import WGJ
 
 @MainActor
+@Suite(.serialized)
 struct AppleCoachNarrativeServiceTests {
     @Test
     func recapFallsBackWhenGenerationIsUnavailable() async throws {
@@ -493,6 +494,63 @@ struct AppleCoachNarrativeServiceTests {
         }
 
         #expect(refreshedHeadline == "Fresh Headline")
+        #expect(generator.recapInputs.count == 1)
+    }
+
+    @Test
+    func recapForDisplayReturnsFallbackImmediatelyWhenNoCacheExists() async throws {
+        let fixture = try makeFixture()
+        let snapshot = WeeklyCoachInsightSnapshot(
+            weekStart: fixture.weekStart,
+            revisionKey: "revision-display-fallback-first",
+            baselineWeekCount: 6,
+            completedWorkoutCount: 3,
+            totalVolumeDelta: 8.4,
+            consistencyDelta: 1,
+            topRisingSignals: [],
+            topWatchSignals: [],
+            fallbackSummary: "",
+            followUpKinds: [.whatChanged]
+        )
+
+        let gate = AsyncGate()
+        let generator = GeneratorProbe()
+        let service = AppleCoachNarrativeService(
+            cacheRepository: fixture.cacheRepository,
+            availabilityProvider: { true },
+            recapGenerator: { input in
+                generator.recapInputs.append(input)
+                await gate.markEntered()
+                await gate.waitUntilReleased()
+                return CoachNarrativeSummary(
+                    headline: "Generated Later",
+                    body: "Generated body for \(input.snapshot.revisionKey)",
+                    availabilityMode: .generated
+                )
+            }
+        )
+
+        let displayed = try await service.recapForDisplay(for: snapshot)
+
+        #expect(displayed.availabilityMode == .fallback)
+        #expect(displayed.headline == "Volume Moved Up")
+
+        await gate.waitUntilEntered()
+        await gate.release()
+
+        var refreshedHeadline: String?
+        for _ in 0..<20 {
+            refreshedHeadline = try fixture.cacheRepository.recap(
+                forWeekStart: snapshot.weekStart,
+                revisionKey: snapshot.revisionKey
+            )?.headline
+            if refreshedHeadline == "Generated Later" {
+                break
+            }
+            await Task.yield()
+        }
+
+        #expect(refreshedHeadline == "Generated Later")
         #expect(generator.recapInputs.count == 1)
     }
 

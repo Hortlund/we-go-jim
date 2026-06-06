@@ -951,9 +951,11 @@ struct ProfileView: View {
             }
 
             do {
-                let summary = try await AppleCoachNarrativeService(modelContext: modelContext).followUp(
-                    for: kind,
-                    snapshot: coachBrief.snapshot
+                let summary = try await controller.loadCoachFollowUpSummary(
+                    modelContext: modelContext,
+                    kind: kind,
+                    snapshot: coachBrief.snapshot,
+                    backgroundStore: appBackgroundStore
                 )
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
@@ -1411,15 +1413,53 @@ final class ProfileViewController {
             return nil
         }
 
-        let snapshot: WeeklyCoachInsightSnapshot
         if let backgroundStore {
-            snapshot = try await backgroundStore.perform("profile.coach.snapshot") { backgroundContext in
-                try WeeklyCoachInsightService(modelContext: backgroundContext).weeklyInsightSnapshot()
+            return try await backgroundStore.performAsync("profile.coach.presentation") { backgroundContext in
+                try await Self.loadCoachBriefPresentation(
+                    modelContext: backgroundContext,
+                    enabledWidgets: enabledWidgets
+                )
             }
-        } else {
-            snapshot = try WGJPerformance.measure("profile.coach.snapshot") {
-                try WeeklyCoachInsightService(modelContext: modelContext).weeklyInsightSnapshot()
+        }
+
+        return try await Self.loadCoachBriefPresentation(
+            modelContext: modelContext,
+            enabledWidgets: enabledWidgets
+        )
+    }
+
+    func loadCoachFollowUpSummary(
+        modelContext: ModelContext,
+        kind: CoachFollowUpKind,
+        snapshot: WeeklyCoachInsightSnapshot,
+        backgroundStore: AppBackgroundStore?
+    ) async throws -> CoachNarrativeSummary {
+        if let backgroundStore {
+            return try await backgroundStore.performAsync("profile.coach.followup") { backgroundContext in
+                try await AppleCoachNarrativeService(modelContext: backgroundContext).followUp(
+                    for: kind,
+                    snapshot: snapshot
+                )
             }
+        }
+
+        return try await AppleCoachNarrativeService(modelContext: modelContext).followUp(
+            for: kind,
+            snapshot: snapshot
+        )
+    }
+
+    private static func loadCoachBriefPresentation(
+        modelContext: ModelContext,
+        enabledWidgets: [ProfileWidgetConfigSnapshot]
+    ) async throws -> ProfileCoachPresentation? {
+        guard enabledWidgets.contains(where: { $0.kind == .coachBrief }) else {
+            return nil
+        }
+
+        let snapshot: WeeklyCoachInsightSnapshot
+        snapshot = try WGJPerformance.measure("profile.coach.snapshot") {
+            try WeeklyCoachInsightService(modelContext: modelContext).weeklyInsightSnapshot()
         }
 
         let recap = try await AppleCoachNarrativeService(modelContext: modelContext).recapForDisplay(for: snapshot)

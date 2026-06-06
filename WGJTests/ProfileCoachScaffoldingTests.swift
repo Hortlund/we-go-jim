@@ -157,7 +157,33 @@ struct ProfileCoachScaffoldingTests {
         )
     }
 
+    @Test
+    func profileCoachBriefCanLoadThroughBackgroundStore() async throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let backgroundStore = AppBackgroundStore(container: container)
+        let enabledWidgets = [
+            ProfileWidgetConfigSnapshot(config: ProfileWidgetConfig(kind: .coachBrief, sortOrder: 0)),
+        ]
+
+        let presentation = try await ProfileViewController().loadCoachBriefPresentation(
+            modelContext: context,
+            enabledWidgets: enabledWidgets,
+            backgroundStore: backgroundStore
+        )
+
+        let cachedCount = try await backgroundStore.perform("profile.coach.cache-test") { backgroundContext in
+            try backgroundContext.fetch(FetchDescriptor<CachedCoachNarrative>()).count
+        }
+        #expect(presentation != nil)
+        #expect(cachedCount == 1)
+    }
+
     private func makeInMemoryContext() throws -> ModelContext {
+        ModelContext(try makeInMemoryContainer())
+    }
+
+    private func makeInMemoryContainer() throws -> ModelContainer {
         let schema = Schema([
             ExerciseCatalogItem.self,
             MuscleGroup.self,
@@ -200,8 +226,7 @@ struct ProfileCoachScaffoldingTests {
             isStoredInMemoryOnly: true,
             cloudKitDatabase: .none
         )
-        let container = try ModelContainer(for: schema, configurations: [configuration])
-        return ModelContext(container)
+        return try ModelContainer(for: schema, configurations: [configuration])
     }
 
     private func seedLegacySevenWidgetConfigs(in context: ModelContext) {

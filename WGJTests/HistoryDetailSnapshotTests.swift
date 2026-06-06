@@ -84,6 +84,70 @@ struct HistoryDetailSnapshotTests {
     }
 
     @Test
+    func snapshotLoadCanSkipHydrationForCollapsedRows() throws {
+        let context = try makeInMemoryContext()
+        let repository = WorkoutSessionRepository(modelContext: context)
+        let bench = makeCatalogItem(
+            context: context,
+            remoteUUID: "history-detail-skip-hydration-bench",
+            displayName: "Bench Press",
+            category: "Chest"
+        )
+        let row = makeCatalogItem(
+            context: context,
+            remoteUUID: "history-detail-skip-hydration-row",
+            displayName: "Barbell Row",
+            category: "Back"
+        )
+        let session = try repository.createEmptySession(name: "Skip Hydration")
+        try repository.addExercise(sessionID: session.id, catalogItem: bench)
+        try repository.addExercise(sessionID: session.id, catalogItem: row)
+        try repository.finishSession(sessionID: session.id)
+
+        let snapshot = try HistoryDetailSnapshotBuilder.load(
+            modelContext: context,
+            sessionID: session.id,
+            hydrationExerciseIDs: []
+        )
+
+        #expect(snapshot.exercises.count == 2)
+        #expect(snapshot.localState.setDraftsByExerciseID.keys.count == 2)
+        #expect(snapshot.hydrationPayloadByExerciseID.isEmpty)
+    }
+
+    @Test
+    func hydrationPayloadLoadOnlyReturnsRequestedExercises() throws {
+        let context = try makeInMemoryContext()
+        let repository = WorkoutSessionRepository(modelContext: context)
+        let bench = makeCatalogItem(
+            context: context,
+            remoteUUID: "history-detail-targeted-hydration-bench",
+            displayName: "Bench Press",
+            category: "Chest"
+        )
+        let row = makeCatalogItem(
+            context: context,
+            remoteUUID: "history-detail-targeted-hydration-row",
+            displayName: "Barbell Row",
+            category: "Back"
+        )
+        let session = try repository.createEmptySession(name: "Targeted Hydration")
+        try repository.addExercise(sessionID: session.id, catalogItem: bench)
+        try repository.addExercise(sessionID: session.id, catalogItem: row)
+        try repository.finishSession(sessionID: session.id)
+        let exercises = try repository.sessionExercises(sessionID: session.id)
+        let requestedExercise = try #require(exercises.first)
+
+        let payloads = try HistoryDetailSnapshotBuilder.loadHydrationPayloads(
+            modelContext: context,
+            sessionID: session.id,
+            exerciseIDs: [requestedExercise.id]
+        )
+
+        #expect(Set(payloads.keys) == [requestedExercise.id])
+    }
+
+    @Test
     func snapshotLoadBuildsWorkoutMuscleHeatmapFromCompletedWorkingSets() throws {
         let context = try makeInMemoryContext()
         let repository = WorkoutSessionRepository(modelContext: context)

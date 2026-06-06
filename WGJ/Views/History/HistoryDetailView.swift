@@ -3,6 +3,8 @@ import SwiftData
 import SwiftUI
 
 struct HistoryDetailView: View {
+    private static let topAnchorID = "history-detail-top-anchor"
+
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(\.appBackgroundStore) private var appBackgroundStore
@@ -16,15 +18,19 @@ struct HistoryDetailView: View {
     @State private var sessionNameDraft = ""
     @State private var notesDraft = ""
     @State private var preferredLoadUnit: TemplateLoadUnit = .kg
+    @State private var loadedLocalState = HistoryDetailSnapshotBuilder.LocalState.empty
     @State private var setDraftsByExerciseID: [UUID: [WorkoutSessionSetDraft]] = [:]
     @State private var restByExerciseID: [UUID: Int] = [:]
     @State private var notesByExerciseID: [UUID: String] = [:]
     @State private var hydrationPayloadByExerciseID: [UUID: HistoryDetailSnapshotBuilder.ExerciseHydrationPayload] = [:]
-    @State private var personalRecordPresentationByExerciseID: [UUID: HistoryExercisePersonalRecordPresentation] = [:]
+    @State private var loadingHydrationExerciseIDs: Set<UUID> = []
+    @State private var hydrationLoadGeneration = UUID()
     @State private var loadedExerciseStateStamp: HistoryExerciseInteractionStamp?
     @State private var expandedExerciseIDs: [UUID: Bool] = [:]
     @State private var hasPendingSummaryRebuild = false
     @State private var isSavingChanges = false
+    @State private var scrollToTopRequestID: UUID?
+    @State private var sessionHeaderFlushCoordinator = HistorySessionHeaderFlushCoordinator()
     @State private var rowFlushCoordinator = WorkoutExerciseRowFlushCoordinator()
 
     @State private var showingExercisePicker = false
@@ -55,56 +61,67 @@ struct HistoryDetailView: View {
     var body: some View {
         let catalogRepository = ExerciseCatalogRepository(modelContext: modelContext)
 
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: WGJSpacing.section) {
-                if let session {
-                    headerCard(session)
-                    workoutMuscleHeatmapCard
-                    cardioSection
-                    exercisesSectionHeader
-                } else if didLoadSnapshot {
-                    WGJEmptyStateCard(
-                        title: "Workout not found",
-                        message: "This workout could not be loaded.",
-                        icon: "exclamationmark.triangle"
-                    )
-                } else {
-                    ProgressView()
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 32)
-                }
+        ScrollViewReader { scrollProxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: WGJSpacing.section) {
+                    Color.clear
+                        .frame(height: 0)
+                        .id(Self.topAnchorID)
 
-                if sessionExercises.isEmpty {
-                    WGJEmptyStateCard(
-                        title: "No exercises logged",
-                        message: "Add exercises to update this workout and save corrected sets or rest values.",
-                        icon: "list.bullet.rectangle"
-                    ) {
-                        Button("Add Exercise") {
-                            showingExercisePicker = true
-                        }
-                        .buttonStyle(WGJPrimaryButtonStyle())
+                    if let session {
+                        headerCard(session)
+                        workoutMuscleHeatmapCard
+                        cardioSection
+                        exercisesSectionHeader
+                    } else if didLoadSnapshot {
+                        WGJEmptyStateCard(
+                            title: "Workout not found",
+                            message: "This workout could not be loaded.",
+                            icon: "exclamationmark.triangle"
+                        )
+                    } else {
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 32)
                     }
-                }
 
-                ForEach(Array(sessionExercises.enumerated()), id: \.element.id) { index, exercise in
-                    exerciseSection(exercise, index: index)
-                        .id(exercise.id)
-                }
+                    if sessionExercises.isEmpty {
+                        WGJEmptyStateCard(
+                            title: "No exercises logged",
+                            message: "Add exercises to update this workout and save corrected sets or rest values.",
+                            icon: "list.bullet.rectangle"
+                        ) {
+                            Button("Add Exercise") {
+                                showingExercisePicker = true
+                            }
+                            .buttonStyle(WGJPrimaryButtonStyle())
+                        }
+                    }
 
-                if !sessionExercises.isEmpty {
-                    addExerciseButton(title: "Add another exercise")
-                        .disabled(session == nil)
-                }
+                    ForEach(Array(sessionExercises.enumerated()), id: \.element.id) { index, exercise in
+                        exerciseSection(exercise, index: index)
+                            .id(exercise.id)
+                    }
 
-                Button("Save Changes") {
-                    saveChanges()
+                    if !sessionExercises.isEmpty {
+                        addExerciseButton(title: "Add another exercise")
+                            .disabled(session == nil)
+                    }
+
+                    Button("Save Changes") {
+                        saveChanges()
+                    }
+                    .buttonStyle(WGJPrimaryButtonStyle())
+                    .disabled(session == nil || isSavingChanges)
+                    .accessibilityIdentifier("history-detail-save-changes-button")
                 }
-                .buttonStyle(WGJPrimaryButtonStyle())
-                .disabled(session == nil || isSavingChanges)
-                .accessibilityIdentifier("history-detail-save-changes-button")
+                .padding(WGJSpacing.page)
             }
-            .padding(WGJSpacing.page)
+            .onChange(of: scrollToTopRequestID) { _, _ in
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    scrollProxy.scrollTo(Self.topAnchorID, anchor: .top)
+                }
+            }
         }
         .scrollDismissesKeyboard(.interactively)
         .wgjScreenBackground()
@@ -205,18 +222,13 @@ struct HistoryDetailView: View {
                 )
             }
 
-            WGJResponsiveTextField(
-                placeholder: "Workout name",
-                text: $sessionNameDraft,
-                capitalization: .words
-            )
-
-            WGJResponsiveTextField(
-                placeholder: "Notes",
-                text: $notesDraft,
-                axis: .vertical,
-                lineLimit: 2...5,
-                capitalization: .sentences
+            HistorySessionHeaderDraftFields(
+                sessionName: sessionNameDraft,
+                sessionNotes: notesDraft,
+                onDraftsCommitted: { name, notes in
+                    updateSessionHeaderDrafts(name: name, notes: notes)
+                },
+                flushCoordinator: sessionHeaderFlushCoordinator
             )
 
             ViewThatFits(in: .horizontal) {
@@ -356,35 +368,37 @@ struct HistoryDetailView: View {
         sessionNameDraft = loadedSnapshot.session.name
         notesDraft = loadedSnapshot.session.notes
         preferredLoadUnit = loadedSnapshot.preferredLoadUnit
+        loadedLocalState = loadedSnapshot.localState
         setDraftsByExerciseID = loadedSnapshot.localState.setDraftsByExerciseID
         restByExerciseID = loadedSnapshot.localState.restByExerciseID
         notesByExerciseID = loadedSnapshot.localState.notesByExerciseID
         hydrationPayloadByExerciseID = loadedSnapshot.hydrationPayloadByExerciseID
-        personalRecordPresentationByExerciseID = loadedSnapshot.hydrationPayloadByExerciseID
-            .mapValues(\.personalRecords)
+        loadingHydrationExerciseIDs.removeAll()
+        hydrationLoadGeneration = UUID()
 
         let validIDs = Set(loadedSnapshot.exercises.map(\.id))
         for exerciseID in Set(setDraftsByExerciseID.keys)
             .union(restByExerciseID.keys)
             .union(notesByExerciseID.keys)
             .union(hydrationPayloadByExerciseID.keys)
-            .union(personalRecordPresentationByExerciseID.keys)
         where !validIDs.contains(exerciseID) {
             clearLocalState(for: exerciseID)
             hydrationPayloadByExerciseID.removeValue(forKey: exerciseID)
-            personalRecordPresentationByExerciseID.removeValue(forKey: exerciseID)
         }
 
         syncExpandedExerciseState()
         loadedExerciseStateStamp = historyExerciseStateStamp
+        schedulePendingHydration()
     }
 
     private func clearLocalStateForAllExercises() {
+        loadedLocalState = .empty
         setDraftsByExerciseID.removeAll()
         restByExerciseID.removeAll()
         notesByExerciseID.removeAll()
         hydrationPayloadByExerciseID.removeAll()
-        personalRecordPresentationByExerciseID.removeAll()
+        loadingHydrationExerciseIDs.removeAll()
+        hydrationLoadGeneration = UUID()
         expandedExerciseIDs.removeAll()
         loadedExerciseStateStamp = nil
     }
@@ -393,7 +407,23 @@ struct HistoryDetailView: View {
         modelContext: ModelContext,
         sessionID: UUID
     ) throws -> HistoryDetailSnapshotBuilder.Snapshot {
-        try HistoryDetailSnapshotBuilder.load(modelContext: modelContext, sessionID: sessionID)
+        try HistoryDetailSnapshotBuilder.load(
+            modelContext: modelContext,
+            sessionID: sessionID,
+            hydrationExerciseIDs: []
+        )
+    }
+
+    nonisolated private static func loadHydrationPayloads(
+        modelContext: ModelContext,
+        sessionID: UUID,
+        exerciseIDs: Set<UUID>
+    ) throws -> [UUID: HistoryDetailSnapshotBuilder.ExerciseHydrationPayload] {
+        try HistoryDetailSnapshotBuilder.loadHydrationPayloads(
+            modelContext: modelContext,
+            sessionID: sessionID,
+            exerciseIDs: exerciseIDs
+        )
     }
 
     @ViewBuilder
@@ -542,7 +572,8 @@ struct HistoryDetailView: View {
             }
 
             do {
-                rowFlushCoordinator.flushAll()
+                sessionHeaderFlushCoordinator.flushDirty()
+                rowFlushCoordinator.flushDirty()
                 let command = makeSaveCommand()
                 let didPersistChanges: Bool
                 if let appBackgroundStore {
@@ -563,6 +594,7 @@ struct HistoryDetailView: View {
                     hasPendingSummaryRebuild = false
                 }
                 await reloadSnapshot()
+                scrollToTopRequestID = UUID()
             } catch {
                 showError(error)
             }
@@ -595,6 +627,7 @@ struct HistoryDetailView: View {
             try sessionRepository.removeExercise(sessionID: sessionID, sessionExerciseID: exerciseID)
             clearLocalState(for: exerciseID)
             hydrationPayloadByExerciseID.removeValue(forKey: exerciseID)
+            loadingHydrationExerciseIDs.remove(exerciseID)
             hasPendingSummaryRebuild = true
         } catch {
             capturedError = error
@@ -654,6 +687,16 @@ struct HistoryDetailView: View {
     }
 
     @MainActor
+    private func updateSessionHeaderDrafts(name: String, notes: String) {
+        if sessionNameDraft != name {
+            sessionNameDraft = name
+        }
+        if notesDraft != notes {
+            notesDraft = notes
+        }
+    }
+
+    @MainActor
     private func updateDraftsValue(_ updated: [WorkoutSessionSetDraft], for exerciseID: UUID) {
         guard setDraftsByExerciseID[exerciseID] != updated else { return }
         setDraftsByExerciseID[exerciseID] = updated
@@ -676,28 +719,78 @@ struct HistoryDetailView: View {
     private func handleExpandedChange(_ updated: Bool, for exerciseID: UUID) {
         guard expandedExerciseIDs[exerciseID] != updated else { return }
         expandedExerciseIDs[exerciseID] = updated
+        if updated {
+            schedulePendingHydration()
+        } else {
+            loadingHydrationExerciseIDs.remove(exerciseID)
+        }
+    }
+
+    @MainActor
+    private func schedulePendingHydration() {
+        let orderedIDs = sessionExercises.map(\.id)
+        let pendingExerciseIDs = HistoryExerciseHydrationPlanner.pendingExerciseIDs(
+            orderedExerciseIDs: orderedIDs,
+            expandedExerciseIDs: expandedExerciseIDs,
+            hydratedExerciseIDs: Set(hydrationPayloadByExerciseID.keys).union(loadingHydrationExerciseIDs)
+        )
+        guard !pendingExerciseIDs.isEmpty else { return }
+
+        let generation = hydrationLoadGeneration
+        loadingHydrationExerciseIDs.formUnion(pendingExerciseIDs)
+        Task { @MainActor in
+            do {
+                let payloads: [UUID: HistoryDetailSnapshotBuilder.ExerciseHydrationPayload]
+                if let appBackgroundStore {
+                    payloads = try await appBackgroundStore.perform("history-detail.hydration") { backgroundContext in
+                        try Self.loadHydrationPayloads(
+                            modelContext: backgroundContext,
+                            sessionID: sessionID,
+                            exerciseIDs: pendingExerciseIDs
+                        )
+                    }
+                } else {
+                    payloads = try Self.loadHydrationPayloads(
+                        modelContext: modelContext,
+                        sessionID: sessionID,
+                        exerciseIDs: pendingExerciseIDs
+                    )
+                }
+
+                guard hydrationLoadGeneration == generation else { return }
+                for (exerciseID, payload) in payloads {
+                    hydrationPayloadByExerciseID[exerciseID] = payload
+                }
+                loadingHydrationExerciseIDs.subtract(pendingExerciseIDs)
+            } catch is CancellationError {
+                loadingHydrationExerciseIDs.subtract(pendingExerciseIDs)
+            } catch {
+                loadingHydrationExerciseIDs.subtract(pendingExerciseIDs)
+            }
+        }
     }
 
     @MainActor
     private func makeSaveCommand() -> HistorySaveCommand {
-        let changedExerciseIDs = Set<UUID>(setDraftsByExerciseID.keys)
-            .union(restByExerciseID.keys)
-            .union(notesByExerciseID.keys)
         let snapshots = Dictionary<UUID, HistoryExerciseSaveSnapshot>(
             sessionExercises.compactMap { exercise -> (UUID, HistoryExerciseSaveSnapshot)? in
-                guard changedExerciseIDs.contains(exercise.id),
-                      let drafts = setDraftsByExerciseID[exercise.id] else {
+                guard let drafts = setDraftsByExerciseID[exercise.id] else {
                     return nil
                 }
 
-                return (
-                    exercise.id,
-                    HistoryExerciseSaveSnapshot(
-                        setDrafts: drafts,
-                        restSeconds: restByExerciseID[exercise.id] ?? exercise.restSeconds,
-                        notes: notesByExerciseID[exercise.id] ?? exercise.notes
-                    )
+                let snapshot = HistoryExerciseSaveSnapshot(
+                    setDrafts: drafts,
+                    restSeconds: restByExerciseID[exercise.id] ?? exercise.restSeconds,
+                    notes: notesByExerciseID[exercise.id] ?? exercise.notes
                 )
+                let baseline = HistoryExerciseSaveSnapshot(
+                    setDrafts: loadedLocalState.setDraftsByExerciseID[exercise.id] ?? [],
+                    restSeconds: loadedLocalState.restByExerciseID[exercise.id] ?? exercise.restSeconds,
+                    notes: loadedLocalState.notesByExerciseID[exercise.id] ?? exercise.notes
+                )
+                guard snapshot != baseline else { return nil }
+
+                return (exercise.id, snapshot)
             },
             uniquingKeysWith: { first, _ in first }
         )
@@ -775,101 +868,7 @@ struct HistoryDetailView: View {
     }
 }
 
-nonisolated private struct HistoryDetailSnapshot: Equatable, Sendable {
-    let session: HistoryDetailSessionSnapshot
-    let cardioBlocks: [HistoryDetailCardioBlockSnapshot]
-    let exercises: [HistoryDetailExerciseSnapshot]
-    let preferredLoadUnit: TemplateLoadUnit
-}
-
-nonisolated private struct HistoryDetailSessionSnapshot: Identifiable, Equatable, Sendable {
-    let id: UUID
-    let name: String
-    let startedAt: Date
-    let endedAt: Date?
-    let durationSeconds: Int
-    let prHitsCount: Int
-    let notes: String
-    let updatedAt: Date
-
-    nonisolated init(model: WorkoutSession) {
-        self.id = model.id
-        self.name = model.name
-        self.startedAt = model.startedAt
-        self.endedAt = model.endedAt
-        self.durationSeconds = model.durationSeconds
-        self.prHitsCount = model.prHitsCount
-        self.notes = model.notes
-        self.updatedAt = model.updatedAt
-    }
-}
-
-nonisolated private struct HistoryDetailCardioBlockSnapshot: Identifiable, Equatable, Sendable {
-    let id: UUID
-    let phase: WorkoutCardioPhase
-    let catalogExerciseUUID: String
-    let exerciseNameSnapshot: String
-    let categorySnapshot: String
-    let muscleSummarySnapshot: String
-    let targetDurationSeconds: Int
-    let isCompleted: Bool
-    let updatedAt: Date
-
-    nonisolated init(model: WorkoutSessionCardioBlock) {
-        self.id = model.id
-        self.phase = model.phase
-        self.catalogExerciseUUID = model.catalogExerciseUUID
-        self.exerciseNameSnapshot = model.exerciseNameSnapshot
-        self.categorySnapshot = model.categorySnapshot
-        self.muscleSummarySnapshot = model.muscleSummarySnapshot
-        self.targetDurationSeconds = model.targetDurationSeconds
-        self.isCompleted = model.isCompleted
-        self.updatedAt = model.updatedAt
-    }
-}
-
-nonisolated private struct HistoryDetailExerciseSnapshot: Identifiable, Equatable, Sendable {
-    let id: UUID
-    let catalogExerciseUUID: String
-    let exerciseNameSnapshot: String
-    let categorySnapshot: String
-    let muscleSummarySnapshot: String
-    let notes: String
-    let targetRepMin: Int?
-    let targetRepMax: Int?
-    let restSeconds: Int
-    let totalSetCount: Int
-    let completedSetCount: Int
-    let hasDropsets: Bool
-    let supersetGroupID: UUID?
-    let supersetPosition: SupersetExercisePosition?
-    let updatedAt: Date
-
-    nonisolated init(model: WorkoutSessionExercise) {
-        self.id = model.id
-        self.catalogExerciseUUID = model.catalogExerciseUUID
-        self.exerciseNameSnapshot = model.exerciseNameSnapshot
-        self.categorySnapshot = model.categorySnapshot
-        self.muscleSummarySnapshot = model.muscleSummarySnapshot
-        self.notes = model.notes
-        self.targetRepMin = model.targetRepMin
-        self.targetRepMax = model.targetRepMax
-        self.restSeconds = model.restSeconds
-        self.totalSetCount = model.totalSetCount
-        self.completedSetCount = model.completedSetCount
-        self.hasDropsets = model.hasDropsets
-        self.supersetGroupID = model.supersetGroupID
-        self.supersetPosition = model.supersetPosition
-        self.updatedAt = model.updatedAt
-    }
-}
-
-private struct HistoryExerciseHydrationPayload: Equatable, Sendable {
-    let previousPerformanceResolution: WorkoutPreviousPerformanceResolution
-    let personalRecords: HistoryExercisePersonalRecordPresentation
-}
-
-private struct HistoryExerciseSaveSnapshot: Sendable {
+private struct HistoryExerciseSaveSnapshot: Equatable, Sendable {
     let setDrafts: [WorkoutSessionSetDraft]
     let restSeconds: Int
     let notes: String
@@ -970,6 +969,119 @@ private struct HistoryWorkoutPersonalRecordSummary {
         }
 
         return "\(highlightedSetCount) PR set\(highlightedSetCount == 1 ? "" : "s")"
+    }
+}
+
+@MainActor
+private final class HistorySessionHeaderFlushCoordinator {
+    private var flushHandler: (@MainActor () -> Void)?
+    private(set) var hasDirtyDraft = false
+
+    func register(handler: @escaping @MainActor () -> Void) {
+        flushHandler = handler
+    }
+
+    func unregister() {
+        flushHandler = nil
+        hasDirtyDraft = false
+    }
+
+    func setDirty(_ isDirty: Bool) {
+        hasDirtyDraft = isDirty
+    }
+
+    func flushDirty() {
+        guard hasDirtyDraft else { return }
+        flushHandler?()
+        hasDirtyDraft = false
+    }
+}
+
+private struct HistorySessionHeaderDraftFields: View {
+    let sessionName: String
+    let sessionNotes: String
+    let onDraftsCommitted: (String, String) -> Void
+    let flushCoordinator: HistorySessionHeaderFlushCoordinator
+
+    @State private var localName: String
+    @State private var localNotes: String
+
+    init(
+        sessionName: String,
+        sessionNotes: String,
+        onDraftsCommitted: @escaping (String, String) -> Void,
+        flushCoordinator: HistorySessionHeaderFlushCoordinator
+    ) {
+        self.sessionName = sessionName
+        self.sessionNotes = sessionNotes
+        self.onDraftsCommitted = onDraftsCommitted
+        self.flushCoordinator = flushCoordinator
+        _localName = State(initialValue: sessionName)
+        _localNotes = State(initialValue: sessionNotes)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            WGJResponsiveTextField(
+                placeholder: "Workout name",
+                text: Binding(
+                    get: { localName },
+                    set: { updateName($0) }
+                ),
+                capitalization: .words
+            )
+
+            WGJResponsiveTextField(
+                placeholder: "Notes",
+                text: Binding(
+                    get: { localNotes },
+                    set: { updateNotes($0) }
+                ),
+                axis: .vertical,
+                lineLimit: 2...5,
+                capitalization: .sentences
+            )
+        }
+        .onAppear {
+            flushCoordinator.register {
+                flushPendingDrafts()
+            }
+            updateDirtyState()
+        }
+        .onDisappear {
+            flushPendingDrafts()
+            flushCoordinator.unregister()
+        }
+        .onChange(of: sessionName) { _, newValue in
+            guard !flushCoordinator.hasDirtyDraft else { return }
+            localName = newValue
+            updateDirtyState()
+        }
+        .onChange(of: sessionNotes) { _, newValue in
+            guard !flushCoordinator.hasDirtyDraft else { return }
+            localNotes = newValue
+            updateDirtyState()
+        }
+    }
+
+    private func updateName(_ updated: String) {
+        localName = updated
+        updateDirtyState()
+    }
+
+    private func updateNotes(_ updated: String) {
+        localNotes = updated
+        updateDirtyState()
+    }
+
+    private func flushPendingDrafts() {
+        guard flushCoordinator.hasDirtyDraft else { return }
+        onDraftsCommitted(localName, localNotes)
+        flushCoordinator.setDirty(false)
+    }
+
+    private func updateDirtyState() {
+        flushCoordinator.setDirty(localName != sessionName || localNotes != sessionNotes)
     }
 }
 
@@ -1362,6 +1474,7 @@ private struct HistoryExerciseDetailEditorCard: View {
             flushCoordinator?.register(exerciseID: exerciseID) {
                 flushPendingEdits()
             }
+            updateDirtyState()
         }
         .onDisappear {
             flushPendingEdits()
@@ -1375,6 +1488,7 @@ private struct HistoryExerciseDetailEditorCard: View {
             )
             guard localSetDrafts != newValue else { return }
             localSetDrafts = newValue
+            updateDirtyState()
         }
         .onChange(of: restSeconds) { _, newValue in
             editingCoordinator.syncCommittedState(
@@ -1384,6 +1498,7 @@ private struct HistoryExerciseDetailEditorCard: View {
             )
             guard localRestSeconds != newValue else { return }
             localRestSeconds = newValue
+            updateDirtyState()
         }
         .onChange(of: exerciseNotes) { _, newValue in
             editingCoordinator.syncCommittedState(
@@ -1393,6 +1508,7 @@ private struct HistoryExerciseDetailEditorCard: View {
             )
             guard localExerciseNotes != newValue else { return }
             localExerciseNotes = newValue
+            updateDirtyState()
         }
     }
 
@@ -1603,7 +1719,7 @@ private struct HistoryExerciseDetailEditorCard: View {
                         .multilineTextAlignment(.center)
                         .disabled(draft.isLocked)
                         .wgjPillField()
-                        .accessibilityIdentifier("\(exerciseAccessibilityIdentifier)-set-\(index + 1)-weight-field")
+                        .accessibilityIdentifier("workout-set-\(index)-weight-field")
                 }
 
                 metricField(title: "Reps") {
@@ -1612,7 +1728,7 @@ private struct HistoryExerciseDetailEditorCard: View {
                         .multilineTextAlignment(.center)
                         .disabled(draft.isLocked)
                         .wgjPillField()
-                        .accessibilityIdentifier("\(exerciseAccessibilityIdentifier)-set-\(index + 1)-reps-field")
+                        .accessibilityIdentifier("workout-set-\(index)-reps-field")
                 }
             }
 
@@ -1717,6 +1833,7 @@ private struct HistoryExerciseDetailEditorCard: View {
     private func updateNotes(_ updated: String) {
         localExerciseNotes = updated
         editingCoordinator.stageNotesCommit(updated)
+        updateDirtyState()
     }
 
     private func updateRest(_ updated: Int) {
@@ -1729,6 +1846,7 @@ private struct HistoryExerciseDetailEditorCard: View {
         }
         editingCoordinator.stageRestCommit(normalized)
         editingCoordinator.stageDrafts(localSetDrafts)
+        updateDirtyState()
     }
 
     private func addSet() {
@@ -1748,22 +1866,30 @@ private struct HistoryExerciseDetailEditorCard: View {
         )
         localSetDrafts.append(newDraft)
         editingCoordinator.stageDrafts(localSetDrafts)
+        updateDirtyState()
     }
 
     private func removeSet(_ setID: UUID) {
         localSetDrafts.removeAll { $0.id == setID }
         editingCoordinator.stageDrafts(localSetDrafts)
+        updateDirtyState()
     }
 
     private func updateSet(_ setID: UUID, update: (inout WorkoutSessionSetDraft) -> Void) {
         guard let index = localSetDrafts.firstIndex(where: { $0.id == setID }) else { return }
         update(&localSetDrafts[index])
         editingCoordinator.stageDrafts(localSetDrafts)
+        updateDirtyState()
     }
 
     private func flushPendingEdits() {
         guard editingCoordinator.hasPendingChanges else { return }
         editingCoordinator.flushCommits()
+        flushCoordinator?.setDirty(false, for: exerciseID)
+    }
+
+    private func updateDirtyState() {
+        flushCoordinator?.setDirty(editingCoordinator.hasPendingChanges, for: exerciseID)
     }
 
     private func weightBinding(for setID: UUID) -> Binding<String> {

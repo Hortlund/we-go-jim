@@ -121,7 +121,8 @@ enum HistoryDetailSnapshotBuilder {
 
     nonisolated static func load(
         modelContext: ModelContext,
-        sessionID: UUID
+        sessionID: UUID,
+        hydrationExerciseIDs: Set<UUID>? = nil
     ) throws -> Snapshot {
         let repository = WorkoutSessionRepository(modelContext: modelContext)
         guard let session = try repository.session(id: sessionID) else {
@@ -133,10 +134,12 @@ enum HistoryDetailSnapshotBuilder {
         let preferredLoadUnit = (try? ProfileRepository(modelContext: modelContext)
             .currentProfile()?.preferredLoadUnit) ?? .kg
         let localState = localState(for: exercises)
+        let requestedHydrationIDs = hydrationExerciseIDs ?? Set(exercises.map(\.id))
+        let hydrationExercises = exercises.filter { requestedHydrationIDs.contains($0.id) }
         let hydrationPayloadByExerciseID = try hydrationPayloads(
             modelContext: modelContext,
             session: session,
-            exercises: exercises,
+            exercises: hydrationExercises,
             draftsByExerciseID: localState.setDraftsByExerciseID
         )
         let muscleHeatmap = try muscleHeatmap(
@@ -152,6 +155,31 @@ enum HistoryDetailSnapshotBuilder {
             localState: localState,
             hydrationPayloadByExerciseID: hydrationPayloadByExerciseID,
             muscleHeatmap: muscleHeatmap
+        )
+    }
+
+    nonisolated static func loadHydrationPayloads(
+        modelContext: ModelContext,
+        sessionID: UUID,
+        exerciseIDs: Set<UUID>
+    ) throws -> [UUID: ExerciseHydrationPayload] {
+        guard !exerciseIDs.isEmpty else { return [:] }
+
+        let repository = WorkoutSessionRepository(modelContext: modelContext)
+        guard let session = try repository.session(id: sessionID) else {
+            throw WorkoutSessionRepositoryError.sessionNotFound
+        }
+
+        let exercises = try repository.sessionExercises(sessionID: sessionID)
+            .filter { exerciseIDs.contains($0.id) }
+        guard !exercises.isEmpty else { return [:] }
+
+        let localState = localState(for: exercises)
+        return try hydrationPayloads(
+            modelContext: modelContext,
+            session: session,
+            exercises: exercises,
+            draftsByExerciseID: localState.setDraftsByExerciseID
         )
     }
 
