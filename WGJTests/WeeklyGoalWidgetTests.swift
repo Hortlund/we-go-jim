@@ -10,6 +10,20 @@ struct WeeklyGoalWidgetTests {
     }
 
     @Test
+    func widgetExtensionDebugBuildUsesSingleExecutableForWidgetKitDiscovery() throws {
+        let project = try String(contentsOf: projectFileURL(), encoding: .utf8)
+        let widgetDebugConfiguration = try #require(
+            xcodeBuildConfiguration(
+                named: "Debug",
+                containing: "CODE_SIGN_ENTITLEMENTS = WGJWidgetExtension/WGJWidgetExtension.entitlements;",
+                in: project
+            )
+        )
+
+        #expect(widgetDebugConfiguration.contains("ENABLE_DEBUG_DYLIB = NO;"))
+    }
+
+    @Test
     func storeUsesCacheResetSnapshotKey() {
         #expect(WeeklyGoalWidgetStore.snapshotDefaultsKey == "weeklyGoalWidget.snapshot.v4")
         #expect(WeeklyGoalWidgetStore.legacySnapshotDefaultsKeys == [
@@ -321,6 +335,31 @@ struct WeeklyGoalWidgetTests {
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defaults.removePersistentDomain(forName: suiteName)
         return defaults
+    }
+
+    private func projectFileURL() -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("WGJ.xcodeproj/project.pbxproj")
+    }
+
+    private func xcodeBuildConfiguration(named name: String, containing marker: String, in project: String) -> String? {
+        var searchStart = project.startIndex
+        while let nameRange = project.range(of: "/* \(name) */ = {", range: searchStart..<project.endIndex) {
+            guard let blockEnd = project.range(of: "\n\t\t};", range: nameRange.lowerBound..<project.endIndex) else {
+                return nil
+            }
+
+            let block = String(project[nameRange.lowerBound..<blockEnd.upperBound])
+            if block.contains(marker) {
+                return block
+            }
+
+            searchStart = blockEnd.upperBound
+        }
+
+        return nil
     }
 
     @MainActor

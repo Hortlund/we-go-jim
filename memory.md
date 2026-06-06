@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-06-06 - Widget Extension Debug Builds Need Single Executable
+
+- Date: 2026-06-06
+- Trigger/Problem: The weekly goal WidgetKit preview and placed Home Screen widget rendered as a black rounded rectangle even though the widget kind, snapshot key, copy, and assets were present in the built extension.
+- Root Cause: The widget extension Debug build used Xcode's split debug dylib layout (`ENABLE_DEBUG_DYLIB = YES`), leaving the WidgetKit-facing `.appex` with a stub executable plus debug dylib artifacts. `chronod` rejected/discovered the extension poorly, so the widget host showed a black fallback instead of the SwiftUI view.
+- Durable Rule: Keep `ENABLE_DEBUG_DYLIB = NO` for `WGJWidgetExtension` Debug builds so WidgetKit discovers and renders a normal single extension executable. Do not re-enable split debug dylibs for the widget target unless WidgetKit rendering is explicitly reverified on the signed-in simulator/device.
+- How to Verify Next Time: Run `WGJTests/WeeklyGoalWidgetTests`, show `WGJWidgetExtension` Debug build settings for `ENABLE_DEBUG_DYLIB = NO`, then clean build/run and inspect the built `.appex` to confirm `WGJWidgetExtension.debug.dylib` and `__preview.dylib` are absent while `WGJWeeklyGoalWidgetV4` is present in the main executable.
+- Status: active
+
 ## 2026-06-06 - Pre-Release Widget Cache Resets Need A Kind Bump
 
 - Date: 2026-06-06
