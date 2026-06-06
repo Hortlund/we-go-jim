@@ -166,12 +166,20 @@ struct ContentView: View {
         isPreparingMainPhase = true
         defer { isPreparingMainPhase = false }
 
-        await prepareLocalProfileIdentityIfNeeded()
-        await prepareFirstRunLocalBootstrapIfNeeded()
+        let skipsSplash = ProcessInfo.processInfo.arguments.contains(AppStartupRouting.skipSplashArgument)
+        let shouldRunFirstRunLocalBootstrap = shouldRunFirstRunLocalBootstrapBeforeMainEntry(
+            skipsSplash: skipsSplash
+        )
+
+        if !shouldRunFirstRunLocalBootstrap {
+            await prepareLocalProfileIdentityIfNeeded()
+        }
+        await prepareFirstRunLocalBootstrapIfNeeded(shouldRun: shouldRunFirstRunLocalBootstrap)
         let startupWarmupTasks = startStartupWarmSnapshotsIfNeeded()
         if StartupWarmupLaunchPolicy.shouldWaitForWarmupsBeforeMainEntry(
-            skipsSplash: ProcessInfo.processInfo.arguments.contains(AppStartupRouting.skipSplashArgument),
-            hasAnyWarmup: startupWarmupTasks.hasAnyWarmup
+            skipsSplash: skipsSplash,
+            hasAnyWarmup: startupWarmupTasks.hasAnyWarmup,
+            isFirstRunLaunch: shouldRunFirstRunLocalBootstrap
         ) {
             await StartupWarmupGate.waitForWarmups(
                 profileTask: startupWarmupTasks.profileTask,
@@ -904,13 +912,17 @@ struct ContentView: View {
     }
 
     @MainActor
-    private func prepareFirstRunLocalBootstrapIfNeeded() async {
-        let skipsSplash = ProcessInfo.processInfo.arguments.contains(AppStartupRouting.skipSplashArgument)
-        guard FirstRunLocalBootstrapPolicy.shouldRunBeforeMainEntry(
+    private func shouldRunFirstRunLocalBootstrapBeforeMainEntry(skipsSplash: Bool) -> Bool {
+        FirstRunLocalBootstrapPolicy.shouldRunBeforeMainEntry(
             skipsSplash: skipsSplash,
             hasBackgroundStore: appBackgroundStore != nil,
             hasCompletedBootstrap: FirstRunLocalBootstrapProgress.isCompleted()
-        ) else {
+        )
+    }
+
+    @MainActor
+    private func prepareFirstRunLocalBootstrapIfNeeded(shouldRun: Bool) async {
+        guard shouldRun else {
             return
         }
 

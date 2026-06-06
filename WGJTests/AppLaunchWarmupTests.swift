@@ -248,11 +248,33 @@ struct AppLaunchWarmupTests {
 
     @Test
     func firstFrameTabPolicyDefersInitialProfileAndBrosMounts() {
-        #expect(FirstFrameTabContentPolicy.initialContentMountDelayMilliseconds(tab: .profile) >= 350)
-        #expect(FirstFrameTabContentPolicy.initialContentMountDelayMilliseconds(tab: .bros) >= 350)
+        #expect(FirstFrameTabContentPolicy.initialContentMountDelayMilliseconds(
+            tab: .profile,
+            hasFreshWarmSnapshot: false
+        ) >= 350)
+        #expect(FirstFrameTabContentPolicy.initialContentMountDelayMilliseconds(
+            tab: .bros,
+            hasFreshWarmSnapshot: false
+        ) >= 350)
         #expect(FirstFrameTabContentPolicy.initialContentMountDelayMilliseconds(tab: .history) == 0)
         #expect(FirstFrameTabContentPolicy.initialContentMountDelayMilliseconds(tab: .startWorkout) == 0)
         #expect(FirstFrameTabContentPolicy.initialContentMountDelayMilliseconds(tab: .exercises) == 0)
+    }
+
+    @Test
+    func firstFrameTabPolicyMountsImmediatelyWhenWarmSnapshotIsReady() {
+        #expect(FirstFrameTabContentPolicy.initialContentMountDelayMilliseconds(
+            tab: .profile,
+            hasFreshWarmSnapshot: true
+        ) == 0)
+        #expect(FirstFrameTabContentPolicy.initialContentMountDelayMilliseconds(
+            tab: .bros,
+            hasFreshWarmSnapshot: true
+        ) == 0)
+        #expect(FirstFrameTabContentPolicy.initialContentMountDelayMilliseconds(
+            tab: .history,
+            hasFreshWarmSnapshot: true
+        ) == 0)
     }
 
     @Test
@@ -336,7 +358,7 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
-    func startupWarmupLaunchPolicyStartsWarmupsWithoutBlockingMainEntry() {
+    func startupWarmupLaunchPolicyStartsWarmupsAndOnlyWaitsOnFirstRun() {
         #expect(StartupWarmupLaunchPolicy.shouldStartNonblockingWarmups(
             skipsSplash: false,
             hasBackgroundStore: true,
@@ -362,17 +384,25 @@ struct AppLaunchWarmupTests {
             shouldWarmBros: true
         ))
 
-        #expect(!StartupWarmupLaunchPolicy.shouldWaitForWarmupsBeforeMainEntry(
+        #expect(StartupWarmupLaunchPolicy.shouldWaitForWarmupsBeforeMainEntry(
             skipsSplash: false,
-            hasAnyWarmup: true
+            hasAnyWarmup: true,
+            isFirstRunLaunch: true
         ))
         #expect(!StartupWarmupLaunchPolicy.shouldWaitForWarmupsBeforeMainEntry(
             skipsSplash: true,
-            hasAnyWarmup: true
+            hasAnyWarmup: true,
+            isFirstRunLaunch: true
         ))
         #expect(!StartupWarmupLaunchPolicy.shouldWaitForWarmupsBeforeMainEntry(
             skipsSplash: false,
-            hasAnyWarmup: false
+            hasAnyWarmup: true,
+            isFirstRunLaunch: false
+        ))
+        #expect(!StartupWarmupLaunchPolicy.shouldWaitForWarmupsBeforeMainEntry(
+            skipsSplash: false,
+            hasAnyWarmup: false,
+            isFirstRunLaunch: true
         ))
     }
 

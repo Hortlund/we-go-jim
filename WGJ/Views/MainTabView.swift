@@ -161,6 +161,7 @@ struct MainTabView: View {
             tab: tab,
             deferInitialContentMount: false,
             preloadContent: false,
+            initialContentMountDelayMilliseconds: 0,
             firstFrameShell: { EmptyView() },
             content: content
         )
@@ -182,6 +183,10 @@ struct MainTabView: View {
             tab: tab,
             deferInitialContentMount: FirstFrameTabContentPolicy.shouldDeferInitialContentMount(tab: tab),
             preloadContent: shouldPreloadDeferredTab(tab),
+            initialContentMountDelayMilliseconds: FirstFrameTabContentPolicy.initialContentMountDelayMilliseconds(
+                tab: tab,
+                hasFreshWarmSnapshot: hasFreshWarmSnapshot(for: tab)
+            ),
             firstFrameShell: firstFrameShell,
             content: content
         )
@@ -197,13 +202,24 @@ struct MainTabView: View {
         case .profile:
             return FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
                 tab: tab,
-                hasFreshWarmSnapshot: appWarmupState.freshProfile() != nil
+                hasFreshWarmSnapshot: hasFreshWarmSnapshot(for: tab)
             )
         case .bros:
             return FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
                 tab: tab,
-                hasFreshWarmSnapshot: appWarmupState.freshBros() != nil
+                hasFreshWarmSnapshot: hasFreshWarmSnapshot(for: tab)
             )
+        case .history, .startWorkout, .exercises:
+            return false
+        }
+    }
+
+    private func hasFreshWarmSnapshot(for tab: AppMainTab) -> Bool {
+        switch tab {
+        case .profile:
+            return appWarmupState.freshProfile() != nil
+        case .bros:
+            return appWarmupState.freshBros() != nil
         case .history, .startWorkout, .exercises:
             return false
         }
@@ -564,6 +580,7 @@ private struct LazyTabContainer<Content: View, FirstFrameShell: View>: View {
     let tab: AppMainTab
     let deferInitialContentMount: Bool
     let preloadContent: Bool
+    let initialContentMountDelayMilliseconds: Int
     let firstFrameShell: () -> FirstFrameShell
     let content: () -> Content
 
@@ -598,6 +615,18 @@ private struct LazyTabContainer<Content: View, FirstFrameShell: View>: View {
             guard shouldPreload else { return }
             markLoaded()
         }
+        .onChange(of: initialContentMountDelayMilliseconds) { _, delayMilliseconds in
+            guard delayMilliseconds == 0,
+                  deferInitialContentMount,
+                  tabState.selectedTab == tab,
+                  !hasLoaded
+            else {
+                return
+            }
+
+            cancelPendingInitialContentMountIfNeeded()
+            mountInitialContentNow()
+        }
         .onChange(of: tabState.selectedTab) { _, _ in
             guard !deferInitialContentMount || isSelectionObservationReady else { return }
             handleSelectionChange(isSelectionChange: true)
@@ -618,6 +647,11 @@ private struct LazyTabContainer<Content: View, FirstFrameShell: View>: View {
 
         guard deferInitialContentMount else {
             handleSelectionChange(isSelectionChange: false)
+            return
+        }
+
+        if tabState.selectedTab == tab, initialContentMountDelayMilliseconds == 0 {
+            mountInitialContentNow()
             return
         }
 
@@ -667,10 +701,19 @@ private struct LazyTabContainer<Content: View, FirstFrameShell: View>: View {
         scheduleInitialContentMount()
     }
 
+    private func mountInitialContentNow() {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            isInitialContentMountReady = true
+            markLoaded()
+        }
+    }
+
     private func scheduleInitialContentMount() {
         guard initialContentMountTask == nil else { return }
         initialContentMountTask = Task { @MainActor in
-            let delayMilliseconds = initialContentMountDelayMilliseconds()
+            let delayMilliseconds = resolvedInitialContentMountDelayMilliseconds()
             if delayMilliseconds > 0 {
                 try? await Task.sleep(for: .milliseconds(delayMilliseconds))
             } else {
@@ -681,18 +724,13 @@ private struct LazyTabContainer<Content: View, FirstFrameShell: View>: View {
                 return
             }
 
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                isInitialContentMountReady = true
-                markLoaded()
-            }
+            mountInitialContentNow()
             initialContentMountTask = nil
         }
     }
 
-    private func initialContentMountDelayMilliseconds() -> Int {
-        let defaultDelay = FirstFrameTabContentPolicy.initialContentMountDelayMilliseconds(tab: tab)
+    private func resolvedInitialContentMountDelayMilliseconds() -> Int {
+        let defaultDelay = initialContentMountDelayMilliseconds
 #if DEBUG
         guard defaultDelay > 0,
               let rawValue = Self.processOverrideValue(for: "UITEST_FIRST_TAB_CONTENT_MOUNT_DELAY_MS"),

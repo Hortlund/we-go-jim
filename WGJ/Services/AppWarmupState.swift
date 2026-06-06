@@ -79,9 +79,12 @@ nonisolated enum StartupWarmupLaunchPolicy {
 
     static func shouldWaitForWarmupsBeforeMainEntry(
         skipsSplash: Bool,
-        hasAnyWarmup: Bool
+        hasAnyWarmup: Bool,
+        isFirstRunLaunch: Bool
     ) -> Bool {
-        false
+        !skipsSplash
+            && hasAnyWarmup
+            && isFirstRunLaunch
     }
 }
 
@@ -217,10 +220,19 @@ nonisolated enum FirstFrameTabContentPolicy {
         }
     }
 
-    static func initialContentMountDelayMilliseconds(tab: AppMainTab) -> Int {
-        shouldDeferInitialContentMount(tab: tab)
-            ? transitionSafeContentMountDelayMilliseconds
-            : 0
+    static func initialContentMountDelayMilliseconds(
+        tab: AppMainTab,
+        hasFreshWarmSnapshot: Bool = false
+    ) -> Int {
+        guard shouldDeferInitialContentMount(tab: tab) else {
+            return 0
+        }
+
+        guard !hasFreshWarmSnapshot else {
+            return 0
+        }
+
+        return transitionSafeContentMountDelayMilliseconds
     }
 
     static func shouldScheduleInitialContentMount(
