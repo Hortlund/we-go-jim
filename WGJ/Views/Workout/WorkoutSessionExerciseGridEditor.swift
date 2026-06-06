@@ -2998,6 +2998,7 @@ private extension View {
     func metricInputShell(isFocused: Bool) -> some View {
         padding(.vertical, 11)
             .padding(.horizontal, 12)
+            .frame(minHeight: 54)
             .background {
                 RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
                     .fill(isFocused ? WGJTheme.fieldStrong : WGJTheme.field.opacity(0.88))

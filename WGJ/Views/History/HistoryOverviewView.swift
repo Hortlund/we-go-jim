@@ -4,6 +4,7 @@ import SwiftUI
 
 struct HistoryOverviewView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(\.isTabActive) private var isTabActive
 
     @State private var selectedDayFilter: Date?
@@ -122,7 +123,7 @@ struct HistoryOverviewView: View {
 
     private func openWorkoutCalendar() {
         let referenceDate = selectedDayFilter
-            ?? controller.completedSessions.first.map { $0.endedAt ?? $0.startedAt }
+            ?? controller.completedSessions.first.map(\.displayDate)
             ?? Date()
         displayedCalendarMonth = startOfMonth(for: referenceDate)
         showingWorkoutCalendar = true
@@ -199,12 +200,24 @@ struct HistoryOverviewView: View {
     @MainActor
     private func reloadSnapshot(contentUpdatedAt: Date?) async {
         do {
-            try WGJPerformance.measure("history-overview.snapshot.reload") {
-                try controller.reload(
-                    modelContext: modelContext,
-                    selectedDayFilter: selectedDayFilter
-                )
+            let loaded: HistoryOverviewLoadedSnapshot
+            let dayFilter = selectedDayFilter
+            if let appBackgroundStore {
+                loaded = try await appBackgroundStore.perform("history-overview.snapshot.reload") { backgroundContext in
+                    try HistoryOverviewSnapshotLoader.load(
+                        modelContext: backgroundContext,
+                        selectedDayFilter: dayFilter
+                    )
+                }
+            } else {
+                loaded = try WGJPerformance.measure("history-overview.snapshot.reload") {
+                    try HistoryOverviewSnapshotLoader.load(
+                        modelContext: modelContext,
+                        selectedDayFilter: dayFilter
+                    )
+                }
             }
+            controller.apply(loaded)
             hasLoadedSnapshot = true
             needsExplicitRefresh = false
             lastLoadedContentUpdatedAt = contentUpdatedAt
@@ -227,7 +240,7 @@ struct HistoryMonthSection: Identifiable {
     let cards: [HistorySessionCardData]
 }
 
-struct HistorySessionCardData: Identifiable, Equatable {
+nonisolated struct HistorySessionCardData: Identifiable, Equatable, Sendable {
     let id: String
     let sessionID: UUID
     let updatedAtStamp: TimeInterval
@@ -239,7 +252,23 @@ struct HistorySessionCardData: Identifiable, Equatable {
     let summaryRows: [HistorySessionSummaryRow]
 }
 
-struct HistoryOverviewSnapshot {
+nonisolated struct HistoryOverviewSessionSnapshot: Identifiable, Equatable, Sendable {
+    let id: UUID
+    let updatedAt: Date
+    let name: String
+    let startedAt: Date
+    let endedAt: Date?
+    let durationSeconds: Int
+    let totalVolume: Double
+    let prHitsCount: Int
+    let summaryRows: [HistorySessionSummaryRow]
+
+    var displayDate: Date {
+        endedAt ?? startedAt
+    }
+}
+
+nonisolated struct HistoryOverviewSnapshot: Sendable {
     let workoutCountsByDay: [Date: Int]
     let sections: [HistoryMonthSection]
 
@@ -252,33 +281,29 @@ struct HistoryOverviewSnapshot {
 @MainActor
 @Observable
 final class HistoryOverviewController {
-    var completedSessions: [WorkoutSession] = []
+    var completedSessions: [HistoryOverviewSessionSnapshot] = []
     var snapshot = HistoryOverviewSnapshot.empty
 
-    func reload(
-        modelContext: ModelContext,
-        selectedDayFilter: Date?
-    ) throws {
-        let loaded = try HistoryOverviewSnapshotLoader.load(
-            modelContext: modelContext,
-            selectedDayFilter: selectedDayFilter
-        )
+    func apply(_ loaded: HistoryOverviewLoadedSnapshot) {
         completedSessions = loaded.completedSessions
         snapshot = loaded.snapshot
     }
 }
 
-struct HistoryOverviewLoadedSnapshot {
-    let completedSessions: [WorkoutSession]
+nonisolated struct HistoryOverviewLoadedSnapshot: Sendable {
+    let completedSessions: [HistoryOverviewSessionSnapshot]
     let snapshot: HistoryOverviewSnapshot
 }
 
-enum HistoryOverviewSnapshotLoader {
-    static func load(
+nonisolated enum HistoryOverviewSnapshotLoader {
+    nonisolated static func load(
         modelContext: ModelContext,
         selectedDayFilter: Date?
     ) throws -> HistoryOverviewLoadedSnapshot {
-        let completedSessions = try WorkoutSessionRepository(modelContext: modelContext).completedSessions()
+        let completedSessions = try WorkoutSessionRepository(modelContext: modelContext)
+            .completedSessions()
+            .filter { $0.archivedAt == nil }
+            .map(HistoryOverviewSessionSnapshot.init(session:))
         return HistoryOverviewLoadedSnapshot(
             completedSessions: completedSessions,
             snapshot: HistoryOverviewSnapshotBuilder.build(
@@ -289,22 +314,19 @@ enum HistoryOverviewSnapshotLoader {
     }
 }
 
-@MainActor
-enum HistoryOverviewSnapshotBuilder {
-    static func build(
-        sessions: [WorkoutSession],
+nonisolated enum HistoryOverviewSnapshotBuilder {
+    nonisolated static func build(
+        sessions: [HistoryOverviewSessionSnapshot],
         selectedDayFilter: Date?,
         calendar: Calendar = .current
     ) -> HistoryOverviewSnapshot {
-        let completedSessions = sessions.filter {
-            $0.status == .completed && $0.archivedAt == nil
-        }
+        let completedSessions = sessions
         let selectedDayStart = selectedDayFilter.map { startOfDay(for: $0, calendar: calendar) }
 
         var workoutCountsByDay: [Date: Int] = [:]
-        var sessionsByMonth: [Date: [WorkoutSession]] = [:]
+        var sessionsByMonth: [Date: [HistoryOverviewSessionSnapshot]] = [:]
         for session in completedSessions {
-            let sessionDate = session.endedAt ?? session.startedAt
+            let sessionDate = session.displayDate
             let day = startOfDay(for: sessionDate, calendar: calendar)
             workoutCountsByDay[day, default: 0] += 1
             let shouldIncludeSession = selectedDayStart.map { $0 == day } ?? true
@@ -316,7 +338,7 @@ enum HistoryOverviewSnapshotBuilder {
 
         let sections = sessionsByMonth.keys.sorted(by: >).map { key in
             let orderedSessions = sessionsByMonth[key, default: []].sorted { lhs, rhs in
-                (lhs.endedAt ?? lhs.startedAt) > (rhs.endedAt ?? rhs.startedAt)
+                lhs.displayDate > rhs.displayDate
             }
 
             return HistoryMonthSection(
@@ -332,7 +354,21 @@ enum HistoryOverviewSnapshotBuilder {
         )
     }
 
-    private static func makeCardData(_ session: WorkoutSession) -> HistorySessionCardData {
+    nonisolated static func build(
+        sessions: [WorkoutSession],
+        selectedDayFilter: Date?,
+        calendar: Calendar = .current
+    ) -> HistoryOverviewSnapshot {
+        build(
+            sessions: sessions
+                .filter { $0.status == .completed && $0.archivedAt == nil }
+                .map(HistoryOverviewSessionSnapshot.init(session:)),
+            selectedDayFilter: selectedDayFilter,
+            calendar: calendar
+        )
+    }
+
+    nonisolated private static func makeCardData(_ session: HistoryOverviewSessionSnapshot) -> HistorySessionCardData {
         HistorySessionCardData(
             id: session.id.uuidString,
             sessionID: session.id,
@@ -342,16 +378,15 @@ enum HistoryOverviewSnapshotBuilder {
             durationText: formattedDuration(session.durationSeconds),
             volumeText: formattedVolume(session.totalVolume),
             prsText: "\(session.prHitsCount) PR\(session.prHitsCount == 1 ? "" : "s")",
-            summaryRows: HistorySessionSummaryBuilder.rows(for: session)
+            summaryRows: session.summaryRows
         )
     }
 
-    private static func formattedSessionDate(_ session: WorkoutSession) -> String {
-        let value = session.endedAt ?? session.startedAt
-        return value.formatted(date: .abbreviated, time: .shortened)
+    nonisolated private static func formattedSessionDate(_ session: HistoryOverviewSessionSnapshot) -> String {
+        session.displayDate.formatted(date: .abbreviated, time: .shortened)
     }
 
-    private static func formattedDuration(_ seconds: Int) -> String {
+    nonisolated private static func formattedDuration(_ seconds: Int) -> String {
         let mins = max(0, seconds) / 60
         let hours = mins / 60
         let remMins = mins % 60
@@ -361,20 +396,36 @@ enum HistoryOverviewSnapshotBuilder {
         return "\(remMins)m"
     }
 
-    private static func formattedVolume(_ volume: Double) -> String {
+    nonisolated private static func formattedVolume(_ volume: Double) -> String {
         if volume == 0 {
             return "0 kg"
         }
         return "\(WGJFormatters.integerString(volume)) kg"
     }
 
-    private static func startOfMonth(for date: Date, calendar: Calendar) -> Date {
+    nonisolated private static func startOfMonth(for date: Date, calendar: Calendar) -> Date {
         let components = calendar.dateComponents([.year, .month], from: date)
         return calendar.date(from: components) ?? date
     }
 
-    private static func startOfDay(for date: Date, calendar: Calendar) -> Date {
+    nonisolated private static func startOfDay(for date: Date, calendar: Calendar) -> Date {
         calendar.startOfDay(for: date)
+    }
+}
+
+extension HistoryOverviewSessionSnapshot {
+    nonisolated init(session: WorkoutSession) {
+        self.init(
+            id: session.id,
+            updatedAt: session.updatedAt,
+            name: session.name,
+            startedAt: session.startedAt,
+            endedAt: session.endedAt,
+            durationSeconds: session.durationSeconds,
+            totalVolume: session.totalVolume,
+            prHitsCount: session.prHitsCount,
+            summaryRows: HistorySessionSummaryBuilder.rows(for: session)
+        )
     }
 }
 
@@ -494,8 +545,8 @@ private struct HistorySessionCardView: View, Equatable {
 
 }
 
-enum HistorySessionSummaryBuilder {
-    static func rows(for session: WorkoutSession) -> [HistorySessionSummaryRow] {
+nonisolated enum HistorySessionSummaryBuilder {
+    nonisolated static func rows(for session: WorkoutSession) -> [HistorySessionSummaryRow] {
         let exercises = (session.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
         return exercises.enumerated().map { index, exercise in
             let sets = (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
@@ -508,7 +559,7 @@ enum HistorySessionSummaryBuilder {
     }
 }
 
-struct HistorySessionSummaryRow: Identifiable, Equatable {
+nonisolated struct HistorySessionSummaryRow: Identifiable, Equatable, Sendable {
     let id: Int
     let exercise: String
     let bestSet: String

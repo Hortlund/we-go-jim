@@ -81,7 +81,7 @@ nonisolated enum StartupWarmupLaunchPolicy {
         skipsSplash: Bool,
         hasAnyWarmup: Bool
     ) -> Bool {
-        !skipsSplash && hasAnyWarmup
+        false
     }
 }
 
@@ -271,6 +271,15 @@ enum BrosWarmStateSnapshot: Equatable, Sendable {
     case unavailable(String)
     case onboarding
     case active(BrosFeedSnapshot)
+
+    var canSkipInitialActivationRefresh: Bool {
+        switch self {
+        case .active, .onboarding:
+            return true
+        case .loading, .unavailable:
+            return false
+        }
+    }
 }
 
 struct BrosWarmSnapshot: Equatable, Sendable {
@@ -471,6 +480,13 @@ nonisolated enum TimestampedReloadPolicy {
 }
 
 nonisolated enum ProfileReloadPolicy {
+    static func shouldReloadAfterApplyingWarmSnapshot(
+        force: Bool,
+        didApplyWarmSnapshot: Bool
+    ) -> Bool {
+        force || !didApplyWarmSnapshot
+    }
+
     static func shouldReload(
         hasLoadedProfile: Bool,
         needsExplicitRefresh: Bool,

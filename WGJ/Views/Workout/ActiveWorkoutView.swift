@@ -36,10 +36,13 @@ struct ActiveWorkoutView: View {
     @State private var foregroundNonCriticalInteractionWorkTask: Task<Void, Never>?
     @State private var pendingGuidanceRefreshTask: Task<Void, Never>?
     @State private var pendingUserEditSnapshotTask: Task<Void, Never>?
+    @State private var pendingMinimizedSnapshotTask: Task<Void, Never>?
     @State private var pendingGuidanceRefreshExerciseIDs: Set<UUID> = []
     @State private var shouldRefreshAllGuidance = false
     @State private var cardStateController = ActiveWorkoutExerciseCardStateController()
     @State private var renderProjection = ActiveWorkoutRenderProjection.empty
+    @State private var isBatchingRenderProjectionRefresh = false
+    @State private var needsBatchedRenderProjectionRefresh = false
     @State private var currentScrollTarget: ActiveWorkoutScrollTarget?
     @State private var restoredScrollTarget: ActiveWorkoutScrollTarget?
     @State private var profilePreferences = ActiveWorkoutProfilePreferences.default
@@ -816,6 +819,22 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func refreshRenderProjection() {
+        guard !isBatchingRenderProjectionRefresh else {
+            needsBatchedRenderProjectionRefresh = true
+            return
+        }
+
+        renderProjection = ActiveWorkoutRenderProjectionBuilder.build(
+            session: runtimeSession,
+            setDraftsByExerciseID: setDraftsByExerciseID,
+            pendingCardioCompletionsByPhase: pendingCardioCompletionsByPhase
+        )
+    }
+
+    @MainActor
+    private func flushBatchedRenderProjectionIfNeeded() {
+        guard needsBatchedRenderProjectionRefresh else { return }
+        needsBatchedRenderProjectionRefresh = false
         renderProjection = ActiveWorkoutRenderProjectionBuilder.build(
             session: runtimeSession,
             setDraftsByExerciseID: setDraftsByExerciseID,
@@ -937,7 +956,8 @@ struct ActiveWorkoutView: View {
             restsByExerciseID: restByExerciseID.filter { currentExerciseIDs.contains($0.key) },
             notesByExerciseID: notesByExerciseID.filter { currentExerciseIDs.contains($0.key) },
             catalogMatchesByUUID: catalogMatchesByUUID,
-            previousResolutionByExerciseID: previousResolutionByExerciseID.filter { currentExerciseIDs.contains($0.key) }
+            previousResolutionByExerciseID: previousResolutionByExerciseID.filter { currentExerciseIDs.contains($0.key) },
+            guidanceByExerciseID: guidanceByExerciseID.filter { currentExerciseIDs.contains($0.key) }
         )
     }
 
@@ -1141,6 +1161,9 @@ struct ActiveWorkoutView: View {
         refreshRenderProjection()
         previousResolutionByExerciseID.merge(
             snapshot.previousResolutionByExerciseID.filter { exerciseIDs.contains($0.key) }
+        ) { _, new in new }
+        guidanceByExerciseID.merge(
+            snapshot.guidanceByExerciseID.filter { exerciseIDs.contains($0.key) }
         ) { _, new in new }
         catalogMatchesByUUID.merge(snapshot.catalogMatchesByUUID) { _, new in new }
     }
@@ -1933,8 +1956,7 @@ struct ActiveWorkoutView: View {
             guard !isEndingSession else { return }
             isEndingSession = true
             rowFlushCoordinator.flushAll()
-            await pendingUserEditSnapshotTask?.value
-            pendingUserEditSnapshotTask = nil
+            await awaitPendingSnapshotWrites(cancelMinimizedWrite: true)
             guard let finishingSession = currentRuntimeSnapshot() else {
                 isEndingSession = false
                 showError(WorkoutSessionRepositoryError.sessionNotFound)
@@ -2088,6 +2110,32 @@ struct ActiveWorkoutView: View {
             for: sessionID
         )
         activeWorkoutPresentationState.stageScrollTarget(minimizedScrollRestoreTarget(), for: sessionID)
+        scheduleMinimizedDurableSnapshotSave(snapshot)
+    }
+
+    @MainActor
+    private func scheduleMinimizedDurableSnapshotSave(_ snapshot: ActiveWorkoutRuntimeSession) {
+        guard ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: .minimize) else {
+            return
+        }
+
+        let restTimerSnapshot = restTimerState.restTimerSnapshot()
+        pendingMinimizedSnapshotTask?.cancel()
+        pendingMinimizedSnapshotTask = Task(priority: .utility) {
+            guard !Task.isCancelled else { return }
+            do {
+                try await ActiveWorkoutSnapshotStore.shared.save(
+                    snapshot,
+                    restTimer: restTimerSnapshot,
+                    preservesExistingRestTimer: false
+                )
+            } catch {
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    showError(error)
+                }
+            }
+        }
     }
 
     @MainActor
@@ -2116,8 +2164,7 @@ struct ActiveWorkoutView: View {
             guard !isEndingSession else { return }
             isEndingSession = true
             rowFlushCoordinator.flushAll()
-            await pendingUserEditSnapshotTask?.value
-            pendingUserEditSnapshotTask = nil
+            await awaitPendingSnapshotWrites(cancelMinimizedWrite: true)
             restTimerState.clearRestTimer()
 
             do {
@@ -2432,8 +2479,15 @@ struct ActiveWorkoutView: View {
     private func flushDirtyWritesNow(checkpoint: ActiveWorkoutLifecycleCheckpoint) async -> Bool {
         if checkpoint == .sceneTransition,
            !rowFlushCoordinator.hasDirtyRows,
-           pendingUserEditSnapshotTask == nil {
+           pendingUserEditSnapshotTask == nil,
+           pendingMinimizedSnapshotTask == nil {
             return true
+        }
+
+        let shouldBatchProjectionRefresh = checkpoint == .sceneTransition
+        if shouldBatchProjectionRefresh {
+            isBatchingRenderProjectionRefresh = true
+            needsBatchedRenderProjectionRefresh = false
         }
 
         switch checkpoint {
@@ -2442,16 +2496,49 @@ struct ActiveWorkoutView: View {
         case .finish, .cancel, .minimize, .userEdit:
             rowFlushCoordinator.flushAll()
         }
+
+        if shouldBatchProjectionRefresh {
+            isBatchingRenderProjectionRefresh = false
+            flushBatchedRenderProjectionIfNeeded()
+        }
+
         let pendingSnapshotTask = pendingUserEditSnapshotTask
         pendingUserEditSnapshotTask = nil
+        let pendingMinimizedSnapshotTask = pendingMinimizedSnapshotTask
+        self.pendingMinimizedSnapshotTask = nil
 
         if checkpoint == .sceneTransition {
+            pendingSnapshotTask?.cancel()
+            pendingMinimizedSnapshotTask?.cancel()
             await pendingSnapshotTask?.value
-            return true
+            await pendingMinimizedSnapshotTask?.value
+
+            guard let snapshot = currentRuntimeSnapshot() else {
+                pendingCardioCompletionsByPhase = [:]
+                return true
+            }
+
+            runtimeSession = snapshot
+            pendingCardioCompletionsByPhase = [:]
+            refreshRenderProjection()
+
+            do {
+                try await ActiveWorkoutSnapshotStore.shared.save(
+                    snapshot,
+                    restTimer: restTimerState.restTimerSnapshot(),
+                    preservesExistingRestTimer: false
+                )
+                return true
+            } catch {
+                showError(error)
+                return false
+            }
         }
 
         pendingSnapshotTask?.cancel()
+        pendingMinimizedSnapshotTask?.cancel()
         await pendingSnapshotTask?.value
+        await pendingMinimizedSnapshotTask?.value
 
         switch checkpoint {
         case .finish, .cancel:
@@ -2487,6 +2574,10 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func handleScenePhaseChange(_ newPhase: ScenePhase) {
+        if ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: newPhase) {
+            dismissKeyboard()
+        }
+
         // Foreground return must stay memory-only; non-critical work resumes from explicit user interactions.
         if ActiveWorkoutInteractionWorkPolicy.shouldCancelNonCriticalInteractionWork(scenePhase: newPhase) {
             cancelNonCriticalInteractionWorkForSceneTransition()
@@ -2577,6 +2668,21 @@ struct ActiveWorkoutView: View {
                 showError(error)
             }
         }
+    }
+
+    @MainActor
+    private func awaitPendingSnapshotWrites(cancelMinimizedWrite: Bool) async {
+        let pendingUserEditSnapshotTask = pendingUserEditSnapshotTask
+        self.pendingUserEditSnapshotTask = nil
+        let pendingMinimizedSnapshotTask = pendingMinimizedSnapshotTask
+        self.pendingMinimizedSnapshotTask = nil
+
+        pendingUserEditSnapshotTask?.cancel()
+        if cancelMinimizedWrite {
+            pendingMinimizedSnapshotTask?.cancel()
+        }
+        await pendingUserEditSnapshotTask?.value
+        await pendingMinimizedSnapshotTask?.value
     }
 
     private func performFinishCommand(
@@ -3658,7 +3764,8 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
             hasSession: session != nil,
             isEndingSession: isEndingSession,
             isKeyboardVisible: isKeyboardVisible,
-            isMetricInputFocused: isMetricInputFocused
+            isMetricInputFocused: isMetricInputFocused,
+            scenePhase: scenePhase
         )
     }
 

@@ -24,7 +24,7 @@ nonisolated enum ActiveWorkoutLifecycleCheckpoint {
 
 nonisolated enum ActiveWorkoutSnapshotPersistencePolicy {
     static func shouldWriteDurableSnapshot(for checkpoint: ActiveWorkoutLifecycleCheckpoint) -> Bool {
-        checkpoint == .userEdit || checkpoint == .sceneTransition
+        checkpoint == .userEdit || checkpoint == .sceneTransition || checkpoint == .minimize
     }
 
     static func shouldWriteDurableSnapshot(for summary: ActiveWorkoutSetDraftChangeSummary) -> Bool {
@@ -41,9 +41,10 @@ nonisolated enum ActiveWorkoutKeyboardChromePolicy {
         hasSession: Bool,
         isEndingSession: Bool,
         isKeyboardVisible: Bool,
-        isMetricInputFocused: Bool
+        isMetricInputFocused: Bool,
+        scenePhase: ScenePhase = .active
     ) -> Bool {
-        hasSession && !isEndingSession && !isKeyboardVisible && !isMetricInputFocused
+        scenePhase == .active && hasSession && !isEndingSession && !isKeyboardVisible && !isMetricInputFocused
     }
 
     static func shouldShowFloatingKeyboardDismissButton(

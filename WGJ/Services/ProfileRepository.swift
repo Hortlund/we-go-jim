@@ -218,7 +218,7 @@ nonisolated final class ProfileRepository {
         Task.detached(priority: .utility) {
             let backgroundContext = ModelContext(container)
             backgroundContext.autosaveEnabled = false
-            try? CloudKitBrosSocialService(modelContext: backgroundContext)?
+            try? CloudKitBrosSocialService.makeIfUserDataSyncEnabled(modelContext: backgroundContext)?
                 .queueCurrentProfileSync()
         }
     }

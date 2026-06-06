@@ -268,12 +268,17 @@ struct MainTabView: View {
             NavigationStack {
                 ActiveWorkoutView(sessionID: activeSessionID)
             }
-            .frame(width: size.width, height: size.height)
+            .frame(width: sanitizedOverlayLength(size.width), height: sanitizedOverlayLength(size.height))
             .background(WGJTheme.bgBase.ignoresSafeArea())
             .transition(activeWorkoutOverlayTransition)
             .zIndex(20)
             .accessibilityIdentifier("active-workout-overlay")
         }
+    }
+
+    private func sanitizedOverlayLength(_ value: CGFloat) -> CGFloat {
+        guard value.isFinite else { return 0 }
+        return max(value, 0)
     }
 
     private var shouldShowSyncBanner: Bool {

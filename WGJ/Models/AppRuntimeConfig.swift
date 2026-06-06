@@ -112,7 +112,7 @@ nonisolated enum AppRuntimeConfig {
     static let supportXHandle = "@AndreasHortlund"
     static let supportXURL = URL(string: "https://x.com/AndreasHortlund")
     static let privacyPolicyURL = URL(string: "https://highball.se/wgj/privacy/")
-    static let supportURL = URL(string: "https://highball.se/wgj/privacy/")
+    static let supportURL = URL(string: "https://highball.se/wgj/index.html")
     static let reviewPolicy = AppReviewPolicy(
         brosEnabled: true,
         syncBrosAvatars: true
@@ -799,13 +799,15 @@ nonisolated struct ActiveWorkoutPreparedFirstRenderSnapshot: Equatable, Sendable
     let notesByExerciseID: [UUID: String]
     let catalogMatchesByUUID: [String: TrainingGuidanceCatalogSnapshot]
     let previousResolutionByExerciseID: [UUID: WorkoutPreviousPerformanceResolution]
+    let guidanceByExerciseID: [UUID: ActiveWorkoutExerciseGuidancePresentation?]
 
     static let empty = ActiveWorkoutPreparedFirstRenderSnapshot(
         draftsByExerciseID: [:],
         restsByExerciseID: [:],
         notesByExerciseID: [:],
         catalogMatchesByUUID: [:],
-        previousResolutionByExerciseID: [:]
+        previousResolutionByExerciseID: [:],
+        guidanceByExerciseID: [:]
     )
 }
 

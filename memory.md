@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-06-06 - Active Workout Minimize Snapshot Writes Must Be Ordered
+
+- Date: 2026-06-06
+- Trigger/Problem: Adding a durable snapshot on active-workout minimize initially used an untracked fire-and-forget save, which could race with finish/cancel snapshot deletion or a quick reopen edit.
+- Root Cause: Minimize is a UI dismissal path, but its durability write still touches the same local active-workout snapshot file as foreground edit, background, finish, and cancel flows. Untracked snapshot tasks can recreate stale recovery files after a workout has ended.
+- Durable Rule: Any active-workout minimize durability checkpoint must be tracked and ordered with `pendingUserEditSnapshotTask`, finish, cancel, scene-transition, and later user-edit snapshot writes. Finish/cancel must cancel or await pending minimize writes before deleting the active snapshot.
+- How to Verify Next Time: Review `ActiveWorkoutView` for every `ActiveWorkoutSnapshotStore.shared.save/delete` path, then run `WGJTests/ActiveWorkoutRuntimeTests` and `WGJTests/AppPerformanceRuntimeTests`; if changing minimize/reopen, include a collapse/reopen and finish/cancel recovery smoke.
+- Status: active
+
 ## 2026-05-23 - RevenueCat TestFlight Uses Platform Public Key With Sandbox Receipts
 
 - Date: 2026-05-23
@@ -161,9 +170,9 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 - Date: 2026-04-25
 - Trigger/Problem: Staging only previous-performance before presenting Active Workout still allowed the first active render to show exercise loading cards and then catch up through async draft hydration.
-- Root Cause: The presentation handoff lacked set drafts, rest, notes, catalog hints, and persistence baselines, so first input could race the hydration task and the UI could still pay an avoidable first-frame update.
-- Durable Rule: Workout start/resume handoff should stage a full first-render snapshot for active logging: drafts, rest, notes, previous-performance, catalog hints, and the persisted baseline used for checkpoint diffs. Do not present a newly started workout with only previous-performance staged.
-- How to Verify Next Time: Start a template workout with previous values and immediately interact with pre-cardio and the first set field; confirm the first exercise renders from prepared draft data, no loading card is needed for normal starts, and an immediate lifecycle flush still persists typed values.
+- Root Cause: The presentation handoff lacked set drafts, rest, notes, catalog hints, guidance cache, and persistence baselines, so first input or minimized reopen could race hydration/guidance refresh tasks and the UI could still pay avoidable first-frame updates.
+- Durable Rule: Workout start/resume/minimize handoff should stage a full first-render snapshot for active logging: drafts, rest, notes, previous-performance, catalog hints, coach guidance, and the persisted baseline used for checkpoint diffs. Do not present a newly started or reopened workout with only previous-performance staged.
+- How to Verify Next Time: Start a template workout with previous values, then immediately interact with pre-cardio and the first set field; also collapse and reopen the active workout. Confirm exercise cards render from prepared draft data, coach guidance badges are present immediately, no loading card is needed for normal starts, and an immediate lifecycle flush still persists typed values.
 - Status: active
 
 ## 2026-04-25 - Cold Tab Smoothness Needs UI Preload, Not Only Data Warmup
