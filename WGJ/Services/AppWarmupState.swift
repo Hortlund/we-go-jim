@@ -246,9 +246,10 @@ nonisolated enum FirstFrameTabContentPolicy {
 
     static func shouldPreloadDeferredContent(
         tab: AppMainTab,
-        hasFreshWarmSnapshot: Bool
+        hasFreshWarmSnapshot: Bool,
+        isWarmupActive: Bool = false
     ) -> Bool {
-        tab == .profile && hasFreshWarmSnapshot
+        tab == .profile && (hasFreshWarmSnapshot || isWarmupActive)
     }
 
     static func presentation(

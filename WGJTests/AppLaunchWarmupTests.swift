@@ -306,17 +306,25 @@ struct AppLaunchWarmupTests {
             tab: .profile,
             hasFreshWarmSnapshot: true
         ))
+        #expect(FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
+            tab: .profile,
+            hasFreshWarmSnapshot: false,
+            isWarmupActive: true
+        ))
         #expect(!FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
             tab: .bros,
-            hasFreshWarmSnapshot: true
+            hasFreshWarmSnapshot: true,
+            isWarmupActive: true
         ))
         #expect(!FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
             tab: .profile,
-            hasFreshWarmSnapshot: false
+            hasFreshWarmSnapshot: false,
+            isWarmupActive: false
         ))
         #expect(!FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
             tab: .history,
-            hasFreshWarmSnapshot: true
+            hasFreshWarmSnapshot: true,
+            isWarmupActive: true
         ))
     }
 

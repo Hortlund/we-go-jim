@@ -85,9 +85,29 @@ struct WeeklyGoalWidgetTests {
         #expect(source.contains("case .vibrant"))
         #expect(source.contains(".widgetAccentable()"))
         #expect(source.contains(".widgetAccentedRenderingMode("))
-        #expect(source.contains("templateLogo"))
+        #expect(source.contains("adaptedLogo"))
         #expect(source.contains("renderingMode == .fullColor"))
         #expect(source.contains("WGJWidgetPalette.templatePrimary"))
+    }
+
+    @Test
+    func widgetBrandBadgeKeepsLogoForAccentedRendering() throws {
+        let source = try String(contentsOf: widgetExtensionSourceURL(), encoding: .utf8)
+        let badge = try #require(sourceStruct(named: "WGJWidgetBrandBadge", in: source))
+
+        #expect(badge.contains("Image(\"WidgetLogo\")"))
+        #expect(badge.contains("WidgetAccentedRenderingMode.fullColor"))
+        #expect(badge.contains("WidgetAccentedRenderingMode.desaturated"))
+        #expect(!badge.contains("Text(\"W\")"))
+    }
+
+    @Test
+    func widgetContainerBackgroundLetsWidgetKitOwnAccentedRemoval() throws {
+        let source = try String(contentsOf: widgetExtensionSourceURL(), encoding: .utf8)
+        let background = try #require(sourceStruct(named: "WGJWidgetBackground", in: source))
+
+        #expect(background.contains("fullColorBackground"))
+        #expect(!background.contains("Color.clear"))
     }
 
     @Test
@@ -433,6 +453,32 @@ struct WeeklyGoalWidgetTests {
     private func sourceFunction(named name: String, in source: String) -> String? {
         guard
             let signatureRange = source.range(of: "func \(name)"),
+            let openBrace = source[signatureRange.lowerBound...].firstIndex(of: "{")
+        else {
+            return nil
+        }
+
+        var depth = 0
+        var cursor = openBrace
+        while cursor < source.endIndex {
+            let character = source[cursor]
+            if character == "{" {
+                depth += 1
+            } else if character == "}" {
+                depth -= 1
+                if depth == 0 {
+                    return String(source[signatureRange.lowerBound...cursor])
+                }
+            }
+            cursor = source.index(after: cursor)
+        }
+
+        return nil
+    }
+
+    private func sourceStruct(named name: String, in source: String) -> String? {
+        guard
+            let signatureRange = source.range(of: "struct \(name)"),
             let openBrace = source[signatureRange.lowerBound...].firstIndex(of: "{")
         else {
             return nil

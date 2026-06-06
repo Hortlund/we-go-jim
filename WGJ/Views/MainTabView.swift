@@ -205,12 +205,14 @@ struct MainTabView: View {
         case .profile:
             return FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
                 tab: tab,
-                hasFreshWarmSnapshot: hasFreshWarmSnapshot(for: tab)
+                hasFreshWarmSnapshot: hasFreshWarmSnapshot(for: tab),
+                isWarmupActive: appWarmupState.isProfileWarmupActive
             )
         case .bros:
             return FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
                 tab: tab,
-                hasFreshWarmSnapshot: hasFreshWarmSnapshot(for: tab)
+                hasFreshWarmSnapshot: hasFreshWarmSnapshot(for: tab),
+                isWarmupActive: appWarmupState.isBrosWarmupActive
             )
         case .history, .startWorkout, .exercises:
             return false

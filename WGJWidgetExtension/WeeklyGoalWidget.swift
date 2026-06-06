@@ -18,19 +18,8 @@ private enum WGJWidgetLayout {
 }
 
 private struct WGJWidgetBackground: View {
-    @Environment(\.widgetRenderingMode) private var renderingMode
-
     var body: some View {
-        switch renderingMode {
-        case .fullColor:
-            fullColorBackground
-        case .accented:
-            Color.clear
-        case .vibrant:
-            Color.clear
-        default:
-            fullColorBackground
-        }
+        fullColorBackground
     }
 
     private var fullColorBackground: some View {
@@ -456,7 +445,7 @@ private struct WGJWidgetBrandBadge: View {
         if renderingMode == .fullColor {
             fullColorLogo
         } else {
-            templateLogo
+            adaptedLogo
         }
     }
 
@@ -484,14 +473,19 @@ private struct WGJWidgetBrandBadge: View {
             .accessibilityHidden(true)
     }
 
-    private var templateLogo: some View {
-        Text("W")
-            .font(.system(size: max(10, size * 0.64), weight: .black, design: .rounded))
-            .foregroundStyle(WGJWidgetPalette.templatePrimary)
-            .minimumScaleFactor(0.7)
-            .lineLimit(1)
-            .frame(width: size, height: size)
-            .accessibilityHidden(true)
+    @ViewBuilder
+    private var adaptedLogo: some View {
+        if #available(iOS 18.0, *) {
+            Image("WidgetLogo")
+                .resizable()
+                .widgetAccentedRenderingMode(WidgetAccentedRenderingMode.desaturated)
+                .scaledToFit()
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: size * 0.24, style: .continuous))
+                .accessibilityHidden(true)
+        } else {
+            logoImage
+        }
     }
 }
 
