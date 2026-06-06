@@ -6,7 +6,7 @@ import Testing
 struct WeeklyGoalWidgetTests {
     @Test
     func widgetDescriptorUsesCacheResetKind() {
-        #expect(WeeklyGoalWidgetDescriptor.kind == "WGJWeeklyGoalWidgetV9")
+        #expect(WeeklyGoalWidgetDescriptor.kind == "WGJWeeklyGoalWidgetV10")
     }
 
     @Test
@@ -25,7 +25,7 @@ struct WeeklyGoalWidgetTests {
 
     @Test
     func storeUsesCacheResetSnapshotKey() {
-        #expect(WeeklyGoalWidgetStore.snapshotDefaultsKey == "weeklyGoalWidget.snapshot.v9")
+        #expect(WeeklyGoalWidgetStore.snapshotDefaultsKey == "weeklyGoalWidget.snapshot.v10")
         #expect(WeeklyGoalWidgetStore.legacySnapshotDefaultsKeys == [
             "weeklyGoalWidget.snapshot.v1",
             "weeklyGoalWidget.snapshot.v2",
@@ -35,6 +35,7 @@ struct WeeklyGoalWidgetTests {
             "weeklyGoalWidget.snapshot.v6",
             "weeklyGoalWidget.snapshot.v7",
             "weeklyGoalWidget.snapshot.v8",
+            "weeklyGoalWidget.snapshot.v9",
         ])
     }
 
