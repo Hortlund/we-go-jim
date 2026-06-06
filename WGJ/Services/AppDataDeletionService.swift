@@ -25,6 +25,8 @@ final class AppDataDeletionService {
     private let fileManager: FileManager
     private let socialDataDeleter: BrosCloudDataDeleting?
     private let socialDataDeleterFactory: @MainActor (ModelContext) -> BrosCloudDataDeleting?
+    private let clearWeeklyGoalWidgetSnapshot: @MainActor () -> Void
+    private let clearActiveWorkoutSnapshot: @MainActor () async throws -> Void
 
     init(
         modelContext: ModelContext,
@@ -32,12 +34,20 @@ final class AppDataDeletionService {
         socialDataDeleter: BrosCloudDataDeleting? = nil,
         socialDataDeleterFactory: @escaping @MainActor (ModelContext) -> BrosCloudDataDeleting? = { modelContext in
             CloudKitBrosSocialService.makeIfContainerAvailable(modelContext: modelContext)
+        },
+        clearWeeklyGoalWidgetSnapshot: @escaping @MainActor () -> Void = {
+            WeeklyGoalWidgetPublisher()?.clear()
+        },
+        clearActiveWorkoutSnapshot: @escaping @MainActor () async throws -> Void = {
+            try ActiveWorkoutSnapshotStore.shared.delete()
         }
     ) {
         self.modelContext = modelContext
         self.fileManager = fileManager
         self.socialDataDeleter = socialDataDeleter
         self.socialDataDeleterFactory = socialDataDeleterFactory
+        self.clearWeeklyGoalWidgetSnapshot = clearWeeklyGoalWidgetSnapshot
+        self.clearActiveWorkoutSnapshot = clearActiveWorkoutSnapshot
     }
 
     func deleteAllUserData() async throws {
@@ -45,6 +55,7 @@ final class AppDataDeletionService {
         let deleter = socialDataDeleter ?? socialDataDeleterFactory(modelContext)
 
         try deleteLocalData()
+        try await clearLocalArtifacts()
 
         if let deleter {
             do {
@@ -54,6 +65,7 @@ final class AppDataDeletionService {
             }
 
             try deleteLocalData()
+            try await clearLocalArtifacts()
         }
 
         if let cloudCleanupError {
@@ -84,6 +96,11 @@ final class AppDataDeletionService {
         try deleteAll(BlockedBro.self)
         try deleteAll(UserProfile.self)
         try modelContext.save()
+    }
+
+    private func clearLocalArtifacts() async throws {
+        clearWeeklyGoalWidgetSnapshot()
+        try await clearActiveWorkoutSnapshot()
     }
 
     private func clearExerciseImageCache() throws {

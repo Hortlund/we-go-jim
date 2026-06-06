@@ -82,22 +82,26 @@ struct WeeklyGoalWidget: Widget {
     let kind = WeeklyGoalWidgetDescriptor.kind
 
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: WeeklyGoalWidgetProvider()) { entry in
-            WeeklyGoalWidgetView(entry: entry)
-                .containerBackground(for: .widget) {
-                    WGJWidgetBackground()
-                }
-                .widgetURL(WeeklyGoalWidgetDeepLink.profileWeeklyGoalURL)
-        }
-        .configurationDisplayName("Weekly Goal")
-        .description("Track this week's workout target.")
-        .supportedFamilies([
-            .systemSmall,
-            .systemMedium,
-            .accessoryCircular,
-            .accessoryRectangular,
-        ])
+        weeklyGoalWidgetConfiguration(kind: kind)
     }
+}
+
+private func weeklyGoalWidgetConfiguration(kind: String) -> some WidgetConfiguration {
+    StaticConfiguration(kind: kind, provider: WeeklyGoalWidgetProvider()) { entry in
+        WeeklyGoalWidgetView(entry: entry)
+            .containerBackground(for: .widget) {
+                WGJWidgetBackground()
+            }
+            .widgetURL(WeeklyGoalWidgetDeepLink.profileWeeklyGoalURL)
+    }
+    .configurationDisplayName("Weekly Goal")
+    .description("Track this week's workout target.")
+    .supportedFamilies([
+        .systemSmall,
+        .systemMedium,
+        .accessoryCircular,
+        .accessoryRectangular,
+    ])
 }
 
 struct WeeklyGoalWidgetView: View {

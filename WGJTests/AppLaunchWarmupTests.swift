@@ -604,13 +604,13 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
-    func profileDashboardRenderPolicyDefersOnlyFirstDashboardMount() {
-        #expect(ProfileDashboardRenderPolicy.renderDelay(hasRenderedDashboardContent: false) == .milliseconds(900))
+    func profileDashboardRenderPolicyDefersFirstDashboardMountEvenWhenProfileSnapshotIsWarm() {
+        #expect(ProfileDashboardRenderPolicy.renderDelay(hasRenderedDashboardContent: false) == .milliseconds(450))
         #expect(ProfileDashboardRenderPolicy.renderDelay(hasRenderedDashboardContent: true) == .zero)
         #expect(ProfileDashboardRenderPolicy.renderDelay(
             hasRenderedDashboardContent: false,
             hasFreshWarmSnapshot: true
-        ) == .zero)
+        ) == .milliseconds(450))
     }
 
     @Test

@@ -4,23 +4,24 @@ import WidgetKit
 
 nonisolated final class WeeklyGoalWidgetPublisher {
     static let widgetKind = WeeklyGoalWidgetDescriptor.kind
+    static let widgetKinds = [WeeklyGoalWidgetDescriptor.kind]
 
     private let store: WeeklyGoalWidgetStore
-    private let reloadTimelines: () -> Void
+    private let reloadTimelines: (String) -> Void
 
     convenience init?() {
         guard let store = WeeklyGoalWidgetStore() else {
             return nil
         }
 
-        self.init(store: store) {
+        self.init(store: store) { _ in
             WidgetCenter.shared.reloadTimelines(ofKind: Self.widgetKind)
         }
     }
 
     init(
         store: WeeklyGoalWidgetStore,
-        reloadTimelines: @escaping () -> Void
+        reloadTimelines: @escaping (String) -> Void
     ) {
         self.store = store
         self.reloadTimelines = reloadTimelines
@@ -64,11 +65,11 @@ nonisolated final class WeeklyGoalWidgetPublisher {
         )
 
         try store.save(snapshot)
-        reloadTimelines()
+        reloadTimelines(Self.widgetKind)
     }
 
     func clear() {
         store.clear()
-        reloadTimelines()
+        reloadTimelines(Self.widgetKind)
     }
 }

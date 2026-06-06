@@ -49,6 +49,33 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-06-06 - Final Widget Resets Need One Registered Kind
+
+- Date: 2026-06-06
+- Trigger/Problem: Keeping legacy weekly goal widget aliases reduced old placed-widget risk, but it made the widget gallery show all previous sample entries and still did not fix the user's black physical-device widget.
+- Root Cause: WidgetKit treats each registered `kind` in the bundle as a separate widget type for gallery/discovery. Registering V2-V10 plus the original kind intentionally multiplies gallery entries, while already-black placed widgets can still stay stuck in host cache.
+- Durable Rule: For a hard widget reset, ship one new final widget `kind`, one current snapshot key, one `WidgetBundle` entry, and clear prior snapshot keys. Do not keep legacy alias widgets registered when the goal is to remove duplicate gallery samples. Tell the user to delete old placed widgets and add the new final widget because apps cannot programmatically remove Home Screen widgets.
+- How to Verify Next Time: Run `WGJTests/WeeklyGoalWidgetTests`, inspect the built `.appex` strings for only the current kind/key, verify the app-group snapshot key is current after launch, and add the widget from the gallery to confirm only one WGJ widget entry renders.
+- Status: active
+
+## 2026-06-06 - SwiftData Automatic Stores Resolve To App Group
+
+- Date: 2026-06-06
+- Trigger/Problem: The pasted CoreData log showed `HistoryProjection.store` under the app-group container even though `WGJApp.swift` did not explicitly pass an app-group `groupContainer` for that store in the old source.
+- Root Cause: In WGJ, `ModelConfiguration` defaults `groupContainer` to `.automatic`, and with the app-group entitlement present SwiftData resolves the named stores into `group.se.highball.WeGoJim`. Treating `.automatic` as the normal app data container led to a bad assumption about store relocation risk.
+- Durable Rule: Do not infer SwiftData store location from missing explicit `groupContainer` arguments in WGJ. Verify with simulator/device file layout or set `groupContainer` intentionally. If app-group stores fail to open, first make sure the app-group `Library/Application Support` parent exists before changing store locations or adding migration code.
+- How to Verify Next Time: On the signed-in simulator, uninstall/reinstall a clean build, launch once, then inspect the app-group `Library/Application Support` folder and runtime logs for CoreData sandbox/path errors before claiming store-layout fixes.
+- Status: active
+
+## 2026-06-06 - Widget Kind Bumps Need Legacy Aliases For Placed Widgets
+
+- Date: 2026-06-06
+- Trigger/Problem: The weekly goal widget still appeared as a black widget after many fixes and repeated `kind` bumps from the original widget kind through V10.
+- Root Cause: A Home Screen widget placed with an older WidgetKit `kind` can become a dead/stale host entry when the extension stops registering that kind. Bumping only to a new kind helps reset gallery/cache state but does not repair already placed widgets using prior identities.
+- Durable Rule: When bumping a WidgetKit `kind` during development, keep legacy kind aliases registered in the widget bundle until placed old widgets have a planned removal path, and reload timelines for every supported kind after publishing shared state. Do not keep solving black placed widgets with another kind bump alone.
+- How to Verify Next Time: Inspect recent kind history, confirm the extension binary contains the current kind plus legacy aliases for placed widgets, confirm the publisher reloads all supported kinds, and run `WGJTests/WeeklyGoalWidgetTests` plus a simulator build artifact string check.
+- Status: superseded by `2026-06-06 - Final Widget Resets Need One Registered Kind`. Legacy aliases can be useful for a planned compatibility window, but they are the wrong choice when the user wants duplicate gallery samples removed and is willing to reset the widget.
+
 ## 2026-06-06 - iOS 26 Widgets Need Rendering Mode Support
 
 - Date: 2026-06-06
@@ -83,7 +110,7 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 - Root Cause: WidgetKit can keep timeline/gallery/render state tied to the widget `kind`, so changing layout code and reloading timelines may not be enough to force a visible reset on a development device.
 - Durable Rule: For unreleased widgets with stubborn stale device renders, bump `WeeklyGoalWidgetDescriptor.kind` and keep the new kind. Do not change it back unless intentionally preserving or restoring the old WidgetKit identity.
 - How to Verify Next Time: After a kind bump, build and inspect the app and extension binaries for the new kind string, then remove the old placed widget and add the new widget from the gallery.
-- Status: active
+- Status: superseded by `2026-06-06 - Widget Kind Bumps Need Legacy Aliases For Placed Widgets`. Kind bumps can still reset stale gallery state, but they are not sufficient for already placed widgets unless legacy aliases remain registered.
 
 ## 2026-06-06 - Unreleased Features Do Not Need Internal Backward Compatibility
 

@@ -57,9 +57,9 @@ struct WorkoutSessionRepositoryTests {
         }
 
         let store = WeeklyGoalWidgetStore(defaults: defaults)
-        var reloadCount = 0
-        let publisher = WeeklyGoalWidgetPublisher(store: store) {
-            reloadCount += 1
+        var reloadedKinds: [String] = []
+        let publisher = WeeklyGoalWidgetPublisher(store: store) { kind in
+            reloadedKinds.append(kind)
         }
         let repository = WorkoutSessionRepository(
             modelContext: context,
@@ -73,7 +73,7 @@ struct WorkoutSessionRepositoryTests {
         #expect(snapshot.completedWorkouts == 1)
         #expect(snapshot.weeklyGoal == 3)
         #expect(snapshot.statusText == "2 to go")
-        #expect(reloadCount == 1)
+        #expect(reloadedKinds == [WeeklyGoalWidgetPublisher.widgetKind])
     }
 
     @Test

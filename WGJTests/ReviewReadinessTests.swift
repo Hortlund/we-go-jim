@@ -193,9 +193,16 @@ struct ReviewReadinessTests {
         try activeWorkoutRepository.addExercise(sessionID: draftSession.id, catalogItem: seededExercise)
         try context.save()
 
+        let artifactTracker = LocalDeletionArtifactTracker()
         let service = AppDataDeletionService(
             modelContext: context,
-            socialDataDeleter: NoopCloudDataDeleter()
+            socialDataDeleter: NoopCloudDataDeleter(),
+            clearWeeklyGoalWidgetSnapshot: {
+                artifactTracker.widgetClearCount += 1
+            },
+            clearActiveWorkoutSnapshot: {
+                artifactTracker.activeSnapshotClearCount += 1
+            }
         )
         try await service.deleteAllUserData()
 
@@ -217,6 +224,8 @@ struct ReviewReadinessTests {
         let remainingAsset = try #require(try context.fetch(FetchDescriptor<ExerciseImageAsset>()).first)
         #expect(remainingAsset.localPath == nil)
         #expect(remainingAsset.fileSizeBytes == 0)
+        #expect(artifactTracker.widgetClearCount == 2)
+        #expect(artifactTracker.activeSnapshotClearCount == 2)
     }
 
     @Test
@@ -394,6 +403,12 @@ struct ReviewReadinessTests {
             role: role
         )
     }
+}
+
+@MainActor
+private final class LocalDeletionArtifactTracker {
+    var widgetClearCount = 0
+    var activeSnapshotClearCount = 0
 }
 
 @MainActor

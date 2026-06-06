@@ -56,6 +56,7 @@ struct WGJApp: App {
 
     private static func makeCloudBackedContainer() throws -> ModelContainer {
         let appSchema = fullAppSchema()
+        try AppStoreLayout.prepareHistoryProjectionStoreDirectory()
         return try ModelContainer(
             for: appSchema,
             configurations: storeConfigurations(userDataCloudKitDatabase: .automatic)
@@ -64,6 +65,7 @@ struct WGJApp: App {
 
     private static func makeLocalFallbackContainer() throws -> ModelContainer {
         let appSchema = fullAppSchema()
+        try AppStoreLayout.prepareHistoryProjectionStoreDirectory()
         return try ModelContainer(
             for: appSchema,
             configurations: storeConfigurations(userDataCloudKitDatabase: .none)
@@ -209,6 +211,7 @@ struct WGJApp: App {
                 AppStoreLayout.historyProjectionConfigurationName,
                 schema: historyProjectionSchema,
                 isStoredInMemoryOnly: false,
+                groupContainer: AppStoreLayout.historyProjectionGroupContainer,
                 cloudKitDatabase: .none
             ),
         ]
@@ -263,6 +266,7 @@ struct WGJApp: App {
 }
 
 enum AppStoreLayout {
+    static let appGroupIdentifier = WeeklyGoalWidgetStore.appGroupIdentifier
     static let localCatalogConfigurationName = "LocalCatalog"
     static let userDataConfigurationName = "UserData"
     static let activeWorkoutDraftConfigurationName = "ActiveWorkoutDraft"
@@ -276,6 +280,23 @@ enum AppStoreLayout {
         historyProjectionConfigurationName,
     ]
     static let storeFilePrefixes = configurationNames.map { "\($0).store" }
+    static let historyProjectionGroupContainer = ModelConfiguration.GroupContainer.identifier(appGroupIdentifier)
+
+    static func prepareHistoryProjectionStoreDirectory(fileManager: FileManager = .default) throws {
+        guard let groupContainerURL = fileManager.containerURL(
+            forSecurityApplicationGroupIdentifier: appGroupIdentifier
+        ) else {
+            return
+        }
+
+        let supportDirectory = groupContainerURL
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Application Support", isDirectory: true)
+        try fileManager.createDirectory(
+            at: supportDirectory,
+            withIntermediateDirectories: true
+        )
+    }
 }
 
 enum AppBootstrapRecoveryPolicy {

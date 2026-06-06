@@ -574,13 +574,14 @@ nonisolated enum ProfileReloadPolicy {
 }
 
 nonisolated enum ProfileDashboardRenderPolicy {
-    static let initialRenderDelay: Duration = .milliseconds(900)
+    static let initialRenderDelay: Duration = .milliseconds(450)
 
     static func renderDelay(
         hasRenderedDashboardContent: Bool,
         hasFreshWarmSnapshot: Bool = false
     ) -> Duration {
-        hasRenderedDashboardContent || hasFreshWarmSnapshot ? .zero : initialRenderDelay
+        _ = hasFreshWarmSnapshot
+        return hasRenderedDashboardContent ? .zero : initialRenderDelay
     }
 
     static func visibilityAfterCancellingRender(

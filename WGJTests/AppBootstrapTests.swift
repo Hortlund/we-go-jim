@@ -10,6 +10,7 @@ struct AppBootstrapTests {
 
     @Test
     func storeLayoutUsesNamedStoresForEachConfiguration() {
+        #expect(AppStoreLayout.appGroupIdentifier == WeeklyGoalWidgetStore.appGroupIdentifier)
         #expect(AppStoreLayout.configurationNames == [
             "LocalCatalog",
             "UserData",
@@ -25,6 +26,16 @@ struct AppBootstrapTests {
             "HistoryProjection.store",
         ])
         #expect(!AppStoreLayout.storeFilePrefixes.contains("default.store"))
+    }
+
+    @Test
+    func historyProjectionStorePinsAppGroupContainerWhileOtherStoresKeepAutomaticResolution() throws {
+        let appSource = try String(contentsOf: appSourceURL(), encoding: .utf8)
+
+        #expect(appSource.contains("prepareHistoryProjectionStoreDirectory()"))
+        #expect(appSource.contains("ModelConfiguration.GroupContainer.identifier(appGroupIdentifier)"))
+        #expect(appSource.components(separatedBy: "groupContainer: AppStoreLayout.historyProjectionGroupContainer").count - 1 == 1)
+        #expect(!appSource.contains("groupContainer: AppStoreLayout.historyProjectionGroupContainer,\n                cloudKitDatabase: userDataCloudKitDatabase"))
     }
 
     @Test
@@ -114,5 +125,13 @@ struct AppBootstrapTests {
         tracker.finishRun(secondRunID)
 
         #expect(!tracker.isRunning)
+    }
+
+    private func appSourceURL() -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("WGJ")
+            .appendingPathComponent("WGJApp.swift")
     }
 }

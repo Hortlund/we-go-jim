@@ -6,7 +6,19 @@ import Testing
 struct WeeklyGoalWidgetTests {
     @Test
     func widgetDescriptorUsesCacheResetKind() {
-        #expect(WeeklyGoalWidgetDescriptor.kind == "WGJWeeklyGoalWidgetV10")
+        #expect(WeeklyGoalWidgetDescriptor.kind == "WGJWeeklyGoalWidgetV11")
+    }
+
+    @Test
+    func widgetDescriptorUsesOneFinalKindOnly() throws {
+        let widgetSource = try String(contentsOf: widgetExtensionSourceURL(), encoding: .utf8)
+
+        #expect(WeeklyGoalWidgetPublisher.widgetKinds == ["WGJWeeklyGoalWidgetV11"])
+        #expect(!widgetSource.contains("WeeklyGoalWidgetLegacy"))
+        #expect(widgetSource.components(separatedBy: "WeeklyGoalWidget()").count - 1 == 2)
+        #expect(!widgetSource.contains("WGJWeeklyGoalWidgetV10"))
+        #expect(!widgetSource.contains("WGJWeeklyGoalWidgetV9"))
+        #expect(!widgetSource.contains("WeeklyGoalWidget\""))
     }
 
     @Test
@@ -25,7 +37,7 @@ struct WeeklyGoalWidgetTests {
 
     @Test
     func storeUsesCacheResetSnapshotKey() {
-        #expect(WeeklyGoalWidgetStore.snapshotDefaultsKey == "weeklyGoalWidget.snapshot.v10")
+        #expect(WeeklyGoalWidgetStore.snapshotDefaultsKey == "weeklyGoalWidget.snapshot.v11")
         #expect(WeeklyGoalWidgetStore.legacySnapshotDefaultsKeys == [
             "weeklyGoalWidget.snapshot.v1",
             "weeklyGoalWidget.snapshot.v2",
@@ -36,6 +48,7 @@ struct WeeklyGoalWidgetTests {
             "weeklyGoalWidget.snapshot.v7",
             "weeklyGoalWidget.snapshot.v8",
             "weeklyGoalWidget.snapshot.v9",
+            "weeklyGoalWidget.snapshot.v10",
         ])
     }
 
@@ -112,12 +125,15 @@ struct WeeklyGoalWidgetTests {
     }
 
     @Test
-    func publisherFlushesAppGroupSnapshotAndReloadsOnlyWeeklyGoalKind() throws {
+    func publisherFlushesAppGroupSnapshotAndReloadsFinalWeeklyGoalKindOnly() throws {
         let publisherSource = try String(contentsOf: publisherSourceURL(), encoding: .utf8)
         let sharedSource = try String(contentsOf: sharedSourceURL(), encoding: .utf8)
+        let widgetSource = try String(contentsOf: widgetExtensionSourceURL(), encoding: .utf8)
 
+        #expect(!publisherSource.contains("for kind in Self.widgetKinds"))
         #expect(publisherSource.contains("WidgetCenter.shared.reloadTimelines(ofKind: Self.widgetKind)"))
         #expect(sharedSource.contains("defaults.synchronize()"))
+        #expect(widgetSource.contains("let kind = WeeklyGoalWidgetDescriptor.kind"))
     }
 
     @Test
@@ -299,9 +315,9 @@ struct WeeklyGoalWidgetTests {
             defaults.removePersistentDomain(forName: suiteName)
         }
         let store = WeeklyGoalWidgetStore(defaults: defaults)
-        var reloadCount = 0
-        let publisher = WeeklyGoalWidgetPublisher(store: store) {
-            reloadCount += 1
+        var reloadedKinds: [String] = []
+        let publisher = WeeklyGoalWidgetPublisher(store: store) { kind in
+            reloadedKinds.append(kind)
         }
 
         try publisher.publish(modelContext: context, generatedAt: Date(timeIntervalSince1970: 1_800_010_000))
@@ -310,7 +326,7 @@ struct WeeklyGoalWidgetTests {
         #expect(snapshot.completedWorkouts == 1)
         #expect(snapshot.weeklyGoal == 3)
         #expect(snapshot.hasActiveWorkout)
-        #expect(reloadCount == 1)
+        #expect(reloadedKinds == [WeeklyGoalWidgetPublisher.widgetKind])
     }
 
     @MainActor
@@ -343,7 +359,7 @@ struct WeeklyGoalWidgetTests {
             defaults.removePersistentDomain(forName: suiteName)
         }
         let store = WeeklyGoalWidgetStore(defaults: defaults)
-        let publisher = WeeklyGoalWidgetPublisher(store: store) {}
+        let publisher = WeeklyGoalWidgetPublisher(store: store) { _ in }
 
         try publisher.publish(modelContext: context, generatedAt: Date(timeIntervalSince1970: 1_800_010_000))
 
@@ -370,15 +386,15 @@ struct WeeklyGoalWidgetTests {
                 weekStart: Date(timeIntervalSince1970: 1_800_000_000)
             )
         )
-        var reloadCount = 0
-        let publisher = WeeklyGoalWidgetPublisher(store: store) {
-            reloadCount += 1
+        var reloadedKinds: [String] = []
+        let publisher = WeeklyGoalWidgetPublisher(store: store) { kind in
+            reloadedKinds.append(kind)
         }
 
         publisher.clear()
 
         #expect(try store.load() == nil)
-        #expect(reloadCount == 1)
+        #expect(reloadedKinds == [WeeklyGoalWidgetPublisher.widgetKind])
     }
 
     @MainActor
