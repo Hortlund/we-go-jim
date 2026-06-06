@@ -13,6 +13,53 @@ nonisolated private final class BrosAvatarCacheEntry: NSObject {
     }
 }
 
+nonisolated enum BrosAvatarPrimingScope: Equatable, Sendable {
+    case firstFrame(feedEventLimit: Int)
+    case all
+}
+
+nonisolated enum BrosAvatarPrimingPolicy {
+    static let defaultFirstFrameFeedEventLimit = 8
+
+    static func avatarCacheKeys(
+        in snapshot: BrosFeedSnapshot,
+        scope: BrosAvatarPrimingScope
+    ) -> Set<String> {
+        Set(avatarEntries(in: snapshot, scope: scope).map(\.key))
+    }
+
+    static func avatarEntries(
+        in snapshot: BrosFeedSnapshot,
+        scope: BrosAvatarPrimingScope
+    ) -> [(key: String, data: Data)] {
+        var avatarsByKey: [String: Data] = [:]
+
+        func include(key: String?, data: Data?) {
+            guard let key, let data else { return }
+            avatarsByKey[key] = data
+        }
+
+        include(key: snapshot.currentMember.avatarCacheKey, data: snapshot.currentMember.avatarImageData)
+        for member in snapshot.members {
+            include(key: member.avatarCacheKey, data: member.avatarImageData)
+        }
+
+        let feedEvents: ArraySlice<BroFeedEvent>
+        switch scope {
+        case .firstFrame(let feedEventLimit):
+            feedEvents = snapshot.feedEvents.prefix(max(0, feedEventLimit))
+        case .all:
+            feedEvents = snapshot.feedEvents[...]
+        }
+
+        for event in feedEvents {
+            include(key: event.actorAvatarCacheKey, data: event.actorAvatarImageData)
+        }
+
+        return avatarsByKey.map { (key: $0.key, data: $0.value) }
+    }
+}
+
 nonisolated final class BrosAvatarCacheService {
     static let shared = BrosAvatarCacheService()
 
@@ -98,23 +145,38 @@ nonisolated final class BrosAvatarCacheService {
         in snapshot: BrosFeedSnapshot,
         maxPixelSize: CGFloat = 176
     ) async {
-        var avatarsByKey: [String: Data] = [:]
+        await primeAvatars(
+            in: snapshot,
+            scope: .all,
+            maxPixelSize: maxPixelSize
+        )
+    }
 
-        func include(key: String?, data: Data?) {
-            guard let key, let data else { return }
-            avatarsByKey[key] = data
-        }
+    func primeFirstFrameAvatars(
+        in snapshot: BrosFeedSnapshot,
+        maxPixelSize: CGFloat = 176
+    ) async {
+        await primeAvatars(
+            in: snapshot,
+            scope: .firstFrame(feedEventLimit: BrosAvatarPrimingPolicy.defaultFirstFrameFeedEventLimit),
+            maxPixelSize: maxPixelSize
+        )
+    }
 
-        include(key: snapshot.currentMember.avatarCacheKey, data: snapshot.currentMember.avatarImageData)
-        for member in snapshot.members {
-            include(key: member.avatarCacheKey, data: member.avatarImageData)
-        }
-        for event in snapshot.feedEvents {
-            include(key: event.actorAvatarCacheKey, data: event.actorAvatarImageData)
-        }
+    func primeAvatars(
+        in snapshot: BrosFeedSnapshot,
+        scope: BrosAvatarPrimingScope,
+        maxPixelSize: CGFloat = 176
+    ) async {
+        let avatars = BrosAvatarPrimingPolicy.avatarEntries(in: snapshot, scope: scope)
+        guard !avatars.isEmpty else { return }
 
-        for (key, data) in avatarsByKey {
-            await prime(data: data, for: key, maxPixelSize: maxPixelSize)
+        await withTaskGroup(of: Void.self) { group in
+            for avatar in avatars {
+                group.addTask { [self] in
+                    await prime(data: avatar.data, for: avatar.key, maxPixelSize: maxPixelSize)
+                }
+            }
         }
     }
 

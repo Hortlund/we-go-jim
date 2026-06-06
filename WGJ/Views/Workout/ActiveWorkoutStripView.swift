@@ -71,6 +71,9 @@ struct ActiveWorkoutStripView: View {
         .task(id: sessionID) {
             await loadSnapshot()
         }
+        .onAppear {
+            applyPreparedSnapshotIfAvailable()
+        }
     }
 
     @MainActor
@@ -86,6 +89,12 @@ struct ActiveWorkoutStripView: View {
             return
         }
         session = snapshot
+    }
+
+    @MainActor
+    private func applyPreparedSnapshotIfAvailable() {
+        guard session == nil else { return }
+        session = activeWorkoutPresentationState.preparedRuntimeSession(for: sessionID)
     }
 
     private func elapsedText(now: Date) -> String {

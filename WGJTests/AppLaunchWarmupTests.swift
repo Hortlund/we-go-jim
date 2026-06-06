@@ -676,6 +676,22 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
+    func profileReloadPolicyKeepsFreshWarmSnapshotOffFirstActivationReloadPath() {
+        #expect(!ProfileReloadPolicy.shouldReloadAfterApplyingWarmSnapshot(
+            force: false,
+            didApplyWarmSnapshot: true
+        ))
+        #expect(ProfileReloadPolicy.shouldReloadAfterApplyingWarmSnapshot(
+            force: true,
+            didApplyWarmSnapshot: true
+        ))
+        #expect(ProfileReloadPolicy.shouldReloadAfterApplyingWarmSnapshot(
+            force: false,
+            didApplyWarmSnapshot: false
+        ))
+    }
+
+    @Test
     func asyncCloudStartupPreflightUsesLocalFallbackForNoAccount() async {
         let decision = await CloudStartupPreflight.makeDecisionAsync(
             statusProvider: MockAsyncCloudStartupAccountStatusProvider(status: .noAccount)

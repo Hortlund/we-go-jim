@@ -527,11 +527,13 @@ final class BrosViewModel {
                     freshSnapshot: snapshot,
                     currentSnapshot: currentSnapshot
                 )
-                await primeAvatarThumbnails(in: mergedSnapshot)
+                await primeFirstFrameAvatarThumbnails(in: mergedSnapshot)
                 state = .active(mergedSnapshot)
+                scheduleRemainingAvatarThumbnailPrime(in: mergedSnapshot)
             } else {
-                await primeAvatarThumbnails(in: snapshot)
+                await primeFirstFrameAvatarThumbnails(in: snapshot)
                 state = .active(snapshot)
+                scheduleRemainingAvatarThumbnailPrime(in: snapshot)
             }
         } else {
             state = .onboarding
@@ -544,6 +546,16 @@ final class BrosViewModel {
 
     private func primeAvatarThumbnails(in snapshot: BrosFeedSnapshot) async {
         await BrosAvatarCacheService.shared.primeVisibleAvatars(in: snapshot)
+    }
+
+    private func primeFirstFrameAvatarThumbnails(in snapshot: BrosFeedSnapshot) async {
+        await BrosAvatarCacheService.shared.primeFirstFrameAvatars(in: snapshot)
+    }
+
+    private func scheduleRemainingAvatarThumbnailPrime(in snapshot: BrosFeedSnapshot) {
+        Task {
+            await primeAvatarThumbnails(in: snapshot)
+        }
     }
 
     private func markCurrentSnapshotAuthoritative() {

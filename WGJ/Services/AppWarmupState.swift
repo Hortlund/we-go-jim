@@ -471,6 +471,13 @@ nonisolated enum TimestampedReloadPolicy {
 }
 
 nonisolated enum ProfileReloadPolicy {
+    static func shouldReloadAfterApplyingWarmSnapshot(
+        force: Bool,
+        didApplyWarmSnapshot: Bool
+    ) -> Bool {
+        force || !didApplyWarmSnapshot
+    }
+
     static func shouldReload(
         hasLoadedProfile: Bool,
         needsExplicitRefresh: Bool,

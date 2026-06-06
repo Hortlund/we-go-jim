@@ -63,11 +63,12 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 8))
 
         tapTabWithoutWaitingForIdle("Profile", in: app)
-        let profileSettingsTile = identifiedElement("profile-settings-tile", in: app)
-        XCTAssertTrue(profileSettingsTile.waitForExistence(timeout: 6))
+        XCTAssertTrue(identifiedElement("profile-content-root", in: app).waitForExistence(timeout: 2))
+        XCTAssertTrue(identifiedElement("profile-manage-button", in: app).waitForExistence(timeout: 2))
 
         tapTabWithoutWaitingForIdle("Bros", in: app)
         XCTAssertTrue(waitForAnyElement([
+            identifiedElement("bros-content-root", in: app),
             identifiedElement("bros-loading-card", in: app),
             app.staticTexts["Bros unavailable"],
             app.staticTexts["Start a bro circle"],
@@ -1138,7 +1139,9 @@ final class WGJUITests: XCTestCase {
 
     @MainActor
     func testActiveWorkoutStartMinimizeRestoreFlow() throws {
-        let app = launchApp()
+        let app = launchApp(mode: .localInMemory, launchArguments: [
+            "UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT",
+        ])
 
         tapTab("Start Workout", in: app)
         let startButton = app.buttons["start-workout-empty-button"]
@@ -1161,8 +1164,13 @@ final class WGJUITests: XCTestCase {
 
     @MainActor
     func testActiveWorkoutHomeReturnKeepsTypedNotesAndPresentation() throws {
-        let app = launchApp(launchEnvironment: [
-            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+        let app = launchApp(
+            mode: .localInMemory,
+            launchArguments: [
+                "UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT",
+            ],
+            launchEnvironment: [
+                "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
                 name: "Home Return Workout",
                 notes: "Resume after backgrounding.",
                 exercises: [
@@ -1185,8 +1193,9 @@ final class WGJUITests: XCTestCase {
                         ]
                     ),
                 ]
-            ),
-        ])
+                ),
+            ]
+        )
 
         startPreviewedTemplateWorkout(in: app)
 
@@ -1350,41 +1359,47 @@ final class WGJUITests: XCTestCase {
 
     @MainActor
     func testActiveWorkoutGuidanceBadgeExpandsCoachTip() throws {
-        let app = launchApp(launchEnvironment: [
-            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
-                name: "Guidance Badge Workout",
-                notes: "Smoke the coach guidance badge.",
-                exercises: [
-                    templatePayloadExercise(
-                        catalogExerciseUUID: "ui-guidance-bench",
-                        exerciseNameSnapshot: "Bench Press",
-                        categorySnapshot: "Chest",
-                        muscleSummarySnapshot: "Chest, Triceps",
-                        targetRepMin: 6,
-                        targetRepMax: 8,
-                        restSeconds: 120,
-                        sets: [
-                            templatePayloadSet(
-                                targetReps: 6,
-                                targetWeight: 100,
-                                loadUnit: "kg",
-                                restSeconds: 120,
-                                isWarmup: false
-                            ),
-                        ]
-                    ),
-                ]
-            ),
-        ])
+        let app = launchApp(
+            mode: .localInMemory,
+            launchArguments: [
+                "UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT",
+            ],
+            launchEnvironment: [
+                "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                    name: "Guidance Badge Workout",
+                    notes: "Smoke the coach guidance badge.",
+                    exercises: [
+                        templatePayloadExercise(
+                            catalogExerciseUUID: "ui-guidance-bench",
+                            exerciseNameSnapshot: "Bench Press",
+                            categorySnapshot: "Chest",
+                            muscleSummarySnapshot: "Chest, Triceps",
+                            targetRepMin: 6,
+                            targetRepMax: 8,
+                            restSeconds: 120,
+                            sets: [
+                                templatePayloadSet(
+                                    targetReps: 6,
+                                    targetWeight: 100,
+                                    loadUnit: "kg",
+                                    restSeconds: 120,
+                                    isWarmup: false
+                                ),
+                            ]
+                        ),
+                    ]
+                ),
+            ]
+        )
 
         startPreviewedTemplateWorkout(in: app)
 
         let badgeButton = identifiedElement(
-            "active-workout-exercise-ui-guidance-bench-guidance-badge-button",
+            "active-workout-exercise-seed-bench-press-guidance-badge-button",
             in: app
         )
         let detail = identifiedElement(
-            "active-workout-exercise-ui-guidance-bench-guidance-detail",
+            "active-workout-exercise-seed-bench-press-guidance-detail",
             in: app
         )
 
@@ -1396,6 +1411,20 @@ final class WGJUITests: XCTestCase {
 
         badgeButton.tap()
         XCTAssertTrue(waitForElementToDisappear(detail, timeout: 5))
+
+        let minimizeButton = app.buttons["active-workout-minimize-button"]
+        XCTAssertTrue(minimizeButton.waitForExistence(timeout: 5))
+        minimizeButton.tap()
+
+        let strip = identifiedElement("active-workout-strip", in: app)
+        XCTAssertTrue(strip.waitForExistence(timeout: 5))
+        strip.tap()
+
+        let reopenedBadgeButton = identifiedElement(
+            "active-workout-exercise-seed-bench-press-guidance-badge-button",
+            in: app
+        )
+        XCTAssertTrue(reopenedBadgeButton.waitForExistence(timeout: 1))
     }
 
     @MainActor

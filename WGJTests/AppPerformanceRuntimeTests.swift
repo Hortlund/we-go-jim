@@ -415,6 +415,35 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
+    func historyOverviewSnapshotBuilderUsesValueSnapshotsForScrollCards() {
+        let sessionID = UUID()
+        let endedAt = Date(timeIntervalSinceReferenceDate: 1_000)
+        let session = HistoryOverviewSessionSnapshot(
+            id: sessionID,
+            updatedAt: endedAt,
+            name: "Pull Day",
+            startedAt: endedAt.addingTimeInterval(-3_600),
+            endedAt: endedAt,
+            durationSeconds: 3_600,
+            totalVolume: 12_500,
+            prHitsCount: 2,
+            summaryRows: [
+                HistorySessionSummaryRow(id: 0, exercise: "3 x Pull Up", bestSet: "10 reps"),
+            ]
+        )
+
+        let snapshot = HistoryOverviewSnapshotBuilder.build(
+            sessions: [session],
+            selectedDayFilter: nil
+        )
+
+        #expect(snapshot.sections.count == 1)
+        #expect(snapshot.sections[0].cards.count == 1)
+        #expect(snapshot.sections[0].cards[0].sessionID == sessionID)
+        #expect(snapshot.sections[0].cards[0].summaryRows == session.summaryRows)
+    }
+
+    @Test
     func activeWorkoutDurableSnapshotPolicySkipsValueOnlySetDraftEdits() {
         let previous = [
             WorkoutSessionSetDraft(
@@ -494,6 +523,13 @@ struct AppPerformanceRuntimeTests {
             isEndingSession: true,
             isKeyboardVisible: false,
             isMetricInputFocused: false
+        ))
+        #expect(!ActiveWorkoutKeyboardChromePolicy.shouldShowTimerDock(
+            hasSession: true,
+            isEndingSession: false,
+            isKeyboardVisible: false,
+            isMetricInputFocused: false,
+            scenePhase: .background
         ))
         #expect(!ActiveWorkoutKeyboardChromePolicy.shouldShowFloatingKeyboardDismissButton(
             isKeyboardVisible: true,
@@ -1182,7 +1218,19 @@ struct AppPerformanceRuntimeTests {
             restsByExerciseID: [exerciseID: 120],
             notesByExerciseID: [exerciseID: "Keep control"],
             catalogMatchesByUUID: [:],
-            previousResolutionByExerciseID: [exerciseID: .resolved([:])]
+            previousResolutionByExerciseID: [exerciseID: .resolved([:])],
+            guidanceByExerciseID: [
+                exerciseID: ActiveWorkoutExerciseGuidancePresentation(
+                    title: "Keep Load",
+                    summary: "Stay in the target range.",
+                    tone: .success,
+                    badge: ActiveWorkoutGuidanceBadgePresentation(
+                        title: "Keep Load",
+                        subtitle: "Next workout",
+                        systemImage: "equal.circle.fill"
+                    )
+                ),
+            ]
         )
         let state = ActiveWorkoutPresentationState()
 
@@ -1196,5 +1244,6 @@ struct AppPerformanceRuntimeTests {
         #expect(state.preparedRuntimeSession(for: session.id) == session)
         #expect(state.preparedFirstRenderSnapshot(for: session.id) == firstRenderSnapshot)
         #expect(state.preparedPreviousPerformanceResolution(for: session.id)[exerciseID] == .resolved([:]))
+        #expect(state.preparedFirstRenderSnapshot(for: session.id)?.guidanceByExerciseID == firstRenderSnapshot.guidanceByExerciseID)
     }
 }

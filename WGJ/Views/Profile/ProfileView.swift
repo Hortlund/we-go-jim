@@ -754,7 +754,14 @@ struct ProfileView: View {
     @MainActor
     private func reloadProfileIfNeeded(force: Bool) async {
         let warmSnapshot = appWarmupState.freshProfile()
-        applyWarmProfileSnapshotIfAvailable()
+        let didApplyWarmSnapshot = applyWarmProfileSnapshotIfAvailable()
+        if !ProfileReloadPolicy.shouldReloadAfterApplyingWarmSnapshot(
+            force: force,
+            didApplyWarmSnapshot: didApplyWarmSnapshot
+        ) {
+            scheduleDashboardRenderIfNeeded()
+            return
+        }
 
         if FirstVisitTabReadiness.shouldDeferProfileHydration(
             hasLoadedProfile: hasLoadedProfile,
@@ -835,9 +842,10 @@ struct ProfileView: View {
     }
 
     @MainActor
-    private func applyWarmProfileSnapshotIfAvailable() {
-        guard !hasLoadedProfile, currentProfile == nil else { return }
-        guard let warmSnapshot = appWarmupState.freshProfile() else { return }
+    @discardableResult
+    private func applyWarmProfileSnapshotIfAvailable() -> Bool {
+        guard !hasLoadedProfile, currentProfile == nil else { return false }
+        guard let warmSnapshot = appWarmupState.freshProfile() else { return false }
         currentProfile = warmSnapshot.profile
         dashboardContent = warmSnapshot.dashboard
         hasLoadedProfile = true
@@ -845,6 +853,7 @@ struct ProfileView: View {
         lastLoadedProfileUpdatedAt = warmSnapshot.profile.updatedAt
         lastRefreshAt = warmSnapshot.warmedAt
         scheduleDashboardRender(enabledWidgets: warmSnapshot.dashboard.enabledWidgets)
+        return true
     }
 
     @MainActor

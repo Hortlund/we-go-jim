@@ -41,9 +41,10 @@ nonisolated enum ActiveWorkoutKeyboardChromePolicy {
         hasSession: Bool,
         isEndingSession: Bool,
         isKeyboardVisible: Bool,
-        isMetricInputFocused: Bool
+        isMetricInputFocused: Bool,
+        scenePhase: ScenePhase = .active
     ) -> Bool {
-        hasSession && !isEndingSession && !isKeyboardVisible && !isMetricInputFocused
+        scenePhase == .active && hasSession && !isEndingSession && !isKeyboardVisible && !isMetricInputFocused
     }
 
     static func shouldShowFloatingKeyboardDismissButton(

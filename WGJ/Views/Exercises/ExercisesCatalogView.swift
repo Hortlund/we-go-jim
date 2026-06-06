@@ -440,7 +440,11 @@ struct ExercisesCatalogView: View {
                     HStack(spacing: 8) {
                         bodyPartFilter
                         categoryFilter
+                    }
+
+                    HStack(spacing: 8) {
                         sortButton
+                        Spacer(minLength: 0)
                     }
                     activeFilterDropdownPanel
                 }
@@ -1086,7 +1090,7 @@ enum ExercisesCatalogHeaderCollapsePolicy {
     }
 
     static func expandedControlsHeight(usesCompactFilterLayout: Bool) -> CGFloat {
-        120
+        usesCompactFilterLayout ? 158 : 112
     }
 }
 

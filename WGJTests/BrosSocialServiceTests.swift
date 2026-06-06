@@ -114,6 +114,95 @@ struct BrosSocialServiceTests {
     }
 
     @Test
+    func firstFrameAvatarPrimingOnlyTargetsAboveFoldAvatars() throws {
+        let currentAvatarData = try #require(makeAvatarData(color: .systemBlue))
+        let memberAvatarData = try #require(makeAvatarData(color: .systemGreen))
+        let eventAvatarData = try #require(makeAvatarData(color: .systemRed))
+        let hiddenEventAvatarData = try #require(makeAvatarData(color: .systemPurple))
+        let visibleEvent = BroFeedEvent(
+            id: "visible-event",
+            circleID: "circle-1",
+            actorUserRecordName: "visible-user",
+            actorMembershipID: "visible-member",
+            actorDisplayName: "Visible Bro",
+            actorAvatarImageData: eventAvatarData,
+            createdAt: Date(timeIntervalSince1970: 120),
+            kind: .workoutCompleted,
+            workout: BroWorkoutFeedSnapshot(
+                workoutName: "Push",
+                durationSeconds: 3600,
+                totalVolume: 1000,
+                prCount: 0,
+                exercisePreview: ["Bench Press"]
+            ),
+            pr: nil,
+            reactions: []
+        )
+        let hiddenEvent = BroFeedEvent(
+            id: "hidden-event",
+            circleID: "circle-1",
+            actorUserRecordName: "hidden-user",
+            actorMembershipID: "hidden-member",
+            actorDisplayName: "Hidden Bro",
+            actorAvatarImageData: hiddenEventAvatarData,
+            createdAt: Date(timeIntervalSince1970: 110),
+            kind: .workoutCompleted,
+            workout: BroWorkoutFeedSnapshot(
+                workoutName: "Pull",
+                durationSeconds: 3600,
+                totalVolume: 1000,
+                prCount: 0,
+                exercisePreview: ["Row"]
+            ),
+            pr: nil,
+            reactions: []
+        )
+        let snapshot = BrosFeedSnapshot(
+            circle: BroCircleSummary(
+                circleID: "circle-1",
+                ownerUserRecordName: "user-1",
+                inviteCode: "BRO123",
+                memberLimit: 4,
+                createdAt: Date(timeIntervalSince1970: 100),
+                updatedAt: Date(timeIntervalSince1970: 100)
+            ),
+            currentMember: BroMemberSummary(
+                id: "current-member",
+                circleID: "circle-1",
+                userRecordName: "user-1",
+                displayName: "Atlas",
+                athleteType: nil,
+                avatarImageData: currentAvatarData,
+                joinedAt: Date(timeIntervalSince1970: 100),
+                role: .owner
+            ),
+            members: [
+                BroMemberSummary(
+                    id: "member-2",
+                    circleID: "circle-1",
+                    userRecordName: "user-2",
+                    displayName: "Brody",
+                    athleteType: nil,
+                    avatarImageData: memberAvatarData,
+                    joinedAt: Date(timeIntervalSince1970: 101),
+                    role: .member
+                ),
+            ],
+            feedEvents: [visibleEvent, hiddenEvent]
+        )
+
+        let keys = BrosAvatarPrimingPolicy.avatarCacheKeys(
+            in: snapshot,
+            scope: .firstFrame(feedEventLimit: 1)
+        )
+
+        #expect(keys.contains(snapshot.currentMember.avatarCacheKey ?? ""))
+        #expect(keys.contains(snapshot.members[0].avatarCacheKey ?? ""))
+        #expect(keys.contains(visibleEvent.actorAvatarCacheKey ?? ""))
+        #expect(!keys.contains(hiddenEvent.actorAvatarCacheKey ?? ""))
+    }
+
+    @Test
     func reactionResolutionTogglesOrReplaces() {
         #expect(BrosSocialRules.resolvedReaction(existing: nil, tapped: .flex) == .flex)
         #expect(BrosSocialRules.resolvedReaction(existing: .flex, tapped: .flex) == nil)

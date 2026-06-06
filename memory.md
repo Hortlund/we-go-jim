@@ -161,9 +161,9 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 - Date: 2026-04-25
 - Trigger/Problem: Staging only previous-performance before presenting Active Workout still allowed the first active render to show exercise loading cards and then catch up through async draft hydration.
-- Root Cause: The presentation handoff lacked set drafts, rest, notes, catalog hints, and persistence baselines, so first input could race the hydration task and the UI could still pay an avoidable first-frame update.
-- Durable Rule: Workout start/resume handoff should stage a full first-render snapshot for active logging: drafts, rest, notes, previous-performance, catalog hints, and the persisted baseline used for checkpoint diffs. Do not present a newly started workout with only previous-performance staged.
-- How to Verify Next Time: Start a template workout with previous values and immediately interact with pre-cardio and the first set field; confirm the first exercise renders from prepared draft data, no loading card is needed for normal starts, and an immediate lifecycle flush still persists typed values.
+- Root Cause: The presentation handoff lacked set drafts, rest, notes, catalog hints, guidance cache, and persistence baselines, so first input or minimized reopen could race hydration/guidance refresh tasks and the UI could still pay avoidable first-frame updates.
+- Durable Rule: Workout start/resume/minimize handoff should stage a full first-render snapshot for active logging: drafts, rest, notes, previous-performance, catalog hints, coach guidance, and the persisted baseline used for checkpoint diffs. Do not present a newly started or reopened workout with only previous-performance staged.
+- How to Verify Next Time: Start a template workout with previous values, then immediately interact with pre-cardio and the first set field; also collapse and reopen the active workout. Confirm exercise cards render from prepared draft data, coach guidance badges are present immediately, no loading card is needed for normal starts, and an immediate lifecycle flush still persists typed values.
 - Status: active
 
 ## 2026-04-25 - Cold Tab Smoothness Needs UI Preload, Not Only Data Warmup

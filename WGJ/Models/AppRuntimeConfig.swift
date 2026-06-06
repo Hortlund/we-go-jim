@@ -799,13 +799,15 @@ nonisolated struct ActiveWorkoutPreparedFirstRenderSnapshot: Equatable, Sendable
     let notesByExerciseID: [UUID: String]
     let catalogMatchesByUUID: [String: TrainingGuidanceCatalogSnapshot]
     let previousResolutionByExerciseID: [UUID: WorkoutPreviousPerformanceResolution]
+    let guidanceByExerciseID: [UUID: ActiveWorkoutExerciseGuidancePresentation?]
 
     static let empty = ActiveWorkoutPreparedFirstRenderSnapshot(
         draftsByExerciseID: [:],
         restsByExerciseID: [:],
         notesByExerciseID: [:],
         catalogMatchesByUUID: [:],
-        previousResolutionByExerciseID: [:]
+        previousResolutionByExerciseID: [:],
+        guidanceByExerciseID: [:]
     )
 }
 
