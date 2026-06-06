@@ -38,6 +38,25 @@ nonisolated final class AvatarThumbnailCacheService {
             forKey: fingerprint as NSString
         )
     }
+
+    func prime(data: Data?, maxPixelSize: CGFloat) async {
+        guard let data else { return }
+        let fingerprint = Self.fingerprint(for: data)
+        if cachedThumbnail(for: fingerprint, maxPixelSize: maxPixelSize) != nil {
+            return
+        }
+
+        let thumbnail = await AvatarImageCodec.thumbnail(from: data, maxPixelSize: maxPixelSize)
+        store(thumbnail, for: fingerprint, maxPixelSize: maxPixelSize)
+    }
+
+    func clear() {
+        cache.removeAllObjects()
+    }
+
+    static func fingerprint(for data: Data) -> String {
+        "\(data.count)-\(data.hashValue)"
+    }
 }
 
 enum AvatarImageCodec {

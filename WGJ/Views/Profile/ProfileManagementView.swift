@@ -325,6 +325,11 @@ struct ProfileAvatarView: View {
     let imageData: Data?
     @State private var image: UIImage?
 
+    init(imageData: Data?) {
+        self.imageData = imageData
+        _image = State(initialValue: Self.cachedThumbnail(for: imageData))
+    }
+
     var body: some View {
         Group {
             if let image {
@@ -357,8 +362,16 @@ struct ProfileAvatarView: View {
 
     private var loadKey: LoadKey {
         LoadKey(
-            dataFingerprint: imageData.map { Self.fingerprint(for: $0) },
+            dataFingerprint: imageData.map { AvatarThumbnailCacheService.fingerprint(for: $0) },
             pixelSize: 176
+        )
+    }
+
+    private static func cachedThumbnail(for imageData: Data?) -> UIImage? {
+        guard let imageData else { return nil }
+        return AvatarThumbnailCacheService.shared.cachedThumbnail(
+            for: AvatarThumbnailCacheService.fingerprint(for: imageData),
+            maxPixelSize: 176
         )
     }
 
@@ -369,7 +382,7 @@ struct ProfileAvatarView: View {
             return
         }
 
-        let fingerprint = Self.fingerprint(for: imageData)
+        let fingerprint = AvatarThumbnailCacheService.fingerprint(for: imageData)
         if let cachedImage = AvatarThumbnailCacheService.shared.cachedThumbnail(
             for: fingerprint,
             maxPixelSize: 176
@@ -390,10 +403,6 @@ struct ProfileAvatarView: View {
             maxPixelSize: 176
         )
         image = decodedImage
-    }
-
-    private static func fingerprint(for data: Data) -> String {
-        "\(data.count)-\(data.hashValue)"
     }
 }
 

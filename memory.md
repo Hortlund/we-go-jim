@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-06-06 - Weekly Goal Widget Must Keep One Stable Public Kind
+
+- Date: 2026-06-06
+- Trigger/Problem: The physical widget stayed black after repeated cache resets and kind bumps through V11, while each bump risked leaving already placed Home Screen widgets bound to a kind the extension no longer registered.
+- Root Cause: WidgetKit persists placed widgets by `kind`. Repeated V-number kind changes can strand physical widgets on old identities, and registering every legacy kind creates duplicate gallery samples. The stable public identity for WGJ's weekly goal widget is the original `WeeklyGoalWidget` kind.
+- Durable Rule: Do not keep bumping WGJ weekly goal widget kinds to fix black renders. Keep one registered public kind, `WeeklyGoalWidget`, and reset stale data through the shared snapshot key plus legacy snapshot cleanup. If compatibility with a prior V-kind is intentionally needed, first accept that it will appear as another gallery entry.
+- How to Verify Next Time: Inspect the built `.appex` strings for `WeeklyGoalWidget` and no `WGJWeeklyGoalWidgetV*` kind strings, verify the app-group preferences contain only `weeklyGoalWidget.snapshot.current`, check WidgetKit/chronod logs for successful placeholder/timeline reloads, and add the widget from the gallery to confirm one WGJ widget entry renders.
+- Status: active
+
 ## 2026-06-06 - Final Widget Resets Need One Registered Kind
 
 - Date: 2026-06-06
@@ -56,7 +65,7 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 - Root Cause: WidgetKit treats each registered `kind` in the bundle as a separate widget type for gallery/discovery. Registering V2-V10 plus the original kind intentionally multiplies gallery entries, while already-black placed widgets can still stay stuck in host cache.
 - Durable Rule: For a hard widget reset, ship one new final widget `kind`, one current snapshot key, one `WidgetBundle` entry, and clear prior snapshot keys. Do not keep legacy alias widgets registered when the goal is to remove duplicate gallery samples. Tell the user to delete old placed widgets and add the new final widget because apps cannot programmatically remove Home Screen widgets.
 - How to Verify Next Time: Run `WGJTests/WeeklyGoalWidgetTests`, inspect the built `.appex` strings for only the current kind/key, verify the app-group snapshot key is current after launch, and add the widget from the gallery to confirm only one WGJ widget entry renders.
-- Status: active
+- Status: superseded by `2026-06-06 - Weekly Goal Widget Must Keep One Stable Public Kind`. One registered kind is still right, but it should be the stable public `WeeklyGoalWidget` identity rather than another V-number reset.
 
 ## 2026-06-06 - SwiftData Automatic Stores Resolve To App Group
 

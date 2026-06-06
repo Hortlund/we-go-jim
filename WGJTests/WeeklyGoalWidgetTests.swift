@@ -6,19 +6,17 @@ import Testing
 struct WeeklyGoalWidgetTests {
     @Test
     func widgetDescriptorUsesCacheResetKind() {
-        #expect(WeeklyGoalWidgetDescriptor.kind == "WGJWeeklyGoalWidgetV11")
+        #expect(WeeklyGoalWidgetDescriptor.kind == "WeeklyGoalWidget")
     }
 
     @Test
     func widgetDescriptorUsesOneFinalKindOnly() throws {
         let widgetSource = try String(contentsOf: widgetExtensionSourceURL(), encoding: .utf8)
 
-        #expect(WeeklyGoalWidgetPublisher.widgetKinds == ["WGJWeeklyGoalWidgetV11"])
+        #expect(WeeklyGoalWidgetPublisher.widgetKinds == ["WeeklyGoalWidget"])
         #expect(!widgetSource.contains("WeeklyGoalWidgetLegacy"))
         #expect(widgetSource.components(separatedBy: "WeeklyGoalWidget()").count - 1 == 2)
-        #expect(!widgetSource.contains("WGJWeeklyGoalWidgetV10"))
-        #expect(!widgetSource.contains("WGJWeeklyGoalWidgetV9"))
-        #expect(!widgetSource.contains("WeeklyGoalWidget\""))
+        #expect(!widgetSource.contains("WGJWeeklyGoalWidget"))
     }
 
     @Test
@@ -37,7 +35,7 @@ struct WeeklyGoalWidgetTests {
 
     @Test
     func storeUsesCacheResetSnapshotKey() {
-        #expect(WeeklyGoalWidgetStore.snapshotDefaultsKey == "weeklyGoalWidget.snapshot.v11")
+        #expect(WeeklyGoalWidgetStore.snapshotDefaultsKey == "weeklyGoalWidget.snapshot.current")
         #expect(WeeklyGoalWidgetStore.legacySnapshotDefaultsKeys == [
             "weeklyGoalWidget.snapshot.v1",
             "weeklyGoalWidget.snapshot.v2",
@@ -49,6 +47,7 @@ struct WeeklyGoalWidgetTests {
             "weeklyGoalWidget.snapshot.v8",
             "weeklyGoalWidget.snapshot.v9",
             "weeklyGoalWidget.snapshot.v10",
+            "weeklyGoalWidget.snapshot.v11",
         ])
     }
 

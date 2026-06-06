@@ -484,11 +484,28 @@ struct AppLaunchWarmupTests {
 
         #expect(source.contains("let profileWarmSnapshot = try? await Self.buildProfileWarmSnapshot"))
         #expect(source.contains("let brosWarmSnapshot = try? await Self.buildBrosWarmSnapshot"))
+        #expect(source.contains("await AvatarThumbnailCacheService.shared.prime(data: profile.avatarImageData"))
         #expect(source.contains("FirstRunLocalBootstrapResult("))
         #expect(source.contains("profileWarmSnapshot: profileWarmSnapshot"))
         #expect(source.contains("brosWarmSnapshot: brosWarmSnapshot"))
         #expect(source.contains("appWarmupState.storeProfile(profileWarmSnapshot)"))
         #expect(source.contains("appWarmupState.storeBros(brosWarmSnapshot)"))
+    }
+
+    @Test
+    func firstRunLocalBootstrapKeepsBrosRemoteFetchOutOfBeforeMainEntry() throws {
+        let source = try String(contentsOf: contentViewSourceURL(), encoding: .utf8)
+
+        #expect(!FirstRunBrosBootstrapPolicy.allowsRemoteFetchBeforeMainEntry)
+        #expect(source.contains("allowsRemoteFetch: FirstRunBrosBootstrapPolicy.allowsRemoteFetchBeforeMainEntry"))
+    }
+
+    @Test
+    func profileAvatarViewUsesPrimedThumbnailBeforeAsyncDecodeTask() throws {
+        let source = try String(contentsOf: profileManagementSourceURL(), encoding: .utf8)
+
+        #expect(source.contains("_image = State(initialValue: Self.cachedThumbnail(for: imageData))"))
+        #expect(source.contains("AvatarThumbnailCacheService.shared.cachedThumbnail"))
     }
 
     @Test
@@ -1414,6 +1431,16 @@ private func contentViewSourceURL() -> URL {
         .deletingLastPathComponent()
         .appendingPathComponent("WGJ")
         .appendingPathComponent("ContentView.swift")
+}
+
+private func profileManagementSourceURL() -> URL {
+    URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("WGJ")
+        .appendingPathComponent("Views")
+        .appendingPathComponent("Profile")
+        .appendingPathComponent("ProfileManagementView.swift")
 }
 
 private final class LockedBootstrapBuildRecorder: @unchecked Sendable {

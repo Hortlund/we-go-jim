@@ -202,6 +202,10 @@ nonisolated enum BrosWarmSnapshotPolicy {
     }
 }
 
+nonisolated enum FirstRunBrosBootstrapPolicy {
+    static let allowsRemoteFetchBeforeMainEntry = false
+}
+
 nonisolated enum FirstFrameTabPresentation: Equatable, Sendable {
     case empty
     case shell

@@ -8,6 +8,25 @@ import UIKit
 @MainActor
 struct BrosSocialServiceTests {
     @Test
+    func profileAvatarCachePrimesThumbnailForImmediateFirstRender() async throws {
+        AvatarThumbnailCacheService.shared.clear()
+        let data = try #require(makeAvatarData(color: .systemBlue))
+        let fingerprint = AvatarThumbnailCacheService.fingerprint(for: data)
+
+        #expect(AvatarThumbnailCacheService.shared.cachedThumbnail(
+            for: fingerprint,
+            maxPixelSize: 176
+        ) == nil)
+
+        await AvatarThumbnailCacheService.shared.prime(data: data, maxPixelSize: 176)
+
+        #expect(AvatarThumbnailCacheService.shared.cachedThumbnail(
+            for: fingerprint,
+            maxPixelSize: 176
+        ) != nil)
+    }
+
+    @Test
     func deterministicRecordNamesStayStable() {
         let sessionID = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
         let workoutID = BrosRecordNames.workoutEventRecordName(sessionID: sessionID)

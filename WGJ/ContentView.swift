@@ -992,7 +992,7 @@ struct ContentView: View {
                 modelContext: backgroundContext,
                 cloudSyncEnabled: cloudSyncEnabled,
                 cloudSyncErrorDescription: cloudSyncErrorDescription,
-                allowsRemoteFetch: true
+                allowsRemoteFetch: FirstRunBrosBootstrapPolicy.allowsRemoteFetchBeforeMainEntry
             )
             return FirstRunLocalBootstrapResult(
                 profileWarmSnapshot: profileWarmSnapshot,
@@ -1023,6 +1023,7 @@ struct ContentView: View {
         let profile = try await ProfileRepository(modelContext: modelContext).bootstrapProfileIdentitySnapshot(
             cloudSyncEnabled: cloudSyncEnabled
         )
+        await AvatarThumbnailCacheService.shared.prime(data: profile.avatarImageData, maxPixelSize: 176)
         let widgetRepository = ProfileWidgetRepository(modelContext: modelContext)
         let metricsService = WorkoutMetricsService(modelContext: modelContext)
         let enabledWidgets = try widgetRepository.enabledConfigurationSnapshots()
