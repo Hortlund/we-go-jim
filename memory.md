@@ -513,10 +513,10 @@ Promote a lesson here only when it clears the bar above.
 ## 2026-05-10 - Active Workout Keyboard Chrome Must Wait For Did-Hide
 
 - Date: 2026-05-10
-- Trigger/Problem: The Active Workout elapsed-time dock could appear above the keyboard during dismissal or fail to return cleanly after keyboard hide/resume flows.
-- Root Cause: The bottom dock cleared keyboard-visible state on `keyboardWillHide`, and scene resume could miss a keyboard show frame notification while a metric field was still focused. That made the timer dock depend on transient UIKit timing instead of the actual keyboard-chrome lifecycle.
-- Durable Rule: Active Workout bottom chrome must hide the timer while either the keyboard is visible or a metric input is focused, and it must clear keyboard/focus state from `keyboardDidHide`, not `keyboardWillHide`. Do not show the timer dock during the keyboard dismissal animation.
-- How to Verify Next Time: Run the active-workout UI flow that focuses a set field, backgrounds/returns, confirms the timer is absent while the keyboard is visible, taps `keyboard-hide-button`, waits for the keyboard to disappear, and confirms `active-workout-elapsed-timer` returns.
+- Trigger/Problem: The Active Workout elapsed-time dock could appear above the keyboard during dismissal, fail to return cleanly after keyboard hide/resume flows, or reappear with a blocky gap after the keyboard fully disappeared.
+- Root Cause: The bottom dock originally cleared keyboard-visible state on `keyboardWillHide`, and scene resume could miss a keyboard show frame notification while a metric field was still focused. Later, the dock waited correctly for `keyboardDidHide`, but its SwiftUI transition only animated rest-timer popup changes, not the `shouldShowDock` visibility change that happens after the keyboard disappears.
+- Durable Rule: Active Workout bottom chrome must hide the timer while either the keyboard is visible or a metric input is focused, and it must clear keyboard/focus state from `keyboardDidHide`, not `keyboardWillHide`. Do not show the timer dock during the keyboard dismissal animation, but animate the dock's own visibility transition when `shouldShowDock` changes after the keyboard is gone.
+- How to Verify Next Time: Run the active-workout UI flow that focuses a set field, backgrounds/returns, confirms the timer is absent while the keyboard is visible, taps `keyboard-hide-button`, waits for the keyboard to disappear, and confirms `active-workout-elapsed-timer` returns smoothly rather than popping in. Run `WGJTests/AppPerformanceRuntimeTests.activeWorkoutKeyboardChromeAnimatesTimerDockWhenVisibilityChanges`.
 - Status: active
 
 ## 2026-05-10 - Keyboard Toolbars Must Attach Near The Focused Surface

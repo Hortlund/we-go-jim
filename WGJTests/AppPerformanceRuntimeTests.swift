@@ -619,6 +619,26 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
+    func activeWorkoutKeyboardChromeAnimatesTimerDockWhenVisibilityChanges() {
+        #expect(ActiveWorkoutKeyboardChromePolicy.shouldAnimateTimerDockVisibilityChange(
+            previousIsVisible: false,
+            currentIsVisible: true
+        ))
+        #expect(ActiveWorkoutKeyboardChromePolicy.shouldAnimateTimerDockVisibilityChange(
+            previousIsVisible: true,
+            currentIsVisible: false
+        ))
+        #expect(!ActiveWorkoutKeyboardChromePolicy.shouldAnimateTimerDockVisibilityChange(
+            previousIsVisible: true,
+            currentIsVisible: true
+        ))
+        #expect(!ActiveWorkoutKeyboardChromePolicy.shouldAnimateTimerDockVisibilityChange(
+            previousIsVisible: false,
+            currentIsVisible: false
+        ))
+    }
+
+    @Test
     func templateKeyboardDismissTokenAdvancesOnExplicitDismiss() {
         var token = TemplateEditorKeyboardDismissToken()
         let initialValue = token.value

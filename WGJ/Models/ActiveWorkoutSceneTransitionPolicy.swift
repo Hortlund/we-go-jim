@@ -53,6 +53,13 @@ nonisolated enum ActiveWorkoutKeyboardChromePolicy {
     ) -> Bool {
         false
     }
+
+    static func shouldAnimateTimerDockVisibilityChange(
+        previousIsVisible: Bool,
+        currentIsVisible: Bool
+    ) -> Bool {
+        previousIsVisible != currentIsVisible
+    }
 }
 
 nonisolated enum ActiveWorkoutInteractionWorkPolicy {

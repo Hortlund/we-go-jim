@@ -3736,7 +3736,7 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
                     reduceMotion: reduceMotion,
                     onDismissRestTimer: onDismissRestTimer
                 )
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .transition(WGJMotion.cardTransition(reduceMotion: reduceMotion))
             }
         }
         .frame(maxWidth: .infinity, alignment: .bottomTrailing)
@@ -3751,6 +3751,7 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
             isKeyboardVisible = false
         }
         .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: restTimerPopupID)
+        .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: shouldShowDock)
     }
 
     private var shouldShowDock: Bool {
