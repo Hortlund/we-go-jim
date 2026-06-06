@@ -1,19 +1,36 @@
 import SwiftUI
 import WidgetKit
 
+private enum WGJWidgetPalette {
+    static let textPrimary = Color.white
+    static let textSecondary = Color.white.opacity(0.70)
+    static let accentBlue = Color(red: 0.29, green: 0.57, blue: 1.0)
+    static let ringTrack = Color.white.opacity(0.16)
+    static let goalLine = Color.white.opacity(0.32)
+    static let priorBar = Color(red: 0.29, green: 0.57, blue: 1.0).opacity(0.42)
+}
+
+private struct WGJWidgetBackground: View {
+    var body: some View {
+        LinearGradient(
+            colors: [
+                Color(red: 0.025, green: 0.035, blue: 0.070),
+                Color(red: 0.030, green: 0.090, blue: 0.170),
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+}
+
 struct WeeklyGoalWidgetEntry: TimelineEntry {
     let date: Date
     let snapshot: WeeklyGoalWidgetSnapshot?
-    let usesPreviewContent: Bool
 }
 
 struct WeeklyGoalWidgetProvider: TimelineProvider {
     func placeholder(in context: Context) -> WeeklyGoalWidgetEntry {
-        WeeklyGoalWidgetEntry(
-            date: .now,
-            snapshot: WeeklyGoalWidgetContentPolicy.preview(),
-            usesPreviewContent: true
-        )
+        WeeklyGoalWidgetEntry(date: .now, snapshot: nil)
     }
 
     func getSnapshot(in context: Context, completion: @escaping (WeeklyGoalWidgetEntry) -> Void) {
@@ -21,8 +38,7 @@ struct WeeklyGoalWidgetProvider: TimelineProvider {
             completion(
                 WeeklyGoalWidgetEntry(
                     date: .now,
-                    snapshot: WeeklyGoalWidgetContentPolicy.preview(),
-                    usesPreviewContent: true
+                    snapshot: WeeklyGoalWidgetContentPolicy.preview()
                 )
             )
             return
@@ -40,7 +56,7 @@ struct WeeklyGoalWidgetProvider: TimelineProvider {
 
     private func entry(date: Date = .now) -> WeeklyGoalWidgetEntry {
         let snapshot = try? WeeklyGoalWidgetStore()?.load()
-        return WeeklyGoalWidgetEntry(date: date, snapshot: snapshot, usesPreviewContent: false)
+        return WeeklyGoalWidgetEntry(date: date, snapshot: snapshot)
     }
 }
 
@@ -50,7 +66,9 @@ struct WeeklyGoalWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: WeeklyGoalWidgetProvider()) { entry in
             WeeklyGoalWidgetView(entry: entry)
-                .containerBackground(.fill.tertiary, for: .widget)
+                .containerBackground(for: .widget) {
+                    WGJWidgetBackground()
+                }
                 .widgetURL(WeeklyGoalWidgetDeepLink.profileWeeklyGoalURL)
         }
         .configurationDisplayName("Weekly Goal")
@@ -70,12 +88,8 @@ struct WeeklyGoalWidgetView: View {
     let entry: WeeklyGoalWidgetEntry
 
     var body: some View {
-        if entry.usesPreviewContent {
-            content
-                .unredacted()
-        } else {
-            content
-        }
+        content
+            .unredacted()
     }
 
     @ViewBuilder
@@ -99,7 +113,7 @@ struct WeeklyGoalWidgetView: View {
             HStack(spacing: 6) {
                 Text("WGJ")
                     .font(.caption.weight(.black))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(WGJWidgetPalette.textSecondary)
                 Spacer(minLength: 0)
                 WGJWidgetLogoBadge(size: 32)
             }
@@ -111,15 +125,16 @@ struct WeeklyGoalWidgetView: View {
                         .frame(width: 80, height: 80)
                     Text(snapshot.progressText)
                         .font(.title3.weight(.bold))
+                        .foregroundStyle(WGJWidgetPalette.textPrimary)
                         .minimumScaleFactor(0.65)
                 }
                 VStack(spacing: 2) {
                     Text("Weekly Goal")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(WGJWidgetPalette.textSecondary)
                     Text(snapshot.statusText)
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(WGJWidgetPalette.textSecondary)
                 }
                 Spacer(minLength: 0)
             } else {
@@ -139,16 +154,16 @@ struct WeeklyGoalWidgetView: View {
                         Spacer(minLength: 0)
                         Text("Workouts\nPer Week")
                             .font(.headline.weight(.bold))
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(WGJWidgetPalette.textPrimary)
                             .lineLimit(2)
                             .minimumScaleFactor(0.8)
                         Text("\(snapshot.completedWorkouts)/\(snapshot.weeklyGoal) this week")
                             .font(.title3.weight(.bold))
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(WGJWidgetPalette.accentBlue)
                             .minimumScaleFactor(0.75)
                         Text(mediumStatus(snapshot))
                             .font(.caption.weight(.medium))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(WGJWidgetPalette.textSecondary)
                             .lineLimit(1)
                     }
                     .frame(width: 112, alignment: .leading)
@@ -176,12 +191,15 @@ struct WeeklyGoalWidgetView: View {
                 VStack(spacing: -1) {
                     Text("\(snapshot.completedWorkouts)")
                         .font(.headline.weight(.bold))
+                        .foregroundStyle(WGJWidgetPalette.textPrimary)
                     Text("/\(snapshot.weeklyGoal)")
                         .font(.caption2.weight(.semibold))
+                        .foregroundStyle(WGJWidgetPalette.textSecondary)
                 }
             }
         } else {
             Image(systemName: "figure.strengthtraining.traditional")
+                .foregroundStyle(WGJWidgetPalette.accentBlue)
         }
     }
 
@@ -189,14 +207,18 @@ struct WeeklyGoalWidgetView: View {
         VStack(alignment: .leading, spacing: 2) {
             Text("Weekly Goal")
                 .font(.caption2.weight(.semibold))
+                .foregroundStyle(WGJWidgetPalette.textSecondary)
             if let snapshot = entry.snapshot {
                 Text("\(snapshot.completedWorkouts) of \(snapshot.weeklyGoal) workouts")
                     .font(.headline.weight(.bold))
+                    .foregroundStyle(WGJWidgetPalette.textPrimary)
                 Text(snapshot.statusText)
                     .font(.caption2)
+                    .foregroundStyle(WGJWidgetPalette.textSecondary)
             } else {
                 Text("Open WGJ")
                     .font(.headline.weight(.bold))
+                    .foregroundStyle(WGJWidgetPalette.textPrimary)
             }
         }
     }
@@ -206,20 +228,21 @@ struct WeeklyGoalWidgetView: View {
             WGJWidgetLogoBadge(size: 32)
             Text("Open WGJ")
                 .font(.headline.weight(.bold))
+                .foregroundStyle(WGJWidgetPalette.textPrimary)
             Text("Set weekly goal")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(WGJWidgetPalette.textSecondary)
         }
     }
 
     private func progressRing(snapshot: WeeklyGoalWidgetSnapshot, lineWidth: CGFloat) -> some View {
         ZStack {
             Circle()
-                .stroke(.secondary.opacity(0.2), lineWidth: lineWidth)
+                .stroke(WGJWidgetPalette.ringTrack, lineWidth: lineWidth)
             Circle()
                 .trim(from: 0, to: snapshot.progressFraction)
                 .stroke(
-                    .blue,
+                    WGJWidgetPalette.accentBlue,
                     style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
                 )
                 .rotationEffect(.degrees(-90))
@@ -258,7 +281,11 @@ private struct WeeklyGoalWidgetBarChart: View {
                             VStack(spacing: 0) {
                                 Spacer(minLength: 0)
                                 RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                    .fill(week == snapshot.recentWeeks.last ? Color.blue : Color.blue.opacity(0.45))
+                                    .fill(
+                                        week == snapshot.recentWeeks.last
+                                            ? WGJWidgetPalette.accentBlue
+                                            : WGJWidgetPalette.priorBar
+                                    )
                                     .frame(height: barHeight(for: week, chartHeight: chartHeight, maxValue: maxValue))
                             }
                             .frame(maxWidth: .infinity)
@@ -271,7 +298,7 @@ private struct WeeklyGoalWidgetBarChart: View {
                     ForEach(snapshot.recentWeeks) { week in
                         Text(week.weekStart.formatted(.dateTime.day().month(.defaultDigits)))
                             .font(.caption2.weight(.medium))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(WGJWidgetPalette.textSecondary)
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
                             .frame(maxWidth: .infinity)
@@ -289,7 +316,7 @@ private struct WeeklyGoalWidgetBarChart: View {
             Spacer()
                 .frame(height: max(0, chartHeight - goalLineOffset(chartHeight: chartHeight, maxValue: maxValue)))
             Rectangle()
-                .fill(Color.primary.opacity(0.32))
+                .fill(WGJWidgetPalette.goalLine)
                 .frame(height: 1)
             Spacer(minLength: 0)
         }
@@ -336,7 +363,6 @@ struct WGJWidgetBundle: WidgetBundle {
             completedWorkouts: 3,
             weeklyGoal: 4,
             weekStart: .now
-        ),
-        usesPreviewContent: true
+        )
     )
 }
