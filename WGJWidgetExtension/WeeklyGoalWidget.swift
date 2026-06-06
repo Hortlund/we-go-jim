@@ -10,6 +10,10 @@ private enum WGJWidgetPalette {
     static let priorBar = Color(red: 0.29, green: 0.57, blue: 1.0).opacity(0.42)
 }
 
+private enum WGJWidgetLayout {
+    static let mediumInfoWidth: CGFloat = 104
+}
+
 private struct WGJWidgetBackground: View {
     @Environment(\.widgetRenderingMode) private var renderingMode
 
@@ -133,72 +137,86 @@ struct WeeklyGoalWidgetView: View {
     private var systemSmall: some View {
         let snapshot = entry.snapshot
 
-        return VStack(spacing: 8) {
+        return VStack(spacing: 6) {
             HStack(spacing: 6) {
                 Text("WGJ")
                     .font(.caption.weight(.black))
                     .foregroundStyle(secondaryTextStyle)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                 Spacer(minLength: 0)
-                WGJWidgetBrandBadge(size: 32)
+                WGJWidgetBrandBadge(size: 22)
             }
 
             Spacer(minLength: 0)
             ZStack {
                 progressRing(snapshot: snapshot, lineWidth: 9)
-                    .frame(width: 80, height: 80)
+                    .frame(width: 74, height: 74)
                     .widgetAccentable()
                 Text(snapshot.progressText)
-                    .font(.title3.weight(.bold))
+                    .font(.headline.weight(.bold))
                     .foregroundStyle(primaryTextStyle)
+                    .lineLimit(1)
                     .minimumScaleFactor(0.65)
-                    .widgetAccentable()
             }
             VStack(spacing: 2) {
                 Text("Weekly Goal")
-                    .font(.caption.weight(.semibold))
+                    .font(.caption2.weight(.semibold))
                     .foregroundStyle(secondaryTextStyle)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                 Text(snapshot.statusText)
-                    .font(.caption.weight(.medium))
+                    .font(.caption2.weight(.medium))
                     .foregroundStyle(secondaryTextStyle)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             }
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(2)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 3)
     }
 
     private var systemMedium: some View {
         let snapshot = entry.snapshot
 
-        return ZStack(alignment: .topTrailing) {
-            HStack(alignment: .bottom, spacing: 14) {
-                VStack(alignment: .leading, spacing: 6) {
-                    WGJWidgetBrandBadge(size: 28)
-                    Spacer(minLength: 0)
-                    Text("Workouts\nPer Week")
-                        .font(.headline.weight(.bold))
-                        .foregroundStyle(primaryTextStyle)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.8)
-                    Text("\(snapshot.completedWorkouts)/\(snapshot.weeklyGoal) this week")
-                        .font(.title3.weight(.bold))
-                        .foregroundStyle(accentStyle)
-                        .minimumScaleFactor(0.75)
-                        .widgetAccentable()
-                    Text(mediumStatus(snapshot))
-                        .font(.caption.weight(.medium))
+        return HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 5) {
+                    WGJWidgetBrandBadge(size: 20)
+                    Text("Weekly Goal")
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(secondaryTextStyle)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                 }
-                .frame(width: 112, alignment: .leading)
-
-                WeeklyGoalWidgetBarChart(snapshot: snapshot)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .widgetAccentable()
+                Spacer(minLength: 0)
+                Text(snapshot.progressText)
+                    .font(.system(size: 31, weight: .black, design: .rounded))
+                    .foregroundStyle(primaryTextStyle)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.55)
+                Text("\(snapshot.completedWorkouts) of \(snapshot.weeklyGoal) workouts")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(secondaryTextStyle)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.55)
+                Text(snapshot.statusText)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(secondaryTextStyle)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.55)
             }
+            .frame(width: WGJWidgetLayout.mediumInfoWidth, alignment: .leading)
+
+            WeeklyGoalWidgetBarChart(snapshot: snapshot)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .widgetAccentable()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(2)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 4)
     }
 
     private var accessoryCircular: some View {

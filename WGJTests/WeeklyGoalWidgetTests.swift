@@ -6,7 +6,7 @@ import Testing
 struct WeeklyGoalWidgetTests {
     @Test
     func widgetDescriptorUsesCacheResetKind() {
-        #expect(WeeklyGoalWidgetDescriptor.kind == "WGJWeeklyGoalWidgetV6")
+        #expect(WeeklyGoalWidgetDescriptor.kind == "WGJWeeklyGoalWidgetV7")
     }
 
     @Test
@@ -25,13 +25,14 @@ struct WeeklyGoalWidgetTests {
 
     @Test
     func storeUsesCacheResetSnapshotKey() {
-        #expect(WeeklyGoalWidgetStore.snapshotDefaultsKey == "weeklyGoalWidget.snapshot.v6")
+        #expect(WeeklyGoalWidgetStore.snapshotDefaultsKey == "weeklyGoalWidget.snapshot.v7")
         #expect(WeeklyGoalWidgetStore.legacySnapshotDefaultsKeys == [
             "weeklyGoalWidget.snapshot.v1",
             "weeklyGoalWidget.snapshot.v2",
             "weeklyGoalWidget.snapshot.v3",
             "weeklyGoalWidget.snapshot.v4",
             "weeklyGoalWidget.snapshot.v5",
+            "weeklyGoalWidget.snapshot.v6",
         ])
     }
 
@@ -82,6 +83,17 @@ struct WeeklyGoalWidgetTests {
         #expect(source.contains("case .vibrant"))
         #expect(source.contains(".widgetAccentable()"))
         #expect(source.contains(".widgetAccentedRenderingMode("))
+    }
+
+    @Test
+    func widgetLayoutUsesCompactBadgesAndFlexibleMediumText() throws {
+        let source = try String(contentsOf: widgetExtensionSourceURL(), encoding: .utf8)
+
+        #expect(source.contains("WGJWidgetBrandBadge(size: 22)"))
+        #expect(source.contains("WGJWidgetBrandBadge(size: 20)"))
+        #expect(source.contains("mediumInfoWidth"))
+        #expect(source.contains("minimumScaleFactor(0.55)"))
+        #expect(!source.contains(".frame(width: 112"))
     }
 
     @Test
