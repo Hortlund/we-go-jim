@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-06-06 - iOS 26 Widgets Need Rendering Mode Support
+
+- Date: 2026-06-06
+- Trigger/Problem: The weekly goal WidgetKit gallery preview and placed Home Screen widget still rendered as a black rounded rectangle after the provider returned non-nil entries and the extension installed with the expected kind/key.
+- Root Cause: The widget view only designed for full-color rendering: it used a custom dark removable background and fixed foreground colors without adapting to iOS 26 WidgetKit `accented` and `vibrant` rendering modes. Apple documents that Home Screen widgets can render in accented mode, where the system removes/replaces backgrounds and recolors content by alpha groups.
+- Durable Rule: System widget views must explicitly read `widgetRenderingMode`, handle `.fullColor`, `.accented`, and `.vibrant`, use `widgetAccentable()` for accent content, and set `widgetAccentedRenderingMode` for branded images. Do not ship a widget that only looks correct in full-color mode.
+- How to Verify Next Time: Run `WGJTests/WeeklyGoalWidgetTests`, confirm the built `.appex` contains the current widget kind/key, and on the signed-in `iPhone 17 / iOS 26.2` simulator or device verify the app-group snapshot is written after launch or workout completion. If a placed widget is available, visually inspect the Home Screen in the active appearance mode.
+- Status: active
+
 ## 2026-06-06 - Widget First Paint Needs Non-Nil Entries
 
 - Date: 2026-06-06
@@ -56,7 +65,7 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 - Root Cause: The widget provider returned `snapshot: nil` from `placeholder(in:)`, and the normal timeline path could also return an entry with no snapshot when app-group data was unavailable. Apple's WidgetKit contract renders `placeholder(in:)` first and expects gallery snapshots to return visible sample data immediately when live data is not ready.
 - Durable Rule: Widget providers must return visible, non-optional first-paint content for `placeholder(in:)`, gallery `getSnapshot`, and no-data timeline fallbacks. Do not rely on an empty-state branch or app-group data being present for the first widget render.
 - How to Verify Next Time: Run `WGJTests/WeeklyGoalWidgetTests`; confirm tests cover visible sample placeholder content and non-optional widget entry snapshots, then build/run the signed-in `iPhone 17 / iOS 26.2` simulator and inspect the built `.appex` for the current widget kind/key.
-- Status: active
+- Status: superseded by `2026-06-06 - iOS 26 Widgets Need Rendering Mode Support` as the primary black-widget fix. Non-nil first-paint entries remain required, but they were not sufficient by themselves.
 
 ## 2026-06-06 - Widget Extension Debug Builds Need Single Executable
 

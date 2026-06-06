@@ -45,6 +45,38 @@ struct WorkoutSessionRepositoryTests {
     }
 
     @Test
+    func finishSessionPublishesWeeklyGoalWidgetProgress() throws {
+        let context = try makeInMemoryContext()
+        context.insert(UserProfile(displayName: "Athlete", weeklyWorkoutGoal: 3))
+
+        let suiteName = "WorkoutSessionRepositoryTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = WeeklyGoalWidgetStore(defaults: defaults)
+        var reloadCount = 0
+        let publisher = WeeklyGoalWidgetPublisher(store: store) {
+            reloadCount += 1
+        }
+        let repository = WorkoutSessionRepository(
+            modelContext: context,
+            weeklyGoalWidgetPublisher: publisher
+        )
+
+        let session = try repository.createEmptySession(name: "Widget Update")
+        try repository.finishSession(sessionID: session.id)
+
+        let snapshot = try #require(try store.load())
+        #expect(snapshot.completedWorkouts == 1)
+        #expect(snapshot.weeklyGoal == 3)
+        #expect(snapshot.statusText == "2 to go")
+        #expect(reloadCount == 1)
+    }
+
+    @Test
     func addExerciseUsesPreferredWeightUnitForDefaultSets() throws {
         let context = try makeInMemoryContext()
         let profileRepository = ProfileRepository(modelContext: context)

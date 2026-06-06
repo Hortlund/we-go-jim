@@ -26,6 +26,23 @@ nonisolated final class WeeklyGoalWidgetPublisher {
         self.reloadTimelines = reloadTimelines
     }
 
+    static func publishBestEffort(modelContext: ModelContext, generatedAt: Date = .now) {
+        guard let publisher = WeeklyGoalWidgetPublisher() else {
+            #if DEBUG
+            print("Weekly goal widget publish skipped: app group store unavailable")
+            #endif
+            return
+        }
+
+        do {
+            try publisher.publish(modelContext: modelContext, generatedAt: generatedAt)
+        } catch {
+            #if DEBUG
+            print("Weekly goal widget publish failed: \(error)")
+            #endif
+        }
+    }
+
     func publish(modelContext: ModelContext, generatedAt: Date = .now) throws {
         let dashboard = try WorkoutMetricsService(modelContext: modelContext)
             .profileDashboardSnapshot(prLimit: 1, weeks: 6)

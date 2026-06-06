@@ -11,7 +11,22 @@ private enum WGJWidgetPalette {
 }
 
 private struct WGJWidgetBackground: View {
+    @Environment(\.widgetRenderingMode) private var renderingMode
+
     var body: some View {
+        switch renderingMode {
+        case .fullColor:
+            fullColorBackground
+        case .accented:
+            Color.clear
+        case .vibrant:
+            Color.clear
+        default:
+            fullColorBackground
+        }
+    }
+
+    private var fullColorBackground: some View {
         LinearGradient(
             colors: [
                 Color(red: 0.025, green: 0.035, blue: 0.070),
@@ -90,6 +105,7 @@ struct WeeklyGoalWidget: Widget {
 
 struct WeeklyGoalWidgetView: View {
     @Environment(\.widgetFamily) private var family
+    @Environment(\.widgetRenderingMode) private var renderingMode
 
     let entry: WeeklyGoalWidgetEntry
 
@@ -121,7 +137,7 @@ struct WeeklyGoalWidgetView: View {
             HStack(spacing: 6) {
                 Text("WGJ")
                     .font(.caption.weight(.black))
-                    .foregroundStyle(WGJWidgetPalette.textSecondary)
+                    .foregroundStyle(secondaryTextStyle)
                 Spacer(minLength: 0)
                 WGJWidgetBrandBadge(size: 32)
             }
@@ -130,18 +146,20 @@ struct WeeklyGoalWidgetView: View {
             ZStack {
                 progressRing(snapshot: snapshot, lineWidth: 9)
                     .frame(width: 80, height: 80)
+                    .widgetAccentable()
                 Text(snapshot.progressText)
                     .font(.title3.weight(.bold))
-                    .foregroundStyle(WGJWidgetPalette.textPrimary)
+                    .foregroundStyle(primaryTextStyle)
                     .minimumScaleFactor(0.65)
+                    .widgetAccentable()
             }
             VStack(spacing: 2) {
                 Text("Weekly Goal")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(WGJWidgetPalette.textSecondary)
+                    .foregroundStyle(secondaryTextStyle)
                 Text(snapshot.statusText)
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(WGJWidgetPalette.textSecondary)
+                    .foregroundStyle(secondaryTextStyle)
             }
             Spacer(minLength: 0)
         }
@@ -159,22 +177,24 @@ struct WeeklyGoalWidgetView: View {
                     Spacer(minLength: 0)
                     Text("Workouts\nPer Week")
                         .font(.headline.weight(.bold))
-                        .foregroundStyle(WGJWidgetPalette.textPrimary)
+                        .foregroundStyle(primaryTextStyle)
                         .lineLimit(2)
                         .minimumScaleFactor(0.8)
                     Text("\(snapshot.completedWorkouts)/\(snapshot.weeklyGoal) this week")
                         .font(.title3.weight(.bold))
-                        .foregroundStyle(WGJWidgetPalette.accentBlue)
+                        .foregroundStyle(accentStyle)
                         .minimumScaleFactor(0.75)
+                        .widgetAccentable()
                     Text(mediumStatus(snapshot))
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(WGJWidgetPalette.textSecondary)
+                        .foregroundStyle(secondaryTextStyle)
                         .lineLimit(1)
                 }
                 .frame(width: 112, alignment: .leading)
 
                 WeeklyGoalWidgetBarChart(snapshot: snapshot)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .widgetAccentable()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -186,13 +206,14 @@ struct WeeklyGoalWidgetView: View {
 
         return ZStack {
             progressRing(snapshot: snapshot, lineWidth: 5)
+                .widgetAccentable()
             VStack(spacing: -1) {
                 Text("\(snapshot.completedWorkouts)")
                     .font(.headline.weight(.bold))
-                    .foregroundStyle(WGJWidgetPalette.textPrimary)
+                    .foregroundStyle(primaryTextStyle)
                 Text("/\(snapshot.weeklyGoal)")
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(WGJWidgetPalette.textSecondary)
+                    .foregroundStyle(secondaryTextStyle)
             }
         }
     }
@@ -203,13 +224,13 @@ struct WeeklyGoalWidgetView: View {
         return VStack(alignment: .leading, spacing: 2) {
             Text("Weekly Goal")
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(WGJWidgetPalette.textSecondary)
+                .foregroundStyle(secondaryTextStyle)
             Text("\(snapshot.completedWorkouts) of \(snapshot.weeklyGoal) workouts")
                 .font(.headline.weight(.bold))
-                .foregroundStyle(WGJWidgetPalette.textPrimary)
+                .foregroundStyle(primaryTextStyle)
             Text(snapshot.statusText)
                 .font(.caption2)
-                .foregroundStyle(WGJWidgetPalette.textSecondary)
+                .foregroundStyle(secondaryTextStyle)
         }
     }
 
@@ -224,6 +245,49 @@ struct WeeklyGoalWidgetView: View {
                     style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
                 )
                 .rotationEffect(.degrees(-90))
+        }
+    }
+
+    private var currentRenderingMode: WidgetRenderingMode {
+        renderingMode
+    }
+
+    private var primaryTextStyle: Color {
+        switch currentRenderingMode {
+        case .fullColor:
+            WGJWidgetPalette.textPrimary
+        case .accented:
+            .white
+        case .vibrant:
+            .white
+        default:
+            WGJWidgetPalette.textPrimary
+        }
+    }
+
+    private var secondaryTextStyle: Color {
+        switch currentRenderingMode {
+        case .fullColor:
+            WGJWidgetPalette.textSecondary
+        case .accented:
+            .white.opacity(0.78)
+        case .vibrant:
+            .white.opacity(0.78)
+        default:
+            WGJWidgetPalette.textSecondary
+        }
+    }
+
+    private var accentStyle: Color {
+        switch currentRenderingMode {
+        case .fullColor:
+            WGJWidgetPalette.accentBlue
+        case .accented:
+            .white
+        case .vibrant:
+            .white
+        default:
+            WGJWidgetPalette.accentBlue
         }
     }
 
@@ -316,12 +380,26 @@ private struct WGJWidgetBrandBadge: View {
     let size: CGFloat
 
     var body: some View {
+        if #available(iOS 18.0, *) {
+            Image("WidgetLogo")
+                .resizable()
+                .widgetAccentedRenderingMode(WidgetAccentedRenderingMode.fullColor)
+                .scaledToFit()
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: size * 0.24, style: .continuous))
+                .accessibilityHidden(true)
+        } else {
+            logoImage
+        }
+    }
+
+    private var logoImage: some View {
         Image("WidgetLogo")
             .resizable()
             .scaledToFit()
-        .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: size * 0.24, style: .continuous))
-        .accessibilityHidden(true)
+            .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: size * 0.24, style: .continuous))
+            .accessibilityHidden(true)
     }
 }
 

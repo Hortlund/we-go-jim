@@ -308,13 +308,13 @@ struct ContentView: View {
                     key: .feature("weekly-goal-widget.publish"),
                     operationName: "weekly-goal-widget.publish"
                 ) { backgroundContext in
-                    try? WeeklyGoalWidgetPublisher()?.publish(modelContext: backgroundContext)
+                    WeeklyGoalWidgetPublisher.publishBestEffort(modelContext: backgroundContext)
                 }
             }
             return
         }
 
-        try? WeeklyGoalWidgetPublisher()?.publish(modelContext: modelContext)
+        WeeklyGoalWidgetPublisher.publishBestEffort(modelContext: modelContext)
     }
 
     private func clearWeeklyGoalWidgetSnapshot() {

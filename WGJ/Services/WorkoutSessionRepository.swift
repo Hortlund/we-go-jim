@@ -150,12 +150,17 @@ nonisolated enum WorkoutSessionRepositoryError: Error {
 
 nonisolated final class WorkoutSessionRepository {
     private let modelContext: ModelContext
+    private let weeklyGoalWidgetPublisher: WeeklyGoalWidgetPublisher?
     private var historyProjectionRepository: HistoryProjectionRepository {
         HistoryProjectionRepository(modelContext: modelContext)
     }
 
-    init(modelContext: ModelContext) {
+    init(
+        modelContext: ModelContext,
+        weeklyGoalWidgetPublisher: WeeklyGoalWidgetPublisher? = WeeklyGoalWidgetPublisher()
+    ) {
         self.modelContext = modelContext
+        self.weeklyGoalWidgetPublisher = weeklyGoalWidgetPublisher
     }
 
     private func preferredLoadUnit() -> TemplateLoadUnit {
@@ -181,6 +186,18 @@ nonisolated final class WorkoutSessionRepository {
             sessionID: sessionID,
             container: modelContext.container
         )
+    }
+
+    private func publishWeeklyGoalWidgetProgress() {
+        guard let weeklyGoalWidgetPublisher else { return }
+
+        do {
+            try weeklyGoalWidgetPublisher.publish(modelContext: modelContext, generatedAt: .now)
+        } catch {
+            #if DEBUG
+            print("Weekly goal widget publish failed: \(error)")
+            #endif
+        }
     }
 
     func createEmptySession(name: String = "Empty Workout") throws -> WorkoutSession {
@@ -806,7 +823,7 @@ nonisolated final class WorkoutSessionRepository {
         try saveUserDataChanges()
         invalidateAnalyticsCache()
         scheduleProjectionRebuild(for: sessionID)
-        try? WeeklyGoalWidgetPublisher()?.publish(modelContext: modelContext)
+        publishWeeklyGoalWidgetProgress()
         try? CloudKitBrosSocialService.makeIfUserDataSyncEnabled(modelContext: modelContext)?.queueCompletedSessionPublish(sessionID: sessionID)
     }
 
@@ -826,7 +843,7 @@ nonisolated final class WorkoutSessionRepository {
         session.updatedAt = now
         try saveUserDataChanges()
         invalidateAnalyticsCache()
-        try? WeeklyGoalWidgetPublisher()?.publish(modelContext: modelContext)
+        publishWeeklyGoalWidgetProgress()
     }
 
     func restoreArchivedSession(id: UUID) throws {
@@ -844,7 +861,7 @@ nonisolated final class WorkoutSessionRepository {
         session.updatedAt = Date()
         try saveUserDataChanges()
         invalidateAnalyticsCache()
-        try? WeeklyGoalWidgetPublisher()?.publish(modelContext: modelContext)
+        publishWeeklyGoalWidgetProgress()
     }
 
     func cancelSession(sessionID: UUID) throws {
@@ -910,7 +927,7 @@ nonisolated final class WorkoutSessionRepository {
 
         try saveUserDataChanges()
         invalidateAnalyticsCache()
-        try? WeeklyGoalWidgetPublisher()?.publish(modelContext: modelContext)
+        publishWeeklyGoalWidgetProgress()
         return staleSessions.count
     }
 
@@ -931,7 +948,7 @@ nonisolated final class WorkoutSessionRepository {
         modelContext.delete(session)
         try saveUserDataChanges()
         invalidateAnalyticsCache()
-        try? WeeklyGoalWidgetPublisher()?.publish(modelContext: modelContext)
+        publishWeeklyGoalWidgetProgress()
     }
 
     private func template(id: UUID) throws -> WorkoutTemplate? {

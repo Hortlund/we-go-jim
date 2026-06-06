@@ -6,7 +6,7 @@ import Testing
 struct WeeklyGoalWidgetTests {
     @Test
     func widgetDescriptorUsesCacheResetKind() {
-        #expect(WeeklyGoalWidgetDescriptor.kind == "WGJWeeklyGoalWidgetV5")
+        #expect(WeeklyGoalWidgetDescriptor.kind == "WGJWeeklyGoalWidgetV6")
     }
 
     @Test
@@ -25,12 +25,13 @@ struct WeeklyGoalWidgetTests {
 
     @Test
     func storeUsesCacheResetSnapshotKey() {
-        #expect(WeeklyGoalWidgetStore.snapshotDefaultsKey == "weeklyGoalWidget.snapshot.v5")
+        #expect(WeeklyGoalWidgetStore.snapshotDefaultsKey == "weeklyGoalWidget.snapshot.v6")
         #expect(WeeklyGoalWidgetStore.legacySnapshotDefaultsKeys == [
             "weeklyGoalWidget.snapshot.v1",
             "weeklyGoalWidget.snapshot.v2",
             "weeklyGoalWidget.snapshot.v3",
             "weeklyGoalWidget.snapshot.v4",
+            "weeklyGoalWidget.snapshot.v5",
         ])
     }
 
@@ -68,6 +69,19 @@ struct WeeklyGoalWidgetTests {
         let source = try String(contentsOf: widgetExtensionSourceURL(), encoding: .utf8)
 
         #expect(source.contains("Image(\"WidgetLogo\")"))
+    }
+
+    @Test
+    func widgetViewAdaptsToIOS26RenderingModes() throws {
+        let source = try String(contentsOf: widgetExtensionSourceURL(), encoding: .utf8)
+
+        #expect(source.contains("@Environment(\\.widgetRenderingMode)"))
+        #expect(source.contains("WidgetRenderingMode"))
+        #expect(source.contains("case .fullColor"))
+        #expect(source.contains("case .accented"))
+        #expect(source.contains("case .vibrant"))
+        #expect(source.contains(".widgetAccentable()"))
+        #expect(source.contains(".widgetAccentedRenderingMode("))
     }
 
     @Test

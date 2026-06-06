@@ -133,7 +133,7 @@ nonisolated final class ProfileRepository {
         profile.weeklyWorkoutGoal = max(1, min(14, goal))
         profile.updatedAt = .now
         try saveUserDataChanges()
-        try? WeeklyGoalWidgetPublisher()?.publish(modelContext: modelContext)
+        WeeklyGoalWidgetPublisher.publishBestEffort(modelContext: modelContext)
     }
 
     func updateTrainingGuidanceEnabled(_ isEnabled: Bool) throws {
