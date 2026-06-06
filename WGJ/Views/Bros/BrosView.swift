@@ -937,6 +937,10 @@ struct BrosView: View {
         .wgjMinimalKeyboardToolbar()
         .accessibilityIdentifier("bros-content-root")
         .toolbar(.hidden, for: .navigationBar)
+        .onAppear {
+            applyWarmSnapshotIfAvailable()
+            rebuildFilteredSnapshot()
+        }
         .task(id: isTabActive) {
             guard isTabActive else {
                 cancelActivationRefresh()

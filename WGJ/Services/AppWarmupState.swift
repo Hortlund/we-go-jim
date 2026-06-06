@@ -249,7 +249,12 @@ nonisolated enum FirstFrameTabContentPolicy {
         hasFreshWarmSnapshot: Bool,
         isWarmupActive: Bool = false
     ) -> Bool {
-        tab == .profile && (hasFreshWarmSnapshot || isWarmupActive)
+        switch tab {
+        case .profile, .bros:
+            return hasFreshWarmSnapshot || isWarmupActive
+        case .history, .startWorkout, .exercises:
+            return false
+        }
     }
 
     static func presentation(

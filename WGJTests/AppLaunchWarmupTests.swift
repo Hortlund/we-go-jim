@@ -301,7 +301,7 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
-    func firstFrameTabPolicyPreloadsOnlyWarmProfileThroughTabView() {
+    func firstFrameTabPolicyPreloadsWarmFirstVisitTabsThroughTabView() {
         #expect(FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
             tab: .profile,
             hasFreshWarmSnapshot: true
@@ -311,9 +311,14 @@ struct AppLaunchWarmupTests {
             hasFreshWarmSnapshot: false,
             isWarmupActive: true
         ))
-        #expect(!FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
+        #expect(FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
             tab: .bros,
             hasFreshWarmSnapshot: true,
+            isWarmupActive: false
+        ))
+        #expect(FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
+            tab: .bros,
+            hasFreshWarmSnapshot: false,
             isWarmupActive: true
         ))
         #expect(!FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
@@ -471,6 +476,19 @@ struct AppLaunchWarmupTests {
         #expect(FirstRunLocalBootstrapProgress.isCompleted(
             appliedVersion: FirstRunLocalBootstrapProgress.currentVersion
         ))
+    }
+
+    @Test
+    func firstRunLocalBootstrapWarmsProfileAndBrosSnapshotsBeforeMainEntry() throws {
+        let source = try String(contentsOf: contentViewSourceURL(), encoding: .utf8)
+
+        #expect(source.contains("let profileWarmSnapshot = try? await Self.buildProfileWarmSnapshot"))
+        #expect(source.contains("let brosWarmSnapshot = try? await Self.buildBrosWarmSnapshot"))
+        #expect(source.contains("FirstRunLocalBootstrapResult("))
+        #expect(source.contains("profileWarmSnapshot: profileWarmSnapshot"))
+        #expect(source.contains("brosWarmSnapshot: brosWarmSnapshot"))
+        #expect(source.contains("appWarmupState.storeProfile(profileWarmSnapshot)"))
+        #expect(source.contains("appWarmupState.storeBros(brosWarmSnapshot)"))
     }
 
     @Test
@@ -1388,6 +1406,14 @@ private actor ControlledRuntimeAccountStatusProvider: AccountStatusProviding {
             continuation.resume(returning: status)
         }
     }
+}
+
+private func contentViewSourceURL() -> URL {
+    URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("WGJ")
+        .appendingPathComponent("ContentView.swift")
 }
 
 private final class LockedBootstrapBuildRecorder: @unchecked Sendable {

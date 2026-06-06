@@ -979,6 +979,7 @@ struct ContentView: View {
 
         guard let appBackgroundStore else { return }
         let cloudSyncEnabled = appRuntimeState.cloudSyncEnabled
+        let cloudSyncErrorDescription = appRuntimeState.cloudSyncErrorDescription
 
         let result = try? await appBackgroundStore.performAsync("app.first-run.local-bootstrap") { backgroundContext in
             BrosCleanStartPolicy.applyIfNeeded(modelContext: backgroundContext)
@@ -987,7 +988,16 @@ struct ContentView: View {
                 modelContext: backgroundContext,
                 cloudSyncEnabled: cloudSyncEnabled
             )
-            return FirstRunLocalBootstrapResult(profileWarmSnapshot: profileWarmSnapshot)
+            let brosWarmSnapshot = try? await Self.buildBrosWarmSnapshot(
+                modelContext: backgroundContext,
+                cloudSyncEnabled: cloudSyncEnabled,
+                cloudSyncErrorDescription: cloudSyncErrorDescription,
+                allowsRemoteFetch: true
+            )
+            return FirstRunLocalBootstrapResult(
+                profileWarmSnapshot: profileWarmSnapshot,
+                brosWarmSnapshot: brosWarmSnapshot
+            )
         }
 
         guard let result else { return }
@@ -999,6 +1009,9 @@ struct ContentView: View {
                 notificationStyle: profileWarmSnapshot.profile.workoutNotificationStyle,
                 keepsScreenAwake: profileWarmSnapshot.profile.keepsScreenAwake
             )
+        }
+        if let brosWarmSnapshot = result.brosWarmSnapshot {
+            appWarmupState.storeBros(brosWarmSnapshot)
         }
         FirstRunLocalBootstrapProgress.markCompleted()
     }
@@ -1141,6 +1154,7 @@ private struct DeferredMaintenanceExecutionOutcome: Sendable {
 
 private struct FirstRunLocalBootstrapResult: Sendable {
     let profileWarmSnapshot: ProfileWarmSnapshot?
+    let brosWarmSnapshot: BrosWarmSnapshot?
 }
 
 private enum AppStartupRouting {

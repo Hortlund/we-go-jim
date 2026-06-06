@@ -98,6 +98,9 @@ struct ProfileView: View {
         .wgjScreenBackground()
         .accessibilityIdentifier("profile-content-root")
         .toolbar(.hidden, for: .navigationBar)
+        .onAppear {
+            applyWarmProfileSnapshotIfAvailable()
+        }
         .task(id: isTabActive) {
             guard isTabActive else { return }
             await handleInitialActivation()

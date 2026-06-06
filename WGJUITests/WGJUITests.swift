@@ -70,11 +70,11 @@ final class WGJUITests: XCTestCase {
         tapTabWithoutWaitingForIdle("Bros", in: app)
         XCTAssertTrue(waitForAnyElement([
             identifiedElement("bros-content-root", in: app),
-            identifiedElement("bros-loading-card", in: app),
             app.staticTexts["Bros unavailable"],
             app.staticTexts["Start a bro circle"],
             identifiedElement("bros-manage-circle-button", in: app),
         ], timeout: 6))
+        XCTAssertFalse(identifiedElement("bros-loading-card", in: app).exists)
     }
 
     @MainActor
