@@ -153,7 +153,7 @@ nonisolated enum WeeklyGoalWidgetDeepLink {
 }
 
 nonisolated enum WeeklyGoalWidgetDescriptor {
-    static let kind = "WeeklyGoalWidget"
+    static let kind = "WGJWeeklyGoalWidgetV2"
 }
 
 nonisolated struct WeeklyGoalWidgetStore {

@@ -5,6 +5,11 @@ import Testing
 
 struct WeeklyGoalWidgetTests {
     @Test
+    func widgetDescriptorUsesCacheResetKind() {
+        #expect(WeeklyGoalWidgetDescriptor.kind == "WGJWeeklyGoalWidgetV2")
+    }
+
+    @Test
     func contentPolicyClampsGoalAndFinishedCount() {
         let snapshot = WeeklyGoalWidgetContentPolicy.snapshot(
             completedWorkouts: -2,

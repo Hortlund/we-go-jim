@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-06-06 - Pre-Release Widget Cache Resets Need A Kind Bump
+
+- Date: 2026-06-06
+- Trigger/Problem: The weekly goal widget kept rendering the old layout on device even after delete/reinstall/cache-clearing attempts, while the built `.appex` contained the new layout strings and logo asset.
+- Root Cause: WidgetKit can keep timeline/gallery/render state tied to the widget `kind`, so changing layout code and reloading timelines may not be enough to force a visible reset on a development device.
+- Durable Rule: For unreleased widgets with stubborn stale device renders, bump `WeeklyGoalWidgetDescriptor.kind` and keep the new kind. Do not change it back unless intentionally preserving or restoring the old WidgetKit identity.
+- How to Verify Next Time: After a kind bump, build and inspect the app and extension binaries for the new kind string, then remove the old placed widget and add the new widget from the gallery.
+- Status: active
+
 ## 2026-06-06 - Unreleased Features Do Not Need Internal Backward Compatibility
 
 - Date: 2026-06-06
