@@ -6,7 +6,7 @@ import Testing
 struct WeeklyGoalWidgetTests {
     @Test
     func widgetDescriptorUsesCacheResetKind() {
-        #expect(WeeklyGoalWidgetDescriptor.kind == "WGJWeeklyGoalWidgetV4")
+        #expect(WeeklyGoalWidgetDescriptor.kind == "WGJWeeklyGoalWidgetV5")
     }
 
     @Test
@@ -25,11 +25,12 @@ struct WeeklyGoalWidgetTests {
 
     @Test
     func storeUsesCacheResetSnapshotKey() {
-        #expect(WeeklyGoalWidgetStore.snapshotDefaultsKey == "weeklyGoalWidget.snapshot.v4")
+        #expect(WeeklyGoalWidgetStore.snapshotDefaultsKey == "weeklyGoalWidget.snapshot.v5")
         #expect(WeeklyGoalWidgetStore.legacySnapshotDefaultsKeys == [
             "weeklyGoalWidget.snapshot.v1",
             "weeklyGoalWidget.snapshot.v2",
             "weeklyGoalWidget.snapshot.v3",
+            "weeklyGoalWidget.snapshot.v4",
         ])
     }
 
@@ -43,6 +44,30 @@ struct WeeklyGoalWidgetTests {
         #expect(snapshot.recentWeeks.count == 6)
         #expect(snapshot.recentWeeks.last?.completedWorkouts == 3)
         #expect(snapshot.statusText == "1 to go")
+    }
+
+    @Test
+    func widgetProviderPlaceholderUsesVisibleSampleSnapshot() throws {
+        let source = try String(contentsOf: widgetExtensionSourceURL(), encoding: .utf8)
+        let placeholder = try #require(sourceFunction(named: "placeholder", in: source))
+
+        #expect(placeholder.contains("WeeklyGoalWidgetContentPolicy.preview()"))
+        #expect(!placeholder.contains("snapshot: nil"))
+    }
+
+    @Test
+    func widgetEntrySnapshotIsNonOptionalForFirstPaint() throws {
+        let source = try String(contentsOf: widgetExtensionSourceURL(), encoding: .utf8)
+
+        #expect(source.contains("let snapshot: WeeklyGoalWidgetSnapshot\n"))
+        #expect(!source.contains("let snapshot: WeeklyGoalWidgetSnapshot?"))
+    }
+
+    @Test
+    func widgetBrandBadgeUsesPackagedLogoAsset() throws {
+        let source = try String(contentsOf: widgetExtensionSourceURL(), encoding: .utf8)
+
+        #expect(source.contains("Image(\"WidgetLogo\")"))
     }
 
     @Test
@@ -342,6 +367,39 @@ struct WeeklyGoalWidgetTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .appendingPathComponent("WGJ.xcodeproj/project.pbxproj")
+    }
+
+    private func widgetExtensionSourceURL() -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("WGJWidgetExtension/WeeklyGoalWidget.swift")
+    }
+
+    private func sourceFunction(named name: String, in source: String) -> String? {
+        guard
+            let signatureRange = source.range(of: "func \(name)"),
+            let openBrace = source[signatureRange.lowerBound...].firstIndex(of: "{")
+        else {
+            return nil
+        }
+
+        var depth = 0
+        var cursor = openBrace
+        while cursor < source.endIndex {
+            let character = source[cursor]
+            if character == "{" {
+                depth += 1
+            } else if character == "}" {
+                depth -= 1
+                if depth == 0 {
+                    return String(source[signatureRange.lowerBound...cursor])
+                }
+            }
+            cursor = source.index(after: cursor)
+        }
+
+        return nil
     }
 
     private func xcodeBuildConfiguration(named name: String, containing marker: String, in project: String) -> String? {

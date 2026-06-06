@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-06-06 - Widget First Paint Needs Non-Nil Entries
+
+- Date: 2026-06-06
+- Trigger/Problem: The weekly goal WidgetKit gallery preview and placed Home Screen widget still rendered as a black rounded rectangle after build-layout and cache-reset fixes.
+- Root Cause: The widget provider returned `snapshot: nil` from `placeholder(in:)`, and the normal timeline path could also return an entry with no snapshot when app-group data was unavailable. Apple's WidgetKit contract renders `placeholder(in:)` first and expects gallery snapshots to return visible sample data immediately when live data is not ready.
+- Durable Rule: Widget providers must return visible, non-optional first-paint content for `placeholder(in:)`, gallery `getSnapshot`, and no-data timeline fallbacks. Do not rely on an empty-state branch or app-group data being present for the first widget render.
+- How to Verify Next Time: Run `WGJTests/WeeklyGoalWidgetTests`; confirm tests cover visible sample placeholder content and non-optional widget entry snapshots, then build/run the signed-in `iPhone 17 / iOS 26.2` simulator and inspect the built `.appex` for the current widget kind/key.
+- Status: active
+
 ## 2026-06-06 - Widget Extension Debug Builds Need Single Executable
 
 - Date: 2026-06-06
@@ -56,7 +65,7 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 - Root Cause: The widget extension Debug build used Xcode's split debug dylib layout (`ENABLE_DEBUG_DYLIB = YES`), leaving the WidgetKit-facing `.appex` with a stub executable plus debug dylib artifacts. `chronod` rejected/discovered the extension poorly, so the widget host showed a black fallback instead of the SwiftUI view.
 - Durable Rule: Keep `ENABLE_DEBUG_DYLIB = NO` for `WGJWidgetExtension` Debug builds so WidgetKit discovers and renders a normal single extension executable. Do not re-enable split debug dylibs for the widget target unless WidgetKit rendering is explicitly reverified on the signed-in simulator/device.
 - How to Verify Next Time: Run `WGJTests/WeeklyGoalWidgetTests`, show `WGJWidgetExtension` Debug build settings for `ENABLE_DEBUG_DYLIB = NO`, then clean build/run and inspect the built `.appex` to confirm `WGJWidgetExtension.debug.dylib` and `__preview.dylib` are absent while `WGJWeeklyGoalWidgetV4` is present in the main executable.
-- Status: active
+- Status: superseded by `2026-06-06 - Widget First Paint Needs Non-Nil Entries` as the primary black-widget fix. Keeping a single debug executable is still useful extension hygiene, but it was not sufficient to fix the black render by itself.
 
 ## 2026-06-06 - Pre-Release Widget Cache Resets Need A Kind Bump
 
