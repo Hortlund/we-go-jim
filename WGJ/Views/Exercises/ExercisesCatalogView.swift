@@ -1660,6 +1660,7 @@ private struct CustomExerciseEditorView: View {
         }
         .wgjScreenBackground()
         .wgjNavigationChrome()
+        .wgjMinimalKeyboardToolbar()
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

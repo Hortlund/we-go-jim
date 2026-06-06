@@ -63,6 +63,7 @@ struct ProfileManagementView: View {
         .wgjNavigationChrome()
         .navigationTitle("Profile")
         .navigationBarTitleDisplayMode(.inline)
+        .wgjMinimalKeyboardToolbar()
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Cancel") {

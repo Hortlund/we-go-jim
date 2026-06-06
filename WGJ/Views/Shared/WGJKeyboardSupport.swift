@@ -26,15 +26,32 @@ enum WGJKeyboardHideControl {
     static let accessibilityLabel = "Hide keyboard"
     static let accessibilityIdentifier = "keyboard-hide-button"
     static let imagePadding: CGFloat = 6
-    static let horizontalPadding: CGFloat = 8
+    static let horizontalPadding: CGFloat = 12
     static let verticalPadding: CGFloat = 6
+    static let minimumHeight: CGFloat = 34
 
     static var foregroundStyle: Color {
         WGJTheme.textPrimary
     }
 
+    static var backgroundStyle: Color {
+        WGJTheme.fieldStrong.opacity(0.96)
+    }
+
+    static var outlineStyle: Color {
+        WGJTheme.outline.opacity(0.44)
+    }
+
     static var foregroundUIColor: UIColor {
         UIColor(WGJTheme.textPrimary)
+    }
+
+    static var backgroundUIColor: UIColor {
+        UIColor(WGJTheme.fieldStrong.opacity(0.96))
+    }
+
+    static var outlineUIColor: UIColor {
+        UIColor(WGJTheme.outline.opacity(0.44))
     }
 
     static func buttonConfiguration() -> UIButton.Configuration {
@@ -43,6 +60,16 @@ enum WGJKeyboardHideControl {
         configuration.imagePadding = imagePadding
         configuration.title = title
         configuration.baseForegroundColor = foregroundUIColor
+        configuration.baseBackgroundColor = backgroundUIColor
+        configuration.cornerStyle = .capsule
+        configuration.contentInsets = NSDirectionalEdgeInsets(
+            top: verticalPadding,
+            leading: horizontalPadding,
+            bottom: verticalPadding,
+            trailing: horizontalPadding
+        )
+        configuration.background.strokeColor = outlineUIColor
+        configuration.background.strokeWidth = 1
         return configuration
     }
 }
@@ -62,6 +89,15 @@ struct WGJKeyboardHideButton: View {
             .foregroundStyle(WGJKeyboardHideControl.foregroundStyle)
             .padding(.horizontal, WGJKeyboardHideControl.horizontalPadding)
             .padding(.vertical, WGJKeyboardHideControl.verticalPadding)
+            .frame(minHeight: WGJKeyboardHideControl.minimumHeight)
+            .background {
+                Capsule(style: .continuous)
+                    .fill(WGJKeyboardHideControl.backgroundStyle)
+                    .overlay {
+                        Capsule(style: .continuous)
+                            .stroke(WGJKeyboardHideControl.outlineStyle, lineWidth: 1)
+                    }
+            }
         }
         .buttonStyle(.plain)
         .accessibilityLabel(WGJKeyboardHideControl.accessibilityLabel)
@@ -151,6 +187,8 @@ struct WGJAccessoryTextField: UIViewRepresentable {
             button.accessibilityLabel = WGJKeyboardHideControl.accessibilityLabel
             button.accessibilityIdentifier = WGJKeyboardHideControl.accessibilityIdentifier
             button.addTarget(self, action: #selector(dismissKeyboard), for: .touchUpInside)
+            button.setContentHuggingPriority(.required, for: .horizontal)
+            button.setContentCompressionResistancePriority(.required, for: .horizontal)
 
             toolbar.items = [
                 UIBarButtonItem.flexibleSpace(),

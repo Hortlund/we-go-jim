@@ -934,6 +934,7 @@ struct BrosView: View {
             )
         }
         .wgjScreenBackground()
+        .wgjMinimalKeyboardToolbar()
         .accessibilityIdentifier("bros-content-root")
         .toolbar(.hidden, for: .navigationBar)
         .task(id: isTabActive) {

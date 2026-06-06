@@ -629,6 +629,17 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
+    func keyboardHideControlUsesSharedProminentAccessoryStyle() {
+        let configuration = WGJKeyboardHideControl.buttonConfiguration()
+
+        #expect(configuration.image == UIImage(systemName: WGJKeyboardHideControl.systemImage))
+        #expect(configuration.imagePadding == WGJKeyboardHideControl.imagePadding)
+        #expect(configuration.title == WGJKeyboardHideControl.title)
+        #expect(configuration.cornerStyle == .capsule)
+        #expect(configuration.baseBackgroundColor == WGJKeyboardHideControl.backgroundUIColor)
+    }
+
+    @Test
     func keyboardVisibilityIgnoresInvalidFrameSignals() {
         let invalidFrameNotification = Notification(
             name: UIResponder.keyboardWillChangeFrameNotification,

@@ -128,6 +128,7 @@ struct HistoryDetailView: View {
         .wgjNavigationChrome()
         .navigationTitle("Workout")
         .navigationBarTitleDisplayMode(.inline)
+        .wgjMinimalKeyboardToolbar()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
