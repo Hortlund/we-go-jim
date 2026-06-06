@@ -638,6 +638,28 @@ final class TemplateFileOpenState {
 }
 
 @MainActor
+enum AppDeepLinkRouter {
+    @discardableResult
+    static func route(url: URL, appPhase: AppPhase, tabState: AppTabState) -> Bool {
+        guard supports(url: url) else {
+            return false
+        }
+        guard appPhase == .main else {
+            return false
+        }
+
+        tabState.selectedTab = .profile
+        return true
+    }
+
+    static func supports(url: URL) -> Bool {
+        url.scheme?.lowercased() == "wgj"
+            && url.host?.lowercased() == "profile"
+            && url.path.lowercased() == "/weekly-goal"
+    }
+}
+
+@MainActor
 @Observable
 final class AppNotificationRouter {
     static let shared = AppNotificationRouter()

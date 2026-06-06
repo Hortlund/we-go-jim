@@ -2707,6 +2707,7 @@ struct ActiveWorkoutView: View {
         guard let completedSession = try completedSessionRepository.session(id: finishedSessionID) else {
             throw WorkoutSessionRepositoryError.sessionNotFound
         }
+        try? WeeklyGoalWidgetPublisher()?.publish(modelContext: modelContext)
 
         let folderSnapshots: [ActiveWorkoutTemplateFolderSnapshot]
         let templateUpdatePreview: WorkoutTemplateSyncPreview?

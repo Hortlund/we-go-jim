@@ -11,9 +11,32 @@
 		C85A32112F3AB00100217B62 /* MuscleMap in Frameworks */ = {isa = PBXBuildFile; productRef = C85A32102F3AB00100217B62 /* MuscleMap */; };
 		C85A32142F3AC00100217B62 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = C85A32122F3AC00100217B62 /* RevenueCat */; };
 		C85A32152F3AC00100217B62 /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = C85A32132F3AC00100217B62 /* RevenueCatUI */; };
+		8D9893B38D044AD3944CE69A /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7E452FB2BAC24120AC2DC115 /* WidgetKit.framework */; };
+		EA880FACDBBD473798D3C753 /* WGJWidgetExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 31E5144B791046F1A717FFBB /* WGJWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		19525F82E2324559A4C343F1 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				EA880FACDBBD473798D3C753 /* WGJWidgetExtension.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXContainerItemProxy section */
+		D465145C3B95439097399E10 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C85A31BD2F367BAE00217B62 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C0D3D2FB8E954A6EA2CDDEE5;
+			remoteInfo = WGJWidgetExtension;
+		};
 		C85A31D52F367BAF00217B62 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = C85A31BD2F367BAE00217B62 /* Project object */;
@@ -34,10 +57,36 @@
 		C85A31C52F367BAE00217B62 /* WGJ.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WGJ.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C85A31D42F367BAF00217B62 /* WGJTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WGJTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C85A31DE2F367BAF00217B62 /* WGJUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WGJUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		31E5144B791046F1A717FFBB /* WGJWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = WGJWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		C85A32002F39A7B000217B62 /* AppIntents.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppIntents.framework; path = System/Library/Frameworks/AppIntents.framework; sourceTree = SDKROOT; };
+		7E452FB2BAC24120AC2DC115 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		6376CEA46B67410F95330E69 /* Exceptions for "WGJWidgetExtension" folder in "WGJWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+				WGJWidgetExtension.entitlements,
+			);
+			target = C0D3D2FB8E954A6EA2CDDEE5 /* WGJWidgetExtension */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		5FDCCDC93B7C462386C9807A /* WidgetShared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = WGJ/WidgetShared;
+			sourceTree = "<group>";
+		};
+		F7851339077540C68451E76E /* WGJWidgetExtension */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				6376CEA46B67410F95330E69 /* Exceptions for "WGJWidgetExtension" folder in "WGJWidgetExtension" target */,
+			);
+			path = WGJWidgetExtension;
+			sourceTree = "<group>";
+		};
 		C85A31C72F367BAE00217B62 /* WGJ */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = WGJ;
@@ -81,6 +130,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		FB4AC257C23E4A408D53E93A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8D9893B38D044AD3944CE69A /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -88,6 +145,7 @@
 			isa = PBXGroup;
 			children = (
 				C85A31C72F367BAE00217B62 /* WGJ */,
+				F7851339077540C68451E76E /* WGJWidgetExtension */,
 				C85A31D72F367BAF00217B62 /* WGJTests */,
 				C85A31E12F367BAF00217B62 /* WGJUITests */,
 				C85A32022F39A7B000217B62 /* Frameworks */,
@@ -99,6 +157,7 @@
 			isa = PBXGroup;
 			children = (
 				C85A31C52F367BAE00217B62 /* WGJ.app */,
+				31E5144B791046F1A717FFBB /* WGJWidgetExtension.appex */,
 				C85A31D42F367BAF00217B62 /* WGJTests.xctest */,
 				C85A31DE2F367BAF00217B62 /* WGJUITests.xctest */,
 			);
@@ -109,6 +168,7 @@
 			isa = PBXGroup;
 			children = (
 				C85A32002F39A7B000217B62 /* AppIntents.framework */,
+				7E452FB2BAC24120AC2DC115 /* WidgetKit.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -123,10 +183,12 @@
 				C85A31C12F367BAE00217B62 /* Sources */,
 				C85A31C22F367BAE00217B62 /* Frameworks */,
 				C85A31C32F367BAE00217B62 /* Resources */,
+				19525F82E2324559A4C343F1 /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				CAFE0CC613284A98AE819F9D /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				C85A31C72F367BAE00217B62 /* WGJ */,
@@ -140,6 +202,29 @@
 			productName = WGJ;
 			productReference = C85A31C52F367BAE00217B62 /* WGJ.app */;
 			productType = "com.apple.product-type.application";
+		};
+		C0D3D2FB8E954A6EA2CDDEE5 /* WGJWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7FC12504937542229DAE903A /* Build configuration list for PBXNativeTarget "WGJWidgetExtension" */;
+			buildPhases = (
+				636131DFBD6341AC92C5FFFB /* Sources */,
+				FB4AC257C23E4A408D53E93A /* Frameworks */,
+				0309BE716B4F4202BFAC30F2 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				F7851339077540C68451E76E /* WGJWidgetExtension */,
+				5FDCCDC93B7C462386C9807A /* WidgetShared */,
+			);
+			name = WGJWidgetExtension;
+			packageProductDependencies = (
+			);
+			productName = WGJWidgetExtension;
+			productReference = 31E5144B791046F1A717FFBB /* WGJWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 		C85A31D32F367BAF00217B62 /* WGJTests */ = {
 			isa = PBXNativeTarget;
@@ -200,6 +285,9 @@
 					C85A31C42F367BAE00217B62 = {
 						CreatedOnToolsVersion = 26.3;
 						SystemCapabilities = {
+							com.apple.ApplicationGroups.iOS = {
+								enabled = 1;
+							};
 							com.apple.CloudKit = {
 								enabled = 1;
 							};
@@ -210,6 +298,14 @@
 								enabled = 1;
 							};
 							com.apple.iCloud = {
+								enabled = 1;
+							};
+						};
+					};
+					C0D3D2FB8E954A6EA2CDDEE5 = {
+						CreatedOnToolsVersion = 26.3;
+						SystemCapabilities = {
+							com.apple.ApplicationGroups.iOS = {
 								enabled = 1;
 							};
 						};
@@ -243,6 +339,7 @@
 			projectRoot = "";
 			targets = (
 				C85A31C42F367BAE00217B62 /* WGJ */,
+				C0D3D2FB8E954A6EA2CDDEE5 /* WGJWidgetExtension */,
 				C85A31D32F367BAF00217B62 /* WGJTests */,
 				C85A31DD2F367BAF00217B62 /* WGJUITests */,
 			);
@@ -265,6 +362,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		C85A31DC2F367BAF00217B62 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0309BE716B4F4202BFAC30F2 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -295,9 +399,21 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		636131DFBD6341AC92C5FFFB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		CAFE0CC613284A98AE819F9D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C0D3D2FB8E954A6EA2CDDEE5 /* WGJWidgetExtension */;
+			targetProxy = D465145C3B95439097399E10 /* PBXContainerItemProxy */;
+		};
 		C85A31D62F367BAF00217B62 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = C85A31C42F367BAE00217B62 /* WGJ */;
@@ -466,6 +582,7 @@
 				TARGETED_DEVICE_FAMILY = "1,2";
 				WGJ_APP_DISPLAY_NAME = "We Go Jim Dev";
 				WGJ_APP_ENVIRONMENT = development;
+				WGJ_APP_GROUP_IDENTIFIER = group.se.highball.WeGoJim;
 				WGJ_CLOUDKIT_CONTAINER_IDENTIFIER = iCloud.se.highball.WeGoJim;
 				WGJ_REVENUECAT_API_KEY = test_XUFcsPSSOoRjJduGqgMTQirLDjV;
 			};
@@ -502,8 +619,76 @@
 				TARGETED_DEVICE_FAMILY = "1,2";
 				WGJ_APP_DISPLAY_NAME = "We Go Jim";
 				WGJ_APP_ENVIRONMENT = production;
+				WGJ_APP_GROUP_IDENTIFIER = group.se.highball.WeGoJim;
 				WGJ_CLOUDKIT_CONTAINER_IDENTIFIER = iCloud.se.highball.WeGoJim;
 				WGJ_REVENUECAT_API_KEY = appl_hLQVEpwIIHRMWePRAvutzpdrJcn;
+			};
+			name = Release;
+		};
+		824D5823F5B54C90AC62EEE8 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CODE_SIGN_ENTITLEMENTS = WGJWidgetExtension/WGJWidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4CHUW3PG2V;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = WGJWidgetExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = se.highball.WeGoJim.dev.WGJWidgetExtension;
+				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphonesimulator*]" = se.highball.WeGoJim.WGJWidgetExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				WGJ_APP_GROUP_IDENTIFIER = group.se.highball.WeGoJim;
+			};
+			name = Debug;
+		};
+		542B8022FE984A7E85BC83BA /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CODE_SIGN_ENTITLEMENTS = WGJWidgetExtension/WGJWidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4CHUW3PG2V;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = WGJWidgetExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = se.highball.WeGoJim.WGJWidgetExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				WGJ_APP_GROUP_IDENTIFIER = group.se.highball.WeGoJim;
 			};
 			name = Release;
 		};
@@ -610,6 +795,15 @@
 			buildConfigurations = (
 				C85A31E92F367BAF00217B62 /* Debug */,
 				C85A31EA2F367BAF00217B62 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		7FC12504937542229DAE903A /* Build configuration list for PBXNativeTarget "WGJWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				824D5823F5B54C90AC62EEE8 /* Debug */,
+				542B8022FE984A7E85BC83BA /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

@@ -30,6 +30,7 @@ struct ContentView: View {
     @State private var hasInstalledUITestPendingTemplate = false
     @State private var hasScheduledInitialDeferredMaintenance = false
     @State private var fallbackCoachWarmupTask: Task<Void, Never>?
+    @State private var pendingDeepLinkURL: URL?
 
     var body: some View {
         @Bindable var subscriptionState = subscriptionState
@@ -106,10 +107,11 @@ struct ContentView: View {
             appWarmupState.invalidateBros()
             requestNewDeferredMaintenanceRun()
             scheduleSubscriptionRefreshIfNeeded()
+            scheduleWeeklyGoalWidgetPublish()
             requestDeferredMaintenance(trigger: .activeWorkoutEnded)
         }
         .onOpenURL { url in
-            handleIncomingTemplateFileURL(url)
+            handleIncomingURL(url)
         }
         .onChange(of: appRuntimeState.keepsScreenAwake) { _, _ in
             updateIdleTimerState()
@@ -200,6 +202,32 @@ struct ContentView: View {
         handleEnteredMainPhase()
     }
 
+    private func handleIncomingURL(_ url: URL) {
+        if AppDeepLinkRouter.supports(url: url) {
+            pendingDeepLinkURL = url
+            routePendingDeepLinkIfNeeded()
+            return
+        }
+
+        handleIncomingTemplateFileURL(url)
+    }
+
+    private func routePendingDeepLinkIfNeeded() {
+        guard let pendingDeepLinkURL else {
+            return
+        }
+
+        guard AppDeepLinkRouter.route(
+            url: pendingDeepLinkURL,
+            appPhase: appPhase,
+            tabState: appTabState
+        ) else {
+            return
+        }
+
+        self.pendingDeepLinkURL = nil
+    }
+
     private func handleIncomingTemplateFileURL(_ url: URL) {
         guard templateFileOpenState.enqueueIfSupported(url: url) else {
             return
@@ -263,12 +291,34 @@ struct ContentView: View {
 
     private func handleEnteredMainPhase() {
         scheduleResumeCriticalMaintenanceIfNeeded()
+        routePendingDeepLinkIfNeeded()
         routePendingTemplateFileIfNeeded()
         scheduleSubscriptionRefreshIfNeeded()
+        scheduleWeeklyGoalWidgetPublish()
 
         guard !hasScheduledInitialDeferredMaintenance else { return }
         hasScheduledInitialDeferredMaintenance = true
         scheduleEnteredMainDeferredMaintenance()
+    }
+
+    private func scheduleWeeklyGoalWidgetPublish() {
+        if let appBackgroundStore {
+            Task {
+                await appBackgroundStore.scheduleCoalesced(
+                    key: .feature("weekly-goal-widget.publish"),
+                    operationName: "weekly-goal-widget.publish"
+                ) { backgroundContext in
+                    try? WeeklyGoalWidgetPublisher()?.publish(modelContext: backgroundContext)
+                }
+            }
+            return
+        }
+
+        try? WeeklyGoalWidgetPublisher()?.publish(modelContext: modelContext)
+    }
+
+    private func clearWeeklyGoalWidgetSnapshot() {
+        WeeklyGoalWidgetPublisher()?.clear()
     }
 
     private func scheduleEnteredMainDeferredMaintenance() {
@@ -600,6 +650,7 @@ struct ContentView: View {
         fallbackCoachWarmupTask?.cancel()
         fallbackCoachWarmupTask = nil
         activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
+        clearWeeklyGoalWidgetSnapshot()
         catalogSyncCoordinator = CatalogSyncCoordinator()
         deferredMaintenanceState.reset()
         deferredMaintenanceRunTracker.reset()
