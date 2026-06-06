@@ -10,6 +10,18 @@ struct WeeklyGoalWidgetTests {
     }
 
     @Test
+    func contentPolicyPreviewSnapshotShowsRealWidgetContent() {
+        let generatedAt = Date(timeIntervalSince1970: 1_800_000_000)
+        let snapshot = WeeklyGoalWidgetContentPolicy.preview(generatedAt: generatedAt)
+
+        #expect(snapshot.completedWorkouts == 3)
+        #expect(snapshot.weeklyGoal == 4)
+        #expect(snapshot.recentWeeks.count == 6)
+        #expect(snapshot.recentWeeks.last?.completedWorkouts == 3)
+        #expect(snapshot.statusText == "1 to go")
+    }
+
+    @Test
     func contentPolicyClampsGoalAndFinishedCount() {
         let snapshot = WeeklyGoalWidgetContentPolicy.snapshot(
             completedWorkouts: -2,

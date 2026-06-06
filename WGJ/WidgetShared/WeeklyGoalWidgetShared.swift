@@ -129,6 +129,30 @@ nonisolated enum WeeklyGoalWidgetContentPolicy {
         )
     }
 
+    static func preview(generatedAt: Date = .now, calendar: Calendar = .current) -> WeeklyGoalWidgetSnapshot {
+        let weekStart = weekStart(for: generatedAt, calendar: calendar)
+        let completedByOffset = [1, 3, 2, 4, 1, 3]
+        let recentWeeks = completedByOffset.enumerated().compactMap { index, completed -> WeeklyGoalWidgetWeek? in
+            guard let week = calendar.date(byAdding: .weekOfYear, value: index - 5, to: weekStart) else {
+                return nil
+            }
+            return WeeklyGoalWidgetWeek(
+                weekStart: week,
+                completedWorkouts: completed,
+                goal: defaultGoal
+            )
+        }
+
+        return snapshot(
+            completedWorkouts: 3,
+            weeklyGoal: defaultGoal,
+            weekStart: weekStart,
+            recentWeeks: recentWeeks,
+            calendar: calendar,
+            generatedAt: generatedAt
+        )
+    }
+
     static func normalizedGoal(_ goal: Int) -> Int {
         max(minimumGoal, min(maximumGoal, goal))
     }
@@ -145,6 +169,11 @@ nonisolated enum WeeklyGoalWidgetContentPolicy {
 
         let remaining = normalizedGoal - normalizedCompleted
         return "\(remaining) to go"
+    }
+
+    private static func weekStart(for date: Date, calendar: Calendar) -> Date {
+        let components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
+        return calendar.date(from: components) ?? date
     }
 }
 

@@ -4,17 +4,30 @@ import WidgetKit
 struct WeeklyGoalWidgetEntry: TimelineEntry {
     let date: Date
     let snapshot: WeeklyGoalWidgetSnapshot?
+    let usesPreviewContent: Bool
 }
 
 struct WeeklyGoalWidgetProvider: TimelineProvider {
     func placeholder(in context: Context) -> WeeklyGoalWidgetEntry {
         WeeklyGoalWidgetEntry(
             date: .now,
-            snapshot: WeeklyGoalWidgetContentPolicy.placeholder()
+            snapshot: WeeklyGoalWidgetContentPolicy.preview(),
+            usesPreviewContent: true
         )
     }
 
     func getSnapshot(in context: Context, completion: @escaping (WeeklyGoalWidgetEntry) -> Void) {
+        if context.isPreview {
+            completion(
+                WeeklyGoalWidgetEntry(
+                    date: .now,
+                    snapshot: WeeklyGoalWidgetContentPolicy.preview(),
+                    usesPreviewContent: true
+                )
+            )
+            return
+        }
+
         completion(entry())
     }
 
@@ -27,7 +40,7 @@ struct WeeklyGoalWidgetProvider: TimelineProvider {
 
     private func entry(date: Date = .now) -> WeeklyGoalWidgetEntry {
         let snapshot = try? WeeklyGoalWidgetStore()?.load()
-        return WeeklyGoalWidgetEntry(date: date, snapshot: snapshot)
+        return WeeklyGoalWidgetEntry(date: date, snapshot: snapshot, usesPreviewContent: false)
     }
 }
 
@@ -57,6 +70,16 @@ struct WeeklyGoalWidgetView: View {
     let entry: WeeklyGoalWidgetEntry
 
     var body: some View {
+        if entry.usesPreviewContent {
+            content
+                .unredacted()
+        } else {
+            content
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         switch family {
         case .systemSmall:
             systemSmall
@@ -313,6 +336,7 @@ struct WGJWidgetBundle: WidgetBundle {
             completedWorkouts: 3,
             weeklyGoal: 4,
             weekStart: .now
-        )
+        ),
+        usesPreviewContent: true
     )
 }
