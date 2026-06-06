@@ -12,19 +12,19 @@
 		C85A32142F3AC00100217B62 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = C85A32122F3AC00100217B62 /* RevenueCat */; };
 		C85A32152F3AC00100217B62 /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = C85A32132F3AC00100217B62 /* RevenueCatUI */; };
 		8D9893B38D044AD3944CE69A /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7E452FB2BAC24120AC2DC115 /* WidgetKit.framework */; };
-		EA880FACDBBD473798D3C753 /* WGJWidgetExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 31E5144B791046F1A717FFBB /* WGJWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		EA880FACDBBD473798D3C753 /* WGJWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 31E5144B791046F1A717FFBB /* WGJWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
-		19525F82E2324559A4C343F1 /* Embed App Extensions */ = {
+		19525F82E2324559A4C343F1 /* Embed Foundation Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
-				EA880FACDBBD473798D3C753 /* WGJWidgetExtension.appex in Embed App Extensions */,
+				EA880FACDBBD473798D3C753 /* WGJWidgetExtension.appex in Embed Foundation Extensions */,
 			);
-			name = "Embed App Extensions";
+			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
@@ -183,7 +183,7 @@
 				C85A31C12F367BAE00217B62 /* Sources */,
 				C85A31C22F367BAE00217B62 /* Frameworks */,
 				C85A31C32F367BAE00217B62 /* Resources */,
-				19525F82E2324559A4C343F1 /* Embed App Extensions */,
+				19525F82E2324559A4C343F1 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
