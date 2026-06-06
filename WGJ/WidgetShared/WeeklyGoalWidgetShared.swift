@@ -182,13 +182,16 @@ nonisolated enum WeeklyGoalWidgetDeepLink {
 }
 
 nonisolated enum WeeklyGoalWidgetDescriptor {
-    static let kind = "WGJWeeklyGoalWidgetV2"
+    static let kind = "WGJWeeklyGoalWidgetV3"
 }
 
 nonisolated struct WeeklyGoalWidgetStore {
     static let appGroupIdentifier = "group.se.highball.WeGoJim"
-    static let snapshotDefaultsKey = "weeklyGoalWidget.snapshot.v2"
-    static let legacySnapshotDefaultsKey = "weeklyGoalWidget.snapshot.v1"
+    static let snapshotDefaultsKey = "weeklyGoalWidget.snapshot.v3"
+    static let legacySnapshotDefaultsKeys = [
+        "weeklyGoalWidget.snapshot.v1",
+        "weeklyGoalWidget.snapshot.v2",
+    ]
 
     private let defaults: UserDefaults
 
@@ -214,12 +217,18 @@ nonisolated struct WeeklyGoalWidgetStore {
     func save(_ snapshot: WeeklyGoalWidgetSnapshot) throws {
         let data = try encoder.encode(snapshot)
         defaults.set(data, forKey: Self.snapshotDefaultsKey)
-        defaults.removeObject(forKey: Self.legacySnapshotDefaultsKey)
+        clearLegacySnapshots()
     }
 
     func clear() {
         defaults.removeObject(forKey: Self.snapshotDefaultsKey)
-        defaults.removeObject(forKey: Self.legacySnapshotDefaultsKey)
+        clearLegacySnapshots()
+    }
+
+    private func clearLegacySnapshots() {
+        for key in Self.legacySnapshotDefaultsKeys {
+            defaults.removeObject(forKey: key)
+        }
     }
 
     private var encoder: JSONEncoder {
