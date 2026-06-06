@@ -1,7 +1,20 @@
 import Foundation
 
+nonisolated struct WeeklyGoalWidgetWeek: Codable, Equatable, Identifiable, Sendable {
+    let weekStart: Date
+    let completedWorkouts: Int
+    let goal: Int
+
+    var id: Date { weekStart }
+
+    var progressFraction: Double {
+        guard goal > 0 else { return 0 }
+        return min(1, Double(completedWorkouts) / Double(goal))
+    }
+}
+
 nonisolated struct WeeklyGoalWidgetSnapshot: Codable, Equatable, Sendable {
-    static let schemaVersion = 1
+    static let schemaVersion = 2
 
     let schemaVersion: Int
     let completedWorkouts: Int
@@ -10,6 +23,7 @@ nonisolated struct WeeklyGoalWidgetSnapshot: Codable, Equatable, Sendable {
     let weekEnd: Date
     let generatedAt: Date
     let hasActiveWorkout: Bool
+    let recentWeeks: [WeeklyGoalWidgetWeek]
 
     init(
         schemaVersion: Int = Self.schemaVersion,
@@ -18,7 +32,8 @@ nonisolated struct WeeklyGoalWidgetSnapshot: Codable, Equatable, Sendable {
         weekStart: Date,
         weekEnd: Date,
         generatedAt: Date,
-        hasActiveWorkout: Bool = false
+        hasActiveWorkout: Bool = false,
+        recentWeeks: [WeeklyGoalWidgetWeek] = []
     ) {
         self.schemaVersion = schemaVersion
         self.completedWorkouts = completedWorkouts
@@ -27,6 +42,43 @@ nonisolated struct WeeklyGoalWidgetSnapshot: Codable, Equatable, Sendable {
         self.weekEnd = weekEnd
         self.generatedAt = generatedAt
         self.hasActiveWorkout = hasActiveWorkout
+        self.recentWeeks = recentWeeks.isEmpty
+            ? [WeeklyGoalWidgetWeek(weekStart: weekStart, completedWorkouts: completedWorkouts, goal: weeklyGoal)]
+            : recentWeeks
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion
+        case completedWorkouts
+        case weeklyGoal
+        case weekStart
+        case weekEnd
+        case generatedAt
+        case hasActiveWorkout
+        case recentWeeks
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        let completedWorkouts = try container.decode(Int.self, forKey: .completedWorkouts)
+        let weeklyGoal = try container.decode(Int.self, forKey: .weeklyGoal)
+        let weekStart = try container.decode(Date.self, forKey: .weekStart)
+        let weekEnd = try container.decode(Date.self, forKey: .weekEnd)
+        let generatedAt = try container.decode(Date.self, forKey: .generatedAt)
+        let hasActiveWorkout = try container.decodeIfPresent(Bool.self, forKey: .hasActiveWorkout) ?? false
+        let recentWeeks = try container.decodeIfPresent([WeeklyGoalWidgetWeek].self, forKey: .recentWeeks) ?? []
+
+        self.init(
+            schemaVersion: schemaVersion,
+            completedWorkouts: completedWorkouts,
+            weeklyGoal: weeklyGoal,
+            weekStart: weekStart,
+            weekEnd: weekEnd,
+            generatedAt: generatedAt,
+            hasActiveWorkout: hasActiveWorkout,
+            recentWeeks: recentWeeks
+        )
     }
 
     var remainingWorkouts: Int {
@@ -48,6 +100,15 @@ nonisolated struct WeeklyGoalWidgetSnapshot: Codable, Equatable, Sendable {
     var progressText: String {
         "\(completedWorkouts) / \(weeklyGoal)"
     }
+
+    var chartMaximumWorkouts: Int {
+        max(
+            weeklyGoal,
+            recentWeeks
+                .flatMap { [$0.goal, $0.completedWorkouts] }
+                .max() ?? weeklyGoal
+        )
+    }
 }
 
 nonisolated enum WeeklyGoalWidgetContentPolicy {
@@ -59,6 +120,7 @@ nonisolated enum WeeklyGoalWidgetContentPolicy {
         completedWorkouts: Int,
         weeklyGoal: Int,
         weekStart: Date,
+        recentWeeks: [WeeklyGoalWidgetWeek] = [],
         calendar: Calendar = .current,
         hasActiveWorkout: Bool = false,
         generatedAt: Date = .now
@@ -66,6 +128,13 @@ nonisolated enum WeeklyGoalWidgetContentPolicy {
         let normalizedGoal = normalizedGoal(weeklyGoal)
         let normalizedCompleted = max(0, completedWorkouts)
         let resolvedWeekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart) ?? weekStart
+        let normalizedWeeks = recentWeeks.map { week in
+            WeeklyGoalWidgetWeek(
+                weekStart: week.weekStart,
+                completedWorkouts: max(0, week.completedWorkouts),
+                goal: WeeklyGoalWidgetContentPolicy.normalizedGoal(week.goal)
+            )
+        }
 
         return WeeklyGoalWidgetSnapshot(
             completedWorkouts: normalizedCompleted,
@@ -73,7 +142,8 @@ nonisolated enum WeeklyGoalWidgetContentPolicy {
             weekStart: weekStart,
             weekEnd: resolvedWeekEnd,
             generatedAt: generatedAt,
-            hasActiveWorkout: hasActiveWorkout
+            hasActiveWorkout: hasActiveWorkout,
+            recentWeeks: normalizedWeeks
         )
     }
 

@@ -35,6 +35,30 @@ struct WeeklyGoalWidgetTests {
     }
 
     @Test
+    func contentPolicyNormalizesRecentWeeksForWidgetChart() {
+        let calendar = Calendar(identifier: .gregorian)
+        let baseWeek = Date(timeIntervalSince1970: 1_800_000_000)
+        let priorWeek = calendar.date(byAdding: .weekOfYear, value: -1, to: baseWeek)!
+        let snapshot = WeeklyGoalWidgetContentPolicy.snapshot(
+            completedWorkouts: 3,
+            weeklyGoal: 4,
+            weekStart: baseWeek,
+            recentWeeks: [
+                WeeklyGoalWidgetWeek(weekStart: priorWeek, completedWorkouts: -4, goal: 99),
+                WeeklyGoalWidgetWeek(weekStart: baseWeek, completedWorkouts: 3, goal: 4),
+            ],
+            calendar: calendar
+        )
+
+        #expect(snapshot.recentWeeks.count == 2)
+        #expect(snapshot.recentWeeks[0].completedWorkouts == 0)
+        #expect(snapshot.recentWeeks[0].goal == 14)
+        #expect(snapshot.recentWeeks[1].completedWorkouts == 3)
+        #expect(snapshot.recentWeeks[1].goal == 4)
+        #expect(snapshot.chartMaximumWorkouts == 14)
+    }
+
+    @Test
     func contentPolicyStatusCopyCoversProgressStates() {
         let weekStart = Date(timeIntervalSince1970: 1_800_000_000)
 
@@ -104,6 +128,36 @@ struct WeeklyGoalWidgetTests {
         #expect(try store.load() == nil)
     }
 
+    @Test
+    func storeDecodesLegacySnapshotWithoutRecentWeeks() throws {
+        let suiteName = defaultsSuiteName()
+        let defaults = try temporaryDefaults(suiteName: suiteName)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        let store = WeeklyGoalWidgetStore(defaults: defaults)
+        let payload = """
+        {
+          "schemaVersion": 1,
+          "completedWorkouts": 2,
+          "weeklyGoal": 4,
+          "weekStart": "2027-01-04T00:00:00Z",
+          "weekEnd": "2027-01-11T00:00:00Z",
+          "generatedAt": "2027-01-05T00:00:00Z",
+          "hasActiveWorkout": false
+        }
+        """
+        defaults.set(Data(payload.utf8), forKey: WeeklyGoalWidgetStore.snapshotDefaultsKey)
+
+        let snapshot = try #require(try store.load())
+
+        #expect(snapshot.completedWorkouts == 2)
+        #expect(snapshot.weeklyGoal == 4)
+        #expect(snapshot.recentWeeks.count == 1)
+        #expect(snapshot.recentWeeks[0].completedWorkouts == 2)
+        #expect(snapshot.recentWeeks[0].goal == 4)
+    }
+
     @MainActor
     @Test
     func publisherPublishesCurrentWeekFinishedWorkoutProgressOnly() throws {
@@ -136,6 +190,48 @@ struct WeeklyGoalWidgetTests {
         #expect(snapshot.weeklyGoal == 3)
         #expect(snapshot.hasActiveWorkout)
         #expect(reloads == [WeeklyGoalWidgetPublisher.widgetKind])
+    }
+
+    @MainActor
+    @Test
+    func publisherPublishesRecentWeeklyHistoryForMediumWidget() throws {
+        let context = try makeInMemoryContext()
+        let profile = UserProfile(displayName: "Athlete", weeklyWorkoutGoal: 4)
+        context.insert(profile)
+        let calendar = Calendar.current
+        let currentWeek = weekStart(for: Date(), calendar: calendar)
+        let twoWeeksAgo = try #require(calendar.date(byAdding: .weekOfYear, value: -2, to: currentWeek))
+        let currentWeekWorkoutDate = try #require(calendar.date(byAdding: .day, value: 1, to: currentWeek))
+        let oldWorkoutDate = try #require(calendar.date(byAdding: .day, value: 2, to: twoWeeksAgo))
+
+        try insertCompletedSession(
+            name: "Two Weeks Ago",
+            at: oldWorkoutDate,
+            context: context
+        )
+        try insertCompletedSession(
+            name: "Current Week",
+            at: currentWeekWorkoutDate,
+            context: context
+        )
+        _ = try WorkoutSessionRepository(modelContext: context).createEmptySession(name: "Active")
+
+        let suiteName = defaultsSuiteName()
+        let defaults = try temporaryDefaults(suiteName: suiteName)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        let store = WeeklyGoalWidgetStore(defaults: defaults)
+        let publisher = WeeklyGoalWidgetPublisher(store: store) { _ in }
+
+        try publisher.publish(modelContext: context, generatedAt: Date(timeIntervalSince1970: 1_800_010_000))
+
+        let snapshot = try #require(try store.load())
+        #expect(snapshot.completedWorkouts == 1)
+        #expect(snapshot.recentWeeks.count == 6)
+        #expect(snapshot.recentWeeks.map(\.goal).allSatisfy { $0 == 4 })
+        #expect(snapshot.recentWeeks.suffix(3).map(\.completedWorkouts) == [1, 0, 1])
+        #expect(snapshot.hasActiveWorkout)
     }
 
     @Test
@@ -248,5 +344,22 @@ struct WeeklyGoalWidgetTests {
         )
         let container = try ModelContainer(for: schema, configurations: [configuration])
         return ModelContext(container)
+    }
+
+    @MainActor
+    private func insertCompletedSession(name: String, at date: Date, context: ModelContext) throws {
+        let repository = WorkoutSessionRepository(modelContext: context)
+        let session = try repository.createEmptySession(name: name)
+        try repository.finishSession(sessionID: session.id)
+        session.startedAt = date.addingTimeInterval(-3_600)
+        session.endedAt = date
+        session.durationSeconds = 3_600
+        session.updatedAt = date
+        try context.save()
+    }
+
+    private func weekStart(for date: Date, calendar: Calendar) -> Date {
+        let components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
+        return calendar.date(from: components) ?? date
     }
 }
