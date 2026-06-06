@@ -758,7 +758,7 @@ struct ContentView: View {
                 modelContext: backgroundContext,
                 cloudSyncEnabled: cloudSyncEnabled,
                 cloudSyncErrorDescription: cloudSyncErrorDescription,
-                allowsRemoteFetch: false
+                allowsRemoteFetch: true
             )
         }
 

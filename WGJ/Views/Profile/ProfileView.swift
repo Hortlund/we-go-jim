@@ -1011,7 +1011,8 @@ struct ProfileView: View {
         }
 
         let delay = ProfileDashboardRenderPolicy.renderDelay(
-            hasRenderedDashboardContent: hasRenderedDashboardContent
+            hasRenderedDashboardContent: hasRenderedDashboardContent,
+            hasFreshWarmSnapshot: appWarmupState.freshProfile() != nil
         )
         let renderToken = profileReloadToken
         dashboardRenderTask = Task {

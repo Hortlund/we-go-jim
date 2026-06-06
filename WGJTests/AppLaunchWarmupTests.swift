@@ -294,12 +294,12 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
-    func firstFrameTabPolicyDoesNotPreloadDeferredTabsFromWarmSnapshots() {
-        #expect(!FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
+    func firstFrameTabPolicyPreloadsDeferredTabsFromWarmSnapshots() {
+        #expect(FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
             tab: .profile,
             hasFreshWarmSnapshot: true
         ))
-        #expect(!FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
+        #expect(FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
             tab: .bros,
             hasFreshWarmSnapshot: true
         ))
@@ -554,6 +554,10 @@ struct AppLaunchWarmupTests {
     func profileDashboardRenderPolicyDefersOnlyFirstDashboardMount() {
         #expect(ProfileDashboardRenderPolicy.renderDelay(hasRenderedDashboardContent: false) == .milliseconds(900))
         #expect(ProfileDashboardRenderPolicy.renderDelay(hasRenderedDashboardContent: true) == .zero)
+        #expect(ProfileDashboardRenderPolicy.renderDelay(
+            hasRenderedDashboardContent: false,
+            hasFreshWarmSnapshot: true
+        ) == .zero)
     }
 
     @Test

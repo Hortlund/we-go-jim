@@ -246,7 +246,8 @@ nonisolated enum FirstFrameTabContentPolicy {
         tab: AppMainTab,
         hasFreshWarmSnapshot: Bool
     ) -> Bool {
-        false
+        guard hasFreshWarmSnapshot else { return false }
+        return shouldDeferInitialContentMount(tab: tab)
     }
 
     static func presentation(
@@ -549,8 +550,11 @@ nonisolated enum ProfileReloadPolicy {
 nonisolated enum ProfileDashboardRenderPolicy {
     static let initialRenderDelay: Duration = .milliseconds(900)
 
-    static func renderDelay(hasRenderedDashboardContent: Bool) -> Duration {
-        hasRenderedDashboardContent ? .zero : initialRenderDelay
+    static func renderDelay(
+        hasRenderedDashboardContent: Bool,
+        hasFreshWarmSnapshot: Bool = false
+    ) -> Duration {
+        hasRenderedDashboardContent || hasFreshWarmSnapshot ? .zero : initialRenderDelay
     }
 
     static func visibilityAfterCancellingRender(

@@ -54,6 +54,7 @@ final class BrosViewModel {
 
     private var hasLoaded = false
     private var isSnapshotRefreshInFlight = false
+    @ObservationIgnored private var snapshotRefreshWaiters: [CheckedContinuation<Void, Never>] = []
     private var pendingOutboxHydration = false
     private var pendingReactionEventIDs: Set<String> = []
     private var outboxFlushTask: Task<Void, Never>?
@@ -133,7 +134,9 @@ final class BrosViewModel {
         cloudSyncErrorDescription: String?,
         force: Bool = false
     ) async {
-        guard !isSnapshotRefreshInFlight else { return }
+        if await waitForSnapshotRefreshIfInFlight() {
+            return
+        }
 
         guard AppRuntimeConfig.reviewPolicy.brosEnabled else {
             state = .unavailable("Bros is disabled for this build.")
@@ -152,7 +155,10 @@ final class BrosViewModel {
 
         guard shouldRefreshSnapshot(force: force) else { return }
         isSnapshotRefreshInFlight = true
-        defer { isSnapshotRefreshInFlight = false }
+        defer {
+            isSnapshotRefreshInFlight = false
+            resumeSnapshotRefreshWaiters()
+        }
 
         guard serviceFactory(modelContext) != nil else {
             if !hasRenderableState {
@@ -205,6 +211,20 @@ final class BrosViewModel {
             pendingOutboxHydration = false
             await hydrateSnapshotAfterOutboxFlush(modelContext: modelContext)
         }
+    }
+
+    private func waitForSnapshotRefreshIfInFlight() async -> Bool {
+        guard isSnapshotRefreshInFlight else { return false }
+        await withCheckedContinuation { continuation in
+            snapshotRefreshWaiters.append(continuation)
+        }
+        return true
+    }
+
+    private func resumeSnapshotRefreshWaiters() {
+        let waiters = snapshotRefreshWaiters
+        snapshotRefreshWaiters = []
+        waiters.forEach { $0.resume() }
     }
 
     func createCircle(modelContext: ModelContext) async {
@@ -1073,8 +1093,8 @@ struct BrosView: View {
             return
         }
 
-        activationRefreshTask?.cancel()
-        let delay: Duration = hasCompletedInitialActivationRefresh ? .milliseconds(100) : .milliseconds(1_000)
+        guard activationRefreshTask == nil else { return }
+        let delay: Duration = hasCompletedInitialActivationRefresh ? .milliseconds(100) : .zero
         activationRefreshTask = Task { @MainActor in
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled, isTabActive else { return }

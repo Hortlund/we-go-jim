@@ -133,6 +133,51 @@ struct BrosViewModelTests {
     }
 
     @Test
+    func concurrentRefreshCallsWaitForActiveFetchInsteadOfStartingAnother() async throws {
+        let context = try makeInMemoryContext()
+        let service = StubBrosSocialService()
+        let refreshedSnapshot = makeSnapshot(displayName: "Custom Bro")
+        service.snapshot = refreshedSnapshot
+        service.shouldSuspendFetch = true
+
+        let viewModel = BrosViewModel(
+            accountStatusProvider: { .available },
+            serviceFactory: { _ in service }
+        )
+
+        let firstRefresh = Task { @MainActor in
+            await viewModel.refresh(
+                modelContext: context,
+                cloudSyncEnabled: true,
+                cloudSyncErrorDescription: nil,
+                force: true
+            )
+        }
+        while service.fetchSnapshotCallCount == 0 {
+            await Task.yield()
+        }
+
+        let secondRefresh = Task { @MainActor in
+            await viewModel.refresh(
+                modelContext: context,
+                cloudSyncEnabled: true,
+                cloudSyncErrorDescription: nil,
+                force: true
+            )
+        }
+        await Task.yield()
+
+        #expect(service.fetchSnapshotCallCount == 1)
+
+        service.releaseFetch()
+        await firstRefresh.value
+        await secondRefresh.value
+
+        #expect(service.fetchSnapshotCallCount == 1)
+        #expect(viewModel.state == .active(refreshedSnapshot))
+    }
+
+    @Test
     func refreshPrimesVisibleAvatarThumbnailsBeforePublishingActiveSnapshot() async throws {
         BrosAvatarCacheService.shared.clear()
         let context = try makeInMemoryContext()
@@ -616,9 +661,11 @@ nonisolated private final class StubBrosSocialService: BrosSocialService, BrosSo
     var fetchSnapshotCallCount = 0
     var setReactionEventIDs: [String] = []
     var setReactionKinds: [BroReactionKind] = []
+    var shouldSuspendFetch = false
     var shouldSuspendReaction = false
     var reactionError: Error?
 
+    private var fetchContinuation: CheckedContinuation<Void, Never>?
     private var reactionContinuation: CheckedContinuation<Void, Never>?
 
     func refreshLocalMembershipState() async {
@@ -628,7 +675,19 @@ nonisolated private final class StubBrosSocialService: BrosSocialService, BrosSo
     @MainActor
     func fetchSnapshot() async throws -> BrosFeedSnapshot? {
         fetchSnapshotCallCount += 1
+        if shouldSuspendFetch {
+            await withCheckedContinuation { continuation in
+                fetchContinuation = continuation
+            }
+        }
         return snapshot
+    }
+
+    @MainActor
+    func releaseFetch() {
+        shouldSuspendFetch = false
+        fetchContinuation?.resume()
+        fetchContinuation = nil
     }
 
     @MainActor
