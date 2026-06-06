@@ -195,9 +195,15 @@ struct MainTabView: View {
     private func shouldPreloadDeferredTab(_ tab: AppMainTab) -> Bool {
         switch tab {
         case .profile:
-            return appWarmupState.freshProfile() != nil
+            return FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
+                tab: tab,
+                hasFreshWarmSnapshot: appWarmupState.freshProfile() != nil
+            )
         case .bros:
-            return appWarmupState.freshBros() != nil
+            return FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
+                tab: tab,
+                hasFreshWarmSnapshot: appWarmupState.freshBros() != nil
+            )
         case .history, .startWorkout, .exercises:
             return false
         }

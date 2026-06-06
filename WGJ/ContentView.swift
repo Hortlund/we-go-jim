@@ -749,7 +749,8 @@ struct ContentView: View {
             try await Self.buildBrosWarmSnapshot(
                 modelContext: backgroundContext,
                 cloudSyncEnabled: cloudSyncEnabled,
-                cloudSyncErrorDescription: cloudSyncErrorDescription
+                cloudSyncErrorDescription: cloudSyncErrorDescription,
+                allowsRemoteFetch: false
             )
         }
 
@@ -966,7 +967,8 @@ struct ContentView: View {
     private static func buildBrosWarmSnapshot(
         modelContext: ModelContext,
         cloudSyncEnabled: Bool,
-        cloudSyncErrorDescription: String?
+        cloudSyncErrorDescription: String?,
+        allowsRemoteFetch: Bool = true
     ) async throws -> BrosWarmSnapshot {
         let blockedUserRecordNames = blockedUserRecordNames(in: modelContext)
 
@@ -978,17 +980,14 @@ struct ContentView: View {
             )
         }
 
-        guard cloudSyncEnabled else {
+        if let earlyState = BrosWarmSnapshotPolicy.stateBeforeRemoteFetch(
+            cloudSyncEnabled: cloudSyncEnabled,
+            cloudSyncErrorDescription: cloudSyncErrorDescription,
+            allowsRemoteFetch: allowsRemoteFetch,
+            unavailableMessage: BrosSocialServiceError.unavailable.localizedDescription
+        ) {
             return BrosWarmSnapshot(
-                state: .unavailable(cloudSyncErrorDescription ?? BrosSocialServiceError.unavailable.localizedDescription),
-                blockedUserRecordNames: blockedUserRecordNames,
-                warmedAt: .now
-            )
-        }
-
-        if let cloudSyncErrorDescription, !cloudSyncErrorDescription.isEmpty {
-            return BrosWarmSnapshot(
-                state: .unavailable(cloudSyncErrorDescription),
+                state: earlyState,
                 blockedUserRecordNames: blockedUserRecordNames,
                 warmedAt: .now
             )

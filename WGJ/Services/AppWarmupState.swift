@@ -180,6 +180,25 @@ nonisolated enum BrosInitialActivationPolicy {
     }
 }
 
+nonisolated enum BrosWarmSnapshotPolicy {
+    static func stateBeforeRemoteFetch(
+        cloudSyncEnabled: Bool,
+        cloudSyncErrorDescription: String?,
+        allowsRemoteFetch: Bool,
+        unavailableMessage: String
+    ) -> BrosWarmStateSnapshot? {
+        guard cloudSyncEnabled else {
+            return .unavailable(cloudSyncErrorDescription ?? unavailableMessage)
+        }
+
+        if let cloudSyncErrorDescription, !cloudSyncErrorDescription.isEmpty {
+            return .unavailable(cloudSyncErrorDescription)
+        }
+
+        return allowsRemoteFetch ? nil : .loading
+    }
+}
+
 nonisolated enum FirstFrameTabPresentation: Equatable, Sendable {
     case empty
     case shell
@@ -209,6 +228,13 @@ nonisolated enum FirstFrameTabContentPolicy {
         deferInitialContentMount: Bool
     ) -> Bool {
         !deferInitialContentMount || isSelectionChange
+    }
+
+    static func shouldPreloadDeferredContent(
+        tab: AppMainTab,
+        hasFreshWarmSnapshot: Bool
+    ) -> Bool {
+        false
     }
 
     static func presentation(

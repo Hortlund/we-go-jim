@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-06-06 - First Visit Profile And Bros Must Not Preload Heavy Content
+
+- Date: 2026-06-06
+- Trigger/Problem: The user clarified that Profile/Bros lag happened only after a fresh install on the first visit; later visits were fine.
+- Root Cause: First-install startup can still be busy with Core Data/CloudKit store setup and export scheduling. Treating fresh warm snapshots as permission to mount real Profile/Bros tab content offscreen, and allowing startup Bros warmup to do a remote CloudKit feed fetch, can collide with the user's first tab tap.
+- Durable Rule: Warm Profile/Bros snapshots may feed first content once the tab is selected, but they must not bypass the first-frame shell or mount heavyweight deferred tab views offscreen. Startup Bros warmup must stay local/status-only and avoid remote feed fetches; real Bros CloudKit refresh belongs behind active tab activation.
+- How to Verify Next Time: Run `WGJTests/AppLaunchWarmupTests` and confirm deferred Profile/Bros tabs do not preload from warm snapshots, startup Bros warm snapshot returns `.loading` rather than fetching remotely when cloud is available, and first-frame shell policy still delays real content mount.
+- Status: active
+
 ## 2026-06-06 - Active Workout Minimize Snapshot Writes Must Be Ordered
 
 - Date: 2026-06-06

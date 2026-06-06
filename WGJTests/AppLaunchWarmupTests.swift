@@ -272,6 +272,26 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
+    func firstFrameTabPolicyDoesNotPreloadDeferredTabsFromWarmSnapshots() {
+        #expect(!FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
+            tab: .profile,
+            hasFreshWarmSnapshot: true
+        ))
+        #expect(!FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
+            tab: .bros,
+            hasFreshWarmSnapshot: true
+        ))
+        #expect(!FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
+            tab: .profile,
+            hasFreshWarmSnapshot: false
+        ))
+        #expect(!FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
+            tab: .history,
+            hasFreshWarmSnapshot: true
+        ))
+    }
+
+    @Test
     func startupWarmupGateWaitsForFastWarmups() async {
         let probe = WarmupGateProbe()
         let profileTask = Task {
@@ -470,6 +490,34 @@ struct AppLaunchWarmupTests {
             hasFreshWarmSnapshot: true,
             hasNotificationRefreshRequest: false
         ))
+    }
+
+    @Test
+    func startupBrosWarmSnapshotPolicyAvoidsRemoteFetchWhenCloudIsAvailable() {
+        #expect(BrosWarmSnapshotPolicy.stateBeforeRemoteFetch(
+            cloudSyncEnabled: true,
+            cloudSyncErrorDescription: nil,
+            allowsRemoteFetch: false,
+            unavailableMessage: "Unavailable"
+        ) == .loading)
+        #expect(BrosWarmSnapshotPolicy.stateBeforeRemoteFetch(
+            cloudSyncEnabled: true,
+            cloudSyncErrorDescription: nil,
+            allowsRemoteFetch: true,
+            unavailableMessage: "Unavailable"
+        ) == nil)
+        #expect(BrosWarmSnapshotPolicy.stateBeforeRemoteFetch(
+            cloudSyncEnabled: true,
+            cloudSyncErrorDescription: "iCloud is warming up.",
+            allowsRemoteFetch: false,
+            unavailableMessage: "Unavailable"
+        ) == .unavailable("iCloud is warming up."))
+        #expect(BrosWarmSnapshotPolicy.stateBeforeRemoteFetch(
+            cloudSyncEnabled: false,
+            cloudSyncErrorDescription: nil,
+            allowsRemoteFetch: false,
+            unavailableMessage: "Unavailable"
+        ) == .unavailable("Unavailable"))
     }
 
     @Test
