@@ -69,7 +69,6 @@ struct ActiveWorkoutView: View {
     @State private var saveTemplateFolders: [ActiveWorkoutTemplateFolderSnapshot] = []
     @State private var preferredLoadUnit: TemplateLoadUnit = .kg
 
-    @State private var duplicateExerciseNotice: ExerciseSelectionDuplicateNotice?
     @State private var errorMessage = ""
     @State private var showingError = false
     @State private var isMetricInputFocused = false
@@ -250,13 +249,6 @@ struct ActiveWorkoutView: View {
                 Button("OK", role: .cancel) { }
             } message: {
                 workoutErrorAlertMessage
-            }
-            .alert(item: $duplicateExerciseNotice) { notice in
-                Alert(
-                    title: Text(notice.title),
-                    message: Text(notice.message),
-                    dismissButton: .default(Text("OK"))
-                )
             }
         }
     }
@@ -1310,14 +1302,15 @@ struct ActiveWorkoutView: View {
         )
     }
 
-    private func handlePickedExercise(_ item: ExerciseCatalogItem, target: ActiveWorkoutPickerTarget) {
+    private func handlePickedExercise(_ item: ExerciseCatalogItem, target: ActiveWorkoutPickerTarget) -> ExercisePickerSelectionResult {
         switch target {
         case .exercise:
-            addExercise(item)
+            return addExercise(item)
         case .replaceExercise(let exerciseID):
-            replaceExercise(exerciseID: exerciseID, with: item)
+            return replaceExercise(exerciseID: exerciseID, with: item)
         case .cardio(let phase):
             upsertCardioBlock(phase: phase, catalogItem: item)
+            return .accepted
         }
     }
 
@@ -1331,11 +1324,10 @@ struct ActiveWorkoutView: View {
         pickerTarget = .replaceExercise(exerciseID)
     }
 
-    private func addExercise(_ item: ExerciseCatalogItem) {
-        guard runtimeSession != nil else { return }
+    private func addExercise(_ item: ExerciseCatalogItem) -> ExercisePickerSelectionResult {
+        guard runtimeSession != nil else { return .accepted }
         guard !sessionExercises.contains(where: { $0.catalogExerciseUUID == item.remoteUUID }) else {
-            presentDuplicateExerciseNotice(for: item)
-            return
+            return duplicateExerciseRejectedResult(for: item)
         }
 
         withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
@@ -1353,13 +1345,13 @@ struct ActiveWorkoutView: View {
             exerciseHydrationInvalidation += 1
         }
         persistCommittedUserEditSnapshot()
+        return .accepted
     }
 
-    private func replaceExercise(exerciseID: UUID, with item: ExerciseCatalogItem) {
-        guard let existingExercise = sessionExercises.first(where: { $0.id == exerciseID }) else { return }
+    private func replaceExercise(exerciseID: UUID, with item: ExerciseCatalogItem) -> ExercisePickerSelectionResult {
+        guard let existingExercise = sessionExercises.first(where: { $0.id == exerciseID }) else { return .accepted }
         guard !sessionExercises.contains(where: { $0.id != exerciseID && $0.catalogExerciseUUID == item.remoteUUID }) else {
-            presentDuplicateExerciseNotice(for: item)
-            return
+            return duplicateExerciseRejectedResult(for: item)
         }
 
         let removedSetIDs = Set((setDraftsByExerciseID[exerciseID] ?? existingExercise.setDrafts).map(\.id))
@@ -1392,6 +1384,7 @@ struct ActiveWorkoutView: View {
         }
         scheduleGuidanceRefresh(for: exerciseID)
         persistCommittedUserEditSnapshot()
+        return .accepted
     }
 
     private func moveExerciseUp(_ index: Int) {
@@ -2897,10 +2890,12 @@ struct ActiveWorkoutView: View {
         }
     }
 
-    private func presentDuplicateExerciseNotice(for item: ExerciseCatalogItem) {
-        duplicateExerciseNotice = ExerciseSelectionDuplicateNotice(
-            exerciseName: item.displayName,
-            destination: .activeWorkout
+    private func duplicateExerciseRejectedResult(for item: ExerciseCatalogItem) -> ExercisePickerSelectionResult {
+        .rejected(
+            ExerciseSelectionDuplicateNotice(
+                exerciseName: item.displayName,
+                destination: .activeWorkout
+            )
         )
     }
 

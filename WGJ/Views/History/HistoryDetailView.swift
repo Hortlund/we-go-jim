@@ -140,6 +140,7 @@ struct HistoryDetailView: View {
         .sheet(isPresented: $showingExercisePicker) {
             ExercisePickerView(repository: catalogRepository) { item in
                 addExercise(item)
+                return .accepted
             }
             .wgjSheetSurface()
         }

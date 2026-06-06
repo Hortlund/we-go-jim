@@ -24,7 +24,6 @@ struct TemplateEditorView: View {
     @State private var pickerTarget: TemplateEditorPickerTarget?
     @State private var cardioSettingsDraft: WorkoutCardioSettingsDraft?
     @State private var exerciseReorderRequest: ExerciseReorderRequest?
-    @State private var duplicateExerciseNotice: ExerciseSelectionDuplicateNotice?
     @State private var errorMessage = ""
     @State private var showingError = false
     @State private var keyboardDismissToken = TemplateEditorKeyboardDismissToken()
@@ -140,13 +139,6 @@ struct TemplateEditorView: View {
                 Button("OK", role: .cancel) { }
             } message: {
                 Text(errorMessage)
-            }
-            .alert(item: $duplicateExerciseNotice) { notice in
-                Alert(
-                    title: Text(notice.title),
-                    message: Text(notice.message),
-                    dismissButton: .default(Text("OK"))
-                )
             }
             .task {
                 await loadInitialDataIfNeeded()
@@ -341,10 +333,9 @@ struct TemplateEditorView: View {
         }
     }
 
-    private func appendExercise(catalogItem: ExerciseCatalogItem) {
+    private func appendExercise(catalogItem: ExerciseCatalogItem) -> ExercisePickerSelectionResult {
         guard !containsComponentCatalogUUID(catalogItem.remoteUUID) else {
-            presentDuplicateExerciseNotice(for: catalogItem)
-            return
+            return duplicateExerciseRejectedResult(for: catalogItem)
         }
 
         let draftStore = TemplateExerciseDraftStore(
@@ -357,28 +348,29 @@ struct TemplateEditorView: View {
         withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
             exerciseDrafts.append(draftStore)
         }
+        return .accepted
     }
 
-    private func handlePickedExercise(_ item: ExerciseCatalogItem, target: TemplateEditorPickerTarget) {
+    private func handlePickedExercise(_ item: ExerciseCatalogItem, target: TemplateEditorPickerTarget) -> ExercisePickerSelectionResult {
         switch target {
         case .exercise:
-            appendExercise(catalogItem: item)
+            return appendExercise(catalogItem: item)
         case .replaceExercise(let exerciseID):
-            replaceExercise(with: item, exerciseID: exerciseID)
+            return replaceExercise(with: item, exerciseID: exerciseID)
         case .component(let exerciseID):
-            appendComponent(catalogItem: item, to: exerciseID)
+            return appendComponent(catalogItem: item, to: exerciseID)
         case .cardio(let phase):
             upsertCardioBlock(phase: phase, catalogItem: item)
+            return .accepted
         }
     }
 
-    private func replaceExercise(with catalogItem: ExerciseCatalogItem, exerciseID: UUID) {
+    private func replaceExercise(with catalogItem: ExerciseCatalogItem, exerciseID: UUID) -> ExercisePickerSelectionResult {
         guard !containsComponentCatalogUUID(catalogItem.remoteUUID, excluding: exerciseID) else {
-            presentDuplicateExerciseNotice(for: catalogItem)
-            return
+            return duplicateExerciseRejectedResult(for: catalogItem)
         }
         guard let draftStore = exerciseDrafts.first(where: { $0.id == exerciseID }) else {
-            return
+            return .accepted
         }
 
         let replacement = draftStore.draft.replacingExercise(
@@ -390,19 +382,20 @@ struct TemplateEditorView: View {
             draftStore.isExpanded = true
         }
         recommendationByExerciseID[exerciseID] = nil
+        return .accepted
     }
 
-    private func appendComponent(catalogItem: ExerciseCatalogItem, to exerciseID: UUID) {
+    private func appendComponent(catalogItem: ExerciseCatalogItem, to exerciseID: UUID) -> ExercisePickerSelectionResult {
         guard !containsComponentCatalogUUID(catalogItem.remoteUUID) else {
-            presentDuplicateExerciseNotice(for: catalogItem)
-            return
+            return duplicateExerciseRejectedResult(for: catalogItem)
         }
         guard let draftStore = exerciseDrafts.first(where: { $0.id == exerciseID }) else {
-            return
+            return .accepted
         }
 
         draftStore.components.append(TemplateExerciseComponentDraft(catalogItem: catalogItem))
         draftStore.isExpanded = true
+        return .accepted
     }
 
     private func upsertCardioBlock(phase: WorkoutCardioPhase, catalogItem: ExerciseCatalogItem) {
@@ -601,10 +594,12 @@ struct TemplateEditorView: View {
         }
     }
 
-    private func presentDuplicateExerciseNotice(for catalogItem: ExerciseCatalogItem) {
-        duplicateExerciseNotice = ExerciseSelectionDuplicateNotice(
-            exerciseName: catalogItem.displayName,
-            destination: .template
+    private func duplicateExerciseRejectedResult(for catalogItem: ExerciseCatalogItem) -> ExercisePickerSelectionResult {
+        .rejected(
+            ExerciseSelectionDuplicateNotice(
+                exerciseName: catalogItem.displayName,
+                destination: .template
+            )
         )
     }
 
