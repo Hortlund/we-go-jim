@@ -170,7 +170,7 @@ struct SettingsView: View {
                     WGJNavigationTile(
                         title: "We Go Jim Pro",
                         systemImage: "sparkles",
-                        subtitle: "View plans, restore purchases, and open Customer Center.",
+                        subtitle: "View plans, restore purchases, and manage billing support.",
                         accessibilityID: "settings-we-go-jim-pro-tile"
                     ) {
                         ProSubscriptionView()

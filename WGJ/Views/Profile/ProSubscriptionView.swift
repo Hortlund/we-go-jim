@@ -1,6 +1,15 @@
 import StoreKit
 import SwiftUI
 
+nonisolated enum ProSubscriptionManagementPresentation {
+    static let sectionTitle = "Subscription Management"
+    static let sectionSubtitle = """
+        Use Apple to manage or cancel App Store subscriptions. Customer Center can help with billing support, refunds, and save offers when available.
+        """
+    static let appleActionTitle = "Manage or Cancel Subscription"
+    static let customerCenterActionTitle = "Billing Support & Offers"
+}
+
 struct ProSubscriptionView: View {
     @Environment(SubscriptionState.self) private var subscriptionState
     @State private var showingAppleSubscriptionManagement = false
@@ -64,6 +73,7 @@ struct ProSubscriptionView: View {
             }
         }
         .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .wgjCardContainer(strong: true)
     }
 
@@ -78,21 +88,24 @@ struct ProSubscriptionView: View {
             proFeatureRow("Bros circles above two members", systemImage: "person.3.fill")
         }
         .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .wgjCardContainer()
     }
 
     private var managementCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             WGJSectionHeader(
-                "Subscription Management",
-                subtitle: "Use Apple to manage or cancel App Store subscriptions. Customer Center can help with billing support when enabled."
+                ProSubscriptionManagementPresentation.sectionTitle,
+                subtitle: ProSubscriptionManagementPresentation.sectionSubtitle
             )
 
             Button {
                 showingAppleSubscriptionManagement = true
             } label: {
-                Label("Manage or Cancel Subscription", systemImage: "creditcard")
-                    .frame(maxWidth: .infinity)
+                managementButtonLabel(
+                    ProSubscriptionManagementPresentation.appleActionTitle,
+                    systemImage: "creditcard"
+                )
             }
             .buttonStyle(WGJGhostButtonStyle())
             .accessibilityIdentifier("pro-subscription-manage-apple-button")
@@ -100,8 +113,10 @@ struct ProSubscriptionView: View {
             Button {
                 subscriptionState.isCustomerCenterPresented = true
             } label: {
-                Label("Open Customer Center", systemImage: "person.crop.circle.badge.questionmark")
-                    .frame(maxWidth: .infinity)
+                managementButtonLabel(
+                    ProSubscriptionManagementPresentation.customerCenterActionTitle,
+                    systemImage: "person.crop.circle.badge.questionmark"
+                )
             }
             .buttonStyle(WGJGhostButtonStyle())
             .accessibilityIdentifier("pro-subscription-customer-center-button")
@@ -109,8 +124,7 @@ struct ProSubscriptionView: View {
             Button {
                 subscriptionState.redeemOfferCode()
             } label: {
-                Label("Redeem Offer Code", systemImage: "ticket")
-                    .frame(maxWidth: .infinity)
+                managementButtonLabel("Redeem Offer Code", systemImage: "ticket")
             }
             .buttonStyle(WGJGhostButtonStyle())
             .accessibilityIdentifier("pro-subscription-redeem-offer-code-button")
@@ -124,8 +138,7 @@ struct ProSubscriptionView: View {
                     ProgressView()
                         .frame(maxWidth: .infinity)
                 } else {
-                    Label("Restore Purchases", systemImage: "arrow.clockwise")
-                        .frame(maxWidth: .infinity)
+                    managementButtonLabel("Restore Purchases", systemImage: "arrow.clockwise")
                 }
             }
             .buttonStyle(WGJGhostButtonStyle())
@@ -133,6 +146,7 @@ struct ProSubscriptionView: View {
             .accessibilityIdentifier("pro-subscription-restore-button")
         }
         .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .wgjCardContainer()
     }
 
@@ -151,15 +165,30 @@ struct ProSubscriptionView: View {
     }
 
     private func proFeatureRow(_ title: String, systemImage: String) -> some View {
-        Label {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(WGJTheme.accentGold)
+                .frame(width: 32, alignment: .center)
+
             Text(title)
                 .font(.subheadline)
                 .foregroundStyle(WGJTheme.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
-        } icon: {
-            Image(systemName: systemImage)
-                .foregroundStyle(WGJTheme.accentGold)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    private func managementButtonLabel(_ title: String, systemImage: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.subheadline.weight(.semibold))
+                .frame(width: 24, alignment: .center)
+
+            Text(title)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
