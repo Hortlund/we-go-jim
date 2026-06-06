@@ -211,9 +211,15 @@ nonisolated enum FirstFrameTabPresentation: Equatable, Sendable {
 nonisolated enum FirstFrameTabContentPolicy {
     private static let transitionSafeContentMountDelayMilliseconds = 450
 
-    static func shouldDeferInitialContentMount(tab: AppMainTab) -> Bool {
+    static func shouldDeferInitialContentMount(
+        tab: AppMainTab,
+        hasFreshWarmSnapshot: Bool = false
+    ) -> Bool {
         switch tab {
-        case .profile, .bros:
+        case .profile:
+            _ = hasFreshWarmSnapshot
+            return false
+        case .bros:
             return true
         case .history, .startWorkout, .exercises:
             return false
@@ -224,8 +230,7 @@ nonisolated enum FirstFrameTabContentPolicy {
         tab: AppMainTab,
         hasFreshWarmSnapshot: Bool = false
     ) -> Int {
-        _ = hasFreshWarmSnapshot
-        guard shouldDeferInitialContentMount(tab: tab) else {
+        guard shouldDeferInitialContentMount(tab: tab, hasFreshWarmSnapshot: hasFreshWarmSnapshot) else {
             return 0
         }
 
@@ -243,9 +248,7 @@ nonisolated enum FirstFrameTabContentPolicy {
         tab: AppMainTab,
         hasFreshWarmSnapshot: Bool
     ) -> Bool {
-        _ = tab
-        _ = hasFreshWarmSnapshot
-        return false
+        tab == .profile && hasFreshWarmSnapshot
     }
 
     static func presentation(
@@ -367,6 +370,7 @@ final class AppWarmupState {
     @ObservationIgnored private var brosWarmupGeneration = 0
     @ObservationIgnored private var activeProfileWarmupRunID: Int?
     @ObservationIgnored private var activeBrosWarmupRunID: Int?
+    @ObservationIgnored private var profileWarmupWaiters: [CheckedContinuation<Void, Never>] = []
 
     func storeProfile(_ snapshot: ProfileWarmSnapshot) {
         latestProfile = snapshot
@@ -431,6 +435,7 @@ final class AppWarmupState {
         activeProfileWarmupRunID = nil
         isProfileWarmupActive = false
         profileCompletionVersion += 1
+        resumeProfileWarmupWaiters()
     }
 
     func beginBrosWarmup(
@@ -474,6 +479,7 @@ final class AppWarmupState {
         isProfileWarmupActive = false
         profileWarmupGeneration += 1
         profileCompletionVersion += 1
+        resumeProfileWarmupWaiters()
     }
 
     func invalidateBros() {
@@ -495,6 +501,22 @@ final class AppWarmupState {
         brosWarmupGeneration = 0
         profileCompletionVersion = 0
         brosCompletionVersion = 0
+        resumeProfileWarmupWaiters()
+    }
+
+    func waitForActiveProfileWarmup() async {
+        guard isProfileWarmupActive else { return }
+        await withCheckedContinuation { continuation in
+            profileWarmupWaiters.append(continuation)
+        }
+    }
+
+    private func resumeProfileWarmupWaiters() {
+        let waiters = profileWarmupWaiters
+        profileWarmupWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
+        }
     }
 }
 

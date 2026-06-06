@@ -63,9 +63,8 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 8))
 
         tapTabWithoutWaitingForIdle("Profile", in: app)
-        XCTAssertTrue(identifiedElement("profile-first-shell", in: app).waitForExistence(timeout: 2))
-        XCTAssertFalse(identifiedElement("profile-content-root", in: app).exists)
-        XCTAssertTrue(identifiedElement("profile-content-root", in: app).waitForExistence(timeout: 8))
+        XCTAssertFalse(identifiedElement("profile-first-shell", in: app).exists)
+        XCTAssertTrue(identifiedElement("profile-content-root", in: app).waitForExistence(timeout: 2))
         XCTAssertTrue(identifiedElement("profile-manage-button", in: app).waitForExistence(timeout: 2))
 
         tapTabWithoutWaitingForIdle("Bros", in: app)

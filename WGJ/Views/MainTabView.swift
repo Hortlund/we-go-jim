@@ -49,7 +49,7 @@ struct MainTabView: View {
                         title: "Profile",
                         systemImage: "person.fill"
                     ) {
-                        ProfileFirstFrameShellView()
+                        EmptyView()
                     } content: {
                         NavigationStack {
                             ProfileView()
@@ -181,7 +181,10 @@ struct MainTabView: View {
     ) -> some View {
         LazyTabContainer(
             tab: tab,
-            deferInitialContentMount: FirstFrameTabContentPolicy.shouldDeferInitialContentMount(tab: tab),
+            deferInitialContentMount: FirstFrameTabContentPolicy.shouldDeferInitialContentMount(
+                tab: tab,
+                hasFreshWarmSnapshot: hasFreshWarmSnapshot(for: tab)
+            ),
             preloadContent: shouldPreloadDeferredTab(tab),
             initialContentMountDelayMilliseconds: FirstFrameTabContentPolicy.initialContentMountDelayMilliseconds(
                 tab: tab,

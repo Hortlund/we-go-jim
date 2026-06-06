@@ -79,7 +79,7 @@
 - Avoid schema, store layout, or persistence changes unless the task explicitly requires them and the change is backed by targeted verification.
 - For test-only behavior, prefer the existing launch arguments and environment hooks over one-off debug code paths.
 - Treat SwiftData writes as explicit boundaries. Avoid no-op saves, repeated save churn during active workout edits, and broad saves from lifecycle callbacks.
-- Do not add synchronous main-context SwiftData reads or writes to cold navigation paths, especially Profile, `Bros`, app startup, and active workout restore. Prefer warm snapshots, placeholders, or `AppBackgroundStore` paths where available.
+- Do not add synchronous main-context SwiftData reads or writes to cold navigation paths, especially Profile, `Bros`, app startup, and active workout restore. Prefer warm snapshots or `AppBackgroundStore` paths where available. Profile first visit must join startup warmup/preload instead of showing an empty first-frame shell; `Bros` may still use bounded placeholders because cloud feed loading is open-ended.
 - Keep persisted baselines aligned with UI normalization. If a screen normalizes persisted drafts for display, diff against the effective normalized snapshot before deciding data is dirty.
 - Keep CloudKit status handling conservative. Only opt into cloud-backed behavior when account/runtime status is positively available; uncertain, unavailable, restricted, timed-out, or temporarily unavailable states must degrade without queuing new CloudKit work.
 - Treat Core Data + CloudKit export scheduler logs as framework-owned until app-side redundant saves or incorrect cloud gating are proven. Do not add custom background-task plumbing to silence those logs.

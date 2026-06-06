@@ -6,7 +6,7 @@ import Testing
 struct WeeklyGoalWidgetTests {
     @Test
     func widgetDescriptorUsesCacheResetKind() {
-        #expect(WeeklyGoalWidgetDescriptor.kind == "WGJWeeklyGoalWidgetV8")
+        #expect(WeeklyGoalWidgetDescriptor.kind == "WGJWeeklyGoalWidgetV9")
     }
 
     @Test
@@ -25,7 +25,7 @@ struct WeeklyGoalWidgetTests {
 
     @Test
     func storeUsesCacheResetSnapshotKey() {
-        #expect(WeeklyGoalWidgetStore.snapshotDefaultsKey == "weeklyGoalWidget.snapshot.v8")
+        #expect(WeeklyGoalWidgetStore.snapshotDefaultsKey == "weeklyGoalWidget.snapshot.v9")
         #expect(WeeklyGoalWidgetStore.legacySnapshotDefaultsKeys == [
             "weeklyGoalWidget.snapshot.v1",
             "weeklyGoalWidget.snapshot.v2",
@@ -34,6 +34,7 @@ struct WeeklyGoalWidgetTests {
             "weeklyGoalWidget.snapshot.v5",
             "weeklyGoalWidget.snapshot.v6",
             "weeklyGoalWidget.snapshot.v7",
+            "weeklyGoalWidget.snapshot.v8",
         ])
     }
 
@@ -87,6 +88,15 @@ struct WeeklyGoalWidgetTests {
         #expect(source.contains("templateLogo"))
         #expect(source.contains("renderingMode == .fullColor"))
         #expect(source.contains("WGJWidgetPalette.templatePrimary"))
+    }
+
+    @Test
+    func publisherFlushesAppGroupSnapshotAndReloadsOnlyWeeklyGoalKind() throws {
+        let publisherSource = try String(contentsOf: publisherSourceURL(), encoding: .utf8)
+        let sharedSource = try String(contentsOf: sharedSourceURL(), encoding: .utf8)
+
+        #expect(publisherSource.contains("WidgetCenter.shared.reloadTimelines(ofKind: Self.widgetKind)"))
+        #expect(sharedSource.contains("defaults.synchronize()"))
     }
 
     @Test
@@ -404,6 +414,20 @@ struct WeeklyGoalWidgetTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .appendingPathComponent("WGJWidgetExtension/WeeklyGoalWidget.swift")
+    }
+
+    private func publisherSourceURL() -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("WGJ/Services/WeeklyGoalWidgetPublisher.swift")
+    }
+
+    private func sharedSourceURL() -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("WGJ/WidgetShared/WeeklyGoalWidgetShared.swift")
     }
 
     private func sourceFunction(named name: String, in source: String) -> String? {

@@ -204,8 +204,11 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
-    func firstFrameTabPolicyShowsShellBeforeInitialProfileAndBrosContent() {
-        #expect(FirstFrameTabContentPolicy.shouldDeferInitialContentMount(tab: .profile))
+    func firstFrameTabPolicyUsesWarmProfileSnapshotForImmediateInitialContent() {
+        #expect(!FirstFrameTabContentPolicy.shouldDeferInitialContentMount(
+            tab: .profile,
+            hasFreshWarmSnapshot: true
+        ))
         #expect(FirstFrameTabContentPolicy.shouldDeferInitialContentMount(tab: .bros))
         #expect(!FirstFrameTabContentPolicy.shouldDeferInitialContentMount(tab: .history))
 
@@ -213,9 +216,9 @@ struct AppLaunchWarmupTests {
             tab: .profile,
             selectedTab: .profile,
             hasLoaded: false,
-            deferInitialContentMount: true,
+            deferInitialContentMount: false,
             isInitialContentMountReady: false
-        ) == .shell)
+        ) == .content)
         #expect(FirstFrameTabContentPolicy.presentation(
             tab: .bros,
             selectedTab: .bros,
@@ -251,7 +254,7 @@ struct AppLaunchWarmupTests {
         #expect(FirstFrameTabContentPolicy.initialContentMountDelayMilliseconds(
             tab: .profile,
             hasFreshWarmSnapshot: false
-        ) >= 350)
+        ) == 0)
         #expect(FirstFrameTabContentPolicy.initialContentMountDelayMilliseconds(
             tab: .bros,
             hasFreshWarmSnapshot: false
@@ -262,11 +265,11 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
-    func firstFrameTabPolicyKeepsTransitionDelayWhenWarmSnapshotIsReady() {
+    func firstFrameTabPolicyPreloadsProfileWhenWarmSnapshotIsReady() {
         #expect(FirstFrameTabContentPolicy.initialContentMountDelayMilliseconds(
             tab: .profile,
             hasFreshWarmSnapshot: true
-        ) >= 350)
+        ) == 0)
         #expect(FirstFrameTabContentPolicy.initialContentMountDelayMilliseconds(
             tab: .bros,
             hasFreshWarmSnapshot: true
@@ -275,6 +278,10 @@ struct AppLaunchWarmupTests {
             tab: .history,
             hasFreshWarmSnapshot: true
         ) == 0)
+        #expect(FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
+            tab: .profile,
+            hasFreshWarmSnapshot: true
+        ))
     }
 
     @Test
@@ -294,8 +301,8 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
-    func firstFrameTabPolicyDoesNotPreloadDeferredTabsThroughTabView() {
-        #expect(!FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
+    func firstFrameTabPolicyPreloadsOnlyWarmProfileThroughTabView() {
+        #expect(FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
             tab: .profile,
             hasFreshWarmSnapshot: true
         ))
@@ -354,6 +361,26 @@ struct AppLaunchWarmupTests {
 
         await probe.releaseProfile()
         await profileTask.value
+        #expect(await probe.didFinishProfile)
+    }
+
+    @MainActor
+    @Test
+    func profileActivationWaitsForActiveStartupWarmupToFinish() async throws {
+        let state = AppWarmupState()
+        let probe = WarmupGateProbe()
+        let runID = try #require(state.beginProfileWarmup())
+
+        let waiterTask = Task { @MainActor in
+            await state.waitForActiveProfileWarmup()
+            await probe.finishProfile()
+        }
+
+        await Task.yield()
+        #expect(await probe.didFinishProfile == false)
+
+        state.finishProfileWarmup(runID: runID, snapshot: nil)
+        await waiterTask.value
         #expect(await probe.didFinishProfile)
     }
 

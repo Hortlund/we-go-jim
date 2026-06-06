@@ -75,7 +75,6 @@ struct ProfileView: View {
     @State private var coachFollowUpTasks: [CoachFollowUpKind: Task<Void, Never>] = [:]
     @State private var coachFollowUpTokens: [CoachFollowUpKind: UUID] = [:]
     @State private var hasLoadedProfile = false
-    @State private var hasPresentedInitialShell = false
     @State private var needsExplicitRefresh = true
     @State private var lastLoadedProfileUpdatedAt: Date?
     @State private var lastRefreshAt: Date?
@@ -105,9 +104,6 @@ struct ProfileView: View {
         }
         .task(id: appWarmupState.profileCompletionVersion) {
             guard appWarmupState.profileCompletionVersion > 0 else { return }
-            if isTabActive {
-                await presentInitialShellIfNeeded()
-            }
             applyWarmProfileSnapshotIfAvailable()
             guard isTabActive else { return }
             await hydrateProfileIfNeeded(force: false)
@@ -731,17 +727,25 @@ struct ProfileView: View {
 
     @MainActor
     private func handleInitialActivation() async {
-        await presentInitialShellIfNeeded()
+        await joinStartupProfileWarmupIfNeeded()
         await hydrateProfileIfNeeded(force: false)
     }
 
     @MainActor
-    private func presentInitialShellIfNeeded() async {
-        guard !hasPresentedInitialShell else { return }
-        WGJPerformance.measure("profile.first-shell") {
-            hasPresentedInitialShell = true
+    private func joinStartupProfileWarmupIfNeeded() async {
+        guard FirstVisitTabReadiness.shouldDeferProfileHydration(
+            hasLoadedProfile: hasLoadedProfile,
+            hasCurrentProfile: currentProfile != nil,
+            isProfileWarmupActive: appWarmupState.isProfileWarmupActive,
+            hasFreshWarmSnapshot: appWarmupState.freshProfile() != nil
+        ) else {
+            return
         }
-        await Task.yield()
+
+        await WGJPerformance.measureAsync("profile.join-startup-warmup") {
+            await appWarmupState.waitForActiveProfileWarmup()
+        }
+        applyWarmProfileSnapshotIfAvailable()
     }
 
     @MainActor

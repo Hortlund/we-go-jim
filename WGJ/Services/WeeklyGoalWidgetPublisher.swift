@@ -14,7 +14,7 @@ nonisolated final class WeeklyGoalWidgetPublisher {
         }
 
         self.init(store: store) {
-            WidgetCenter.shared.reloadAllTimelines()
+            WidgetCenter.shared.reloadTimelines(ofKind: Self.widgetKind)
         }
     }
 

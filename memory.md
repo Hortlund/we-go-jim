@@ -119,6 +119,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 - Root Cause: First-install startup can still be busy with Core Data/CloudKit store setup and export scheduling. Treating fresh warm snapshots as permission to mount real Profile/Bros tab content immediately during the first tab selection still lets SwiftUI build the heavy tab tree while the tab transition is moving.
 - Durable Rule: Warm Profile/Bros snapshots may feed a lightweight first-frame shell, but they must not bypass the transition-safe initial content mount delay inside `TabView`. Do not preload deferred Profile/Bros tab trees through `TabView`; show the shell first, then mount real content after the transition. Startup Bros warmup may perform the real feed snapshot fetch during splash, but visible Bros activation must coalesce with any in-flight refresh instead of cancelling it or starting another one.
 - How to Verify Next Time: Run `WGJTests/AppLaunchWarmupTests`, `WGJTests/BrosViewModelTests`, and `WGJUITests/WGJUITests/testColdLaunchProfileAndBrosTabsRespondAfterSplash`; confirm warm snapshots do not zero out the first content mount delay, Profile first tap shows `profile-first-shell` before `profile-content-root`, startup Bros warm snapshot policy still degrades cleanly when cloud is unavailable, and concurrent Bros refresh calls wait for the active fetch instead of duplicating it.
+- Status: superseded by `2026-06-06 - First Visit Profile Must Join Startup Preload, Not Show A Shell`.
+
+## 2026-06-06 - First Visit Profile Must Join Startup Preload, Not Show A Shell
+
+- Date: 2026-06-06
+- Trigger/Problem: The user rejected the Profile first-frame shell approach and clarified that first fresh-install Profile should be actually preloaded during splash/boot; if tapped while loading, it should join the existing warmup instead of restarting or showing an empty shell.
+- Root Cause: The prior implementation treated Profile like Bros and intentionally delayed the real Profile tab tree behind `ProfileFirstFrameShellView`, so splash-time warm snapshots could still be hidden behind a shell and an in-flight warmup could leave visible placeholder content.
+- Durable Rule: Profile must not use a first-frame shell on initial tab selection. Startup Profile warmup should begin during boot, main entry should use the warmed snapshot when available, and first Profile activation must wait on the active warmup completion before deciding whether to apply the warm snapshot or load locally. Bros can keep the transition-safe shell/deferred mount because cloud feed loading is open-ended.
+- How to Verify Next Time: Run `WGJTests/AppLaunchWarmupTests`, `WGJTests/WeeklyGoalWidgetTests` if widget state is also touched, and `WGJUITests/WGJUITests/testColdLaunchProfileAndBrosTabsRespondAfterSplash`; confirm Profile has zero initial mount delay, warm Profile can preload through `TabView`, `AppWarmupState.waitForActiveProfileWarmup()` resumes on warmup finish, and `profile-first-shell` is absent while `profile-content-root` appears on the first Profile tap.
 - Status: active
 
 ## 2026-06-06 - Active Workout Minimize Snapshot Writes Must Be Ordered
