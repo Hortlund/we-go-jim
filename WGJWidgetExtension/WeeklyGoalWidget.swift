@@ -8,6 +8,9 @@ private enum WGJWidgetPalette {
     static let ringTrack = Color.white.opacity(0.16)
     static let goalLine = Color.white.opacity(0.32)
     static let priorBar = Color(red: 0.29, green: 0.57, blue: 1.0).opacity(0.42)
+    static let templatePrimary = Color.white
+    static let templateSecondary = Color.white.opacity(0.82)
+    static let templateMuted = Color.white.opacity(0.46)
 }
 
 private enum WGJWidgetLayout {
@@ -33,8 +36,9 @@ private struct WGJWidgetBackground: View {
     private var fullColorBackground: some View {
         LinearGradient(
             colors: [
-                Color(red: 0.025, green: 0.035, blue: 0.070),
-                Color(red: 0.030, green: 0.090, blue: 0.170),
+                Color(red: 0.035, green: 0.100, blue: 0.210),
+                Color(red: 0.040, green: 0.220, blue: 0.330),
+                Color(red: 0.020, green: 0.035, blue: 0.075),
             ],
             startPoint: .topLeading,
             endPoint: .bottomTrailing
@@ -255,11 +259,11 @@ struct WeeklyGoalWidgetView: View {
     private func progressRing(snapshot: WeeklyGoalWidgetSnapshot, lineWidth: CGFloat) -> some View {
         ZStack {
             Circle()
-                .stroke(WGJWidgetPalette.ringTrack, lineWidth: lineWidth)
+                .stroke(ringTrackStyle, lineWidth: lineWidth)
             Circle()
                 .trim(from: 0, to: snapshot.progressFraction)
                 .stroke(
-                    WGJWidgetPalette.accentBlue,
+                    accentStyle,
                     style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
                 )
                 .rotationEffect(.degrees(-90))
@@ -275,9 +279,9 @@ struct WeeklyGoalWidgetView: View {
         case .fullColor:
             WGJWidgetPalette.textPrimary
         case .accented:
-            .white
+            WGJWidgetPalette.templatePrimary
         case .vibrant:
-            .white
+            WGJWidgetPalette.templatePrimary
         default:
             WGJWidgetPalette.textPrimary
         }
@@ -288,9 +292,9 @@ struct WeeklyGoalWidgetView: View {
         case .fullColor:
             WGJWidgetPalette.textSecondary
         case .accented:
-            .white.opacity(0.78)
+            WGJWidgetPalette.templateSecondary
         case .vibrant:
-            .white.opacity(0.78)
+            WGJWidgetPalette.templateSecondary
         default:
             WGJWidgetPalette.textSecondary
         }
@@ -301,11 +305,22 @@ struct WeeklyGoalWidgetView: View {
         case .fullColor:
             WGJWidgetPalette.accentBlue
         case .accented:
-            .white
+            WGJWidgetPalette.templatePrimary
         case .vibrant:
-            .white
+            WGJWidgetPalette.templatePrimary
         default:
             WGJWidgetPalette.accentBlue
+        }
+    }
+
+    private var ringTrackStyle: Color {
+        switch currentRenderingMode {
+        case .fullColor:
+            WGJWidgetPalette.ringTrack
+        case .accented, .vibrant:
+            WGJWidgetPalette.templateMuted
+        default:
+            WGJWidgetPalette.ringTrack
         }
     }
 
@@ -325,6 +340,8 @@ struct WeeklyGoalWidgetView: View {
 }
 
 private struct WeeklyGoalWidgetBarChart: View {
+    @Environment(\.widgetRenderingMode) private var renderingMode
+
     let snapshot: WeeklyGoalWidgetSnapshot
 
     var body: some View {
@@ -341,11 +358,7 @@ private struct WeeklyGoalWidgetBarChart: View {
                             VStack(spacing: 0) {
                                 Spacer(minLength: 0)
                                 RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                    .fill(
-                                        week == snapshot.recentWeeks.last
-                                            ? WGJWidgetPalette.accentBlue
-                                            : WGJWidgetPalette.priorBar
-                                    )
+                                    .fill(barFill(for: week))
                                     .frame(height: barHeight(for: week, chartHeight: chartHeight, maxValue: maxValue))
                             }
                             .frame(maxWidth: .infinity)
@@ -358,7 +371,7 @@ private struct WeeklyGoalWidgetBarChart: View {
                     ForEach(snapshot.recentWeeks) { week in
                         Text(week.weekStart.formatted(.dateTime.day().month(.defaultDigits)))
                             .font(.caption2.weight(.medium))
-                            .foregroundStyle(WGJWidgetPalette.textSecondary)
+                            .foregroundStyle(secondaryTextStyle)
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
                             .frame(maxWidth: .infinity)
@@ -376,7 +389,7 @@ private struct WeeklyGoalWidgetBarChart: View {
             Spacer()
                 .frame(height: max(0, chartHeight - goalLineOffset(chartHeight: chartHeight, maxValue: maxValue)))
             Rectangle()
-                .fill(WGJWidgetPalette.goalLine)
+                .fill(goalLineStyle)
                 .frame(height: 1)
             Spacer(minLength: 0)
         }
@@ -392,12 +405,63 @@ private struct WeeklyGoalWidgetBarChart: View {
         let height = chartHeight * CGFloat(fraction)
         return max(week.completedWorkouts > 0 ? 8 : 2, height)
     }
+
+    private func barFill(for week: WeeklyGoalWidgetWeek) -> Color {
+        switch renderingMode {
+        case .fullColor:
+            return week == snapshot.recentWeeks.last
+                ? WGJWidgetPalette.accentBlue
+                : WGJWidgetPalette.priorBar
+        case .accented, .vibrant:
+            return week == snapshot.recentWeeks.last
+                ? WGJWidgetPalette.templatePrimary
+                : WGJWidgetPalette.templateMuted
+        default:
+            return week == snapshot.recentWeeks.last
+                ? WGJWidgetPalette.accentBlue
+                : WGJWidgetPalette.priorBar
+        }
+    }
+
+    private var goalLineStyle: Color {
+        switch renderingMode {
+        case .fullColor:
+            WGJWidgetPalette.goalLine
+        case .accented, .vibrant:
+            WGJWidgetPalette.templateSecondary
+        default:
+            WGJWidgetPalette.goalLine
+        }
+    }
+
+    private var secondaryTextStyle: Color {
+        switch renderingMode {
+        case .fullColor:
+            WGJWidgetPalette.textSecondary
+        case .accented, .vibrant:
+            WGJWidgetPalette.templateSecondary
+        default:
+            WGJWidgetPalette.textSecondary
+        }
+    }
 }
 
 private struct WGJWidgetBrandBadge: View {
+    @Environment(\.widgetRenderingMode) private var renderingMode
+
     let size: CGFloat
 
+    @ViewBuilder
     var body: some View {
+        if renderingMode == .fullColor {
+            fullColorLogo
+        } else {
+            templateLogo
+        }
+    }
+
+    @ViewBuilder
+    private var fullColorLogo: some View {
         if #available(iOS 18.0, *) {
             Image("WidgetLogo")
                 .resizable()
@@ -417,6 +481,16 @@ private struct WGJWidgetBrandBadge: View {
             .scaledToFit()
             .frame(width: size, height: size)
             .clipShape(RoundedRectangle(cornerRadius: size * 0.24, style: .continuous))
+            .accessibilityHidden(true)
+    }
+
+    private var templateLogo: some View {
+        Text("W")
+            .font(.system(size: max(10, size * 0.64), weight: .black, design: .rounded))
+            .foregroundStyle(WGJWidgetPalette.templatePrimary)
+            .minimumScaleFactor(0.7)
+            .lineLimit(1)
+            .frame(width: size, height: size)
             .accessibilityHidden(true)
     }
 }

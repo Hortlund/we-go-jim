@@ -490,52 +490,6 @@ private struct WGJCloudSyncBannerIcon: View {
     }
 }
 
-private struct ProfileFirstFrameShellView: View {
-    var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 16) {
-                WGJRootHeader("Profile", subtitle: "Your training snapshot, progress, and app controls.")
-
-                placeholderCard(
-                    title: "Preparing profile",
-                    subtitle: "Loading your profile shell.",
-                    accessibilityID: "profile-first-shell"
-                )
-                placeholderCard(title: "Highlights", subtitle: "Stats will fill in after the first frame.")
-            }
-            .padding(.top, 8)
-            .padding(16)
-        }
-        .wgjScreenBackground()
-    }
-
-    private func placeholderCard(
-        title: String,
-        subtitle: String,
-        accessibilityID: String? = nil
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            WGJActionHeader(title, subtitle: subtitle) {
-                Image(systemName: "ellipsis")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(WGJTheme.textSecondary)
-            }
-
-            VStack(spacing: 8) {
-                ForEach(0..<3, id: \.self) { index in
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .fill(WGJTheme.rowDivider.opacity(index == 0 ? 0.34 : 0.22))
-                        .frame(height: index == 0 ? 18 : 12)
-                }
-            }
-        }
-        .padding(14)
-        .wgjCardContainer(strong: true)
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier(accessibilityID ?? "")
-    }
-}
-
 private struct BrosFirstFrameShellView: View {
     var body: some View {
         ScrollView {

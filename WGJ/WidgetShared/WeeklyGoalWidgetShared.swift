@@ -182,12 +182,12 @@ nonisolated enum WeeklyGoalWidgetDeepLink {
 }
 
 nonisolated enum WeeklyGoalWidgetDescriptor {
-    static let kind = "WGJWeeklyGoalWidgetV7"
+    static let kind = "WGJWeeklyGoalWidgetV8"
 }
 
 nonisolated struct WeeklyGoalWidgetStore {
     static let appGroupIdentifier = "group.se.highball.WeGoJim"
-    static let snapshotDefaultsKey = "weeklyGoalWidget.snapshot.v7"
+    static let snapshotDefaultsKey = "weeklyGoalWidget.snapshot.v8"
     static let legacySnapshotDefaultsKeys = [
         "weeklyGoalWidget.snapshot.v1",
         "weeklyGoalWidget.snapshot.v2",
@@ -195,6 +195,7 @@ nonisolated struct WeeklyGoalWidgetStore {
         "weeklyGoalWidget.snapshot.v4",
         "weeklyGoalWidget.snapshot.v5",
         "weeklyGoalWidget.snapshot.v6",
+        "weeklyGoalWidget.snapshot.v7",
     ]
 
     private let defaults: UserDefaults

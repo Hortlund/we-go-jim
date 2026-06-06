@@ -262,15 +262,15 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
-    func firstFrameTabPolicyMountsImmediatelyWhenWarmSnapshotIsReady() {
+    func firstFrameTabPolicyKeepsTransitionDelayWhenWarmSnapshotIsReady() {
         #expect(FirstFrameTabContentPolicy.initialContentMountDelayMilliseconds(
             tab: .profile,
             hasFreshWarmSnapshot: true
-        ) == 0)
+        ) >= 350)
         #expect(FirstFrameTabContentPolicy.initialContentMountDelayMilliseconds(
             tab: .bros,
             hasFreshWarmSnapshot: true
-        ) == 0)
+        ) >= 350)
         #expect(FirstFrameTabContentPolicy.initialContentMountDelayMilliseconds(
             tab: .history,
             hasFreshWarmSnapshot: true
@@ -294,12 +294,12 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
-    func firstFrameTabPolicyPreloadsDeferredTabsFromWarmSnapshots() {
-        #expect(FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
+    func firstFrameTabPolicyDoesNotPreloadDeferredTabsThroughTabView() {
+        #expect(!FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
             tab: .profile,
             hasFreshWarmSnapshot: true
         ))
-        #expect(FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
+        #expect(!FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
             tab: .bros,
             hasFreshWarmSnapshot: true
         ))

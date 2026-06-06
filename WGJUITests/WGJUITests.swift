@@ -51,19 +51,21 @@ final class WGJUITests: XCTestCase {
         app.launchArguments = [
             "UITEST_IN_MEMORY_STORE",
             "UITEST_FORCE_AUTO_ENTER_AFTER_SPLASH",
-            "UITEST_FIRST_TAB_CONTENT_MOUNT_DELAY_MS=1500",
+            "UITEST_FIRST_TAB_CONTENT_MOUNT_DELAY_MS=6000",
         ]
         app.launchEnvironment = [
             "UITEST_PROFILE_STARTUP_WARMUP_DELAY_MS": "2000",
             "UITEST_BROS_STARTUP_WARMUP_DELAY_MS": "2000",
-            "UITEST_FIRST_TAB_CONTENT_MOUNT_DELAY_MS": "1500",
+            "UITEST_FIRST_TAB_CONTENT_MOUNT_DELAY_MS": "6000",
         ]
         app.launch()
 
         XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 8))
 
         tapTabWithoutWaitingForIdle("Profile", in: app)
-        XCTAssertTrue(identifiedElement("profile-content-root", in: app).waitForExistence(timeout: 2))
+        XCTAssertTrue(identifiedElement("profile-first-shell", in: app).waitForExistence(timeout: 2))
+        XCTAssertFalse(identifiedElement("profile-content-root", in: app).exists)
+        XCTAssertTrue(identifiedElement("profile-content-root", in: app).waitForExistence(timeout: 8))
         XCTAssertTrue(identifiedElement("profile-manage-button", in: app).waitForExistence(timeout: 2))
 
         tapTabWithoutWaitingForIdle("Bros", in: app)

@@ -224,11 +224,8 @@ nonisolated enum FirstFrameTabContentPolicy {
         tab: AppMainTab,
         hasFreshWarmSnapshot: Bool = false
     ) -> Int {
+        _ = hasFreshWarmSnapshot
         guard shouldDeferInitialContentMount(tab: tab) else {
-            return 0
-        }
-
-        guard !hasFreshWarmSnapshot else {
             return 0
         }
 
@@ -246,8 +243,9 @@ nonisolated enum FirstFrameTabContentPolicy {
         tab: AppMainTab,
         hasFreshWarmSnapshot: Bool
     ) -> Bool {
-        guard hasFreshWarmSnapshot else { return false }
-        return shouldDeferInitialContentMount(tab: tab)
+        _ = tab
+        _ = hasFreshWarmSnapshot
+        return false
     }
 
     static func presentation(

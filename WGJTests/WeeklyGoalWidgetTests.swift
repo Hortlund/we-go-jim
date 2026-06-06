@@ -6,7 +6,7 @@ import Testing
 struct WeeklyGoalWidgetTests {
     @Test
     func widgetDescriptorUsesCacheResetKind() {
-        #expect(WeeklyGoalWidgetDescriptor.kind == "WGJWeeklyGoalWidgetV7")
+        #expect(WeeklyGoalWidgetDescriptor.kind == "WGJWeeklyGoalWidgetV8")
     }
 
     @Test
@@ -25,7 +25,7 @@ struct WeeklyGoalWidgetTests {
 
     @Test
     func storeUsesCacheResetSnapshotKey() {
-        #expect(WeeklyGoalWidgetStore.snapshotDefaultsKey == "weeklyGoalWidget.snapshot.v7")
+        #expect(WeeklyGoalWidgetStore.snapshotDefaultsKey == "weeklyGoalWidget.snapshot.v8")
         #expect(WeeklyGoalWidgetStore.legacySnapshotDefaultsKeys == [
             "weeklyGoalWidget.snapshot.v1",
             "weeklyGoalWidget.snapshot.v2",
@@ -33,6 +33,7 @@ struct WeeklyGoalWidgetTests {
             "weeklyGoalWidget.snapshot.v4",
             "weeklyGoalWidget.snapshot.v5",
             "weeklyGoalWidget.snapshot.v6",
+            "weeklyGoalWidget.snapshot.v7",
         ])
     }
 
@@ -83,6 +84,9 @@ struct WeeklyGoalWidgetTests {
         #expect(source.contains("case .vibrant"))
         #expect(source.contains(".widgetAccentable()"))
         #expect(source.contains(".widgetAccentedRenderingMode("))
+        #expect(source.contains("templateLogo"))
+        #expect(source.contains("renderingMode == .fullColor"))
+        #expect(source.contains("WGJWidgetPalette.templatePrimary"))
     }
 
     @Test
