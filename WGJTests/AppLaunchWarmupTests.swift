@@ -1555,7 +1555,7 @@ struct AppLaunchWarmupTests {
         try ModelContainer(
             for: Schema([UserProfile.self]),
             configurations: [
-                ModelConfiguration("Test", schema: Schema([UserProfile.self]), isStoredInMemoryOnly: true, cloudKitDatabase: .none),
+                ModelConfiguration("AppLaunchWarmup-\(UUID().uuidString)", schema: Schema([UserProfile.self]), isStoredInMemoryOnly: true, cloudKitDatabase: .none),
             ]
         )
     }

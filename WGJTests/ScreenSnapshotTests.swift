@@ -524,7 +524,7 @@ struct ScreenSnapshotTests {
             BlockedBro.self,
         ])
         let configuration = ModelConfiguration(
-            "SnapshotLoaderTests",
+            "SnapshotLoaderTests-\(UUID().uuidString)",
             schema: schema,
             isStoredInMemoryOnly: true,
             cloudKitDatabase: .none

@@ -252,7 +252,7 @@ struct HistoryDetailSnapshotTests {
             SocialOutboxItem.self,
             BlockedBro.self,
         ])
-        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)
+        let config = ModelConfiguration("HistoryDetailSnapshot-\(UUID().uuidString)", schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: schema, configurations: [config])
         return ModelContext(container)
     }

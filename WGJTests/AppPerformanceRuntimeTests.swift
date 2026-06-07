@@ -154,17 +154,21 @@ struct AppPerformanceRuntimeTests {
     @MainActor
     @Test
     func socialMaintenanceSchedulerUsesPerScheduleDelay() async throws {
-        let scheduler = SocialMaintenanceScheduler(debounceDuration: .milliseconds(1))
+        var requestedDelays: [Duration] = []
+        let scheduler = SocialMaintenanceScheduler(
+            debounceDuration: .milliseconds(1),
+            sleep: { duration in
+                requestedDelays.append(duration)
+            }
+        )
         var didRun = false
 
         scheduler.schedule(after: .milliseconds(80)) {
             didRun = true
         }
 
-        try await Task.sleep(for: .milliseconds(20))
-        #expect(didRun == false)
-
-        try await Task.sleep(for: .milliseconds(120))
+        await scheduler.waitForIdleForTesting()
+        #expect(requestedDelays == [.milliseconds(80)])
         #expect(didRun == true)
     }
 

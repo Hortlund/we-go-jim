@@ -223,6 +223,7 @@ struct ProfileCoachScaffoldingTests {
         ])
 
         let configuration = ModelConfiguration(
+            "SwiftDataTest-\(UUID().uuidString)",
             schema: schema,
             isStoredInMemoryOnly: true,
             cloudKitDatabase: .none
