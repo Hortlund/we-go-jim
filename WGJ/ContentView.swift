@@ -295,6 +295,7 @@ struct ContentView: View {
         routePendingTemplateFileIfNeeded()
         scheduleSubscriptionRefreshIfNeeded()
         scheduleWeeklyGoalWidgetPublish()
+        requestWarmups(trigger: .enteredMain)
 
         guard !hasScheduledInitialDeferredMaintenance else { return }
         hasScheduledInitialDeferredMaintenance = true
@@ -718,11 +719,9 @@ struct ContentView: View {
         }
 
         let forceWarmup = trigger == .activeWorkoutEnded
-        guard forceWarmup else { return }
-
-        scheduleProfileWarmupIfNeeded(force: forceWarmup)
+        let didScheduleProfileWarmup = scheduleProfileWarmupIfNeeded(force: forceWarmup)
         scheduleBrosWarmupIfNeeded(force: forceWarmup)
-        if trigger != .sceneActivated {
+        if trigger != .sceneActivated, forceWarmup || didScheduleProfileWarmup {
             scheduleCoachWarmupIfNeeded()
         }
     }
@@ -730,7 +729,8 @@ struct ContentView: View {
     @MainActor
     private func startStartupWarmSnapshotsIfNeeded() -> StartupWarmupTasks {
         let shouldWarmProfile = appWarmupState.shouldWarmProfile()
-        let shouldWarmBros = appWarmupState.shouldWarmBros()
+        let hasBrosHydrationPlaceholder = appWarmupState.freshBros()?.state.needsRemoteHydration == true
+        let shouldWarmBros = appWarmupState.shouldWarmBros() && !hasBrosHydrationPlaceholder
         guard StartupWarmupLaunchPolicy.shouldStartNonblockingWarmups(
             skipsSplash: ProcessInfo.processInfo.arguments.contains(AppStartupRouting.skipSplashArgument),
             hasBackgroundStore: appBackgroundStore != nil,
@@ -834,9 +834,10 @@ struct ContentView: View {
 #endif
     }
 
-    private func scheduleProfileWarmupIfNeeded(force: Bool) {
-        guard let appBackgroundStore else { return }
-        guard let runID = appWarmupState.beginProfileWarmup(force: force) else { return }
+    @discardableResult
+    private func scheduleProfileWarmupIfNeeded(force: Bool) -> Bool {
+        guard let appBackgroundStore else { return false }
+        guard let runID = appWarmupState.beginProfileWarmup(force: force) else { return false }
 
         let cloudSyncEnabled = appRuntimeState.cloudSyncEnabled
 
@@ -863,11 +864,13 @@ struct ContentView: View {
                 }
             }
         }
+        return true
     }
 
-    private func scheduleBrosWarmupIfNeeded(force: Bool) {
-        guard let appBackgroundStore else { return }
-        guard let runID = appWarmupState.beginBrosWarmup(force: force) else { return }
+    @discardableResult
+    private func scheduleBrosWarmupIfNeeded(force: Bool) -> Bool {
+        guard let appBackgroundStore else { return false }
+        guard let runID = appWarmupState.beginBrosWarmup(force: force) else { return false }
 
         let cloudSyncEnabled = appRuntimeState.cloudSyncEnabled
         let cloudSyncErrorDescription = appRuntimeState.cloudSyncErrorDescription
@@ -892,6 +895,7 @@ struct ContentView: View {
                 }
             }
         }
+        return true
     }
 
     private func scheduleCoachWarmupIfNeeded() {

@@ -94,8 +94,22 @@ struct SettingsView: View {
 
                     Toggle(isOn: $isBozarModeEnabled) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Bozar Mode")
-                                .foregroundStyle(WGJTheme.textPrimary)
+                            HStack(spacing: 8) {
+                                Text("Bozar Mode")
+                                    .foregroundStyle(WGJTheme.textPrimary)
+
+                                Text("Beta")
+                                    .font(.caption2.weight(.bold))
+                                    .textCase(.uppercase)
+                                    .foregroundStyle(WGJTheme.warning)
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 3)
+                                    .background(
+                                        Capsule()
+                                            .fill(WGJTheme.warning.opacity(0.14))
+                                    )
+                                    .accessibilityLabel("Beta")
+                            }
 
                             Text("Lets you complete a set with empty fields and fills missing reps or weight from your last performance when available.")
                                 .font(.caption)

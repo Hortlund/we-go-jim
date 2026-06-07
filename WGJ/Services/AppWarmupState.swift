@@ -254,8 +254,11 @@ nonisolated enum FirstFrameTabContentPolicy {
         isWarmupActive: Bool = false
     ) -> Bool {
         switch tab {
-        case .profile, .bros:
+        case .profile:
             return hasFreshWarmSnapshot || isWarmupActive
+        case .bros:
+            _ = isWarmupActive
+            return hasFreshWarmSnapshot
         case .history, .startWorkout, .exercises:
             return false
         }
@@ -329,6 +332,13 @@ enum BrosWarmStateSnapshot: Equatable, Sendable {
         case .loading, .unavailable:
             return false
         }
+    }
+
+    var needsRemoteHydration: Bool {
+        if case .loading = self {
+            return true
+        }
+        return false
     }
 }
 
@@ -419,7 +429,10 @@ final class AppWarmupState {
         now: Date = .now,
         maxAge: TimeInterval = defaultBrosFreshnessInterval
     ) -> Bool {
-        force || (activeBrosWarmupRunID == nil && freshBros(now: now, maxAge: maxAge) == nil)
+        if force { return true }
+        guard activeBrosWarmupRunID == nil else { return false }
+        guard let snapshot = freshBros(now: now, maxAge: maxAge) else { return true }
+        return snapshot.state.needsRemoteHydration
     }
 
     func beginProfileWarmup(

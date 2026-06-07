@@ -1049,7 +1049,7 @@ struct BrosView: View {
         BrosInitialActivationPolicy.shouldDeferActivationRefresh(
             hasCompletedInitialActivationRefresh: hasCompletedInitialActivationRefresh,
             isBrosWarmupActive: appWarmupState.isBrosWarmupActive,
-            hasFreshWarmSnapshot: appWarmupState.freshBros() != nil,
+            hasFreshWarmSnapshot: appWarmupState.freshBros()?.state.canSkipInitialActivationRefresh == true,
             hasNotificationRefreshRequest: notificationRouter.brosRefreshRequestID != nil
         )
     }

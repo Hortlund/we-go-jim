@@ -76,6 +76,21 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
+    func appWarmupStateTreatsLoadingBrosSnapshotAsNeedingHydration() {
+        let state = AppWarmupState()
+        state.storeBros(BrosWarmSnapshot(
+            state: .loading,
+            blockedUserRecordNames: [],
+            warmedAt: Date(timeIntervalSince1970: 700)
+        ))
+
+        #expect(state.freshBros(now: Date(timeIntervalSince1970: 720), maxAge: 30) != nil)
+        #expect(state.shouldWarmBros(now: Date(timeIntervalSince1970: 720), maxAge: 30))
+        #expect(state.beginBrosWarmup(now: Date(timeIntervalSince1970: 720), maxAge: 30) != nil)
+        #expect(!state.shouldWarmBros(now: Date(timeIntervalSince1970: 721), maxAge: 30))
+    }
+
+    @Test
     func appWarmupDefaultsKeepStartupSnapshotsReusableForFirstVisits() {
         #expect(AppWarmupState.defaultProfileFreshnessInterval == 300)
         #expect(AppWarmupState.defaultBrosFreshnessInterval == 300)
@@ -316,7 +331,7 @@ struct AppLaunchWarmupTests {
             hasFreshWarmSnapshot: true,
             isWarmupActive: false
         ))
-        #expect(FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
+        #expect(!FirstFrameTabContentPolicy.shouldPreloadDeferredContent(
             tab: .bros,
             hasFreshWarmSnapshot: false,
             isWarmupActive: true
@@ -447,6 +462,14 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
+    func appLifecycleStartsWarmupsBeforeFirstProfileOrBrosTabVisit() throws {
+        let source = try String(contentsOf: contentViewSourceURL(), encoding: .utf8)
+
+        #expect(source.contains("requestWarmups(trigger: .enteredMain)"))
+        #expect(!source.contains("guard forceWarmup else { return }"))
+    }
+
+    @Test
     func firstRunLocalBootstrapPolicyBlocksOnlyRealFirstLaunches() {
         #expect(FirstRunLocalBootstrapPolicy.shouldRunBeforeMainEntry(
             skipsSplash: false,
@@ -554,6 +577,17 @@ struct AppLaunchWarmupTests {
             hasCompletedInitialActivationRefresh: true,
             isBrosWarmupActive: true,
             hasFreshWarmSnapshot: false,
+            hasNotificationRefreshRequest: false
+        ))
+    }
+
+    @Test
+    func brosInitialActivationPolicyTreatsLoadingSnapshotAsMissingWhileWarmupRuns() {
+        #expect(!BrosWarmStateSnapshot.loading.canSkipInitialActivationRefresh)
+        #expect(BrosInitialActivationPolicy.shouldDeferActivationRefresh(
+            hasCompletedInitialActivationRefresh: false,
+            isBrosWarmupActive: true,
+            hasFreshWarmSnapshot: BrosWarmStateSnapshot.loading.canSkipInitialActivationRefresh,
             hasNotificationRefreshRequest: false
         ))
     }

@@ -173,6 +173,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 - Root Cause: First-run bootstrap built and stored a Profile warm snapshot but not a Bros warm snapshot. Later changes also relied on async `.task` handlers to apply warm snapshots, which could allow a visible first frame of loading after the user had already landed on Profile or Bros.
 - Durable Rule: First-run bootstrap must build and store both Profile and Bros warm snapshots before main entry when splash is not skipped. Profile and Bros must synchronously apply available warm snapshots on appearance, and first-visit tab policy must allow both tabs to preload through `TabView` when a fresh snapshot exists or startup warmup is active. Do not reintroduce visible first-visit Profile/Bros shells or loading cards as the expected successful path.
 - How to Verify Next Time: Run `WGJTests/AppLaunchWarmupTests`, `WGJTests/BrosViewModelTests`, `WGJUITests/WGJUITests/testColdLaunchProfileAndBrosTabsRespondAfterSplash`, and `WGJTests/WeeklyGoalWidgetTests` if widget state is also touched. Confirm first-run bootstrap stores both warm snapshots, Profile/Bros preload policy covers fresh or active warmup, `profile-first-shell` is absent, `profile-content-root` appears on first Profile tap, and `bros-loading-card` is not present after first Bros entry.
+- Status: superseded by `2026-06-07 - Bros Loading Warm Snapshots Must Hydrate In Background`. Profile still preloads from fresh or active startup warmup, but Bros must not treat a `.loading` warm snapshot as render-ready content.
+
+## 2026-06-07 - Bros Loading Warm Snapshots Must Hydrate In Background
+
+- Date: 2026-06-07
+- Trigger/Problem: Profile first entry looked smooth, but Bros still loaded live data on first visit after fresh install or app quit even though the tab transition itself no longer lagged.
+- Root Cause: First-run local bootstrap intentionally stored a `.loading` Bros warm snapshot when remote fetch was disallowed before main entry. That fresh loading placeholder then counted as enough warm state, so startup/lifecycle warmup skipped the real CloudKit hydration until Bros became active.
+- Durable Rule: A `.loading` Bros warm snapshot is a first-frame placeholder, not completed warm content. It must trigger a background Bros hydration after main entry, and Bros tab activation should defer its own foreground refresh while that warmup is active. Do not preload the heavy Bros content tree merely because a Bros warmup is active; preload it once a renderable warm snapshot exists.
+- How to Verify Next Time: Run `WGJTests/AppLaunchWarmupTests`, `WGJTests/BrosViewModelTests`, and `WGJUITests/WGJUITests/testColdLaunchProfileAndBrosTabsRespondAfterSplash`. Confirm `.loading` snapshots make `AppWarmupState.shouldWarmBros` true, `handleEnteredMainPhase` requests warmups before tab visits, non-forced warmups are not discarded, and `bros-loading-card` is absent after first Bros entry.
 - Status: active
 
 ## 2026-06-06 - Active Workout Minimize Snapshot Writes Must Be Ordered
