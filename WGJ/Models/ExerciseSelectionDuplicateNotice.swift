@@ -57,3 +57,23 @@ nonisolated enum ExercisePickerSelectionResult: Equatable, Sendable {
         }
     }
 }
+
+nonisolated enum ExerciseReplacementSelectionPolicy {
+    static func result(
+        catalogExerciseUUID: String,
+        exerciseName: String,
+        existingCatalogExerciseUUIDs: some Sequence<String>,
+        destination: ExerciseSelectionDuplicateNotice.Destination
+    ) -> ExercisePickerSelectionResult {
+        guard !existingCatalogExerciseUUIDs.contains(catalogExerciseUUID) else {
+            return .rejected(
+                ExerciseSelectionDuplicateNotice(
+                    exerciseName: exerciseName,
+                    destination: destination
+                )
+            )
+        }
+
+        return .accepted
+    }
+}

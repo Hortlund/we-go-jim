@@ -151,6 +151,83 @@ struct ActiveWorkoutRuntimeTests {
     }
 
     @Test
+    func finishingRuntimeSessionWithEditedCardioProducesTemplateUpdatePreview() throws {
+        let context = try makeInMemoryContext()
+        let templateRepository = TemplateRepository(modelContext: context)
+        let bench = makeCatalogItem(context: context, remoteUUID: "bench-press")
+        let bike = ExerciseCatalogItem(
+            remoteUUID: "air-bike",
+            displayName: "Air Bike",
+            categoryName: "Cardio",
+            equipmentSummary: "Bike",
+            isCurated: true,
+            sourceName: "test"
+        )
+        let treadmill = ExerciseCatalogItem(
+            remoteUUID: "incline-treadmill",
+            displayName: "Incline Treadmill Walk",
+            categoryName: "Cardio",
+            equipmentSummary: "Treadmill",
+            isCurated: true,
+            sourceName: "test"
+        )
+        context.insert(bike)
+        context.insert(treadmill)
+
+        let template = try templateRepository.createTemplate(name: "Hybrid", notes: "")
+        try templateRepository.setExercises(
+            templateID: template.id,
+            drafts: [
+                TemplateExerciseDraft(
+                    catalogItem: bench,
+                    preferredLoadUnit: .kg
+                ),
+            ]
+        )
+        try templateRepository.setCardioBlocks(
+            templateID: template.id,
+            drafts: [
+                TemplateCardioBlockDraft(
+                    phase: .preWorkout,
+                    catalogExerciseUUID: bike.remoteUUID,
+                    exerciseNameSnapshot: bike.displayName,
+                    categorySnapshot: bike.categoryName,
+                    muscleSummarySnapshot: bike.primaryMuscleNames,
+                    targetDurationSeconds: 300
+                ),
+            ]
+        )
+
+        var runtimeSession = try ActiveWorkoutSessionFactory(modelContext: context)
+            .createSessionFromTemplate(templateID: template.id)
+        let existingPreCardio = try #require(runtimeSession.cardioBlocks.first { $0.phase == .preWorkout })
+        runtimeSession.cardioBlocks = [
+            ActiveWorkoutRuntimeCardioBlock(
+                id: existingPreCardio.id,
+                phase: .preWorkout,
+                catalogExerciseUUID: treadmill.remoteUUID,
+                exerciseNameSnapshot: treadmill.displayName,
+                categorySnapshot: treadmill.categoryName,
+                muscleSummarySnapshot: treadmill.primaryMuscleNames,
+                targetDurationSeconds: existingPreCardio.targetDurationSeconds,
+                isCompleted: false,
+                createdAt: existingPreCardio.createdAt,
+                updatedAt: .now
+            ),
+        ]
+
+        let completedSessionID = try ActiveWorkoutCompletionWriter(modelContext: context)
+            .finish(session: runtimeSession)
+        let preview = try #require(
+            try WorkoutTemplateSyncService(modelContext: context)
+                .previewTemplateUpdate(forSessionID: completedSessionID)
+        )
+
+        #expect(preview.editedCardioBlocks.map(\.phase) == [.preWorkout])
+        #expect(preview.editedCardioBlocks.first?.changes == ["Exercise Air Bike -> Incline Treadmill Walk"])
+    }
+
+    @Test
     func snapshotStorePreservesRestTimerWhenSessionOnlyCallSitesSave() async throws {
         let directory = try temporaryDirectory()
         let store = ActiveWorkoutSnapshotStore(baseDirectory: directory)

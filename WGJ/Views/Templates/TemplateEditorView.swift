@@ -360,14 +360,21 @@ struct TemplateEditorView: View {
         case .component(let exerciseID):
             return appendComponent(catalogItem: item, to: exerciseID)
         case .cardio(let phase):
-            upsertCardioBlock(phase: phase, catalogItem: item)
-            return .accepted
+            return upsertCardioBlock(phase: phase, catalogItem: item)
         }
     }
 
     private func replaceExercise(with catalogItem: ExerciseCatalogItem, exerciseID: UUID) -> ExercisePickerSelectionResult {
-        guard !containsComponentCatalogUUID(catalogItem.remoteUUID, excluding: exerciseID) else {
-            return duplicateExerciseRejectedResult(for: catalogItem)
+        let duplicateResult = ExerciseReplacementSelectionPolicy.result(
+            catalogExerciseUUID: catalogItem.remoteUUID,
+            exerciseName: catalogItem.displayName,
+            existingCatalogExerciseUUIDs: exerciseDrafts.flatMap { draftStore in
+                draftStore.components.map(\.catalogExerciseUUID)
+            },
+            destination: .template
+        )
+        guard duplicateResult == .accepted else {
+            return duplicateResult
         }
         guard let draftStore = exerciseDrafts.first(where: { $0.id == exerciseID }) else {
             return .accepted
@@ -398,8 +405,21 @@ struct TemplateEditorView: View {
         return .accepted
     }
 
-    private func upsertCardioBlock(phase: WorkoutCardioPhase, catalogItem: ExerciseCatalogItem) {
+    private func upsertCardioBlock(
+        phase: WorkoutCardioPhase,
+        catalogItem: ExerciseCatalogItem
+    ) -> ExercisePickerSelectionResult {
         let existing = cardioDraftsByPhase[phase]
+        let duplicateResult = ExerciseReplacementSelectionPolicy.result(
+            catalogExerciseUUID: catalogItem.remoteUUID,
+            exerciseName: catalogItem.displayName,
+            existingCatalogExerciseUUIDs: [existing?.catalogExerciseUUID].compactMap { $0 },
+            destination: .template
+        )
+        guard duplicateResult == .accepted else {
+            return duplicateResult
+        }
+
         cardioDraftsByPhase[phase] = TemplateCardioBlockDraft(
             id: existing?.id ?? UUID(),
             phase: phase,
@@ -409,6 +429,7 @@ struct TemplateEditorView: View {
             muscleSummarySnapshot: catalogItem.primaryMuscleNames,
             targetDurationSeconds: existing?.targetDurationSeconds ?? phase.defaultDurationSeconds
         )
+        return .accepted
     }
 
     private func updateCardioDuration(phase: WorkoutCardioPhase, targetDurationSeconds: Int) {

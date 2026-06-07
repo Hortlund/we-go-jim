@@ -144,8 +144,8 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 - Date: 2026-06-06
 - Trigger/Problem: Duplicate exercise selection initially tried to show a parent alert after the picker dismissed, producing SwiftUI "already presenting" logs and no visible feedback.
 - Root Cause: The picker selection callback mutated parent alert state while the picker sheet presentation was still active or dismissing, so UIKit rejected the alert presentation.
-- Durable Rule: Exercise picker duplicate/add rejection feedback must be non-modal and owned by the picker sheet. Rejected selections should keep the picker open, show a transient warning, and leave Cancel/back available; accepted selections may dismiss.
-- How to Verify Next Time: Run `WGJTests/ExerciseSelectionFeedbackTests`; manually check active-workout and template duplicate selections stay on the exercise picker and show `exercise-picker-duplicate-warning` without alert presentation logs.
+- Durable Rule: Exercise picker duplicate/add/replacement rejection feedback must be non-modal and owned by the picker sheet. Replacing an exercise or cardio block with the same catalog exercise counts as a rejected duplicate/no-op selection. Rejected selections should keep the picker open, show a transient warning, and leave Cancel/back available; accepted selections may dismiss.
+- How to Verify Next Time: Run `WGJTests/ExerciseSelectionFeedbackTests` and `WGJTests/ActiveWorkoutRuntimeTests`; manually check active-workout and template duplicate selections stay on the exercise picker and show `exercise-picker-duplicate-warning` without alert presentation logs.
 - Status: active
 
 ## 2026-06-06 - Workout Cardio Must Stay Free Order

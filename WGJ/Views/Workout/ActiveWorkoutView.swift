@@ -1309,8 +1309,7 @@ struct ActiveWorkoutView: View {
         case .replaceExercise(let exerciseID):
             return replaceExercise(exerciseID: exerciseID, with: item)
         case .cardio(let phase):
-            upsertCardioBlock(phase: phase, catalogItem: item)
-            return .accepted
+            return upsertCardioBlock(phase: phase, catalogItem: item)
         }
     }
 
@@ -1350,8 +1349,14 @@ struct ActiveWorkoutView: View {
 
     private func replaceExercise(exerciseID: UUID, with item: ExerciseCatalogItem) -> ExercisePickerSelectionResult {
         guard let existingExercise = sessionExercises.first(where: { $0.id == exerciseID }) else { return .accepted }
-        guard !sessionExercises.contains(where: { $0.id != exerciseID && $0.catalogExerciseUUID == item.remoteUUID }) else {
-            return duplicateExerciseRejectedResult(for: item)
+        let duplicateResult = ExerciseReplacementSelectionPolicy.result(
+            catalogExerciseUUID: item.remoteUUID,
+            exerciseName: item.displayName,
+            existingCatalogExerciseUUIDs: sessionExercises.map(\.catalogExerciseUUID),
+            destination: .activeWorkout
+        )
+        guard duplicateResult == .accepted else {
+            return duplicateResult
         }
 
         let removedSetIDs = Set((setDraftsByExerciseID[exerciseID] ?? existingExercise.setDrafts).map(\.id))
@@ -1435,8 +1440,21 @@ struct ActiveWorkoutView: View {
         persistCommittedUserEditSnapshot()
     }
 
-    private func upsertCardioBlock(phase: WorkoutCardioPhase, catalogItem: ExerciseCatalogItem) {
+    private func upsertCardioBlock(
+        phase: WorkoutCardioPhase,
+        catalogItem: ExerciseCatalogItem
+    ) -> ExercisePickerSelectionResult {
         let existing = cardioBlock(for: phase)
+        let duplicateResult = ExerciseReplacementSelectionPolicy.result(
+            catalogExerciseUUID: catalogItem.remoteUUID,
+            exerciseName: catalogItem.displayName,
+            existingCatalogExerciseUUIDs: [existing?.catalogExerciseUUID].compactMap { $0 },
+            destination: .activeWorkout
+        )
+        guard duplicateResult == .accepted else {
+            return duplicateResult
+        }
+
         let updated = ActiveWorkoutRuntimeCardioBlock(
             id: existing?.id ?? UUID(),
             phase: phase,
@@ -1454,6 +1472,7 @@ struct ActiveWorkoutView: View {
             session.cardioBlocks.append(updated)
         }
         persistCommittedUserEditSnapshot()
+        return .accepted
     }
 
     private func removeCardioBlock(phase: WorkoutCardioPhase) {
