@@ -541,6 +541,22 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
+    func postMainStartupWorkPolicyDefersNoncriticalCloudBackedReadsPastFirstFrame() {
+        #expect(!PostMainStartupWorkPolicy.shouldDeferNoncriticalWork(cloudSyncEnabled: false))
+        #expect(PostMainStartupWorkPolicy.shouldDeferNoncriticalWork(cloudSyncEnabled: true))
+    }
+
+    @Test
+    func enteredMainNoncriticalWorkUsesCloudAwareScheduler() throws {
+        let source = try String(contentsOf: contentViewSourceURL(), encoding: .utf8)
+
+        #expect(source.contains("scheduleEnteredMainNoncriticalWork()"))
+        #expect(source.contains("PostMainStartupWorkPolicy.shouldDeferNoncriticalWork"))
+        #expect(source.contains("requestWarmups(trigger: .enteredMain)"))
+        #expect(source.contains("scheduleWeeklyGoalWidgetPublish()"))
+    }
+
+    @Test
     func firstRunLocalBootstrapWarmsProfileAndBrosSnapshotsBeforeMainEntry() throws {
         let source = try String(contentsOf: contentViewSourceURL(), encoding: .utf8)
 

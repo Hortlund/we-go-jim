@@ -25,6 +25,7 @@ struct ContentView: View {
     @State private var resumeCriticalMaintenanceTracker = ResumeCriticalMaintenanceTracker()
     @State private var resumeCriticalMaintenanceTask: Task<Void, Never>?
     @State private var enteredMainDeferredMaintenanceTask: Task<Void, Never>?
+    @State private var enteredMainNoncriticalWorkTask: Task<Void, Never>?
     @State private var subscriptionRefreshTask: Task<Void, Never>?
     @State private var isPreparingMainPhase = false
     @State private var hasInstalledUITestPendingTemplate = false
@@ -302,12 +303,34 @@ struct ContentView: View {
         routePendingDeepLinkIfNeeded()
         routePendingTemplateFileIfNeeded()
         scheduleSubscriptionRefreshIfNeeded()
-        scheduleWeeklyGoalWidgetPublish()
-        requestWarmups(trigger: .enteredMain)
+        scheduleEnteredMainNoncriticalWork()
 
         guard !hasScheduledInitialDeferredMaintenance else { return }
         hasScheduledInitialDeferredMaintenance = true
         scheduleEnteredMainDeferredMaintenance()
+    }
+
+    private func scheduleEnteredMainNoncriticalWork() {
+        enteredMainNoncriticalWorkTask?.cancel()
+
+        if !PostMainStartupWorkPolicy.shouldDeferNoncriticalWork(
+            cloudSyncEnabled: appRuntimeState.cloudSyncEnabled
+        ) {
+            performEnteredMainNoncriticalWork()
+            return
+        }
+
+        enteredMainNoncriticalWorkTask = Task { @MainActor in
+            try? await Task.sleep(for: AppMaintenancePolicy.enteredMainDeferredDelay)
+            guard !Task.isCancelled, appPhase == .main else { return }
+            performEnteredMainNoncriticalWork()
+            enteredMainNoncriticalWorkTask = nil
+        }
+    }
+
+    private func performEnteredMainNoncriticalWork() {
+        scheduleWeeklyGoalWidgetPublish()
+        requestWarmups(trigger: .enteredMain)
     }
 
     private func scheduleWeeklyGoalWidgetPublish() {
@@ -655,6 +678,8 @@ struct ContentView: View {
         resetResumeCriticalMaintenanceCycle()
         enteredMainDeferredMaintenanceTask?.cancel()
         enteredMainDeferredMaintenanceTask = nil
+        enteredMainNoncriticalWorkTask?.cancel()
+        enteredMainNoncriticalWorkTask = nil
         cancelSubscriptionRefresh()
         fallbackCoachWarmupTask?.cancel()
         fallbackCoachWarmupTask = nil

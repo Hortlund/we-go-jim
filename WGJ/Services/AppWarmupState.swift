@@ -140,6 +140,12 @@ nonisolated enum PreMainStartupWorkPolicy {
     }
 }
 
+nonisolated enum PostMainStartupWorkPolicy {
+    static func shouldDeferNoncriticalWork(cloudSyncEnabled: Bool) -> Bool {
+        cloudSyncEnabled
+    }
+}
+
 private actor StartupWarmupCompletion {
     private(set) var isFinished = false
 
