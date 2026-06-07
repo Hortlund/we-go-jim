@@ -486,6 +486,37 @@ struct UserDataCloudMirrorBridgeTests {
     }
 
     @Test
+    func bridgeUsesNewestTemplateWhenDuplicateIDsExist() async throws {
+        let templateID = UUID()
+        let localContainer = try makeUserDataContainer("LocalDuplicateTemplateExport")
+        let mirrorContainer = try makeUserDataContainer("MirrorDuplicateTemplateExport")
+        let localContext = ModelContext(localContainer)
+
+        localContext.insert(WorkoutTemplate(
+            id: templateID,
+            folderID: TemplateRepository.unfiledFolderID,
+            name: "Older Duplicate",
+            updatedAt: Date(timeIntervalSinceReferenceDate: 10)
+        ))
+        localContext.insert(WorkoutTemplate(
+            id: templateID,
+            folderID: TemplateRepository.unfiledFolderID,
+            name: "Newer Duplicate",
+            updatedAt: Date(timeIntervalSinceReferenceDate: 20)
+        ))
+        try localContext.save()
+
+        try await UserDataCloudMirrorBridge(
+            localContainer: localContainer,
+            mirrorContainer: mirrorContainer
+        ).syncLocalChangesToMirror()
+
+        let mirrorContext = ModelContext(mirrorContainer)
+        let mirroredTemplate = try #require(try fetchTemplate(id: templateID, in: mirrorContext))
+        #expect(mirroredTemplate.name == "Newer Duplicate")
+    }
+
+    @Test
     func bridgeImportsCompletedWorkoutAggregateToLocal() async throws {
         let sessionID = UUID()
         let exerciseID = UUID()

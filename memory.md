@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-06-07 - Direct User Data Backup Must Merge, Not Replace
+
+- Date: 2026-06-07
+- Trigger/Problem: Release-readiness review found the new durable iCloud user-data backup could overwrite fresher CloudKit mirror data, export a stale singleton backup from a behind device, and let a fresh local bootstrap profile beat a real restored profile.
+- Root Cause: The direct backup was treated as a wholesale restore/export authority instead of another sync input. The mirror bridge also resolved profiles only by timestamp, so untouched local bootstrap rows could look newer than real restored user data.
+- Durable Rule: Treat the direct user-data backup as a merge source before both restore and export. Never clear or overwrite non-empty mirror/local data from the singleton backup without per-entity conflict checks. Untouched bootstrap/default profiles must lose to real customized restored profiles even when the bootstrap row has a newer timestamp.
+- How to Verify Next Time: Run `WGJTests/UserDataCloudBackupServiceTests`, `WGJTests/UserDataCloudMirrorBridgeTests`, and `WGJTests/ReviewReadinessTests` with serialized testing. Confirm coverage includes stale backup vs fresher mirror data, export merging an existing direct backup, default-profile restore precedence, delete-all mutation marking, and duplicate-ID bridge resilience.
+- Status: active
+
 ## 2026-06-07 - SwiftData Tests Need Context-Backed Relationship Fixtures
 
 - Date: 2026-06-07

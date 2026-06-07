@@ -3152,20 +3152,22 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
-    func testActiveWorkoutCardioPhasesGateExerciseFlow() throws {
-        let app = launchApp(launchEnvironment: [
+    func testActiveWorkoutCardioPhasesAllowFreeOrderExerciseFlow() throws {
+        let app = launchApp(mode: .localInMemory, launchArguments: [
+            "UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT",
+        ], launchEnvironment: [
             "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
-                name: "Gated Cardio Workout",
-                notes: "Cardio should gate the session phases.",
+                name: "Free Order Cardio Workout",
+                notes: "Cardio should stay free order.",
                 preWorkoutCardio: templatePayloadCardio(
-                    catalogExerciseUUID: "gated-bike-1",
+                    catalogExerciseUUID: "free-order-bike-1",
                     exerciseNameSnapshot: "Bike",
                     categorySnapshot: "Cardio",
                     muscleSummarySnapshot: "Warmup",
                     targetDurationSeconds: 300
                 ),
                 postWorkoutCardio: templatePayloadCardio(
-                    catalogExerciseUUID: "gated-treadmill-1",
+                    catalogExerciseUUID: "free-order-treadmill-1",
                     exerciseNameSnapshot: "Incline Treadmill Walk",
                     categorySnapshot: "Cardio",
                     muscleSummarySnapshot: "Cooldown",
@@ -3173,7 +3175,7 @@ final class WGJUITests: XCTestCase {
                 ),
                 exercises: [
                     templatePayloadExercise(
-                        catalogExerciseUUID: "gated-bench-1",
+                        catalogExerciseUUID: "free-order-bench-1",
                         exerciseNameSnapshot: "Bench Press",
                         categorySnapshot: "Chest",
                         muscleSummarySnapshot: "Chest",
@@ -3195,22 +3197,23 @@ final class WGJUITests: XCTestCase {
 
         XCTAssertTrue(preToggle.waitForExistence(timeout: 5))
         XCTAssertTrue(postToggle.waitForExistence(timeout: 5))
-        XCTAssertFalse(postToggle.isEnabled)
-
-        preToggle.tap()
-
         XCTAssertTrue(completeSetButton.waitForExistence(timeout: 5))
         XCTAssertTrue(weightField.waitForExistence(timeout: 5))
+        XCTAssertTrue(postToggle.isEnabled)
         XCTAssertTrue(weightField.isEnabled)
         XCTAssertTrue(completeSetButton.isEnabled)
-        XCTAssertTrue(postToggle.waitForExistence(timeout: 5))
+
         completeSetButton.tap()
         XCTAssertTrue(postToggle.isEnabled)
+        postToggle.tap()
+        preToggle.tap()
     }
 
     @MainActor
-    func testActiveWorkoutFinishWarningCallsOutIncompletePreWorkoutCardio() throws {
-        let app = launchApp(launchEnvironment: [
+    func testActiveWorkoutFinishWarningCallsOutIncompleteCardio() throws {
+        let app = launchApp(mode: .localInMemory, launchArguments: [
+            "UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT",
+        ], launchEnvironment: [
             "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
                 name: "Finish Warmup Warning Workout",
                 notes: "Finishing before warmup should call it out.",
@@ -3246,9 +3249,9 @@ final class WGJUITests: XCTestCase {
         let message = identifiedElement("active-workout-finish-confirmation-message", in: app)
 
         XCTAssertTrue(title.waitForExistence(timeout: 5))
-        XCTAssertEqual(title.label, "Pre-workout Cardio Incomplete")
+        XCTAssertEqual(title.label, "Finish With Unfinished Work?")
         XCTAssertTrue(message.waitForExistence(timeout: 5))
-        XCTAssertTrue(message.label.contains("Pre-workout cardio is still incomplete"))
+        XCTAssertTrue(message.label.contains("1 unfinished cardio section"))
     }
 
     @MainActor
@@ -3342,7 +3345,9 @@ final class WGJUITests: XCTestCase {
 
     @MainActor
     func testTemplateWorkoutFinishKeepTemplateCompletesSummaryFlow() throws {
-        let app = launchApp(launchEnvironment: [
+        let app = launchApp(mode: .localInMemory, launchArguments: [
+            "UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT",
+        ], launchEnvironment: [
             "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
                 name: "Keep Template Workout",
                 notes: "UI test template",
@@ -3693,7 +3698,9 @@ final class WGJUITests: XCTestCase {
 
     @MainActor
     func testTemplateWorkoutFinishUpdateTemplateAppliesNewStructure() throws {
-        let app = launchApp(launchEnvironment: [
+        let app = launchApp(mode: .localInMemory, launchArguments: [
+            "UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT",
+        ], launchEnvironment: [
             "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
                 name: "Apply Template Workout",
                 notes: "UI test template",
@@ -4085,6 +4092,9 @@ final class WGJUITests: XCTestCase {
     ) {
         func startFromPreview() {
             let previewSheet = identifiedElement("template-preview-sheet", in: app)
+            if !previewSheet.waitForExistence(timeout: 5) {
+                recoverFromStaleActiveWorkoutIfNeeded(in: app)
+            }
             XCTAssertTrue(previewSheet.waitForExistence(timeout: 5))
 
             let startButton = identifiedElement("template-preview-start-button", in: app)
@@ -4125,6 +4135,26 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(app.buttons["active-workout-finish-button"].waitForExistence(timeout: 5))
         if expandFirstExercise {
             expandFirstActiveWorkoutExerciseIfNeeded(in: app)
+        }
+    }
+
+    private func recoverFromStaleActiveWorkoutIfNeeded(in app: XCUIApplication) {
+        let finishButton = app.buttons["active-workout-finish-button"]
+        if finishButton.exists || finishButton.waitForExistence(timeout: 1) {
+            discardCurrentWorkout(in: app)
+            app.terminate()
+            app.launch()
+            authenticateIfNeeded(app, mode: launchMode(for: app))
+            return
+        }
+
+        let resumeCurrentWorkoutButton = app.buttons["Resume Current Workout"]
+        if resumeCurrentWorkoutButton.exists || resumeCurrentWorkoutButton.waitForExistence(timeout: 1) {
+            resumeCurrentWorkoutButton.tap()
+            discardCurrentWorkout(in: app)
+            app.terminate()
+            app.launch()
+            authenticateIfNeeded(app, mode: launchMode(for: app))
         }
     }
 

@@ -251,6 +251,253 @@ struct UserDataCloudBackupServiceTests {
         #expect(try fetchWorkoutCardioBlock(sessionID: sessionID, in: restoredContext)?.isCompleted == true)
     }
 
+    @Test
+    func staleDirectBackupDoesNotReplaceFresherMirrorData() async throws {
+        let sourceLocalContainer = try makeUserDataContainer("StaleBackupSourceLocal")
+        let sourceMirrorContainer = try makeUserDataContainer("StaleBackupSourceMirror")
+        let sourceContext = ModelContext(sourceLocalContainer)
+        let staleProfileID = UUID()
+        sourceContext.insert(UserProfile(
+            id: staleProfileID,
+            displayName: "Stale Backup Profile",
+            weeklyWorkoutGoal: 3,
+            createdAt: Date(timeIntervalSinceReferenceDate: 100),
+            updatedAt: Date(timeIntervalSinceReferenceDate: 100)
+        ))
+        try sourceContext.save()
+
+        let backupStore = FakeUserDataCloudBackupStore()
+        try await UserDataCloudBackupService(
+            localContainer: sourceLocalContainer,
+            mirrorContainer: sourceMirrorContainer,
+            backupStore: backupStore,
+            projectionScheduler: { _, _ in }
+        ).exportCurrentBackup()
+        let savedRecordCandidate = await backupStore.savedRecord()
+        let savedRecord = try #require(savedRecordCandidate)
+
+        let restoredLocalContainer = try makeUserDataContainer("StaleBackupRestoredLocal")
+        let restoredMirrorContainer = try makeUserDataContainer("StaleBackupRestoredMirror")
+        let restoredMirrorContext = ModelContext(restoredMirrorContainer)
+        let freshProfileID = UUID()
+        restoredMirrorContext.insert(UserProfile(
+            id: freshProfileID,
+            displayName: "Fresh Mirror Profile",
+            weeklyWorkoutGoal: 7,
+            createdAt: savedRecord.updatedAt.addingTimeInterval(30),
+            updatedAt: savedRecord.updatedAt.addingTimeInterval(30)
+        ))
+        try restoredMirrorContext.save()
+
+        let didRestore = try await UserDataCloudBackupService(
+            localContainer: restoredLocalContainer,
+            mirrorContainer: restoredMirrorContainer,
+            backupStore: backupStore,
+            projectionScheduler: { _, _ in }
+        ).restoreLatestBackup()
+
+        #expect(didRestore)
+        let restoredLocalContext = ModelContext(restoredLocalContainer)
+        #expect(try fetchProfile(id: freshProfileID, in: restoredLocalContext)?.displayName == "Fresh Mirror Profile")
+        #expect(try fetchProfile(id: staleProfileID, in: restoredLocalContext) == nil)
+    }
+
+    @Test
+    func exportMergesExistingDirectBackupBeforeSavingSnapshot() async throws {
+        let firstDeviceLocalContainer = try makeUserDataContainer("FirstDeviceLocal")
+        let firstDeviceMirrorContainer = try makeUserDataContainer("FirstDeviceMirror")
+        let firstDeviceContext = ModelContext(firstDeviceLocalContainer)
+        let firstTemplateID = UUID()
+        firstDeviceContext.insert(WorkoutTemplate(
+            id: firstTemplateID,
+            folderID: TemplateRepository.unfiledFolderID,
+            name: "First Device Template",
+            createdAt: Date(timeIntervalSinceReferenceDate: 100),
+            updatedAt: Date(timeIntervalSinceReferenceDate: 100)
+        ))
+        try firstDeviceContext.save()
+
+        let backupStore = FakeUserDataCloudBackupStore()
+        try await UserDataCloudBackupService(
+            localContainer: firstDeviceLocalContainer,
+            mirrorContainer: firstDeviceMirrorContainer,
+            backupStore: backupStore,
+            projectionScheduler: { _, _ in }
+        ).exportCurrentBackup()
+
+        let secondDeviceLocalContainer = try makeUserDataContainer("SecondDeviceLocal")
+        let secondDeviceMirrorContainer = try makeUserDataContainer("SecondDeviceMirror")
+        let secondDeviceContext = ModelContext(secondDeviceLocalContainer)
+        let secondTemplateID = UUID()
+        secondDeviceContext.insert(WorkoutTemplate(
+            id: secondTemplateID,
+            folderID: TemplateRepository.unfiledFolderID,
+            name: "Second Device Template",
+            createdAt: Date(timeIntervalSinceReferenceDate: 200),
+            updatedAt: Date(timeIntervalSinceReferenceDate: 200)
+        ))
+        try secondDeviceContext.save()
+
+        try await UserDataCloudBackupService(
+            localContainer: secondDeviceLocalContainer,
+            mirrorContainer: secondDeviceMirrorContainer,
+            backupStore: backupStore,
+            projectionScheduler: { _, _ in }
+        ).exportCurrentBackup()
+
+        let restoredLocalContainer = try makeUserDataContainer("MergedBackupLocal")
+        let restoredMirrorContainer = try makeUserDataContainer("MergedBackupMirror")
+        _ = try await UserDataCloudBackupService(
+            localContainer: restoredLocalContainer,
+            mirrorContainer: restoredMirrorContainer,
+            backupStore: backupStore,
+            projectionScheduler: { _, _ in }
+        ).restoreLatestBackup()
+
+        let restoredContext = ModelContext(restoredLocalContainer)
+        #expect(try fetchTemplate(id: firstTemplateID, in: restoredContext)?.name == "First Device Template")
+        #expect(try fetchTemplate(id: secondTemplateID, in: restoredContext)?.name == "Second Device Template")
+    }
+
+    @Test
+    func restoredProfileBeatsFreshUntouchedLocalDefaultProfile() async throws {
+        let localContainer = try makeUserDataContainer("DefaultProfileLocal")
+        let mirrorContainer = try makeUserDataContainer("DefaultProfileMirror")
+        let localContext = ModelContext(localContainer)
+        let mirrorContext = ModelContext(mirrorContainer)
+        let realProfileID = UUID()
+
+        localContext.insert(UserProfile(
+            displayName: "Athlete",
+            createdAt: Date(timeIntervalSinceReferenceDate: 2_000),
+            updatedAt: Date(timeIntervalSinceReferenceDate: 2_000)
+        ))
+        mirrorContext.insert(UserProfile(
+            id: realProfileID,
+            displayName: "Cloud Bro",
+            athleteType: .powerlifting,
+            weeklyWorkoutGoal: 6,
+            createdAt: Date(timeIntervalSinceReferenceDate: 100),
+            updatedAt: Date(timeIntervalSinceReferenceDate: 100)
+        ))
+        try localContext.save()
+        try mirrorContext.save()
+
+        try await UserDataCloudMirrorBridge(
+            localContainer: localContainer,
+            mirrorContainer: mirrorContainer,
+            projectionScheduler: { _, _ in }
+        ).syncLocalChangesToMirror()
+
+        let syncedLocalContext = ModelContext(localContainer)
+        let syncedProfile = try #require(try fetchProfile(id: realProfileID, in: syncedLocalContext))
+        #expect(syncedProfile.displayName == "Cloud Bro")
+        #expect(syncedProfile.athleteType == .powerlifting)
+        #expect(syncedProfile.weeklyWorkoutGoal == 6)
+    }
+
+    @Test
+    func backupProfileBeatsFreshUntouchedMirrorDefaultProfile() async throws {
+        let sourceLocalContainer = try makeUserDataContainer("BackupProfileSourceLocal")
+        let sourceMirrorContainer = try makeUserDataContainer("BackupProfileSourceMirror")
+        let sourceContext = ModelContext(sourceLocalContainer)
+        let realProfileID = UUID()
+        sourceContext.insert(UserProfile(
+            id: realProfileID,
+            displayName: "Real Backup Profile",
+            athleteType: .hybridAthlete,
+            weeklyWorkoutGoal: 6,
+            createdAt: Date(timeIntervalSinceReferenceDate: 100),
+            updatedAt: Date(timeIntervalSinceReferenceDate: 100)
+        ))
+        try sourceContext.save()
+
+        let backupStore = FakeUserDataCloudBackupStore()
+        try await UserDataCloudBackupService(
+            localContainer: sourceLocalContainer,
+            mirrorContainer: sourceMirrorContainer,
+            backupStore: backupStore,
+            projectionScheduler: { _, _ in }
+        ).exportCurrentBackup()
+
+        let restoredLocalContainer = try makeUserDataContainer("BackupProfileRestoredLocal")
+        let restoredMirrorContainer = try makeUserDataContainer("BackupProfileRestoredMirror")
+        let restoredMirrorContext = ModelContext(restoredMirrorContainer)
+        restoredMirrorContext.insert(UserProfile(
+            displayName: "Athlete",
+            createdAt: Date(timeIntervalSinceReferenceDate: 2_000),
+            updatedAt: Date(timeIntervalSinceReferenceDate: 2_000)
+        ))
+        try restoredMirrorContext.save()
+
+        _ = try await UserDataCloudBackupService(
+            localContainer: restoredLocalContainer,
+            mirrorContainer: restoredMirrorContainer,
+            backupStore: backupStore,
+            projectionScheduler: { _, _ in }
+        ).restoreLatestBackup()
+
+        let restoredLocalContext = ModelContext(restoredLocalContainer)
+        let restoredProfile = try #require(try fetchProfile(id: realProfileID, in: restoredLocalContext))
+        #expect(restoredProfile.displayName == "Real Backup Profile")
+        #expect(restoredProfile.athleteType == .hybridAthlete)
+        #expect(restoredProfile.weeklyWorkoutGoal == 6)
+    }
+
+    @Test
+    func backupMergeUsesNewestFolderWhenDuplicateFolderIDsExist() async throws {
+        let sourceLocalContainer = try makeUserDataContainer("BackupDuplicateFolderSourceLocal")
+        let sourceMirrorContainer = try makeUserDataContainer("BackupDuplicateFolderSourceMirror")
+        let sourceContext = ModelContext(sourceLocalContainer)
+        let folderID = UUID()
+        let templateID = UUID()
+        sourceContext.insert(TemplateFolder(
+            id: folderID,
+            name: "Backup Folder",
+            updatedAt: Date(timeIntervalSinceReferenceDate: 100)
+        ))
+        sourceContext.insert(WorkoutTemplate(
+            id: templateID,
+            folderID: folderID,
+            name: "Backup Template In Folder",
+            updatedAt: Date(timeIntervalSinceReferenceDate: 100)
+        ))
+        try sourceContext.save()
+
+        let backupStore = FakeUserDataCloudBackupStore()
+        try await UserDataCloudBackupService(
+            localContainer: sourceLocalContainer,
+            mirrorContainer: sourceMirrorContainer,
+            backupStore: backupStore,
+            projectionScheduler: { _, _ in }
+        ).exportCurrentBackup()
+
+        let restoredLocalContainer = try makeUserDataContainer("BackupDuplicateFolderRestoredLocal")
+        let restoredMirrorContainer = try makeUserDataContainer("BackupDuplicateFolderRestoredMirror")
+        let restoredMirrorContext = ModelContext(restoredMirrorContainer)
+        restoredMirrorContext.insert(TemplateFolder(
+            id: folderID,
+            name: "Older Duplicate Folder",
+            updatedAt: Date(timeIntervalSinceReferenceDate: 10)
+        ))
+        restoredMirrorContext.insert(TemplateFolder(
+            id: folderID,
+            name: "Newer Duplicate Folder",
+            updatedAt: Date(timeIntervalSinceReferenceDate: 20)
+        ))
+        try restoredMirrorContext.save()
+
+        _ = try await UserDataCloudBackupService(
+            localContainer: restoredLocalContainer,
+            mirrorContainer: restoredMirrorContainer,
+            backupStore: backupStore,
+            projectionScheduler: { _, _ in }
+        ).restoreLatestBackup()
+
+        let restoredLocalContext = ModelContext(restoredLocalContainer)
+        #expect(try fetchTemplate(id: templateID, in: restoredLocalContext)?.name == "Backup Template In Folder")
+    }
+
     private func makeUserDataContainer(_ name: String) throws -> ModelContainer {
         let schema = Schema([
             ExerciseCatalogItem.self,

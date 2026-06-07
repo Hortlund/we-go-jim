@@ -47,6 +47,7 @@ final class UserDataCloudBackupService {
     }
 
     func exportCurrentBackup() async throws {
+        try await mergeLatestBackupIntoMirrorIfAvailable()
         try await UserDataCloudMirrorBridge(
             localContainer: localContainer,
             mirrorContainer: mirrorContainer,
@@ -70,7 +71,7 @@ final class UserDataCloudBackupService {
 
         let payload = try decoder.decode(UserDataCloudBackupPayload.self, from: record.payloadData)
         let mirrorContext = ModelContext(mirrorContainer)
-        try payload.replaceMirrorContents(in: mirrorContext)
+        try payload.mergeIntoMirrorContents(in: mirrorContext)
         if mirrorContext.hasChanges {
             try mirrorContext.save()
         }
@@ -81,6 +82,19 @@ final class UserDataCloudBackupService {
             projectionScheduler: projectionScheduler
         ).syncLocalChangesToMirror()
         return true
+    }
+
+    private func mergeLatestBackupIntoMirrorIfAvailable() async throws {
+        guard let record = try await backupStore.fetchBackup() else {
+            return
+        }
+
+        let payload = try decoder.decode(UserDataCloudBackupPayload.self, from: record.payloadData)
+        let mirrorContext = ModelContext(mirrorContainer)
+        try payload.mergeIntoMirrorContents(in: mirrorContext)
+        if mirrorContext.hasChanges {
+            try mirrorContext.save()
+        }
     }
 }
 
@@ -221,7 +235,18 @@ private struct UserDataCloudBackupPayload: Codable {
         workoutDropStages = try context.fetch(FetchDescriptor<WorkoutSessionDropStage>()).map { WorkoutDropStageBackup($0) }.sorted { $0.id.uuidString < $1.id.uuidString }
     }
 
-    func replaceMirrorContents(in context: ModelContext) throws {
+    func mergeIntoMirrorContents(in context: ModelContext) throws {
+        if try isMirrorEmpty(in: context) {
+            try replaceMirrorContents(in: context)
+            return
+        }
+
+        try mergeSimpleRecords(in: context)
+        try mergeTemplateAggregates(in: context)
+        try mergeWorkoutSessionAggregates(in: context)
+    }
+
+    private func replaceMirrorContents(in context: ModelContext) throws {
         try clearMirrorContents(in: context)
 
         for item in customExercises {
@@ -330,6 +355,185 @@ private struct UserDataCloudBackupPayload: Codable {
         }
     }
 
+    private func mergeSimpleRecords(in context: ModelContext) throws {
+        try mergeCustomExercises(in: context)
+        try mergeBlockedBros(in: context)
+        try mergeProfiles(in: context)
+        try mergeProfileWidgets(in: context)
+        try mergeTombstones(in: context)
+        try mergeTemplateFolders(in: context)
+    }
+
+    private func mergeCustomExercises(in context: ModelContext) throws {
+        let existingRecords = try context.fetch(FetchDescriptor<CustomExerciseCloudRecord>())
+        for item in customExercises {
+            if let existing = existingRecords.first(where: { $0.remoteUUID == item.remoteUUID }) {
+                guard item.updatedAt > existing.updatedAt else { continue }
+                context.delete(existing)
+            }
+            context.insert(item.model)
+        }
+    }
+
+    private func mergeBlockedBros(in context: ModelContext) throws {
+        let existingRecords = try context.fetch(FetchDescriptor<BlockedBroCloudRecord>())
+        for item in blockedBros {
+            if let existing = existingRecords.first(where: { $0.userRecordName == item.userRecordName }) {
+                guard item.blockedAt > existing.blockedAt else { continue }
+                context.delete(existing)
+            }
+            context.insert(item.model)
+        }
+    }
+
+    private func mergeProfiles(in context: ModelContext) throws {
+        let existingProfiles = try context.fetch(FetchDescriptor<UserProfile>())
+        for item in profiles {
+            let model = item.model
+            if let existing = existingProfiles.first {
+                guard shouldPreferProfile(model, over: existing) else { continue }
+                for profile in existingProfiles {
+                    context.delete(profile)
+                }
+            }
+            context.insert(model)
+        }
+    }
+
+    private func mergeProfileWidgets(in context: ModelContext) throws {
+        let existingConfigs = try context.fetch(FetchDescriptor<ProfileWidgetConfig>())
+        for item in profileWidgets {
+            if let existing = existingConfigs.first(where: { $0.id == item.id }) {
+                guard item.updatedAt > existing.updatedAt else { continue }
+                context.delete(existing)
+            }
+            context.insert(item.model)
+        }
+    }
+
+    private func mergeTombstones(in context: ModelContext) throws {
+        let existingTombstones = try context.fetch(FetchDescriptor<UserDataDeletionTombstone>())
+        for item in tombstones {
+            if let existing = existingTombstones.first(where: { tombstoneKey($0) == item.key }) {
+                guard item.deletedAt > existing.deletedAt else { continue }
+                context.delete(existing)
+            }
+            context.insert(item.model)
+        }
+    }
+
+    private func mergeTemplateFolders(in context: ModelContext) throws {
+        let existingFolders = try context.fetch(FetchDescriptor<TemplateFolder>())
+        for item in templateFolders {
+            if let existing = existingFolders.first(where: { $0.id == item.id }) {
+                guard item.updatedAt > existing.updatedAt else { continue }
+                context.delete(existing)
+            }
+            context.insert(item.model)
+        }
+    }
+
+    private func mergeTemplateAggregates(in context: ModelContext) throws {
+        let existingTemplates = try context.fetch(FetchDescriptor<WorkoutTemplate>())
+        for item in workoutTemplates {
+            if let existing = existingTemplates.first(where: { $0.id == item.id }) {
+                guard item.updatedAt > existing.updatedAt else { continue }
+                try deleteTemplateAggregate(id: item.id, in: context)
+            }
+            try insertTemplateAggregate(item, in: context)
+        }
+    }
+
+    private func insertTemplateAggregate(_ item: WorkoutTemplateBackup, in context: ModelContext) throws {
+        let folders = newestFolderByID(try context.fetch(FetchDescriptor<TemplateFolder>()))
+        let model = item.model(folder: folders[item.folderID])
+        context.insert(model)
+        var templateGroups: [UUID: TemplateSupersetGroup] = [:]
+        for groupItem in templateSupersetGroups where groupItem.templateID == item.id {
+            let group = groupItem.model(template: model)
+            context.insert(group)
+            templateGroups[groupItem.id] = group
+        }
+        for cardioItem in templateCardioBlocks where cardioItem.templateID == item.id {
+            context.insert(cardioItem.model(template: model))
+        }
+        var exercises: [UUID: TemplateExercise] = [:]
+        for exerciseItem in templateExercises where exerciseItem.templateID == item.id {
+            let exercise = exerciseItem.model(
+                template: model,
+                supersetGroup: exerciseItem.supersetGroupID.flatMap { templateGroups[$0] }
+            )
+            context.insert(exercise)
+            exercises[exerciseItem.id] = exercise
+        }
+        for componentItem in templateComponents where exercises[componentItem.templateExerciseID] != nil {
+            context.insert(componentItem.model(templateExercise: exercises[componentItem.templateExerciseID]))
+        }
+        var sets: [UUID: TemplateExerciseSet] = [:]
+        for setItem in templateSets where exercises[setItem.templateExerciseID] != nil {
+            let set = setItem.model(templateExercise: exercises[setItem.templateExerciseID])
+            context.insert(set)
+            sets[setItem.id] = set
+        }
+        for stageItem in templateDropStages where sets[stageItem.templateExerciseSetID] != nil {
+            context.insert(stageItem.model(templateExerciseSet: sets[stageItem.templateExerciseSetID]))
+        }
+    }
+
+    private func mergeWorkoutSessionAggregates(in context: ModelContext) throws {
+        let existingSessions = try context.fetch(FetchDescriptor<WorkoutSession>())
+        for item in workoutSessions {
+            if let existing = existingSessions.first(where: { $0.id == item.id }) {
+                guard item.updatedAt > existing.updatedAt else { continue }
+                try deleteWorkoutSessionAggregate(id: item.id, in: context)
+            }
+            try insertWorkoutSessionAggregate(item, in: context)
+        }
+    }
+
+    private func insertWorkoutSessionAggregate(_ item: WorkoutSessionBackup, in context: ModelContext) throws {
+        let model = item.model
+        context.insert(model)
+        var workoutGroups: [UUID: WorkoutSessionSupersetGroup] = [:]
+        for groupItem in workoutSupersetGroups where groupItem.sessionID == item.id {
+            let group = groupItem.model(session: model)
+            context.insert(group)
+            workoutGroups[groupItem.id] = group
+        }
+        for cardioItem in workoutCardioBlocks where cardioItem.sessionID == item.id {
+            context.insert(cardioItem.model(session: model))
+        }
+        var exercises: [UUID: WorkoutSessionExercise] = [:]
+        for exerciseItem in workoutExercises where exerciseItem.sessionID == item.id {
+            let exercise = exerciseItem.model(
+                session: model,
+                supersetGroup: exerciseItem.supersetGroupID.flatMap { workoutGroups[$0] }
+            )
+            context.insert(exercise)
+            exercises[exerciseItem.id] = exercise
+        }
+        var sets: [UUID: WorkoutSessionSet] = [:]
+        for setItem in workoutSets where exercises[setItem.sessionExerciseID] != nil {
+            let set = setItem.model(sessionExercise: exercises[setItem.sessionExerciseID])
+            context.insert(set)
+            sets[setItem.id] = set
+        }
+        for stageItem in workoutDropStages where sets[stageItem.sessionSetID] != nil {
+            context.insert(stageItem.model(sessionSet: sets[stageItem.sessionSetID]))
+        }
+    }
+
+    private func isMirrorEmpty(in context: ModelContext) throws -> Bool {
+        try context.fetch(FetchDescriptor<UserProfile>()).isEmpty
+            && context.fetch(FetchDescriptor<UserDataDeletionTombstone>()).isEmpty
+            && context.fetch(FetchDescriptor<CustomExerciseCloudRecord>()).isEmpty
+            && context.fetch(FetchDescriptor<ProfileWidgetConfig>()).isEmpty
+            && context.fetch(FetchDescriptor<BlockedBroCloudRecord>()).isEmpty
+            && context.fetch(FetchDescriptor<TemplateFolder>()).isEmpty
+            && context.fetch(FetchDescriptor<WorkoutTemplate>()).isEmpty
+            && context.fetch(FetchDescriptor<WorkoutSession>()).isEmpty
+    }
+
     private func clearMirrorContents(in context: ModelContext) throws {
         try deleteAll(WorkoutSessionDropStage.self, in: context)
         try deleteAll(WorkoutSessionSet.self, in: context)
@@ -356,6 +560,66 @@ private struct UserDataCloudBackupPayload: Codable {
         for model in try context.fetch(FetchDescriptor<T>()) {
             context.delete(model)
         }
+    }
+
+    private func shouldPreferProfile(_ candidate: UserProfile, over other: UserProfile) -> Bool {
+        let candidateIsUntouchedBootstrap = isUntouchedBootstrapProfile(candidate)
+        let otherIsUntouchedBootstrap = isUntouchedBootstrapProfile(other)
+
+        if candidateIsUntouchedBootstrap != otherIsUntouchedBootstrap {
+            return !candidateIsUntouchedBootstrap
+        }
+
+        return candidate.updatedAt >= other.updatedAt
+    }
+
+    private func isUntouchedBootstrapProfile(_ profile: UserProfile) -> Bool {
+        abs(profile.updatedAt.timeIntervalSince(profile.createdAt)) <= 1
+            && profile.athleteTypeRaw == nil
+            && profile.avatarImageData == nil
+            && profile.preferredWeightUnitRaw == PreferredWeightUnit.kg.rawValue
+            && profile.workoutNotificationStyleRaw == WorkoutNotificationStyle.timeSensitive.rawValue
+            && profile.weeklyWorkoutGoal == 4
+            && profile.isTrainingGuidanceEnabled
+            && !profile.keepsScreenAwake
+            && !profile.isBozarModeEnabled
+            && profile.brosCircleID == nil
+            && profile.brosMembershipID == nil
+            && profile.brosUserRecordName == nil
+            && profile.brosJoinedAt == nil
+            && profile.brosRoleRaw == nil
+    }
+
+    private func newestFolderByID(_ folders: [TemplateFolder]) -> [UUID: TemplateFolder] {
+        folders.reduce(into: [:]) { result, folder in
+            guard let existing = result[folder.id] else {
+                result[folder.id] = folder
+                return
+            }
+            if folder.updatedAt > existing.updatedAt {
+                result[folder.id] = folder
+            }
+        }
+    }
+
+    private func deleteTemplateAggregate(id: UUID, in context: ModelContext) throws {
+        for template in try context.fetch(FetchDescriptor<WorkoutTemplate>()) where template.id == id {
+            context.delete(template)
+        }
+    }
+
+    private func deleteWorkoutSessionAggregate(id: UUID, in context: ModelContext) throws {
+        for session in try context.fetch(FetchDescriptor<WorkoutSession>()) where session.id == id {
+            context.delete(session)
+        }
+    }
+
+    private func tombstoneKey(_ tombstone: UserDataDeletionTombstone) -> String {
+        if let entityKey = tombstone.entityKey?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !entityKey.isEmpty {
+            return "\(tombstone.entityName):\(entityKey)"
+        }
+        return "\(tombstone.entityName):\(tombstone.entityID.uuidString)"
     }
 }
 

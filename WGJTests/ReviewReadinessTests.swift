@@ -250,6 +250,32 @@ struct ReviewReadinessTests {
     }
 
     @Test
+    func deleteAllUserDataMarksDurableUserDataMutationForMirrorSync() async throws {
+        let context = try makeInMemoryContext()
+        context.insert(UserProfile(displayName: "Delete Me"))
+        try context.save()
+
+        let tracker = UserDataSyncTracker.shared
+        _ = tracker.configureForLaunch(isCloudEnabled: true, errorDescription: nil)
+        defer {
+            _ = tracker.configureForLaunch(isCloudEnabled: false, errorDescription: nil)
+        }
+        let beforeDelete = tracker.currentSnapshot().latestLocalMutationAt
+
+        let service = AppDataDeletionService(
+            modelContext: context,
+            socialDataDeleter: NoopCloudDataDeleter(),
+            clearWeeklyGoalWidgetSnapshot: {},
+            clearActiveWorkoutSnapshot: {}
+        )
+        try await service.deleteAllUserData()
+
+        let afterDelete = tracker.currentSnapshot().latestLocalMutationAt
+        #expect(afterDelete != nil)
+        #expect(afterDelete != beforeDelete)
+    }
+
+    @Test
     func deleteAllUserDataStillAttemptsFallbackCloudCleanupInLocalOnlySessions() async throws {
         let context = try makeInMemoryContext()
         context.insert(UserProfile(displayName: "Demo Lifter"))

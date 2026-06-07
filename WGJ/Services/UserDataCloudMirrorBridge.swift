@@ -256,8 +256,8 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
     ) throws {
         let localFolders = try fetchAll(TemplateFolder.self, in: localContext)
         let mirrorFolders = try fetchAll(TemplateFolder.self, in: mirrorContext)
-        let localByID = Dictionary(uniqueKeysWithValues: localFolders.map { ($0.id, $0) })
-        let mirrorByID = Dictionary(uniqueKeysWithValues: mirrorFolders.map { ($0.id, $0) })
+        let localByID = newestFolderByID(localFolders)
+        let mirrorByID = newestFolderByID(mirrorFolders)
 
         for id in Set(localByID.keys).union(mirrorByID.keys) {
             switch (localByID[id], mirrorByID[id]) {
@@ -284,8 +284,8 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
         let localTemplates = try fetchAll(WorkoutTemplate.self, in: localContext)
         let mirrorTemplates = try fetchAll(WorkoutTemplate.self, in: mirrorContext)
         let tombstonedTemplateIDs = try tombstonedIDs(entityName: "WorkoutTemplate", localContext: localContext, mirrorContext: mirrorContext)
-        let localByID = Dictionary(uniqueKeysWithValues: localTemplates.map { ($0.id, $0) })
-        let mirrorByID = Dictionary(uniqueKeysWithValues: mirrorTemplates.map { ($0.id, $0) })
+        let localByID = newestTemplateByID(localTemplates)
+        let mirrorByID = newestTemplateByID(mirrorTemplates)
 
         for id in Set(localByID.keys).union(mirrorByID.keys).subtracting(tombstonedTemplateIDs) {
             switch (localByID[id], mirrorByID[id]) {
@@ -332,8 +332,8 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
         let mirrorSessions = try fetchAll(WorkoutSession.self, in: mirrorContext)
             .filter { $0.status == .completed }
         let tombstonedSessionIDs = try tombstonedIDs(entityName: "WorkoutSession", localContext: localContext, mirrorContext: mirrorContext)
-        let localByID = Dictionary(uniqueKeysWithValues: localSessions.map { ($0.id, $0) })
-        let mirrorByID = Dictionary(uniqueKeysWithValues: mirrorSessions.map { ($0.id, $0) })
+        let localByID = newestWorkoutSessionByID(localSessions)
+        let mirrorByID = newestWorkoutSessionByID(mirrorSessions)
         var projectionSessionIDs: Set<UUID> = []
 
         for id in Set(localByID.keys).union(mirrorByID.keys).subtracting(tombstonedSessionIDs) {
@@ -391,7 +391,7 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
         case (.none, .some(let source)):
             localContext.insert(cloneProfile(source))
         case (.some(let local), .some(let mirror)):
-            if local.updatedAt >= mirror.updatedAt {
+            if shouldPreferProfile(local, over: mirror) {
                 copyProfile(local, into: mirror)
             } else {
                 copyProfile(mirror, into: local)
@@ -451,6 +451,34 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
         target.brosRoleRaw = source.brosRoleRaw
         target.createdAt = source.createdAt
         target.updatedAt = source.updatedAt
+    }
+
+    private func shouldPreferProfile(_ candidate: UserProfile, over other: UserProfile) -> Bool {
+        let candidateIsUntouchedBootstrap = isUntouchedBootstrapProfile(candidate)
+        let otherIsUntouchedBootstrap = isUntouchedBootstrapProfile(other)
+
+        if candidateIsUntouchedBootstrap != otherIsUntouchedBootstrap {
+            return !candidateIsUntouchedBootstrap
+        }
+
+        return candidate.updatedAt >= other.updatedAt
+    }
+
+    private func isUntouchedBootstrapProfile(_ profile: UserProfile) -> Bool {
+        abs(profile.updatedAt.timeIntervalSince(profile.createdAt)) <= 1
+            && profile.athleteTypeRaw == nil
+            && profile.avatarImageData == nil
+            && profile.preferredWeightUnitRaw == PreferredWeightUnit.kg.rawValue
+            && profile.workoutNotificationStyleRaw == WorkoutNotificationStyle.timeSensitive.rawValue
+            && profile.weeklyWorkoutGoal == 4
+            && profile.isTrainingGuidanceEnabled
+            && !profile.keepsScreenAwake
+            && !profile.isBozarModeEnabled
+            && profile.brosCircleID == nil
+            && profile.brosMembershipID == nil
+            && profile.brosUserRecordName == nil
+            && profile.brosJoinedAt == nil
+            && profile.brosRoleRaw == nil
     }
 
     private func cloneFolder(_ source: TemplateFolder) -> TemplateFolder {
@@ -799,6 +827,42 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
 
             if config.updatedAt > existing.updatedAt {
                 result[key] = config
+            }
+        }
+    }
+
+    private func newestFolderByID(_ folders: [TemplateFolder]) -> [UUID: TemplateFolder] {
+        folders.reduce(into: [:]) { result, folder in
+            guard let existing = result[folder.id] else {
+                result[folder.id] = folder
+                return
+            }
+            if folder.updatedAt > existing.updatedAt {
+                result[folder.id] = folder
+            }
+        }
+    }
+
+    private func newestTemplateByID(_ templates: [WorkoutTemplate]) -> [UUID: WorkoutTemplate] {
+        templates.reduce(into: [:]) { result, template in
+            guard let existing = result[template.id] else {
+                result[template.id] = template
+                return
+            }
+            if template.updatedAt > existing.updatedAt {
+                result[template.id] = template
+            }
+        }
+    }
+
+    private func newestWorkoutSessionByID(_ sessions: [WorkoutSession]) -> [UUID: WorkoutSession] {
+        sessions.reduce(into: [:]) { result, session in
+            guard let existing = result[session.id] else {
+                result[session.id] = session
+                return
+            }
+            if session.updatedAt > existing.updatedAt {
+                result[session.id] = session
             }
         }
     }

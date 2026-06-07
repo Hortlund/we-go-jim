@@ -91,6 +91,7 @@ final class AppDataDeletionService {
         try deleteAll(BlockedBro.self)
         try deleteAll(UserProfile.self)
         try modelContext.save()
+        UserDataSyncTrackerBridge.markLocalMutation()
     }
 
     private func clearLocalArtifacts() async throws {
