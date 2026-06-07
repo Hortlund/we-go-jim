@@ -1047,8 +1047,9 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
-    func appLaunchBootstrapResolverBuildsLocalFallbackWhenStartupDecisionRejectsCloud() async throws {
+    func appLaunchBootstrapResolverBuildsLocalAuthoritativeRootWithoutStartupPreflight() async throws {
         let container = try makeContainer()
+        var didRunStartupPreflight = false
         var didRequestCloudContainer = false
         var didRequestLocalFallback = false
 
@@ -1056,7 +1057,8 @@ struct AppLaunchWarmupTests {
             processInfo: MockProcessInfo(arguments: []),
             canUseConfiguredCloudKitContainer: true,
             startupDecisionProvider: {
-                CloudStartupDecision(
+                didRunStartupPreflight = true
+                return CloudStartupDecision(
                     accountStatus: .noAccount,
                     storeMode: .localFallback,
                     cloudSyncErrorDescription: "No iCloud account is signed in on this device. Using local-only mode for this session."
@@ -1077,15 +1079,21 @@ struct AppLaunchWarmupTests {
             describeError: { _ in "unreachable" }
         )
 
-        #expect(bootstrap.cloudSyncEnabled == false)
-        #expect(bootstrap.cloudSyncErrorDescription?.contains("No iCloud account") == true)
+        #expect(bootstrap.storageMode == .localAuthoritative)
+        #expect(bootstrap.cloudRuntimeMode == .checking)
+        #expect(bootstrap.cloudFeaturesEnabled)
+        #expect(!bootstrap.userDataSyncEnabled)
+        #expect(bootstrap.cloudSyncEnabled)
+        #expect(bootstrap.cloudSyncErrorDescription == nil)
+        #expect(!didRunStartupPreflight)
         #expect(didRequestLocalFallback)
         #expect(!didRequestCloudContainer)
     }
 
     @Test
-    func appLaunchBootstrapResolverUsesCloudBackedStoreForTimedOutStartupStatus() async throws {
+    func appLaunchBootstrapResolverDoesNotBuildCloudBackedRootForTimedOutStartupStatus() async throws {
         let container = try makeContainer()
+        var didRunStartupPreflight = false
         var didRequestCloudContainer = false
         var didRequestLocalFallback = false
 
@@ -1093,7 +1101,8 @@ struct AppLaunchWarmupTests {
             processInfo: MockProcessInfo(arguments: []),
             canUseConfiguredCloudKitContainer: true,
             startupDecisionProvider: {
-                await CloudStartupPreflight.makeDecisionAsync(
+                didRunStartupPreflight = true
+                return await CloudStartupPreflight.makeDecisionAsync(
                     statusProvider: MockAsyncCloudStartupAccountStatusProvider(status: .timedOut)
                 )
             },
@@ -1112,14 +1121,16 @@ struct AppLaunchWarmupTests {
             describeError: { _ in "unreachable" }
         )
 
+        #expect(bootstrap.storageMode == .localAuthoritative)
         #expect(bootstrap.cloudSyncEnabled)
-        #expect(bootstrap.cloudSyncErrorDescription?.contains("timed out") == true)
-        #expect(didRequestCloudContainer)
-        #expect(!didRequestLocalFallback)
+        #expect(bootstrap.cloudSyncErrorDescription == nil)
+        #expect(!didRunStartupPreflight)
+        #expect(!didRequestCloudContainer)
+        #expect(didRequestLocalFallback)
     }
 
     @Test
-    func appLaunchBootstrapResolverKeepsCloudBackedStoreAvailableOnIOS17WhenICloudIsAvailable() async throws {
+    func appLaunchBootstrapResolverKeepsRootLocalWhenICloudIsAvailable() async throws {
         let container = try makeContainer()
         var didRunStartupPreflight = false
         var didRequestCloudContainer = false
@@ -1151,11 +1162,15 @@ struct AppLaunchWarmupTests {
             describeError: { _ in "unreachable" }
         )
 
+        #expect(bootstrap.storageMode == .localAuthoritative)
+        #expect(bootstrap.cloudRuntimeMode == .checking)
+        #expect(bootstrap.cloudFeaturesEnabled)
+        #expect(!bootstrap.userDataSyncEnabled)
         #expect(bootstrap.cloudSyncEnabled)
         #expect(bootstrap.cloudSyncErrorDescription == nil)
-        #expect(didRunStartupPreflight)
-        #expect(didRequestCloudContainer)
-        #expect(!didRequestLocalFallback)
+        #expect(!didRunStartupPreflight)
+        #expect(!didRequestCloudContainer)
+        #expect(didRequestLocalFallback)
     }
 
     @Test
@@ -1244,9 +1259,10 @@ struct AppLaunchWarmupTests {
 
         #expect(bootstrap.cloudSyncEnabled)
         #expect(bootstrap.cloudSyncErrorDescription == nil)
+        #expect(bootstrap.storageMode == .localAuthoritative)
         #expect(!didRunStartupPreflight)
-        #expect(didRequestCloudContainer)
-        #expect(!didRequestLocalFallback)
+        #expect(!didRequestCloudContainer)
+        #expect(didRequestLocalFallback)
     }
 
     @Test
@@ -1287,9 +1303,10 @@ struct AppLaunchWarmupTests {
 
         #expect(bootstrap.cloudSyncEnabled)
         #expect(bootstrap.cloudSyncErrorDescription == nil)
+        #expect(bootstrap.storageMode == .localAuthoritative)
         #expect(!didRunStartupPreflight)
-        #expect(didRequestCloudContainer)
-        #expect(!didRequestLocalFallback)
+        #expect(!didRequestCloudContainer)
+        #expect(didRequestLocalFallback)
     }
 
     @Test
@@ -1328,15 +1345,16 @@ struct AppLaunchWarmupTests {
             describeError: { _ in "unreachable" }
         )
 
-        #expect(bootstrap.cloudSyncEnabled == false)
-        #expect(bootstrap.cloudSyncErrorDescription?.contains("No iCloud account") == true)
-        #expect(didRunStartupPreflight)
+        #expect(bootstrap.cloudSyncEnabled)
+        #expect(bootstrap.cloudSyncErrorDescription == nil)
+        #expect(bootstrap.storageMode == .localAuthoritative)
+        #expect(!didRunStartupPreflight)
         #expect(!didRequestCloudContainer)
         #expect(didRequestLocalFallback)
     }
 
     @Test
-    func appLaunchBootstrapResolverFallsBackToLocalWhenCloudContainerCreationFails() async throws {
+    func appLaunchBootstrapResolverNeverBuildsCloudBackedRootWhenCloudContainerCreationWouldFail() async throws {
         let localFallbackContainer = try makeContainer()
         enum TestError: Error { case boom }
         var didRequestStandardLocalFallback = false
@@ -1372,57 +1390,11 @@ struct AppLaunchWarmupTests {
             }
         )
 
-        #expect(bootstrap.cloudSyncEnabled == false)
-        #expect(bootstrap.cloudSyncErrorDescription?.contains("boom") == true)
-        #expect(!didRequestStandardLocalFallback)
-        #expect(didRequestCloudFailureFallback)
-    }
-
-    @Test
-    func appLaunchBootstrapResolverFallsBackWhenCloudContainerCreationTimesOut() async throws {
-        let localFallbackContainer = try makeContainer()
-        let start = ContinuousClock.now
-        var didRequestStandardLocalFallback = false
-        var didRequestCloudFailureFallback = false
-
-        let bootstrap = try await AppLaunchBootstrapResolver.resolve(
-            processInfo: MockProcessInfo(arguments: []),
-            canUseConfiguredCloudKitContainer: true,
-            startupDecisionProvider: {
-                CloudStartupDecision(
-                    accountStatus: .available,
-                    storeMode: .cloudBacked,
-                    cloudSyncErrorDescription: nil
-                )
-            },
-            cloudContainerBuildTimeout: .milliseconds(25),
-            makeUITestContainer: {
-                Issue.record("UI test container should not be requested.")
-                return localFallbackContainer
-            },
-            makeCloudBackedContainer: {
-                Thread.sleep(forTimeInterval: 1)
-                return localFallbackContainer
-            },
-            makeLocalFallbackContainer: {
-                didRequestStandardLocalFallback = true
-                return localFallbackContainer
-            },
-            makeCloudFailureLocalFallbackContainer: {
-                didRequestCloudFailureFallback = true
-                return localFallbackContainer
-            },
-            describeError: { error in
-                String(describing: error)
-            }
-        )
-
-        let elapsed = start.duration(to: .now)
-        #expect(bootstrap.cloudSyncEnabled == false)
-        #expect(bootstrap.cloudSyncErrorDescription?.contains("timed out") == true)
-        #expect(elapsed < .milliseconds(500))
-        #expect(!didRequestStandardLocalFallback)
-        #expect(didRequestCloudFailureFallback)
+        #expect(bootstrap.cloudSyncEnabled)
+        #expect(bootstrap.cloudSyncErrorDescription == nil)
+        #expect(bootstrap.storageMode == .localAuthoritative)
+        #expect(didRequestStandardLocalFallback)
+        #expect(!didRequestCloudFailureFallback)
     }
 
     @Test
@@ -1465,7 +1437,7 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
-    func appLaunchBootstrapResolverHonorsTaskCancellationBeforeBuildingStores() async throws {
+    func appLaunchBootstrapResolverDoesNotBuildCloudStoreWhenLaunchTaskIsCancelledLate() async throws {
         let recorder = LockedBootstrapBuildRecorder()
         let container = try makeContainer()
 
@@ -1504,15 +1476,18 @@ struct AppLaunchWarmupTests {
 
         do {
             _ = try await task.value
-            Issue.record("Expected bootstrap resolution to stop when the task is cancelled.")
         } catch is CancellationError {
+            let counts = recorder.snapshot()
+            #expect(counts.cloud == 0)
+            #expect(counts.uiTest == 0)
+            return
         } catch {
             Issue.record("Expected cancellation, got \(error).")
         }
 
         let counts = recorder.snapshot()
         #expect(counts.cloud == 0)
-        #expect(counts.local == 0)
+        #expect(counts.local == 1)
         #expect(counts.uiTest == 0)
     }
 

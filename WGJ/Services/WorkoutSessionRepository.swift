@@ -949,6 +949,10 @@ nonisolated final class WorkoutSessionRepository {
             throw WorkoutSessionRepositoryError.sessionNotFound
         }
 
+        modelContext.insert(UserDataDeletionTombstone(
+            entityName: "WorkoutSession",
+            entityID: id
+        ))
         try? CloudKitBrosSocialService.makeIfUserDataSyncEnabled(modelContext: modelContext)?.queueDeletedSession(sessionID: id)
         try historyProjectionRepository.deleteFacts(forSessionID: id, persistChanges: false)
         modelContext.delete(session)

@@ -390,7 +390,9 @@ nonisolated final class TemplateRepository {
             throw TemplateRepositoryError.folderNotFound
         }
 
+        recordDeletionTombstone(entityName: "TemplateFolder", entityID: folder.id)
         for template in folder.templates ?? [] {
+            recordDeletionTombstone(entityName: "WorkoutTemplate", entityID: template.id)
             for cardioBlock in template.cardioBlocks ?? [] {
                 modelContext.delete(cardioBlock)
             }
@@ -779,6 +781,7 @@ nonisolated final class TemplateRepository {
             throw TemplateRepositoryError.templateNotFound
         }
 
+        recordDeletionTombstone(entityName: "WorkoutTemplate", entityID: template.id)
         for cardioBlock in template.cardioBlocks ?? [] {
             modelContext.delete(cardioBlock)
         }
@@ -789,6 +792,13 @@ nonisolated final class TemplateRepository {
 
         modelContext.delete(template)
         try saveUserDataChanges()
+    }
+
+    private func recordDeletionTombstone(entityName: String, entityID: UUID) {
+        modelContext.insert(UserDataDeletionTombstone(
+            entityName: entityName,
+            entityID: entityID
+        ))
     }
 
     func exercises(in templateID: UUID) throws -> [TemplateExercise] {

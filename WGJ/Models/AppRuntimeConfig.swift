@@ -73,6 +73,39 @@ nonisolated enum CloudKitContainerAvailabilityError: Error, Sendable {
     case unavailable
 }
 
+nonisolated enum AppStorageMode: Equatable, Sendable {
+    case localAuthoritative
+
+    var usesCloudBackedUserDataStore: Bool {
+        false
+    }
+}
+
+nonisolated enum CloudRuntimeMode: Equatable, Sendable {
+    case unavailable(String)
+    case checking
+    case available
+    case degraded(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .available, .checking:
+            return nil
+        case .unavailable(let description), .degraded(let description):
+            return description
+        }
+    }
+
+    var allowsCloudAttempts: Bool {
+        switch self {
+        case .checking, .available:
+            return true
+        case .unavailable, .degraded:
+            return false
+        }
+    }
+}
+
 nonisolated enum AppEnvironment: String {
     case development
     case production
@@ -321,6 +354,8 @@ nonisolated enum RuntimeCloudAvailabilityRefreshPolicy {
 final class AppRuntimeState {
     static let shared = AppRuntimeState()
 
+    var storageMode: AppStorageMode = .localAuthoritative
+    var cloudRuntimeMode: CloudRuntimeMode = .unavailable("CloudKit has not been checked yet.")
     var cloudSyncEnabled = false
     var cloudSyncErrorDescription: String?
     var latestCloudSyncEvent: CloudSyncEventSummary?
@@ -342,16 +377,30 @@ final class AppRuntimeState {
     }
 #endif
 
-    func updateCloudState(isEnabled: Bool, errorDescription: String?) {
+    func updateCloudState(
+        storageMode: AppStorageMode = .localAuthoritative,
+        runtimeMode: CloudRuntimeMode? = nil,
+        isEnabled: Bool,
+        errorDescription: String?
+    ) {
         cancelRuntimeCloudAvailabilityRefresh()
+        self.storageMode = storageMode
         cloudSyncEnabled = isEnabled
         cloudSyncErrorDescription = errorDescription
+        cloudRuntimeMode = runtimeMode ?? Self.runtimeMode(
+            isEnabled: isEnabled,
+            errorDescription: errorDescription
+        )
         hasResolvedRuntimeCloudAvailability = false
         lastRuntimeCloudAvailabilityRefreshAt = nil
     }
 
     func updateCloudRuntimeError(_ errorDescription: String?) {
         cloudSyncErrorDescription = errorDescription
+        cloudRuntimeMode = Self.runtimeMode(
+            isEnabled: cloudSyncEnabled,
+            errorDescription: errorDescription
+        )
     }
 
     func updateLatestCloudSyncEvent(_ summary: CloudSyncEventSummary?) {
@@ -420,7 +469,7 @@ final class AppRuntimeState {
     func isBrosCloudAvailable(cloudContainerAvailable: Bool) -> Bool {
         AppRuntimeConfig.reviewPolicy.brosEnabled
             && cloudSyncEnabled
-            && cloudSyncErrorDescription == nil
+            && cloudRuntimeMode.allowsCloudAttempts
             && cloudContainerAvailable
     }
 
@@ -439,6 +488,24 @@ final class AppRuntimeState {
         case .unknown:
             return "WGJ could not verify iCloud availability right now. Cloud features are temporarily unavailable."
         }
+    }
+
+    private static func runtimeMode(
+        isEnabled: Bool,
+        errorDescription: String?
+    ) -> CloudRuntimeMode {
+        guard isEnabled else {
+            return .unavailable(
+                errorDescription
+                    ?? "CloudKit is unavailable for this session."
+            )
+        }
+
+        guard let errorDescription, !errorDescription.isEmpty else {
+            return .available
+        }
+
+        return .degraded(errorDescription)
     }
 
     private static func accountStatus(

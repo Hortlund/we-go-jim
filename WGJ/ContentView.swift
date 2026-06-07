@@ -8,6 +8,7 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.appBackgroundStore) private var appBackgroundStore
+    @Environment(\.makeUserDataCloudMirrorContainer) private var makeUserDataCloudMirrorContainer
 
     @State private var appRuntimeState = AppRuntimeState.shared
     @State private var subscriptionState = SubscriptionState.shared
@@ -21,6 +22,7 @@ struct ContentView: View {
     @State private var socialMaintenanceScheduler = SocialMaintenanceScheduler()
     @State private var deferredMaintenanceState = AppDeferredMaintenanceState()
     @State private var appWarmupState = AppWarmupState()
+    @State private var userDataCloudMirrorCoordinator = UserDataCloudMirrorCoordinator()
     @State private var deferredMaintenanceRunTracker = DeferredMaintenanceRunTracker()
     @State private var resumeCriticalMaintenanceTracker = ResumeCriticalMaintenanceTracker()
     @State private var resumeCriticalMaintenanceTask: Task<Void, Never>?
@@ -62,6 +64,7 @@ struct ContentView: View {
         .environment(restTimerState)
         .environment(catalogSyncCoordinator)
         .environment(appWarmupState)
+        .environment(userDataCloudMirrorCoordinator)
         .environment(subscriptionState)
         .tint(WGJTheme.accent)
         .preferredColorScheme(.dark)
@@ -97,6 +100,14 @@ struct ContentView: View {
                 resetResumeCriticalMaintenanceCycle()
             }
             updateIdleTimerState()
+        }
+        .onChange(of: appRuntimeState.cloudRuntimeMode) { _, _ in
+            guard appPhase == .main else { return }
+            startUserDataCloudMirrorIfReady()
+        }
+        .onChange(of: appRuntimeState.userDataSyncStatus.latestLocalMutationAt) { _, _ in
+            guard appPhase == .main else { return }
+            syncUserDataCloudMirrorIfActive()
         }
         .onChange(of: activeWorkoutPresentationState.activeSessionID) { oldValue, newValue in
             if oldValue == nil, newValue != nil {
@@ -174,16 +185,17 @@ struct ContentView: View {
         let shouldRunFirstRunLocalBootstrap = shouldRunFirstRunLocalBootstrapBeforeMainEntry(
             skipsSplash: skipsSplash
         )
+        let usesCloudBackedRootStore = appRuntimeState.storageMode.usesCloudBackedUserDataStore
 
         if PreMainStartupWorkPolicy.shouldPrepareLocalProfileIdentity(
-            cloudSyncEnabled: appRuntimeState.cloudSyncEnabled,
+            cloudSyncEnabled: usesCloudBackedRootStore,
             shouldRunFirstRunLocalBootstrap: shouldRunFirstRunLocalBootstrap
         ) {
             await prepareLocalProfileIdentityIfNeeded()
         }
         await prepareFirstRunLocalBootstrapIfNeeded(shouldRun: shouldRunFirstRunLocalBootstrap)
         let startupWarmupTasks = PreMainStartupWorkPolicy.shouldStartWarmSnapshots(
-            cloudSyncEnabled: appRuntimeState.cloudSyncEnabled
+            cloudSyncEnabled: usesCloudBackedRootStore
         ) ? startStartupWarmSnapshotsIfNeeded() : .none
         if StartupWarmupLaunchPolicy.shouldWaitForWarmupsBeforeMainEntry(
             skipsSplash: skipsSplash,
@@ -196,13 +208,13 @@ struct ContentView: View {
             )
         }
         if PreMainStartupWorkPolicy.shouldRestoreActiveWorkoutBeforeMainEntry(
-            cloudSyncEnabled: appRuntimeState.cloudSyncEnabled
+            cloudSyncEnabled: usesCloudBackedRootStore
         ) {
             await activeWorkoutPresentationState.restoreActiveSessionIfMissing(
                 modelContext: modelContext,
                 backgroundStore: appBackgroundStore,
                 allowsLegacyDraftImport: PreMainStartupWorkPolicy.shouldImportLegacyActiveWorkoutDraftsBeforeMainEntry(
-                    cloudSyncEnabled: appRuntimeState.cloudSyncEnabled
+                    cloudSyncEnabled: usesCloudBackedRootStore
                 )
             )
             await restoreRestTimerFromStoredActiveWorkoutIfNeeded()
@@ -319,7 +331,7 @@ struct ContentView: View {
         enteredMainResumeCriticalMaintenanceTask?.cancel()
 
         if !PostMainStartupWorkPolicy.shouldDeferResumeCriticalMaintenance(
-            cloudSyncEnabled: appRuntimeState.cloudSyncEnabled
+            cloudSyncEnabled: appRuntimeState.storageMode.usesCloudBackedUserDataStore
         ) {
             scheduleResumeCriticalMaintenanceIfNeeded()
             return
@@ -337,7 +349,7 @@ struct ContentView: View {
         enteredMainNoncriticalWorkTask?.cancel()
 
         if !PostMainStartupWorkPolicy.shouldDeferNoncriticalWork(
-            cloudSyncEnabled: appRuntimeState.cloudSyncEnabled
+            cloudSyncEnabled: appRuntimeState.storageMode.usesCloudBackedUserDataStore
         ) {
             performEnteredMainNoncriticalWork()
             return
@@ -352,8 +364,30 @@ struct ContentView: View {
     }
 
     private func performEnteredMainNoncriticalWork() {
+        appRuntimeState.refreshCloudAvailabilityIfNeeded()
+        startUserDataCloudMirrorIfReady()
         scheduleWeeklyGoalWidgetPublish()
         requestWarmups(trigger: .enteredMain)
+    }
+
+    private func startUserDataCloudMirrorIfReady() {
+        let cloudRuntimeMode = appRuntimeState.cloudRuntimeMode
+        guard cloudRuntimeMode == .available else { return }
+
+        Task {
+            await userDataCloudMirrorCoordinator.startIfNeeded(
+                localContainer: modelContext.container,
+                cloudRuntimeMode: cloudRuntimeMode,
+                canUseConfiguredCloudKitContainer: AppRuntimeConfig.canUseConfiguredCloudKitContainer,
+                makeMirrorContainer: makeUserDataCloudMirrorContainer
+            )
+        }
+    }
+
+    private func syncUserDataCloudMirrorIfActive() {
+        Task {
+            await userDataCloudMirrorCoordinator.syncIfActive()
+        }
     }
 
     private func scheduleWeeklyGoalWidgetPublish() {
@@ -1029,7 +1063,7 @@ struct ContentView: View {
         FirstRunLocalBootstrapPolicy.shouldRunBeforeMainEntry(
             skipsSplash: skipsSplash,
             hasBackgroundStore: appBackgroundStore != nil,
-            cloudSyncEnabled: appRuntimeState.cloudSyncEnabled,
+            cloudSyncEnabled: appRuntimeState.storageMode.usesCloudBackedUserDataStore,
             hasCompletedBootstrap: FirstRunLocalBootstrapProgress.isCompleted()
         )
     }
@@ -1041,8 +1075,8 @@ struct ContentView: View {
         }
 
         guard let appBackgroundStore else { return }
-        let cloudSyncEnabled = appRuntimeState.cloudSyncEnabled
-        let cloudSyncErrorDescription = appRuntimeState.cloudSyncErrorDescription
+        let cloudSyncEnabled = false
+        let cloudSyncErrorDescription: String? = nil
 
         let result = try? await appBackgroundStore.performAsync("app.first-run.local-bootstrap") { backgroundContext in
             BrosCleanStartPolicy.applyIfNeeded(modelContext: backgroundContext)
@@ -1253,6 +1287,7 @@ private enum AppStartupRouting {
             ExerciseAttribution.self,
             ExerciseCatalogSyncState.self,
             UserProfile.self,
+            UserDataDeletionTombstone.self,
             ProfileWidgetConfig.self,
             BlockedBro.self,
             TemplateFolder.self,

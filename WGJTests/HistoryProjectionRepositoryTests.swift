@@ -346,6 +346,7 @@ struct HistoryProjectionRepositoryTests {
             ExerciseCatalogSyncState.self,
             UserProfile.self,
             ProfileWidgetConfig.self,
+            UserDataDeletionTombstone.self,
             TemplateFolder.self,
             WorkoutTemplate.self,
             TemplateCardioBlock.self,

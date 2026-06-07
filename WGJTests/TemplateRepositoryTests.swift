@@ -128,6 +128,17 @@ struct TemplateRepositoryTests {
     }
 
     @Test
+    func deletingTemplateRecordsCloudMirrorTombstone() throws {
+        let context = try makeInMemoryContext()
+        let repository = TemplateRepository(modelContext: context)
+        let template = try repository.createTemplate(name: "Delete Cloud Mirror", notes: "")
+
+        try repository.deleteTemplate(id: template.id)
+
+        #expect(try tombstone(entityName: "WorkoutTemplate", entityID: template.id, in: context) != nil)
+    }
+
+    @Test
     func createTemplateFromCompletedSessionCopiesCardioBlocks() throws {
         let context = try makeInMemoryContext()
         let templateRepository = TemplateRepository(modelContext: context)
@@ -932,6 +943,7 @@ struct TemplateRepositoryTests {
             ExerciseAttribution.self,
             ExerciseCatalogSyncState.self,
             UserProfile.self,
+            UserDataDeletionTombstone.self,
             ProfileWidgetConfig.self,
             TemplateFolder.self,
             WorkoutTemplate.self,
@@ -982,5 +994,19 @@ struct TemplateRepositoryTests {
         }
 
         #expect(try repository.facts(forSessionID: sessionID).count == expectedCount)
+    }
+
+    private func tombstone(
+        entityName: String,
+        entityID: UUID,
+        in context: ModelContext
+    ) throws -> UserDataDeletionTombstone? {
+        var descriptor = FetchDescriptor<UserDataDeletionTombstone>(
+            predicate: #Predicate { tombstone in
+                tombstone.entityName == entityName && tombstone.entityID == entityID
+            }
+        )
+        descriptor.fetchLimit = 1
+        return try context.fetch(descriptor).first
     }
 }

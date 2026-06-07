@@ -23,6 +23,9 @@ struct WGJApp: App {
                         .environment(\.cloudSyncErrorDescription, resolvedBootstrap.bootstrap.cloudSyncErrorDescription)
                         .environment(\.userDataSyncStatus, AppRuntimeState.shared.userDataSyncStatus)
                         .environment(\.appBackgroundStore, resolvedBootstrap.backgroundStore)
+                        .environment(\.makeUserDataCloudMirrorContainer, {
+                            try Self.makeUserDataCloudMirrorContainer()
+                        })
                         .environment(AppNotificationRouter.shared)
                         .modelContainer(resolvedBootstrap.bootstrap.container)
                 } else {
@@ -59,7 +62,7 @@ struct WGJApp: App {
 
     private static func makeCloudBackedContainer() throws -> ModelContainer {
         let appSchema = fullAppSchema()
-        try AppStoreLayout.prepareHistoryProjectionStoreDirectory()
+        try AppStoreLayout.prepareAppGroupStoreDirectory()
         return try ModelContainer(
             for: appSchema,
             configurations: storeConfigurations(userDataCloudKitDatabase: .automatic)
@@ -68,7 +71,7 @@ struct WGJApp: App {
 
     private static func makeLocalFallbackContainer() throws -> ModelContainer {
         let appSchema = fullAppSchema()
-        try AppStoreLayout.prepareHistoryProjectionStoreDirectory()
+        try AppStoreLayout.prepareAppGroupStoreDirectory()
         return try ModelContainer(
             for: appSchema,
             configurations: storeConfigurations(userDataCloudKitDatabase: .none)
@@ -77,13 +80,29 @@ struct WGJApp: App {
 
     private static func makeCloudFailureLocalFallbackContainer() throws -> ModelContainer {
         let appSchema = fullAppSchema()
-        try AppStoreLayout.prepareHistoryProjectionStoreDirectory()
+        try AppStoreLayout.prepareAppGroupStoreDirectory()
         return try ModelContainer(
             for: appSchema,
             configurations: storeConfigurations(
                 userDataCloudKitDatabase: .none,
                 userDataConfigurationName: AppStoreLayout.cloudFailureFallbackUserDataConfigurationName
             )
+        )
+    }
+
+    nonisolated private static func makeUserDataCloudMirrorContainer() throws -> ModelContainer {
+        let userDataSchema = userDataCloudMirrorSchema()
+        try AppStoreLayout.prepareAppGroupStoreDirectory()
+        return try ModelContainer(
+            for: userDataSchema,
+            configurations: [
+                ModelConfiguration(
+                    AppStoreLayout.userDataCloudMirrorConfigurationName,
+                    schema: userDataSchema,
+                    isStoredInMemoryOnly: false,
+                    cloudKitDatabase: .automatic
+                )
+            ]
         )
     }
 
@@ -115,6 +134,7 @@ struct WGJApp: App {
             ExerciseAttribution.self,
             ExerciseCatalogSyncState.self,
             UserProfile.self,
+            UserDataDeletionTombstone.self,
             ProfileWidgetConfig.self,
             CachedCoachNarrative.self,
             CachedCoachFollowUpNarrative.self,
@@ -145,6 +165,28 @@ struct WGJApp: App {
         ])
     }
 
+    nonisolated private static func userDataCloudMirrorSchema() -> Schema {
+        Schema([
+            UserProfile.self,
+            UserDataDeletionTombstone.self,
+            ProfileWidgetConfig.self,
+            TemplateFolder.self,
+            WorkoutTemplate.self,
+            TemplateCardioBlock.self,
+            TemplateExercise.self,
+            TemplateExerciseComponent.self,
+            TemplateExerciseSet.self,
+            TemplateSupersetGroup.self,
+            TemplateExerciseDropStage.self,
+            WorkoutSession.self,
+            WorkoutSessionCardioBlock.self,
+            WorkoutSessionExercise.self,
+            WorkoutSessionSet.self,
+            WorkoutSessionSupersetGroup.self,
+            WorkoutSessionDropStage.self,
+        ])
+    }
+
     private static func storeConfigurations(
         userDataCloudKitDatabase: ModelConfiguration.CloudKitDatabase,
         userDataConfigurationName: String = AppStoreLayout.userDataConfigurationName
@@ -160,6 +202,7 @@ struct WGJApp: App {
 
         let userDataSchema = Schema([
             UserProfile.self,
+            UserDataDeletionTombstone.self,
             ProfileWidgetConfig.self,
             TemplateFolder.self,
             WorkoutTemplate.self,
@@ -281,10 +324,11 @@ struct WGJApp: App {
     }
 }
 
-enum AppStoreLayout {
+nonisolated enum AppStoreLayout {
     static let appGroupIdentifier = WeeklyGoalWidgetStore.appGroupIdentifier
     static let localCatalogConfigurationName = "LocalCatalog"
     static let userDataConfigurationName = "UserData"
+    static let userDataCloudMirrorConfigurationName = "UserDataCloudMirror"
     static let cloudFailureFallbackUserDataConfigurationName = "UserDataCloudFailureFallback"
     static let activeWorkoutDraftConfigurationName = "ActiveWorkoutDraft"
     static let socialOutboxConfigurationName = "SocialOutbox"
@@ -292,6 +336,7 @@ enum AppStoreLayout {
     static let configurationNames = [
         localCatalogConfigurationName,
         userDataConfigurationName,
+        userDataCloudMirrorConfigurationName,
         activeWorkoutDraftConfigurationName,
         socialOutboxConfigurationName,
         historyProjectionConfigurationName,
@@ -299,7 +344,7 @@ enum AppStoreLayout {
     static let storeFilePrefixes = configurationNames.map { "\($0).store" }
     static let historyProjectionGroupContainer = ModelConfiguration.GroupContainer.identifier(appGroupIdentifier)
 
-    static func prepareHistoryProjectionStoreDirectory(fileManager: FileManager = .default) throws {
+    static func prepareAppGroupStoreDirectory(fileManager: FileManager = .default) throws {
         guard let groupContainerURL = fileManager.containerURL(
             forSecurityApplicationGroupIdentifier: appGroupIdentifier
         ) else {

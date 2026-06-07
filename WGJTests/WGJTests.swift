@@ -1211,6 +1211,21 @@ struct WGJTests {
         #expect(!AppRuntimeState.shared.isBrosCloudAvailable(cloudContainerAvailable: true))
     }
 
+    @Test
+    func brosCloudAvailabilityAllowsDirectCheckWhileCloudRuntimeIsChecking() {
+        resetAppRuntimeState()
+        defer { resetAppRuntimeState() }
+
+        AppRuntimeState.shared.updateCloudState(
+            runtimeMode: .checking,
+            isEnabled: true,
+            errorDescription: nil
+        )
+
+        #expect(AppRuntimeState.shared.storageMode == .localAuthoritative)
+        #expect(AppRuntimeState.shared.isBrosCloudAvailable(cloudContainerAvailable: true))
+    }
+
 #if DEBUG
     @Test
     func demoSeedServiceSeedsProfileAndTemplatesIdempotently() throws {
@@ -1295,6 +1310,7 @@ struct WGJTests {
             ExerciseCatalogSyncState.self,
             UserProfile.self,
             ProfileWidgetConfig.self,
+            UserDataDeletionTombstone.self,
             TemplateFolder.self,
             WorkoutTemplate.self,
             TemplateCardioBlock.self,

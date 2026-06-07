@@ -776,6 +776,17 @@ struct WorkoutSessionRepositoryTests {
     }
 
     @Test
+    func deleteSessionRecordsCloudMirrorTombstone() throws {
+        let context = try makeInMemoryContext()
+        let repository = WorkoutSessionRepository(modelContext: context)
+        let session = try repository.createEmptySession(name: "Delete Cloud Mirror")
+
+        try repository.deleteSession(id: session.id)
+
+        #expect(try tombstone(entityName: "WorkoutSession", entityID: session.id, in: context) != nil)
+    }
+
+    @Test
     func archiveAndRestoreCompletedSessionKeepsCanonicalHistory() throws {
         let context = try makeInMemoryContext()
         let repository = WorkoutSessionRepository(modelContext: context)
@@ -839,6 +850,7 @@ struct WorkoutSessionRepositoryTests {
             ExerciseAttribution.self,
             ExerciseCatalogSyncState.self,
             UserProfile.self,
+            UserDataDeletionTombstone.self,
             ProfileWidgetConfig.self,
             TemplateFolder.self,
             WorkoutTemplate.self,
@@ -872,5 +884,19 @@ struct WorkoutSessionRepositoryTests {
         )
         let container = try ModelContainer(for: schema, configurations: [configuration])
         return ModelContext(container)
+    }
+
+    private func tombstone(
+        entityName: String,
+        entityID: UUID,
+        in context: ModelContext
+    ) throws -> UserDataDeletionTombstone? {
+        var descriptor = FetchDescriptor<UserDataDeletionTombstone>(
+            predicate: #Predicate { tombstone in
+                tombstone.entityName == entityName && tombstone.entityID == entityID
+            }
+        )
+        descriptor.fetchLimit = 1
+        return try context.fetch(descriptor).first
     }
 }

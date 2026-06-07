@@ -356,6 +356,7 @@ struct ReviewReadinessTests {
             ExerciseAttribution.self,
             ExerciseCatalogSyncState.self,
             UserProfile.self,
+            UserDataDeletionTombstone.self,
             ProfileWidgetConfig.self,
             CachedCoachNarrative.self,
             CachedCoachFollowUpNarrative.self,

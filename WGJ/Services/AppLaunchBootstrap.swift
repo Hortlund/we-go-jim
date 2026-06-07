@@ -11,6 +11,10 @@ extension ProcessInfo: ProcessInfoProviding { }
 
 struct ModelContainerBootstrap {
     let container: ModelContainer
+    let storageMode: AppStorageMode
+    let cloudRuntimeMode: CloudRuntimeMode
+    let cloudFeaturesEnabled: Bool
+    let userDataSyncEnabled: Bool
     let cloudSyncEnabled: Bool
     let cloudSyncErrorDescription: String?
 }
@@ -81,12 +85,14 @@ final class AppLaunchBootstrapState {
         guard resolutionTask != nil else { return }
 
         AppRuntimeState.shared.updateCloudState(
-            isEnabled: bootstrap.cloudSyncEnabled,
+            storageMode: bootstrap.storageMode,
+            runtimeMode: bootstrap.cloudRuntimeMode,
+            isEnabled: bootstrap.cloudFeaturesEnabled,
             errorDescription: bootstrap.cloudSyncErrorDescription
         )
         AppRuntimeState.shared.updateUserDataSyncStatus(
             UserDataSyncTrackerBridge.configureForLaunch(
-                isCloudEnabled: bootstrap.cloudSyncEnabled,
+                isCloudEnabled: bootstrap.userDataSyncEnabled,
                 errorDescription: bootstrap.cloudSyncErrorDescription
             )
         )
@@ -109,7 +115,6 @@ enum AppLaunchBootstrapResolver {
         startupDecisionProvider: @escaping @Sendable () async -> CloudStartupDecision = {
             await CloudStartupPreflight.makeDecisionAsync()
         },
-        cloudContainerBuildTimeout: Duration = .seconds(6),
         makeUITestContainer: @escaping @Sendable () throws -> ModelContainer,
         makeCloudBackedContainer: @escaping @Sendable () throws -> ModelContainer,
         makeLocalFallbackContainer: @escaping @Sendable () throws -> ModelContainer,
@@ -119,6 +124,10 @@ enum AppLaunchBootstrapResolver {
         if processInfo.arguments.contains(uiTestInMemoryStoreArgument) {
             return ModelContainerBootstrap(
                 container: try makeUITestContainer(),
+                storageMode: .localAuthoritative,
+                cloudRuntimeMode: .unavailable("UI test run using an in-memory local container."),
+                cloudFeaturesEnabled: false,
+                userDataSyncEnabled: false,
                 cloudSyncEnabled: false,
                 cloudSyncErrorDescription: "UI test run using an in-memory local container."
             )
@@ -127,102 +136,28 @@ enum AppLaunchBootstrapResolver {
         guard canUseConfiguredCloudKitContainer else {
             return ModelContainerBootstrap(
                 container: try makeLocalFallbackContainer(),
+                storageMode: .localAuthoritative,
+                cloudRuntimeMode: .unavailable("CloudKit is unavailable for this build. Using local-only mode for this session."),
+                cloudFeaturesEnabled: false,
+                userDataSyncEnabled: false,
                 cloudSyncEnabled: false,
                 cloudSyncErrorDescription: "CloudKit is unavailable for this build. Using local-only mode for this session."
             )
         }
 
-        let explicitICloudUITest = AppRuntimeConfig.isExplicitICloudUITestLaunch(
-            isRunningXCTest: processInfo.environment["XCTestConfigurationFilePath"] != nil,
-            launchArguments: processInfo.arguments
+        _ = startupDecisionProvider
+        _ = makeCloudBackedContainer
+        _ = makeCloudFailureLocalFallbackContainer
+        _ = describeError
+
+        return ModelContainerBootstrap(
+            container: try makeLocalFallbackContainer(),
+            storageMode: .localAuthoritative,
+            cloudRuntimeMode: .checking,
+            cloudFeaturesEnabled: true,
+            userDataSyncEnabled: false,
+            cloudSyncEnabled: true,
+            cloudSyncErrorDescription: nil
         )
-        var cloudSyncErrorDescription: String?
-        if !explicitICloudUITest {
-            try Task.checkCancellation()
-            let startupDecision = await startupDecisionProvider()
-            try Task.checkCancellation()
-            cloudSyncErrorDescription = startupDecision.cloudSyncErrorDescription
-            if startupDecision.shouldForceLocalFallbackStore {
-                return ModelContainerBootstrap(
-                    container: try makeLocalFallbackContainer(),
-                    cloudSyncEnabled: false,
-                    cloudSyncErrorDescription: startupDecision.cloudSyncErrorDescription
-                )
-            }
-        }
-
-        do {
-            try Task.checkCancellation()
-            return ModelContainerBootstrap(
-                container: try await makeCloudBackedContainerWithTimeout(
-                    timeout: cloudContainerBuildTimeout,
-                    makeCloudBackedContainer: makeCloudBackedContainer
-                ),
-                cloudSyncEnabled: true,
-                cloudSyncErrorDescription: cloudSyncErrorDescription
-            )
-        } catch {
-            let fallbackContainer = try (makeCloudFailureLocalFallbackContainer ?? makeLocalFallbackContainer)()
-            return ModelContainerBootstrap(
-                container: fallbackContainer,
-                cloudSyncEnabled: false,
-                cloudSyncErrorDescription: describeError(error)
-            )
-        }
-    }
-
-    private static func makeCloudBackedContainerWithTimeout(
-        timeout: Duration,
-        makeCloudBackedContainer: @escaping @Sendable () throws -> ModelContainer
-    ) async throws -> ModelContainer {
-        let resultBox = CloudContainerBuildResultBox()
-        DispatchQueue.global(qos: .userInitiated).async {
-            do {
-                resultBox.finish(.success(try makeCloudBackedContainer()))
-            } catch {
-                resultBox.finish(.failure(error))
-            }
-        }
-
-        let clock = ContinuousClock()
-        let deadline = clock.now.advanced(by: timeout)
-        while clock.now < deadline {
-            if let result = resultBox.result() {
-                return try result.get()
-            }
-            try Task.checkCancellation()
-            try await Task.sleep(for: .milliseconds(10))
-        }
-
-        if let result = resultBox.result() {
-            return try result.get()
-        }
-        throw CloudContainerBuildTimeoutError(timeout: timeout)
-    }
-}
-
-private struct CloudContainerBuildTimeoutError: Error, CustomStringConvertible {
-    let timeout: Duration
-
-    var description: String {
-        "Cloud-backed store creation timed out after \(timeout)."
-    }
-}
-
-private final class CloudContainerBuildResultBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var storedResult: Result<ModelContainer, Error>?
-
-    func finish(_ result: Result<ModelContainer, Error>) {
-        lock.lock()
-        defer { lock.unlock() }
-        guard storedResult == nil else { return }
-        storedResult = result
-    }
-
-    func result() -> Result<ModelContainer, Error>? {
-        lock.lock()
-        defer { lock.unlock() }
-        return storedResult
     }
 }

@@ -901,6 +901,26 @@ final class UserProfile {
 }
 
 @Model
+final class UserDataDeletionTombstone {
+    var id: UUID = UUID()
+    var entityName: String = ""
+    var entityID: UUID = UUID()
+    var deletedAt: Date = Date()
+
+    init(
+        id: UUID = UUID(),
+        entityName: String,
+        entityID: UUID,
+        deletedAt: Date = .now
+    ) {
+        self.id = id
+        self.entityName = entityName
+        self.entityID = entityID
+        self.deletedAt = deletedAt
+    }
+}
+
+@Model
 final class SocialOutboxItem {
     var id: UUID = UUID()
     @Attribute(.unique) var idempotencyKey: String = ""

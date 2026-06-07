@@ -89,6 +89,7 @@ final class AppDataDeletionService {
         try deleteAll(SocialOutboxItem.self)
         try deleteAll(BlockedBro.self)
         try deleteAll(UserProfile.self)
+        try deleteAll(UserDataDeletionTombstone.self)
         try modelContext.save()
     }
 

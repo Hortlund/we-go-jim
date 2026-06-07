@@ -23,6 +23,7 @@ struct AppBootstrapTests {
         #expect(AppStoreLayout.configurationNames == [
             "LocalCatalog",
             "UserData",
+            "UserDataCloudMirror",
             "ActiveWorkoutDraft",
             "SocialOutbox",
             "HistoryProjection",
@@ -30,6 +31,7 @@ struct AppBootstrapTests {
         #expect(AppStoreLayout.storeFilePrefixes == [
             "LocalCatalog.store",
             "UserData.store",
+            "UserDataCloudMirror.store",
             "ActiveWorkoutDraft.store",
             "SocialOutbox.store",
             "HistoryProjection.store",
@@ -38,13 +40,45 @@ struct AppBootstrapTests {
     }
 
     @Test
+    func namedStorePreparationCreatesSharedAppGroupSupportDirectory() throws {
+        let temporaryRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WGJ-AppStoreLayout-\(UUID().uuidString)", isDirectory: true)
+        let appGroupURL = temporaryRoot
+            .appendingPathComponent("AppGroup", isDirectory: true)
+        try FileManager.default.createDirectory(at: appGroupURL, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: temporaryRoot)
+        }
+
+        let fileManager = AppStoreLayoutTestingFileManager(appGroupURL: appGroupURL)
+        try AppStoreLayout.prepareAppGroupStoreDirectory(fileManager: fileManager)
+
+        let supportDirectory = appGroupURL
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Application Support", isDirectory: true)
+        var isDirectory: ObjCBool = false
+        #expect(FileManager.default.fileExists(atPath: supportDirectory.path, isDirectory: &isDirectory))
+        #expect(isDirectory.boolValue)
+    }
+
+    @Test
     func historyProjectionStorePinsAppGroupContainerWhileOtherStoresKeepAutomaticResolution() throws {
         let appSource = try String(contentsOf: appSourceURL(), encoding: .utf8)
 
-        #expect(appSource.contains("prepareHistoryProjectionStoreDirectory()"))
+        #expect(appSource.contains("prepareAppGroupStoreDirectory()"))
         #expect(appSource.contains("ModelConfiguration.GroupContainer.identifier(appGroupIdentifier)"))
         #expect(appSource.components(separatedBy: "groupContainer: AppStoreLayout.historyProjectionGroupContainer").count - 1 == 1)
         #expect(!appSource.contains("groupContainer: AppStoreLayout.historyProjectionGroupContainer,\n                cloudKitDatabase: userDataCloudKitDatabase"))
+    }
+
+    @Test
+    func cloudMirrorStoreUsesDedicatedAutomaticCloudKitConfigurationOutsideRootBootstrap() throws {
+        let appSource = try String(contentsOf: appSourceURL(), encoding: .utf8)
+
+        #expect(appSource.contains("userDataCloudMirrorConfigurationName = \"UserDataCloudMirror\""))
+        #expect(appSource.contains("makeUserDataCloudMirrorContainer()"))
+        #expect(appSource.contains("AppStoreLayout.userDataCloudMirrorConfigurationName"))
+        #expect(appSource.contains("cloudKitDatabase: .automatic"))
     }
 
     @Test
@@ -160,5 +194,20 @@ struct AppBootstrapTests {
             .appendingPathComponent("WGJ")
             .appendingPathComponent("Services")
             .appendingPathComponent("AppLaunchBootstrap.swift")
+    }
+}
+
+private final class AppStoreLayoutTestingFileManager: FileManager, @unchecked Sendable {
+    private let appGroupURL: URL
+
+    init(appGroupURL: URL) {
+        self.appGroupURL = appGroupURL
+        super.init()
+    }
+
+    override func containerURL(
+        forSecurityApplicationGroupIdentifier groupIdentifier: String
+    ) -> URL? {
+        groupIdentifier == AppStoreLayout.appGroupIdentifier ? appGroupURL : nil
     }
 }
