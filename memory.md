@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-06-07 - App Store Icon Must Be Opaque Source Art
+
+- Date: 2026-06-07
+- Trigger/Problem: App Store Connect rejected an archive with `Invalid large app icon` because `AppIcon-1024.png` was a 16-bit RGBA image with transparent rounded corners.
+- Root Cause: WGJ's app icon source was exported as a rounded transparent object. The App Store requires the large app icon asset itself to be a fully opaque 1024x1024 image with no alpha channel; iOS applies the rounded icon mask at display time.
+- Durable Rule: Do not ship transparent or alpha-channel app icons. When replacing app icon art, use pre-mask square source artwork and verify the checked-in marketing icon with `sips -g hasAlpha`; if only rounded transparent art exists, create an opaque edge-bleed fallback rather than leaving alpha in the catalog.
+- How to Verify Next Time: Run `file WGJ/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png`, `sips -g hasAlpha -g pixelHeight -g pixelWidth WGJ/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png`, and `xcrun actool --compile /tmp/WGJ-actool --platform iphoneos --minimum-deployment-target 17.0 --app-icon AppIcon --output-partial-info-plist /tmp/WGJ-actool-info.plist WGJ/Assets.xcassets` before archiving.
+- Status: active
+
 ## 2026-06-07 - Physical Widgets Need Small Raster Assets
 
 - Date: 2026-06-07
