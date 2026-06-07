@@ -6,30 +6,49 @@ protocol UserDataCloudMirrorBridging: Sendable {
 }
 
 actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
+    typealias ProjectionScheduler = @Sendable (_ sessionIDs: Set<UUID>, _ localContainer: ModelContainer) -> Void
+
     private let localContainer: ModelContainer
     private let mirrorContainer: ModelContainer
+    private let projectionScheduler: ProjectionScheduler
 
-    init(localContainer: ModelContainer, mirrorContainer: ModelContainer) {
+    init(
+        localContainer: ModelContainer,
+        mirrorContainer: ModelContainer,
+        projectionScheduler: @escaping ProjectionScheduler = UserDataCloudMirrorBridge.defaultProjectionScheduler
+    ) {
         self.localContainer = localContainer
         self.mirrorContainer = mirrorContainer
+        self.projectionScheduler = projectionScheduler
     }
 
     func syncLocalChangesToMirror() async throws {
         let localContext = makeContext(container: localContainer)
         let mirrorContext = makeContext(container: mirrorContainer)
+        var projectionSessionIDs: Set<UUID> = []
 
         try syncDeletionTombstones(localContext: localContext, mirrorContext: mirrorContext)
-        try applyDeletionTombstones(localContext: localContext, mirrorContext: mirrorContext)
+        projectionSessionIDs.formUnion(
+            try applyDeletionTombstones(localContext: localContext, mirrorContext: mirrorContext)
+        )
+        try syncCustomExercises(localContext: localContext, mirrorContext: mirrorContext)
         try syncProfile(localContext: localContext, mirrorContext: mirrorContext)
+        try syncProfileWidgetConfigs(localContext: localContext, mirrorContext: mirrorContext)
+        try syncBlockedBros(localContext: localContext, mirrorContext: mirrorContext)
         try syncTemplateFolders(localContext: localContext, mirrorContext: mirrorContext)
         try syncTemplates(localContext: localContext, mirrorContext: mirrorContext)
-        try syncCompletedWorkoutSessions(localContext: localContext, mirrorContext: mirrorContext)
+        projectionSessionIDs.formUnion(
+            try syncCompletedWorkoutSessions(localContext: localContext, mirrorContext: mirrorContext)
+        )
 
         if localContext.hasChanges {
             try localContext.save()
         }
         if mirrorContext.hasChanges {
             try mirrorContext.save()
+        }
+        if !projectionSessionIDs.isEmpty {
+            projectionScheduler(projectionSessionIDs, localContainer)
         }
     }
 
@@ -63,12 +82,16 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
     private func applyDeletionTombstones(
         localContext: ModelContext,
         mirrorContext: ModelContext
-    ) throws {
+    ) throws -> Set<UUID> {
         let tombstones = try fetchAll(UserDataDeletionTombstone.self, in: localContext)
             + fetchAll(UserDataDeletionTombstone.self, in: mirrorContext)
+        var projectionSessionIDs: Set<UUID> = []
 
         for tombstone in tombstones {
             switch tombstone.entityName {
+            case "UserProfile":
+                try deleteUserProfile(id: tombstone.entityID, in: localContext)
+                try deleteUserProfile(id: tombstone.entityID, in: mirrorContext)
             case "TemplateFolder":
                 try deleteFolder(id: tombstone.entityID, in: localContext)
                 try deleteFolder(id: tombstone.entityID, in: mirrorContext)
@@ -76,10 +99,153 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
                 try deleteTemplateAggregate(id: tombstone.entityID, in: localContext)
                 try deleteTemplateAggregate(id: tombstone.entityID, in: mirrorContext)
             case "WorkoutSession":
+                projectionSessionIDs.insert(tombstone.entityID)
                 try deleteWorkoutSessionAggregate(id: tombstone.entityID, in: localContext)
                 try deleteWorkoutSessionAggregate(id: tombstone.entityID, in: mirrorContext)
+            case "ProfileWidgetConfig":
+                try deleteProfileWidgetConfig(id: tombstone.entityID, in: localContext)
+                try deleteProfileWidgetConfig(id: tombstone.entityID, in: mirrorContext)
+            case "BlockedBro":
+                try deleteBlockedBro(id: tombstone.entityID, in: localContext)
+                try deleteBlockedBroCloudRecord(id: tombstone.entityID, in: mirrorContext)
+            case "ExerciseCatalogItem":
+                guard let entityKey = tombstone.entityKey?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !entityKey.isEmpty
+                else {
+                    break
+                }
+                try deleteCustomExercise(remoteUUID: entityKey, in: localContext)
+                try deleteCustomExerciseCloudRecord(remoteUUID: entityKey, in: mirrorContext)
             default:
                 break
+            }
+        }
+
+        return projectionSessionIDs
+    }
+
+    private func syncProfileWidgetConfigs(
+        localContext: ModelContext,
+        mirrorContext: ModelContext
+    ) throws {
+        let localConfigs = try fetchAll(ProfileWidgetConfig.self, in: localContext)
+        let mirrorConfigs = try fetchAll(ProfileWidgetConfig.self, in: mirrorContext)
+        let tombstonedConfigIDs = try tombstonedIDs(
+            entityName: "ProfileWidgetConfig",
+            localContext: localContext,
+            mirrorContext: mirrorContext
+        )
+        let liveLocalConfigs = localConfigs.filter { !tombstonedConfigIDs.contains($0.id) }
+        let liveMirrorConfigs = mirrorConfigs.filter { !tombstonedConfigIDs.contains($0.id) }
+        let localByID = Dictionary(liveLocalConfigs.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let mirrorByID = Dictionary(liveMirrorConfigs.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var handledLocalIDs: Set<UUID> = []
+        var handledMirrorIDs: Set<UUID> = []
+
+        for id in Set(localByID.keys).intersection(mirrorByID.keys) {
+            guard let local = localByID[id], let mirror = mirrorByID[id] else { continue }
+            if shouldPreferProfileWidgetConfig(local, over: mirror) {
+                copyProfileWidgetConfig(local, into: mirror)
+            } else {
+                copyProfileWidgetConfig(mirror, into: local)
+            }
+            handledLocalIDs.insert(local.id)
+            handledMirrorIDs.insert(mirror.id)
+        }
+
+        let localByKey = latestProfileWidgetConfigByFallbackSyncKey(
+            liveLocalConfigs.filter { !handledLocalIDs.contains($0.id) }
+        )
+        let mirrorByKey = latestProfileWidgetConfigByFallbackSyncKey(
+            liveMirrorConfigs.filter { !handledMirrorIDs.contains($0.id) }
+        )
+
+        for key in Set(localByKey.keys).union(mirrorByKey.keys) {
+            switch (localByKey[key], mirrorByKey[key]) {
+            case (.none, .none):
+                break
+            case (.some(let source), .none):
+                mirrorContext.insert(cloneProfileWidgetConfig(source))
+            case (.none, .some(let source)):
+                localContext.insert(cloneProfileWidgetConfig(source))
+            case (.some(let local), .some(let mirror)):
+                if shouldPreferProfileWidgetConfig(local, over: mirror) {
+                    copyProfileWidgetConfig(local, into: mirror)
+                } else {
+                    copyProfileWidgetConfig(mirror, into: local)
+                }
+            }
+        }
+    }
+
+    private func syncCustomExercises(
+        localContext: ModelContext,
+        mirrorContext: ModelContext
+    ) throws {
+        let tombstonedRemoteUUIDs = try tombstonedKeys(
+            entityName: "ExerciseCatalogItem",
+            localContext: localContext,
+            mirrorContext: mirrorContext
+        )
+        let localByUUID = customExerciseByUUID(
+            try fetchAll(ExerciseCatalogItem.self, in: localContext)
+                .filter { !tombstonedRemoteUUIDs.contains($0.remoteUUID) }
+        )
+        let mirrorByUUID = customExerciseCloudRecordByUUID(
+            try fetchAll(CustomExerciseCloudRecord.self, in: mirrorContext)
+                .filter { !tombstonedRemoteUUIDs.contains($0.remoteUUID) }
+        )
+
+        for remoteUUID in Set(localByUUID.keys).union(mirrorByUUID.keys) {
+            switch (localByUUID[remoteUUID], mirrorByUUID[remoteUUID]) {
+            case (.none, .none):
+                break
+            case (.some(let source), .none):
+                mirrorContext.insert(try customExerciseCloudRecord(from: source))
+            case (.none, .some(let source)):
+                try insertCustomExercise(from: source, into: localContext)
+            case (.some(let local), .some(let mirror)):
+                if local.updatedAt >= mirror.updatedAt {
+                    try copyCustomExercise(local, into: mirror)
+                } else {
+                    try copyCustomExercise(mirror, into: local, targetContext: localContext)
+                }
+            }
+        }
+    }
+
+    private func syncBlockedBros(
+        localContext: ModelContext,
+        mirrorContext: ModelContext
+    ) throws {
+        let tombstonedBlockedIDs = try tombstonedIDs(
+            entityName: "BlockedBro",
+            localContext: localContext,
+            mirrorContext: mirrorContext
+        )
+        let localByRecordName = latestBlockedBroByRecordName(
+            try fetchAll(BlockedBro.self, in: localContext)
+                .filter { !tombstonedBlockedIDs.contains($0.id) }
+        )
+        let mirrorByRecordName = latestBlockedBroCloudRecordByRecordName(
+            try fetchAll(BlockedBroCloudRecord.self, in: mirrorContext)
+                .filter { !tombstonedBlockedIDs.contains($0.id) }
+        )
+
+        for userRecordName in Set(localByRecordName.keys).union(mirrorByRecordName.keys) {
+            switch (localByRecordName[userRecordName], mirrorByRecordName[userRecordName]) {
+            case (.none, .none):
+                break
+            case (.some(let source), .none):
+                mirrorContext.insert(blockedBroCloudRecord(from: source))
+            case (.none, .some(let source)):
+                localContext.insert(blockedBro(from: source))
+            case (.some(let local), .some(let mirror)):
+                if local.blockedAt >= mirror.blockedAt {
+                    copyBlockedBro(local, into: mirror)
+                } else {
+                    copyBlockedBro(mirror, into: local)
+                }
             }
         }
     }
@@ -160,7 +326,7 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
     private func syncCompletedWorkoutSessions(
         localContext: ModelContext,
         mirrorContext: ModelContext
-    ) throws {
+    ) throws -> Set<UUID> {
         let localSessions = try fetchAll(WorkoutSession.self, in: localContext)
             .filter { $0.status == .completed }
         let mirrorSessions = try fetchAll(WorkoutSession.self, in: mirrorContext)
@@ -168,6 +334,7 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
         let tombstonedSessionIDs = try tombstonedIDs(entityName: "WorkoutSession", localContext: localContext, mirrorContext: mirrorContext)
         let localByID = Dictionary(uniqueKeysWithValues: localSessions.map { ($0.id, $0) })
         let mirrorByID = Dictionary(uniqueKeysWithValues: mirrorSessions.map { ($0.id, $0) })
+        var projectionSessionIDs: Set<UUID> = []
 
         for id in Set(localByID.keys).union(mirrorByID.keys).subtracting(tombstonedSessionIDs) {
             switch (localByID[id], mirrorByID[id]) {
@@ -185,6 +352,7 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
                     sourceContext: mirrorContext,
                     targetContext: localContext
                 )
+                projectionSessionIDs.insert(id)
             case (.some(let local), .some(let mirror)):
                 if local.updatedAt >= mirror.updatedAt {
                     try replaceWorkoutSessionAggregate(
@@ -200,9 +368,12 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
                         sourceContext: mirrorContext,
                         targetContext: localContext
                     )
+                    projectionSessionIDs.insert(id)
                 }
             }
         }
+
+        return projectionSessionIDs
     }
 
     private func syncProfile(
@@ -300,11 +471,351 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
         target.updatedAt = source.updatedAt
     }
 
+    private func customExerciseCloudRecord(from source: ExerciseCatalogItem) throws -> CustomExerciseCloudRecord {
+        try CustomExerciseCloudRecord(
+            remoteUUID: source.remoteUUID,
+            remoteID: source.remoteID,
+            displayName: source.displayName,
+            categoryName: source.categoryName,
+            equipmentSummary: source.equipmentSummary,
+            instructionText: source.instructionText,
+            isHidden: source.isHidden,
+            lastUpdateGlobal: source.lastUpdateGlobal,
+            updatedAt: source.updatedAt,
+            aliasesData: encodeCustomExerciseAliases(source.aliases),
+            primaryMusclesData: encodeCustomExerciseMuscles(source.primaryMuscles),
+            secondaryMusclesData: encodeCustomExerciseMuscles(source.secondaryMuscles)
+        )
+    }
+
+    private func copyCustomExercise(
+        _ source: ExerciseCatalogItem,
+        into target: CustomExerciseCloudRecord
+    ) throws {
+        target.remoteUUID = source.remoteUUID
+        target.remoteID = source.remoteID
+        target.displayName = source.displayName
+        target.categoryName = source.categoryName
+        target.equipmentSummary = source.equipmentSummary
+        target.instructionText = source.instructionText
+        target.isHidden = source.isHidden
+        target.lastUpdateGlobal = source.lastUpdateGlobal
+        target.updatedAt = source.updatedAt
+        target.aliasesData = try encodeCustomExerciseAliases(source.aliases)
+        target.primaryMusclesData = try encodeCustomExerciseMuscles(source.primaryMuscles)
+        target.secondaryMusclesData = try encodeCustomExerciseMuscles(source.secondaryMuscles)
+    }
+
+    private func insertCustomExercise(
+        from source: CustomExerciseCloudRecord,
+        into targetContext: ModelContext
+    ) throws {
+        let exercise = ExerciseCatalogItem(
+            remoteUUID: source.remoteUUID,
+            remoteID: source.remoteID,
+            displayName: source.displayName,
+            categoryName: source.categoryName,
+            equipmentSummary: source.equipmentSummary,
+            instructionText: source.instructionText,
+            isCurated: false,
+            isHidden: source.isHidden,
+            sourceName: "custom",
+            lastUpdateGlobal: source.lastUpdateGlobal,
+            updatedAt: source.updatedAt
+        )
+        targetContext.insert(exercise)
+        try copyCustomExercise(source, into: exercise, targetContext: targetContext)
+    }
+
+    private func copyCustomExercise(
+        _ source: CustomExerciseCloudRecord,
+        into target: ExerciseCatalogItem,
+        targetContext: ModelContext
+    ) throws {
+        target.remoteUUID = source.remoteUUID
+        target.remoteID = source.remoteID
+        target.displayName = source.displayName
+        target.categoryName = source.categoryName
+        target.equipmentSummary = source.equipmentSummary
+        target.instructionText = source.instructionText
+        target.isCurated = false
+        target.isHidden = source.isHidden
+        target.sourceName = "custom"
+        target.lastUpdateGlobal = source.lastUpdateGlobal
+        target.updatedAt = source.updatedAt
+        target.primaryMuscles = try targetMuscles(for: decodeCustomExerciseMuscles(source.primaryMusclesData), in: targetContext)
+        target.secondaryMuscles = try targetMuscles(for: decodeCustomExerciseMuscles(source.secondaryMusclesData), in: targetContext)
+
+        for alias in target.aliases {
+            targetContext.delete(alias)
+        }
+        target.aliases = try decodeCustomExerciseAliases(source.aliasesData).map { alias in
+            ExerciseAlias(value: alias, exercise: target)
+        }
+    }
+
+    private func targetMuscles(
+        for sourceMuscles: [CustomExerciseCloudMuscleSnapshot],
+        in targetContext: ModelContext
+    ) throws -> [MuscleGroup] {
+        try sourceMuscles.map { source in
+            if let existing = try fetchMuscle(remoteID: source.remoteID, in: targetContext) {
+                existing.name = source.name
+                existing.nameEn = source.nameEn
+                return existing
+            }
+
+            let clone = MuscleGroup(
+                remoteID: source.remoteID,
+                name: source.name,
+                nameEn: source.nameEn
+            )
+            targetContext.insert(clone)
+            return clone
+        }
+    }
+
+    private func encodeCustomExerciseAliases(_ aliases: [ExerciseAlias]) throws -> Data? {
+        let values = aliases
+            .map { $0.value.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !values.isEmpty else { return nil }
+        return try JSONEncoder().encode(values)
+    }
+
+    private func decodeCustomExerciseAliases(_ data: Data?) throws -> [String] {
+        guard let data else { return [] }
+        return try JSONDecoder().decode([String].self, from: data)
+    }
+
+    private func encodeCustomExerciseMuscles(_ muscles: [MuscleGroup]) throws -> Data? {
+        let snapshots = muscles.map {
+            CustomExerciseCloudMuscleSnapshot(
+                remoteID: $0.remoteID,
+                name: $0.name,
+                nameEn: $0.nameEn
+            )
+        }
+        guard !snapshots.isEmpty else { return nil }
+        return try JSONEncoder().encode(snapshots)
+    }
+
+    private func decodeCustomExerciseMuscles(_ data: Data?) throws -> [CustomExerciseCloudMuscleSnapshot] {
+        guard let data else { return [] }
+        return try JSONDecoder().decode([CustomExerciseCloudMuscleSnapshot].self, from: data)
+    }
+
+    private func customExerciseByUUID(_ exercises: [ExerciseCatalogItem]) -> [String: ExerciseCatalogItem] {
+        exercises.reduce(into: [:]) { result, exercise in
+            guard exercise.sourceName == "custom" else { return }
+            guard let existing = result[exercise.remoteUUID] else {
+                result[exercise.remoteUUID] = exercise
+                return
+            }
+            if exercise.updatedAt > existing.updatedAt {
+                result[exercise.remoteUUID] = exercise
+            }
+        }
+    }
+
+    private func customExerciseCloudRecordByUUID(_ records: [CustomExerciseCloudRecord]) -> [String: CustomExerciseCloudRecord] {
+        records.reduce(into: [:]) { result, record in
+            let key = record.remoteUUID.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty else { return }
+            guard let existing = result[key] else {
+                result[key] = record
+                return
+            }
+            if record.updatedAt > existing.updatedAt {
+                result[key] = record
+            }
+        }
+    }
+
+    private func cloneProfileWidgetConfig(_ source: ProfileWidgetConfig) -> ProfileWidgetConfig {
+        ProfileWidgetConfig(
+            id: source.id,
+            kind: source.kind,
+            isEnabled: source.isEnabled,
+            selectedCatalogExerciseUUID: source.selectedCatalogExerciseUUID,
+            selectedExerciseNameSnapshot: source.selectedExerciseNameSnapshot,
+            exerciseTrendMetric: profileExerciseTrendMetric(rawValue: source.exerciseTrendMetricRaw),
+            sortOrder: source.sortOrder,
+            createdAt: source.createdAt,
+            updatedAt: source.updatedAt
+        )
+    }
+
+    private func copyProfileWidgetConfig(_ source: ProfileWidgetConfig, into target: ProfileWidgetConfig) {
+        target.id = source.id
+        target.kindRaw = source.kindRaw
+        target.isEnabled = source.isEnabled
+        target.selectedCatalogExerciseUUID = source.selectedCatalogExerciseUUID
+        target.selectedExerciseNameSnapshot = source.selectedExerciseNameSnapshot
+        target.exerciseTrendMetricRaw = source.exerciseTrendMetricRaw
+        target.sortOrder = source.sortOrder
+        target.createdAt = source.createdAt
+        target.updatedAt = source.updatedAt
+    }
+
+    private func blockedBroCloudRecord(from source: BlockedBro) -> BlockedBroCloudRecord {
+        BlockedBroCloudRecord(
+            id: source.id,
+            userRecordName: source.userRecordName,
+            displayNameSnapshot: source.displayNameSnapshot,
+            blockedAt: source.blockedAt
+        )
+    }
+
+    private func blockedBro(from source: BlockedBroCloudRecord) -> BlockedBro {
+        BlockedBro(
+            id: source.id,
+            userRecordName: source.userRecordName,
+            displayNameSnapshot: source.displayNameSnapshot,
+            blockedAt: source.blockedAt
+        )
+    }
+
+    private func copyBlockedBro(_ source: BlockedBro, into target: BlockedBro) {
+        target.id = source.id
+        target.userRecordName = source.userRecordName
+        target.displayNameSnapshot = source.displayNameSnapshot
+        target.blockedAt = source.blockedAt
+    }
+
+    private func copyBlockedBro(_ source: BlockedBro, into target: BlockedBroCloudRecord) {
+        target.id = source.id
+        target.userRecordName = source.userRecordName
+        target.displayNameSnapshot = source.displayNameSnapshot
+        target.blockedAt = source.blockedAt
+    }
+
+    private func copyBlockedBro(_ source: BlockedBroCloudRecord, into target: BlockedBro) {
+        target.id = source.id
+        target.userRecordName = source.userRecordName
+        target.displayNameSnapshot = source.displayNameSnapshot
+        target.blockedAt = source.blockedAt
+    }
+
+    private func latestBlockedBroByRecordName(_ blockedBros: [BlockedBro]) -> [String: BlockedBro] {
+        blockedBros.reduce(into: [:]) { result, blocked in
+            let key = blocked.userRecordName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty else { return }
+            guard let existing = result[key] else {
+                result[key] = blocked
+                return
+            }
+            if blocked.blockedAt > existing.blockedAt {
+                result[key] = blocked
+            }
+        }
+    }
+
+    private func latestBlockedBroCloudRecordByRecordName(
+        _ blockedBros: [BlockedBroCloudRecord]
+    ) -> [String: BlockedBroCloudRecord] {
+        blockedBros.reduce(into: [:]) { result, blocked in
+            let key = blocked.userRecordName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty else { return }
+            guard let existing = result[key] else {
+                result[key] = blocked
+                return
+            }
+            if blocked.blockedAt > existing.blockedAt {
+                result[key] = blocked
+            }
+        }
+    }
+
+    private func shouldPreferProfileWidgetConfig(
+        _ candidate: ProfileWidgetConfig,
+        over other: ProfileWidgetConfig
+    ) -> Bool {
+        let candidateIsDefault = isUntouchedDefaultBuiltInProfileWidgetConfig(candidate)
+        let otherIsDefault = isUntouchedDefaultBuiltInProfileWidgetConfig(other)
+
+        if candidateIsDefault != otherIsDefault {
+            return !candidateIsDefault
+        }
+
+        return candidate.updatedAt >= other.updatedAt
+    }
+
+    private func isUntouchedDefaultBuiltInProfileWidgetConfig(_ config: ProfileWidgetConfig) -> Bool {
+        let kind = config.kind
+        guard !kind.isExerciseTrend else { return false }
+        return config.isEnabled == defaultProfileWidgetEnabled(kind)
+            && config.selectedCatalogExerciseUUID == nil
+            && config.selectedExerciseNameSnapshot == nil
+            && config.exerciseTrendMetricRaw == nil
+            && config.sortOrder == defaultProfileWidgetSortOrder(kind)
+    }
+
+    private func defaultProfileWidgetEnabled(_ kind: ProfileWidgetKind) -> Bool {
+        switch kind {
+        case .prs, .weeklyGoals, .weeklyMuscleHeatmap, .coachBrief:
+            return true
+        case .exerciseOneRMTrend, .exerciseVolumeTrend, .streaks, .topExercises, .consistencyCalendar:
+            return false
+        }
+    }
+
+    private func defaultProfileWidgetSortOrder(_ kind: ProfileWidgetKind) -> Int {
+        switch kind {
+        case .prs:
+            return 0
+        case .weeklyGoals:
+            return 1
+        case .weeklyMuscleHeatmap:
+            return 2
+        case .coachBrief:
+            return 3
+        case .exerciseOneRMTrend:
+            return 4
+        case .exerciseVolumeTrend:
+            return 5
+        case .streaks:
+            return 6
+        case .topExercises:
+            return 7
+        case .consistencyCalendar:
+            return 8
+        }
+    }
+
+    private func profileExerciseTrendMetric(rawValue: String?) -> ProfileExerciseTrendMetric? {
+        rawValue.flatMap(ProfileExerciseTrendMetric.init(rawValue:))
+    }
+
+    private func latestProfileWidgetConfigByFallbackSyncKey(
+        _ configs: [ProfileWidgetConfig]
+    ) -> [String: ProfileWidgetConfig] {
+        configs.reduce(into: [:]) { result, config in
+            let key = profileWidgetConfigFallbackSyncKey(config)
+            guard let existing = result[key] else {
+                result[key] = config
+                return
+            }
+
+            if config.updatedAt > existing.updatedAt {
+                result[key] = config
+            }
+        }
+    }
+
+    private func profileWidgetConfigFallbackSyncKey(_ config: ProfileWidgetConfig) -> String {
+        if config.kind.isExerciseTrend {
+            return "id:\(config.id.uuidString.lowercased())"
+        }
+        return "kind:\(config.kindRaw)"
+    }
+
     private func cloneTombstone(_ source: UserDataDeletionTombstone) -> UserDataDeletionTombstone {
         UserDataDeletionTombstone(
             id: source.id,
             entityName: source.entityName,
             entityID: source.entityID,
+            entityKey: source.entityKey,
             deletedAt: source.deletedAt
         )
     }
@@ -313,11 +824,16 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
         target.id = source.id
         target.entityName = source.entityName
         target.entityID = source.entityID
+        target.entityKey = source.entityKey
         target.deletedAt = source.deletedAt
     }
 
     private func tombstoneKey(_ tombstone: UserDataDeletionTombstone) -> String {
-        "\(tombstone.entityName):\(tombstone.entityID.uuidString.lowercased())"
+        if let entityKey = tombstone.entityKey?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !entityKey.isEmpty {
+            return "\(tombstone.entityName):\(entityKey)"
+        }
+        return "\(tombstone.entityName):\(tombstone.entityID.uuidString.lowercased())"
     }
 
     private func latestTombstoneByKey(
@@ -491,6 +1007,44 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
         }
     }
 
+    private func deleteProfileWidgetConfig(id: UUID, in context: ModelContext) throws {
+        for config in try fetchAll(ProfileWidgetConfig.self, in: context) where config.id == id {
+            context.delete(config)
+        }
+    }
+
+    private func deleteUserProfile(id: UUID, in context: ModelContext) throws {
+        for profile in try fetchAll(UserProfile.self, in: context) where profile.id == id {
+            context.delete(profile)
+        }
+    }
+
+    private func deleteBlockedBro(id: UUID, in context: ModelContext) throws {
+        for blocked in try fetchAll(BlockedBro.self, in: context) where blocked.id == id {
+            context.delete(blocked)
+        }
+    }
+
+    private func deleteBlockedBroCloudRecord(id: UUID, in context: ModelContext) throws {
+        for blocked in try fetchAll(BlockedBroCloudRecord.self, in: context) where blocked.id == id {
+            context.delete(blocked)
+        }
+    }
+
+    private func deleteCustomExercise(remoteUUID: String, in context: ModelContext) throws {
+        for exercise in try fetchAll(ExerciseCatalogItem.self, in: context)
+        where exercise.sourceName == "custom" && exercise.remoteUUID == remoteUUID {
+            context.delete(exercise)
+        }
+    }
+
+    private func deleteCustomExerciseCloudRecord(remoteUUID: String, in context: ModelContext) throws {
+        for exercise in try fetchAll(CustomExerciseCloudRecord.self, in: context)
+        where exercise.remoteUUID == remoteUUID {
+            context.delete(exercise)
+        }
+    }
+
     private func replaceWorkoutSessionAggregate(
         id: UUID,
         source: WorkoutSession,
@@ -646,6 +1200,16 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
         return try context.fetch(descriptor).first
     }
 
+    private func fetchMuscle(remoteID: Int, in context: ModelContext) throws -> MuscleGroup? {
+        var descriptor = FetchDescriptor<MuscleGroup>(
+            predicate: #Predicate { muscle in
+                muscle.remoteID == remoteID
+            }
+        )
+        descriptor.fetchLimit = 1
+        return try context.fetch(descriptor).first
+    }
+
     private func tombstonedIDs(
         entityName: String,
         localContext: ModelContext,
@@ -656,6 +1220,21 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
         return Set(tombstones.filter { $0.entityName == entityName }.map(\.entityID))
     }
 
+    private func tombstonedKeys(
+        entityName: String,
+        localContext: ModelContext,
+        mirrorContext: ModelContext
+    ) throws -> Set<String> {
+        let tombstones = try fetchAll(UserDataDeletionTombstone.self, in: localContext)
+            + fetchAll(UserDataDeletionTombstone.self, in: mirrorContext)
+        return Set(
+            tombstones
+                .filter { $0.entityName == entityName }
+                .compactMap { $0.entityKey?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        )
+    }
+
     private func fetchAll<T: PersistentModel>(_ type: T.Type, in context: ModelContext) throws -> [T] {
         try context.fetch(FetchDescriptor<T>())
     }
@@ -664,5 +1243,18 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
         let context = ModelContext(container)
         context.autosaveEnabled = false
         return context
+    }
+
+    nonisolated private static func defaultProjectionScheduler(
+        sessionIDs: Set<UUID>,
+        localContainer: ModelContainer
+    ) {
+        HistoryAnalyticsCache.shared.invalidate(container: localContainer)
+        for sessionID in sessionIDs {
+            HistoryProjectionBackgroundReconciler.shared.scheduleRebuild(
+                sessionID: sessionID,
+                container: localContainer
+            )
+        }
     }
 }

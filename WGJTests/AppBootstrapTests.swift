@@ -82,6 +82,22 @@ struct AppBootstrapTests {
     }
 
     @Test
+    func cloudMirrorSchemaIncludesDurableUserCatalogAndSafetyData() throws {
+        let appSource = try String(contentsOf: appSourceURL(), encoding: .utf8)
+        let schemaStart = try #require(appSource.range(of: "nonisolated private static func userDataCloudMirrorSchema()"))
+        let schemaRemainder = appSource[schemaStart.lowerBound...]
+        let schemaEnd = try #require(schemaRemainder.range(of: "private static func storeConfigurations("))
+        let schemaSource = String(schemaRemainder[..<schemaEnd.lowerBound])
+
+        #expect(schemaSource.contains("CustomExerciseCloudRecord.self"))
+        #expect(schemaSource.contains("BlockedBroCloudRecord.self"))
+        #expect(!schemaSource.contains("ExerciseCatalogItem.self"))
+        #expect(!schemaSource.contains("MuscleGroup.self"))
+        #expect(!schemaSource.contains("ExerciseAlias.self"))
+        #expect(!schemaSource.contains("BlockedBro.self"))
+    }
+
+    @Test
     func appLaunchBootstrapResolutionRunsOffMainActorUntilStatePublication() throws {
         let source = try String(contentsOf: appLaunchBootstrapSourceURL(), encoding: .utf8)
 

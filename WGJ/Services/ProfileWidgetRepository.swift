@@ -22,6 +22,11 @@ nonisolated final class ProfileWidgetRepository {
         self.modelContext = modelContext
     }
 
+    private func saveUserDataChanges() throws {
+        try modelContext.save()
+        UserDataSyncTrackerBridge.markLocalMutation()
+    }
+
     func configurations() throws -> [ProfileWidgetConfig] {
         try ensureDefaultConfigsIfNeeded()
         return try fetchConfigurations()
@@ -45,7 +50,7 @@ nonisolated final class ProfileWidgetRepository {
         try validateCanEnable(config: config, isEnabled: isEnabled)
         config.isEnabled = isEnabled
         config.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func setEnabled(id: UUID, isEnabled: Bool) throws {
@@ -54,7 +59,7 @@ nonisolated final class ProfileWidgetRepository {
         try validateCanEnable(config: config, isEnabled: isEnabled)
         config.isEnabled = isEnabled
         config.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func updateExerciseSelection(
@@ -67,7 +72,7 @@ nonisolated final class ProfileWidgetRepository {
         config.selectedCatalogExerciseUUID = catalogExerciseUUID
         config.selectedExerciseNameSnapshot = exerciseName
         config.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     @discardableResult
@@ -91,7 +96,7 @@ nonisolated final class ProfileWidgetRepository {
         )
         try validateCanEnable(config: config, isEnabled: isEnabled)
         modelContext.insert(config)
-        try modelContext.save()
+        try saveUserDataChanges()
         return config
     }
 
@@ -109,15 +114,19 @@ nonisolated final class ProfileWidgetRepository {
         config.selectedExerciseNameSnapshot = exerciseName.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
         try validateCanEnable(config: config, isEnabled: config.isEnabled)
         config.updatedAt = .now
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func removeConfig(id: UUID) throws {
         try ensureDefaultConfigsIfNeeded()
         let config = try config(id: id)
+        modelContext.insert(UserDataDeletionTombstone(
+            entityName: "ProfileWidgetConfig",
+            entityID: config.id
+        ))
         modelContext.delete(config)
         try normalizeSortOrder()
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func moveEnabledWidget(fromOffsets: IndexSet, toOffset: Int) throws {
@@ -148,7 +157,7 @@ nonisolated final class ProfileWidgetRepository {
             sortIndex += 1
         }
 
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func reorder(kindOrder: [ProfileWidgetKind]) throws {
@@ -173,7 +182,7 @@ nonisolated final class ProfileWidgetRepository {
             next += 1
         }
 
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     private func ensureDefaultConfigsIfNeeded() throws {
@@ -228,7 +237,7 @@ nonisolated final class ProfileWidgetRepository {
         }
 
         if didInsert || didChange {
-            try modelContext.save()
+            try saveUserDataChanges()
         }
     }
 
@@ -245,7 +254,7 @@ nonisolated final class ProfileWidgetRepository {
             sortOrder: (configs.map(\.sortOrder).max() ?? -1) + 1
         )
         modelContext.insert(created)
-        try modelContext.save()
+        try saveUserDataChanges()
         return created
     }
 

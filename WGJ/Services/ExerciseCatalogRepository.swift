@@ -65,6 +65,11 @@ nonisolated final class ExerciseCatalogRepository: ExerciseCatalogRepositoryProt
         )
     }
 
+    private func saveUserDataChanges() throws {
+        try modelContext.save()
+        UserDataSyncTrackerBridge.markLocalMutation()
+    }
+
     func ensureSeedImportedIfNeeded() throws {
         try syncService.ensureSeedImportedIfNeeded()
     }
@@ -90,7 +95,7 @@ nonisolated final class ExerciseCatalogRepository: ExerciseCatalogRepositoryProt
         exercise.secondaryMuscles = validated.secondaryMuscles
         replaceAliases(on: exercise, aliases: validated.aliases)
 
-        try modelContext.save()
+        try saveUserDataChanges()
         ExerciseSearchService.invalidateCatalogIndex(for: modelContext)
         return exercise
     }
@@ -112,7 +117,7 @@ nonisolated final class ExerciseCatalogRepository: ExerciseCatalogRepositoryProt
         replaceAliases(on: exercise, aliases: validated.aliases)
         try refreshTemplateSnapshots(for: exercise)
 
-        try modelContext.save()
+        try saveUserDataChanges()
         ExerciseSearchService.invalidateCatalogIndex(for: modelContext)
     }
 
@@ -121,8 +126,15 @@ nonisolated final class ExerciseCatalogRepository: ExerciseCatalogRepositoryProt
             throw ExerciseCatalogRepositoryError.nonEditableExercise
         }
 
-        modelContext.delete(exercise)
+        let remoteUUID = exercise.remoteUUID
+        modelContext.insert(UserDataDeletionTombstone(
+            entityName: "ExerciseCatalogItem",
+            entityID: UUID(),
+            entityKey: remoteUUID
+        ))
         try modelContext.save()
+        modelContext.delete(exercise)
+        try saveUserDataChanges()
         ExerciseSearchService.invalidateCatalogIndex(for: modelContext)
     }
 

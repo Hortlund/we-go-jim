@@ -41,7 +41,10 @@ struct WGJApp: App {
     }
 
     private static func makeContainerBootstrap() async throws -> ModelContainerBootstrap {
-        try await AppLaunchBootstrapResolver.resolve(
+#if DEBUG
+        try AppStoreLayout.clearPersistentStoreFilesForUITestsIfRequested()
+#endif
+        return try await AppLaunchBootstrapResolver.resolve(
             makeUITestContainer: {
                 try makeUITestContainer()
             },
@@ -167,6 +170,8 @@ struct WGJApp: App {
 
     nonisolated private static func userDataCloudMirrorSchema() -> Schema {
         Schema([
+            CustomExerciseCloudRecord.self,
+            BlockedBroCloudRecord.self,
             UserProfile.self,
             UserDataDeletionTombstone.self,
             ProfileWidgetConfig.self,
@@ -359,6 +364,39 @@ nonisolated enum AppStoreLayout {
             withIntermediateDirectories: true
         )
     }
+
+#if DEBUG
+    static func clearPersistentStoreFilesForUITestsIfRequested(
+        processInfo: ProcessInfo = .processInfo,
+        fileManager: FileManager = .default
+    ) throws {
+        guard processInfo.arguments.contains("UITEST_CLOUD_RESTORE_WIPE_STORES") else {
+            return
+        }
+
+        var directories = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+        if let groupContainerURL = fileManager.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier) {
+            directories.append(
+                groupContainerURL
+                    .appendingPathComponent("Library", isDirectory: true)
+                    .appendingPathComponent("Application Support", isDirectory: true)
+            )
+        }
+
+        for directory in directories {
+            guard fileManager.fileExists(atPath: directory.path) else { continue }
+            let fileURLs = try fileManager.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: nil
+            )
+            for fileURL in fileURLs where storeFilePrefixes.contains(where: { prefix in
+                fileURL.lastPathComponent.hasPrefix(prefix)
+            }) {
+                try? fileManager.removeItem(at: fileURL)
+            }
+        }
+    }
+#endif
 }
 
 enum AppBootstrapRecoveryPolicy {

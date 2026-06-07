@@ -35,6 +35,8 @@ struct ContentView: View {
     @State private var hasScheduledInitialDeferredMaintenance = false
     @State private var fallbackCoachWarmupTask: Task<Void, Never>?
     @State private var pendingDeepLinkURL: URL?
+    @State private var uiTestCloudRestoreProbeStatusID: String?
+    @State private var uiTestCloudRestoreProbeMirrorContainer: ModelContainer?
 
     var body: some View {
         @Bindable var subscriptionState = subscriptionState
@@ -109,6 +111,10 @@ struct ContentView: View {
             guard appPhase == .main else { return }
             syncUserDataCloudMirrorIfActive()
         }
+        .onChange(of: appRuntimeState.userDataSyncStatus.latestSuccessfulImportAt) { _, importFinishedAt in
+            guard appPhase == .main else { return }
+            syncUserDataCloudMirrorAfterImport(importFinishedAt: importFinishedAt)
+        }
         .onChange(of: activeWorkoutPresentationState.activeSessionID) { oldValue, newValue in
             if oldValue == nil, newValue != nil {
                 cancelSubscriptionRefresh()
@@ -125,6 +131,14 @@ struct ContentView: View {
         }
         .onOpenURL { url in
             handleIncomingURL(url)
+        }
+        .overlay(alignment: .bottom) {
+            uiTestCloudRestoreProbeOverlay
+        }
+        .task(id: appPhase) {
+#if DEBUG
+            await runUITestCloudRestoreProbeIfNeeded()
+#endif
         }
         .onChange(of: appRuntimeState.keepsScreenAwake) { _, _ in
             updateIdleTimerState()
@@ -185,17 +199,17 @@ struct ContentView: View {
         let shouldRunFirstRunLocalBootstrap = shouldRunFirstRunLocalBootstrapBeforeMainEntry(
             skipsSplash: skipsSplash
         )
-        let usesCloudBackedRootStore = appRuntimeState.storageMode.usesCloudBackedUserDataStore
+        let cloudFeaturesEnabled = appRuntimeState.cloudSyncEnabled
 
         if PreMainStartupWorkPolicy.shouldPrepareLocalProfileIdentity(
-            cloudSyncEnabled: usesCloudBackedRootStore,
+            cloudSyncEnabled: cloudFeaturesEnabled,
             shouldRunFirstRunLocalBootstrap: shouldRunFirstRunLocalBootstrap
         ) {
             await prepareLocalProfileIdentityIfNeeded()
         }
         await prepareFirstRunLocalBootstrapIfNeeded(shouldRun: shouldRunFirstRunLocalBootstrap)
         let startupWarmupTasks = PreMainStartupWorkPolicy.shouldStartWarmSnapshots(
-            cloudSyncEnabled: usesCloudBackedRootStore
+            cloudSyncEnabled: cloudFeaturesEnabled
         ) ? startStartupWarmSnapshotsIfNeeded() : .none
         if StartupWarmupLaunchPolicy.shouldWaitForWarmupsBeforeMainEntry(
             skipsSplash: skipsSplash,
@@ -208,13 +222,13 @@ struct ContentView: View {
             )
         }
         if PreMainStartupWorkPolicy.shouldRestoreActiveWorkoutBeforeMainEntry(
-            cloudSyncEnabled: usesCloudBackedRootStore
+            cloudSyncEnabled: cloudFeaturesEnabled
         ) {
             await activeWorkoutPresentationState.restoreActiveSessionIfMissing(
                 modelContext: modelContext,
                 backgroundStore: appBackgroundStore,
                 allowsLegacyDraftImport: PreMainStartupWorkPolicy.shouldImportLegacyActiveWorkoutDraftsBeforeMainEntry(
-                    cloudSyncEnabled: usesCloudBackedRootStore
+                    cloudSyncEnabled: cloudFeaturesEnabled
                 )
             )
             await restoreRestTimerFromStoredActiveWorkoutIfNeeded()
@@ -331,7 +345,7 @@ struct ContentView: View {
         enteredMainResumeCriticalMaintenanceTask?.cancel()
 
         if !PostMainStartupWorkPolicy.shouldDeferResumeCriticalMaintenance(
-            cloudSyncEnabled: appRuntimeState.storageMode.usesCloudBackedUserDataStore
+            cloudSyncEnabled: appRuntimeState.cloudSyncEnabled
         ) {
             scheduleResumeCriticalMaintenanceIfNeeded()
             return
@@ -349,7 +363,7 @@ struct ContentView: View {
         enteredMainNoncriticalWorkTask?.cancel()
 
         if !PostMainStartupWorkPolicy.shouldDeferNoncriticalWork(
-            cloudSyncEnabled: appRuntimeState.storageMode.usesCloudBackedUserDataStore
+            cloudSyncEnabled: appRuntimeState.cloudSyncEnabled
         ) {
             performEnteredMainNoncriticalWork()
             return
@@ -384,9 +398,430 @@ struct ContentView: View {
         }
     }
 
+    @ViewBuilder
+    private var uiTestCloudRestoreProbeOverlay: some View {
+#if DEBUG
+        if let uiTestCloudRestoreProbeStatusID {
+            Text(uiTestCloudRestoreProbeStatusID)
+                .font(.caption2)
+                .padding(4)
+                .background(.black.opacity(0.8))
+                .foregroundStyle(.white)
+                .accessibilityIdentifier(uiTestCloudRestoreProbeStatusID)
+        }
+#else
+        EmptyView()
+#endif
+    }
+
+#if DEBUG
+    private struct UITestCloudRestoreProbe {
+        let id: String
+        let mode: String
+
+        var profileName: String { "Restore Probe \(id)" }
+        var exerciseUUID: String { "restore-probe-exercise-\(id)" }
+        var exerciseName: String { "Restore Probe Exercise \(id)" }
+        var templateName: String { "Restore Probe Template \(id)" }
+        var sessionName: String { "Restore Probe Workout \(id)" }
+        var blockedUserRecordName: String { "restore-probe-blocked-\(id)" }
+
+        static func current(processInfo: ProcessInfo = .processInfo) -> UITestCloudRestoreProbe? {
+            let environment = processInfo.environment
+            guard let id = environment["UITEST_CLOUD_RESTORE_PROBE_ID"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !id.isEmpty,
+                  let mode = environment["UITEST_CLOUD_RESTORE_PROBE_MODE"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !mode.isEmpty
+            else {
+                return nil
+            }
+            return UITestCloudRestoreProbe(id: id, mode: mode)
+        }
+    }
+
+    @MainActor
+    private func runUITestCloudRestoreProbeIfNeeded() async {
+        guard appPhase == .main, let probe = UITestCloudRestoreProbe.current() else {
+            return
+        }
+
+        guard appRuntimeState.cloudSyncEnabled else {
+            uiTestCloudRestoreProbeStatusID = "cloud-restore-probe-cloud-unavailable"
+            return
+        }
+
+        do {
+            switch probe.mode {
+            case "seed":
+                try seedUITestCloudRestoreProbe(probe)
+                let mutationStartedAt = Date()
+                UserDataSyncTrackerBridge.markLocalMutation(at: mutationStartedAt)
+                uiTestCloudRestoreProbeStatusID = "cloud-restore-probe-seeded"
+                try await waitForUITestCloudRestoreExport(probe, mutationStartedAt: mutationStartedAt)
+                uiTestCloudRestoreProbeStatusID = "cloud-restore-probe-exported"
+            case "verify":
+                uiTestCloudRestoreProbeStatusID = "cloud-restore-probe-verifying"
+                try await waitForUITestCloudRestoreHydration(probe)
+                uiTestCloudRestoreProbeStatusID = "cloud-restore-probe-verified"
+            case "cleanup":
+                try cleanupUITestCloudRestoreProbe(probe)
+                UserDataSyncTrackerBridge.markLocalMutation()
+                await userDataCloudMirrorCoordinator.syncIfActive()
+                uiTestCloudRestoreProbeStatusID = "cloud-restore-probe-cleaned"
+            default:
+                uiTestCloudRestoreProbeStatusID = "cloud-restore-probe-unknown-mode"
+            }
+        } catch {
+            uiTestCloudRestoreProbeStatusID = "cloud-restore-probe-failed"
+            print("UITest cloud restore probe failed: \(error)")
+        }
+    }
+
+    @MainActor
+    private func waitForUITestCloudRestoreExport(
+        _ probe: UITestCloudRestoreProbe,
+        mutationStartedAt: Date
+    ) async throws {
+        for _ in 0..<90 {
+            startUserDataCloudMirrorIfReady()
+            await userDataCloudMirrorCoordinator.syncIfActive()
+            try await syncUITestCloudRestoreProbeBridge(usesFreshMirrorContainer: false)
+            try await exportUITestCloudRestoreBackup()
+
+            let mirrorContainsFixture = (try? uiTestCloudRestoreMirrorContainsFixture(probe)) == true
+            if mirrorContainsFixture {
+                return
+            }
+            _ = mutationStartedAt
+
+            try await Task.sleep(for: .seconds(1))
+        }
+
+        throw UITestCloudRestoreProbeError.timedOutWaitingForExport
+    }
+
+    @MainActor
+    private func waitForUITestCloudRestoreHydration(_ probe: UITestCloudRestoreProbe) async throws {
+        for _ in 0..<120 {
+            startUserDataCloudMirrorIfReady()
+            await userDataCloudMirrorCoordinator.syncFromFreshMirrorIfActive()
+            try await restoreUITestCloudRestoreBackup()
+            try await syncUITestCloudRestoreProbeBridge(usesFreshMirrorContainer: true)
+
+            if try uiTestCloudRestoreLocalContainsFixture(probe) {
+                return
+            }
+
+            try await Task.sleep(for: .seconds(1))
+        }
+
+        throw UITestCloudRestoreProbeError.timedOutWaitingForHydration
+    }
+
+    private enum UITestCloudRestoreProbeError: Error {
+        case timedOutWaitingForExport
+        case timedOutWaitingForHydration
+    }
+
+    @MainActor
+    private func seedUITestCloudRestoreProbe(_ probe: UITestCloudRestoreProbe) throws {
+        let now = Date()
+        if try profiles(matching: probe).isEmpty {
+            modelContext.insert(UserProfile(
+                displayName: probe.profileName,
+                weeklyWorkoutGoal: 6,
+                createdAt: now,
+                updatedAt: now
+            ))
+        }
+
+        let probeExercise: ExerciseCatalogItem
+        if let existing = try customExercise(matching: probe, in: modelContext) {
+            probeExercise = existing
+            probeExercise.displayName = probe.exerciseName
+            probeExercise.updatedAt = now
+        } else {
+            probeExercise = ExerciseCatalogItem(
+                remoteUUID: probe.exerciseUUID,
+                displayName: probe.exerciseName,
+                categoryName: "Strength",
+                equipmentSummary: "Cable",
+                instructionText: "Probe-only custom exercise.",
+                isCurated: false,
+                sourceName: "custom",
+                updatedAt: now
+            )
+            probeExercise.aliases = [ExerciseAlias(value: "Probe Alias \(probe.id)", exercise: probeExercise)]
+            modelContext.insert(probeExercise)
+        }
+
+        if try profileWidgetConfigs(matching: probe).isEmpty {
+            modelContext.insert(ProfileWidgetConfig(
+                kind: .exerciseVolumeTrend,
+                isEnabled: true,
+                selectedCatalogExerciseUUID: probe.exerciseUUID,
+                selectedExerciseNameSnapshot: probe.exerciseName,
+                exerciseTrendMetric: .volume,
+                sortOrder: 20,
+                createdAt: now,
+                updatedAt: now
+            ))
+        }
+
+        if try templates(matching: probe).isEmpty {
+            let templateID = UUID()
+            let templateExerciseID = UUID()
+            modelContext.insert(WorkoutTemplate(
+                id: templateID,
+                folderID: TemplateRepository.unfiledFolderID,
+                name: probe.templateName,
+                notes: "Cloud restore probe template.",
+                updatedAt: now
+            ))
+            modelContext.insert(TemplateExercise(
+                id: templateExerciseID,
+                templateID: templateID,
+                catalogExerciseUUID: probe.exerciseUUID,
+                exerciseNameSnapshot: probe.exerciseName,
+                categorySnapshot: "Strength",
+                muscleSummarySnapshot: "Probe",
+                sortOrder: 0,
+                updatedAt: now
+            ))
+            modelContext.insert(TemplateExerciseSet(
+                templateExerciseID: templateExerciseID,
+                sortOrder: 0,
+                targetReps: 8,
+                targetWeight: 42,
+                updatedAt: now
+            ))
+        }
+
+        if try completedSessions(matching: probe).isEmpty {
+            let sessionID = UUID()
+            let sessionExerciseID = UUID()
+            modelContext.insert(WorkoutSession(
+                id: sessionID,
+                name: probe.sessionName,
+                status: .completed,
+                startedAt: now.addingTimeInterval(-1800),
+                endedAt: now,
+                durationSeconds: 1800,
+                totalVolume: 420,
+                prHitsCount: 1,
+                updatedAt: now
+            ))
+            modelContext.insert(WorkoutSessionExercise(
+                id: sessionExerciseID,
+                sessionID: sessionID,
+                catalogExerciseUUID: probe.exerciseUUID,
+                exerciseNameSnapshot: probe.exerciseName,
+                categorySnapshot: "Strength",
+                muscleSummarySnapshot: "Probe",
+                totalSetCount: 1,
+                completedSetCount: 1,
+                updatedAt: now
+            ))
+            modelContext.insert(WorkoutSessionSet(
+                sessionExerciseID: sessionExerciseID,
+                sortOrder: 0,
+                actualReps: 10,
+                actualWeight: 42,
+                isCompleted: true,
+                updatedAt: now
+            ))
+        }
+
+        if try blockedBros(matching: probe).isEmpty {
+            modelContext.insert(BlockedBro(
+                userRecordName: probe.blockedUserRecordName,
+                displayNameSnapshot: "Restore Probe Blocked",
+                blockedAt: now
+            ))
+        }
+
+        try modelContext.save()
+    }
+
+    @MainActor
+    private func syncUITestCloudRestoreProbeBridge(usesFreshMirrorContainer: Bool) async throws {
+        let mirrorContainer: ModelContainer
+        if !usesFreshMirrorContainer, let existing = uiTestCloudRestoreProbeMirrorContainer {
+            mirrorContainer = existing
+        } else {
+            let created = try makeUserDataCloudMirrorContainer()
+            uiTestCloudRestoreProbeMirrorContainer = created
+            mirrorContainer = created
+        }
+
+        try await UserDataCloudMirrorBridge(
+            localContainer: modelContext.container,
+            mirrorContainer: mirrorContainer
+        ).syncLocalChangesToMirror()
+    }
+
+    @MainActor
+    private func exportUITestCloudRestoreBackup() async throws {
+        try await UserDataCloudBackupService(
+            localContainer: modelContext.container,
+            mirrorContainer: try makeUserDataCloudMirrorContainer(),
+            backupStore: CloudKitUserDataCloudBackupStore()
+        ).exportCurrentBackup()
+    }
+
+    @MainActor
+    private func restoreUITestCloudRestoreBackup() async throws {
+        _ = try await UserDataCloudBackupService(
+            localContainer: modelContext.container,
+            mirrorContainer: try makeUserDataCloudMirrorContainer(),
+            backupStore: CloudKitUserDataCloudBackupStore()
+        ).restoreLatestBackup()
+    }
+
+    @MainActor
+    private func cleanupUITestCloudRestoreProbe(_ probe: UITestCloudRestoreProbe) throws {
+        let templateRepository = TemplateRepository(modelContext: modelContext)
+        for template in try templates(matching: probe) {
+            try? templateRepository.deleteTemplate(id: template.id)
+        }
+
+        let sessionRepository = WorkoutSessionRepository(modelContext: modelContext)
+        for session in try completedSessions(matching: probe) {
+            try? sessionRepository.deleteSession(id: session.id)
+        }
+
+        let catalogRepository = ExerciseCatalogRepository(modelContext: modelContext)
+        if let exercise = try customExercise(matching: probe, in: modelContext) {
+            try? catalogRepository.deleteCustomExercise(exercise)
+        }
+
+        let blockedRepository = BlockedBroRepository(modelContext: modelContext)
+        try? blockedRepository.unblock(userRecordName: probe.blockedUserRecordName)
+
+        for config in try profileWidgetConfigs(matching: probe) {
+            modelContext.insert(UserDataDeletionTombstone(entityName: "ProfileWidgetConfig", entityID: config.id))
+            modelContext.delete(config)
+        }
+
+        for profile in try profiles(matching: probe) {
+            modelContext.insert(UserDataDeletionTombstone(entityName: "UserProfile", entityID: profile.id))
+            modelContext.delete(profile)
+        }
+
+        try modelContext.save()
+    }
+
+    @MainActor
+    private func uiTestCloudRestoreLocalContainsFixture(_ probe: UITestCloudRestoreProbe) throws -> Bool {
+        try profiles(matching: probe).isEmpty == false
+            && customExercise(matching: probe, in: modelContext) != nil
+            && profileWidgetConfigs(matching: probe).isEmpty == false
+            && templates(matching: probe).isEmpty == false
+            && completedSessions(matching: probe).isEmpty == false
+            && blockedBros(matching: probe).isEmpty == false
+    }
+
+    @MainActor
+    private func uiTestCloudRestoreMirrorContainsFixture(_ probe: UITestCloudRestoreProbe) throws -> Bool {
+        let mirrorContainer = try makeUserDataCloudMirrorContainer()
+        let mirrorContext = ModelContext(mirrorContainer)
+        return try profiles(matching: probe, in: mirrorContext).isEmpty == false
+            && customExerciseCloudRecord(matching: probe, in: mirrorContext) != nil
+            && profileWidgetConfigs(matching: probe, in: mirrorContext).isEmpty == false
+            && templates(matching: probe, in: mirrorContext).isEmpty == false
+            && completedSessions(matching: probe, in: mirrorContext).isEmpty == false
+            && blockedBroCloudRecords(matching: probe, in: mirrorContext).isEmpty == false
+    }
+
+    private func profiles(matching probe: UITestCloudRestoreProbe) throws -> [UserProfile] {
+        try profiles(matching: probe, in: modelContext)
+    }
+
+    private func profiles(matching probe: UITestCloudRestoreProbe, in context: ModelContext) throws -> [UserProfile] {
+        try context.fetch(FetchDescriptor<UserProfile>()).filter { $0.displayName == probe.profileName }
+    }
+
+    private func profileWidgetConfigs(matching probe: UITestCloudRestoreProbe) throws -> [ProfileWidgetConfig] {
+        try profileWidgetConfigs(matching: probe, in: modelContext)
+    }
+
+    private func profileWidgetConfigs(
+        matching probe: UITestCloudRestoreProbe,
+        in context: ModelContext
+    ) throws -> [ProfileWidgetConfig] {
+        try context.fetch(FetchDescriptor<ProfileWidgetConfig>()).filter {
+            $0.selectedCatalogExerciseUUID == probe.exerciseUUID
+        }
+    }
+
+    private func templates(matching probe: UITestCloudRestoreProbe) throws -> [WorkoutTemplate] {
+        try templates(matching: probe, in: modelContext)
+    }
+
+    private func templates(matching probe: UITestCloudRestoreProbe, in context: ModelContext) throws -> [WorkoutTemplate] {
+        try context.fetch(FetchDescriptor<WorkoutTemplate>()).filter { $0.name == probe.templateName }
+    }
+
+    private func completedSessions(matching probe: UITestCloudRestoreProbe) throws -> [WorkoutSession] {
+        try completedSessions(matching: probe, in: modelContext)
+    }
+
+    private func completedSessions(
+        matching probe: UITestCloudRestoreProbe,
+        in context: ModelContext
+    ) throws -> [WorkoutSession] {
+        try context.fetch(FetchDescriptor<WorkoutSession>()).filter {
+            $0.status == .completed && $0.name == probe.sessionName
+        }
+    }
+
+    private func blockedBros(matching probe: UITestCloudRestoreProbe) throws -> [BlockedBro] {
+        try blockedBros(matching: probe, in: modelContext)
+    }
+
+    private func blockedBros(matching probe: UITestCloudRestoreProbe, in context: ModelContext) throws -> [BlockedBro] {
+        try context.fetch(FetchDescriptor<BlockedBro>()).filter {
+            $0.userRecordName == probe.blockedUserRecordName
+        }
+    }
+
+    private func blockedBroCloudRecords(
+        matching probe: UITestCloudRestoreProbe,
+        in context: ModelContext
+    ) throws -> [BlockedBroCloudRecord] {
+        try context.fetch(FetchDescriptor<BlockedBroCloudRecord>()).filter {
+            $0.userRecordName == probe.blockedUserRecordName
+        }
+    }
+
+    private func customExercise(
+        matching probe: UITestCloudRestoreProbe,
+        in context: ModelContext
+    ) throws -> ExerciseCatalogItem? {
+        try context.fetch(FetchDescriptor<ExerciseCatalogItem>()).first {
+            $0.sourceName == "custom" && $0.remoteUUID == probe.exerciseUUID
+        }
+    }
+
+    private func customExerciseCloudRecord(
+        matching probe: UITestCloudRestoreProbe,
+        in context: ModelContext
+    ) throws -> CustomExerciseCloudRecord? {
+        try context.fetch(FetchDescriptor<CustomExerciseCloudRecord>()).first {
+            $0.remoteUUID == probe.exerciseUUID
+        }
+    }
+#endif
+
     private func syncUserDataCloudMirrorIfActive() {
         Task {
             await userDataCloudMirrorCoordinator.syncIfActive()
+        }
+    }
+
+    private func syncUserDataCloudMirrorAfterImport(importFinishedAt: Date?) {
+        Task {
+            await userDataCloudMirrorCoordinator.syncAfterCloudImportIfActive(importFinishedAt: importFinishedAt)
         }
     }
 
@@ -1063,7 +1498,7 @@ struct ContentView: View {
         FirstRunLocalBootstrapPolicy.shouldRunBeforeMainEntry(
             skipsSplash: skipsSplash,
             hasBackgroundStore: appBackgroundStore != nil,
-            cloudSyncEnabled: appRuntimeState.storageMode.usesCloudBackedUserDataStore,
+            cloudSyncEnabled: appRuntimeState.cloudSyncEnabled,
             hasCompletedBootstrap: FirstRunLocalBootstrapProgress.isCompleted()
         )
     }

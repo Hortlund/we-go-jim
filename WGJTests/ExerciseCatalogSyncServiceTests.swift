@@ -350,10 +350,15 @@ struct ExerciseCatalogSyncServiceTests {
                 instructionText: "Drive through the heels."
             )
         )
+        let deletedRemoteUUID = created.remoteUUID
 
         try repository.deleteCustomExercise(created)
 
         #expect(try repository.searchExercises(query: "custom glute bridge").isEmpty)
+        let tombstones = try context.fetch(FetchDescriptor<UserDataDeletionTombstone>())
+        #expect(tombstones.count == 1)
+        #expect(tombstones.first?.entityName == "ExerciseCatalogItem")
+        #expect(tombstones.first?.entityKey == deletedRemoteUUID)
         let remainingExerciseNames = try context.fetch(FetchDescriptor<ExerciseCatalogItem>())
             .map(\.displayName)
             .sorted()
@@ -390,6 +395,7 @@ struct ExerciseCatalogSyncServiceTests {
             ExerciseAttribution.self,
             ExerciseCatalogSyncState.self,
             UserProfile.self,
+            UserDataDeletionTombstone.self,
             ProfileWidgetConfig.self,
             TemplateFolder.self,
             WorkoutTemplate.self,
@@ -424,6 +430,7 @@ struct ExerciseCatalogSyncServiceTests {
         let container = try ModelContainer(for: schema, configurations: [configuration])
         return ModelContext(container)
     }
+
 }
 
 private struct StaticSeedLoader: ExerciseSeedLoading {

@@ -20,6 +20,11 @@ final class BlockedBroRepository {
         self.modelContext = modelContext
     }
 
+    private func saveUserDataChanges() throws {
+        try modelContext.save()
+        UserDataSyncTrackerBridge.markLocalMutation()
+    }
+
     func blockedItems() throws -> [BlockedBro] {
         let descriptor = FetchDescriptor<BlockedBro>(
             sortBy: [SortDescriptor(\.blockedAt, order: .forward)]
@@ -64,13 +69,17 @@ final class BlockedBroRepository {
             modelContext.insert(created)
         }
 
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     func unblock(userRecordName: String) throws {
         guard let existing = try blockedItem(userRecordName: userRecordName) else { return }
+        modelContext.insert(UserDataDeletionTombstone(
+            entityName: "BlockedBro",
+            entityID: existing.id
+        ))
         modelContext.delete(existing)
-        try modelContext.save()
+        try saveUserDataChanges()
     }
 
     private func blockedItem(userRecordName: String) throws -> BlockedBro? {

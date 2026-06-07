@@ -689,3 +689,21 @@ Promote a lesson here only when it clears the bar above.
 - Durable Rule: Share keyboard toolbar rendering through `WGJKeyboardHideButton`/`.wgjMinimalKeyboardToolbar`, but keep the visible hide control icon-only and system-rendered. UIKit input accessories should use a standard `UIBarButtonItem` with `WGJKeyboardHideControl.systemImage`, not a custom text `UIButton` inside a toolbar. Attach the modifier on the screen or sheet that owns the focused fields. Do not assume a parent overlay wrapper will propagate keyboard toolbar items into every focused descendant.
 - How to Verify Next Time: Run `WGJTests/AppPerformanceRuntimeTests.keyboardHideControlUsesSystemBarItemAccessoryStyle`; run an active-workout UI smoke and an Exercises search smoke that focus a field, wait for `keyboard-hide-button`, and confirm the button is icon-only without an extra "Hide" text pill/background.
 - Status: active
+
+## 2026-06-07 - Cloud Mirror Must Include User-Owned Catalog And Safety Data
+
+- Date: 2026-06-07
+- Trigger/Problem: Cross-device restore coverage initially focused on profiles, templates, completed workouts, widgets, and tombstones, but custom exercises and blocked Bros were still only in local stores.
+- Root Cause: The app treated custom catalog rows and block-list rows as implementation details of Exercises and Bros even though they are durable user data that affects restored templates, workout history interpretation, and user safety.
+- Durable Rule: Any user-created catalog entry, user-owned safety/moderation state, or delete tombstone for those records belongs in the user-data cloud mirror bridge unless there is an explicit product decision to keep it device-local. Active in-progress workout snapshots are the separate local-only exception.
+- How to Verify Next Time: Run the user-data mirror bridge tests for custom exercise import/export/delete tombstones and blocked Bro import/export/delete tombstones, plus the app bootstrap schema guard for durable catalog and safety models.
+- Status: active
+
+## 2026-06-07 - New-Device Restore Needs App-Owned Cloud Backup
+
+- Date: 2026-06-07
+- Trigger/Problem: A signed-in iCloud UI restore drill could seed local data into `UserDataCloudMirror.store`, wipe all local stores to simulate a new phone, and still fail to hydrate because the fresh mirror store did not reliably import the seeded rows back from CloudKit.
+- Root Cause: The separate SwiftData CloudKit mirror store can validate local bridge coverage and same-device buffering, but it is not a sufficient product guarantee for remote-only restore when the persistent store identity and Core Data + CloudKit import timing are outside app control.
+- Durable Rule: Do not call new-device restore release-proven from the SwiftData mirror store alone. Keep the mirror bridge for local projection/diffing, but add an app-owned CloudKit backup/restore record or asset that serializes durable user data and can be explicitly fetched on first cloud-enabled launch.
+- How to Verify Next Time: On the signed-in iPhone 17 simulator, run `WGJUITests/WGJUITests/testICloudRemoteOnlyRestoreHydratesFreshLocalStores` and require a pass after wiping local stores; also inspect the fresh mirror/local stores if the test stalls to distinguish remote import failure from bridge import failure.
+- Status: active

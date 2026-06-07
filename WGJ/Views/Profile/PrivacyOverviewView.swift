@@ -43,8 +43,8 @@ struct PrivacyOverviewView: View {
                     title: "Where it lives",
                     lines: [
                         "Core workout, template, exercise, and profile features work locally on your device.",
-                        "When iCloud is available, supported profile, workout, template, and Bros data may sync through Apple's iCloud and CloudKit services.",
-                        "The exercise catalog, cached exercise images, blocked bros, and unsent Bros updates stay on-device unless they need to be sent or synced.",
+                        "When iCloud is available, supported profile, workout, template, custom exercise, block-list, and Bros data may sync through Apple's iCloud and CloudKit services.",
+                        "Bundled exercise catalog data, cached exercise images, active-workout drafts, and unsent Bros updates stay on-device unless they need to be sent or rebuilt.",
                     ]
                 )
 

@@ -905,18 +905,94 @@ final class UserDataDeletionTombstone {
     var id: UUID = UUID()
     var entityName: String = ""
     var entityID: UUID = UUID()
+    var entityKey: String?
     var deletedAt: Date = Date()
 
     init(
         id: UUID = UUID(),
         entityName: String,
         entityID: UUID,
+        entityKey: String? = nil,
         deletedAt: Date = .now
     ) {
         self.id = id
         self.entityName = entityName
         self.entityID = entityID
+        self.entityKey = entityKey
         self.deletedAt = deletedAt
+    }
+}
+
+nonisolated struct CustomExerciseCloudMuscleSnapshot: Codable, Equatable {
+    var remoteID: Int
+    var name: String
+    var nameEn: String
+}
+
+@Model
+final class CustomExerciseCloudRecord {
+    var id: UUID = UUID()
+    var remoteUUID: String = ""
+    var remoteID: Int?
+    var displayName: String = ""
+    var categoryName: String = ""
+    var equipmentSummary: String = ""
+    var instructionText: String?
+    var isHidden: Bool = false
+    var lastUpdateGlobal: Date?
+    var updatedAt: Date = Date()
+    var aliasesData: Data?
+    var primaryMusclesData: Data?
+    var secondaryMusclesData: Data?
+
+    init(
+        id: UUID = UUID(),
+        remoteUUID: String,
+        remoteID: Int? = nil,
+        displayName: String,
+        categoryName: String = "Unknown",
+        equipmentSummary: String = "",
+        instructionText: String? = nil,
+        isHidden: Bool = false,
+        lastUpdateGlobal: Date? = nil,
+        updatedAt: Date = .now,
+        aliasesData: Data? = nil,
+        primaryMusclesData: Data? = nil,
+        secondaryMusclesData: Data? = nil
+    ) {
+        self.id = id
+        self.remoteUUID = remoteUUID
+        self.remoteID = remoteID
+        self.displayName = displayName
+        self.categoryName = categoryName
+        self.equipmentSummary = equipmentSummary
+        self.instructionText = instructionText
+        self.isHidden = isHidden
+        self.lastUpdateGlobal = lastUpdateGlobal
+        self.updatedAt = updatedAt
+        self.aliasesData = aliasesData
+        self.primaryMusclesData = primaryMusclesData
+        self.secondaryMusclesData = secondaryMusclesData
+    }
+}
+
+@Model
+final class BlockedBroCloudRecord {
+    var id: UUID = UUID()
+    var userRecordName: String = ""
+    var displayNameSnapshot: String = ""
+    var blockedAt: Date = Date()
+
+    init(
+        id: UUID = UUID(),
+        userRecordName: String,
+        displayNameSnapshot: String,
+        blockedAt: Date = .now
+    ) {
+        self.id = id
+        self.userRecordName = userRecordName
+        self.displayNameSnapshot = displayNameSnapshot
+        self.blockedAt = blockedAt
     }
 }
 

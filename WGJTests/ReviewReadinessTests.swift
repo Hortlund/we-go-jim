@@ -135,6 +135,20 @@ struct ReviewReadinessTests {
     }
 
     @Test
+    func unblockRecordsCloudMirrorTombstoneForBlockedBro() throws {
+        let context = try makeInMemoryContext()
+        let repository = BlockedBroRepository(modelContext: context)
+
+        try repository.block(userRecordName: "blocked-user", displayName: "Blocked Bro")
+        let blocked = try #require(try context.fetch(FetchDescriptor<BlockedBro>()).first)
+
+        try repository.unblock(userRecordName: "blocked-user")
+
+        #expect(try context.fetch(FetchDescriptor<BlockedBro>()).isEmpty)
+        #expect(try tombstone(entityName: "BlockedBro", entityID: blocked.id, in: context) != nil)
+    }
+
+    @Test
     func deleteAllUserDataClearsLocalRecordsButKeepsSeedCatalog() async throws {
         let context = try makeInMemoryContext()
         let templateRepository = TemplateRepository(modelContext: context)
@@ -178,6 +192,7 @@ struct ReviewReadinessTests {
         )
         context.insert(
             BlockedBro(
+                id: UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!,
                 userRecordName: "blocked-user",
                 displayNameSnapshot: "Blocked Bro"
             )
@@ -215,6 +230,13 @@ struct ReviewReadinessTests {
         #expect(try context.fetch(FetchDescriptor<WorkoutSession>()).isEmpty)
         #expect(try context.fetch(FetchDescriptor<SocialOutboxItem>()).isEmpty)
         #expect(try context.fetch(FetchDescriptor<BlockedBro>()).isEmpty)
+        let tombstones = try context.fetch(FetchDescriptor<UserDataDeletionTombstone>())
+        #expect(tombstones.contains { $0.entityName == "UserProfile" })
+        #expect(tombstones.contains { $0.entityName == "ProfileWidgetConfig" })
+        #expect(tombstones.contains { $0.entityName == "WorkoutTemplate" && $0.entityID == template.id })
+        #expect(tombstones.contains { $0.entityName == "WorkoutSession" && $0.entityID == session.id })
+        #expect(tombstones.contains { $0.entityName == "BlockedBro" && $0.entityID.uuidString == "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB" })
+        #expect(tombstones.contains { $0.entityName == "ExerciseCatalogItem" && $0.entityKey == "custom-1" })
 
         let remainingExercises = try context.fetch(FetchDescriptor<ExerciseCatalogItem>())
         #expect(remainingExercises.count == 1)
@@ -393,6 +415,20 @@ struct ReviewReadinessTests {
         )
         let container = try ModelContainer(for: schema, configurations: [configuration])
         return ModelContext(container)
+    }
+
+    private func tombstone(
+        entityName: String,
+        entityID: UUID,
+        in context: ModelContext
+    ) throws -> UserDataDeletionTombstone? {
+        var descriptor = FetchDescriptor<UserDataDeletionTombstone>(
+            predicate: #Predicate { tombstone in
+                tombstone.entityName == entityName && tombstone.entityID == entityID
+            }
+        )
+        descriptor.fetchLimit = 1
+        return try context.fetch(descriptor).first
     }
 
     private func makeMember(

@@ -1,7 +1,7 @@
 import XCTest
 
 final class WGJUITests: XCTestCase {
-    private enum LaunchMode {
+    private enum LaunchMode: Equatable {
         case iCloud
         case localInMemory
 
@@ -1725,6 +1725,45 @@ final class WGJUITests: XCTestCase {
             catalogExerciseUUID: finalExerciseUUID,
             in: app
         )
+    }
+
+    @MainActor
+    func testICloudRemoteOnlyRestoreHydratesFreshLocalStores() throws {
+        let probeID = "ui-restore-\(UUID().uuidString)"
+
+        let seedApp = launchApp(
+            mode: .iCloud,
+            launchArguments: ["UITEST_CLOUD_RESTORE_WIPE_STORES"],
+            launchEnvironment: [
+                "UITEST_CLOUD_RESTORE_PROBE_ID": probeID,
+                "UITEST_CLOUD_RESTORE_PROBE_MODE": "seed",
+            ]
+        )
+        XCTAssertTrue(
+            seedApp.staticTexts["cloud-restore-probe-exported"].waitForExistence(timeout: 90),
+            "Expected the seed fixture to export before simulating a fresh install restore."
+        )
+        seedApp.terminate()
+
+        let restoreApp = launchApp(
+            mode: .iCloud,
+            launchArguments: ["UITEST_CLOUD_RESTORE_WIPE_STORES"],
+            launchEnvironment: [
+                "UITEST_CLOUD_RESTORE_PROBE_ID": probeID,
+                "UITEST_CLOUD_RESTORE_PROBE_MODE": "verify",
+            ]
+        )
+        XCTAssertTrue(
+            restoreApp.staticTexts["cloud-restore-probe-verified"].waitForExistence(timeout: 120),
+            "Expected an empty local root to hydrate from the CloudKit-backed user-data mirror."
+        )
+        restoreApp.terminate()
+
+        let cleanupApp = launchApp(mode: .iCloud, launchEnvironment: [
+            "UITEST_CLOUD_RESTORE_PROBE_ID": probeID,
+            "UITEST_CLOUD_RESTORE_PROBE_MODE": "cleanup",
+        ])
+        XCTAssertTrue(cleanupApp.staticTexts["cloud-restore-probe-cleaned"].waitForExistence(timeout: 60))
     }
 
     @MainActor
@@ -3598,32 +3637,36 @@ final class WGJUITests: XCTestCase {
 
     @MainActor
     func testActiveWorkoutFocusedSetInputPersistsAcrossMinimizeRestore() throws {
-        let app = launchApp(launchEnvironment: [
-            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
-                name: "Minimize Focused Set Input",
-                notes: "Keep focused weight edits when minimizing.",
-                exercises: [
-                    templatePayloadExercise(
-                        catalogExerciseUUID: "template-focused-minimize-bench",
-                        exerciseNameSnapshot: "Bench Press",
-                        categorySnapshot: "Chest",
-                        muscleSummarySnapshot: "Chest",
-                        targetRepMin: 6,
-                        targetRepMax: 8,
-                        restSeconds: 120,
-                        sets: [
-                            templatePayloadSet(
-                                targetReps: 6,
-                                targetWeight: 100,
-                                loadUnit: "kg",
-                                restSeconds: 120,
-                                isWarmup: false
-                            ),
-                        ]
-                    ),
-                ]
-            ),
-        ])
+        let app = launchApp(
+            mode: .localInMemory,
+            launchArguments: ["UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT"],
+            launchEnvironment: [
+                "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                    name: "Minimize Focused Set Input",
+                    notes: "Keep focused weight edits when minimizing.",
+                    exercises: [
+                        templatePayloadExercise(
+                            catalogExerciseUUID: "template-focused-minimize-bench",
+                            exerciseNameSnapshot: "Bench Press",
+                            categorySnapshot: "Chest",
+                            muscleSummarySnapshot: "Chest",
+                            targetRepMin: 6,
+                            targetRepMax: 8,
+                            restSeconds: 120,
+                            sets: [
+                                templatePayloadSet(
+                                    targetReps: 6,
+                                    targetWeight: 100,
+                                    loadUnit: "kg",
+                                    restSeconds: 120,
+                                    isWarmup: false
+                                ),
+                            ]
+                        ),
+                    ]
+                ),
+            ]
+        )
 
         startPreviewedTemplateWorkout(in: app)
 
@@ -3895,11 +3938,16 @@ final class WGJUITests: XCTestCase {
         launchEnvironment extraLaunchEnvironment: [String: String] = [:]
     ) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = mode.launchArguments + extraLaunchArguments
+        var launchArguments = mode.launchArguments + extraLaunchArguments
+        if mode == .iCloud,
+           extraLaunchEnvironment["UITEST_CLOUD_RESTORE_PROBE_ID"] == nil {
+            launchArguments.append("UITEST_SKIP_USER_DATA_CLOUD_BACKUP")
+        }
+        app.launchArguments = launchArguments
         app.launchEnvironment = extraLaunchEnvironment
         app.launch()
         authenticateIfNeeded(app, mode: mode)
-        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 10))
         return app
     }
 
