@@ -48,6 +48,9 @@ struct WGJApp: App {
             makeLocalFallbackContainer: {
                 try makeLocalFallbackContainer()
             },
+            makeCloudFailureLocalFallbackContainer: {
+                try makeCloudFailureLocalFallbackContainer()
+            },
             describeError: { error in
                 describe(error)
             }
@@ -69,6 +72,18 @@ struct WGJApp: App {
         return try ModelContainer(
             for: appSchema,
             configurations: storeConfigurations(userDataCloudKitDatabase: .none)
+        )
+    }
+
+    private static func makeCloudFailureLocalFallbackContainer() throws -> ModelContainer {
+        let appSchema = fullAppSchema()
+        try AppStoreLayout.prepareHistoryProjectionStoreDirectory()
+        return try ModelContainer(
+            for: appSchema,
+            configurations: storeConfigurations(
+                userDataCloudKitDatabase: .none,
+                userDataConfigurationName: AppStoreLayout.cloudFailureFallbackUserDataConfigurationName
+            )
         )
     }
 
@@ -131,7 +146,8 @@ struct WGJApp: App {
     }
 
     private static func storeConfigurations(
-        userDataCloudKitDatabase: ModelConfiguration.CloudKitDatabase
+        userDataCloudKitDatabase: ModelConfiguration.CloudKitDatabase,
+        userDataConfigurationName: String = AppStoreLayout.userDataConfigurationName
     ) -> [ModelConfiguration] {
         let localCatalogSchema = Schema([
             ExerciseCatalogItem.self,
@@ -190,7 +206,7 @@ struct WGJApp: App {
                 cloudKitDatabase: .none
             ),
             ModelConfiguration(
-                AppStoreLayout.userDataConfigurationName,
+                userDataConfigurationName,
                 schema: userDataSchema,
                 isStoredInMemoryOnly: false,
                 cloudKitDatabase: userDataCloudKitDatabase
@@ -269,6 +285,7 @@ enum AppStoreLayout {
     static let appGroupIdentifier = WeeklyGoalWidgetStore.appGroupIdentifier
     static let localCatalogConfigurationName = "LocalCatalog"
     static let userDataConfigurationName = "UserData"
+    static let cloudFailureFallbackUserDataConfigurationName = "UserDataCloudFailureFallback"
     static let activeWorkoutDraftConfigurationName = "ActiveWorkoutDraft"
     static let socialOutboxConfigurationName = "SocialOutbox"
     static let historyProjectionConfigurationName = "HistoryProjection"

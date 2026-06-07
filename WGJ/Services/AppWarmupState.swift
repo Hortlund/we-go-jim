@@ -138,10 +138,18 @@ nonisolated enum PreMainStartupWorkPolicy {
     static func shouldImportLegacyActiveWorkoutDraftsBeforeMainEntry(cloudSyncEnabled: Bool) -> Bool {
         !cloudSyncEnabled
     }
+
+    static func shouldRestoreActiveWorkoutBeforeMainEntry(cloudSyncEnabled: Bool) -> Bool {
+        !cloudSyncEnabled
+    }
 }
 
 nonisolated enum PostMainStartupWorkPolicy {
     static func shouldDeferNoncriticalWork(cloudSyncEnabled: Bool) -> Bool {
+        cloudSyncEnabled
+    }
+
+    static func shouldDeferResumeCriticalMaintenance(cloudSyncEnabled: Bool) -> Bool {
         cloudSyncEnabled
     }
 }

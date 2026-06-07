@@ -36,7 +36,7 @@ final class AppLaunchBootstrapState {
         resolutionGeneration += 1
         let currentGeneration = resolutionGeneration
 
-        let task = Task(priority: .userInitiated) { [weak self] in
+        let task = Task.detached(priority: .userInitiated) { [weak self] in
             do {
                 let bootstrap = try await resolver()
                 guard !Task.isCancelled else { return }
@@ -47,17 +47,17 @@ final class AppLaunchBootstrapState {
                 )
 
                 guard let self else { return }
-                self.finishResolution(
+                await self.finishResolution(
                     resolved,
                     bootstrap: bootstrap,
                     generation: currentGeneration
                 )
             } catch is CancellationError {
                 guard let self else { return }
-                self.clearResolutionTask(generation: currentGeneration)
+                await self.clearResolutionTask(generation: currentGeneration)
             } catch {
                 guard let self else { return }
-                self.clearResolutionTask(generation: currentGeneration)
+                await self.clearResolutionTask(generation: currentGeneration)
                 preconditionFailure("Could not create ModelContainer bootstrap: \(error)")
             }
         }
@@ -109,9 +109,11 @@ enum AppLaunchBootstrapResolver {
         startupDecisionProvider: @escaping @Sendable () async -> CloudStartupDecision = {
             await CloudStartupPreflight.makeDecisionAsync()
         },
+        cloudContainerBuildTimeout: Duration = .seconds(6),
         makeUITestContainer: @escaping @Sendable () throws -> ModelContainer,
         makeCloudBackedContainer: @escaping @Sendable () throws -> ModelContainer,
         makeLocalFallbackContainer: @escaping @Sendable () throws -> ModelContainer,
+        makeCloudFailureLocalFallbackContainer: (@Sendable () throws -> ModelContainer)? = nil,
         describeError: @escaping @Sendable (Error) -> String
     ) async throws -> ModelContainerBootstrap {
         if processInfo.arguments.contains(uiTestInMemoryStoreArgument) {
@@ -152,17 +154,75 @@ enum AppLaunchBootstrapResolver {
         do {
             try Task.checkCancellation()
             return ModelContainerBootstrap(
-                container: try makeCloudBackedContainer(),
+                container: try await makeCloudBackedContainerWithTimeout(
+                    timeout: cloudContainerBuildTimeout,
+                    makeCloudBackedContainer: makeCloudBackedContainer
+                ),
                 cloudSyncEnabled: true,
                 cloudSyncErrorDescription: cloudSyncErrorDescription
             )
         } catch {
-            let fallbackContainer = try makeLocalFallbackContainer()
+            let fallbackContainer = try (makeCloudFailureLocalFallbackContainer ?? makeLocalFallbackContainer)()
             return ModelContainerBootstrap(
                 container: fallbackContainer,
                 cloudSyncEnabled: false,
                 cloudSyncErrorDescription: describeError(error)
             )
         }
+    }
+
+    private static func makeCloudBackedContainerWithTimeout(
+        timeout: Duration,
+        makeCloudBackedContainer: @escaping @Sendable () throws -> ModelContainer
+    ) async throws -> ModelContainer {
+        let resultBox = CloudContainerBuildResultBox()
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                resultBox.finish(.success(try makeCloudBackedContainer()))
+            } catch {
+                resultBox.finish(.failure(error))
+            }
+        }
+
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        while clock.now < deadline {
+            if let result = resultBox.result() {
+                return try result.get()
+            }
+            try Task.checkCancellation()
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        if let result = resultBox.result() {
+            return try result.get()
+        }
+        throw CloudContainerBuildTimeoutError(timeout: timeout)
+    }
+}
+
+private struct CloudContainerBuildTimeoutError: Error, CustomStringConvertible {
+    let timeout: Duration
+
+    var description: String {
+        "Cloud-backed store creation timed out after \(timeout)."
+    }
+}
+
+private final class CloudContainerBuildResultBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedResult: Result<ModelContainer, Error>?
+
+    func finish(_ result: Result<ModelContainer, Error>) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard storedResult == nil else { return }
+        storedResult = result
+    }
+
+    func result() -> Result<ModelContainer, Error>? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedResult
     }
 }

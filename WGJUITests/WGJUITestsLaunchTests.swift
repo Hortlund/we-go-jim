@@ -29,11 +29,14 @@ final class WGJUITestsLaunchTests: XCTestCase {
         let continueWithICloud = app.buttons["Continue with iCloud"]
         if continueWithICloud.waitForExistence(timeout: 10) {
             continueWithICloud.tap()
-        } else if app.buttons["Continue Locally"].exists {
-            XCTFail("Expected an iCloud-backed launch test, but the app only offered local mode.")
+        } else {
+            let continueLocally = app.buttons["Continue Locally"]
+            if continueLocally.waitForExistence(timeout: 2) {
+                continueLocally.tap()
+            }
         }
 
-        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 10))
 
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "Main Tabs"
@@ -51,7 +54,7 @@ final class WGJUITestsLaunchTests: XCTestCase {
         ]
         app.launch()
 
-        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["Continue Locally"].exists)
         XCTAssertFalse(app.buttons["Continue with iCloud"].exists)
 

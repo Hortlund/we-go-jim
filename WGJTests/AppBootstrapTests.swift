@@ -9,6 +9,15 @@ struct AppBootstrapTests {
     }
 
     @Test
+    func cloudFailureRecoveryUsesDedicatedFallbackUserDataStore() throws {
+        let appSource = try String(contentsOf: appSourceURL(), encoding: .utf8)
+
+        #expect(appSource.contains("makeCloudFailureLocalFallbackContainer"))
+        #expect(appSource.contains("cloudFailureFallbackUserDataConfigurationName"))
+        #expect(appSource.contains("userDataConfigurationName: AppStoreLayout.cloudFailureFallbackUserDataConfigurationName"))
+    }
+
+    @Test
     func storeLayoutUsesNamedStoresForEachConfiguration() {
         #expect(AppStoreLayout.appGroupIdentifier == WeeklyGoalWidgetStore.appGroupIdentifier)
         #expect(AppStoreLayout.configurationNames == [
@@ -36,6 +45,15 @@ struct AppBootstrapTests {
         #expect(appSource.contains("ModelConfiguration.GroupContainer.identifier(appGroupIdentifier)"))
         #expect(appSource.components(separatedBy: "groupContainer: AppStoreLayout.historyProjectionGroupContainer").count - 1 == 1)
         #expect(!appSource.contains("groupContainer: AppStoreLayout.historyProjectionGroupContainer,\n                cloudKitDatabase: userDataCloudKitDatabase"))
+    }
+
+    @Test
+    func appLaunchBootstrapResolutionRunsOffMainActorUntilStatePublication() throws {
+        let source = try String(contentsOf: appLaunchBootstrapSourceURL(), encoding: .utf8)
+
+        #expect(source.contains("Task.detached(priority: .userInitiated)"))
+        #expect(source.contains("await self.finishResolution("))
+        #expect(source.contains("await self.clearResolutionTask("))
     }
 
     @Test
@@ -133,5 +151,14 @@ struct AppBootstrapTests {
             .deletingLastPathComponent()
             .appendingPathComponent("WGJ")
             .appendingPathComponent("WGJApp.swift")
+    }
+
+    private func appLaunchBootstrapSourceURL() -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("WGJ")
+            .appendingPathComponent("Services")
+            .appendingPathComponent("AppLaunchBootstrap.swift")
     }
 }

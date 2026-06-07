@@ -24,6 +24,7 @@ struct ContentView: View {
     @State private var deferredMaintenanceRunTracker = DeferredMaintenanceRunTracker()
     @State private var resumeCriticalMaintenanceTracker = ResumeCriticalMaintenanceTracker()
     @State private var resumeCriticalMaintenanceTask: Task<Void, Never>?
+    @State private var enteredMainResumeCriticalMaintenanceTask: Task<Void, Never>?
     @State private var enteredMainDeferredMaintenanceTask: Task<Void, Never>?
     @State private var enteredMainNoncriticalWorkTask: Task<Void, Never>?
     @State private var subscriptionRefreshTask: Task<Void, Never>?
@@ -194,14 +195,18 @@ struct ContentView: View {
                 brosTask: startupWarmupTasks.brosTask
             )
         }
-        await activeWorkoutPresentationState.restoreActiveSessionIfMissing(
-            modelContext: modelContext,
-            backgroundStore: appBackgroundStore,
-            allowsLegacyDraftImport: PreMainStartupWorkPolicy.shouldImportLegacyActiveWorkoutDraftsBeforeMainEntry(
-                cloudSyncEnabled: appRuntimeState.cloudSyncEnabled
+        if PreMainStartupWorkPolicy.shouldRestoreActiveWorkoutBeforeMainEntry(
+            cloudSyncEnabled: appRuntimeState.cloudSyncEnabled
+        ) {
+            await activeWorkoutPresentationState.restoreActiveSessionIfMissing(
+                modelContext: modelContext,
+                backgroundStore: appBackgroundStore,
+                allowsLegacyDraftImport: PreMainStartupWorkPolicy.shouldImportLegacyActiveWorkoutDraftsBeforeMainEntry(
+                    cloudSyncEnabled: appRuntimeState.cloudSyncEnabled
+                )
             )
-        )
-        await restoreRestTimerFromStoredActiveWorkoutIfNeeded()
+            await restoreRestTimerFromStoredActiveWorkoutIfNeeded()
+        }
 
         if appPhase != .main {
             withAnimation(.easeInOut(duration: 0.2)) {
@@ -299,7 +304,7 @@ struct ContentView: View {
     }
 
     private func handleEnteredMainPhase() {
-        scheduleResumeCriticalMaintenanceIfNeeded()
+        scheduleEnteredMainResumeCriticalMaintenance()
         routePendingDeepLinkIfNeeded()
         routePendingTemplateFileIfNeeded()
         scheduleSubscriptionRefreshIfNeeded()
@@ -308,6 +313,24 @@ struct ContentView: View {
         guard !hasScheduledInitialDeferredMaintenance else { return }
         hasScheduledInitialDeferredMaintenance = true
         scheduleEnteredMainDeferredMaintenance()
+    }
+
+    private func scheduleEnteredMainResumeCriticalMaintenance() {
+        enteredMainResumeCriticalMaintenanceTask?.cancel()
+
+        if !PostMainStartupWorkPolicy.shouldDeferResumeCriticalMaintenance(
+            cloudSyncEnabled: appRuntimeState.cloudSyncEnabled
+        ) {
+            scheduleResumeCriticalMaintenanceIfNeeded()
+            return
+        }
+
+        enteredMainResumeCriticalMaintenanceTask = Task { @MainActor in
+            try? await Task.sleep(for: AppMaintenancePolicy.enteredMainDeferredDelay)
+            guard !Task.isCancelled, appPhase == .main else { return }
+            scheduleResumeCriticalMaintenanceIfNeeded()
+            enteredMainResumeCriticalMaintenanceTask = nil
+        }
     }
 
     private func scheduleEnteredMainNoncriticalWork() {
@@ -440,6 +463,8 @@ struct ContentView: View {
     private func resetResumeCriticalMaintenanceCycle() {
         resumeCriticalMaintenanceTask?.cancel()
         resumeCriticalMaintenanceTask = nil
+        enteredMainResumeCriticalMaintenanceTask?.cancel()
+        enteredMainResumeCriticalMaintenanceTask = nil
         resumeCriticalMaintenanceTracker.resetForegroundCycle()
     }
 

@@ -538,12 +538,21 @@ struct AppLaunchWarmupTests {
         #expect(!PreMainStartupWorkPolicy.shouldImportLegacyActiveWorkoutDraftsBeforeMainEntry(
             cloudSyncEnabled: true
         ))
+
+        #expect(PreMainStartupWorkPolicy.shouldRestoreActiveWorkoutBeforeMainEntry(
+            cloudSyncEnabled: false
+        ))
+        #expect(!PreMainStartupWorkPolicy.shouldRestoreActiveWorkoutBeforeMainEntry(
+            cloudSyncEnabled: true
+        ))
     }
 
     @Test
-    func postMainStartupWorkPolicyDefersNoncriticalCloudBackedReadsPastFirstFrame() {
+    func postMainStartupWorkPolicyDefersCloudBackedReadsPastFirstFrame() {
         #expect(!PostMainStartupWorkPolicy.shouldDeferNoncriticalWork(cloudSyncEnabled: false))
         #expect(PostMainStartupWorkPolicy.shouldDeferNoncriticalWork(cloudSyncEnabled: true))
+        #expect(!PostMainStartupWorkPolicy.shouldDeferResumeCriticalMaintenance(cloudSyncEnabled: false))
+        #expect(PostMainStartupWorkPolicy.shouldDeferResumeCriticalMaintenance(cloudSyncEnabled: true))
     }
 
     @Test
@@ -554,6 +563,15 @@ struct AppLaunchWarmupTests {
         #expect(source.contains("PostMainStartupWorkPolicy.shouldDeferNoncriticalWork"))
         #expect(source.contains("requestWarmups(trigger: .enteredMain)"))
         #expect(source.contains("scheduleWeeklyGoalWidgetPublish()"))
+    }
+
+    @Test
+    func cloudBackedLaunchDefersActiveWorkoutRestoreUntilAfterMainEntry() throws {
+        let source = try String(contentsOf: contentViewSourceURL(), encoding: .utf8)
+
+        #expect(source.contains("PreMainStartupWorkPolicy.shouldRestoreActiveWorkoutBeforeMainEntry"))
+        #expect(source.contains("scheduleEnteredMainResumeCriticalMaintenance()"))
+        #expect(source.contains("PostMainStartupWorkPolicy.shouldDeferResumeCriticalMaintenance"))
     }
 
     @Test
@@ -1321,6 +1339,8 @@ struct AppLaunchWarmupTests {
     func appLaunchBootstrapResolverFallsBackToLocalWhenCloudContainerCreationFails() async throws {
         let localFallbackContainer = try makeContainer()
         enum TestError: Error { case boom }
+        var didRequestStandardLocalFallback = false
+        var didRequestCloudFailureFallback = false
 
         let bootstrap = try await AppLaunchBootstrapResolver.resolve(
             processInfo: MockProcessInfo(arguments: []),
@@ -1340,7 +1360,12 @@ struct AppLaunchWarmupTests {
                 throw TestError.boom
             },
             makeLocalFallbackContainer: {
-                localFallbackContainer
+                didRequestStandardLocalFallback = true
+                return localFallbackContainer
+            },
+            makeCloudFailureLocalFallbackContainer: {
+                didRequestCloudFailureFallback = true
+                return localFallbackContainer
             },
             describeError: { error in
                 String(describing: error)
@@ -1349,6 +1374,55 @@ struct AppLaunchWarmupTests {
 
         #expect(bootstrap.cloudSyncEnabled == false)
         #expect(bootstrap.cloudSyncErrorDescription?.contains("boom") == true)
+        #expect(!didRequestStandardLocalFallback)
+        #expect(didRequestCloudFailureFallback)
+    }
+
+    @Test
+    func appLaunchBootstrapResolverFallsBackWhenCloudContainerCreationTimesOut() async throws {
+        let localFallbackContainer = try makeContainer()
+        let start = ContinuousClock.now
+        var didRequestStandardLocalFallback = false
+        var didRequestCloudFailureFallback = false
+
+        let bootstrap = try await AppLaunchBootstrapResolver.resolve(
+            processInfo: MockProcessInfo(arguments: []),
+            canUseConfiguredCloudKitContainer: true,
+            startupDecisionProvider: {
+                CloudStartupDecision(
+                    accountStatus: .available,
+                    storeMode: .cloudBacked,
+                    cloudSyncErrorDescription: nil
+                )
+            },
+            cloudContainerBuildTimeout: .milliseconds(25),
+            makeUITestContainer: {
+                Issue.record("UI test container should not be requested.")
+                return localFallbackContainer
+            },
+            makeCloudBackedContainer: {
+                Thread.sleep(forTimeInterval: 1)
+                return localFallbackContainer
+            },
+            makeLocalFallbackContainer: {
+                didRequestStandardLocalFallback = true
+                return localFallbackContainer
+            },
+            makeCloudFailureLocalFallbackContainer: {
+                didRequestCloudFailureFallback = true
+                return localFallbackContainer
+            },
+            describeError: { error in
+                String(describing: error)
+            }
+        )
+
+        let elapsed = start.duration(to: .now)
+        #expect(bootstrap.cloudSyncEnabled == false)
+        #expect(bootstrap.cloudSyncErrorDescription?.contains("timed out") == true)
+        #expect(elapsed < .milliseconds(500))
+        #expect(!didRequestStandardLocalFallback)
+        #expect(didRequestCloudFailureFallback)
     }
 
     @Test
