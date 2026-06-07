@@ -5,6 +5,7 @@ import Testing
 import UIKit
 @testable import WGJ
 
+@Suite(.serialized)
 @MainActor
 struct BrosSocialServiceTests {
     @Test
@@ -130,6 +131,67 @@ struct BrosSocialServiceTests {
         )
 
         #expect(secondThumbnailData != firstThumbnailData)
+    }
+
+    @Test
+    func avatarCachePrimeConcurrentCallersWaitForSharedThumbnailDecode() async throws {
+        BrosAvatarCacheService.shared.clear()
+
+        let cacheKey = "membership-concurrent-prime"
+        let avatarData = try #require(makeAvatarData(color: .systemBlue, size: 4096))
+        let firstPrime = Task {
+            await BrosAvatarCacheService.shared.prime(data: avatarData, for: cacheKey, maxPixelSize: 4096)
+        }
+
+        var observedInFlightDecode = false
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(2))
+        while clock.now < deadline {
+            if BrosAvatarCacheService.shared.cachedData(for: cacheKey) == avatarData,
+               BrosAvatarCacheService.shared.cachedThumbnail(for: cacheKey) == nil {
+                observedInFlightDecode = true
+                break
+            }
+            await Task.yield()
+        }
+
+        #expect(observedInFlightDecode)
+
+        await BrosAvatarCacheService.shared.prime(data: avatarData, for: cacheKey, maxPixelSize: 4096)
+        #expect(BrosAvatarCacheService.shared.cachedThumbnail(for: cacheKey) != nil)
+
+        await firstPrime.value
+    }
+
+    @Test
+    func avatarCachePrimeLargerConcurrentRequestSupersedesSmallerDecode() async throws {
+        BrosAvatarCacheService.shared.clear()
+
+        let cacheKey = "membership-larger-prime"
+        let avatarData = try #require(makeAvatarData(color: .systemGreen, size: 4096))
+        let smallerPrime = Task {
+            await BrosAvatarCacheService.shared.prime(data: avatarData, for: cacheKey, maxPixelSize: 72)
+        }
+
+        var observedInFlightDecode = false
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(2))
+        while clock.now < deadline {
+            if BrosAvatarCacheService.shared.cachedData(for: cacheKey) == avatarData,
+               BrosAvatarCacheService.shared.cachedThumbnail(for: cacheKey) == nil {
+                observedInFlightDecode = true
+                break
+            }
+            await Task.yield()
+        }
+
+        #expect(observedInFlightDecode)
+
+        await BrosAvatarCacheService.shared.prime(data: avatarData, for: cacheKey, maxPixelSize: 512)
+        await smallerPrime.value
+
+        let thumbnail = try #require(BrosAvatarCacheService.shared.cachedThumbnail(for: cacheKey))
+        #expect(max(thumbnail.size.width, thumbnail.size.height) > 72)
     }
 
     @Test
@@ -2218,11 +2280,11 @@ struct BrosSocialServiceTests {
         return record
     }
 
-    private func makeAvatarData(color: UIColor) -> Data? {
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 16, height: 16))
+    private func makeAvatarData(color: UIColor, size: CGFloat = 16) -> Data? {
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: size, height: size))
         let image = renderer.image { context in
             color.setFill()
-            context.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
+            context.fill(CGRect(x: 0, y: 0, width: size, height: size))
         }
         return image.pngData()
     }

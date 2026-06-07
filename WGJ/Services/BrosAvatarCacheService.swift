@@ -13,6 +13,20 @@ nonisolated private final class BrosAvatarCacheEntry: NSObject {
     }
 }
 
+nonisolated private struct BrosAvatarInFlightPrime {
+    let dataFingerprint: Int
+    let maxPixelSize: CGFloat
+    var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func satisfies(dataFingerprint: Int, maxPixelSize: CGFloat) -> Bool {
+        self.dataFingerprint == dataFingerprint && self.maxPixelSize >= maxPixelSize
+    }
+
+    func isOwner(dataFingerprint: Int, maxPixelSize: CGFloat) -> Bool {
+        self.dataFingerprint == dataFingerprint && self.maxPixelSize == maxPixelSize
+    }
+}
+
 nonisolated enum BrosAvatarPrimingScope: Equatable, Sendable {
     case firstFrame(feedEventLimit: Int)
     case all
@@ -65,7 +79,7 @@ nonisolated final class BrosAvatarCacheService {
 
     private let cache = NSCache<NSString, BrosAvatarCacheEntry>()
     private let lock = NSLock()
-    private var inFlightFingerprintsByKey: [String: Int] = [:]
+    private var inFlightPrimesByKey: [String: BrosAvatarInFlightPrime] = [:]
 
     private init() {
         cache.countLimit = 256
@@ -102,11 +116,33 @@ nonisolated final class BrosAvatarCacheService {
         }
 
         let dataFingerprint = data.hashValue
-        guard beginPriming(key: key, dataFingerprint: dataFingerprint) else { return }
-        defer { endPriming(key: key, dataFingerprint: dataFingerprint) }
+        guard let staleWaiters = beginPriming(
+            key: key,
+            dataFingerprint: dataFingerprint,
+            maxPixelSize: maxPixelSize
+        ) else {
+            await waitForActivePriming(
+                key: key,
+                dataFingerprint: dataFingerprint,
+                maxPixelSize: maxPixelSize
+            )
+            return
+        }
+        staleWaiters.forEach { $0.resume() }
+        defer {
+            finishPriming(
+                key: key,
+                dataFingerprint: dataFingerprint,
+                maxPixelSize: maxPixelSize
+            )
+        }
 
         let thumbnail = await AvatarImageCodec.thumbnail(from: data, maxPixelSize: maxPixelSize)
-        if shouldStorePrimedThumbnail(for: key, dataFingerprint: dataFingerprint) {
+        if shouldStorePrimedThumbnail(
+            for: key,
+            dataFingerprint: dataFingerprint,
+            maxPixelSize: maxPixelSize
+        ) {
             cache.setObject(
                 BrosAvatarCacheEntry(
                     data: data,
@@ -139,6 +175,8 @@ nonisolated final class BrosAvatarCacheService {
 
     func remove(for key: String) {
         cache.removeObject(forKey: key as NSString)
+        let waiters = cancelPriming(for: key)
+        waiters.forEach { $0.resume() }
     }
 
     func primeVisibleAvatars(
@@ -182,28 +220,99 @@ nonisolated final class BrosAvatarCacheService {
 
     func clear() {
         cache.removeAllObjects()
+        let waiters = cancelAllPriming()
+        waiters.forEach { $0.resume() }
     }
 
-    private func beginPriming(key: String, dataFingerprint: Int) -> Bool {
+    private func beginPriming(
+        key: String,
+        dataFingerprint: Int,
+        maxPixelSize: CGFloat
+    ) -> [CheckedContinuation<Void, Never>]? {
         lock.lock()
         defer { lock.unlock() }
 
-        guard inFlightFingerprintsByKey[key] != dataFingerprint else { return false }
-        inFlightFingerprintsByKey[key] = dataFingerprint
-        return true
+        guard let inFlightPrime = inFlightPrimesByKey[key] else {
+            inFlightPrimesByKey[key] = BrosAvatarInFlightPrime(
+                dataFingerprint: dataFingerprint,
+                maxPixelSize: maxPixelSize
+            )
+            return []
+        }
+
+        if inFlightPrime.satisfies(dataFingerprint: dataFingerprint, maxPixelSize: maxPixelSize) {
+            return nil
+        }
+
+        inFlightPrimesByKey[key] = BrosAvatarInFlightPrime(
+            dataFingerprint: dataFingerprint,
+            maxPixelSize: maxPixelSize
+        )
+        return inFlightPrime.waiters
     }
 
-    private func endPriming(key: String, dataFingerprint: Int) {
+    private func waitForActivePriming(
+        key: String,
+        dataFingerprint: Int,
+        maxPixelSize: CGFloat
+    ) async {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            guard var inFlightPrime = inFlightPrimesByKey[key],
+                  inFlightPrime.satisfies(dataFingerprint: dataFingerprint, maxPixelSize: maxPixelSize)
+            else {
+                lock.unlock()
+                continuation.resume()
+                return
+            }
+
+            inFlightPrime.waiters.append(continuation)
+            inFlightPrimesByKey[key] = inFlightPrime
+            lock.unlock()
+        }
+    }
+
+    private func finishPriming(
+        key: String,
+        dataFingerprint: Int,
+        maxPixelSize: CGFloat
+    ) {
+        let waiters: [CheckedContinuation<Void, Never>]
         lock.lock()
-        if inFlightFingerprintsByKey[key] == dataFingerprint {
-            inFlightFingerprintsByKey.removeValue(forKey: key)
+        if inFlightPrimesByKey[key]?.isOwner(dataFingerprint: dataFingerprint, maxPixelSize: maxPixelSize) == true {
+            waiters = inFlightPrimesByKey.removeValue(forKey: key)?.waiters ?? []
+        } else {
+            waiters = []
         }
         lock.unlock()
+        waiters.forEach { $0.resume() }
     }
 
-    private func shouldStorePrimedThumbnail(for key: String, dataFingerprint: Int) -> Bool {
+    private func shouldStorePrimedThumbnail(
+        for key: String,
+        dataFingerprint: Int,
+        maxPixelSize: CGFloat
+    ) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        return inFlightFingerprintsByKey[key] == dataFingerprint
+        return inFlightPrimesByKey[key]?.isOwner(
+            dataFingerprint: dataFingerprint,
+            maxPixelSize: maxPixelSize
+        ) == true
+    }
+
+    private func cancelPriming(for key: String) -> [CheckedContinuation<Void, Never>] {
+        lock.lock()
+        let waiters = inFlightPrimesByKey.removeValue(forKey: key)?.waiters ?? []
+        lock.unlock()
+        return waiters
+    }
+
+    private func cancelAllPriming() -> [CheckedContinuation<Void, Never>] {
+        lock.lock()
+        let waiters = inFlightPrimesByKey.values.flatMap(\.waiters)
+        inFlightPrimesByKey.removeAll()
+        lock.unlock()
+        return waiters
     }
 }
