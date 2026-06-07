@@ -67,7 +67,7 @@ struct SupportView: View {
                     title: "What to send",
                     lines: [
                         "App bugs, crashes, account state, iCloud sync, and local-only fallback issues.",
-                        "Privacy questions, delete-my-data follow-up, App Review contact, and support URL verification.",
+                        "Privacy questions, data-deletion follow-up, account issues, and moderation concerns.",
                         "Bros reports, blocks, abuse, harassment, unsafe content, and moderation concerns.",
                         "Purchase, restore, subscription, and billing-support questions for We Go Jim Pro.",
                     ]
@@ -75,8 +75,8 @@ struct SupportView: View {
 
                 if AppRuntimeConfig.supportURL == nil {
                     WGJEmptyStateCard(
-                        title: "Support URL needed",
-                        message: "App Store Connect needs a reachable support URL before review. Keep this in-app support channel available too.",
+                        title: "Support link unavailable",
+                        message: "The support link is not available right now. Use the contact options above for help.",
                         icon: "link.badge.plus"
                     )
                 }

@@ -32,7 +32,7 @@ struct ActiveWorkoutExerciseComponentSummaryView: View {
             )
 
             if resolution.hasOverride {
-                Text("Override active")
+                Text("Using your pick")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(WGJTheme.success)
             }
@@ -103,8 +103,8 @@ struct ActiveWorkoutExerciseComponentPickerSheet: View {
                     WGJSectionHeader(
                         "Choose Exercise",
                         subtitle: draft.resolution.hasOverride
-                            ? "You can keep the override or switch back to the suggested option."
-                            : "Pick another option for this slot without changing the template."
+                            ? "Keep your pick or switch back to the recommended option."
+                            : "Pick a different exercise for today only."
                     )
 
                     ActiveWorkoutExerciseComponentSummaryView(resolution: draft.resolution)

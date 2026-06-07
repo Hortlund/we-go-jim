@@ -144,7 +144,7 @@ struct SettingsDiagnosticsSection: View {
                 )
 
                 Text(
-                    "CloudKit Console query: \(cloudProbe.consoleEnvironmentName) > \(cloudProbe.databaseName) > \(CloudSyncDebugProbeDescriptor.zoneName) > \(CloudSyncDebugProbeDescriptor.recordType). Add a QUERYABLE index for `probeKey`, then query `probeKey == \(CloudSyncDebugProbeDescriptor.recordName)`. Do not leave a blank filter row in the Console because it defaults to `recordName` and throws the queryable error."
+                    "Cloud probe written. Check CloudKit Console for the probe record and index status."
                 )
                 .font(.caption)
                 .foregroundStyle(WGJTheme.textSecondary)

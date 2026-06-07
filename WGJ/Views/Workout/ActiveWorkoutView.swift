@@ -300,7 +300,7 @@ struct ActiveWorkoutView: View {
         } else if isEndingSession || completedSessionID != nil {
             WGJEmptyStateCard(
                 title: "Wrapping up workout",
-                message: "Saving the session and preparing the next step.",
+                message: "Saving your workout.",
                 icon: "checkmark.circle"
             )
         } else {
@@ -466,12 +466,12 @@ struct ActiveWorkoutView: View {
             if sessionExercises.isEmpty {
                 WGJActionHeader(
                     "Exercises",
-                    subtitle: "Add exercises and log each set inline."
+                    subtitle: "Add exercises and log sets as you train."
                 )
             } else {
                 WGJActionHeader(
                     "Exercises",
-                    subtitle: "Swipe the exercise header to delete an exercise, or use exercise actions to move it anywhere in the workout."
+                    subtitle: "Add, reorder, or remove exercises during this workout."
                 ) {
                     Button {
                         pickerTarget = .exercise
@@ -3471,7 +3471,7 @@ private struct ActiveWorkoutSaveTemplateSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    WGJSectionHeader("Save as Template", subtitle: "Use this workout as a reusable plan")
+                    WGJSectionHeader("Save as Template", subtitle: "Save this workout as a template.")
 
                     TextField("Template name", text: $templateNameDraft)
                         .textInputAutocapitalization(.words)

@@ -156,7 +156,7 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(WGJTheme.textSecondary)
 
-                        Text("Critical alerts are not available in this build. Apple requires a special entitlement and extra approval before a workout notification can bypass Silent Mode in the background.")
+                        Text("Background rest-timer alerts use the strongest alert style currently available, but Silent Mode may still affect them.")
                             .font(.caption)
                             .foregroundStyle(WGJTheme.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)

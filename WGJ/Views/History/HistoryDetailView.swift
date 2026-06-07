@@ -88,7 +88,7 @@ struct HistoryDetailView: View {
                     if sessionExercises.isEmpty {
                         WGJEmptyStateCard(
                             title: "No exercises logged",
-                            message: "Add exercises to update this workout and save corrected sets or rest values.",
+                            message: "Add any exercises that are missing from this workout.",
                             icon: "list.bullet.rectangle"
                         ) {
                             Button("Add Exercise") {
@@ -185,12 +185,12 @@ struct HistoryDetailView: View {
             if sessionExercises.isEmpty {
                 WGJActionHeader(
                     "Exercises",
-                    subtitle: "Add exercises and update the logged sets below."
+                    subtitle: "Exercises saved for this workout."
                 )
             } else {
                 WGJActionHeader(
                     "Exercises",
-                    subtitle: "Swipe from the top of a card to delete, or use the card menu."
+                    subtitle: "Logged exercises from this workout. Card menus include edit and delete actions."
                 ) {
                     Button {
                         showingExercisePicker = true
@@ -216,7 +216,7 @@ struct HistoryDetailView: View {
 
     private func headerCard(_ session: HistoryDetailSnapshotBuilder.SessionSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            WGJActionHeader("Session", subtitle: "Review the saved workout and adjust any logged values") {
+            WGJActionHeader("Session", subtitle: "Saved workout details and logged values") {
                 WGJMetricPill(
                     systemImage: personalRecordSummary.highlightedSetCount > 0 ? "trophy.fill" : "flag.checkered",
                     value: personalRecordSummary.label,
@@ -291,9 +291,9 @@ struct HistoryDetailView: View {
             if ProAccessPolicy.canShowMuscleMap(isPro: subscriptionState.isPro) {
                 WorkoutMuscleHeatmapCard(
                     title: "Muscle Map",
-                    subtitle: "Heatmap from completed working sets in this workout.",
+                    subtitle: "Muscles trained in this workout.",
                     snapshot: muscleHeatmap,
-                    emptyMessage: "No completed working sets with muscle data for this workout."
+                    emptyMessage: "Complete sets with muscle data will fill this map."
                 )
             } else {
                 ProLockedCard(
@@ -312,7 +312,7 @@ struct HistoryDetailView: View {
             VStack(alignment: .leading, spacing: 12) {
                 WGJActionHeader(
                     "Cardio Phases",
-                    subtitle: "Timed warmup and cooldown blocks saved with this workout."
+                    subtitle: "Warmup and cooldown work from this session."
                 )
 
                 ForEach(orderedCardioBlocks, id: \.id) { cardioBlock in
@@ -326,7 +326,7 @@ struct HistoryDetailView: View {
                         targetDurationSeconds: cardioBlock.targetDurationSeconds,
                         statusText: cardioBlock.isCompleted ? "Complete" : "Not finished",
                         statusTint: cardioBlock.isCompleted ? WGJTheme.success : WGJTheme.warning,
-                        footnote: cardioBlock.isCompleted ? nil : "This session was finished before this cardio phase was completed."
+                        footnote: cardioBlock.isCompleted ? nil : "This cardio block was not completed before the workout ended."
                     )
                 }
             }

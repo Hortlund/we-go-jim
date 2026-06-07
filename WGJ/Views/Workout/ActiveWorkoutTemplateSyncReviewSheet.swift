@@ -14,7 +14,7 @@ struct ActiveWorkoutTemplateSyncReviewSheet: View {
                     if let editedWorkoutNotes = preview.editedWorkoutNotes {
                         section(
                             title: "Workout Notes",
-                            subtitle: "Reusable workout-level notes that changed during this session."
+                            subtitle: "Workout notes changed during this session."
                         ) {
                             summaryRow(
                                 title: "Workout Notes",
@@ -117,7 +117,7 @@ struct ActiveWorkoutTemplateSyncReviewSheet: View {
                     if !preview.editedExercises.isEmpty {
                         section(
                             title: "Edited Settings",
-                            subtitle: "Template-owned settings that changed during the workout."
+                            subtitle: "Reusable exercise targets changed during this workout."
                         ) {
                             ForEach(preview.editedExercises) { edited in
                                 summaryRow(
@@ -160,7 +160,7 @@ struct ActiveWorkoutTemplateSyncReviewSheet: View {
                 .foregroundStyle(WGJTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text("Apply these reusable changes to the template, or keep the original template and just save the finished workout.")
+            Text("Update the template with these changes, or keep it as-is and save only this workout.")
                 .font(.caption)
                 .foregroundStyle(WGJTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)

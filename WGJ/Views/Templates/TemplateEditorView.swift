@@ -251,12 +251,12 @@ struct TemplateEditorView: View {
         if exerciseDrafts.isEmpty {
             WGJActionHeader(
                 "Exercises",
-                subtitle: "Build your workout with cleaner set targets."
+                subtitle: "Add exercises and set targets."
             )
         } else {
             WGJActionHeader(
                 "Exercises",
-                subtitle: "Swipe from the top of a card to delete, or use the card menu to move exercises anywhere in the template."
+                subtitle: "Add, reorder, or remove exercises in this template."
             ) {
                 Button {
                     pickerTarget = .exercise
@@ -270,7 +270,7 @@ struct TemplateEditorView: View {
         if exerciseDrafts.isEmpty {
             WGJEmptyStateCard(
                 title: "No exercises selected",
-                message: "Add exercises to build the template and set up the planned sets.",
+                message: "Add exercises, then plan sets and rest.",
                 icon: "list.bullet.rectangle"
             ) {
                 Button("Add Exercise") {
@@ -803,7 +803,7 @@ struct TemplateEditorView: View {
     private func cardioSectionSubtitle(for phase: WorkoutCardioPhase) -> String {
         switch phase {
         case .preWorkout:
-            return "Optional warmup cardio that runs before the lift roster starts."
+            return "Optional warmup cardio before the main workout."
         case .postWorkout:
             return "Optional cooldown cardio that starts after every exercise is done."
         }
@@ -821,9 +821,9 @@ struct TemplateEditorView: View {
     private func cardioFootnote(for phase: WorkoutCardioPhase) -> String {
         switch phase {
         case .preWorkout:
-            return "This section stays pinned before every exercise in the workout."
+            return "Shows before the main workout."
         case .postWorkout:
-            return "This section stays pinned after every exercise in the workout."
+            return "Shows after the main workout."
         }
     }
 

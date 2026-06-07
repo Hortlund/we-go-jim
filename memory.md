@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-06-07 - UI Copy Must Not Sound Like Implementation Notes
+
+- Date: 2026-06-07
+- Trigger/Problem: The user called out template-library subtitle copy that sounded like instructions or notes about what had been changed rather than natural app text.
+- Root Cause: Several UI strings described implementation/design choices, internal service state, App Review setup, or developer-facing actions instead of the user's current state and available app actions.
+- Durable Rule: User-facing copy should be short, natural, and product-facing. Avoid phrases that mention implementation details, build configuration, App Store Connect, internal service names, hidden menus, payloads, outbox items, or instructions to the developer. Prefer copy that describes what the user can do or what the app state means.
+- How to Verify Next Time: Before shipping copy changes, scan changed Swift files for internal terms such as `App Store Connect`, `RevenueCat reports`, `payload`, `outbox`, `hidden menus`, `build`, and instruction-like phrases such as `Use this`, `Swipe from`, or `Open the editor`, then review the visible UI wording in context.
+- Status: active
+
 ## 2026-06-07 - App Store Icon Must Be Opaque Source Art
 
 - Date: 2026-06-07

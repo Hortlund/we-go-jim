@@ -39,13 +39,13 @@ struct TemplatesOverviewView: View {
             LazyVStack(alignment: .leading, spacing: 16) {
                 WGJRootHeader(
                     "Templates",
-                    subtitle: "Create, file, and tweak reusable workout plans."
+                    subtitle: "Reusable plans for the sessions you come back to."
                 ) {
                     headerActions
                 }
 
                 VStack(alignment: .leading, spacing: 10) {
-                    WGJSectionHeader("Folder Filter", subtitle: "Use chips to focus templates")
+                    WGJSectionHeader("Folder Filter", subtitle: "Narrow the library by folder.")
 
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
@@ -62,7 +62,7 @@ struct TemplatesOverviewView: View {
                 .wgjCardContainer(strong: true)
 
                 LazyVStack(alignment: .leading, spacing: 10) {
-                    WGJSectionHeader("Template Library", subtitle: "Manage workouts without hidden menus")
+                    WGJSectionHeader("Template Library", subtitle: "Saved plans ready to edit, organize, or start.")
 
                     if displayedTemplates.isEmpty {
                         WGJEmptyStateCard(
@@ -78,12 +78,12 @@ struct TemplatesOverviewView: View {
                 }
 
                 LazyVStack(alignment: .leading, spacing: 10) {
-                    WGJSectionHeader("Folders", subtitle: "Open, rename, and organize templates")
+                    WGJSectionHeader("Folders", subtitle: "Groups for splits, goals, and training blocks.")
 
                     if folders.isEmpty {
                         WGJEmptyStateCard(
                             title: "No folders yet",
-                            message: "Create folders to organize templates by split, goal, or training block.",
+                            message: "Group templates by split, goal, or training block.",
                             icon: "folder"
                         )
                     }
@@ -445,8 +445,8 @@ struct TemplateFolderEditorSheet: View {
                     WGJSectionHeader(
                         isEditing ? "Rename Folder" : "Create Folder",
                         subtitle: isEditing
-                            ? "Update the folder name anywhere this group appears."
-                            : "Use folders to group templates by split, goal, or training block."
+                            ? "This updates the name across your template library."
+                            : "Set up a group for a split, goal, or training block."
                     )
 
                     VStack(alignment: .leading, spacing: 8) {
@@ -462,7 +462,7 @@ struct TemplateFolderEditorSheet: View {
                             .wgjPillField()
                             .accessibilityIdentifier("template-folder-name-field")
 
-                        Text("Keep names short and obvious so templates stay easy to browse.")
+                        Text("Short names are easiest to scan.")
                             .font(.caption)
                             .foregroundStyle(WGJTheme.textSecondary)
                     }

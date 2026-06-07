@@ -204,7 +204,7 @@ struct TemplateDetailView: View {
             VStack(alignment: .leading, spacing: 12) {
                 WGJActionHeader(
                     "Cardio Phases",
-                    subtitle: "Separate warmup and cooldown blocks pinned around the main exercises."
+                    subtitle: "Warmup and cooldown saved with this template."
                 ) {
                     Button {
                         showingEditor = true
@@ -239,8 +239,8 @@ struct TemplateDetailView: View {
             WGJActionHeader(
                 "Exercises",
                 subtitle: templateExercises.isEmpty
-                    ? "Open the editor to build this template, then fine-tune targets here."
-                    : "Swipe from the top of a card to delete. Open the editor to add or reorder exercises."
+                    ? "Add exercises, then tune sets and rest."
+                    : "Tune sets here, or edit the template to add and reorder exercises."
             ) {
                 if templateExercises.isEmpty {
                     Button {
@@ -262,7 +262,7 @@ struct TemplateDetailView: View {
             if templateExercises.isEmpty {
                 WGJEmptyStateCard(
                     title: "No exercises yet",
-                    message: "Open the template editor to add exercises, then return here to tune set targets and rest periods.",
+                    message: "Add exercises, then tune set targets and rest.",
                     icon: "list.bullet.rectangle"
                 ) {
                     Button("Open Template Editor") {

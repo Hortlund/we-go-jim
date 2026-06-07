@@ -382,7 +382,7 @@ nonisolated final class WorkoutTemplateSyncService {
             let templateTargetSequence = templateSetSnapshots.map(\.targetIdentity)
             let sessionTargetSequence = sessionSetSnapshots.map(\.targetIdentity)
             if templateTargetSequence != sessionTargetSequence {
-                changes.append("Set layout changed")
+                changes.append("Set plan changed")
             }
         }
 
@@ -420,7 +420,7 @@ nonisolated final class WorkoutTemplateSyncService {
         }
 
         if normalizedSession.isEmpty {
-            changes.append("The reusable workout note will be cleared.")
+            changes.append("The template workout note will be cleared.")
         } else {
             changes.append(normalizedSession)
         }

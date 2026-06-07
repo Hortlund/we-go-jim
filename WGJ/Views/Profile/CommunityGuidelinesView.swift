@@ -35,7 +35,7 @@ struct CommunityGuidelinesView: View {
                 guidelineCard(
                     title: "What happens next",
                     lines: [
-                        "Reported content can be reviewed through the configured support channel.",
+                        "Reported content can be reviewed by support.",
                         "Abuse, unsafe content, or repeated rule violations can lead to removal from a circle, support follow-up, or future moderation action.",
                     ]
                 )

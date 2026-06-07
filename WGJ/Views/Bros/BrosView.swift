@@ -139,7 +139,7 @@ final class BrosViewModel {
         }
 
         guard AppRuntimeConfig.reviewPolicy.brosEnabled else {
-            state = .unavailable("Bros is disabled for this build.")
+            state = .unavailable("Bros is unavailable right now. Workouts, templates, history, and profile still work locally.")
             return
         }
 
@@ -1932,7 +1932,7 @@ struct BrosView: View {
             UIPasteboard.general.string = supportCopyText(for: draft)
             showSupportNotice(
                 title: "Mail Unavailable",
-                message: "The report payload was copied to your clipboard. Send it to \(draft.recipient)."
+                message: "The report details were copied to your clipboard. Send them to \(draft.recipient)."
             )
             return
         }
@@ -1941,10 +1941,10 @@ struct BrosView: View {
             guard !accepted else { return }
             UIPasteboard.general.string = supportCopyText(for: draft)
             Task { @MainActor in
-                showSupportNotice(
-                    title: "Mail Unavailable",
-                    message: "The report payload was copied to your clipboard. Send it to \(draft.recipient)."
-                )
+                    showSupportNotice(
+                        title: "Mail Unavailable",
+                        message: "The report details were copied to your clipboard. Send them to \(draft.recipient)."
+                    )
             }
         }
     }

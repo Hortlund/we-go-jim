@@ -8,7 +8,7 @@ struct ExerciseDetailStatsSection: View {
         VStack(alignment: .leading, spacing: 12) {
             WGJSectionHeader(
                 "Workout Stats",
-                subtitle: "Exercise-owned progress from your completed workouts."
+                subtitle: "Progress from your completed workouts."
             )
 
             if let snapshot {
@@ -19,7 +19,7 @@ struct ExerciseDetailStatsSection: View {
                         if let series = snapshot.oneRepMaxTrend {
                             ExerciseMetricTrendCard(
                                 title: "Strength Trend",
-                                subtitle: "Best estimated 1RM across recent workouts.",
+                                subtitle: "Your best estimated 1RM from recent workouts.",
                                 accent: WGJTheme.accentGold,
                                 series: series
                             )

@@ -345,7 +345,7 @@ struct ProfileView: View {
                     .foregroundStyle(WGJTheme.textPrimary)
             }
 
-            Text("Your profile is ready. Widgets will appear right after the tab settles.")
+            Text("Your profile is ready. Widgets will appear in a moment.")
                 .font(.subheadline)
                 .foregroundStyle(WGJTheme.textSecondary)
         }

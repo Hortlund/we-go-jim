@@ -24,7 +24,7 @@ struct HistoryOverviewView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
-                WGJRootHeader("History", subtitle: "Review completed sessions, volume, and best sets.") {
+                WGJRootHeader("History", subtitle: "Completed sessions, volume, and best sets.") {
                     Button("Calendar") {
                         openWorkoutCalendar()
                     }
@@ -46,8 +46,8 @@ struct HistoryOverviewView: View {
                     WGJEmptyStateCard(
                         title: selectedDayFilter == nil ? "No completed workouts yet" : "No workouts on this day",
                         message: selectedDayFilter == nil
-                            ? "Finish an active session to build up your history."
-                            : "Pick another logged day in the calendar or clear the filter.",
+                            ? "Completed workouts will appear here."
+                            : "No workouts were logged for this date.",
                         icon: "clock.arrow.trianglehead.counterclockwise.rotate.90"
                     )
                 }
@@ -580,7 +580,7 @@ private struct HistoryArchivedWorkoutsSheet: View {
                 if archivedSessions.isEmpty {
                     WGJEmptyStateCard(
                         title: "No hidden workouts",
-                        message: "Workouts you hide from history will show up here so you can restore them later.",
+                        message: "Hidden workouts appear here and can be restored anytime.",
                         icon: "archivebox"
                     )
                 } else {
@@ -837,7 +837,7 @@ private struct HistoryWorkoutCalendarSheet: View {
                     .buttonStyle(WGJGhostButtonStyle())
                 }
 
-                Text("Select a day to filter history. Heatmap shading marks logged days, and deeper color means more workouts.")
+                Text("Logged days are highlighted. Darker days have more workouts.")
                     .font(.subheadline)
                     .foregroundStyle(WGJTheme.textSecondary)
 

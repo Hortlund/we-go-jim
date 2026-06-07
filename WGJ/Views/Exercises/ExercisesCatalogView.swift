@@ -282,7 +282,7 @@ struct ExercisesCatalogView: View {
                 pendingExerciseForAdd = nil
             }
         } message: {
-            Text("Start an empty workout first to add exercises on the fly.")
+            Text("Start a workout now and this exercise will be added.")
         }
         .alert("Exercises Error", isPresented: $showingError) {
             Button("OK", role: .cancel) { }
@@ -352,7 +352,7 @@ struct ExercisesCatalogView: View {
             if shouldRenderHeader {
                 WGJRootHeader(
                     "Exercises",
-                    subtitle: "Search, filter, and add exercises fast.",
+                    subtitle: "Find exercises by name, body part, or category.",
                     titleAccessibilityIdentifier: "exercises-catalog-title"
                 )
                 .opacity(1 - progress)
@@ -794,14 +794,14 @@ struct ExercisesCatalogView: View {
 
     private var emptyStateMessage: String {
         if loadState == .loading || isBootstrappingCatalog {
-            return "Loading the bundled exercise library."
+            return "Getting exercises ready."
         }
         if controller.snapshot.catalogExercises.isEmpty {
             return loadState == .failed
-                ? "The bundled exercise library could not be loaded yet."
-                : "The bundled exercise library has not finished loading."
+                ? "Exercises are not available right now."
+                : "Exercises are still getting ready."
         }
-        return "Try changing the search text or relaxing the current filters."
+        return "Try a different search or fewer filters."
     }
 
     private var emptyStateIcon: String {
@@ -1526,7 +1526,7 @@ struct ExerciseDetailDestinationView: View {
 
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("This removes \(exercise.displayName) from your custom exercise library. Bundled exercises cannot be deleted.")
+            Text("This removes \(exercise.displayName) from your exercises. Built-in exercises cannot be deleted.")
         }
         .task(id: exercise.remoteUUID) {
             loadStatsSnapshot()
@@ -1635,7 +1635,7 @@ private struct CustomExerciseEditorView: View {
         availableMuscles: [MuscleGroup],
         suggestedCategories: [String],
         title: String = "New Exercise",
-        subtitle: String = "Add a movement to your local library.",
+        subtitle: String = "Save a custom exercise for future workouts.",
         saveButtonTitle: String = "Save",
         onCancel: @escaping () -> Void,
         onSave: @escaping () -> Void
@@ -1721,7 +1721,7 @@ private struct CustomExerciseEditorView: View {
                 .textInputAutocapitalization(.sentences)
                 .wgjPillField()
 
-            Text("Use commas or line breaks if you want the exercise to show as separate steps.")
+            Text("Commas and line breaks will appear as separate steps.")
                 .font(.footnote)
                 .foregroundStyle(WGJTheme.textSecondary)
         }
@@ -1731,7 +1731,7 @@ private struct CustomExerciseEditorView: View {
 
     private var categorySuggestions: some View {
         VStack(alignment: .leading, spacing: 10) {
-            WGJSectionHeader("Common Categories", subtitle: "Tap a category to fill the field above.")
+            WGJSectionHeader("Common Categories", subtitle: "Quick picks for the category field.")
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {

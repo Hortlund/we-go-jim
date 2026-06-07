@@ -360,7 +360,7 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
                 changes.append("Superset pairing removed")
             case let (.some(templateMembership), .some(sessionMembership)):
                 if templateMembership.position != sessionMembership.position {
-                    changes.append("Superset slot \(templateMembership.position.label) -> \(sessionMembership.position.label)")
+                    changes.append("Superset order \(templateMembership.position.label) -> \(sessionMembership.position.label)")
                 } else if templateMembership.roundRestSeconds != sessionMembership.roundRestSeconds {
                     changes.append(
                         "Superset rest \(formattedRest(templateMembership.roundRestSeconds)) -> \(formattedRest(sessionMembership.roundRestSeconds))"
@@ -397,7 +397,7 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
             let templateTargetSequence = templateSetSnapshots.map(\.targetIdentity)
             let sessionTargetSequence = sessionSetSnapshots.map(\.targetIdentity)
             if templateTargetSequence != sessionTargetSequence {
-                changes.append("Set layout changed")
+                changes.append("Set plan changed")
             }
         }
 
@@ -439,7 +439,7 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
         }
 
         if normalizedSession.isEmpty {
-            changes.append("The reusable workout note will be cleared.")
+            changes.append("The template workout note will be cleared.")
         } else {
             changes.append(normalizedSession)
         }

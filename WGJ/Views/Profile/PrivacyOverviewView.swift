@@ -24,8 +24,8 @@ struct PrivacyOverviewView: View {
                     .wgjCardContainer(strong: true)
                 } else {
                     WGJEmptyStateCard(
-                        title: "Privacy policy needed",
-                        message: "A public privacy policy URL is required in App Store Connect and should remain reachable from inside the app.",
+                        title: "Privacy policy unavailable",
+                        message: "The privacy policy link is not available right now. Contact support with privacy questions.",
                         icon: "doc.text.magnifyingglass"
                     )
                 }
@@ -44,7 +44,7 @@ struct PrivacyOverviewView: View {
                     lines: [
                         "Core workout, template, exercise, and profile features work locally on your device.",
                         "When iCloud is available, supported profile, workout, template, and Bros data may sync through Apple's iCloud and CloudKit services.",
-                        "The bundled exercise catalog, cached exercise images, blocked bros, and pending social outbox items stay on-device unless a sync action is needed.",
+                        "The exercise catalog, cached exercise images, blocked bros, and unsent Bros updates stay on-device unless they need to be sent or synced.",
                     ]
                 )
 

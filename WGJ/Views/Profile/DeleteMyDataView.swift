@@ -19,7 +19,7 @@ struct DeleteMyDataView: View {
                 infoCard(
                     title: "This deletes",
                     lines: [
-                        "Your local profile, avatar, workouts, active-workout draft, templates, widgets, custom exercises, block list, and pending social outbox items.",
+                        "Your local profile, avatar, workouts, active-workout draft, templates, widgets, custom exercises, block list, and unsent Bros updates.",
                         "Cached exercise images stored on-device.",
                         "Your own Bros membership, reactions, workout events, PR events, and synced profile data when iCloud is available and reachable.",
                     ]

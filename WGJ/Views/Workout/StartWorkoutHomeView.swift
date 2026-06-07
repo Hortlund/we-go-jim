@@ -51,7 +51,7 @@ struct StartWorkoutHomeView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 20) {
-                WGJRootHeader("Start Workout", subtitle: "Open the folder you need, keep the rest tucked away.")
+                WGJRootHeader("Start Workout", subtitle: "Pick a template or start fresh.")
 
                 quickStartSection
                 templateWorkspaceSection
@@ -242,7 +242,7 @@ struct StartWorkoutHomeView: View {
                 HStack(alignment: .top, spacing: 14) {
                     WGJSectionHeader(
                         "Template Library",
-                        subtitle: "Keep the main create action close and the organizing tools lighter."
+                        subtitle: "Create or pick a saved template."
                     )
 
                     Spacer(minLength: 0)
@@ -253,7 +253,7 @@ struct StartWorkoutHomeView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     WGJSectionHeader(
                         "Template Library",
-                        subtitle: "Keep the main create action close and the organizing tools lighter."
+                        subtitle: "Create or pick a saved template."
                     )
 
                     addTemplateButton
@@ -533,8 +533,8 @@ struct StartWorkoutHomeView: View {
 
             Text(
                 section.isUnfiled
-                    ? "Create a template here or move one into Unfiled from the template menu."
-                    : "Add a template directly into this folder so it stays organized from the start."
+                    ? "Create a template here or move one into Unfiled."
+                    : "Create a template in this folder to keep it organized."
             )
             .font(.caption)
             .foregroundStyle(WGJTheme.textSecondary)
@@ -2075,7 +2075,7 @@ private struct TemplateStartPreviewSheet: View {
             WGJActionHeader(
                 cardioBlock.phase.title,
                 subtitle: cardioBlock.phase == .preWorkout
-                    ? "Warmup cardio before the lift roster starts."
+                    ? "Warmup cardio before the main workout."
                     : "Cooldown cardio after the main exercises."
             )
 

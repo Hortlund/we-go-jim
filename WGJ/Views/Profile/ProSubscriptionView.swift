@@ -46,7 +46,7 @@ struct ProSubscriptionView: View {
             WGJSectionHeader(
                 subscriptionState.isPro ? "Pro Active" : "Free Plan",
                 subtitle: subscriptionState.isPro
-                    ? "RevenueCat reports the We Go Jim Pro entitlement as active."
+                    ? "Your We Go Jim Pro access is active."
                     : "Free keeps the core training loop open. Pro removes caps and unlocks analysis."
             )
 
