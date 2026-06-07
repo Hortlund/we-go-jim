@@ -40,7 +40,22 @@ nonisolated enum ProfileWeeklyGoalChartScalePolicy {
     }
 }
 
+nonisolated enum ProfileScrollResetPolicy {
+    static func shouldResetOnTabActivation(isTabActive: Bool) -> Bool {
+        isTabActive
+    }
+
+    static func shouldResetOnProfileInvalidation(
+        version: Int,
+        lastHandledVersion: Int
+    ) -> Bool {
+        version > 0 && version != lastHandledVersion
+    }
+}
+
 struct ProfileView: View {
+    private static let profileTopAnchorID = "profile-top"
+
     private enum CoachBriefLoadState {
         case idle
         case loading
@@ -79,87 +94,102 @@ struct ProfileView: View {
     @State private var lastLoadedProfileUpdatedAt: Date?
     @State private var lastRefreshAt: Date?
     @State private var lastHandledProfileInvalidationVersion = 0
+    @State private var profileScrollToTopRequestID: UUID?
 
     @State private var errorMessage = ""
     @State private var showingError = false
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 16) {
-                WGJRootHeader("Profile", subtitle: "Your training snapshot, progress, and app controls.")
+        ScrollViewReader { scrollProxy in
+            ScrollView {
+                Color.clear
+                    .frame(height: 0)
+                    .id(Self.profileTopAnchorID)
 
-                identityCard
-                highlightsCard
-                dashboardSection
-                appSection
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    WGJRootHeader("Profile", subtitle: "Your training snapshot, progress, and app controls.")
+
+                    identityCard
+                    highlightsCard
+                    dashboardSection
+                    appSection
+                }
+                .padding(.top, 8)
+                .padding(16)
             }
-            .padding(.top, 8)
-            .padding(16)
-        }
-        .scrollDismissesKeyboard(.interactively)
-        .wgjScreenBackground()
-        .accessibilityIdentifier("profile-content-root")
-        .toolbar(.hidden, for: .navigationBar)
-        .onAppear {
-            applyWarmProfileSnapshotIfAvailable()
-        }
-        .task(id: isTabActive) {
-            guard isTabActive else { return }
-            await handleInitialActivation()
-        }
-        .task(id: appWarmupState.profileCompletionVersion) {
-            guard appWarmupState.profileCompletionVersion > 0 else { return }
-            applyWarmProfileSnapshotIfAvailable()
-            guard isTabActive else { return }
-            await hydrateProfileIfNeeded(force: false)
-        }
-        .task(id: appWarmupState.profileInvalidationVersion) {
-            await handleProfileInvalidated(version: appWarmupState.profileInvalidationVersion)
-        }
-        .onDisappear {
-            cancelDashboardRender(isTabExit: true)
-            cancelTrendSeriesLoad()
-            cancelCoachBriefLoad()
-            cancelCoachFollowUpLoads()
-        }
-        .onChange(of: subscriptionState.isPro) { _, _ in
-            handleSubscriptionAccessChanged()
-        }
-        .sheet(isPresented: $showingWidgetManager) {
-            NavigationStack {
-                ProfileWidgetManagerView()
+            .scrollDismissesKeyboard(.interactively)
+            .wgjScreenBackground()
+            .accessibilityIdentifier("profile-content-root")
+            .toolbar(.hidden, for: .navigationBar)
+            .onAppear {
+                requestProfileScrollToTop()
+                applyWarmProfileSnapshotIfAvailable()
             }
-            .wgjSheetSurface()
+            .onChange(of: profileScrollToTopRequestID) { _, requestID in
+                guard requestID != nil else { return }
+                scrollProfileToTop(using: scrollProxy)
+            }
+            .task(id: isTabActive) {
+                if ProfileScrollResetPolicy.shouldResetOnTabActivation(isTabActive: isTabActive) {
+                    requestProfileScrollToTop()
+                }
+                guard isTabActive else { return }
+                await handleInitialActivation()
+            }
+            .task(id: appWarmupState.profileCompletionVersion) {
+                guard appWarmupState.profileCompletionVersion > 0 else { return }
+                applyWarmProfileSnapshotIfAvailable()
+                guard isTabActive else { return }
+                await hydrateProfileIfNeeded(force: false)
+            }
+            .task(id: appWarmupState.profileInvalidationVersion) {
+                await handleProfileInvalidated(version: appWarmupState.profileInvalidationVersion)
+            }
             .onDisappear {
-                markProfileDirtyAndReloadIfActive()
+                cancelDashboardRender(isTabExit: true)
+                cancelTrendSeriesLoad()
+                cancelCoachBriefLoad()
+                cancelCoachFollowUpLoads()
             }
-        }
-        .sheet(isPresented: $showingProfileManagement) {
-            NavigationStack {
-                ProfileManagementView()
+            .onChange(of: subscriptionState.isPro) { _, _ in
+                handleSubscriptionAccessChanged()
             }
-            .wgjSheetSurface()
-            .onDisappear {
-                markProfileDirtyAndReloadIfActive()
-            }
-        }
-        .sheet(isPresented: $showingCoachAnalysis) {
-            if let coachBrief = dashboardContent.coachBrief {
-                ProfileCoachAnalysisSheet(
-                    presentation: coachBrief,
-                    followUpSummaries: coachFollowUpSummaries,
-                    loadingKinds: loadingCoachFollowUps,
-                    runFollowUp: loadCoachFollowUp
-                )
+            .sheet(isPresented: $showingWidgetManager) {
+                NavigationStack {
+                    ProfileWidgetManagerView()
+                }
                 .wgjSheetSurface()
                 .onDisappear {
-                    cancelCoachFollowUpLoads()
+                    markProfileDirtyAndReloadIfActive()
                 }
             }
-        }
-        .alert("Profile Error", isPresented: $showingError) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text(errorMessage)
+            .sheet(isPresented: $showingProfileManagement) {
+                NavigationStack {
+                    ProfileManagementView()
+                }
+                .wgjSheetSurface()
+                .onDisappear {
+                    markProfileDirtyAndReloadIfActive()
+                }
+            }
+            .sheet(isPresented: $showingCoachAnalysis) {
+                if let coachBrief = dashboardContent.coachBrief {
+                    ProfileCoachAnalysisSheet(
+                        presentation: coachBrief,
+                        followUpSummaries: coachFollowUpSummaries,
+                        loadingKinds: loadingCoachFollowUps,
+                        runFollowUp: loadCoachFollowUp
+                    )
+                    .wgjSheetSurface()
+                    .onDisappear {
+                        cancelCoachFollowUpLoads()
+                    }
+                }
+            }
+            .alert("Profile Error", isPresented: $showingError) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(errorMessage)
+            }
         }
     }
 
@@ -1000,13 +1030,28 @@ struct ProfileView: View {
 
     @MainActor
     private func handleProfileInvalidated(version: Int) async {
-        guard version > 0 else { return }
-        guard version != lastHandledProfileInvalidationVersion else { return }
+        guard ProfileScrollResetPolicy.shouldResetOnProfileInvalidation(
+            version: version,
+            lastHandledVersion: lastHandledProfileInvalidationVersion
+        ) else {
+            return
+        }
         lastHandledProfileInvalidationVersion = version
+        requestProfileScrollToTop()
         needsExplicitRefresh = true
         shouldRenderDashboardContent = hasRenderedDashboardContent
         guard isTabActive else { return }
         await reloadProfileIfNeeded(force: true)
+    }
+
+    private func requestProfileScrollToTop() {
+        profileScrollToTopRequestID = UUID()
+    }
+
+    private func scrollProfileToTop(using scrollProxy: ScrollViewProxy) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            scrollProxy.scrollTo(Self.profileTopAnchorID, anchor: .top)
+        }
     }
 
     private func handleSubscriptionAccessChanged() {

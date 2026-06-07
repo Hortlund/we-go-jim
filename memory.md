@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-06-07 - Profile Refresh Must Own Scroll Reset
+
+- Date: 2026-06-07
+- Trigger/Problem: After fixing weekly goal settings to invalidate and reload Profile, Profile could sometimes reopen visually far below the content with an empty lower area, especially after returning from Settings or switching back to the Profile tab.
+- Root Cause: Profile refreshed and temporarily reshaped dashboard content while SwiftUI preserved an old `ScrollView` offset. The screen had no explicit top anchor or scroll reset request tied to tab activation, navigation return, or profile invalidation.
+- Durable Rule: When Profile content is invalidated, reloaded, or reshaped from settings/widget/profile-management flows, keep a Profile-owned top scroll anchor and reset the Profile scroll position on tab activation, view reappearance, and profile invalidation. Do not add more Profile reload triggers without checking scroll offset behavior.
+- How to Verify Next Time: Run `WGJTests/AppLaunchWarmupTests`, then on simulator scroll Profile down, switch away/back, open Settings from the bottom of Profile and return, and confirm `profile-content-root` shows the Profile header/Identity area rather than dashboard bottom or blank space.
+- Status: active
+
 ## 2026-06-07 - UI Copy Must Not Sound Like Implementation Notes
 
 - Date: 2026-06-07

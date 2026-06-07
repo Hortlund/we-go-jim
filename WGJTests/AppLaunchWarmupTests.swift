@@ -555,6 +555,26 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
+    func profileScrollResetPolicyResetsOnTabActivationAndNewInvalidation() {
+        #expect(ProfileScrollResetPolicy.shouldResetOnTabActivation(isTabActive: true))
+        #expect(!ProfileScrollResetPolicy.shouldResetOnTabActivation(isTabActive: false))
+        #expect(ProfileScrollResetPolicy.shouldResetOnProfileInvalidation(version: 2, lastHandledVersion: 1))
+        #expect(!ProfileScrollResetPolicy.shouldResetOnProfileInvalidation(version: 0, lastHandledVersion: 0))
+        #expect(!ProfileScrollResetPolicy.shouldResetOnProfileInvalidation(version: 2, lastHandledVersion: 2))
+    }
+
+    @Test
+    func profileViewOwnsTopScrollAnchorForTabAndInvalidationResets() throws {
+        let source = try String(contentsOf: profileViewSourceURL(), encoding: .utf8)
+
+        #expect(source.contains("ScrollViewReader"))
+        #expect(source.contains("profileTopAnchorID"))
+        #expect(source.contains(".id(Self.profileTopAnchorID)"))
+        #expect(source.contains("profileScrollToTopRequestID"))
+        #expect(source.contains("scrollProxy.scrollTo(Self.profileTopAnchorID, anchor: .top)"))
+    }
+
+    @Test
     func profileInitialLoadPolicyDefersReloadWhileStartupWarmupIsActive() {
         #expect(FirstVisitTabReadiness.shouldDeferProfileHydration(
             hasLoadedProfile: false,
