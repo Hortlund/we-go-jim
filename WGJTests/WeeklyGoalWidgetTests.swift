@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 import SwiftData
 import Testing
 @testable import WGJ
@@ -85,6 +86,31 @@ struct WeeklyGoalWidgetTests {
         let source = try String(contentsOf: widgetExtensionSourceURL(), encoding: .utf8)
 
         #expect(source.contains("Image(\"WidgetLogo\")"))
+    }
+
+    @Test
+    func widgetLogoAssetUsesDeviceSafeRasterSizes() throws {
+        let imagesetURL = widgetLogoImagesetURL()
+        let expectedRenditions: [(filename: String, width: Int, height: Int)] = [
+            ("WidgetLogo.png", 64, 64),
+            ("WidgetLogo@2x.png", 128, 128),
+            ("WidgetLogo@3x.png", 192, 192),
+        ]
+
+        for rendition in expectedRenditions {
+            let imageURL = imagesetURL.appendingPathComponent(rendition.filename)
+            let imageSource = try #require(CGImageSourceCreateWithURL(imageURL as CFURL, nil))
+            let properties = try #require(
+                CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [CFString: Any]
+            )
+            let width = try #require(properties[kCGImagePropertyPixelWidth] as? Int)
+            let height = try #require(properties[kCGImagePropertyPixelHeight] as? Int)
+            let data = try Data(contentsOf: imageURL)
+
+            #expect(width == rendition.width)
+            #expect(height == rendition.height)
+            #expect(data.count < 65_000)
+        }
     }
 
     @Test
@@ -450,6 +476,13 @@ struct WeeklyGoalWidgetTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .appendingPathComponent("WGJWidgetExtension/WeeklyGoalWidget.swift")
+    }
+
+    private func widgetLogoImagesetURL() -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("WGJWidgetExtension/Assets.xcassets/WidgetLogo.imageset")
     }
 
     private func publisherSourceURL() -> URL {

@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-06-07 - Physical Widgets Need Small Raster Assets
+
+- Date: 2026-06-07
+- Trigger/Problem: The weekly goal widget still rendered as a fully black rectangle on a physical iPhone even after kind, snapshot, debug-build, placeholder, and accented-rendering fixes, while simulator rendering looked fine.
+- Root Cause: The widget extension embedded `WidgetLogo.png` as a single 1024x1024 16-bit RGBA 1x image for a 20-22 pt badge. Physical WidgetKit/chronod rendering is less forgiving of oversized widget images, especially on iOS 26 Home Screen accented/Liquid Glass paths, and can fail into a black widget host fallback even when simulator accepts it.
+- Durable Rule: Keep widget-only raster assets sized for their actual display point size with explicit 1x/2x/3x renditions. Do not embed app-icon-sized or 16-bit source art directly in widget asset catalogs. Before another widget kind/cache reset, inspect the built `.appex` `Assets.car` and source images for pixel dimensions and disk size.
+- How to Verify Next Time: Run `WGJTests/WeeklyGoalWidgetTests`, check `WidgetLogo.imageset` files are 64/128/192 px or similarly bounded, build for `iphoneos`, inspect the built `.appex` with `xcrun assetutil --info`, install on a physical device, launch the app once, then remove/re-add the current `WeeklyGoalWidget` if the Home Screen had a stale placed widget.
+- Status: active
+
 ## 2026-06-06 - Weekly Goal Widget Must Keep One Stable Public Kind
 
 - Date: 2026-06-06
