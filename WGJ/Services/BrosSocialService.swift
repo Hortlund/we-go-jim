@@ -771,7 +771,7 @@ nonisolated final class CloudKitBrosSocialService: BrosSocialService, BrosSocial
     }
 
     static func makeIfUserDataSyncEnabled(modelContext: ModelContext) -> CloudKitBrosSocialService? {
-        guard UserDataSyncTracker.shared.currentSnapshot().cloudSyncEnabled else {
+        guard UserDataSyncTracker.shared.currentSnapshot().allowsDirectCloudOperations else {
             return nil
         }
         return CloudKitBrosSocialService(modelContext: modelContext)

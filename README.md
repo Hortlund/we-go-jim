@@ -60,8 +60,9 @@ Profile includes identity, avatar, preferences, weekly goal, notification style,
 
 - Local-only mode keeps workouts, templates, exercises, history, and profile usable.
 - Cloud-backed behavior is enabled only when iCloud and CloudKit are positively available.
-- Unavailable, restricted, temporarily unavailable, timed-out, or uncertain CloudKit states degrade to local-only behavior.
-- `Bros` is unavailable in local-only mode, while the rest of the app remains usable.
+- No iCloud account, restricted iCloud, unavailable CloudKit container, or cloud-backed store construction failures degrade to local-only behavior.
+- Temporarily unavailable, timed-out, or uncertain startup checks keep the cloud-backed local replica and show degraded sync messaging until runtime iCloud availability recovers.
+- `Bros` is unavailable in local-only mode or while runtime cloud availability is degraded, while the rest of the app remains usable.
 - UI tests can use `UITEST_IN_MEMORY_STORE`.
 - UI tests can skip splash with `UITEST_SKIP_SPLASH`.
 - Template-open launch payload hooks are preserved for UI smoke tests.

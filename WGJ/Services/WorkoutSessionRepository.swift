@@ -895,11 +895,17 @@ nonisolated final class WorkoutSessionRepository {
         if session.status == .completed {
             let end = session.endedAt ?? .now
             session.durationSeconds = max(0, Int(end.timeIntervalSince(session.startedAt)))
+            _ = try historyProjectionRepository.rebuildFacts(
+                forSessionID: sessionID,
+                persistChanges: false
+            )
         }
 
         try saveUserDataChanges()
         invalidateAnalyticsCache()
-        scheduleProjectionRebuild(for: sessionID)
+        if session.status != .completed {
+            scheduleProjectionRebuild(for: sessionID)
+        }
     }
 
     @discardableResult

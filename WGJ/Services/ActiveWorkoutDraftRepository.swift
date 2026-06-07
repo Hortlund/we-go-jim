@@ -886,8 +886,51 @@ nonisolated final class ActiveWorkoutDraftRepository {
             throw WorkoutSessionRepositoryError.sessionNotFound
         }
 
+        try deleteDraftAggregateRows(sessionID: sessionID)
         modelContext.delete(session)
         try modelContext.save()
+    }
+
+    private func deleteDraftAggregateRows(sessionID: UUID) throws {
+        let exercises = try sessionExercises(sessionID: sessionID)
+        for exercise in exercises {
+            for set in orderedSessionSets(for: exercise) {
+                for dropStage in try dropStages(sessionSetID: set.id) {
+                    modelContext.delete(dropStage)
+                }
+                modelContext.delete(set)
+            }
+            for component in orderedComponents(for: exercise) {
+                modelContext.delete(component)
+            }
+            modelContext.delete(exercise)
+        }
+
+        for cardioBlock in try cardioBlocks(sessionID: sessionID) {
+            modelContext.delete(cardioBlock)
+        }
+
+        for supersetGroup in try draftSupersetGroups(sessionID: sessionID) {
+            modelContext.delete(supersetGroup)
+        }
+    }
+
+    private func dropStages(sessionSetID: UUID) throws -> [ActiveWorkoutDraftDropStage] {
+        let descriptor = FetchDescriptor<ActiveWorkoutDraftDropStage>(
+            predicate: #Predicate { dropStage in
+                dropStage.sessionSetID == sessionSetID
+            }
+        )
+        return try modelContext.fetch(descriptor)
+    }
+
+    private func draftSupersetGroups(sessionID: UUID) throws -> [ActiveWorkoutDraftSupersetGroup] {
+        let descriptor = FetchDescriptor<ActiveWorkoutDraftSupersetGroup>(
+            predicate: #Predicate { group in
+                group.sessionID == sessionID
+            }
+        )
+        return try modelContext.fetch(descriptor)
     }
 
     private func activeDraftSessions() throws -> [ActiveWorkoutDraftSession] {

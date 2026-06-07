@@ -22,8 +22,6 @@ struct WorkoutCompletionSnapshotBuilderTests {
         )
         bench.primaryMuscles = [chest]
         bench.secondaryMuscles = [triceps]
-        context.insert(chest)
-        context.insert(triceps)
         context.insert(bench)
 
         let session = try repository.createEmptySession(name: "Upper")

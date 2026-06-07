@@ -92,10 +92,12 @@ nonisolated enum FirstRunLocalBootstrapPolicy {
     static func shouldRunBeforeMainEntry(
         skipsSplash: Bool,
         hasBackgroundStore: Bool,
+        cloudSyncEnabled: Bool,
         hasCompletedBootstrap: Bool
     ) -> Bool {
         !skipsSplash
             && hasBackgroundStore
+            && !cloudSyncEnabled
             && !hasCompletedBootstrap
     }
 }
@@ -118,6 +120,23 @@ nonisolated enum FirstRunLocalBootstrapProgress {
 
     static func reset(defaults: UserDefaults = .standard) {
         defaults.removeObject(forKey: defaultsKey)
+    }
+}
+
+nonisolated enum PreMainStartupWorkPolicy {
+    static func shouldPrepareLocalProfileIdentity(
+        cloudSyncEnabled: Bool,
+        shouldRunFirstRunLocalBootstrap: Bool
+    ) -> Bool {
+        !cloudSyncEnabled && !shouldRunFirstRunLocalBootstrap
+    }
+
+    static func shouldStartWarmSnapshots(cloudSyncEnabled: Bool) -> Bool {
+        !cloudSyncEnabled
+    }
+
+    static func shouldImportLegacyActiveWorkoutDraftsBeforeMainEntry(cloudSyncEnabled: Bool) -> Bool {
+        !cloudSyncEnabled
     }
 }
 

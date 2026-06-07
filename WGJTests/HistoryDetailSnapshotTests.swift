@@ -6,35 +6,37 @@ import Testing
 @MainActor
 struct HistoryDetailSnapshotTests {
     @Test
-    func overviewSummaryRowsIncludeEveryExercise() {
-        let session = WorkoutSession(name: "Long Session", status: .completed)
-        session.exercises = (0..<8).map { index in
-            let exercise = WorkoutSessionExercise(
-                sessionID: session.id,
-                catalogExerciseUUID: "history-summary-\(index)",
-                exerciseNameSnapshot: "Exercise \(index + 1)",
-                categorySnapshot: "Strength",
-                muscleSummarySnapshot: "Training",
-                sortOrder: index,
-                session: session
+    func overviewSummaryRowsIncludeEveryExercise() throws {
+        let context = try makeInMemoryContext()
+        let repository = WorkoutSessionRepository(modelContext: context)
+        let session = try repository.createEmptySession(name: "Long Session")
+
+        for index in 0..<8 {
+            let item = makeCatalogItem(
+                context: context,
+                remoteUUID: "history-summary-\(index)",
+                displayName: "Exercise \(index + 1)",
+                category: "Strength"
             )
-            exercise.sets = [
-                WorkoutSessionSet(
-                    sessionExerciseID: exercise.id,
-                    sortOrder: 0,
-                    actualReps: 10 + index,
-                    actualWeight: nil,
-                    isCompleted: true,
-                    sessionExercise: exercise
-                ),
-            ]
-            return exercise
+            try repository.addExercise(sessionID: session.id, catalogItem: item)
         }
 
-        let rows = HistorySessionSummaryBuilder.rows(for: session)
+        for exercise in try repository.sessionExercises(sessionID: session.id) {
+            let index = exercise.sortOrder
+            var drafts = try repository.setDrafts(sessionExerciseID: exercise.id)
+            drafts[1].actualReps = 10 + index
+            drafts[1].actualWeight = nil
+            drafts[1].actualLoadUnit = .bodyweight
+            drafts[1].isCompleted = true
+            try repository.saveSetDrafts(sessionExerciseID: exercise.id, drafts: drafts)
+        }
+
+        try repository.finishSession(sessionID: session.id)
+        let completedSession = try #require(try repository.session(id: session.id))
+        let rows = HistorySessionSummaryBuilder.rows(for: completedSession)
 
         #expect(rows.count == 8)
-        #expect(rows.map(\.exercise).last == "1 x Exercise 8")
+        #expect(rows.map(\.exercise).last == "3 x Exercise 8")
         #expect(rows.map(\.bestSet).last == "17 reps")
     }
 

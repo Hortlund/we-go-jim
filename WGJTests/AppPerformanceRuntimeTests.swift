@@ -12,6 +12,30 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
+    func compactIOS17TabChromeLiftsMinimizedWorkoutAboveStandardTabBar() {
+        let compactLegacyLift = MainTabOverlayLayoutPolicy.activeWorkoutStripBottomGap(
+            screenHeight: 844,
+            usesModernTabChrome: false
+        )
+        let modernLift = MainTabOverlayLayoutPolicy.activeWorkoutStripBottomGap(
+            screenHeight: 932,
+            usesModernTabChrome: true
+        )
+
+        #expect(compactLegacyLift > modernLift)
+        #expect(modernLift == 45)
+    }
+
+    @Test
+    func minimizedWorkoutScrollClearanceIncludesStripLiftAndHeight() {
+        let compactClearance = MainTabOverlayLayoutPolicy.activeWorkoutScrollBottomInset(
+            stripBottomGap: 78
+        )
+
+        #expect(compactClearance == 160)
+    }
+
+    @Test
     func exercisesCatalogHeaderCollapseProgressTracksScrollOffsetGradually() {
         #expect(ExercisesCatalogHeaderCollapsePolicy.progress(forScrollOffset: 0) == 0)
         #expect(ExercisesCatalogHeaderCollapsePolicy.progress(forScrollOffset: -18) > 0)

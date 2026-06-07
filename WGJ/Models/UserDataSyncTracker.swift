@@ -13,6 +13,11 @@ nonisolated enum UserDataSyncTrackerPolicy {
     static let runningCloudEventExpiryWakeupLeeway: TimeInterval = 0.25
 }
 
+nonisolated private enum UserDataSyncErrorSource {
+    case cloudAvailability
+    case cloudEvent
+}
+
 nonisolated struct UserDataSyncStatusSnapshot: Equatable, Sendable {
     let state: UserDataSyncStateKind
     let cloudSyncEnabled: Bool
@@ -24,6 +29,10 @@ nonisolated struct UserDataSyncStatusSnapshot: Equatable, Sendable {
     let runningCloudEventType: CloudSyncEventType?
     let latestErrorDescription: String?
     let localOnlyReason: String?
+
+    var allowsDirectCloudOperations: Bool {
+        cloudSyncEnabled && latestErrorDescription == nil
+    }
 
     static func localOnly(reason: String?) -> UserDataSyncStatusSnapshot {
         UserDataSyncStatusSnapshot(
@@ -99,6 +108,7 @@ nonisolated final class UserDataSyncTracker {
     private var runningCloudEventType: CloudSyncEventType?
     private var runningCloudEventStartedAt: Date?
     private var latestErrorDescription: String?
+    private var latestErrorSource: UserDataSyncErrorSource?
 
     private init() { }
 
@@ -115,6 +125,7 @@ nonisolated final class UserDataSyncTracker {
         runningCloudEventType = nil
         runningCloudEventStartedAt = nil
         latestErrorDescription = isCloudEnabled ? errorDescription : nil
+        latestErrorSource = isCloudEnabled && errorDescription != nil ? .cloudAvailability : nil
         return makeSnapshotLocked(now: .now)
     }
 
@@ -156,6 +167,7 @@ nonisolated final class UserDataSyncTracker {
 
             if summary.type != .unknown {
                 latestErrorDescription = nil
+                latestErrorSource = nil
             }
         case .failed:
             if summary.type == runningCloudEventType {
@@ -165,6 +177,7 @@ nonisolated final class UserDataSyncTracker {
             if !CloudSyncEventHealthClassifier.suppressesUserVisibleFailure(summary) {
                 latestErrorDescription = CloudSyncEventHealthClassifier.runtimeErrorDescription(for: summary)
                     ?? summary.errorDescription
+                latestErrorSource = .cloudEvent
             }
         }
 
@@ -174,6 +187,17 @@ nonisolated final class UserDataSyncTracker {
     func currentSnapshot(now: Date = .now) -> UserDataSyncStatusSnapshot {
         lock.lock()
         defer { lock.unlock() }
+        return makeSnapshotLocked(now: now)
+    }
+
+    func recordRuntimeCloudAvailabilityRecovered(now: Date = .now) -> UserDataSyncStatusSnapshot {
+        lock.lock()
+        defer { lock.unlock() }
+
+        if cloudSyncEnabled && latestErrorSource == .cloudAvailability {
+            latestErrorDescription = nil
+            latestErrorSource = nil
+        }
         return makeSnapshotLocked(now: now)
     }
 
@@ -258,6 +282,10 @@ nonisolated enum UserDataSyncTrackerBridge {
             AppRuntimeState.shared.updateUserDataSyncStatus(snapshot)
         }
         scheduleRunningEventExpiryIfNeeded(for: snapshot)
+    }
+
+    static func recordRuntimeCloudAvailabilityRecovered() -> UserDataSyncStatusSnapshot {
+        UserDataSyncTracker.shared.recordRuntimeCloudAvailabilityRecovered()
     }
 
     private static func scheduleRunningEventExpiryIfNeeded(for snapshot: UserDataSyncStatusSnapshot) {

@@ -1164,6 +1164,28 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testMinimizedActiveWorkoutStripClearsLegacyCompactTabBar() throws {
+        let app = launchApp(mode: .localInMemory, launchArguments: [
+            "UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT",
+        ])
+
+        tapTab("Start Workout", in: app)
+        let startButton = app.buttons["start-workout-empty-button"]
+        XCTAssertTrue(startButton.waitForExistence(timeout: 5))
+        startButton.tap()
+
+        let minimizeButton = app.buttons["active-workout-minimize-button"]
+        XCTAssertTrue(minimizeButton.waitForExistence(timeout: 5))
+        minimizeButton.tap()
+
+        let strip = identifiedElement("active-workout-strip", in: app)
+        XCTAssertTrue(strip.waitForExistence(timeout: 5))
+        let tabBar = app.tabBars.firstMatch
+        XCTAssertTrue(tabBar.waitForExistence(timeout: 5))
+        XCTAssertLessThanOrEqual(strip.frame.maxY, tabBar.frame.minY - 4)
+    }
+
+    @MainActor
     func testActiveWorkoutHomeReturnKeepsTypedNotesAndPresentation() throws {
         let app = launchApp(
             mode: .localInMemory,

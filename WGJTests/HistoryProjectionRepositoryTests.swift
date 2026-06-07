@@ -3,6 +3,7 @@ import SwiftData
 import Testing
 @testable import WGJ
 
+@Suite(.serialized)
 @MainActor
 struct HistoryProjectionRepositoryTests {
     @Test
@@ -433,7 +434,14 @@ struct HistoryProjectionRepositoryTests {
 
         let facts = try repository.facts(forSessionID: sessionID)
         let fact = facts.first(where: predicate)
-        #expect(fact != nil)
-        return fact!
+        guard let fact else {
+            Issue.record("Expected projected fact matching predicate for session \(sessionID), got \(facts.count) facts.")
+            throw HistoryProjectionTestError.projectedFactNotFound
+        }
+        return fact
     }
+}
+
+private enum HistoryProjectionTestError: Error {
+    case projectedFactNotFound
 }

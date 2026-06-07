@@ -49,6 +49,24 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-06-07 - SwiftData Tests Need Context-Backed Relationship Fixtures
+
+- Date: 2026-06-07
+- Trigger/Problem: Full `WGJTests` verification repeatedly crashed or reported noisy failures around snapshot, template transfer, active draft, and history fixtures after startup/iCloud fixes were otherwise targeted.
+- Root Cause: Several tests built transient `@Model` relationship graphs outside a `ModelContext`, inserted both sides of SwiftData inverse relationships, or reused separate in-memory configurations that resolved to the same backing store path. Under Swift Testing and SwiftData this produced duplicate-registration crashes, cascade-delete surprises, and misleading parallel test noise.
+- Durable Rule: For SwiftData tests, build relationship-heavy fixtures through a single in-memory `ModelContainer`/`ModelContext`, insert only the aggregate root or one side of an inverse relationship, and let SwiftData register related models through ownership. Use serialized full-target verification for release confidence when the suite includes shared SwiftData-heavy fixtures; do not treat parallel harness crashes as production regressions until the failing fixture is isolated.
+- How to Verify Next Time: Run the focused failing suite first, then run full `WGJTests` with `-parallel-testing-enabled NO`. If a duplicate-registration crash appears, inspect the fixture for explicit inserts on both sides of an inverse relationship before changing production code.
+- Status: active
+
+## 2026-06-07 - Cloud Launch Must Not Block On Pre-Main Store Work
+
+- Date: 2026-06-07
+- Trigger/Problem: A TestFlight tester on iPhone 13 / iOS 17.6.1 got stuck on the splash screen while newer iPhone/iOS 26 devices launched normally.
+- Root Cause: On a fresh signed-in iPhone 13 / iOS 17.5 simulator, the app opened the CloudKit-backed SwiftData `UserData.store`, then nonessential pre-main SwiftData work such as first-run local bootstrap, warm snapshots, and legacy active-workout draft import touched the container while Core Data + CloudKit mirroring setup was still settling. The mirroring delegate could get torn down with `Store Removed / Stores Changed`, leaving splash visible while Core Data waited on CloudKit importer/exporter teardown.
+- Durable Rule: Keep cloud-backed SwiftData launch available on iOS 17 when iCloud is available, and for transient startup statuses such as timeouts, temporary unavailability, or CloudKit setup errors prefer the cloud-backed local replica with degraded sync messaging over a `.none` local-only store. Use true local-only fallback only when CloudKit cannot be used, such as no iCloud account, restricted account, missing container, or cloud-backed store construction failure. Do not solve iOS 17 splash hangs by forcing local-only mode; avoid nonessential pre-main background reads/writes against the cloud-backed store, enter main first, then run local bootstrap, catalog priming, warmups, legacy active-workout import, and sync/deferred maintenance after the UI is alive.
+- How to Verify Next Time: Run `WGJTests/AppLaunchWarmupTests`, then on the signed-in iPhone 13 / iOS 17.5 simulator uninstall the app and launch with `UITEST_FORCE_AUTO_ENTER_AFTER_SPLASH`. Confirm the Start Workout tab appears and logs show CloudKit-backed `UserData.store` setup was attempted; CloudKit account/key-sync errors may degrade sync but must not keep splash onscreen.
+- Status: active
+
 ## 2026-06-07 - Profile Refresh Must Own Scroll Reset
 
 - Date: 2026-06-07

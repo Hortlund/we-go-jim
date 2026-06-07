@@ -7,15 +7,11 @@ import Testing
 @Suite(.serialized)
 struct UserDataSyncTrackerTests {
     @Test
-    func cloudStartupPreflightForcesLocalFallbackUnlessAccountIsAvailable() {
+    func cloudStartupPreflightForcesLocalFallbackOnlyWhenCloudCannotBeUsed() {
         let localFallbackStatuses: [CloudStartupAccountStatus] = [
             .noAccount,
             .restricted,
             .containerUnavailable,
-            .temporarilyUnavailable,
-            .couldNotDetermine,
-            .timedOut,
-            .error,
         ]
 
         for status in localFallbackStatuses {
@@ -24,6 +20,23 @@ struct UserDataSyncTrackerTests {
             )
 
             #expect(decision.shouldForceLocalFallbackStore)
+        }
+
+        let transientCloudBackedStatuses: [CloudStartupAccountStatus] = [
+            .temporarilyUnavailable,
+            .couldNotDetermine,
+            .timedOut,
+            .error,
+        ]
+
+        for status in transientCloudBackedStatuses {
+            let decision = CloudStartupPreflight.makeDecision(
+                statusProvider: MockCloudStartupAccountStatusProvider(status: status)
+            )
+
+            #expect(!decision.shouldForceLocalFallbackStore)
+            #expect(decision.storeMode == .cloudBacked)
+            #expect(decision.cloudSyncErrorDescription != nil)
         }
 
         let availableDecision = CloudStartupPreflight.makeDecision(
@@ -40,12 +53,14 @@ struct UserDataSyncTrackerTests {
 
         let configured = tracker.configureForLaunch(isCloudEnabled: true, errorDescription: nil)
         #expect(configured.state == .caughtUp)
+        #expect(configured.allowsDirectCloudOperations)
 
         let pending = tracker.markLocalUserDataMutation(
             at: Date(timeIntervalSinceReferenceDate: 10)
         )
         #expect(pending.state == .pendingExport)
         #expect(pending.hasPendingExport)
+        #expect(pending.allowsDirectCloudOperations)
 
         let exported = tracker.recordCloudEvent(
             makeCloudSyncSummary(
@@ -75,6 +90,7 @@ struct UserDataSyncTrackerTests {
         )
         #expect(degraded.state == .degraded)
         #expect(degraded.latestErrorDescription?.contains("permission") == true)
+        #expect(!degraded.allowsDirectCloudOperations)
 
         let recovered = tracker.recordCloudEvent(
             makeCloudSyncSummary(
@@ -86,6 +102,59 @@ struct UserDataSyncTrackerTests {
         )
         #expect(recovered.state == .caughtUp)
         #expect(recovered.latestSuccessfulImportAt == Date(timeIntervalSinceReferenceDate: 41))
+        #expect(recovered.allowsDirectCloudOperations)
+    }
+
+    @Test
+    func runtimeCloudRecoveryClearsLaunchDegradationWithoutDroppingPendingExport() {
+        let tracker = UserDataSyncTracker.shared
+
+        let degraded = tracker.configureForLaunch(
+            isCloudEnabled: true,
+            errorDescription: "iCloud availability check timed out."
+        )
+        #expect(degraded.state == .degraded)
+        #expect(!degraded.allowsDirectCloudOperations)
+
+        let pending = tracker.markLocalUserDataMutation(at: Date(timeIntervalSinceReferenceDate: 10))
+        #expect(pending.state == .degraded)
+        #expect(pending.hasPendingExport)
+        #expect(!pending.allowsDirectCloudOperations)
+
+        let recovered = tracker.recordRuntimeCloudAvailabilityRecovered()
+        #expect(recovered.state == .pendingExport)
+        #expect(recovered.hasPendingExport)
+        #expect(recovered.latestErrorDescription == nil)
+        #expect(recovered.allowsDirectCloudOperations)
+    }
+
+    @Test
+    func runtimeCloudRecoveryDoesNotClearCloudEventFailures() {
+        let tracker = UserDataSyncTracker.shared
+
+        _ = tracker.configureForLaunch(isCloudEnabled: true, errorDescription: nil)
+        let failedExport = tracker.recordCloudEvent(
+            makeCloudSyncSummary(
+                type: .export,
+                status: .failed,
+                startedAt: Date(timeIntervalSinceReferenceDate: 30),
+                endedAt: Date(timeIntervalSinceReferenceDate: 31),
+                error: CloudSyncErrorSnapshot(
+                    domain: CKError.errorDomain,
+                    code: CKError.Code.permissionFailure.rawValue,
+                    underlyingDomain: nil,
+                    underlyingCode: nil,
+                    description: "CloudKit permission failure."
+                )
+            )
+        )
+        #expect(failedExport.state == .degraded)
+        #expect(!failedExport.allowsDirectCloudOperations)
+
+        let accountRecovered = tracker.recordRuntimeCloudAvailabilityRecovered()
+        #expect(accountRecovered.state == .degraded)
+        #expect(accountRecovered.latestErrorDescription?.contains("permission") == true)
+        #expect(!accountRecovered.allowsDirectCloudOperations)
     }
 
     @Test

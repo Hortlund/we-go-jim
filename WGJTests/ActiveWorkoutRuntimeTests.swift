@@ -296,6 +296,36 @@ struct ActiveWorkoutRuntimeTests {
     }
 
     @Test
+    func activeWorkoutRestoreSkipsLegacyDraftImportWhenDisabled() async throws {
+        ActiveWorkoutSnapshotStore.deleteDefaultSnapshotFileForUITests()
+        defer {
+            ActiveWorkoutSnapshotStore.deleteDefaultSnapshotFileForUITests()
+        }
+
+        let context = try makeInMemoryContext()
+        let repository = ActiveWorkoutDraftRepository(modelContext: context)
+        let legacy = try repository.createEmptySession(name: "Legacy Active")
+        let state = ActiveWorkoutPresentationState()
+
+        await state.restoreActiveSessionIfMissing(
+            modelContext: context,
+            allowsLegacyDraftImport: false
+        )
+
+        #expect(state.activeSessionID == nil)
+        #expect(try context.fetch(FetchDescriptor<ActiveWorkoutDraftSession>()).map(\.id) == [legacy.id])
+
+        await state.restoreActiveSessionIfMissing(
+            modelContext: context,
+            allowsLegacyDraftImport: true
+        )
+
+        #expect(state.activeSessionID == legacy.id)
+        #expect(try context.fetch(FetchDescriptor<ActiveWorkoutDraftSession>()).isEmpty)
+        #expect(try await ActiveWorkoutSnapshotStore.shared.load()?.id == legacy.id)
+    }
+
+    @Test
     func completionWriterMaterializesRuntimeSessionAsCompletedWorkoutAndMarksDurableMutation() throws {
         let context = try makeInMemoryContext()
         let tracker = UserDataSyncTracker.shared
@@ -323,6 +353,19 @@ struct ActiveWorkoutRuntimeTests {
     func brosSocialOutboxFactorySkipsLocalFallbackSessions() throws {
         let tracker = UserDataSyncTracker.shared
         _ = tracker.configureForLaunch(isCloudEnabled: false, errorDescription: "Local fallback")
+        defer {
+            _ = tracker.configureForLaunch(isCloudEnabled: false, errorDescription: nil)
+        }
+
+        let context = try makeInMemoryContext()
+
+        #expect(CloudKitBrosSocialService.makeIfUserDataSyncEnabled(modelContext: context) == nil)
+    }
+
+    @Test
+    func brosSocialOutboxFactorySkipsDegradedCloudBackedSessions() throws {
+        let tracker = UserDataSyncTracker.shared
+        _ = tracker.configureForLaunch(isCloudEnabled: true, errorDescription: "iCloud availability check timed out.")
         defer {
             _ = tracker.configureForLaunch(isCloudEnabled: false, errorDescription: nil)
         }

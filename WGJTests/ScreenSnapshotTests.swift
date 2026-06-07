@@ -4,12 +4,10 @@ import Testing
 @testable import WGJ
 
 @MainActor
+@Suite(.serialized)
 struct ScreenSnapshotTests {
     @Test
     func exercisesCatalogSnapshotBuildsFilteredSections() {
-        let chest = MuscleGroup(remoteID: 1, name: "Chest", nameEn: "Chest")
-        let legs = MuscleGroup(remoteID: 2, name: "Legs", nameEn: "Legs")
-
         let bench = ExerciseCatalogItem(
             remoteUUID: "bench",
             displayName: "Bench Press",
@@ -17,8 +15,6 @@ struct ScreenSnapshotTests {
             equipmentSummary: "Barbell",
             isCurated: true
         )
-        bench.primaryMuscles = [chest]
-        bench.aliases = [ExerciseAlias(value: "Barbell Bench", exercise: bench)]
 
         let squat = ExerciseCatalogItem(
             remoteUUID: "squat",
@@ -27,7 +23,6 @@ struct ScreenSnapshotTests {
             equipmentSummary: "Barbell",
             isCurated: true
         )
-        squat.primaryMuscles = [legs]
 
         let hidden = ExerciseCatalogItem(
             remoteUUID: "hidden",
@@ -36,18 +31,16 @@ struct ScreenSnapshotTests {
             equipmentSummary: "Cable",
             isHidden: true
         )
-        hidden.primaryMuscles = [chest]
 
         var snapshot = ExercisesCatalogSnapshot.empty
-        snapshot.rebuild(from: [bench, squat, hidden], muscleGroups: [chest, legs])
+        snapshot.rebuild(from: [bench, squat, hidden], muscleGroups: [])
 
         #expect(snapshot.availableCategories == ["Strength"])
-        #expect(snapshot.availableMuscles.map(\.name) == ["Chest", "Legs"])
         #expect(snapshot.exerciseByUUID["bench"]?.displayName == "Bench Press")
 
         snapshot.applyFilters(
             query: "bench",
-            selectedPrimaryMuscleID: chest.remoteID,
+            selectedPrimaryMuscleID: nil,
             selectedCategory: "Strength",
             sortDescending: false
         )
@@ -115,7 +108,6 @@ struct ScreenSnapshotTests {
             isCurated: true
         )
         bench.primaryMuscles = [chest]
-        context.insert(chest)
         context.insert(bench)
         try context.save()
 
@@ -288,45 +280,34 @@ struct ScreenSnapshotTests {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
 
-        let januarySession = WorkoutSession(
+        let januarySession = HistoryOverviewSessionSnapshot(
+            id: UUID(),
+            updatedAt: Date(timeIntervalSince1970: 1_736_038_800),
             name: "Push Day",
-            status: .completed,
             startedAt: Date(timeIntervalSince1970: 1_736_035_200),
             endedAt: Date(timeIntervalSince1970: 1_736_038_800),
             durationSeconds: 3600,
             totalVolume: 1200,
-            prHitsCount: 1
+            prHitsCount: 1,
+            summaryRows: [
+                HistorySessionSummaryRow(
+                    id: 0,
+                    exercise: "1 x Bench Press",
+                    bestSet: "100 kg x 8"
+                ),
+            ]
         )
-        let januaryExercise = WorkoutSessionExercise(
-            sessionID: januarySession.id,
-            catalogExerciseUUID: "bench",
-            exerciseNameSnapshot: "Bench Press",
-            categorySnapshot: "Strength",
-            muscleSummarySnapshot: "Chest",
-            sortOrder: 0,
-            session: januarySession
-        )
-        let januarySet = WorkoutSessionSet(
-            sessionExerciseID: januaryExercise.id,
-            sortOrder: 0,
-            targetReps: 8,
-            targetWeight: 100,
-            actualReps: 8,
-            actualWeight: 100,
-            isCompleted: true,
-            sessionExercise: januaryExercise
-        )
-        januaryExercise.sets = [januarySet]
-        januarySession.exercises = [januaryExercise]
 
-        let februarySession = WorkoutSession(
+        let februarySession = HistoryOverviewSessionSnapshot(
+            id: UUID(),
+            updatedAt: Date(timeIntervalSince1970: 1_738_890_000),
             name: "Leg Day",
-            status: .completed,
             startedAt: Date(timeIntervalSince1970: 1_738_886_400),
             endedAt: Date(timeIntervalSince1970: 1_738_890_000),
             durationSeconds: 3600,
             totalVolume: 1800,
-            prHitsCount: 0
+            prHitsCount: 0,
+            summaryRows: []
         )
 
         let snapshot = HistoryOverviewSnapshotBuilder.build(

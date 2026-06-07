@@ -3,6 +3,7 @@ import SwiftData
 import Testing
 @testable import WGJ
 
+@Suite(.serialized)
 @MainActor
 struct ReviewReadinessTests {
     @Test
@@ -151,12 +152,10 @@ struct ReviewReadinessTests {
         let cachedAsset = ExerciseImageAsset(
             remoteURL: "https://example.com/bench.png",
             localPath: "bench.png",
-            fileSizeBytes: 2048,
-            exercise: seededExercise
+            fileSizeBytes: 2048
         )
         seededExercise.images.append(cachedAsset)
         context.insert(seededExercise)
-        context.insert(cachedAsset)
 
         let customExercise = ExerciseCatalogItem(
             remoteUUID: "custom-1",
@@ -299,21 +298,29 @@ struct ReviewReadinessTests {
 
     @Test
     func privacyManifestDeclaresUserDefaultsRequiredReason() throws {
-        let manifestURL = URL(fileURLWithPath: #filePath)
+        let projectRootURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-            .appendingPathComponent("WGJ/PrivacyInfo.xcprivacy")
-        let data = try Data(contentsOf: manifestURL)
-        let plist = try #require(
-            PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
-        )
-        let accessedAPITypes = try #require(plist["NSPrivacyAccessedAPITypes"] as? [[String: Any]])
-        let userDefaultsEntry = try #require(accessedAPITypes.first {
-            $0["NSPrivacyAccessedAPIType"] as? String == "NSPrivacyAccessedAPICategoryUserDefaults"
-        })
-        let reasons = try #require(userDefaultsEntry["NSPrivacyAccessedAPITypeReasons"] as? [String])
 
-        #expect(reasons.contains("CA92.1"))
+        let manifestPaths = [
+            "WGJ/PrivacyInfo.xcprivacy",
+            "WGJWidgetExtension/PrivacyInfo.xcprivacy",
+        ]
+
+        for manifestPath in manifestPaths {
+            let manifestURL = projectRootURL.appendingPathComponent(manifestPath)
+            let data = try Data(contentsOf: manifestURL)
+            let plist = try #require(
+                PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+            )
+            let accessedAPITypes = try #require(plist["NSPrivacyAccessedAPITypes"] as? [[String: Any]])
+            let userDefaultsEntry = try #require(accessedAPITypes.first {
+                $0["NSPrivacyAccessedAPIType"] as? String == "NSPrivacyAccessedAPICategoryUserDefaults"
+            })
+            let reasons = try #require(userDefaultsEntry["NSPrivacyAccessedAPITypeReasons"] as? [String])
+
+            #expect(reasons.contains("CA92.1"), "\(manifestPath) must declare the UserDefaults required reason.")
+        }
     }
 
     @Test
@@ -350,6 +357,8 @@ struct ReviewReadinessTests {
             ExerciseCatalogSyncState.self,
             UserProfile.self,
             ProfileWidgetConfig.self,
+            CachedCoachNarrative.self,
+            CachedCoachFollowUpNarrative.self,
             BlockedBro.self,
             TemplateFolder.self,
             WorkoutTemplate.self,
@@ -419,7 +428,7 @@ private struct NoopCloudDataDeleter: BrosCloudDataDeleting {
 @MainActor
 private struct HangingCloudDataDeleter: BrosCloudDataDeleting {
     func deleteCurrentUserData() async throws {
-        try await withCheckedThrowingContinuation { (_: CheckedContinuation<Void, any Error>) in }
+        try await withUnsafeThrowingContinuation { (_: UnsafeContinuation<Void, any Error>) in }
     }
 }
 

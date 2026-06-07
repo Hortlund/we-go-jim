@@ -900,10 +900,8 @@ struct TemplateTransferServiceTests {
             displayName: "WGJ Component Press",
             categoryName: "WGJ Test Chest"
         )
-        let localAlias = ExerciseAlias(value: "WGJ Alias Press", exercise: localBench)
+        localBench.aliases = [ExerciseAlias(value: "WGJ Alias Press")]
         context.insert(localBench)
-        context.insert(localAlias)
-        localBench.aliases = [localAlias]
         try context.save()
 
         let importedTemplate = try service.importTemplate(

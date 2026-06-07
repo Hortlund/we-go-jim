@@ -1427,6 +1427,7 @@ nonisolated final class TemplateRepository {
             throw TemplateRepositoryError.templateExerciseNotFound
         }
 
+        deleteTemplateExerciseChildren(exercise)
         modelContext.delete(exercise)
         var updatedExercises = currentExercises
         updatedExercises.removeAll(where: { $0.id == templateExerciseID })
@@ -1444,6 +1445,19 @@ nonisolated final class TemplateRepository {
         )
         template.updatedAt = .now
         try saveUserDataChanges()
+    }
+
+    private func deleteTemplateExerciseChildren(_ exercise: TemplateExercise) {
+        for set in exercise.prescribedSets ?? [] {
+            for dropStage in set.dropStages ?? [] {
+                modelContext.delete(dropStage)
+            }
+            modelContext.delete(set)
+        }
+
+        for component in exercise.components ?? [] {
+            modelContext.delete(component)
+        }
     }
 
     func moveExercise(templateID: UUID, fromOffsets: IndexSet, toOffset: Int) throws {

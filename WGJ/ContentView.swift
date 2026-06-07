@@ -173,11 +173,16 @@ struct ContentView: View {
             skipsSplash: skipsSplash
         )
 
-        if !shouldRunFirstRunLocalBootstrap {
+        if PreMainStartupWorkPolicy.shouldPrepareLocalProfileIdentity(
+            cloudSyncEnabled: appRuntimeState.cloudSyncEnabled,
+            shouldRunFirstRunLocalBootstrap: shouldRunFirstRunLocalBootstrap
+        ) {
             await prepareLocalProfileIdentityIfNeeded()
         }
         await prepareFirstRunLocalBootstrapIfNeeded(shouldRun: shouldRunFirstRunLocalBootstrap)
-        let startupWarmupTasks = startStartupWarmSnapshotsIfNeeded()
+        let startupWarmupTasks = PreMainStartupWorkPolicy.shouldStartWarmSnapshots(
+            cloudSyncEnabled: appRuntimeState.cloudSyncEnabled
+        ) ? startStartupWarmSnapshotsIfNeeded() : .none
         if StartupWarmupLaunchPolicy.shouldWaitForWarmupsBeforeMainEntry(
             skipsSplash: skipsSplash,
             hasAnyWarmup: startupWarmupTasks.hasAnyWarmup,
@@ -190,7 +195,10 @@ struct ContentView: View {
         }
         await activeWorkoutPresentationState.restoreActiveSessionIfMissing(
             modelContext: modelContext,
-            backgroundStore: appBackgroundStore
+            backgroundStore: appBackgroundStore,
+            allowsLegacyDraftImport: PreMainStartupWorkPolicy.shouldImportLegacyActiveWorkoutDraftsBeforeMainEntry(
+                cloudSyncEnabled: appRuntimeState.cloudSyncEnabled
+            )
         )
         await restoreRestTimerFromStoredActiveWorkoutIfNeeded()
 
@@ -971,6 +979,7 @@ struct ContentView: View {
         FirstRunLocalBootstrapPolicy.shouldRunBeforeMainEntry(
             skipsSplash: skipsSplash,
             hasBackgroundStore: appBackgroundStore != nil,
+            cloudSyncEnabled: appRuntimeState.cloudSyncEnabled,
             hasCompletedBootstrap: FirstRunLocalBootstrapProgress.isCompleted()
         )
     }

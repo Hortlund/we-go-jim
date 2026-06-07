@@ -123,9 +123,17 @@ final class BrosViewModel {
             }
         }
 
-        hasLoaded = snapshot.state != .loading
+        let isAuthoritativeLoadedState: Bool
+        switch snapshot.state {
+        case .onboarding, .active:
+            isAuthoritativeLoadedState = true
+        case .loading, .unavailable:
+            isAuthoritativeLoadedState = false
+        }
+
+        hasLoaded = isAuthoritativeLoadedState
         errorMessage = nil
-        lastSuccessfulSnapshotRefreshAt = snapshot.state == .loading ? nil : snapshot.warmedAt
+        lastSuccessfulSnapshotRefreshAt = isAuthoritativeLoadedState ? snapshot.warmedAt : nil
     }
 
     func refresh(

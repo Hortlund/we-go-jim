@@ -823,77 +823,13 @@ struct ActiveWorkoutDraftRepositoryTests {
             BlockedBro.self,
         ])
 
-        let configurations = [
-            ModelConfiguration(
-                AppStoreLayout.localCatalogConfigurationName,
-                schema: Schema([
-                    ExerciseCatalogItem.self,
-                    MuscleGroup.self,
-                    ExerciseImageAsset.self,
-                    ExerciseAlias.self,
-                    ExerciseAttribution.self,
-                    ExerciseCatalogSyncState.self,
-                ]),
-                isStoredInMemoryOnly: true,
-                cloudKitDatabase: .none
-            ),
-            ModelConfiguration(
-                AppStoreLayout.userDataConfigurationName,
-                schema: Schema([
-                    UserProfile.self,
-                    ProfileWidgetConfig.self,
-                    TemplateFolder.self,
-                    WorkoutTemplate.self,
-                    TemplateCardioBlock.self,
-                    TemplateExercise.self,
-                    TemplateExerciseComponent.self,
-                    TemplateExerciseSet.self,
-            TemplateSupersetGroup.self,
-            TemplateExerciseDropStage.self,
-                    WorkoutSession.self,
-                    WorkoutSessionCardioBlock.self,
-                    WorkoutSessionExercise.self,
-                    WorkoutSessionSet.self,
-            WorkoutSessionSupersetGroup.self,
-            WorkoutSessionDropStage.self,
-                ]),
-                isStoredInMemoryOnly: true,
-                cloudKitDatabase: .none
-            ),
-            ModelConfiguration(
-                AppStoreLayout.activeWorkoutDraftConfigurationName,
-                schema: Schema([
-                    ActiveWorkoutDraftSession.self,
-                    ActiveWorkoutDraftCardioBlock.self,
-                    ActiveWorkoutDraftExercise.self,
-                    ActiveWorkoutDraftExerciseComponent.self,
-                    ActiveWorkoutDraftSet.self,
-            ActiveWorkoutDraftSupersetGroup.self,
-            ActiveWorkoutDraftDropStage.self,
-                ]),
-                isStoredInMemoryOnly: true,
-                cloudKitDatabase: .none
-            ),
-            ModelConfiguration(
-                AppStoreLayout.socialOutboxConfigurationName,
-                schema: Schema([
-                    SocialOutboxItem.self,
-                    BlockedBro.self,
-                ]),
-                isStoredInMemoryOnly: true,
-                cloudKitDatabase: .none
-            ),
-            ModelConfiguration(
-                AppStoreLayout.historyProjectionConfigurationName,
-                schema: Schema([
-                    CompletedSetFact.self,
-                ]),
-                isStoredInMemoryOnly: true,
-                cloudKitDatabase: .none
-            ),
-        ]
+        let configuration = ModelConfiguration(
+            schema: schema,
+            isStoredInMemoryOnly: true,
+            cloudKitDatabase: .none
+        )
 
-        let container = try ModelContainer(for: schema, configurations: configurations)
+        let container = try ModelContainer(for: schema, configurations: [configuration])
         return ModelContext(container)
     }
 

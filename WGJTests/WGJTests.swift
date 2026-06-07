@@ -971,7 +971,7 @@ struct WGJTests {
     }
 
     @Test
-    func cloudStartupPreflightChoosesLocalFallbackForTransientStartupStatus() {
+    func cloudStartupPreflightKeepsCloudBackedStoreForTransientStartupStatus() {
         let expectations: [(CloudStartupAccountStatus, String)] = [
             (.temporarilyUnavailable, "temporarily unavailable"),
             (.couldNotDetermine, "could not verify"),
@@ -984,8 +984,8 @@ struct WGJTests {
                 statusProvider: MockCloudStartupAccountStatusProvider(status: status)
             )
 
-            #expect(decision.storeMode == .localFallback, "Expected local fallback launch for \(expectedMessageFragment).")
-            #expect(!decision.cloudSyncEnabled)
+            #expect(decision.storeMode == .cloudBacked, "Expected cloud-backed local replica launch for \(expectedMessageFragment).")
+            #expect(decision.cloudSyncEnabled)
             #expect(decision.cloudSyncErrorDescription?.contains(expectedMessageFragment) == true)
         }
     }
@@ -1396,6 +1396,6 @@ private final class HangingRuntimeAccountStatusProvider: AccountStatusProviding 
 
     func fetchAccountStatus() async -> AccountStatus {
         fetchCount += 1
-        return await withCheckedContinuation { (_: CheckedContinuation<AccountStatus, Never>) in }
+        return await withUnsafeContinuation { (_: UnsafeContinuation<AccountStatus, Never>) in }
     }
 }

@@ -1415,8 +1415,7 @@ struct BrosSocialServiceTests {
                 exerciseNameSnapshot: "Bench Press",
                 categorySnapshot: "Chest",
                 muscleSummarySnapshot: "Chest",
-                sortOrder: 0,
-                session: session
+                sortOrder: 0
             ),
             WorkoutSessionExercise(
                 sessionID: session.id,
@@ -1424,8 +1423,7 @@ struct BrosSocialServiceTests {
                 exerciseNameSnapshot: "Barbell Row",
                 categorySnapshot: "Back",
                 muscleSummarySnapshot: "Lats",
-                sortOrder: 1,
-                session: session
+                sortOrder: 1
             ),
             WorkoutSessionExercise(
                 sessionID: session.id,
@@ -1433,8 +1431,7 @@ struct BrosSocialServiceTests {
                 exerciseNameSnapshot: "Back Squat",
                 categorySnapshot: "Legs",
                 muscleSummarySnapshot: "Quads",
-                sortOrder: 2,
-                session: session
+                sortOrder: 2
             ),
             WorkoutSessionExercise(
                 sessionID: session.id,
@@ -1442,8 +1439,7 @@ struct BrosSocialServiceTests {
                 exerciseNameSnapshot: "Pull Up",
                 categorySnapshot: "Back",
                 muscleSummarySnapshot: "Lats",
-                sortOrder: 3,
-                session: session
+                sortOrder: 3
             ),
             WorkoutSessionExercise(
                 sessionID: session.id,
@@ -1451,8 +1447,7 @@ struct BrosSocialServiceTests {
                 exerciseNameSnapshot: "Hanging Leg Raise",
                 categorySnapshot: "Core",
                 muscleSummarySnapshot: "Abs",
-                sortOrder: 4,
-                session: session
+                sortOrder: 4
             ),
             WorkoutSessionExercise(
                 sessionID: session.id,
@@ -1460,8 +1455,7 @@ struct BrosSocialServiceTests {
                 exerciseNameSnapshot: "Dumbbell Curl",
                 categorySnapshot: "Arms",
                 muscleSummarySnapshot: "Biceps",
-                sortOrder: 5,
-                session: session
+                sortOrder: 5
             ),
             WorkoutSessionExercise(
                 sessionID: session.id,
@@ -1469,13 +1463,11 @@ struct BrosSocialServiceTests {
                 exerciseNameSnapshot: "Cable Pushdown",
                 categorySnapshot: "Arms",
                 muscleSummarySnapshot: "Triceps",
-                sortOrder: 6,
-                session: session
+                sortOrder: 6
             ),
         ]
         session.exercises = exercises
         context.insert(session)
-        exercises.forEach(context.insert)
         try context.save()
 
         var savedWorkoutRecord: CKRecord?
@@ -2094,6 +2086,12 @@ struct BrosSocialServiceTests {
 
     private func makeInMemoryContext() throws -> ModelContext {
         let schema = Schema([
+            ExerciseCatalogItem.self,
+            MuscleGroup.self,
+            ExerciseImageAsset.self,
+            ExerciseAlias.self,
+            ExerciseAttribution.self,
+            ExerciseCatalogSyncState.self,
             UserProfile.self,
             WorkoutSession.self,
             WorkoutSessionCardioBlock.self,

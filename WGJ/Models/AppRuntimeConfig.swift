@@ -506,6 +506,7 @@ final class AppRuntimeState {
             hasResolvedRuntimeCloudAvailability = false
         case .available:
             updateCloudRuntimeError(nil)
+            updateUserDataSyncStatus(UserDataSyncTrackerBridge.recordRuntimeCloudAvailabilityRecovered())
             hasResolvedRuntimeCloudAvailability = true
         case .unavailable(let reason):
             updateCloudRuntimeError(Self.runtimeErrorDescription(for: reason))
@@ -849,6 +850,32 @@ nonisolated enum ActiveWorkoutOverlayPresentationPolicy {
     }
 }
 
+nonisolated enum MainTabOverlayLayoutPolicy {
+    private static let modernTabChromeStripBottomGap: CGFloat = 45
+    private static let compactLegacyTabChromeStripBottomGap: CGFloat = 78
+    private static let regularLegacyTabChromeStripBottomGap: CGFloat = 64
+    private static let compactScreenHeight: CGFloat = 860
+    private static let activeWorkoutStripHeight: CGFloat = 64
+    private static let activeWorkoutScrollClearance: CGFloat = 18
+
+    static func activeWorkoutStripBottomGap(
+        screenHeight: CGFloat,
+        usesModernTabChrome: Bool
+    ) -> CGFloat {
+        guard !usesModernTabChrome else {
+            return modernTabChromeStripBottomGap
+        }
+
+        return screenHeight <= compactScreenHeight
+            ? compactLegacyTabChromeStripBottomGap
+            : regularLegacyTabChromeStripBottomGap
+    }
+
+    static func activeWorkoutScrollBottomInset(stripBottomGap: CGFloat) -> CGFloat {
+        activeWorkoutStripHeight + stripBottomGap + activeWorkoutScrollClearance
+    }
+}
+
 @MainActor
 @Observable
 final class ActiveWorkoutPresentationState {
@@ -1018,12 +1045,14 @@ final class ActiveWorkoutPresentationState {
     func restoreActiveSessionIfMissing(
         modelContext: ModelContext,
         backgroundStore: AppBackgroundStore? = nil,
+        allowsLegacyDraftImport: Bool = true,
         shouldApplyRestoredSession: @escaping @MainActor () -> Bool = { true }
     ) async {
         guard activeSessionID == nil else { return }
         await restoreActiveSessionIfNeeded(
             modelContext: modelContext,
             backgroundStore: backgroundStore,
+            allowsLegacyDraftImport: allowsLegacyDraftImport,
             shouldApplyRestoredSession: shouldApplyRestoredSession
         )
     }
@@ -1031,11 +1060,13 @@ final class ActiveWorkoutPresentationState {
     func restoreActiveSessionIfNeeded(
         modelContext: ModelContext,
         backgroundStore: AppBackgroundStore? = nil,
+        allowsLegacyDraftImport: Bool = true,
         shouldApplyRestoredSession: @escaping @MainActor () -> Bool = { true }
     ) async {
         let activeSessionID = await Self.fetchActiveSessionIDIfNeeded(
             modelContext: modelContext,
-            backgroundStore: backgroundStore
+            backgroundStore: backgroundStore,
+            allowsLegacyDraftImport: allowsLegacyDraftImport
         )
 
         guard shouldApplyRestoredSession() else { return }
@@ -1051,7 +1082,8 @@ final class ActiveWorkoutPresentationState {
     @MainActor
     private static func fetchActiveSessionIDIfNeeded(
         modelContext: ModelContext,
-        backgroundStore: AppBackgroundStore?
+        backgroundStore: AppBackgroundStore?,
+        allowsLegacyDraftImport: Bool
     ) async -> UUID? {
         do {
             if let snapshot = try await ActiveWorkoutSnapshotStore.shared.load() {
@@ -1060,6 +1092,10 @@ final class ActiveWorkoutPresentationState {
         } catch {
             // Fall through to legacy draft import. A bad local snapshot should not block
             // one-time migration from old active SwiftData rows.
+        }
+
+        guard allowsLegacyDraftImport else {
+            return nil
         }
 
         let imported: ActiveWorkoutRuntimeSession?

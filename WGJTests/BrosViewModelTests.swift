@@ -261,6 +261,34 @@ struct BrosViewModelTests {
     }
 
     @Test
+    func unavailableWarmSnapshotDoesNotBlockRefreshAfterRuntimeCloudRecovers() async throws {
+        let context = try makeInMemoryContext()
+        let service = StubBrosSocialService()
+        let recoveredSnapshot = makeSnapshot(displayName: "Recovered Bro")
+        service.snapshot = recoveredSnapshot
+
+        let viewModel = BrosViewModel(
+            accountStatusProvider: { .available },
+            serviceFactory: { _ in service }
+        )
+
+        viewModel.applyWarmState(BrosWarmSnapshot(
+            state: .unavailable("iCloud availability check timed out."),
+            blockedUserRecordNames: [],
+            warmedAt: .now
+        ))
+
+        await viewModel.loadIfNeeded(
+            modelContext: context,
+            cloudSyncEnabled: true,
+            cloudSyncErrorDescription: nil
+        )
+
+        #expect(service.fetchSnapshotCallCount == 1)
+        #expect(viewModel.state == .active(recoveredSnapshot))
+    }
+
+    @Test
     func toggleReactionAppliesOptimisticStateBeforeCloudKitCompletes() async throws {
         let context = try makeInMemoryContext()
         let service = StubBrosSocialService()

@@ -477,21 +477,31 @@ struct AppLaunchWarmupTests {
         #expect(FirstRunLocalBootstrapPolicy.shouldRunBeforeMainEntry(
             skipsSplash: false,
             hasBackgroundStore: true,
+            cloudSyncEnabled: false,
             hasCompletedBootstrap: false
         ))
         #expect(!FirstRunLocalBootstrapPolicy.shouldRunBeforeMainEntry(
             skipsSplash: true,
             hasBackgroundStore: true,
+            cloudSyncEnabled: false,
             hasCompletedBootstrap: false
         ))
         #expect(!FirstRunLocalBootstrapPolicy.shouldRunBeforeMainEntry(
             skipsSplash: false,
             hasBackgroundStore: false,
+            cloudSyncEnabled: false,
             hasCompletedBootstrap: false
         ))
         #expect(!FirstRunLocalBootstrapPolicy.shouldRunBeforeMainEntry(
             skipsSplash: false,
             hasBackgroundStore: true,
+            cloudSyncEnabled: true,
+            hasCompletedBootstrap: false
+        ))
+        #expect(!FirstRunLocalBootstrapPolicy.shouldRunBeforeMainEntry(
+            skipsSplash: false,
+            hasBackgroundStore: true,
+            cloudSyncEnabled: false,
             hasCompletedBootstrap: true
         ))
     }
@@ -501,6 +511,32 @@ struct AppLaunchWarmupTests {
         #expect(FirstRunLocalBootstrapProgress.isCompleted(appliedVersion: 0) == false)
         #expect(FirstRunLocalBootstrapProgress.isCompleted(
             appliedVersion: FirstRunLocalBootstrapProgress.currentVersion
+        ))
+    }
+
+    @Test
+    func preMainStartupWorkPolicyAvoidsCloudBackedUserStoreWorkBeforeMainEntry() {
+        #expect(PreMainStartupWorkPolicy.shouldPrepareLocalProfileIdentity(
+            cloudSyncEnabled: false,
+            shouldRunFirstRunLocalBootstrap: false
+        ))
+        #expect(!PreMainStartupWorkPolicy.shouldPrepareLocalProfileIdentity(
+            cloudSyncEnabled: true,
+            shouldRunFirstRunLocalBootstrap: false
+        ))
+        #expect(!PreMainStartupWorkPolicy.shouldPrepareLocalProfileIdentity(
+            cloudSyncEnabled: false,
+            shouldRunFirstRunLocalBootstrap: true
+        ))
+
+        #expect(PreMainStartupWorkPolicy.shouldStartWarmSnapshots(cloudSyncEnabled: false))
+        #expect(!PreMainStartupWorkPolicy.shouldStartWarmSnapshots(cloudSyncEnabled: true))
+
+        #expect(PreMainStartupWorkPolicy.shouldImportLegacyActiveWorkoutDraftsBeforeMainEntry(
+            cloudSyncEnabled: false
+        ))
+        #expect(!PreMainStartupWorkPolicy.shouldImportLegacyActiveWorkoutDraftsBeforeMainEntry(
+            cloudSyncEnabled: true
         ))
     }
 
@@ -942,14 +978,23 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
-    func asyncCloudStartupPreflightUsesLocalFallbackForTransientStartupStatus() async {
-        let decision = await CloudStartupPreflight.makeDecisionAsync(
-            statusProvider: MockAsyncCloudStartupAccountStatusProvider(status: .timedOut)
-        )
+    func asyncCloudStartupPreflightKeepsCloudBackedStoreForTransientStartupStatus() async {
+        let expectations: [(CloudStartupAccountStatus, String)] = [
+            (.temporarilyUnavailable, "temporarily unavailable"),
+            (.couldNotDetermine, "could not verify"),
+            (.timedOut, "timed out"),
+            (.error, "CloudKit startup error"),
+        ]
 
-        #expect(decision.storeMode == .localFallback)
-        #expect(!decision.cloudSyncEnabled)
-        #expect(decision.cloudSyncErrorDescription?.contains("timed out") == true)
+        for (status, expectedMessageFragment) in expectations {
+            let decision = await CloudStartupPreflight.makeDecisionAsync(
+                statusProvider: MockAsyncCloudStartupAccountStatusProvider(status: status)
+            )
+
+            #expect(decision.storeMode == .cloudBacked)
+            #expect(decision.cloudSyncEnabled)
+            #expect(decision.cloudSyncErrorDescription?.contains(expectedMessageFragment) == true)
+        }
     }
 
     @Test
@@ -963,7 +1008,7 @@ struct AppLaunchWarmupTests {
 
         let elapsed = start.duration(to: .now)
         #expect(decision.accountStatus == .timedOut)
-        #expect(decision.storeMode == .localFallback)
+        #expect(decision.storeMode == .cloudBacked)
         #expect(elapsed < .seconds(2))
     }
 
@@ -1005,7 +1050,7 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
-    func appLaunchBootstrapResolverUsesLocalFallbackForTimedOutStartupStatus() async throws {
+    func appLaunchBootstrapResolverUsesCloudBackedStoreForTimedOutStartupStatus() async throws {
         let container = try makeContainer()
         var didRequestCloudContainer = false
         var didRequestLocalFallback = false
@@ -1033,10 +1078,50 @@ struct AppLaunchWarmupTests {
             describeError: { _ in "unreachable" }
         )
 
-        #expect(bootstrap.cloudSyncEnabled == false)
+        #expect(bootstrap.cloudSyncEnabled)
         #expect(bootstrap.cloudSyncErrorDescription?.contains("timed out") == true)
-        #expect(!didRequestCloudContainer)
-        #expect(didRequestLocalFallback)
+        #expect(didRequestCloudContainer)
+        #expect(!didRequestLocalFallback)
+    }
+
+    @Test
+    func appLaunchBootstrapResolverKeepsCloudBackedStoreAvailableOnIOS17WhenICloudIsAvailable() async throws {
+        let container = try makeContainer()
+        var didRunStartupPreflight = false
+        var didRequestCloudContainer = false
+        var didRequestLocalFallback = false
+
+        let bootstrap = try await AppLaunchBootstrapResolver.resolve(
+            processInfo: MockProcessInfo(arguments: []),
+            canUseConfiguredCloudKitContainer: true,
+            startupDecisionProvider: {
+                didRunStartupPreflight = true
+                return CloudStartupDecision(
+                    accountStatus: .available,
+                    storeMode: .cloudBacked,
+                    cloudSyncErrorDescription: nil
+                )
+            },
+            makeUITestContainer: {
+                Issue.record("UI test container should not be requested.")
+                return container
+            },
+            makeCloudBackedContainer: {
+                didRequestCloudContainer = true
+                return container
+            },
+            makeLocalFallbackContainer: {
+                didRequestLocalFallback = true
+                return container
+            },
+            describeError: { _ in "unreachable" }
+        )
+
+        #expect(bootstrap.cloudSyncEnabled)
+        #expect(bootstrap.cloudSyncErrorDescription == nil)
+        #expect(didRunStartupPreflight)
+        #expect(didRequestCloudContainer)
+        #expect(!didRequestLocalFallback)
     }
 
     @Test
@@ -1436,7 +1521,7 @@ private struct MockAsyncCloudStartupAccountStatusProvider: AsyncCloudStartupAcco
 
 private struct HangingAsyncCloudStartupAccountStatusProvider: AsyncCloudStartupAccountStatusProviding {
     func currentStatus() async -> CloudStartupAccountStatus {
-        await withCheckedContinuation { (_: CheckedContinuation<CloudStartupAccountStatus, Never>) in }
+        await withUnsafeContinuation { (_: UnsafeContinuation<CloudStartupAccountStatus, Never>) in }
     }
 }
 

@@ -2,10 +2,6 @@ import SwiftUI
 import SwiftData
 
 struct MainTabView: View {
-    private static let activeWorkoutStripBottomGap: CGFloat = 45
-    private static let activeWorkoutStripFallbackHeight: CGFloat = 64
-    private static let activeWorkoutScrollClearance: CGFloat = 18
-
     @Environment(AppTabState.self) private var tabState
     @Environment(AppNotificationRouter.self) private var notificationRouter
     @Environment(WorkoutCompletionPresentationState.self) private var workoutCompletionPresentationState
@@ -41,13 +37,15 @@ struct MainTabView: View {
         GeometryReader { proxy in
             let bottomSafeAreaInset = proxy.safeAreaInsets.bottom
             let topSafeAreaInset = proxy.safeAreaInsets.top
+            let overlayBottomInset = activeWorkoutOverlayBottomInset(size: proxy.size)
 
             ZStack(alignment: .bottom) {
                 TabView(selection: $tabState.selectedTab) {
                     deferredRootTab(
                         .profile,
                         title: "Profile",
-                        systemImage: "person.fill"
+                        systemImage: "person.fill",
+                        activeWorkoutOverlayBottomInset: overlayBottomInset
                     ) {
                         EmptyView()
                     } content: {
@@ -56,19 +54,34 @@ struct MainTabView: View {
                         }
                     }
 
-                    rootTab(.history, title: "History", systemImage: "clock.fill") {
+                    rootTab(
+                        .history,
+                        title: "History",
+                        systemImage: "clock.fill",
+                        activeWorkoutOverlayBottomInset: overlayBottomInset
+                    ) {
                         NavigationStack {
                             HistoryOverviewView()
                         }
                     }
 
-                    rootTab(.startWorkout, title: "Start Workout", systemImage: "plus") {
+                    rootTab(
+                        .startWorkout,
+                        title: "Start Workout",
+                        systemImage: "plus",
+                        activeWorkoutOverlayBottomInset: overlayBottomInset
+                    ) {
                         NavigationStack {
                             StartWorkoutHomeView()
                         }
                     }
 
-                    rootTab(.exercises, title: "Exercises", systemImage: "dumbbell.fill") {
+                    rootTab(
+                        .exercises,
+                        title: "Exercises",
+                        systemImage: "dumbbell.fill",
+                        activeWorkoutOverlayBottomInset: overlayBottomInset
+                    ) {
                         NavigationStack {
                             ExercisesCatalogView()
                         }
@@ -77,7 +90,8 @@ struct MainTabView: View {
                     deferredRootTab(
                         .bros,
                         title: "Bros",
-                        systemImage: "person.3.fill"
+                        systemImage: "person.3.fill",
+                        activeWorkoutOverlayBottomInset: overlayBottomInset
                     ) {
                         BrosFirstFrameShellView()
                     } content: {
@@ -89,9 +103,9 @@ struct MainTabView: View {
                 .tint(WGJTheme.accentBlue)
                 .wgjTabChrome()
                 .wgjMinimalKeyboardToolbar()
-                .environment(\.activeWorkoutOverlayBottomInset, activeWorkoutOverlayBottomInset)
+                .environment(\.activeWorkoutOverlayBottomInset, overlayBottomInset)
 
-                bottomOverlayChrome(bottomSafeAreaInset: bottomSafeAreaInset)
+                bottomOverlayChrome(size: proxy.size, bottomSafeAreaInset: bottomSafeAreaInset)
                     .animation(overlayAnimation, value: activeWorkoutPresentationState.isActiveWorkoutStripCollapsed)
                     .animation(overlayAnimation, value: restTimerState.restTimerPopup?.id)
                     .animation(overlayAnimation, value: isKeyboardVisible)
@@ -136,7 +150,7 @@ struct MainTabView: View {
         }
     }
 
-    private var activeWorkoutOverlayBottomInset: CGFloat {
+    private func activeWorkoutOverlayBottomInset(size: CGSize) -> CGFloat {
         guard activeWorkoutPresentationState.activeSessionID != nil,
               activeWorkoutPresentationState.isActiveWorkoutStripCollapsed,
               !isKeyboardVisible
@@ -144,17 +158,16 @@ struct MainTabView: View {
             return 0
         }
 
-        // The minimized strip floats above the tab bar by an additional bottom gap.
-        // Scroll content needs clearance for both that lift and the strip itself.
-        return Self.activeWorkoutStripFallbackHeight
-            + Self.activeWorkoutStripBottomGap
-            + Self.activeWorkoutScrollClearance
+        return MainTabOverlayLayoutPolicy.activeWorkoutScrollBottomInset(
+            stripBottomGap: activeWorkoutStripBottomGap(size: size)
+        )
     }
 
     private func rootTab<Content: View>(
         _ tab: AppMainTab,
         title: String,
         systemImage: String,
+        activeWorkoutOverlayBottomInset: CGFloat,
         @ViewBuilder content: @escaping () -> Content
     ) -> some View {
         LazyTabContainer(
@@ -176,6 +189,7 @@ struct MainTabView: View {
         _ tab: AppMainTab,
         title: String,
         systemImage: String,
+        activeWorkoutOverlayBottomInset: CGFloat,
         @ViewBuilder firstFrameShell: @escaping () -> FirstFrameShell,
         @ViewBuilder content: @escaping () -> Content
     ) -> some View {
@@ -231,7 +245,7 @@ struct MainTabView: View {
     }
 
     @ViewBuilder
-    private func bottomOverlayChrome(bottomSafeAreaInset: CGFloat) -> some View {
+    private func bottomOverlayChrome(size: CGSize, bottomSafeAreaInset: CGFloat) -> some View {
         ZStack(alignment: .bottom) {
             if let activeSessionID = activeWorkoutPresentationState.activeSessionID,
                activeWorkoutPresentationState.isActiveWorkoutStripCollapsed,
@@ -240,7 +254,7 @@ struct MainTabView: View {
                 ActiveWorkoutStripView(sessionID: activeSessionID) {
                     presentActiveWorkout(sessionID: activeSessionID)
                 }
-                .padding(.bottom, activeWorkoutStripBottomLift(bottomSafeAreaInset: bottomSafeAreaInset))
+                .padding(.bottom, activeWorkoutStripBottomLift(size: size, bottomSafeAreaInset: bottomSafeAreaInset))
                 .transition(activeWorkoutStripTransition)
                 .zIndex(2)
             }
@@ -256,7 +270,7 @@ struct MainTabView: View {
                     tint: WGJTheme.success
                 )
                 .padding(.horizontal, WGJSpacing.page)
-                .padding(.bottom, popupBottomLift(bottomSafeAreaInset: bottomSafeAreaInset))
+                .padding(.bottom, popupBottomLift(size: size, bottomSafeAreaInset: bottomSafeAreaInset))
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
@@ -320,15 +334,29 @@ struct MainTabView: View {
         userDataSyncStatus.detail
     }
 
-    private func activeWorkoutStripBottomLift(bottomSafeAreaInset: CGFloat) -> CGFloat {
-        bottomSafeAreaInset + Self.activeWorkoutStripBottomGap
+    private func activeWorkoutStripBottomLift(size: CGSize, bottomSafeAreaInset: CGFloat) -> CGFloat {
+        bottomSafeAreaInset + activeWorkoutStripBottomGap(size: size)
     }
 
-    private func popupBottomLift(bottomSafeAreaInset: CGFloat) -> CGFloat {
+    private func popupBottomLift(size: CGSize, bottomSafeAreaInset: CGFloat) -> CGFloat {
         if activeWorkoutPresentationState.isActiveWorkoutStripCollapsed {
-            return activeWorkoutStripBottomLift(bottomSafeAreaInset: bottomSafeAreaInset) + 82
+            return activeWorkoutStripBottomLift(size: size, bottomSafeAreaInset: bottomSafeAreaInset) + 82
         }
         return bottomSafeAreaInset + 72
+    }
+
+    private func activeWorkoutStripBottomGap(size: CGSize) -> CGFloat {
+        MainTabOverlayLayoutPolicy.activeWorkoutStripBottomGap(
+            screenHeight: size.height,
+            usesModernTabChrome: usesModernTabChrome
+        )
+    }
+
+    private var usesModernTabChrome: Bool {
+        if #available(iOS 26.0, *) {
+            return true
+        }
+        return false
     }
 
     private func presentActiveWorkout(sessionID: UUID) {
