@@ -19,6 +19,7 @@ struct ContentView: View {
     @State private var activeWorkoutPresentationState = ActiveWorkoutPresentationState()
     @State private var restTimerState = RestTimerState()
     @State private var catalogSyncCoordinator = CatalogSyncCoordinator()
+    @State private var deferredMaintenanceScheduler = SocialMaintenanceScheduler()
     @State private var socialMaintenanceScheduler = SocialMaintenanceScheduler()
     @State private var deferredMaintenanceState = AppDeferredMaintenanceState()
     @State private var appWarmupState = AppWarmupState()
@@ -857,7 +858,7 @@ struct ContentView: View {
     }
 
     private func scheduleDeferredMaintenance(trigger: AppMaintenanceTrigger) {
-        socialMaintenanceScheduler.schedule {
+        deferredMaintenanceScheduler.schedule {
             await performDeferredMaintenanceIfNeeded(trigger: trigger)
         }
     }
@@ -1050,7 +1051,7 @@ struct ContentView: View {
         }
 
         if work.shouldRunSocialMaintenance {
-            scheduleSocialMaintenanceIfNeeded()
+            scheduleSocialMaintenanceIfNeeded(trigger: trigger)
         }
 
         if deferredMaintenanceRunTracker.markCompleted(runID: runID) {
@@ -1088,9 +1089,10 @@ struct ContentView: View {
         )
     }
 
-    private func scheduleSocialMaintenanceIfNeeded() {
-        if let appBackgroundStore {
-            Task {
+    private func scheduleSocialMaintenanceIfNeeded(trigger: AppMaintenanceTrigger) {
+        let delay = socialMaintenanceDelay(for: trigger)
+        socialMaintenanceScheduler.schedule(after: delay) {
+            if let appBackgroundStore {
                 await appBackgroundStore.scheduleCoalesced(
                     key: .feature("social.maintenance"),
                     operationName: "app.maintenance.social",
@@ -1100,14 +1102,21 @@ struct ContentView: View {
                         await Self.runSocialMaintenance(modelContext: backgroundContext)
                     }
                 }
+                return
             }
-            return
-        }
 
-        Task {
             await WGJPerformance.measureAsync("app.maintenance.social") {
                 await Self.runSocialMaintenance(modelContext: modelContext)
             }
+        }
+    }
+
+    private func socialMaintenanceDelay(for trigger: AppMaintenanceTrigger) -> Duration? {
+        switch trigger {
+        case .enteredMain, .sceneActivated:
+            AppMaintenancePolicy.enteredMainSocialMaintenanceDelay
+        case .activeWorkoutEnded:
+            nil
         }
     }
 
@@ -1168,6 +1177,7 @@ struct ContentView: View {
     }
 
     private func resetToStartupFlow() {
+        deferredMaintenanceScheduler.cancel()
         socialMaintenanceScheduler.cancel()
         resetResumeCriticalMaintenanceCycle()
         enteredMainDeferredMaintenanceTask?.cancel()

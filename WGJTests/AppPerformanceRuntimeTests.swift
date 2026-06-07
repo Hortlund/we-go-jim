@@ -36,6 +36,55 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
+    func syncBannerShowsOnlyForActiveSyncWithoutBlockingOverlays() {
+        let syncing = UserDataSyncStatusSnapshot(
+            state: .syncing,
+            cloudSyncEnabled: true,
+            latestLocalMutationAt: nil,
+            latestSuccessfulSetupAt: nil,
+            latestSuccessfulImportAt: nil,
+            latestSuccessfulExportAt: nil,
+            hasPendingExport: false,
+            runningCloudEventType: .export,
+            latestErrorDescription: nil,
+            localOnlyReason: nil
+        )
+        let pendingExport = UserDataSyncStatusSnapshot(
+            state: .pendingExport,
+            cloudSyncEnabled: true,
+            latestLocalMutationAt: Date(timeIntervalSinceReferenceDate: 1),
+            latestSuccessfulSetupAt: nil,
+            latestSuccessfulImportAt: nil,
+            latestSuccessfulExportAt: nil,
+            hasPendingExport: true,
+            runningCloudEventType: nil,
+            latestErrorDescription: nil,
+            localOnlyReason: nil
+        )
+
+        #expect(MainTabSyncBannerPolicy.shouldShow(
+            status: syncing,
+            isActiveWorkoutPresented: false,
+            isKeyboardVisible: false
+        ))
+        #expect(!MainTabSyncBannerPolicy.shouldShow(
+            status: syncing,
+            isActiveWorkoutPresented: true,
+            isKeyboardVisible: false
+        ))
+        #expect(!MainTabSyncBannerPolicy.shouldShow(
+            status: syncing,
+            isActiveWorkoutPresented: false,
+            isKeyboardVisible: true
+        ))
+        #expect(!MainTabSyncBannerPolicy.shouldShow(
+            status: pendingExport,
+            isActiveWorkoutPresented: false,
+            isKeyboardVisible: false
+        ))
+    }
+
+    @Test
     func exercisesCatalogHeaderCollapseProgressTracksScrollOffsetGradually() {
         #expect(ExercisesCatalogHeaderCollapsePolicy.progress(forScrollOffset: 0) == 0)
         #expect(ExercisesCatalogHeaderCollapsePolicy.progress(forScrollOffset: -18) > 0)
@@ -94,6 +143,34 @@ struct AppPerformanceRuntimeTests {
     @Test
     func enteredMainDeferredMaintenanceWaitsPastFirstTabInteractionWindow() {
         #expect(AppMaintenancePolicy.enteredMainDeferredDelay == .milliseconds(2_500))
+    }
+
+    @Test
+    func startupAndForegroundSocialMaintenanceWaitPastFirstTabInteractionWindow() {
+        #expect(AppMaintenancePolicy.enteredMainSocialMaintenanceDelay == .seconds(30))
+        #expect(AppMaintenancePolicy.enteredMainSocialMaintenanceDelay > AppMaintenancePolicy.enteredMainDeferredDelay)
+    }
+
+    @MainActor
+    @Test
+    func socialMaintenanceSchedulerUsesPerScheduleDelay() async throws {
+        let scheduler = SocialMaintenanceScheduler(debounceDuration: .milliseconds(1))
+        var didRun = false
+
+        scheduler.schedule(after: .milliseconds(80)) {
+            didRun = true
+        }
+
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(didRun == false)
+
+        try await Task.sleep(for: .milliseconds(120))
+        #expect(didRun == true)
+    }
+
+    @Test
+    func userDataMirrorPostStartHydrationWaitsPastFirstTabInteractionWindow() {
+        #expect(UserDataCloudMirrorStartupPolicy.postStartHydrationDelays.first == .seconds(30))
     }
 
     @Test

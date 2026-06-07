@@ -67,6 +67,7 @@ final class AppDeferredMaintenanceState {
 
 nonisolated enum AppMaintenancePolicy {
     static let enteredMainDeferredDelay: Duration = .milliseconds(2_500)
+    static let enteredMainSocialMaintenanceDelay: Duration = .seconds(30)
 
     static func shouldRunResumeCritical(
         appPhase: AppPhase,

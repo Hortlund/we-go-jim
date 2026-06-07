@@ -16,7 +16,13 @@ struct UserDataCloudMirrorCoordinatorTests {
 
         let mirrorContainer = try makeContainer()
         let buildRecorder = LockedMirrorBuildRecorder()
-        let coordinator = UserDataCloudMirrorCoordinator()
+        let bridge = CountingMirrorBridge()
+        let coordinator = UserDataCloudMirrorCoordinator(
+            isCloudBackupEnabled: {
+                false
+            },
+            postStartHydrationDelays: []
+        )
 
         await coordinator.startIfNeeded(
             localContainer: mirrorContainer,
@@ -25,14 +31,19 @@ struct UserDataCloudMirrorCoordinatorTests {
             makeMirrorContainer: {
                 buildRecorder.recordBuild()
                 return mirrorContainer
+            },
+            makeBridge: { _, _ in
+                bridge
             }
         )
 
         #expect(buildRecorder.didBuild)
+        #expect(await bridge.syncCount == 1)
         #expect(coordinator.state == .active)
         let snapshot = tracker.currentSnapshot()
         #expect(snapshot.cloudSyncEnabled)
-        #expect(snapshot.state == .pendingExport)
+        #expect(snapshot.state == .caughtUp)
+        #expect(snapshot.latestLocalMutationAt == nil)
     }
 
     @Test
@@ -44,7 +55,7 @@ struct UserDataCloudMirrorCoordinatorTests {
             _ = tracker.configureForLaunch(isCloudEnabled: false, errorDescription: nil)
         }
 
-        let coordinator = UserDataCloudMirrorCoordinator()
+        let coordinator = UserDataCloudMirrorCoordinator(postStartHydrationDelays: [])
 
         await coordinator.startIfNeeded(
             localContainer: try makeContainer(),
@@ -65,7 +76,7 @@ struct UserDataCloudMirrorCoordinatorTests {
     func coordinatorRunsActiveBridgeAgainWhenExplicitSyncIsRequested() async throws {
         let container = try makeContainer()
         let bridge = CountingMirrorBridge()
-        let coordinator = UserDataCloudMirrorCoordinator()
+        let coordinator = UserDataCloudMirrorCoordinator(postStartHydrationDelays: [])
 
         await coordinator.startIfNeeded(
             localContainer: container,
@@ -98,7 +109,8 @@ struct UserDataCloudMirrorCoordinatorTests {
             },
             isCloudBackupEnabled: {
                 false
-            }
+            },
+            postStartHydrationDelays: []
         )
 
         await coordinator.startIfNeeded(
@@ -124,7 +136,7 @@ struct UserDataCloudMirrorCoordinatorTests {
     func coordinatorRunsActiveBridgeWhenCloudImportCompletes() async throws {
         let container = try makeContainer()
         let bridge = CountingMirrorBridge()
-        let coordinator = UserDataCloudMirrorCoordinator()
+        let coordinator = UserDataCloudMirrorCoordinator(postStartHydrationDelays: [])
 
         await coordinator.startIfNeeded(
             localContainer: container,
@@ -150,7 +162,7 @@ struct UserDataCloudMirrorCoordinatorTests {
     func coordinatorDeduplicatesAlreadyHandledCloudImport() async throws {
         let container = try makeContainer()
         let bridge = CountingMirrorBridge()
-        let coordinator = UserDataCloudMirrorCoordinator()
+        let coordinator = UserDataCloudMirrorCoordinator(postStartHydrationDelays: [])
         let importFinishedAt = Date(timeIntervalSinceReferenceDate: 100)
 
         await coordinator.startIfNeeded(

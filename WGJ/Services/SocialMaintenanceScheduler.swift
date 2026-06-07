@@ -12,7 +12,10 @@ final class SocialMaintenanceScheduler {
         self.debounceDuration = debounceDuration
     }
 
-    func schedule(operation: @escaping @MainActor () async -> Void) {
+    func schedule(
+        after delay: Duration? = nil,
+        operation: @escaping @MainActor () async -> Void
+    ) {
         latestOperation = operation
 
         if activeTask != nil {
@@ -23,7 +26,7 @@ final class SocialMaintenanceScheduler {
         scheduledTask?.cancel()
         scheduledTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            try? await Task.sleep(for: self.debounceDuration)
+            try? await Task.sleep(for: delay ?? self.debounceDuration)
             guard !Task.isCancelled else { return }
             await self.runPendingOperation()
         }

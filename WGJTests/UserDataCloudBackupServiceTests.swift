@@ -4,6 +4,7 @@ import Testing
 @testable import WGJ
 
 @Suite(.serialized)
+@MainActor
 struct UserDataCloudBackupServiceTests {
     @Test
     func backupRestoresDurableUserDataIntoFreshLocalStores() async throws {
@@ -38,10 +39,12 @@ struct UserDataCloudBackupServiceTests {
             sourceName: "custom",
             updatedAt: now
         )
-        customExercise.primaryMuscles = [muscle]
-        customExercise.aliases = [ExerciseAlias(value: "Backup DB Squat", exercise: customExercise)]
         sourceContext.insert(muscle)
         sourceContext.insert(customExercise)
+        customExercise.primaryMuscles.append(muscle)
+        let alias = ExerciseAlias(value: "Backup DB Squat", exercise: customExercise)
+        sourceContext.insert(alias)
+        customExercise.aliases.append(alias)
 
         sourceContext.insert(ProfileWidgetConfig(
             id: UUID(),

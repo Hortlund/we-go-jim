@@ -378,10 +378,12 @@ struct UserDataCloudMirrorBridgeTests {
             sourceName: "custom",
             updatedAt: Date(timeIntervalSinceReferenceDate: 40)
         )
-        exercise.primaryMuscles = [legs]
-        exercise.aliases = [ExerciseAlias(value: "DB Squat", exercise: exercise)]
         localContext.insert(legs)
         localContext.insert(exercise)
+        exercise.primaryMuscles.append(legs)
+        let alias = ExerciseAlias(value: "DB Squat", exercise: exercise)
+        localContext.insert(alias)
+        exercise.aliases.append(alias)
         try localContext.save()
 
         try await UserDataCloudMirrorBridge(

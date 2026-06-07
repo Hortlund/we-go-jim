@@ -716,3 +716,12 @@ Promote a lesson here only when it clears the bar above.
 - Durable Rule: Do not call new-device restore release-proven from the SwiftData mirror store alone. Keep the mirror bridge for local projection/diffing, but add an app-owned CloudKit backup/restore record or asset that serializes durable user data and can be explicitly fetched on first cloud-enabled launch.
 - How to Verify Next Time: On the signed-in iPhone 17 simulator, run `WGJUITests/WGJUITests/testICloudRemoteOnlyRestoreHydratesFreshLocalStores` and require a pass after wiping local stores; also inspect the fresh mirror/local stores if the test stalls to distinguish remote import failure from bridge import failure.
 - Status: active
+
+## 2026-06-07 - Slow Paths Need Root-Cause Fixes, Not Timeouts
+
+- Date: 2026-06-07
+- Trigger/Problem: iPhone 13 / iOS 17.5 made Bros and Exercises feel laggy around CloudKit and sync startup, and a timeout-based account-status fallback was proposed as a quick mitigation.
+- Root Cause: The real pressure came from redundant sync/projection work, broad SwiftData reads, and social maintenance competing with early tab interaction, not from a single slow account-status call.
+- Durable Rule: Do not mask app-wide loading or sync slowness with arbitrary timeouts unless the timeout is part of a product-defined fallback contract. First inspect logs/tests, remove redundant work, narrow persistence reads, and move non-critical maintenance outside interaction-critical windows.
+- How to Verify Next Time: Reproduce on iPhone 13 / iOS 17.5, check performance logs for startup/tab timings and background maintenance, and require focused tests around the scheduler/persistence policy that changed.
+- Status: active

@@ -281,10 +281,7 @@ struct MainTabView: View {
     @ViewBuilder
     private func syncBannerChrome(topSafeAreaInset: CGFloat) -> some View {
         ZStack(alignment: .top) {
-            if shouldShowSyncBanner,
-               !activeWorkoutPresentationState.isActiveWorkoutPresented,
-               !isKeyboardVisible
-            {
+            if shouldShowSyncBanner {
                 WGJTopAttachedSyncBanner(
                     title: syncBannerTitle,
                     message: syncBannerMessage,
@@ -323,7 +320,11 @@ struct MainTabView: View {
     }
 
     private var shouldShowSyncBanner: Bool {
-        userDataSyncStatus.state == .syncing
+        MainTabSyncBannerPolicy.shouldShow(
+            status: userDataSyncStatus,
+            isActiveWorkoutPresented: activeWorkoutPresentationState.isActiveWorkoutPresented,
+            isKeyboardVisible: isKeyboardVisible
+        )
     }
 
     private var syncBannerTitle: String {
@@ -391,6 +392,18 @@ private var activeWorkoutStripTransition: AnyTransition {
             .combined(with: .opacity)
             .combined(with: .scale(scale: 0.98, anchor: .bottom))
     )
+}
+
+nonisolated enum MainTabSyncBannerPolicy {
+    static func shouldShow(
+        status: UserDataSyncStatusSnapshot,
+        isActiveWorkoutPresented: Bool,
+        isKeyboardVisible: Bool
+    ) -> Bool {
+        status.state == .syncing
+            && !isActiveWorkoutPresented
+            && !isKeyboardVisible
+    }
 }
 
 private struct WGJTopAttachedSyncBanner: View {

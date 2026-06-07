@@ -188,7 +188,7 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
             mirrorContext: mirrorContext
         )
         let localByUUID = customExerciseByUUID(
-            try fetchAll(ExerciseCatalogItem.self, in: localContext)
+            try fetchCustomExerciseCatalogItems(in: localContext)
                 .filter { !tombstonedRemoteUUIDs.contains($0.remoteUUID) }
         )
         let mirrorByUUID = customExerciseCloudRecordByUUID(
@@ -327,10 +327,8 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
         localContext: ModelContext,
         mirrorContext: ModelContext
     ) throws -> Set<UUID> {
-        let localSessions = try fetchAll(WorkoutSession.self, in: localContext)
-            .filter { $0.status == .completed }
-        let mirrorSessions = try fetchAll(WorkoutSession.self, in: mirrorContext)
-            .filter { $0.status == .completed }
+        let localSessions = try fetchCompletedWorkoutSessions(in: localContext)
+        let mirrorSessions = try fetchCompletedWorkoutSessions(in: mirrorContext)
         let tombstonedSessionIDs = try tombstonedIDs(entityName: "WorkoutSession", localContext: localContext, mirrorContext: mirrorContext)
         let localByID = newestWorkoutSessionByID(localSessions)
         let mirrorByID = newestWorkoutSessionByID(mirrorSessions)
@@ -500,7 +498,7 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
     }
 
     private func customExerciseCloudRecord(from source: ExerciseCatalogItem) throws -> CustomExerciseCloudRecord {
-        try CustomExerciseCloudRecord(
+        return try CustomExerciseCloudRecord(
             remoteUUID: source.remoteUUID,
             remoteID: source.remoteID,
             displayName: source.displayName,
@@ -578,7 +576,9 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
             targetContext.delete(alias)
         }
         target.aliases = try decodeCustomExerciseAliases(source.aliasesData).map { alias in
-            ExerciseAlias(value: alias, exercise: target)
+            let model = ExerciseAlias(value: alias, exercise: target)
+            targetContext.insert(model)
+            return model
         }
     }
 
@@ -1096,15 +1096,23 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
     }
 
     private func deleteCustomExercise(remoteUUID: String, in context: ModelContext) throws {
-        for exercise in try fetchAll(ExerciseCatalogItem.self, in: context)
-        where exercise.sourceName == "custom" && exercise.remoteUUID == remoteUUID {
+        let descriptor = FetchDescriptor<ExerciseCatalogItem>(
+            predicate: #Predicate { exercise in
+                exercise.sourceName == "custom" && exercise.remoteUUID == remoteUUID
+            }
+        )
+        for exercise in try context.fetch(descriptor) {
             context.delete(exercise)
         }
     }
 
     private func deleteCustomExerciseCloudRecord(remoteUUID: String, in context: ModelContext) throws {
-        for exercise in try fetchAll(CustomExerciseCloudRecord.self, in: context)
-        where exercise.remoteUUID == remoteUUID {
+        let descriptor = FetchDescriptor<CustomExerciseCloudRecord>(
+            predicate: #Predicate { exercise in
+                exercise.remoteUUID == remoteUUID
+            }
+        )
+        for exercise in try context.fetch(descriptor) {
             context.delete(exercise)
         }
     }
@@ -1142,8 +1150,7 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
         )
         targetContext.insert(targetSession)
 
-        let sourceSupersetGroups = try fetchAll(WorkoutSessionSupersetGroup.self, in: sourceContext)
-            .filter { $0.sessionID == source.id }
+        let sourceSupersetGroups = try fetchWorkoutSupersetGroups(sessionID: source.id, in: sourceContext)
         var targetSupersetGroups: [UUID: WorkoutSessionSupersetGroup] = [:]
         for group in sourceSupersetGroups {
             let clone = WorkoutSessionSupersetGroup(
@@ -1158,7 +1165,7 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
             targetSupersetGroups[group.id] = clone
         }
 
-        for block in try fetchAll(WorkoutSessionCardioBlock.self, in: sourceContext).filter({ $0.sessionID == source.id }) {
+        for block in try fetchWorkoutCardioBlocks(sessionID: source.id, in: sourceContext) {
             targetContext.insert(WorkoutSessionCardioBlock(
                 id: block.id,
                 sessionID: block.sessionID,
@@ -1175,8 +1182,7 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
             ))
         }
 
-        let sourceExercises = try fetchAll(WorkoutSessionExercise.self, in: sourceContext)
-            .filter { $0.sessionID == source.id }
+        let sourceExercises = try fetchWorkoutExercises(sessionID: source.id, in: sourceContext)
         var targetExercises: [UUID: WorkoutSessionExercise] = [:]
         for exercise in sourceExercises {
             let clone = WorkoutSessionExercise(
@@ -1206,8 +1212,7 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
             targetExercises[exercise.id] = clone
         }
 
-        let sourceSets = try fetchAll(WorkoutSessionSet.self, in: sourceContext)
-            .filter { targetExercises[$0.sessionExerciseID] != nil }
+        let sourceSets = try fetchWorkoutSets(sessionExerciseIDs: Set(targetExercises.keys), in: sourceContext)
         var targetSets: [UUID: WorkoutSessionSet] = [:]
         for set in sourceSets {
             let clone = WorkoutSessionSet(
@@ -1232,8 +1237,7 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
             targetSets[set.id] = clone
         }
 
-        for stage in try fetchAll(WorkoutSessionDropStage.self, in: sourceContext)
-            where targetSets[stage.sessionSetID] != nil {
+        for stage in try fetchWorkoutDropStages(sessionSetIDs: Set(targetSets.keys), in: sourceContext) {
             targetContext.insert(WorkoutSessionDropStage(
                 id: stage.id,
                 sessionSetID: stage.sessionSetID,
@@ -1253,8 +1257,125 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
     }
 
     private func deleteWorkoutSessionAggregate(id: UUID, in context: ModelContext) throws {
-        for session in try fetchAll(WorkoutSession.self, in: context) where session.id == id {
+        let descriptor = FetchDescriptor<WorkoutSession>(
+            predicate: #Predicate { session in
+                session.id == id
+            }
+        )
+        for session in try context.fetch(descriptor) {
             context.delete(session)
+        }
+    }
+
+    private func fetchCustomExerciseCatalogItems(in context: ModelContext) throws -> [ExerciseCatalogItem] {
+        let descriptor = FetchDescriptor<ExerciseCatalogItem>(
+            predicate: #Predicate { exercise in
+                exercise.sourceName == "custom"
+            },
+            sortBy: [
+                SortDescriptor(\.updatedAt, order: .reverse),
+                SortDescriptor(\.displayName, order: .forward),
+            ]
+        )
+        return try context.fetch(descriptor)
+    }
+
+    private func fetchCompletedWorkoutSessions(in context: ModelContext) throws -> [WorkoutSession] {
+        let completedStatus = WorkoutSessionStatus.completed.rawValue
+        let descriptor = FetchDescriptor<WorkoutSession>(
+            predicate: #Predicate { session in
+                session.statusRaw == completedStatus
+            },
+            sortBy: [
+                SortDescriptor(\.updatedAt, order: .reverse),
+                SortDescriptor(\.startedAt, order: .reverse),
+            ]
+        )
+        return try context.fetch(descriptor)
+    }
+
+    private func fetchWorkoutSupersetGroups(
+        sessionID: UUID,
+        in context: ModelContext
+    ) throws -> [WorkoutSessionSupersetGroup] {
+        let descriptor = FetchDescriptor<WorkoutSessionSupersetGroup>(
+            predicate: #Predicate { group in
+                group.sessionID == sessionID
+            },
+            sortBy: [SortDescriptor(\.createdAt, order: .forward)]
+        )
+        return try context.fetch(descriptor)
+    }
+
+    private func fetchWorkoutCardioBlocks(
+        sessionID: UUID,
+        in context: ModelContext
+    ) throws -> [WorkoutSessionCardioBlock] {
+        let descriptor = FetchDescriptor<WorkoutSessionCardioBlock>(
+            predicate: #Predicate { block in
+                block.sessionID == sessionID
+            },
+            sortBy: [SortDescriptor(\.phaseRaw, order: .forward)]
+        )
+        return try context.fetch(descriptor)
+    }
+
+    private func fetchWorkoutExercises(
+        sessionID: UUID,
+        in context: ModelContext
+    ) throws -> [WorkoutSessionExercise] {
+        let descriptor = FetchDescriptor<WorkoutSessionExercise>(
+            predicate: #Predicate { exercise in
+                exercise.sessionID == sessionID
+            },
+            sortBy: [SortDescriptor(\.sortOrder, order: .forward)]
+        )
+        return try context.fetch(descriptor)
+    }
+
+    private func fetchWorkoutSets(
+        sessionExerciseIDs: Set<UUID>,
+        in context: ModelContext
+    ) throws -> [WorkoutSessionSet] {
+        guard !sessionExerciseIDs.isEmpty else { return [] }
+        var sets: [WorkoutSessionSet] = []
+        for sessionExerciseID in sessionExerciseIDs {
+            let descriptor = FetchDescriptor<WorkoutSessionSet>(
+                predicate: #Predicate { set in
+                    set.sessionExerciseID == sessionExerciseID
+                },
+                sortBy: [SortDescriptor(\.sortOrder, order: .forward)]
+            )
+            sets.append(contentsOf: try context.fetch(descriptor))
+        }
+        return sets.sorted {
+            if $0.sessionExerciseID != $1.sessionExerciseID {
+                return $0.sessionExerciseID.uuidString < $1.sessionExerciseID.uuidString
+            }
+            return $0.sortOrder < $1.sortOrder
+        }
+    }
+
+    private func fetchWorkoutDropStages(
+        sessionSetIDs: Set<UUID>,
+        in context: ModelContext
+    ) throws -> [WorkoutSessionDropStage] {
+        guard !sessionSetIDs.isEmpty else { return [] }
+        var stages: [WorkoutSessionDropStage] = []
+        for sessionSetID in sessionSetIDs {
+            let descriptor = FetchDescriptor<WorkoutSessionDropStage>(
+                predicate: #Predicate { stage in
+                    stage.sessionSetID == sessionSetID
+                },
+                sortBy: [SortDescriptor(\.sortOrder, order: .forward)]
+            )
+            stages.append(contentsOf: try context.fetch(descriptor))
+        }
+        return stages.sorted {
+            if $0.sessionSetID != $1.sessionSetID {
+                return $0.sessionSetID.uuidString < $1.sessionSetID.uuidString
+            }
+            return $0.sortOrder < $1.sortOrder
         }
     }
 
@@ -1310,15 +1431,9 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
     }
 
     nonisolated private static func defaultProjectionScheduler(
-        sessionIDs: Set<UUID>,
+        _: Set<UUID>,
         localContainer: ModelContainer
     ) {
         HistoryAnalyticsCache.shared.invalidate(container: localContainer)
-        for sessionID in sessionIDs {
-            HistoryProjectionBackgroundReconciler.shared.scheduleRebuild(
-                sessionID: sessionID,
-                container: localContainer
-            )
-        }
     }
 }

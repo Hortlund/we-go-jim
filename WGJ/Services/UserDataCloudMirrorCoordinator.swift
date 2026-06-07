@@ -11,6 +11,14 @@ enum UserDataCloudMirrorCoordinatorState: Equatable, Sendable {
     case degraded(String)
 }
 
+nonisolated enum UserDataCloudMirrorStartupPolicy {
+    static let postStartHydrationDelays: [Duration] = [
+        .seconds(30),
+        .seconds(120),
+        .seconds(300),
+    ]
+}
+
 @MainActor
 @Observable
 final class UserDataCloudMirrorCoordinator {
@@ -18,6 +26,7 @@ final class UserDataCloudMirrorCoordinator {
 
     @ObservationIgnored private let makeBackupStore: @MainActor () -> any UserDataCloudBackupStoring
     @ObservationIgnored private let isCloudBackupEnabled: @MainActor () -> Bool
+    @ObservationIgnored private let postStartHydrationDelays: [Duration]
     @ObservationIgnored private var localContainer: ModelContainer?
     @ObservationIgnored private var mirrorContainer: ModelContainer?
     @ObservationIgnored private var mirrorBridge: (any UserDataCloudMirrorBridging)?
@@ -34,10 +43,18 @@ final class UserDataCloudMirrorCoordinator {
         },
         isCloudBackupEnabled: @escaping @MainActor () -> Bool = {
             UserDataCloudMirrorCoordinator.defaultCloudBackupEnabled
-        }
+        },
+        postStartHydrationDelays: [Duration] = UserDataCloudMirrorStartupPolicy.postStartHydrationDelays
     ) {
         self.makeBackupStore = makeBackupStore
         self.isCloudBackupEnabled = isCloudBackupEnabled
+        self.postStartHydrationDelays = postStartHydrationDelays
+    }
+
+    deinit {
+        startTask?.cancel()
+        syncTask?.cancel()
+        postStartHydrationTask?.cancel()
     }
 
     func startIfNeeded(
@@ -191,7 +208,6 @@ final class UserDataCloudMirrorCoordinator {
             errorDescription: nil
         )
         AppRuntimeState.shared.updateUserDataSyncStatus(snapshot)
-        UserDataSyncTrackerBridge.markLocalMutation()
         schedulePostStartHydrationPasses()
         startTask = nil
     }
@@ -228,10 +244,12 @@ final class UserDataCloudMirrorCoordinator {
     }
 
     private func schedulePostStartHydrationPasses() {
+        guard !postStartHydrationDelays.isEmpty else { return }
         postStartHydrationTask?.cancel()
-        postStartHydrationTask = Task { @MainActor [weak self] in
-            for delay in [2, 6, 15] {
-                try? await Task.sleep(for: .seconds(delay))
+        let delays = postStartHydrationDelays
+        postStartHydrationTask = Task { @MainActor [weak self, delays] in
+            for delay in delays {
+                try? await Task.sleep(for: delay)
                 guard !Task.isCancelled else { return }
                 await self?.syncFromFreshMirrorIfActive()
             }
