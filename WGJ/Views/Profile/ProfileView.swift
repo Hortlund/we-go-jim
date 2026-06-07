@@ -78,6 +78,7 @@ struct ProfileView: View {
     @State private var needsExplicitRefresh = true
     @State private var lastLoadedProfileUpdatedAt: Date?
     @State private var lastRefreshAt: Date?
+    @State private var lastHandledProfileInvalidationVersion = 0
 
     @State private var errorMessage = ""
     @State private var showingError = false
@@ -110,6 +111,9 @@ struct ProfileView: View {
             applyWarmProfileSnapshotIfAvailable()
             guard isTabActive else { return }
             await hydrateProfileIfNeeded(force: false)
+        }
+        .task(id: appWarmupState.profileInvalidationVersion) {
+            await handleProfileInvalidated(version: appWarmupState.profileInvalidationVersion)
         }
         .onDisappear {
             cancelDashboardRender(isTabExit: true)
@@ -988,13 +992,21 @@ struct ProfileView: View {
     }
 
     private func markProfileDirtyAndReloadIfActive() {
-        needsExplicitRefresh = true
         appWarmupState.invalidateProfile()
+        Task {
+            await handleProfileInvalidated(version: appWarmupState.profileInvalidationVersion)
+        }
+    }
+
+    @MainActor
+    private func handleProfileInvalidated(version: Int) async {
+        guard version > 0 else { return }
+        guard version != lastHandledProfileInvalidationVersion else { return }
+        lastHandledProfileInvalidationVersion = version
+        needsExplicitRefresh = true
         shouldRenderDashboardContent = hasRenderedDashboardContent
         guard isTabActive else { return }
-        Task {
-            await reloadProfileIfNeeded(force: true)
-        }
+        await reloadProfileIfNeeded(force: true)
     }
 
     private func handleSubscriptionAccessChanged() {

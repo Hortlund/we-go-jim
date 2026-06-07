@@ -4,11 +4,15 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
+    @Environment(AppWarmupState.self) private var appWarmupState
 
     @State private var appRuntimeState = AppRuntimeState.shared
     @State private var libraryStatusText = "Not loaded yet"
     @State private var visibleExerciseCount = 0
     @State private var weeklyGoal = 4
+    @State private var savedWeeklyGoal = 4
+    @State private var weeklyGoalSaveMessage: String?
+    @State private var weeklyGoalSaveFeedbackTask: Task<Void, Never>?
     @State private var isTrainingGuidanceEnabled = true
     @State private var keepsScreenAwake = false
     @State private var isBozarModeEnabled = false
@@ -51,10 +55,23 @@ struct SettingsView: View {
                     }
                     .tint(WGJTheme.accentBlue)
 
-                    Button("Save Weekly Goal") {
+                    Button {
                         saveWeeklyGoal()
+                    } label: {
+                        Label(
+                            weeklyGoalSaveMessage == nil ? "Save Weekly Goal" : "Saved",
+                            systemImage: weeklyGoalSaveMessage == nil ? "checkmark.circle" : "checkmark.circle.fill"
+                        )
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .buttonStyle(WGJGhostButtonStyle())
+
+                    if let weeklyGoalSaveMessage {
+                        Label(weeklyGoalSaveMessage, systemImage: "checkmark.circle.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(WGJTheme.success)
+                            .accessibilityIdentifier("settings-weekly-goal-save-feedback")
+                    }
                 }
                 .padding(14)
                 .wgjCardContainer()
@@ -293,6 +310,12 @@ struct SettingsView: View {
             guard hasLoadedProfile else { return }
             saveTrainingGuidancePreference(newValue)
         }
+        .onChange(of: weeklyGoal) { _, newValue in
+            guard hasLoadedProfile else { return }
+            if newValue != savedWeeklyGoal {
+                clearWeeklyGoalSaveFeedback()
+            }
+        }
         .onChange(of: keepsScreenAwake) { _, newValue in
             guard hasLoadedProfile else { return }
             saveKeepsScreenAwakePreference(newValue)
@@ -313,6 +336,9 @@ struct SettingsView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(errorMessage)
+        }
+        .onDisappear {
+            weeklyGoalSaveFeedbackTask?.cancel()
         }
     }
 
@@ -345,6 +371,7 @@ struct SettingsView: View {
         do {
             let profile = try await profileRepository.bootstrapProfileIdentity(cloudSyncEnabled: cloudSyncEnabled)
             weeklyGoal = profile.weeklyWorkoutGoal
+            savedWeeklyGoal = profile.weeklyWorkoutGoal
             isTrainingGuidanceEnabled = profile.isTrainingGuidanceEnabled
             keepsScreenAwake = profile.keepsScreenAwake
             isBozarModeEnabled = profile.isBozarModeEnabled
@@ -378,9 +405,31 @@ struct SettingsView: View {
     private func saveWeeklyGoal() {
         do {
             try profileRepository.updateWeeklyWorkoutGoal(weeklyGoal)
+            let normalizedGoal = max(1, min(14, weeklyGoal))
+            weeklyGoal = normalizedGoal
+            savedWeeklyGoal = normalizedGoal
+            appWarmupState.invalidateProfile()
+            showWeeklyGoalSaveFeedback()
         } catch {
             showError(error)
         }
+    }
+
+    private func showWeeklyGoalSaveFeedback() {
+        weeklyGoalSaveMessage = "Weekly goal updated"
+        weeklyGoalSaveFeedbackTask?.cancel()
+        weeklyGoalSaveFeedbackTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            weeklyGoalSaveMessage = nil
+            weeklyGoalSaveFeedbackTask = nil
+        }
+    }
+
+    private func clearWeeklyGoalSaveFeedback() {
+        weeklyGoalSaveFeedbackTask?.cancel()
+        weeklyGoalSaveFeedbackTask = nil
+        weeklyGoalSaveMessage = nil
     }
 
     private func saveTrainingGuidancePreference(_ isEnabled: Bool) {

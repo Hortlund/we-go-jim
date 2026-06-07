@@ -384,6 +384,7 @@ final class AppWarmupState {
     private(set) var isProfileWarmupActive = false
     private(set) var isBrosWarmupActive = false
     private(set) var profileCompletionVersion = 0
+    private(set) var profileInvalidationVersion = 0
     private(set) var brosCompletionVersion = 0
 
     @ObservationIgnored private var profileWarmupGeneration = 0
@@ -501,6 +502,7 @@ final class AppWarmupState {
         activeProfileWarmupRunID = nil
         isProfileWarmupActive = false
         profileWarmupGeneration += 1
+        profileInvalidationVersion += 1
         profileCompletionVersion += 1
         resumeProfileWarmupWaiters()
     }
@@ -523,6 +525,7 @@ final class AppWarmupState {
         profileWarmupGeneration = 0
         brosWarmupGeneration = 0
         profileCompletionVersion = 0
+        profileInvalidationVersion = 0
         brosCompletionVersion = 0
         resumeProfileWarmupWaiters()
     }

@@ -161,6 +161,7 @@ struct AppLaunchWarmupTests {
     func appWarmupStateIncrementsCompletionVersionsOnFinishAndInvalidate() throws {
         let state = AppWarmupState()
         #expect(state.profileCompletionVersion == 0)
+        #expect(state.profileInvalidationVersion == 0)
         #expect(state.brosCompletionVersion == 0)
 
         let profileRunID = try #require(state.beginProfileWarmup())
@@ -173,9 +174,11 @@ struct AppLaunchWarmupTests {
             )
         )
         #expect(state.profileCompletionVersion == 1)
+        #expect(state.profileInvalidationVersion == 0)
 
         state.invalidateProfile()
         #expect(state.profileCompletionVersion == 2)
+        #expect(state.profileInvalidationVersion == 1)
 
         let brosRunID = try #require(state.beginBrosWarmup())
         state.finishBrosWarmup(
@@ -529,6 +532,26 @@ struct AppLaunchWarmupTests {
 
         #expect(source.contains("_image = State(initialValue: Self.cachedThumbnail(for: imageData))"))
         #expect(source.contains("AvatarThumbnailCacheService.shared.cachedThumbnail"))
+    }
+
+    @Test
+    func settingsWeeklyGoalSaveGivesFeedbackAndInvalidatesProfile() throws {
+        let source = try String(contentsOf: settingsSourceURL(), encoding: .utf8)
+
+        #expect(source.contains("@Environment(AppWarmupState.self) private var appWarmupState"))
+        #expect(source.contains("weeklyGoalSaveMessage"))
+        #expect(source.contains("Weekly goal updated"))
+        #expect(source.contains("settings-weekly-goal-save-feedback"))
+        #expect(source.contains("appWarmupState.invalidateProfile()"))
+    }
+
+    @Test
+    func profileViewReloadsWhenProfileWarmSnapshotIsInvalidated() throws {
+        let source = try String(contentsOf: profileViewSourceURL(), encoding: .utf8)
+
+        #expect(source.contains(".task(id: appWarmupState.profileInvalidationVersion)"))
+        #expect(source.contains("handleProfileInvalidated(version:"))
+        #expect(source.contains("await reloadProfileIfNeeded(force: true)"))
     }
 
     @Test
@@ -1475,6 +1498,26 @@ private func profileManagementSourceURL() -> URL {
         .appendingPathComponent("Views")
         .appendingPathComponent("Profile")
         .appendingPathComponent("ProfileManagementView.swift")
+}
+
+private func settingsSourceURL() -> URL {
+    URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("WGJ")
+        .appendingPathComponent("Views")
+        .appendingPathComponent("Profile")
+        .appendingPathComponent("SettingsView.swift")
+}
+
+private func profileViewSourceURL() -> URL {
+    URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("WGJ")
+        .appendingPathComponent("Views")
+        .appendingPathComponent("Profile")
+        .appendingPathComponent("ProfileView.swift")
 }
 
 private final class LockedBootstrapBuildRecorder: @unchecked Sendable {
