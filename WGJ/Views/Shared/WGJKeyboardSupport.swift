@@ -18,6 +18,18 @@ enum WGJKeyboard {
 
         return endFrame.minY < screenMaxY
     }
+
+    static func bottomOverlap(from notification: Notification, screenMaxY: CGFloat = UIScreen.main.bounds.maxY) -> CGFloat {
+        guard
+            isVisible(from: notification, screenMaxY: screenMaxY),
+            let endFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+            endFrame.minY.isFinite
+        else {
+            return 0
+        }
+
+        return max(0, screenMaxY - endFrame.minY)
+    }
 }
 
 enum WGJKeyboardHideControl {

@@ -71,6 +71,8 @@ struct ActiveWorkoutView: View {
 
     @State private var errorMessage = ""
     @State private var showingError = false
+    @State private var isKeyboardVisible = false
+    @State private var keyboardBottomOverlap: CGFloat = 0
     @State private var isMetricInputFocused = false
 
     private let cancelSectionFocusSpacerHeight: CGFloat = 160
@@ -132,15 +134,32 @@ struct ActiveWorkoutView: View {
                 }
             }
             .wgjMinimalKeyboardToolbar()
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                ActiveWorkoutKeyboardAwareBottomDock(
-                    session: session,
-                    isEndingSession: isEndingSession,
-                    restTimerPopupID: restTimerState.restTimerPopup?.id,
-                    reduceMotion: reduceMotion,
+            .overlay(alignment: .bottom) {
+                if ActiveWorkoutBottomDockPlacementPolicy.shouldPinToScreenOverlay(
+                    hasSession: session != nil,
+                    isEndingSession: isEndingSession
+                ) {
+                    ActiveWorkoutKeyboardAwareBottomDock(
+                        session: session,
+                        isEndingSession: isEndingSession,
+                        restTimerPopupID: restTimerState.restTimerPopup?.id,
+                        reduceMotion: reduceMotion,
+                        isKeyboardVisible: isKeyboardVisible,
+                        isMetricInputFocused: isMetricInputFocused,
+                        onDismissRestTimer: {
+                            clearRestTimerAndPersist()
+                        }
+                    )
+                }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                ActiveWorkoutFloatingKeyboardDismissButton(
+                    isKeyboardVisible: isKeyboardVisible,
                     isMetricInputFocused: isMetricInputFocused,
-                    onDismissRestTimer: {
-                        clearRestTimerAndPersist()
+                    keyboardBottomOverlap: keyboardBottomOverlap,
+                    reduceMotion: reduceMotion,
+                    onDismiss: {
+                        dismissKeyboard()
                     }
                 )
             }
@@ -224,7 +243,15 @@ struct ActiveWorkoutView: View {
                 guard !isFocused, canRunNonCriticalInteractionWork else { return }
                 scheduleForegroundNonCriticalInteractionWorkResume()
             }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
+                updateKeyboardFrameState(from: notification)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { notification in
+                updateKeyboardFrameState(from: notification)
+            }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
+                isKeyboardVisible = false
+                keyboardBottomOverlap = 0
                 isMetricInputFocused = false
             }
             .onAppear {
@@ -429,11 +456,10 @@ struct ActiveWorkoutView: View {
     }
 
     private var shouldShowBottomDock: Bool {
-        guard !isEndingSession, session != nil else {
-            return false
-        }
-
-        return true
+        ActiveWorkoutBottomDockPlacementPolicy.shouldReserveScrollClearance(
+            hasSession: session != nil,
+            isEndingSession: isEndingSession
+        )
     }
 
     private var cancelSectionBottomSpacerHeight: CGFloat {
@@ -2566,6 +2592,9 @@ struct ActiveWorkoutView: View {
     @MainActor
     private func handleScenePhaseChange(_ newPhase: ScenePhase) {
         if ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: newPhase) {
+            isKeyboardVisible = false
+            keyboardBottomOverlap = 0
+            isMetricInputFocused = false
             dismissKeyboard()
         }
 
@@ -2581,6 +2610,15 @@ struct ActiveWorkoutView: View {
         Task { @MainActor in
             _ = await flushDirtyWritesNow(checkpoint: .sceneTransition)
         }
+    }
+
+    @MainActor
+    private func updateKeyboardFrameState(from notification: Notification) {
+        let keyboardIsVisible = WGJKeyboard.isVisible(from: notification)
+        isKeyboardVisible = keyboardIsVisible
+        keyboardBottomOverlap = keyboardIsVisible
+            ? WGJKeyboard.bottomOverlap(from: notification)
+            : 0
     }
 
     @MainActor
@@ -3717,6 +3755,39 @@ private struct ActiveWorkoutCompletionSourceContext {
     let completesSetCycle: Bool
 }
 
+private struct ActiveWorkoutFloatingKeyboardDismissButton: View {
+    let isKeyboardVisible: Bool
+    let isMetricInputFocused: Bool
+    let keyboardBottomOverlap: CGFloat
+    let reduceMotion: Bool
+    let onDismiss: () -> Void
+
+    var body: some View {
+        if ActiveWorkoutKeyboardChromePolicy.shouldShowFloatingKeyboardDismissButton(
+            isKeyboardVisible: isKeyboardVisible,
+            isMetricInputFocused: isMetricInputFocused
+        ) {
+            Button(action: onDismiss) {
+                Image(systemName: WGJKeyboardHideControl.systemImage)
+                    .accessibilityHidden(true)
+            }
+            .buttonStyle(
+                WGJIconButtonStyle(
+                    tint: WGJKeyboardHideControl.foregroundStyle,
+                    background: WGJTheme.cardStrong,
+                    outline: WGJTheme.outline
+                )
+            )
+            .accessibilityLabel(WGJKeyboardHideControl.accessibilityLabel)
+            .accessibilityIdentifier("active-workout-floating-keyboard-hide-button")
+            .padding(.trailing, 16)
+            .padding(.bottom, keyboardBottomOverlap + 12)
+            .transition(WGJMotion.cardTransition(reduceMotion: reduceMotion))
+            .ignoresSafeArea(.keyboard, edges: .bottom)
+        }
+    }
+}
+
 private struct ActiveWorkoutKeyboardAwareBottomDock: View {
     @Environment(\.scenePhase) private var scenePhase
 
@@ -3724,10 +3795,9 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
     let isEndingSession: Bool
     let restTimerPopupID: UUID?
     let reduceMotion: Bool
+    let isKeyboardVisible: Bool
     let isMetricInputFocused: Bool
     let onDismissRestTimer: () -> Void
-
-    @State private var isKeyboardVisible = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -3741,16 +3811,6 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .bottomTrailing)
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
-            updateKeyboardState(from: notification)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
-            isKeyboardVisible = false
-        }
-        .onChange(of: scenePhase) { _, newPhase in
-            guard ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: newPhase) else { return }
-            isKeyboardVisible = false
-        }
         .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: restTimerPopupID)
         .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: shouldShowDock)
     }
@@ -3763,11 +3823,6 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
             isMetricInputFocused: isMetricInputFocused,
             scenePhase: scenePhase
         )
-    }
-
-    private func updateKeyboardState(from notification: Notification) {
-        guard WGJKeyboard.isVisible(from: notification) else { return }
-        isKeyboardVisible = true
     }
 }
 

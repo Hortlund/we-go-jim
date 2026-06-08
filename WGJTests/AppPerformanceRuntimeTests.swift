@@ -709,17 +709,37 @@ struct AppPerformanceRuntimeTests {
             isMetricInputFocused: false,
             scenePhase: .background
         ))
-        #expect(!ActiveWorkoutKeyboardChromePolicy.shouldShowFloatingKeyboardDismissButton(
+        #expect(ActiveWorkoutKeyboardChromePolicy.shouldShowFloatingKeyboardDismissButton(
             isKeyboardVisible: true,
             isMetricInputFocused: false
         ))
-        #expect(!ActiveWorkoutKeyboardChromePolicy.shouldShowFloatingKeyboardDismissButton(
+        #expect(ActiveWorkoutKeyboardChromePolicy.shouldShowFloatingKeyboardDismissButton(
             isKeyboardVisible: false,
             isMetricInputFocused: true
         ))
         #expect(!ActiveWorkoutKeyboardChromePolicy.shouldShowFloatingKeyboardDismissButton(
             isKeyboardVisible: false,
             isMetricInputFocused: false
+        ))
+    }
+
+    @Test
+    func activeWorkoutBottomDockUsesPinnedOverlayWithScrollClearance() {
+        #expect(ActiveWorkoutBottomDockPlacementPolicy.shouldPinToScreenOverlay(
+            hasSession: true,
+            isEndingSession: false
+        ))
+        #expect(ActiveWorkoutBottomDockPlacementPolicy.shouldReserveScrollClearance(
+            hasSession: true,
+            isEndingSession: false
+        ))
+        #expect(!ActiveWorkoutBottomDockPlacementPolicy.shouldPinToScreenOverlay(
+            hasSession: false,
+            isEndingSession: false
+        ))
+        #expect(!ActiveWorkoutBottomDockPlacementPolicy.shouldReserveScrollClearance(
+            hasSession: true,
+            isEndingSession: true
         ))
     }
 
@@ -810,6 +830,8 @@ struct AppPerformanceRuntimeTests {
 
         #expect(WGJKeyboard.isVisible(from: visibleKeyboardNotification, screenMaxY: 844))
         #expect(WGJKeyboard.isVisible(from: hiddenKeyboardNotification, screenMaxY: 844) == false)
+        #expect(WGJKeyboard.bottomOverlap(from: visibleKeyboardNotification, screenMaxY: 844) == 336)
+        #expect(WGJKeyboard.bottomOverlap(from: hiddenKeyboardNotification, screenMaxY: 844) == 0)
     }
 
     @Test

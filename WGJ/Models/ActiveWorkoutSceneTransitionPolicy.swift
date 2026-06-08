@@ -51,7 +51,7 @@ nonisolated enum ActiveWorkoutKeyboardChromePolicy {
         isKeyboardVisible: Bool,
         isMetricInputFocused: Bool
     ) -> Bool {
-        false
+        isKeyboardVisible || isMetricInputFocused
     }
 
     static func shouldAnimateTimerDockVisibilityChange(
@@ -59,6 +59,16 @@ nonisolated enum ActiveWorkoutKeyboardChromePolicy {
         currentIsVisible: Bool
     ) -> Bool {
         previousIsVisible != currentIsVisible
+    }
+}
+
+nonisolated enum ActiveWorkoutBottomDockPlacementPolicy {
+    static func shouldPinToScreenOverlay(hasSession: Bool, isEndingSession: Bool) -> Bool {
+        hasSession && !isEndingSession
+    }
+
+    static func shouldReserveScrollClearance(hasSession: Bool, isEndingSession: Bool) -> Bool {
+        hasSession && !isEndingSession
     }
 }
 
