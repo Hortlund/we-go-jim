@@ -473,7 +473,7 @@ struct ContentView: View {
                 let mutationStartedAt = Date()
                 UserDataSyncTrackerBridge.markLocalMutation(at: mutationStartedAt)
                 uiTestCloudRestoreProbeStatusID = "cloud-restore-probe-seeded"
-                try await waitForUITestCloudRestoreExport(probe, mutationStartedAt: mutationStartedAt)
+                try await waitForUITestCloudRestoreExport(probe)
                 uiTestCloudRestoreProbeStatusID = "cloud-restore-probe-exported"
             case "verify":
                 uiTestCloudRestoreProbeStatusID = "cloud-restore-probe-verifying"
@@ -494,21 +494,17 @@ struct ContentView: View {
     }
 
     @MainActor
-    private func waitForUITestCloudRestoreExport(
-        _ probe: UITestCloudRestoreProbe,
-        mutationStartedAt: Date
-    ) async throws {
-        for _ in 0..<90 {
-            startUserDataCloudMirrorIfReady()
-            await userDataCloudMirrorCoordinator.syncIfActive()
-            try await syncUITestCloudRestoreProbeBridge(usesFreshMirrorContainer: false)
-            try await exportUITestCloudRestoreBackup()
+    private func waitForUITestCloudRestoreExport(_ probe: UITestCloudRestoreProbe) async throws {
+        startUserDataCloudMirrorIfReady()
+        await userDataCloudMirrorCoordinator.syncIfActive()
+        try await syncUITestCloudRestoreProbeBridge(usesFreshMirrorContainer: false)
+        try await exportUITestCloudRestoreBackup()
 
+        for _ in 0..<90 {
             let mirrorContainsFixture = (try? uiTestCloudRestoreMirrorContainsFixture(probe)) == true
             if mirrorContainsFixture {
                 return
             }
-            _ = mutationStartedAt
 
             try await Task.sleep(for: .seconds(1))
         }
@@ -518,15 +514,21 @@ struct ContentView: View {
 
     @MainActor
     private func waitForUITestCloudRestoreHydration(_ probe: UITestCloudRestoreProbe) async throws {
-        for _ in 0..<120 {
-            startUserDataCloudMirrorIfReady()
-            await userDataCloudMirrorCoordinator.syncFromFreshMirrorIfActive()
-            try await restoreUITestCloudRestoreBackup()
-            try await syncUITestCloudRestoreProbeBridge(usesFreshMirrorContainer: true)
+        var didRestoreDirectBackup = false
+        for attempt in 0..<120 {
+            if !didRestoreDirectBackup || attempt.isMultiple(of: 5) {
+                didRestoreDirectBackup = try await restoreUITestCloudRestoreBackup()
+                if !didRestoreDirectBackup {
+                    uiTestCloudRestoreProbeStatusID = "cloud-restore-probe-no-direct-backup"
+                }
+            }
 
-            if try uiTestCloudRestoreLocalContainsFixture(probe) {
+            let missingFixtureParts = try uiTestCloudRestoreLocalMissingFixtureParts(probe)
+            if missingFixtureParts.isEmpty {
                 return
             }
+            let statusID = "cloud-restore-probe-missing-\(missingFixtureParts.joined(separator: "-"))"
+            uiTestCloudRestoreProbeStatusID = statusID
 
             try await Task.sleep(for: .seconds(1))
         }
@@ -686,8 +688,8 @@ struct ContentView: View {
     }
 
     @MainActor
-    private func restoreUITestCloudRestoreBackup() async throws {
-        _ = try await UserDataCloudBackupService(
+    private func restoreUITestCloudRestoreBackup() async throws -> Bool {
+        try await UserDataCloudBackupService(
             localContainer: modelContext.container,
             mirrorContainer: try makeUserDataCloudMirrorContainer(),
             backupStore: CloudKitUserDataCloudBackupStore()
@@ -728,13 +730,28 @@ struct ContentView: View {
     }
 
     @MainActor
-    private func uiTestCloudRestoreLocalContainsFixture(_ probe: UITestCloudRestoreProbe) throws -> Bool {
-        try profiles(matching: probe).isEmpty == false
-            && customExercise(matching: probe, in: modelContext) != nil
-            && profileWidgetConfigs(matching: probe).isEmpty == false
-            && templates(matching: probe).isEmpty == false
-            && completedSessions(matching: probe).isEmpty == false
-            && blockedBros(matching: probe).isEmpty == false
+    private func uiTestCloudRestoreLocalMissingFixtureParts(_ probe: UITestCloudRestoreProbe) throws -> [String] {
+        let freshContext = ModelContext(modelContext.container)
+        var missing: [String] = []
+        if try profiles(matching: probe, in: freshContext).isEmpty {
+            missing.append("profile")
+        }
+        if try customExercise(matching: probe, in: freshContext) == nil {
+            missing.append("custom")
+        }
+        if try profileWidgetConfigs(matching: probe, in: freshContext).isEmpty {
+            missing.append("widget")
+        }
+        if try templates(matching: probe, in: freshContext).isEmpty {
+            missing.append("template")
+        }
+        if try completedSessions(matching: probe, in: freshContext).isEmpty {
+            missing.append("session")
+        }
+        if try blockedBros(matching: probe, in: freshContext).isEmpty {
+            missing.append("blocked")
+        }
+        return missing
     }
 
     @MainActor

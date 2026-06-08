@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-06-08 - Remote-Only User Data Restore Needs Compact App-Owned Backup
+
+- Date: 2026-06-08
+- Trigger/Problem: The separate `UserDataCloudMirror.store` kept same-device upgrades smooth, but remote-only restore on a fresh install could fail or stall because CloudKit mirror identity alone was not enough to hydrate local stores reliably.
+- Root Cause: The app-owned singleton user-data backup relied only on a CloudKit asset payload, which can be unavailable during fresh-launch restore, and repeated failed restore drills left bloated duplicate backup rows that made later export/restore work slow.
+- Durable Rule: Keep the root `UserData.store` local-authoritative, but maintain an app-owned CloudKit user-data backup that has an inline payload fallback, compacts duplicate rows before export and decoded merge, and merges instead of replacing non-empty mirror/local data.
+- How to Verify Next Time: Run `WGJTests/UserDataCloudBackupServiceTests` and the signed-in `WGJUITests/WGJUITests/testICloudRemoteOnlyRestoreHydratesFreshLocalStores` on the `iPhone 17` / iOS 26.2 simulator. Confirm the restore probe reaches `cloud-restore-probe-verified` without relying on root CloudKit SwiftData stores.
+- Status: active
+
 ## 2026-06-08 - Active Workout Relaunch Must Preserve Full-Screen Continuity
 
 - Date: 2026-06-08

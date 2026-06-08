@@ -363,6 +363,92 @@ struct UserDataCloudBackupServiceTests {
     }
 
     @Test
+    func exportDeduplicatesMirrorBackupRowsBeforeSavingSnapshot() async throws {
+        let localContainer = try makeUserDataContainer("DedupedBackupLocal")
+        let mirrorContainer = try makeUserDataContainer("DedupedBackupMirror")
+        let mirrorContext = ModelContext(mirrorContainer)
+
+        mirrorContext.insert(CustomExerciseCloudRecord(
+            remoteUUID: "duplicate-custom-row",
+            displayName: "Old Duplicate",
+            categoryName: "Back",
+            updatedAt: Date(timeIntervalSinceReferenceDate: 100)
+        ))
+        mirrorContext.insert(CustomExerciseCloudRecord(
+            remoteUUID: "duplicate-custom-row",
+            displayName: "New Duplicate",
+            categoryName: "Back",
+            updatedAt: Date(timeIntervalSinceReferenceDate: 200)
+        ))
+        mirrorContext.insert(BlockedBroCloudRecord(
+            userRecordName: "duplicate-blocked-user",
+            displayNameSnapshot: "Old Blocked",
+            blockedAt: Date(timeIntervalSinceReferenceDate: 100)
+        ))
+        mirrorContext.insert(BlockedBroCloudRecord(
+            userRecordName: "duplicate-blocked-user",
+            displayNameSnapshot: "New Blocked",
+            blockedAt: Date(timeIntervalSinceReferenceDate: 200)
+        ))
+        try mirrorContext.save()
+
+        let backupStore = FakeUserDataCloudBackupStore()
+        try await UserDataCloudBackupService(
+            localContainer: localContainer,
+            mirrorContainer: mirrorContainer,
+            backupStore: backupStore,
+            projectionScheduler: { _, _ in }
+        ).exportCurrentBackup()
+
+        let record = try #require(await backupStore.savedRecord())
+        let payload = try #require(String(data: record.payloadData, encoding: .utf8))
+        #expect(payload.components(separatedBy: "duplicate-custom-row").count - 1 == 1)
+        #expect(payload.contains("New Duplicate"))
+        #expect(!payload.contains("Old Duplicate"))
+        #expect(payload.components(separatedBy: "duplicate-blocked-user").count - 1 == 1)
+        #expect(payload.contains("New Blocked"))
+        #expect(!payload.contains("Old Blocked"))
+    }
+
+    @Test
+    func restoreCompactsDuplicateRowsFromExistingDirectBackup() async throws {
+        let duplicateExerciseRemoteUUID = "existing-duplicate-custom-row"
+        let duplicateBlockedUserRecordName = "existing-duplicate-blocked-user"
+        let payloadData = try bloatedBackupPayloadData(
+            duplicateExerciseRemoteUUID: duplicateExerciseRemoteUUID,
+            duplicateBlockedUserRecordName: duplicateBlockedUserRecordName
+        )
+        let backupStore = FakeUserDataCloudBackupStore(record: UserDataCloudBackupRemoteRecord(
+            updatedAt: Date(timeIntervalSinceReferenceDate: 300),
+            payloadData: payloadData
+        ))
+        let localContainer = try makeUserDataContainer("CompactedRestoreLocal")
+        let mirrorContainer = try makeUserDataContainer("CompactedRestoreMirror")
+
+        let didRestore = try await UserDataCloudBackupService(
+            localContainer: localContainer,
+            mirrorContainer: mirrorContainer,
+            backupStore: backupStore,
+            projectionScheduler: { _, _ in }
+        ).restoreLatestBackup()
+
+        #expect(didRestore)
+        let localContext = ModelContext(localContainer)
+        let restoredExercise = try #require(try fetchExercise(remoteUUID: duplicateExerciseRemoteUUID, in: localContext))
+        #expect(restoredExercise.displayName == "New Duplicate")
+        let restoredBlockedBro = try #require(
+            try fetchBlockedBro(userRecordName: duplicateBlockedUserRecordName, in: localContext)
+        )
+        #expect(restoredBlockedBro.displayNameSnapshot == "New Blocked")
+
+        let mirrorContext = ModelContext(mirrorContainer)
+        let mirrorExercises = try fetchCloudExercises(remoteUUID: duplicateExerciseRemoteUUID, in: mirrorContext)
+        #expect(mirrorExercises.map(\.displayName) == ["New Duplicate"])
+        let mirrorBlockedBros = try fetchCloudBlockedBros(userRecordName: duplicateBlockedUserRecordName, in: mirrorContext)
+        #expect(mirrorBlockedBros.map(\.displayNameSnapshot) == ["New Blocked"])
+    }
+
+    @Test
     func restoredProfileBeatsFreshUntouchedLocalDefaultProfile() async throws {
         let localContainer = try makeUserDataContainer("DefaultProfileLocal")
         let mirrorContainer = try makeUserDataContainer("DefaultProfileMirror")
@@ -501,6 +587,19 @@ struct UserDataCloudBackupServiceTests {
         #expect(try fetchTemplate(id: templateID, in: restoredLocalContext)?.name == "Backup Template In Folder")
     }
 
+    @Test
+    func cloudKitBackupStorePersistsInlineFallbackForFreshLaunchRestore() throws {
+        let source = try String(contentsOf: userDataCloudBackupServiceSourceURL(), encoding: .utf8)
+
+        #expect(source.contains("record[UserDataCloudBackupDescriptor.Field.payloadData] = inlinePayload.data as CKRecordValue"))
+        #expect(source.contains("return (payloadData, nil)"))
+        #expect(source.contains("try? Data(contentsOf: fileURL)"))
+        #expect(source.contains("if let payloadData = record[UserDataCloudBackupDescriptor.Field.payloadData] as? Data"))
+        #expect(source.contains("compressed(using: .lzfse)"))
+        #expect(source.contains("decompressed(using: .lzfse)"))
+        #expect(source.contains("UserDataCloudBackupDescriptor.Field.payloadCompression"))
+    }
+
     private func makeUserDataContainer(_ name: String) throws -> ModelContainer {
         let schema = Schema([
             ExerciseCatalogItem.self,
@@ -554,6 +653,26 @@ struct UserDataCloudBackupServiceTests {
         return try context.fetch(descriptor).first
     }
 
+    private func fetchCloudExercises(
+        remoteUUID: String,
+        in context: ModelContext
+    ) throws -> [CustomExerciseCloudRecord] {
+        try context.fetch(FetchDescriptor<CustomExerciseCloudRecord>(
+            predicate: #Predicate { $0.remoteUUID == remoteUUID },
+            sortBy: [SortDescriptor(\.displayName)]
+        ))
+    }
+
+    private func fetchCloudBlockedBros(
+        userRecordName: String,
+        in context: ModelContext
+    ) throws -> [BlockedBroCloudRecord] {
+        try context.fetch(FetchDescriptor<BlockedBroCloudRecord>(
+            predicate: #Predicate { $0.userRecordName == userRecordName },
+            sortBy: [SortDescriptor(\.displayNameSnapshot)]
+        ))
+    }
+
     private func fetchWidget(exerciseUUID: String, in context: ModelContext) throws -> ProfileWidgetConfig? {
         var descriptor = FetchDescriptor<ProfileWidgetConfig>(
             predicate: #Predicate { $0.selectedCatalogExerciseUUID == exerciseUUID }
@@ -591,10 +710,95 @@ struct UserDataCloudBackupServiceTests {
         descriptor.fetchLimit = 1
         return try context.fetch(descriptor).first
     }
+
+    private func userDataCloudBackupServiceSourceURL() -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("WGJ/Services/UserDataCloudBackupService.swift")
+    }
+
+    private func bloatedBackupPayloadData(
+        duplicateExerciseRemoteUUID: String,
+        duplicateBlockedUserRecordName: String
+    ) throws -> Data {
+        let payload: [String: Any] = [
+            "schemaVersion": 1,
+            "generatedAt": 300,
+            "profiles": [],
+            "tombstones": [],
+            "customExercises": [
+                [
+                    "id": UUID().uuidString,
+                    "remoteUUID": duplicateExerciseRemoteUUID,
+                    "remoteID": NSNull(),
+                    "displayName": "Old Duplicate",
+                    "categoryName": "Back",
+                    "equipmentSummary": "",
+                    "instructionText": NSNull(),
+                    "isHidden": false,
+                    "lastUpdateGlobal": NSNull(),
+                    "updatedAt": 100,
+                    "aliasesData": NSNull(),
+                    "primaryMusclesData": NSNull(),
+                    "secondaryMusclesData": NSNull(),
+                ],
+                [
+                    "id": UUID().uuidString,
+                    "remoteUUID": duplicateExerciseRemoteUUID,
+                    "remoteID": NSNull(),
+                    "displayName": "New Duplicate",
+                    "categoryName": "Back",
+                    "equipmentSummary": "",
+                    "instructionText": NSNull(),
+                    "isHidden": false,
+                    "lastUpdateGlobal": NSNull(),
+                    "updatedAt": 200,
+                    "aliasesData": NSNull(),
+                    "primaryMusclesData": NSNull(),
+                    "secondaryMusclesData": NSNull(),
+                ],
+            ],
+            "profileWidgets": [],
+            "blockedBros": [
+                [
+                    "id": UUID().uuidString,
+                    "userRecordName": duplicateBlockedUserRecordName,
+                    "displayNameSnapshot": "Old Blocked",
+                    "blockedAt": 100,
+                ],
+                [
+                    "id": UUID().uuidString,
+                    "userRecordName": duplicateBlockedUserRecordName,
+                    "displayNameSnapshot": "New Blocked",
+                    "blockedAt": 200,
+                ],
+            ],
+            "templateFolders": [],
+            "workoutTemplates": [],
+            "templateSupersetGroups": [],
+            "templateCardioBlocks": [],
+            "templateExercises": [],
+            "templateComponents": [],
+            "templateSets": [],
+            "templateDropStages": [],
+            "workoutSessions": [],
+            "workoutSupersetGroups": [],
+            "workoutCardioBlocks": [],
+            "workoutExercises": [],
+            "workoutSets": [],
+            "workoutDropStages": [],
+        ]
+        return try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+    }
 }
 
 actor FakeUserDataCloudBackupStore: UserDataCloudBackupStoring {
     private var record: UserDataCloudBackupRemoteRecord?
+
+    init(record: UserDataCloudBackupRemoteRecord? = nil) {
+        self.record = record
+    }
 
     func saveBackup(_ record: UserDataCloudBackupRemoteRecord) async throws {
         self.record = record

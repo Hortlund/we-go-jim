@@ -21,6 +21,7 @@ nonisolated enum UserDataCloudBackupDescriptor {
         static let schemaVersion = "schemaVersion"
         static let payloadAsset = "payloadAsset"
         static let payloadData = "payloadData"
+        static let payloadCompression = "payloadCompression"
     }
 }
 
@@ -99,6 +100,9 @@ final class UserDataCloudBackupService {
 }
 
 struct CloudKitUserDataCloudBackupStore: UserDataCloudBackupStoring {
+    private static let inlinePayloadFallbackLimitBytes = 900_000
+    private static let lzfsePayloadCompression = "lzfse"
+
     private let database: CKDatabase?
     private let fileManager: FileManager
 
@@ -120,6 +124,13 @@ struct CloudKitUserDataCloudBackupStore: UserDataCloudBackupStoring {
         record[UserDataCloudBackupDescriptor.Field.updatedAt] = backup.updatedAt as CKRecordValue
         record[UserDataCloudBackupDescriptor.Field.schemaVersion] = NSNumber(value: UserDataCloudBackupPayload.schemaVersion)
         record[UserDataCloudBackupDescriptor.Field.payloadAsset] = CKAsset(fileURL: payloadURL)
+        if let inlinePayload = Self.inlinePayloadFallback(for: backup.payloadData) {
+            record[UserDataCloudBackupDescriptor.Field.payloadData] = inlinePayload.data as CKRecordValue
+            record[UserDataCloudBackupDescriptor.Field.payloadCompression] = inlinePayload.compression as CKRecordValue?
+        } else {
+            record[UserDataCloudBackupDescriptor.Field.payloadData] = nil
+            record[UserDataCloudBackupDescriptor.Field.payloadCompression] = nil
+        }
 
         _ = try await database.modifyRecords(
             saving: [record],
@@ -137,16 +148,45 @@ struct CloudKitUserDataCloudBackupStore: UserDataCloudBackupStoring {
 
         let updatedAt = record[UserDataCloudBackupDescriptor.Field.updatedAt] as? Date ?? .distantPast
         if let asset = record[UserDataCloudBackupDescriptor.Field.payloadAsset] as? CKAsset,
-           let fileURL = asset.fileURL {
-            return try UserDataCloudBackupRemoteRecord(
+           let fileURL = asset.fileURL,
+           let payloadData = try? Data(contentsOf: fileURL) {
+            return UserDataCloudBackupRemoteRecord(
                 updatedAt: updatedAt,
-                payloadData: Data(contentsOf: fileURL)
+                payloadData: payloadData
             )
         }
         if let payloadData = record[UserDataCloudBackupDescriptor.Field.payloadData] as? Data {
-            return UserDataCloudBackupRemoteRecord(updatedAt: updatedAt, payloadData: payloadData)
+            let compression = record[UserDataCloudBackupDescriptor.Field.payloadCompression] as? String
+            guard let decodedPayloadData = Self.decodedInlinePayload(payloadData, compression: compression) else {
+                return nil
+            }
+            return UserDataCloudBackupRemoteRecord(updatedAt: updatedAt, payloadData: decodedPayloadData)
         }
         return nil
+    }
+
+    private static func inlinePayloadFallback(for payloadData: Data) -> (data: Data, compression: String?)? {
+        if payloadData.count <= inlinePayloadFallbackLimitBytes {
+            return (payloadData, nil)
+        }
+
+        guard let compressedPayload = try? (payloadData as NSData).compressed(using: .lzfse) as Data,
+              compressedPayload.count <= inlinePayloadFallbackLimitBytes
+        else {
+            return nil
+        }
+        return (compressedPayload, lzfsePayloadCompression)
+    }
+
+    private static func decodedInlinePayload(_ payloadData: Data, compression: String?) -> Data? {
+        guard let compression else {
+            return payloadData
+        }
+
+        guard compression == lzfsePayloadCompression else {
+            return nil
+        }
+        return try? (payloadData as NSData).decompressed(using: .lzfse) as Data
     }
 
     private func existingRecord(recordID: CKRecord.ID) async throws -> CKRecord? {
@@ -214,36 +254,167 @@ private struct UserDataCloudBackupPayload: Codable {
     var workoutDropStages: [WorkoutDropStageBackup]
 
     init(context: ModelContext) throws {
-        profiles = try context.fetch(FetchDescriptor<UserProfile>()).map { Profile($0) }.sorted { $0.id.uuidString < $1.id.uuidString }
-        tombstones = try context.fetch(FetchDescriptor<UserDataDeletionTombstone>()).map { Tombstone($0) }.sorted { $0.key < $1.key }
-        customExercises = try context.fetch(FetchDescriptor<CustomExerciseCloudRecord>()).map { CustomExercise($0) }.sorted { $0.remoteUUID < $1.remoteUUID }
-        profileWidgets = try context.fetch(FetchDescriptor<ProfileWidgetConfig>()).map { ProfileWidget($0) }.sorted { $0.id.uuidString < $1.id.uuidString }
-        blockedBros = try context.fetch(FetchDescriptor<BlockedBroCloudRecord>()).map { BlockedBroBackup($0) }.sorted { $0.userRecordName < $1.userRecordName }
-        templateFolders = try context.fetch(FetchDescriptor<TemplateFolder>()).map { TemplateFolderBackup($0) }.sorted { $0.id.uuidString < $1.id.uuidString }
-        workoutTemplates = try context.fetch(FetchDescriptor<WorkoutTemplate>()).map { WorkoutTemplateBackup($0) }.sorted { $0.id.uuidString < $1.id.uuidString }
-        templateSupersetGroups = try context.fetch(FetchDescriptor<TemplateSupersetGroup>()).map { TemplateSupersetGroupBackup($0) }.sorted { $0.id.uuidString < $1.id.uuidString }
-        templateCardioBlocks = try context.fetch(FetchDescriptor<TemplateCardioBlock>()).map { TemplateCardioBlockBackup($0) }.sorted { $0.id.uuidString < $1.id.uuidString }
-        templateExercises = try context.fetch(FetchDescriptor<TemplateExercise>()).map { TemplateExerciseBackup($0) }.sorted { $0.id.uuidString < $1.id.uuidString }
-        templateComponents = try context.fetch(FetchDescriptor<TemplateExerciseComponent>()).map { TemplateComponentBackup($0) }.sorted { $0.id.uuidString < $1.id.uuidString }
-        templateSets = try context.fetch(FetchDescriptor<TemplateExerciseSet>()).map { TemplateSetBackup($0) }.sorted { $0.id.uuidString < $1.id.uuidString }
-        templateDropStages = try context.fetch(FetchDescriptor<TemplateExerciseDropStage>()).map { TemplateDropStageBackup($0) }.sorted { $0.id.uuidString < $1.id.uuidString }
-        workoutSessions = try context.fetch(FetchDescriptor<WorkoutSession>()).map { WorkoutSessionBackup($0) }.sorted { $0.id.uuidString < $1.id.uuidString }
-        workoutSupersetGroups = try context.fetch(FetchDescriptor<WorkoutSessionSupersetGroup>()).map { WorkoutSupersetGroupBackup($0) }.sorted { $0.id.uuidString < $1.id.uuidString }
-        workoutCardioBlocks = try context.fetch(FetchDescriptor<WorkoutSessionCardioBlock>()).map { WorkoutCardioBlockBackup($0) }.sorted { $0.id.uuidString < $1.id.uuidString }
-        workoutExercises = try context.fetch(FetchDescriptor<WorkoutSessionExercise>()).map { WorkoutExerciseBackup($0) }.sorted { $0.id.uuidString < $1.id.uuidString }
-        workoutSets = try context.fetch(FetchDescriptor<WorkoutSessionSet>()).map { WorkoutSetBackup($0) }.sorted { $0.id.uuidString < $1.id.uuidString }
-        workoutDropStages = try context.fetch(FetchDescriptor<WorkoutSessionDropStage>()).map { WorkoutDropStageBackup($0) }.sorted { $0.id.uuidString < $1.id.uuidString }
+        profiles = try context.fetch(FetchDescriptor<UserProfile>()).map { Profile($0) }
+        tombstones = try context.fetch(FetchDescriptor<UserDataDeletionTombstone>()).map { Tombstone($0) }
+        customExercises = try context.fetch(FetchDescriptor<CustomExerciseCloudRecord>()).map { CustomExercise($0) }
+        profileWidgets = try context.fetch(FetchDescriptor<ProfileWidgetConfig>()).map { ProfileWidget($0) }
+        blockedBros = try context.fetch(FetchDescriptor<BlockedBroCloudRecord>()).map { BlockedBroBackup($0) }
+        templateFolders = try context.fetch(FetchDescriptor<TemplateFolder>()).map { TemplateFolderBackup($0) }
+        workoutTemplates = try context.fetch(FetchDescriptor<WorkoutTemplate>()).map { WorkoutTemplateBackup($0) }
+        templateSupersetGroups = try context.fetch(FetchDescriptor<TemplateSupersetGroup>())
+            .map { TemplateSupersetGroupBackup($0) }
+        templateCardioBlocks = try context.fetch(FetchDescriptor<TemplateCardioBlock>())
+            .map { TemplateCardioBlockBackup($0) }
+        templateExercises = try context.fetch(FetchDescriptor<TemplateExercise>()).map { TemplateExerciseBackup($0) }
+        templateComponents = try context.fetch(FetchDescriptor<TemplateExerciseComponent>())
+            .map { TemplateComponentBackup($0) }
+        templateSets = try context.fetch(FetchDescriptor<TemplateExerciseSet>()).map { TemplateSetBackup($0) }
+        templateDropStages = try context.fetch(FetchDescriptor<TemplateExerciseDropStage>())
+            .map { TemplateDropStageBackup($0) }
+        workoutSessions = try context.fetch(FetchDescriptor<WorkoutSession>()).map { WorkoutSessionBackup($0) }
+        workoutSupersetGroups = try context.fetch(FetchDescriptor<WorkoutSessionSupersetGroup>())
+            .map { WorkoutSupersetGroupBackup($0) }
+        workoutCardioBlocks = try context.fetch(FetchDescriptor<WorkoutSessionCardioBlock>())
+            .map { WorkoutCardioBlockBackup($0) }
+        workoutExercises = try context.fetch(FetchDescriptor<WorkoutSessionExercise>())
+            .map { WorkoutExerciseBackup($0) }
+        workoutSets = try context.fetch(FetchDescriptor<WorkoutSessionSet>()).map { WorkoutSetBackup($0) }
+        workoutDropStages = try context.fetch(FetchDescriptor<WorkoutSessionDropStage>())
+            .map { WorkoutDropStageBackup($0) }
+        compactInPlace()
+    }
+
+    private static func latestByKey<Item, Key: Hashable>(
+        _ items: [Item],
+        key: (Item) -> Key,
+        isNewer: (Item, Item) -> Bool
+    ) -> [Item] {
+        Array(items.reduce(into: [Key: Item]()) { result, item in
+            let itemKey = key(item)
+            guard let existing = result[itemKey] else {
+                result[itemKey] = item
+                return
+            }
+            if isNewer(item, existing) {
+                result[itemKey] = item
+            }
+        }.values)
     }
 
     func mergeIntoMirrorContents(in context: ModelContext) throws {
-        if try isMirrorEmpty(in: context) {
-            try replaceMirrorContents(in: context)
+        let payload = compacted()
+        if try payload.isMirrorEmpty(in: context) {
+            try payload.replaceMirrorContents(in: context)
             return
         }
 
-        try mergeSimpleRecords(in: context)
-        try mergeTemplateAggregates(in: context)
-        try mergeWorkoutSessionAggregates(in: context)
+        try payload.mergeSimpleRecords(in: context)
+        try payload.mergeTemplateAggregates(in: context)
+        try payload.mergeWorkoutSessionAggregates(in: context)
+    }
+
+    private func compacted() -> Self {
+        var copy = self
+        copy.compactInPlace()
+        return copy
+    }
+
+    private mutating func compactInPlace() {
+        profiles = Self.latestByKey(
+            profiles,
+            key: \.id,
+            isNewer: { $0.updatedAt > $1.updatedAt }
+        ).sorted { $0.id.uuidString < $1.id.uuidString }
+        tombstones = Self.latestByKey(
+            tombstones,
+            key: \.key,
+            isNewer: { $0.deletedAt > $1.deletedAt }
+        ).sorted { $0.key < $1.key }
+        customExercises = Self.latestByKey(
+            customExercises,
+            key: \.remoteUUID,
+            isNewer: { $0.updatedAt > $1.updatedAt }
+        ).sorted { $0.remoteUUID < $1.remoteUUID }
+        profileWidgets = Self.latestByKey(
+            profileWidgets,
+            key: \.id,
+            isNewer: { $0.updatedAt > $1.updatedAt }
+        ).sorted { $0.id.uuidString < $1.id.uuidString }
+        blockedBros = Self.latestByKey(
+            blockedBros,
+            key: \.userRecordName,
+            isNewer: { $0.blockedAt > $1.blockedAt }
+        ).sorted { $0.userRecordName < $1.userRecordName }
+        templateFolders = Self.latestByKey(
+            templateFolders,
+            key: \.id,
+            isNewer: { $0.updatedAt > $1.updatedAt }
+        ).sorted { $0.id.uuidString < $1.id.uuidString }
+        workoutTemplates = Self.latestByKey(
+            workoutTemplates,
+            key: \.id,
+            isNewer: { $0.updatedAt > $1.updatedAt }
+        ).sorted { $0.id.uuidString < $1.id.uuidString }
+        templateSupersetGroups = Self.latestByKey(
+            templateSupersetGroups,
+            key: \.id,
+            isNewer: { $0.updatedAt > $1.updatedAt }
+        ).sorted { $0.id.uuidString < $1.id.uuidString }
+        templateCardioBlocks = Self.latestByKey(
+            templateCardioBlocks,
+            key: \.id,
+            isNewer: { $0.updatedAt > $1.updatedAt }
+        ).sorted { $0.id.uuidString < $1.id.uuidString }
+        templateExercises = Self.latestByKey(
+            templateExercises,
+            key: \.id,
+            isNewer: { $0.updatedAt > $1.updatedAt }
+        ).sorted { $0.id.uuidString < $1.id.uuidString }
+        templateComponents = Self.latestByKey(
+            templateComponents,
+            key: \.id,
+            isNewer: { $0.updatedAt > $1.updatedAt }
+        ).sorted { $0.id.uuidString < $1.id.uuidString }
+        templateSets = Self.latestByKey(
+            templateSets,
+            key: \.id,
+            isNewer: { $0.updatedAt > $1.updatedAt }
+        ).sorted { $0.id.uuidString < $1.id.uuidString }
+        templateDropStages = Self.latestByKey(
+            templateDropStages,
+            key: \.id,
+            isNewer: { $0.updatedAt > $1.updatedAt }
+        ).sorted { $0.id.uuidString < $1.id.uuidString }
+        workoutSessions = Self.latestByKey(
+            workoutSessions,
+            key: \.id,
+            isNewer: { $0.updatedAt > $1.updatedAt }
+        ).sorted { $0.id.uuidString < $1.id.uuidString }
+        workoutSupersetGroups = Self.latestByKey(
+            workoutSupersetGroups,
+            key: \.id,
+            isNewer: { $0.updatedAt > $1.updatedAt }
+        ).sorted { $0.id.uuidString < $1.id.uuidString }
+        workoutCardioBlocks = Self.latestByKey(
+            workoutCardioBlocks,
+            key: \.id,
+            isNewer: { $0.updatedAt > $1.updatedAt }
+        ).sorted { $0.id.uuidString < $1.id.uuidString }
+        workoutExercises = Self.latestByKey(
+            workoutExercises,
+            key: \.id,
+            isNewer: { $0.updatedAt > $1.updatedAt }
+        ).sorted { $0.id.uuidString < $1.id.uuidString }
+        workoutSets = Self.latestByKey(
+            workoutSets,
+            key: \.id,
+            isNewer: { $0.updatedAt > $1.updatedAt }
+        ).sorted { $0.id.uuidString < $1.id.uuidString }
+        workoutDropStages = Self.latestByKey(
+            workoutDropStages,
+            key: \.id,
+            isNewer: { $0.updatedAt > $1.updatedAt }
+        ).sorted { $0.id.uuidString < $1.id.uuidString }
     }
 
     private func replaceMirrorContents(in context: ModelContext) throws {
