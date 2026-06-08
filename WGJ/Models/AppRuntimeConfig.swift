@@ -798,11 +798,13 @@ enum ActiveWorkoutScrollTarget: Hashable {
 }
 
 nonisolated enum ActiveWorkoutCompletionScrollPolicy {
-    static func targetAfterAutoCollapse(
+    static func targetAfterCompletionChange(
         exerciseID: UUID,
         didTransitionToCompleted: Bool
     ) -> ActiveWorkoutScrollTarget? {
-        didTransitionToCompleted ? .exercise(exerciseID) : nil
+        _ = exerciseID
+        _ = didTransitionToCompleted
+        return nil
     }
 }
 

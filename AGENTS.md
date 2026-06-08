@@ -87,6 +87,7 @@
 - Treat Core Data + CloudKit export scheduler logs as framework-owned until app-side redundant saves or incorrect cloud gating are proven. Do not add custom background-task plumbing to silence those logs.
 - Keep local-only stores and cloud-backed user-data stores conceptually separate even when they share app bootstrap machinery. Active workout drafts should not accidentally wake cloud-backed paths through avoidable persistence churn.
 - For active workouts, foregrounding should be memory-first when the active session is already alive. A `.background` scene transition may flush row-local drafts into the runtime session and write the local JSON active-workout snapshot, but foregrounding must not run broad restore, maintenance, SwiftData, or CloudKit work for a known active session.
+- Active Workout exercise cards must not auto-collapse when all sets are completed. Preserve manual expansion across completion and minimize/restore, and avoid completion-driven scroll reanchors unless the user explicitly navigates.
 - If changing dropsets, Bozar, previous-performance hints, active workout draft saves, or template transfer, search the full persistence and UI path before assuming one visible control is the whole behavior.
 
 ## Product Quality / App Review Rules

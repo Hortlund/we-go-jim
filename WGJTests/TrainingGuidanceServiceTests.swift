@@ -400,7 +400,7 @@ struct TrainingGuidanceServiceTests {
     }
 
     @Test
-    func activeWorkoutControllerCollapsesExerciseWhenItCompletes() {
+    func activeWorkoutControllerKeepsExerciseExpandedWhenItCompletes() {
         let first = UUID()
         let second = UUID()
         var controller = ActiveWorkoutExerciseCardStateController()
@@ -416,16 +416,16 @@ struct TrainingGuidanceServiceTests {
 
         controller.setExpanded(true, for: first)
         controller.updateCompletion(for: first, isCompleted: true)
-        #expect(!controller.isExpanded(for: first))
-
-        controller.setExpanded(true, for: first)
-        controller.updateCompletion(for: first, isCompleted: true)
         #expect(controller.isExpanded(for: first))
+
+        controller.setExpanded(false, for: first)
+        controller.updateCompletion(for: first, isCompleted: true)
+        #expect(!controller.isExpanded(for: first))
 
         controller.updateCompletion(for: first, isCompleted: false)
         controller.setExpanded(true, for: first)
         controller.updateCompletion(for: first, isCompleted: true)
-        #expect(!controller.isExpanded(for: first))
+        #expect(controller.isExpanded(for: first))
     }
 
     @Test
@@ -470,15 +470,15 @@ struct TrainingGuidanceServiceTests {
     }
 
     @Test
-    func activeWorkoutCompletionScrollPolicyReanchorsCompletedExerciseOnlyOnNewCompletion() {
+    func activeWorkoutCompletionScrollPolicyDoesNotReanchorWhenExerciseCompletes() {
         let exerciseID = UUID()
 
-        #expect(ActiveWorkoutCompletionScrollPolicy.targetAfterAutoCollapse(
+        #expect(ActiveWorkoutCompletionScrollPolicy.targetAfterCompletionChange(
             exerciseID: exerciseID,
             didTransitionToCompleted: true
-        ) == .exercise(exerciseID))
+        ) == nil)
 
-        #expect(ActiveWorkoutCompletionScrollPolicy.targetAfterAutoCollapse(
+        #expect(ActiveWorkoutCompletionScrollPolicy.targetAfterCompletionChange(
             exerciseID: exerciseID,
             didTransitionToCompleted: false
         ) == nil)
@@ -542,6 +542,33 @@ struct TrainingGuidanceServiceTests {
 
         #expect(!restored.isExpanded(for: first))
         #expect(restored.isExpanded(for: second))
+    }
+
+    @Test
+    func activeWorkoutControllerRestoresCompletedExpandedExercisesAcrossMinimize() {
+        let first = UUID()
+        let second = UUID()
+        var controller = ActiveWorkoutExerciseCardStateController()
+
+        controller.sync(
+            exerciseIDs: [first, second],
+            completedExerciseIDs: [],
+            firstIncompleteExerciseID: first
+        )
+        controller.setExpanded(true, for: first)
+        controller.updateCompletion(for: first, isCompleted: true)
+
+        let expandedIDs = controller.expandedExerciseIDs()
+        var restored = ActiveWorkoutExerciseCardStateController()
+        restored.sync(
+            exerciseIDs: [first, second],
+            completedExerciseIDs: [first],
+            firstIncompleteExerciseID: second
+        )
+        restored.restoreExpandedExerciseIDs(expandedIDs)
+
+        #expect(restored.isExpanded(for: first))
+        #expect(!restored.isExpanded(for: second))
     }
 
     private func makeWorkoutSet(

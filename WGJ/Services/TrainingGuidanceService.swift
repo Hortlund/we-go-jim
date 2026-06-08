@@ -160,7 +160,6 @@ struct ActiveWorkoutExerciseCardStateController: Equatable {
     mutating func restoreExpandedExerciseIDs(_ exerciseIDs: Set<UUID>) {
         for exerciseID in exerciseIDs {
             guard isExpandedByExerciseID[exerciseID] != nil else { continue }
-            guard !completedInCurrentCycle.contains(exerciseID) else { continue }
             isExpandedByExerciseID[exerciseID] = true
         }
     }
@@ -179,7 +178,6 @@ struct ActiveWorkoutExerciseCardStateController: Equatable {
         if isCompleted {
             guard !completedInCurrentCycle.contains(exerciseID) else { return }
             completedInCurrentCycle.insert(exerciseID)
-            isExpandedByExerciseID[exerciseID] = false
         } else {
             completedInCurrentCycle.remove(exerciseID)
         }

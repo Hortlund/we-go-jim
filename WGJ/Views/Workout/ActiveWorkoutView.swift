@@ -105,8 +105,8 @@ struct ActiveWorkoutView: View {
     var body: some View {
         ScrollViewReader { scrollProxy in
             ScrollView {
-                // Exercise cards change height aggressively as sets complete, and a non-lazy
-                // stack keeps the scroll position stable when a completed card collapses.
+                // Exercise cards can change height aggressively as set rows update, and a
+                // non-lazy stack keeps the scroll position stable during active logging.
                 activeWorkoutScrollContent(scrollProxy: scrollProxy)
                 .scrollTargetLayout()
                 .padding(16)
@@ -1536,7 +1536,7 @@ struct ActiveWorkoutView: View {
         didTransitionToCompleted: Bool,
         using scrollProxy: ScrollViewProxy
     ) {
-        guard let target = ActiveWorkoutCompletionScrollPolicy.targetAfterAutoCollapse(
+        guard let target = ActiveWorkoutCompletionScrollPolicy.targetAfterCompletionChange(
             exerciseID: exerciseID,
             didTransitionToCompleted: didTransitionToCompleted
         ) else {

@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-06-08 - Active Workout Completion Must Not Auto-Collapse Exercise Cards
+
+- Date: 2026-06-08
+- Trigger/Problem: The user clarified that exercises should not auto-collapse when all sets are completed.
+- Root Cause: `ActiveWorkoutExerciseCardStateController.updateCompletion` collapsed newly completed exercises, restore skipped expanded completed exercises, and completion scroll policy reanchored the completed exercise to compensate for the collapse.
+- Durable Rule: Preserve the user's manual exercise-card expansion state when all sets complete and across minimize/restore. Do not add completion-driven card collapse or scroll reanchors unless the user explicitly requests navigation.
+- How to Verify Next Time: Run `WGJTests/TrainingGuidanceServiceTests`; confirm completed expanded exercise cards remain expanded, completed expanded cards restore after minimize, and completion does not request a scroll reanchor.
+- Status: active
+
 ## 2026-06-08 - Bros Must Reconnect When iCloud Recovers
 
 - Date: 2026-06-08
