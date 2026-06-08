@@ -144,6 +144,12 @@ nonisolated final class HistoryAnalyticsCache {
         metricsSnapshotsByContainerID.removeValue(forKey: containerID)
     }
 
+    func clear() {
+        lock.lock()
+        metricsSnapshotsByContainerID.removeAll()
+        lock.unlock()
+    }
+
     func currentRevision(for container: ModelContainer) -> Int {
         let containerID = ObjectIdentifier(container)
         lock.lock()

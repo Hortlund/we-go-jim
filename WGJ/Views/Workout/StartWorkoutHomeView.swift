@@ -782,7 +782,11 @@ struct StartWorkoutHomeView: View {
             runtimePreparation = try Self.prepareActiveWorkoutStart(templateID: templateID, modelContext: modelContext)
         }
 
-        try await ActiveWorkoutSnapshotStore.shared.save(runtimePreparation.session)
+        try await ActiveWorkoutSnapshotStore.shared.save(
+            runtimePreparation.session,
+            presentationMode: .presented,
+            preservesExistingPresentationMode: false
+        )
         return ActiveWorkoutStartPreparation(
             sessionID: runtimePreparation.session.id,
             isExistingConflict: false,

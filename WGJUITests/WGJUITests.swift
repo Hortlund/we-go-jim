@@ -1372,11 +1372,14 @@ final class WGJUITests: XCTestCase {
         app.launch()
         authenticateIfNeeded(app, mode: .localInMemory)
 
-        tapTab("Start Workout", in: app)
-        let restoredStrip = identifiedElement("active-workout-strip", in: app)
-        if restoredStrip.waitForExistence(timeout: 5) {
-            restoredStrip.tap()
-        }
+        XCTAssertTrue(
+            identifiedElement("active-workout-overlay", in: app).waitForExistence(timeout: 5),
+            "A workout backgrounded from full-screen should relaunch directly into the active workout."
+        )
+        XCTAssertFalse(
+            identifiedElement("active-workout-strip", in: app).waitForExistence(timeout: 1),
+            "The minimized strip is only valid after the user manually minimizes the workout."
+        )
         expandFirstActiveWorkoutExerciseIfNeeded(in: app)
 
         let restoredWeightField = identifiedElement("workout-set-0-weight-field", in: app)

@@ -959,7 +959,11 @@ struct ExercisesCatalogView: View {
         updatedSession.exercises.append(runtimeExercise)
         updatedSession.normalizeExerciseSortOrder()
         updatedSession.touch()
-        try await ActiveWorkoutSnapshotStore.shared.save(updatedSession)
+        try await ActiveWorkoutSnapshotStore.shared.save(
+            updatedSession,
+            presentationMode: .presented,
+            preservesExistingPresentationMode: false
+        )
     }
 
     private func scrollToTop(using proxy: ScrollViewProxy) {

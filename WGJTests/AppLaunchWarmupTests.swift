@@ -1124,6 +1124,50 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
+    func appLaunchBootstrapResolverUsesEmergencyInMemoryContainerWhenLocalStoreFails() async throws {
+        let emergencyContainer = try makeContainer()
+        enum TestError: Error { case localStoreFailed }
+        var didRequestEmergencyContainer = false
+
+        let bootstrap = try await AppLaunchBootstrapResolver.resolve(
+            processInfo: MockProcessInfo(arguments: []),
+            canUseConfiguredCloudKitContainer: true,
+            startupDecisionProvider: {
+                Issue.record("Startup preflight should not run for local-authoritative root bootstrap.")
+                return CloudStartupDecision(
+                    accountStatus: .available,
+                    storeMode: .cloudBacked,
+                    cloudSyncErrorDescription: nil
+                )
+            },
+            makeUITestContainer: {
+                Issue.record("UI test container should not be requested.")
+                return emergencyContainer
+            },
+            makeCloudBackedContainer: {
+                Issue.record("Cloud-backed root container should not be requested.")
+                return emergencyContainer
+            },
+            makeLocalFallbackContainer: {
+                throw TestError.localStoreFailed
+            },
+            makeEmergencyInMemoryContainer: {
+                didRequestEmergencyContainer = true
+                return emergencyContainer
+            },
+            describeError: { error in
+                String(describing: error)
+            }
+        )
+
+        #expect(bootstrap.storageMode == .localAuthoritative)
+        #expect(!bootstrap.cloudFeaturesEnabled)
+        #expect(!bootstrap.cloudSyncEnabled)
+        #expect(bootstrap.cloudSyncErrorDescription?.contains("Local storage could not be opened") == true)
+        #expect(didRequestEmergencyContainer)
+    }
+
+    @Test
     func appLaunchBootstrapResolverDoesNotBuildCloudBackedRootForTimedOutStartupStatus() async throws {
         let container = try makeContainer()
         var didRunStartupPreflight = false

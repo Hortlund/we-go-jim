@@ -49,6 +49,24 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-06-08 - Active Workout Relaunch Must Preserve Full-Screen Continuity
+
+- Date: 2026-06-08
+- Trigger/Problem: The user reported that after backgrounding from inside Active Workout, reopening could show splash/start page with the active workout minimized in the strip instead of returning directly to the workout.
+- Root Cause: The durable active-workout snapshot only stored the runtime session and rest timer. On a fresh app process, `ActiveWorkoutPresentationState` restored only the session ID, started with `isActiveWorkoutPresented == false`, and therefore collapsed the restored session into the strip even when the user had backgrounded from the full-screen workout.
+- Durable Rule: Active-workout snapshots must distinguish OS/background continuity from an explicit user minimize. Background/user-edit/start handoffs that present Active Workout should persist `.presented`; manual minimize should persist `.collapsed`; restore must honor that presentation mode instead of deriving UI state from session existence alone.
+- How to Verify Next Time: Run `WGJTests/ActiveWorkoutRuntimeTests` and `WGJUITests/WGJUITests/testActiveWorkoutBackgroundRelaunchResumesStartedWorkoutAndDiscardRemovesSnapshot`; confirm the relaunch UI test requires `active-workout-overlay` directly after background + terminate + relaunch and does not tap the strip as a fallback.
+- Status: active
+
+## 2026-06-08 - Launch Failures And Background Memory Pressure Must Not Kill Active Workout
+
+- Date: 2026-06-08
+- Trigger/Problem: The user reported frequent apparent app death after backgrounding, followed by splash/start page on reopen while an active workout was in progress.
+- Root Cause: `AppLaunchBootstrapState.resolveIfNeeded` could hard-crash the app with `preconditionFailure` when bootstrap resolution failed, and volatile decoded image/avatar/analytics/search caches could remain resident after backgrounding, increasing the chance of iOS terminating the process under memory pressure.
+- Durable Rule: App launch/bootstrap failures must degrade into local-only emergency behavior when possible instead of killing the process, especially while the active-workout local snapshot can preserve the training loop. Purge volatile decoded caches on background and memory warnings; keep cache budgets conservative enough that backgrounded Active Workout is cheap to keep alive.
+- How to Verify Next Time: Run `WGJTests/AppBootstrapTests`, `WGJTests/AppLaunchWarmupTests`, `WGJTests/ActiveWorkoutRuntimeTests`, and `WGJUITests/WGJUITests/testActiveWorkoutBackgroundRelaunchResumesStartedWorkoutAndDiscardRemovesSnapshot`; also scan app source for `preconditionFailure`, `fatalError`, `try!`, and `as!` before calling a stability pass done.
+- Status: active
+
 ## 2026-06-08 - Active Workout Set Completion Controls Stay Inline
 
 - Date: 2026-06-08

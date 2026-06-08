@@ -82,8 +82,8 @@ nonisolated final class BrosAvatarCacheService {
     private var inFlightPrimesByKey: [String: BrosAvatarInFlightPrime] = [:]
 
     private init() {
-        cache.countLimit = 256
-        cache.totalCostLimit = 48 * 1024 * 1024
+        cache.countLimit = 96
+        cache.totalCostLimit = 16 * 1024 * 1024
     }
 
     func cachedThumbnail(for key: String?) -> UIImage? {

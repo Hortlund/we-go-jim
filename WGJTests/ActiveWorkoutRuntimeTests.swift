@@ -75,6 +75,48 @@ struct ActiveWorkoutRuntimeTests {
     }
 
     @Test
+    func snapshotStorePersistsActiveWorkoutPresentationMode() async throws {
+        let directory = try temporaryDirectory()
+        let store = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        var session = makeRuntimeSession()
+
+        try await store.save(
+            session,
+            presentationMode: .presented,
+            preservesExistingPresentationMode: false
+        )
+
+        var storedSnapshot = try #require(try await store.loadStoredSnapshot())
+        #expect(storedSnapshot.presentationMode == .presented)
+
+        session.notes = "Minimized manually"
+        try await store.save(
+            session,
+            presentationMode: .collapsed,
+            preservesExistingPresentationMode: false
+        )
+
+        storedSnapshot = try #require(try await store.loadStoredSnapshot())
+        #expect(storedSnapshot.session.notes == "Minimized manually")
+        #expect(storedSnapshot.presentationMode == .collapsed)
+    }
+
+    @Test
+    func snapshotStorePreservesPresentationModeWhenSessionOnlyCallSitesSave() async throws {
+        let directory = try temporaryDirectory()
+        let store = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        var session = makeRuntimeSession()
+
+        try await store.save(session, presentationMode: .presented)
+        session.notes = "Updated elsewhere"
+        try await store.save(session)
+
+        let storedSnapshot = try #require(try await store.loadStoredSnapshot())
+        #expect(storedSnapshot.session.notes == "Updated elsewhere")
+        #expect(storedSnapshot.presentationMode == .presented)
+    }
+
+    @Test
     func runtimeExerciseReplacementKeepsSlotAndResetsLoggedDefaults() {
         let exerciseID = UUID()
         let templateExerciseID = UUID()
@@ -323,6 +365,58 @@ struct ActiveWorkoutRuntimeTests {
         #expect(state.activeSessionID == legacy.id)
         #expect(try context.fetch(FetchDescriptor<ActiveWorkoutDraftSession>()).isEmpty)
         #expect(try await ActiveWorkoutSnapshotStore.shared.load()?.id == legacy.id)
+    }
+
+    @Test
+    func activeWorkoutRestoreReopensPresentedSnapshotFullScreen() async throws {
+        ActiveWorkoutSnapshotStore.deleteDefaultSnapshotFileForUITests()
+        defer {
+            ActiveWorkoutSnapshotStore.deleteDefaultSnapshotFileForUITests()
+        }
+
+        let context = try makeInMemoryContext()
+        let session = makeRuntimeSession()
+        try await ActiveWorkoutSnapshotStore.shared.save(
+            session,
+            presentationMode: .presented,
+            preservesExistingPresentationMode: false
+        )
+        let state = ActiveWorkoutPresentationState()
+
+        await state.restoreActiveSessionIfMissing(
+            modelContext: context,
+            allowsLegacyDraftImport: false
+        )
+
+        #expect(state.activeSessionID == session.id)
+        #expect(state.isActiveWorkoutPresented)
+        #expect(!state.isActiveWorkoutStripCollapsed)
+    }
+
+    @Test
+    func activeWorkoutRestoreKeepsManuallyMinimizedSnapshotCollapsed() async throws {
+        ActiveWorkoutSnapshotStore.deleteDefaultSnapshotFileForUITests()
+        defer {
+            ActiveWorkoutSnapshotStore.deleteDefaultSnapshotFileForUITests()
+        }
+
+        let context = try makeInMemoryContext()
+        let session = makeRuntimeSession()
+        try await ActiveWorkoutSnapshotStore.shared.save(
+            session,
+            presentationMode: .collapsed,
+            preservesExistingPresentationMode: false
+        )
+        let state = ActiveWorkoutPresentationState()
+
+        await state.restoreActiveSessionIfMissing(
+            modelContext: context,
+            allowsLegacyDraftImport: false
+        )
+
+        #expect(state.activeSessionID == session.id)
+        #expect(!state.isActiveWorkoutPresented)
+        #expect(state.isActiveWorkoutStripCollapsed)
     }
 
     @Test

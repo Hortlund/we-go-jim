@@ -14,8 +14,8 @@ nonisolated final class ExerciseImageCacheService {
 
     private static let sharedMemoryImageCache: NSCache<NSString, UIImage> = {
         let cache = NSCache<NSString, UIImage>()
-        cache.countLimit = 220
-        cache.totalCostLimit = 96 * 1024 * 1024
+        cache.countLimit = 96
+        cache.totalCostLimit = 32 * 1024 * 1024
         return cache
     }()
 
@@ -29,6 +29,10 @@ nonisolated final class ExerciseImageCacheService {
 
     deinit {
         metadataSaveTask?.cancel()
+    }
+
+    static func clearMemoryCache() {
+        sharedMemoryImageCache.removeAllObjects()
     }
 
     func image(for exercise: ExerciseCatalogItem) async -> UIImage? {

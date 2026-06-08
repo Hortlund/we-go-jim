@@ -18,8 +18,8 @@ nonisolated final class AvatarThumbnailCacheService {
     private let cache = NSCache<NSString, AvatarThumbnailCacheEntry>()
 
     private init() {
-        cache.countLimit = 128
-        cache.totalCostLimit = 24 * 1024 * 1024
+        cache.countLimit = 48
+        cache.totalCostLimit = 8 * 1024 * 1024
     }
 
     func cachedThumbnail(for fingerprint: String, maxPixelSize: CGFloat) -> UIImage? {

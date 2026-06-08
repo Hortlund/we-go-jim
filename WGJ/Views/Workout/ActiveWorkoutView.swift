@@ -2144,7 +2144,9 @@ struct ActiveWorkoutView: View {
                 try await ActiveWorkoutSnapshotStore.shared.save(
                     snapshot,
                     restTimer: restTimerSnapshot,
-                    preservesExistingRestTimer: false
+                    presentationMode: .collapsed,
+                    preservesExistingRestTimer: false,
+                    preservesExistingPresentationMode: false
                 )
             } catch {
                 guard !Task.isCancelled else { return }
@@ -2543,7 +2545,9 @@ struct ActiveWorkoutView: View {
                 try await ActiveWorkoutSnapshotStore.shared.save(
                     snapshot,
                     restTimer: restTimerState.restTimerSnapshot(),
-                    preservesExistingRestTimer: false
+                    presentationMode: .presented,
+                    preservesExistingRestTimer: false,
+                    preservesExistingPresentationMode: false
                 )
                 return true
             } catch {
@@ -2580,7 +2584,9 @@ struct ActiveWorkoutView: View {
             try await ActiveWorkoutSnapshotStore.shared.save(
                 snapshot,
                 restTimer: restTimerState.restTimerSnapshot(),
-                preservesExistingRestTimer: false
+                presentationMode: .presented,
+                preservesExistingRestTimer: false,
+                preservesExistingPresentationMode: false
             )
             return true
         } catch {
@@ -2687,7 +2693,9 @@ struct ActiveWorkoutView: View {
                 try await ActiveWorkoutSnapshotStore.shared.save(
                     snapshot,
                     restTimer: restTimerState.restTimerSnapshot(),
-                    preservesExistingRestTimer: false
+                    presentationMode: .presented,
+                    preservesExistingRestTimer: false,
+                    preservesExistingPresentationMode: false
                 )
             } catch {
                 guard !Task.isCancelled else { return }

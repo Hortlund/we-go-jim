@@ -51,9 +51,15 @@ nonisolated struct RestTimerSnapshot: Equatable, Codable, Sendable {
     }
 }
 
+nonisolated enum ActiveWorkoutStoredPresentationMode: String, Codable, Sendable {
+    case presented
+    case collapsed
+}
+
 nonisolated struct ActiveWorkoutStoredSnapshot: Equatable, Codable, Sendable {
     let session: ActiveWorkoutRuntimeSession
     let restTimer: RestTimerSnapshot?
+    let presentationMode: ActiveWorkoutStoredPresentationMode?
 }
 
 nonisolated extension ActiveWorkoutRuntimeSession {
@@ -460,18 +466,24 @@ actor ActiveWorkoutSnapshotStore {
         if let storedSnapshot = try? decoder.decode(ActiveWorkoutStoredSnapshot.self, from: data) {
             var session = storedSnapshot.session
             session.normalizeSetRestToExerciseDefaults()
-            return ActiveWorkoutStoredSnapshot(session: session, restTimer: storedSnapshot.restTimer)
+            return ActiveWorkoutStoredSnapshot(
+                session: session,
+                restTimer: storedSnapshot.restTimer,
+                presentationMode: storedSnapshot.presentationMode
+            )
         }
 
         var session = try decoder.decode(ActiveWorkoutRuntimeSession.self, from: data)
         session.normalizeSetRestToExerciseDefaults()
-        return ActiveWorkoutStoredSnapshot(session: session, restTimer: nil)
+        return ActiveWorkoutStoredSnapshot(session: session, restTimer: nil, presentationMode: nil)
     }
 
     func save(
         _ session: ActiveWorkoutRuntimeSession,
         restTimer: RestTimerSnapshot? = nil,
-        preservesExistingRestTimer: Bool = true
+        presentationMode: ActiveWorkoutStoredPresentationMode? = nil,
+        preservesExistingRestTimer: Bool = true,
+        preservesExistingPresentationMode: Bool = true
     ) throws {
         try Task.checkCancellation()
         try FileManager.default.createDirectory(
@@ -481,13 +493,19 @@ actor ActiveWorkoutSnapshotStore {
         var normalizedSession = session
         normalizedSession.normalizeSetRestToExerciseDefaults()
         try Task.checkCancellation()
-        let existingRestTimer = preservesExistingRestTimer
-            ? (try? loadStoredSnapshot()?.restTimer)
+        let existingSnapshot = preservesExistingRestTimer || preservesExistingPresentationMode
+            ? (try? loadStoredSnapshot())
+            : nil
+        let existingRestTimer = preservesExistingRestTimer ? existingSnapshot?.restTimer : nil
+        let existingPresentationMode = preservesExistingPresentationMode
+            ? existingSnapshot?.presentationMode
             : nil
         let resolvedRestTimer = restTimer ?? existingRestTimer
+        let resolvedPresentationMode = presentationMode ?? existingPresentationMode
         let storedSnapshot = ActiveWorkoutStoredSnapshot(
             session: normalizedSession,
-            restTimer: resolvedRestTimer?.isExpired == true ? nil : resolvedRestTimer
+            restTimer: resolvedRestTimer?.isExpired == true ? nil : resolvedRestTimer,
+            presentationMode: resolvedPresentationMode
         )
         try Task.checkCancellation()
         let data = try encoder.encode(storedSnapshot)

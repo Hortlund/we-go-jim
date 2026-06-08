@@ -22,6 +22,12 @@ nonisolated final class ExerciseSearchService {
         cacheLock.unlock()
     }
 
+    static func clearCachedCatalogIndexes() {
+        cacheLock.lock()
+        cachedCatalogIndexByContextID.removeAll()
+        cacheLock.unlock()
+    }
+
     func searchExercises(query: String, filters: ExerciseFilters) throws -> [ExerciseCatalogItem] {
         let rows = try catalogRows()
         return rows.compactMap { row in

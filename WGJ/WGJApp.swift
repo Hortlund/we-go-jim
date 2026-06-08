@@ -11,6 +11,7 @@ struct WGJApp: App {
         Self.configureNavigationTitleAppearance()
         RestTimerNotificationManager.shared.configureNotifications()
         CloudSyncEventMonitor.shared.start()
+        AppLifecycleDiagnostics.shared.start()
         SubscriptionState.shared.configureIfNeeded()
     }
 
@@ -31,9 +32,14 @@ struct WGJApp: App {
                 } else {
                     SplashView()
                         .task {
-                            launchBootstrapState.resolveIfNeeded {
-                                try await Self.makeContainerBootstrap()
-                            }
+                            launchBootstrapState.resolveIfNeeded(
+                                resolver: {
+                                    try await Self.makeContainerBootstrap()
+                                },
+                                failureFallback: { error in
+                                    try Self.makeEmergencyBootstrap(after: error)
+                                }
+                            )
                         }
                 }
             }
@@ -56,6 +62,9 @@ struct WGJApp: App {
             },
             makeCloudFailureLocalFallbackContainer: {
                 try makeCloudFailureLocalFallbackContainer()
+            },
+            makeEmergencyInMemoryContainer: {
+                try makeEmergencyInMemoryContainer()
             },
             describeError: { error in
                 describe(error)
@@ -128,7 +137,35 @@ struct WGJApp: App {
         return container
     }
 
-    private static func fullAppSchema() -> Schema {
+    nonisolated private static func makeEmergencyInMemoryContainer() throws -> ModelContainer {
+        let appSchema = fullAppSchema()
+        return try ModelContainer(
+            for: appSchema,
+            configurations: [
+                ModelConfiguration(
+                    "EmergencyLocalOnly",
+                    schema: appSchema,
+                    isStoredInMemoryOnly: true,
+                    cloudKitDatabase: .none
+                )
+            ]
+        )
+    }
+
+    nonisolated private static func makeEmergencyBootstrap(after error: Error) throws -> ModelContainerBootstrap {
+        let description = "App storage could not be opened. Keeping WGJ running in temporary local-only mode. \(describe(error))"
+        return ModelContainerBootstrap(
+            container: try makeEmergencyInMemoryContainer(),
+            storageMode: .localAuthoritative,
+            cloudRuntimeMode: .unavailable(description),
+            cloudFeaturesEnabled: false,
+            userDataSyncEnabled: false,
+            cloudSyncEnabled: false,
+            cloudSyncErrorDescription: description
+        )
+    }
+
+    nonisolated private static func fullAppSchema() -> Schema {
         Schema([
             ExerciseCatalogItem.self,
             MuscleGroup.self,
@@ -281,7 +318,7 @@ struct WGJApp: App {
         ]
     }
 
-    private static func describe(_ error: Error) -> String {
+    nonisolated private static func describe(_ error: Error) -> String {
         let nsError = error as NSError
         let userInfo = nsError.userInfo.map { "\($0.key)=\($0.value)" }.joined(separator: ", ")
         if userInfo.isEmpty {

@@ -952,6 +952,11 @@ nonisolated enum MainTabOverlayLayoutPolicy {
     }
 }
 
+nonisolated struct ActiveWorkoutRestoredPresentation: Equatable, Sendable {
+    let sessionID: UUID
+    let presentationMode: ActiveWorkoutStoredPresentationMode?
+}
+
 @MainActor
 @Observable
 final class ActiveWorkoutPresentationState {
@@ -1139,7 +1144,7 @@ final class ActiveWorkoutPresentationState {
         allowsLegacyDraftImport: Bool = true,
         shouldApplyRestoredSession: @escaping @MainActor () -> Bool = { true }
     ) async {
-        let activeSessionID = await Self.fetchActiveSessionIDIfNeeded(
+        let restoredPresentation = await Self.fetchActiveSessionPresentationIfNeeded(
             modelContext: modelContext,
             backgroundStore: backgroundStore,
             allowsLegacyDraftImport: allowsLegacyDraftImport
@@ -1147,23 +1152,35 @@ final class ActiveWorkoutPresentationState {
 
         guard shouldApplyRestoredSession() else { return }
 
-        if let activeSessionID {
-            self.activeSessionID = activeSessionID
-            isActiveWorkoutStripCollapsed = !isActiveWorkoutPresented
+        if let restoredPresentation {
+            activeSessionID = restoredPresentation.sessionID
+            switch restoredPresentation.presentationMode {
+            case .some(.presented):
+                isActiveWorkoutPresented = true
+                isActiveWorkoutStripCollapsed = false
+            case .some(.collapsed):
+                isActiveWorkoutPresented = false
+                isActiveWorkoutStripCollapsed = true
+            case .none:
+                isActiveWorkoutStripCollapsed = !isActiveWorkoutPresented
+            }
         } else {
             clearPresentation()
         }
     }
 
     @MainActor
-    private static func fetchActiveSessionIDIfNeeded(
+    private static func fetchActiveSessionPresentationIfNeeded(
         modelContext: ModelContext,
         backgroundStore: AppBackgroundStore?,
         allowsLegacyDraftImport: Bool
-    ) async -> UUID? {
+    ) async -> ActiveWorkoutRestoredPresentation? {
         do {
-            if let snapshot = try await ActiveWorkoutSnapshotStore.shared.load() {
-                return snapshot.id
+            if let snapshot = try await ActiveWorkoutSnapshotStore.shared.loadStoredSnapshot() {
+                return ActiveWorkoutRestoredPresentation(
+                    sessionID: snapshot.session.id,
+                    presentationMode: snapshot.presentationMode
+                )
             }
         } catch {
             // Fall through to legacy draft import. A bad local snapshot should not block
@@ -1188,7 +1205,7 @@ final class ActiveWorkoutPresentationState {
 
         if let imported {
             try? await ActiveWorkoutSnapshotStore.shared.save(imported)
-            return imported.id
+            return ActiveWorkoutRestoredPresentation(sessionID: imported.id, presentationMode: nil)
         }
 
         return nil

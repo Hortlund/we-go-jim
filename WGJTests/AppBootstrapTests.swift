@@ -1,8 +1,11 @@
 import Testing
+import SwiftData
 import SwiftUI
 @testable import WGJ
 
 struct AppBootstrapTests {
+    private struct ForcedBootstrapFailure: Error { }
+
     @Test
     func cloudFailureRecoveryPreservesExistingStores() {
         #expect(AppBootstrapRecoveryPolicy.preservesExistingStoresOnCloudFailure)
@@ -104,6 +107,41 @@ struct AppBootstrapTests {
         #expect(source.contains("Task.detached(priority: .userInitiated)"))
         #expect(source.contains("await self.finishResolution("))
         #expect(source.contains("await self.clearResolutionTask("))
+    }
+
+    @Test
+    func appLaunchBootstrapResolutionDoesNotCrashOnResolverFailure() throws {
+        let source = try String(contentsOf: appLaunchBootstrapSourceURL(), encoding: .utf8)
+
+        #expect(!source.contains("preconditionFailure("))
+        #expect(source.contains("failureFallback"))
+    }
+
+    @Test
+    @MainActor
+    func appLaunchBootstrapStatePublishesFailureFallbackWhenResolverThrows() async throws {
+        let state = AppLaunchBootstrapState()
+
+        state.resolveIfNeeded(
+            resolver: {
+                throw ForcedBootstrapFailure()
+            },
+            failureFallback: { error in
+                let description = "Fallback after \(type(of: error))"
+                return try Self.makeEmergencyBootstrap(description: description)
+            }
+        )
+
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(2))
+        while state.resolvedBootstrap == nil, clock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        let resolved = try #require(state.resolvedBootstrap)
+        #expect(!resolved.bootstrap.cloudFeaturesEnabled)
+        #expect(!resolved.bootstrap.userDataSyncEnabled)
+        #expect(resolved.bootstrap.cloudSyncErrorDescription?.contains("Fallback after") == true)
     }
 
     @Test
@@ -210,6 +248,25 @@ struct AppBootstrapTests {
             .appendingPathComponent("WGJ")
             .appendingPathComponent("Services")
             .appendingPathComponent("AppLaunchBootstrap.swift")
+    }
+
+    private static func makeEmergencyBootstrap(description: String) throws -> ModelContainerBootstrap {
+        let schema = Schema([UserProfile.self])
+        let configuration = ModelConfiguration(
+            "LaunchFailureFallback-\(UUID().uuidString)",
+            schema: schema,
+            isStoredInMemoryOnly: true,
+            cloudKitDatabase: .none
+        )
+        return ModelContainerBootstrap(
+            container: try ModelContainer(for: schema, configurations: [configuration]),
+            storageMode: .localAuthoritative,
+            cloudRuntimeMode: .unavailable(description),
+            cloudFeaturesEnabled: false,
+            userDataSyncEnabled: false,
+            cloudSyncEnabled: false,
+            cloudSyncErrorDescription: description
+        )
     }
 }
 
