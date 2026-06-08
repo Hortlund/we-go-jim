@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-06-08 - Active Workout Set Completion Controls Stay Inline
+
+- Date: 2026-06-08
+- Trigger/Problem: The user asked to compact the set cards inside active-workout exercises and replace the large complete/undo buttons with a small checkmark button beside the reps input.
+- Root Cause: `WorkoutSessionExerciseGridEditor` rendered full-width completion rows for normal sets, completed sets, gated completion, Bozar pending completion, and drop-stage completion. That made each set card taller than necessary and added visual disturbance inside the active workout hot path.
+- Durable Rule: Keep active-workout set and drop-stage completion actions as compact inline icon toggles next to the reps field. Supplemental rows are only for non-action state such as Bozar loading or a revealed completion gate message; do not reintroduce large full-width complete/undo buttons in set cards without explicit user direction.
+- How to Verify Next Time: Run `WGJTests/WorkoutSetCompletionControlPresentationTests` and `WGJTests/AppPerformanceRuntimeTests`; inspect `WorkoutSessionExerciseGridEditor` to confirm main set and drop-stage completion buttons use inline checkmark presentation beside reps fields.
+- Status: active
+
 ## 2026-06-08 - Active Workout Completion Must Not Auto-Collapse Exercise Cards
 
 - Date: 2026-06-08

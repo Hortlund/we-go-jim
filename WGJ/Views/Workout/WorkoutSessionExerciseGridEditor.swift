@@ -662,6 +662,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             let inlineHintPresentation = row.inlineHintPresentation
             let personalRecordKinds = personalRecordKindsBySetID[row.id] ?? []
             let hasPersonalRecord = !personalRecordKinds.isEmpty
+            let completionPresentation = completionControlPresentation(for: row)
 
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .top, spacing: 10) {
@@ -720,7 +721,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                         }
 
                         metricField(title: "Reps", supporting: row.targetRepsText) {
-                            repsField(at: row.index)
+                            repsFieldWithCompletionControl(for: row, presentation: completionPresentation)
                         }
                     }
 
@@ -730,7 +731,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                         }
 
                         metricField(title: "Reps", supporting: row.targetRepsText) {
-                            repsField(at: row.index)
+                            repsFieldWithCompletionControl(for: row, presentation: completionPresentation)
                         }
                     }
                 }
@@ -743,8 +744,8 @@ struct WorkoutSessionExerciseGridEditor: View {
                     dropStagesSection(for: row.index)
                 }
 
-                if manualCompletionMode {
-                    completionRow(for: row)
+                if let supplementalRow = completionPresentation?.supplementalRow {
+                    completionSupplementalRow(supplementalRow, for: row)
                 }
             }
             .padding(12)
@@ -908,6 +909,62 @@ struct WorkoutSessionExerciseGridEditor: View {
             }
             .metricInputShell(isFocused: isInputFocused(.reps, at: index))
         }
+    }
+
+    private func repsFieldWithCompletionControl(
+        for row: WorkoutSessionExerciseSetRowDisplaySnapshot,
+        presentation: WorkoutSetCompletionControlPresentation?
+    ) -> some View {
+        HStack(spacing: 8) {
+            repsField(at: row.index)
+
+            if let inlineButton = presentation?.inlineButton {
+                completionControlButton(inlineButton, for: row)
+            }
+        }
+    }
+
+    private func completionControlButton(
+        _ presentation: WorkoutSetCompletionControlPresentation.InlineButton,
+        for row: WorkoutSessionExerciseSetRowDisplaySnapshot
+    ) -> some View {
+        let set = row.set
+
+        return Button {
+            requestCompletionChange(at: row.index, isCompleted: presentation.targetIsCompleted)
+        } label: {
+            Image(systemName: presentation.systemImage)
+                .font(.system(size: 20, weight: .bold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(completionControlTint(for: presentation.tone))
+                .frame(width: 44, height: 44)
+                .background(
+                    Circle()
+                        .fill(completionControlFill(for: presentation.tone))
+                        .overlay(
+                            Circle()
+                                .stroke(completionControlStroke(for: presentation.tone), lineWidth: 1)
+                        )
+                )
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .frame(width: 48, height: 54)
+        .disabled(!isSetEditingEnabled || set.isLocked)
+        .accessibilityLabel(presentation.label)
+        .accessibilityIdentifier("workout-set-\(row.index)-completion-button")
+    }
+
+    private func completionControlTint(for tone: WorkoutSetCompletionControlPresentation.Tone) -> Color {
+        tone.tintColor
+    }
+
+    private func completionControlFill(for tone: WorkoutSetCompletionControlPresentation.Tone) -> Color {
+        tone.fillColor
+    }
+
+    private func completionControlStroke(for tone: WorkoutSetCompletionControlPresentation.Tone) -> Color {
+        tone.strokeColor
     }
 
     @ViewBuilder
@@ -2167,129 +2224,55 @@ struct WorkoutSessionExerciseGridEditor: View {
         seconds <= 0 ? "No rest" : Self.formattedRest(seconds)
     }
 
-    private func completionRow(for row: WorkoutSessionExerciseSetRowDisplaySnapshot) -> some View {
-        let index = row.index
-        let set = row.set
-        let completionGatePresentation = isSetCompletionEnabled ? nil : setCompletionGatePresentation
-        let isCompletionGateRevealed = revealedCompletionGateSetIDs.contains(set.id)
+    private func completionControlPresentation(
+        for row: WorkoutSessionExerciseSetRowDisplaySnapshot
+    ) -> WorkoutSetCompletionControlPresentation? {
+        WorkoutSetCompletionControlPresentation.make(
+            draft: row.set,
+            manualCompletionMode: manualCompletionMode,
+            isSetCompletionEnabled: isSetCompletionEnabled,
+            gatePresentation: setCompletionGatePresentation,
+            isGateRevealed: revealedCompletionGateSetIDs.contains(row.id),
+            isPendingBozarCompletion: pendingBozarCompletionSetIDs.contains(row.id)
+        )
+    }
 
-        return Group {
-            if pendingBozarCompletionSetIDs.contains(set.id) {
-                HStack(spacing: 10) {
-                    ProgressView()
-                        .controlSize(.small)
+    @ViewBuilder
+    private func completionSupplementalRow(
+        _ supplementalRow: WorkoutSetCompletionControlPresentation.SupplementalRow,
+        for row: WorkoutSessionExerciseSetRowDisplaySnapshot
+    ) -> some View {
+        switch supplementalRow {
+        case .pendingBozarCompletion:
+            HStack(spacing: 10) {
+                ProgressView()
+                    .controlSize(.small)
 
-                    Text("Loading previous set...")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(WGJTheme.textPrimary)
-                        .wgjSingleLineText(scale: 0.9)
+                Text("Loading previous set...")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(WGJTheme.textPrimary)
+                    .wgjSingleLineText(scale: 0.9)
 
-                    Spacer(minLength: 8)
-                }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(WGJTheme.field.opacity(0.78))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(WGJTheme.outline.opacity(0.72), lineWidth: 1)
-                        )
-                )
-                .accessibilityIdentifier("workout-set-\(index)-bozar-pending")
-            } else if set.isCompleted && !set.isCycleCompleted {
-                HStack(spacing: 10) {
-                    Label("Main set complete", systemImage: "arrow.down.to.line.compact")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(WGJTheme.accentCyan)
-                        .wgjSingleLineText(scale: 0.9)
-
-                    Spacer(minLength: 8)
-
-                    Button("Undo Main Set") {
-                        requestCompletionChange(at: index, isCompleted: false)
-                    }
-                    .buttonStyle(WGJGhostButtonStyle())
-                    .disabled(!isSetEditingEnabled || set.isLocked)
-                    .accessibilityIdentifier("workout-set-\(index)-undo-main-set-button")
-                }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(WGJTheme.accentCyan.opacity(0.10))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(WGJTheme.accentCyan.opacity(0.22), lineWidth: 1)
-                        )
-                )
-            } else if set.isCycleCompleted {
-                HStack(spacing: 10) {
-                    Label("Completed", systemImage: "checkmark.circle.fill")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(WGJTheme.success)
-                        .wgjSingleLineText(scale: 0.9)
-
-                    Spacer(minLength: 8)
-
-                Button("Undo") {
-                    requestCompletionChange(at: index, isCompleted: false)
-                }
-                .buttonStyle(WGJGhostButtonStyle())
-                .disabled(!isSetEditingEnabled || set.isLocked)
-                }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(WGJTheme.success.opacity(0.10))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(WGJTheme.success.opacity(0.22), lineWidth: 1)
-                        )
-                )
-            } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    if let completionGatePresentation {
-                        completionGateNotice(
-                            completionGatePresentation,
-                            at: index,
-                            isRevealed: isCompletionGateRevealed
-                        )
-                        Button {
-                            requestCompletionChange(at: index, isCompleted: true)
-                        } label: {
-                            Label(row.completionButtonTitle, systemImage: "lock.fill")
-                                .frame(maxWidth: .infinity)
-                                .wgjSingleLineText(scale: 0.82)
-                                .foregroundStyle(WGJTheme.accentGold)
-                                .padding(.vertical, 12)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .fill(WGJTheme.accentGold.opacity(isCompletionGateRevealed ? 0.16 : 0.10))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                                .stroke(WGJTheme.accentGold.opacity(isCompletionGateRevealed ? 0.40 : 0.24), lineWidth: 1)
-                                        )
-                                )
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(!isSetEditingEnabled || set.isLocked)
-                        .accessibilityIdentifier("workout-set-\(index)-completion-button")
-                    } else {
-                        Button {
-                            requestCompletionChange(at: index, isCompleted: true)
-                        } label: {
-                            Label(row.completionButtonTitle, systemImage: "checkmark.circle.fill")
-                                .frame(maxWidth: .infinity)
-                                .wgjSingleLineText(scale: 0.82)
-                        }
-                        .buttonStyle(WGJCompactPrimaryButtonStyle())
-                        .disabled(!isSetEditingEnabled || set.isLocked)
-                        .accessibilityIdentifier("workout-set-\(index)-completion-button")
-                    }
-                }
+                Spacer(minLength: 8)
             }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(WGJTheme.field.opacity(0.70))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(WGJTheme.outline.opacity(0.58), lineWidth: 1)
+                    )
+            )
+            .accessibilityIdentifier("workout-set-\(row.index)-bozar-pending")
+        case .gateNotice(let presentation):
+            completionGateNotice(
+                presentation,
+                at: row.index,
+                isRevealed: true
+            )
         }
     }
 
@@ -2861,6 +2844,13 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
     }
 
     var body: some View {
+        let completionButton = WorkoutSetCompletionControlPresentation.InlineButton.make(
+            isCompleted: stage.isCompleted,
+            completedLabel: "Undo drop \(stageIndex + 1)",
+            incompleteLabel: "Complete drop \(stageIndex + 1)",
+            isSetCompletionEnabled: isCompletionEnabled
+        )
+
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -2902,38 +2892,14 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
             if horizontalSizeClass == .compact {
                 VStack(alignment: .leading, spacing: 10) {
                     weightField
-                    repsField
+                    repsFieldWithCompletionControl(completionButton)
                 }
             } else {
                 HStack(spacing: 10) {
                     weightField
-                    repsField
+                    repsFieldWithCompletionControl(completionButton)
                 }
             }
-
-            Group {
-                if stage.isCompleted {
-                    Button {
-                        commitLocalText()
-                        onToggleCompletion()
-                    } label: {
-                        Label("Undo Drop \(stageIndex + 1)", systemImage: "arrow.uturn.backward.circle")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(WGJGhostButtonStyle())
-                } else {
-                    Button {
-                        commitLocalText()
-                        onToggleCompletion()
-                    } label: {
-                        Label("Complete Drop \(stageIndex + 1)", systemImage: "checkmark.circle.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(WGJCompactPrimaryButtonStyle())
-                }
-            }
-            .disabled(!isEditingEnabled || !isCompletionEnabled)
-            .accessibilityIdentifier("workout-set-\(setIndex)-drop-stage-\(stageIndex)-completion-button")
         }
         .padding(12)
         .background(
@@ -3003,6 +2969,39 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
             .focused($focusedField, equals: .reps)
             .disabled(!isEditingEnabled)
             .accessibilityIdentifier("workout-set-\(setIndex)-drop-stage-\(stageIndex)-reps-field")
+    }
+
+    private func repsFieldWithCompletionControl(
+        _ presentation: WorkoutSetCompletionControlPresentation.InlineButton
+    ) -> some View {
+        HStack(spacing: 8) {
+            repsField
+
+            Button {
+                commitLocalText()
+                onToggleCompletion()
+            } label: {
+                Image(systemName: presentation.systemImage)
+                    .font(.system(size: 20, weight: .bold))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(presentation.tone.tintColor)
+                    .frame(width: 44, height: 44)
+                    .background(
+                        Circle()
+                            .fill(presentation.tone.fillColor)
+                            .overlay(
+                                Circle()
+                                    .stroke(presentation.tone.strokeColor, lineWidth: 1)
+                            )
+                    )
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .frame(width: 48, height: 44)
+            .disabled(!isEditingEnabled || !isCompletionEnabled)
+            .accessibilityLabel(presentation.label)
+            .accessibilityIdentifier("workout-set-\(setIndex)-drop-stage-\(stageIndex)-completion-button")
+        }
     }
 
     private func commitLocalText() {
@@ -3128,10 +3127,90 @@ private struct WorkoutSessionExerciseSetRowDisplaySnapshot: Identifiable, Equata
     let completionButtonTitle: String
 }
 
-struct WorkoutSetCompletionGatePresentation: Equatable {
+nonisolated struct WorkoutSetCompletionGatePresentation: Equatable {
     let title: String
     let detail: String
     let iconSystemName: String
+}
+
+nonisolated struct WorkoutSetCompletionControlPresentation: Equatable {
+    let inlineButton: InlineButton
+    let supplementalRow: SupplementalRow?
+
+    struct InlineButton: Equatable {
+        let label: String
+        let systemImage: String
+        let tone: Tone
+        let targetIsCompleted: Bool
+
+        static func make(
+            isCompleted: Bool,
+            completedLabel: String,
+            incompleteLabel: String,
+            isSetCompletionEnabled: Bool
+        ) -> InlineButton {
+            if isCompleted {
+                return InlineButton(
+                    label: completedLabel,
+                    systemImage: "checkmark.circle.fill",
+                    tone: .completed,
+                    targetIsCompleted: false
+                )
+            }
+
+            return InlineButton(
+                label: incompleteLabel,
+                systemImage: "checkmark.circle",
+                tone: isSetCompletionEnabled ? .ready : .gated,
+                targetIsCompleted: true
+            )
+        }
+    }
+
+    enum SupplementalRow: Equatable {
+        case pendingBozarCompletion
+        case gateNotice(WorkoutSetCompletionGatePresentation)
+    }
+
+    enum Tone: Equatable {
+        case ready
+        case completed
+        case gated
+    }
+
+    static func make(
+        draft: WorkoutSessionSetDraft,
+        manualCompletionMode: Bool,
+        isSetCompletionEnabled: Bool,
+        gatePresentation: WorkoutSetCompletionGatePresentation?,
+        isGateRevealed: Bool,
+        isPendingBozarCompletion: Bool
+    ) -> WorkoutSetCompletionControlPresentation? {
+        guard manualCompletionMode else {
+            return nil
+        }
+
+        let inlineButton = InlineButton.make(
+            isCompleted: draft.isCompleted,
+            completedLabel: draft.isCycleCompleted ? "Mark set incomplete" : "Undo main set",
+            incompleteLabel: "Complete set",
+            isSetCompletionEnabled: isSetCompletionEnabled
+        )
+
+        let supplementalRow: SupplementalRow?
+        if isPendingBozarCompletion {
+            supplementalRow = .pendingBozarCompletion
+        } else if !isSetCompletionEnabled, isGateRevealed, let gatePresentation {
+            supplementalRow = .gateNotice(gatePresentation)
+        } else {
+            supplementalRow = nil
+        }
+
+        return WorkoutSetCompletionControlPresentation(
+            inlineButton: inlineButton,
+            supplementalRow: supplementalRow
+        )
+    }
 }
 
 struct WorkoutSetInlineHintPresentation: Equatable {
@@ -3189,6 +3268,27 @@ struct WorkoutSetInlineHintPresentation: Equatable {
 
     static func repsGhostText(from previous: WorkoutPreviousSetSnapshot?) -> String? {
         previous?.reps.map(String.init)
+    }
+}
+
+private extension WorkoutSetCompletionControlPresentation.Tone {
+    var tintColor: Color {
+        switch self {
+        case .ready:
+            return WGJTheme.accentBlue
+        case .completed:
+            return WGJTheme.success
+        case .gated:
+            return WGJTheme.accentGold
+        }
+    }
+
+    var fillColor: Color {
+        tintColor.opacity(self == .completed ? 0.18 : 0.12)
+    }
+
+    var strokeColor: Color {
+        tintColor.opacity(self == .completed ? 0.36 : 0.24)
     }
 }
 
