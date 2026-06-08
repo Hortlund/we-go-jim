@@ -1,5 +1,14 @@
 import Foundation
 
+nonisolated enum WorkoutSetRowIdentityResolver {
+    static func currentIndex(
+        for setID: UUID,
+        in drafts: [WorkoutSessionSetDraft]
+    ) -> Int? {
+        drafts.firstIndex { $0.id == setID }
+    }
+}
+
 nonisolated enum ActiveWorkoutEditorCommitDisposition: Equatable, Sendable {
     case none
     case debounced

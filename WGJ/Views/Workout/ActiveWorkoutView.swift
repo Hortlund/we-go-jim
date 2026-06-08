@@ -904,30 +904,14 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func currentRuntimeSnapshot() -> ActiveWorkoutRuntimeSession? {
-        guard var snapshot = runtimeSession else { return nil }
-        let normalizedName = sessionNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !normalizedName.isEmpty {
-            snapshot.name = ReviewModerationService.sanitizedForSharing(normalizedName, kind: .workoutName)
-        }
-        snapshot.notes = notesDraft
-        snapshot.cardioBlocks = snapshot.cardioBlocks.map { cardioBlock in
-            var updated = cardioBlock
-            if let completion = pendingCardioCompletionsByPhase[cardioBlock.phase] {
-                updated.isCompleted = completion
-                updated.updatedAt = .now
-            }
-            return updated
-        }
-        snapshot.exercises = snapshot.exercises.map { exercise in
-            var updated = exercise
-            updated.setDrafts = setDraftsByExerciseID[exercise.id] ?? exercise.setDrafts
-            updated.restSeconds = restByExerciseID[exercise.id] ?? exercise.restSeconds
-            updated.notes = notesByExerciseID[exercise.id] ?? exercise.notes
-            return updated
-        }
-        snapshot.normalizeExerciseSortOrder()
-        snapshot.touch()
-        return snapshot
+        runtimeSession?.snapshotForActiveWorkoutPersistence(
+            sessionNameDraft: sessionNameDraft,
+            notesDraft: notesDraft,
+            pendingCardioCompletionsByPhase: pendingCardioCompletionsByPhase,
+            setDraftsByExerciseID: setDraftsByExerciseID,
+            restByExerciseID: restByExerciseID,
+            notesByExerciseID: notesByExerciseID
+        )
     }
 
     @MainActor
@@ -2651,10 +2635,6 @@ struct ActiveWorkoutView: View {
         pendingCardioCompletionsByPhase = [:]
         refreshRenderProjection()
         activeWorkoutPresentationState.stageRuntimeSession(snapshot, for: sessionID)
-        activeWorkoutPresentationState.stagePreparedFirstRenderSnapshot(
-            currentPreparedFirstRenderSnapshot(),
-            for: sessionID
-        )
 
         guard writeDurableSnapshot,
               ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: .userEdit)
@@ -2664,6 +2644,7 @@ struct ActiveWorkoutView: View {
 
         pendingUserEditSnapshotTask?.cancel()
         pendingUserEditSnapshotTask = Task { @MainActor in
+            guard !Task.isCancelled else { return }
             do {
                 try await ActiveWorkoutSnapshotStore.shared.save(
                     snapshot,

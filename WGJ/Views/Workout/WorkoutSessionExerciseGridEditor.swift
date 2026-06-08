@@ -623,142 +623,180 @@ struct WorkoutSessionExerciseGridEditor: View {
         )
     }
 
+    private func currentDisplayRow(
+        for row: WorkoutSessionExerciseSetRowDisplaySnapshot
+    ) -> WorkoutSessionExerciseSetRowDisplaySnapshot? {
+        guard let currentIndex = indexForSetID(row.id),
+              setDrafts.indices.contains(currentIndex)
+        else {
+            return nil
+        }
+
+        let currentSet = setDrafts[currentIndex]
+        guard row.index != currentIndex || row.set != currentSet else {
+            return row
+        }
+
+        let rows = Self.makeDisplayRows(
+            setDrafts: setDrafts,
+            previousPerformanceResolution: previousPerformanceResolution,
+            targetRepMin: targetRepMin,
+            targetRepMax: targetRepMax,
+            restSeconds: restSeconds,
+            formatWeight: formatWeight
+        )
+
+        guard rows.indices.contains(currentIndex),
+              rows[currentIndex].id == row.id
+        else {
+            return nil
+        }
+
+        return rows[currentIndex]
+    }
+
+    @ViewBuilder
     private func setCard(_ row: WorkoutSessionExerciseSetRowDisplaySnapshot) -> some View {
-        let set = row.set
-        let inlineHintPresentation = row.inlineHintPresentation
-        let personalRecordKinds = personalRecordKindsBySetID[row.id] ?? []
-        let hasPersonalRecord = !personalRecordKinds.isEmpty
+        if let row = currentDisplayRow(for: row) {
+            let set = row.set
+            let inlineHintPresentation = row.inlineHintPresentation
+            let personalRecordKinds = personalRecordKindsBySetID[row.id] ?? []
+            let hasPersonalRecord = !personalRecordKinds.isEmpty
 
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 10) {
-                setBadge(for: row)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 10) {
+                    setBadge(for: row)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Text(row.title)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(WGJTheme.textPrimary)
-                            .wgjSingleLineText(scale: 0.84)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 6) {
+                            Text(row.title)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(WGJTheme.textPrimary)
+                                .wgjSingleLineText(scale: 0.84)
 
-                        if set.isLocked {
-                            Image(systemName: "lock.fill")
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(WGJTheme.accentGold)
+                            if set.isLocked {
+                                Image(systemName: "lock.fill")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(WGJTheme.accentGold)
+                            }
+
+                            if hasPersonalRecord {
+                                Image(systemName: "trophy.fill")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(WGJTheme.accentGold)
+                            }
+                        }
+
+                        if (!manualCompletionMode || inlineHintPresentation == nil),
+                           !row.previousSummary.isEmpty {
+                            Text(row.previousSummary)
+                                .font(.caption)
+                                .foregroundStyle(WGJTheme.textSecondary)
+                                .lineLimit(2)
+                                .monospacedDigit()
+                        }
+
+                        if let metadata = row.metadataLine {
+                            Text(metadata)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(WGJTheme.textSecondary)
+                                .lineLimit(1)
                         }
 
                         if hasPersonalRecord {
-                            Image(systemName: "trophy.fill")
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(WGJTheme.accentGold)
+                            personalRecordChipGroup(personalRecordKinds, compact: true)
                         }
                     }
 
-                    if (!manualCompletionMode || inlineHintPresentation == nil),
-                       !row.previousSummary.isEmpty {
-                        Text(row.previousSummary)
-                            .font(.caption)
-                            .foregroundStyle(WGJTheme.textSecondary)
-                            .lineLimit(2)
-                            .monospacedDigit()
+                    Spacer(minLength: 8)
+
+                    setMenu(for: row)
+                }
+
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 12) {
+                        metricField(title: "Weight", supporting: row.targetWeightText) {
+                            loadField(at: row.index)
+                        }
+
+                        metricField(title: "Reps", supporting: row.targetRepsText) {
+                            repsField(at: row.index)
+                        }
                     }
 
-                    if let metadata = row.metadataLine {
-                        Text(metadata)
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(WGJTheme.textSecondary)
-                            .lineLimit(1)
-                    }
+                    VStack(alignment: .leading, spacing: 12) {
+                        metricField(title: "Weight", supporting: row.targetWeightText) {
+                            loadField(at: row.index)
+                        }
 
-                    if hasPersonalRecord {
-                        personalRecordChipGroup(personalRecordKinds, compact: true)
+                        metricField(title: "Reps", supporting: row.targetRepsText) {
+                            repsField(at: row.index)
+                        }
                     }
                 }
 
-                Spacer(minLength: 8)
-
-                setMenu(for: row)
-            }
-
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 12) {
-                    metricField(title: "Weight", supporting: row.targetWeightText) {
-                        loadField(at: row.index)
-                    }
-
-                    metricField(title: "Reps", supporting: row.targetRepsText) {
-                        repsField(at: row.index)
-                    }
+                if manualCompletionMode, let inlineHintPresentation {
+                    inlineHintRow(inlineHintPresentation, at: row.index)
                 }
 
-                VStack(alignment: .leading, spacing: 12) {
-                    metricField(title: "Weight", supporting: row.targetWeightText) {
-                        loadField(at: row.index)
-                    }
+                if !set.dropStages.isEmpty {
+                    dropStagesSection(for: row.index)
+                }
 
-                    metricField(title: "Reps", supporting: row.targetRepsText) {
-                        repsField(at: row.index)
-                    }
+                if manualCompletionMode {
+                    completionRow(for: row)
                 }
             }
-
-            if manualCompletionMode, let inlineHintPresentation {
-                inlineHintRow(inlineHintPresentation, at: row.index)
-            }
-
-            if !set.dropStages.isEmpty {
-                dropStagesSection(for: row.index)
-            }
-
-            if manualCompletionMode {
-                completionRow(for: row)
-            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(setCardFill(for: set, hasPersonalRecord: hasPersonalRecord))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(setCardStroke(for: set, hasPersonalRecord: hasPersonalRecord), lineWidth: hasPersonalRecord ? 1.35 : 1)
+                    )
+            )
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(setCardFill(for: set, hasPersonalRecord: hasPersonalRecord))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(setCardStroke(for: set, hasPersonalRecord: hasPersonalRecord), lineWidth: hasPersonalRecord ? 1.35 : 1)
-                )
-        )
     }
 
+    @ViewBuilder
     private func inlineHintRow(_ presentation: WorkoutSetInlineHintPresentation, at index: Int) -> some View {
-        let canApplyPrevious = isSetEditingEnabled && presentation.canApplyPrevious && !setDrafts[index].isLocked
+        if setDrafts.indices.contains(index) {
+            let canApplyPrevious = isSetEditingEnabled && presentation.canApplyPrevious && !setDrafts[index].isLocked
 
-        return ViewThatFits(in: .horizontal) {
-            HStack(alignment: .top, spacing: 10) {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        inlineHintAim(presentation.aimText)
+
+                        if let statusText = presentation.statusText {
+                            progressStatusChip(text: statusText, tone: presentation.statusTone)
+                        }
+                    }
+
+                    Spacer(minLength: 8)
+
+                    if canApplyPrevious {
+                        applyPreviousButton(at: index)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                }
+
                 VStack(alignment: .leading, spacing: 8) {
                     inlineHintAim(presentation.aimText)
 
                     if let statusText = presentation.statusText {
                         progressStatusChip(text: statusText, tone: presentation.statusTone)
                     }
-                }
 
-                Spacer(minLength: 8)
-
-                if canApplyPrevious {
-                    applyPreviousButton(at: index)
-                        .fixedSize(horizontal: true, vertical: false)
+                    if canApplyPrevious {
+                        applyPreviousButton(at: index)
+                    }
                 }
             }
-
-            VStack(alignment: .leading, spacing: 8) {
-                inlineHintAim(presentation.aimText)
-
-                if let statusText = presentation.statusText {
-                    progressStatusChip(text: statusText, tone: presentation.statusTone)
-                }
-
-                if canApplyPrevious {
-                    applyPreviousButton(at: index)
-                }
-            }
+            .padding(.horizontal, 2)
         }
-        .padding(.horizontal, 2)
     }
 
     private func inlineHintAim(_ text: String) -> some View {
@@ -845,78 +883,84 @@ struct WorkoutSessionExerciseGridEditor: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    @ViewBuilder
     private func repsField(at index: Int) -> some View {
-        let overlayState = repsFieldDisplayState(at: index)
+        if setDrafts.indices.contains(index) {
+            let overlayState = repsFieldDisplayState(at: index)
 
-        return ZStack {
-            if let overlayState {
-                metricDisplayText(overlayState)
-            }
-
-            TextField(metricPlaceholderText(for: overlayState), text: repsTextBinding(for: index))
-                .keyboardType(.numberPad)
-                .submitLabel(.done)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled(true)
-                .font(.system(.title3, design: .rounded).weight(.semibold))
-                .monospacedDigit()
-                .foregroundStyle(overlayState == nil ? WGJTheme.textPrimary : Color.clear)
-                .focused($focusedInput, equals: inputFocus(for: index, metric: .reps))
-                .multilineTextAlignment(.center)
-                .disabled(!isSetEditingEnabled || setDrafts[index].isLocked)
-                .accessibilityIdentifier("workout-set-\(index)-reps-field")
-        }
-        .metricInputShell(isFocused: isInputFocused(.reps, at: index))
-    }
-
-    private func loadField(at index: Int) -> some View {
-        let isLocked = setDrafts[index].isLocked
-        let overlayState = weightFieldDisplayState(at: index)
-
-        return HStack(spacing: 6) {
             ZStack {
                 if let overlayState {
                     metricDisplayText(overlayState)
                 }
 
-                TextField(metricPlaceholderText(for: overlayState), text: weightTextBinding(for: index))
-                    .keyboardType(.decimalPad)
-                    .submitLabel(.next)
+                TextField(metricPlaceholderText(for: overlayState), text: repsTextBinding(for: index))
+                    .keyboardType(.numberPad)
+                    .submitLabel(.done)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled(true)
                     .font(.system(.title3, design: .rounded).weight(.semibold))
                     .monospacedDigit()
                     .foregroundStyle(overlayState == nil ? WGJTheme.textPrimary : Color.clear)
-                    .focused($focusedInput, equals: inputFocus(for: index, metric: .weight))
+                    .focused($focusedInput, equals: inputFocus(for: index, metric: .reps))
                     .multilineTextAlignment(.center)
-                    .disabled(!isSetEditingEnabled || isLocked)
-                    .accessibilityIdentifier("workout-set-\(index)-weight-field")
+                    .disabled(!isSetEditingEnabled || setDrafts[index].isLocked)
+                    .accessibilityIdentifier("workout-set-\(index)-reps-field")
             }
-
-            WGJActionMenuButton("Load Unit", titleVisibility: .hidden) {
-                ForEach(TemplateLoadUnit.allCases) { unit in
-                    Button(unit.shortLabel) {
-                        let setID = setDrafts[index].id
-                        let hadWeight = setDrafts[index].actualWeight != nil
-                        setDrafts[index].actualLoadUnit = unit
-                        if unit == .bodyweight {
-                            setDrafts[index].actualWeight = nil
-                            metricInputDraftBuffer.stage("", for: setID, metric: .weight)
-                        }
-                        if unit != .bodyweight || hadWeight {
-                            scheduleDisplayRefresh()
-                        }
-                        notifyChanged()
-                    }
-                }
-            } label: {
-                Text(setDrafts[index].actualLoadUnit.shortLabel)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(WGJTheme.accentCyan)
-            }
-            .disabled(!isSetEditingEnabled || isLocked)
+            .metricInputShell(isFocused: isInputFocused(.reps, at: index))
         }
-        .metricInputShell(isFocused: isInputFocused(.weight, at: index))
+    }
+
+    @ViewBuilder
+    private func loadField(at index: Int) -> some View {
+        if setDrafts.indices.contains(index) {
+            let isLocked = setDrafts[index].isLocked
+            let overlayState = weightFieldDisplayState(at: index)
+
+            HStack(spacing: 6) {
+                ZStack {
+                    if let overlayState {
+                        metricDisplayText(overlayState)
+                    }
+
+                    TextField(metricPlaceholderText(for: overlayState), text: weightTextBinding(for: index))
+                        .keyboardType(.decimalPad)
+                        .submitLabel(.next)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled(true)
+                        .font(.system(.title3, design: .rounded).weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(overlayState == nil ? WGJTheme.textPrimary : Color.clear)
+                        .focused($focusedInput, equals: inputFocus(for: index, metric: .weight))
+                        .multilineTextAlignment(.center)
+                        .disabled(!isSetEditingEnabled || isLocked)
+                        .accessibilityIdentifier("workout-set-\(index)-weight-field")
+                }
+
+                WGJActionMenuButton("Load Unit", titleVisibility: .hidden) {
+                    ForEach(TemplateLoadUnit.allCases) { unit in
+                        Button(unit.shortLabel) {
+                            let setID = setDrafts[index].id
+                            let hadWeight = setDrafts[index].actualWeight != nil
+                            setDrafts[index].actualLoadUnit = unit
+                            if unit == .bodyweight {
+                                setDrafts[index].actualWeight = nil
+                                metricInputDraftBuffer.stage("", for: setID, metric: .weight)
+                            }
+                            if unit != .bodyweight || hadWeight {
+                                scheduleDisplayRefresh()
+                            }
+                            notifyChanged()
+                        }
+                    }
+                } label: {
+                    Text(setDrafts[index].actualLoadUnit.shortLabel)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(WGJTheme.accentCyan)
+                }
+                .disabled(!isSetEditingEnabled || isLocked)
+            }
+            .metricInputShell(isFocused: isInputFocused(.weight, at: index))
+        }
     }
 
     private func metricPlaceholderText(for overlayState: MetricFieldDisplayState?) -> String {
@@ -1547,7 +1591,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func indexForSetID(_ setID: UUID) -> Int? {
-        setDrafts.firstIndex(where: { $0.id == setID })
+        WorkoutSetRowIdentityResolver.currentIndex(for: setID, in: setDrafts)
     }
 
     private func toggleWarmup(at index: Int) {
@@ -2280,59 +2324,62 @@ struct WorkoutSessionExerciseGridEditor: View {
         )
     }
 
+    @ViewBuilder
     private func dropStagesSection(for setIndex: Int) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Dropset")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(WGJTheme.accentCyan)
+        if setDrafts.indices.contains(setIndex) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Dropset")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(WGJTheme.accentCyan)
 
-                Spacer()
+                    Spacer()
 
-                if isSetEditingEnabled, !setDrafts[setIndex].isLocked {
-                    Button {
-                        addDropStage(to: setIndex)
-                    } label: {
-                        Label("Add Drop", systemImage: "plus.circle")
-                            .font(.caption.weight(.semibold))
+                    if isSetEditingEnabled, !setDrafts[setIndex].isLocked {
+                        Button {
+                            addDropStage(to: setIndex)
+                        } label: {
+                            Label("Add Drop", systemImage: "plus.circle")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(WGJTheme.accentBlue)
+                        .accessibilityIdentifier("workout-set-\(setIndex)-add-drop-stage-button")
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(WGJTheme.accentBlue)
-                    .accessibilityIdentifier("workout-set-\(setIndex)-add-drop-stage-button")
+                }
+
+                if !setDrafts[setIndex].isCompleted {
+                    Text("Finish the main set before completing the drop stages.")
+                        .font(.caption)
+                        .foregroundStyle(WGJTheme.textSecondary)
+                }
+
+                ForEach(Array(setDrafts[setIndex].dropStages.enumerated()), id: \.element.id) { stageIndex, stage in
+                    WorkoutExerciseDropStageCardView(
+                        setIndex: setIndex,
+                        stageIndex: stageIndex,
+                        stage: stage,
+                        isEditingEnabled: isSetEditingEnabled,
+                        isCompletionEnabled: setDrafts[setIndex].isCompleted,
+                        onToggleCompletion: { toggleDropStageCompletion(stage.id, in: setIndex) },
+                        onRepsChanged: { updateDropStageRepsText($0, stageID: stage.id, setIndex: setIndex) },
+                        onWeightChanged: { updateDropStageWeightText($0, stageID: stage.id, setIndex: setIndex) },
+                        onLoadUnitChanged: { updateDropStageLoadUnit($0, stageID: stage.id, setIndex: setIndex) },
+                        onDelete: { removeDropStage(stage.id, from: setIndex) }
+                    )
                 }
             }
-
-            if !setDrafts[setIndex].isCompleted {
-                Text("Finish the main set before completing the drop stages.")
-                    .font(.caption)
-                    .foregroundStyle(WGJTheme.textSecondary)
-            }
-
-            ForEach(Array(setDrafts[setIndex].dropStages.enumerated()), id: \.element.id) { stageIndex, stage in
-                WorkoutExerciseDropStageCardView(
-                    setIndex: setIndex,
-                    stageIndex: stageIndex,
-                    stage: stage,
-                    isEditingEnabled: isSetEditingEnabled,
-                    isCompletionEnabled: setDrafts[setIndex].isCompleted,
-                    onToggleCompletion: { toggleDropStageCompletion(stage.id, in: setIndex) },
-                    onRepsChanged: { updateDropStageRepsText($0, stageID: stage.id, setIndex: setIndex) },
-                    onWeightChanged: { updateDropStageWeightText($0, stageID: stage.id, setIndex: setIndex) },
-                    onLoadUnitChanged: { updateDropStageLoadUnit($0, stageID: stage.id, setIndex: setIndex) },
-                    onDelete: { removeDropStage(stage.id, from: setIndex) }
-                )
-            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(WGJTheme.accentCyan.opacity(0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(WGJTheme.accentCyan.opacity(0.18), lineWidth: 1)
+                    )
+            )
+            .accessibilityIdentifier("workout-set-\(setIndex)-drop-stages")
         }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(WGJTheme.accentCyan.opacity(0.08))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(WGJTheme.accentCyan.opacity(0.18), lineWidth: 1)
-                )
-        )
-        .accessibilityIdentifier("workout-set-\(setIndex)-drop-stages")
     }
 
     private func toggleCompletion(at index: Int) {

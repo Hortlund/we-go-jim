@@ -853,6 +853,24 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
+    func workoutSetRowIdentityResolvesCurrentIndexAfterDraftReorder() {
+        let first = WorkoutSessionSetDraft(targetLoadUnit: .kg, actualLoadUnit: .kg)
+        let second = WorkoutSessionSetDraft(targetLoadUnit: .kg, actualLoadUnit: .kg)
+        let reordered = [second, first]
+
+        #expect(WorkoutSetRowIdentityResolver.currentIndex(for: first.id, in: reordered) == 1)
+        #expect(WorkoutSetRowIdentityResolver.currentIndex(for: second.id, in: reordered) == 0)
+    }
+
+    @Test
+    func workoutSetRowIdentityRejectsRemovedDraftIDs() {
+        let removed = WorkoutSessionSetDraft(targetLoadUnit: .kg, actualLoadUnit: .kg)
+        let remaining = WorkoutSessionSetDraft(targetLoadUnit: .kg, actualLoadUnit: .kg)
+
+        #expect(WorkoutSetRowIdentityResolver.currentIndex(for: removed.id, in: [remaining]) == nil)
+    }
+
+    @Test
     func activeWorkoutUITestsCanOverridePreviousPerformanceHydrationDelay() {
         #expect(
             ActiveWorkoutInteractionWorkPolicy.previousPerformanceHydrationDelay(

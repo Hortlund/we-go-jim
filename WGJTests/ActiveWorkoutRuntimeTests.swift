@@ -460,6 +460,78 @@ struct ActiveWorkoutRuntimeTests {
     }
 
     @Test
+    func snapshotStoreDoesNotWriteWhenTaskIsAlreadyCancelled() async throws {
+        let directory = try temporaryDirectory()
+        let store = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        let session = makeRuntimeSession()
+
+        let didSave = await Task {
+            withUnsafeCurrentTask { task in
+                task?.cancel()
+            }
+
+            do {
+                try await store.save(session)
+                return true
+            } catch is CancellationError {
+                return false
+            } catch {
+                return false
+            }
+        }.value
+
+        #expect(didSave == false)
+        #expect(!(try await store.hasSnapshot()))
+    }
+
+    @Test
+    func runtimeSnapshotPreservesUpdatedAtWhenCommitIsNoOp() {
+        let session = makeRuntimeSession()
+        let snapshot = session.snapshotForActiveWorkoutPersistence(
+            sessionNameDraft: session.name,
+            notesDraft: session.notes,
+            pendingCardioCompletionsByPhase: [:],
+            setDraftsByExerciseID: Dictionary(
+                session.exercises.map { ($0.id, $0.setDrafts) },
+                uniquingKeysWith: { first, _ in first }
+            ),
+            restByExerciseID: Dictionary(
+                session.exercises.map { ($0.id, $0.restSeconds) },
+                uniquingKeysWith: { first, _ in first }
+            ),
+            notesByExerciseID: Dictionary(
+                session.exercises.map { ($0.id, $0.notes) },
+                uniquingKeysWith: { first, _ in first }
+            ),
+            date: Date(timeIntervalSinceReferenceDate: 999)
+        )
+
+        #expect(snapshot.updatedAt == session.updatedAt)
+    }
+
+    @Test
+    func runtimeSnapshotTouchesUpdatedAtWhenContentChanges() throws {
+        let session = makeRuntimeSession()
+        let exercise = try #require(session.exercises.first)
+        let changeDate = Date(timeIntervalSinceReferenceDate: 999)
+        var changedDrafts = exercise.setDrafts
+        changedDrafts[0].actualReps = 8
+
+        let snapshot = session.snapshotForActiveWorkoutPersistence(
+            sessionNameDraft: session.name,
+            notesDraft: session.notes,
+            pendingCardioCompletionsByPhase: [:],
+            setDraftsByExerciseID: [exercise.id: changedDrafts],
+            restByExerciseID: [exercise.id: exercise.restSeconds],
+            notesByExerciseID: [exercise.id: exercise.notes],
+            date: changeDate
+        )
+
+        #expect(snapshot.updatedAt == changeDate)
+        #expect(snapshot.exercises.first?.setDrafts.first?.actualReps == 8)
+    }
+
+    @Test
     func runtimeFirstRenderSnapshotIncludesPreviousValuesForEveryExercise() throws {
         let context = try makeInMemoryContext()
         let templateRepository = TemplateRepository(modelContext: context)

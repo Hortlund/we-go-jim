@@ -79,6 +79,43 @@ nonisolated extension ActiveWorkoutRuntimeSession {
             return updated
         }
     }
+
+    func snapshotForActiveWorkoutPersistence(
+        sessionNameDraft: String,
+        notesDraft: String,
+        pendingCardioCompletionsByPhase: [WorkoutCardioPhase: Bool],
+        setDraftsByExerciseID: [UUID: [WorkoutSessionSetDraft]],
+        restByExerciseID: [UUID: Int],
+        notesByExerciseID: [UUID: String],
+        date: Date = .now
+    ) -> ActiveWorkoutRuntimeSession {
+        var snapshot = self
+        let normalizedName = sessionNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !normalizedName.isEmpty {
+            snapshot.name = ReviewModerationService.sanitizedForSharing(normalizedName, kind: .workoutName)
+        }
+        snapshot.notes = notesDraft
+        snapshot.cardioBlocks = snapshot.cardioBlocks.map { cardioBlock in
+            var updated = cardioBlock
+            if let completion = pendingCardioCompletionsByPhase[cardioBlock.phase] {
+                updated.isCompleted = completion
+                updated.updatedAt = date
+            }
+            return updated
+        }
+        snapshot.exercises = snapshot.exercises.map { exercise in
+            var updated = exercise
+            updated.setDrafts = setDraftsByExerciseID[exercise.id] ?? exercise.setDrafts
+            updated.restSeconds = restByExerciseID[exercise.id] ?? exercise.restSeconds
+            updated.notes = notesByExerciseID[exercise.id] ?? exercise.notes
+            return updated
+        }
+        snapshot.normalizeExerciseSortOrder()
+        if snapshot != self {
+            snapshot.touch(date: date)
+        }
+        return snapshot
+    }
 }
 
 nonisolated struct ActiveWorkoutRuntimeCardioBlock: Identifiable, Equatable, Codable, Sendable {
@@ -414,6 +451,7 @@ actor ActiveWorkoutSnapshotStore {
     }
 
     func loadStoredSnapshot() throws -> ActiveWorkoutStoredSnapshot? {
+        try Task.checkCancellation()
         let url = snapshotURL
         guard FileManager.default.fileExists(atPath: url.path) else {
             return nil
@@ -435,12 +473,14 @@ actor ActiveWorkoutSnapshotStore {
         restTimer: RestTimerSnapshot? = nil,
         preservesExistingRestTimer: Bool = true
     ) throws {
+        try Task.checkCancellation()
         try FileManager.default.createDirectory(
             at: baseDirectory,
             withIntermediateDirectories: true
         )
         var normalizedSession = session
         normalizedSession.normalizeSetRestToExerciseDefaults()
+        try Task.checkCancellation()
         let existingRestTimer = preservesExistingRestTimer
             ? (try? loadStoredSnapshot()?.restTimer)
             : nil
@@ -449,12 +489,14 @@ actor ActiveWorkoutSnapshotStore {
             session: normalizedSession,
             restTimer: resolvedRestTimer?.isExpired == true ? nil : resolvedRestTimer
         )
+        try Task.checkCancellation()
         let data = try encoder.encode(storedSnapshot)
         if FileManager.default.fileExists(atPath: snapshotURL.path),
            let existingData = try? Data(contentsOf: snapshotURL),
            existingData == data {
             return
         }
+        try Task.checkCancellation()
         try data.write(to: snapshotURL, options: [.atomic])
     }
 
