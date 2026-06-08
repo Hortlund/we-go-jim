@@ -289,6 +289,27 @@ struct BrosViewModelTests {
     }
 
     @Test
+    func runtimeCloudRecoveryPolicyRefreshesActiveTabWhenErrorClears() {
+        #expect(BrosRuntimeCloudRecoveryPolicy.shouldForceRefresh(
+            isTabActive: true,
+            previousErrorDescription: "No iCloud account is signed in on this device.",
+            currentErrorDescription: nil
+        ))
+
+        #expect(!BrosRuntimeCloudRecoveryPolicy.shouldForceRefresh(
+            isTabActive: false,
+            previousErrorDescription: "No iCloud account is signed in on this device.",
+            currentErrorDescription: nil
+        ))
+
+        #expect(!BrosRuntimeCloudRecoveryPolicy.shouldForceRefresh(
+            isTabActive: true,
+            previousErrorDescription: nil,
+            currentErrorDescription: "WGJ could not verify iCloud availability right now."
+        ))
+    }
+
+    @Test
     func toggleReactionAppliesOptimisticStateBeforeCloudKitCompletes() async throws {
         let context = try makeInMemoryContext()
         let service = StubBrosSocialService()

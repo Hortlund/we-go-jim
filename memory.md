@@ -49,6 +49,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-06-08 - Bros Must Reconnect When iCloud Recovers
+
+- Date: 2026-06-08
+- Trigger/Problem: The user clarified that if Bros starts while iCloud is unavailable, it should reconnect when iCloud becomes available during the same app run instead of staying stuck unavailable.
+- Root Cause: Runtime cloud availability treated a missing iCloud account as a resolved state, so normal foreground checks used the long resolved refresh interval. The active Bros view also had no refresh trigger for the transition from runtime cloud error to recovered runtime cloud state.
+- Durable Rule: Treat missing-account runtime status as unresolved for retry purposes, and force the active Bros tab to refresh when the runtime cloud error clears. Do not solve this by making root SwiftData cloud-backed again or by adding CloudKit work to active-workout foreground hot paths.
+- How to Verify Next Time: Run `WGJTests/WGJTests/runtimeCloudAvailabilityRetriesAfterMissingICloudAccount` and `WGJTests/BrosViewModelTests/runtimeCloudRecoveryPolicyRefreshesActiveTabWhenErrorClears`; for device/simulator coverage, launch with iCloud unavailable, open Bros, restore iCloud availability, foreground WGJ, and confirm Bros refreshes without restarting the app.
+- Status: active
+
 ## 2026-06-07 - Direct User Data Backup Must Merge, Not Replace
 
 - Date: 2026-06-07

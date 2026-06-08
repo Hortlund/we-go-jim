@@ -885,6 +885,17 @@ struct BroWorkoutExercisePreviewPresentation: Equatable {
     }
 }
 
+nonisolated enum BrosRuntimeCloudRecoveryPolicy {
+    static func shouldForceRefresh(
+        isTabActive: Bool,
+        previousErrorDescription: String?,
+        currentErrorDescription: String?
+    ) -> Bool {
+        guard isTabActive else { return false }
+        return previousErrorDescription?.isEmpty == false && currentErrorDescription?.isEmpty != false
+    }
+}
+
 struct BrosView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AppNotificationRouter.self) private var notificationRouter
@@ -983,6 +994,9 @@ struct BrosView: View {
                 await AppNotificationManager.shared.clearConsumedBrosReactionNotifications()
             }
             scheduleActivationRefreshIfNeeded()
+        }
+        .onChange(of: cloudSyncErrorDescription) { previousError, currentError in
+            handleRuntimeCloudErrorChanged(from: previousError, to: currentError)
         }
         .onChange(of: viewModel.state) { _, _ in
             rebuildFilteredSnapshot()
@@ -1113,6 +1127,34 @@ struct BrosView: View {
             guard !Task.isCancelled, isTabActive else { return }
             await WGJPerformance.measureAsync("bros.activation-hydration") {
                 await reloadForCurrentActivation()
+            }
+            guard !Task.isCancelled, isTabActive else { return }
+            hasCompletedInitialActivationRefresh = true
+            activationRefreshTask = nil
+            rebuildFilteredSnapshot()
+        }
+    }
+
+    @MainActor
+    private func handleRuntimeCloudErrorChanged(from previousError: String?, to currentError: String?) {
+        guard BrosRuntimeCloudRecoveryPolicy.shouldForceRefresh(
+            isTabActive: isTabActive,
+            previousErrorDescription: previousError,
+            currentErrorDescription: currentError
+        ) else {
+            return
+        }
+
+        cancelActivationRefresh()
+        activationRefreshTask = Task { @MainActor in
+            reloadBlockedBros()
+            await WGJPerformance.measureAsync("bros.runtime-cloud-recovery") {
+                await viewModel.refresh(
+                    modelContext: modelContext,
+                    cloudSyncEnabled: cloudSyncEnabled,
+                    cloudSyncErrorDescription: currentError,
+                    force: true
+                )
             }
             guard !Task.isCancelled, isTabActive else { return }
             hasCompletedInitialActivationRefresh = true

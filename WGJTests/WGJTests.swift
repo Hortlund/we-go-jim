@@ -1141,6 +1141,35 @@ struct WGJTests {
     }
 
     @Test
+    func runtimeCloudAvailabilityRetriesAfterMissingICloudAccount() async {
+        let runtimeState = AppRuntimeState.makeTestingInstance()
+        runtimeState.updateCloudState(isEnabled: true, errorDescription: nil)
+        let accountService = MockRuntimeAccountStatusProvider(statuses: [
+            .unavailable(.noAccount),
+            .available,
+        ])
+        let firstRefreshAt = Date(timeIntervalSince1970: 1_000)
+
+        runtimeState.refreshCloudAvailabilityIfNeeded(
+            accountService: accountService,
+            now: firstRefreshAt
+        )
+        await waitForRuntimeRefresh(fetchCount: 1, accountService: accountService)
+
+        #expect(runtimeState.cloudSyncErrorDescription?.contains("No iCloud account") == true)
+        #expect(accountService.fetchCount == 1)
+
+        runtimeState.refreshCloudAvailabilityIfNeeded(
+            accountService: accountService,
+            now: firstRefreshAt.addingTimeInterval(RuntimeCloudAvailabilityRefreshPolicy.unresolvedRetryInterval)
+        )
+        await waitForRuntimeRefresh(fetchCount: 2, accountService: accountService)
+
+        #expect(runtimeState.cloudSyncErrorDescription == nil)
+        #expect(accountService.fetchCount == 2)
+    }
+
+    @Test
     func runtimeCloudAvailabilityStopsRetryingAfterDefinitiveAvailability() async {
         let runtimeState = AppRuntimeState.makeTestingInstance()
         runtimeState.updateCloudState(isEnabled: true, errorDescription: "temporary")

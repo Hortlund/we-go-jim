@@ -578,9 +578,9 @@ final class AppRuntimeState {
         case .unavailable(let reason):
             updateCloudRuntimeError(Self.runtimeErrorDescription(for: reason))
             switch reason {
-            case .noAccount, .restricted:
+            case .restricted:
                 hasResolvedRuntimeCloudAvailability = true
-            case .temporarilyUnavailable, .unknown:
+            case .noAccount, .temporarilyUnavailable, .unknown:
                 hasResolvedRuntimeCloudAvailability = false
             }
         }
