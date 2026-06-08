@@ -41,10 +41,6 @@ nonisolated enum ProfileWeeklyGoalChartScalePolicy {
 }
 
 nonisolated enum ProfileScrollResetPolicy {
-    static func shouldResetOnTabActivation(isTabActive: Bool) -> Bool {
-        isTabActive
-    }
-
     static func shouldResetOnProfileInvalidation(
         version: Int,
         lastHandledVersion: Int
@@ -121,7 +117,6 @@ struct ProfileView: View {
             .accessibilityIdentifier("profile-content-root")
             .toolbar(.hidden, for: .navigationBar)
             .onAppear {
-                requestProfileScrollToTop()
                 applyWarmProfileSnapshotIfAvailable()
             }
             .onChange(of: profileScrollToTopRequestID) { _, requestID in
@@ -129,9 +124,6 @@ struct ProfileView: View {
                 scrollProfileToTop(using: scrollProxy)
             }
             .task(id: isTabActive) {
-                if ProfileScrollResetPolicy.shouldResetOnTabActivation(isTabActive: isTabActive) {
-                    requestProfileScrollToTop()
-                }
                 guard isTabActive else { return }
                 await handleInitialActivation()
             }

@@ -97,6 +97,25 @@ final class WGJUITests: XCTestCase {
     }
 
     @MainActor
+    func testProfileSettingsBackPreservesScrollPosition() throws {
+        let app = launchApp(mode: .localInMemory)
+
+        tapTab("Profile", in: app)
+        let settingsTile = identifiedElement("profile-settings-tile", in: app)
+        XCTAssertTrue(identifiedElement("profile-dashboard-deferred-placeholder", in: app).waitForNonExistence(timeout: 5))
+
+        revealLazyElement(settingsTile, in: app, maxSwipes: 8)
+        XCTAssertTrue(settingsTile.isHittable)
+        settingsTile.tap()
+
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        app.navigationBars["Settings"].buttons.firstMatch.tap()
+
+        XCTAssertTrue(settingsTile.waitForExistence(timeout: 2))
+        XCTAssertTrue(settingsTile.isHittable)
+    }
+
+    @MainActor
     func testExercisesSearchAndFilterSmoke() throws {
         let app = launchApp(mode: .localInMemory)
 

@@ -92,6 +92,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 - Root Cause: Profile refreshed and temporarily reshaped dashboard content while SwiftUI preserved an old `ScrollView` offset. The screen had no explicit top anchor or scroll reset request tied to tab activation, navigation return, or profile invalidation.
 - Durable Rule: When Profile content is invalidated, reloaded, or reshaped from settings/widget/profile-management flows, keep a Profile-owned top scroll anchor and reset the Profile scroll position on tab activation, view reappearance, and profile invalidation. Do not add more Profile reload triggers without checking scroll offset behavior.
 - How to Verify Next Time: Run `WGJTests/AppLaunchWarmupTests`, then on simulator scroll Profile down, switch away/back, open Settings from the bottom of Profile and return, and confirm `profile-content-root` shows the Profile header/Identity area rather than dashboard bottom or blank space.
+- Status: superseded by `2026-06-08 - Profile Navigation Return Must Preserve Scroll Position`. Resetting on view reappearance fixed one empty-offset symptom but made Settings back navigation lose the user's place.
+
+## 2026-06-08 - Profile Navigation Return Must Preserve Scroll Position
+
+- Date: 2026-06-08
+- Trigger/Problem: Returning from Profile Settings popped the user back to the top of Profile instead of preserving the scroll position near the Settings tile.
+- Root Cause: The previous Profile empty-screen fix reset scroll in `ProfileView.onAppear`, and `NavigationStack` pops from Settings trigger the root Profile view's appearance lifecycle without meaning the user changed tabs or requested a content reset.
+- Durable Rule: Profile may keep a top anchor and may reset for explicit profile invalidation or reshaped content, but do not reset Profile scroll from plain view reappearance, navigation return, or tab re-entry. Settings and other Profile round trips should preserve the user's scroll offset.
+- How to Verify Next Time: Run `WGJTests/AppLaunchWarmupTests`, `WGJUITests/WGJUITests/testProfileSettingsBackPreservesScrollPosition`, and `WGJUITests/WGJUITests/testProfileTabReentryKeepsDeepContentVisible`; manually scroll Profile to Settings, open Settings, tap Back, and confirm the Settings tile remains visible and hittable without showing the old blank lower screen.
 - Status: active
 
 ## 2026-06-07 - UI Copy Must Not Sound Like Implementation Notes

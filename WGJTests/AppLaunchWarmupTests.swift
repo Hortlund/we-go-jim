@@ -642,16 +642,14 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
-    func profileScrollResetPolicyResetsOnTabActivationAndNewInvalidation() {
-        #expect(ProfileScrollResetPolicy.shouldResetOnTabActivation(isTabActive: true))
-        #expect(!ProfileScrollResetPolicy.shouldResetOnTabActivation(isTabActive: false))
+    func profileScrollResetPolicyResetsOnNewInvalidationOnly() {
         #expect(ProfileScrollResetPolicy.shouldResetOnProfileInvalidation(version: 2, lastHandledVersion: 1))
         #expect(!ProfileScrollResetPolicy.shouldResetOnProfileInvalidation(version: 0, lastHandledVersion: 0))
         #expect(!ProfileScrollResetPolicy.shouldResetOnProfileInvalidation(version: 2, lastHandledVersion: 2))
     }
 
     @Test
-    func profileViewOwnsTopScrollAnchorForTabAndInvalidationResets() throws {
+    func profileViewOwnsTopScrollAnchorForInvalidationResets() throws {
         let source = try String(contentsOf: profileViewSourceURL(), encoding: .utf8)
 
         #expect(source.contains("ScrollViewReader"))
@@ -659,6 +657,24 @@ struct AppLaunchWarmupTests {
         #expect(source.contains(".id(Self.profileTopAnchorID)"))
         #expect(source.contains("profileScrollToTopRequestID"))
         #expect(source.contains("scrollProxy.scrollTo(Self.profileTopAnchorID, anchor: .top)"))
+    }
+
+    @Test
+    func profileViewDoesNotResetScrollOnNavigationReturnAppear() throws {
+        let source = try String(contentsOf: profileViewSourceURL(), encoding: .utf8)
+
+        #expect(!source.contains("""
+            .onAppear {
+                requestProfileScrollToTop()
+                applyWarmProfileSnapshotIfAvailable()
+            }
+"""))
+        #expect(!source.contains("shouldResetOnTabActivation"))
+        #expect(source.contains("""
+            .onAppear {
+                applyWarmProfileSnapshotIfAvailable()
+            }
+"""))
     }
 
     @Test
