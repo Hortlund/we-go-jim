@@ -824,6 +824,7 @@ nonisolated final class WorkoutSessionRepository {
         invalidateAnalyticsCache()
         scheduleProjectionRebuild(for: sessionID)
         publishWeeklyGoalWidgetProgress()
+        WorkoutHistoryChangeBroadcaster.post()
         try? CloudKitBrosSocialService.makeIfUserDataSyncEnabled(modelContext: modelContext)?.queueCompletedSessionPublish(sessionID: sessionID)
     }
 
@@ -844,6 +845,7 @@ nonisolated final class WorkoutSessionRepository {
         try saveUserDataChanges()
         invalidateAnalyticsCache()
         publishWeeklyGoalWidgetProgress()
+        WorkoutHistoryChangeBroadcaster.post()
     }
 
     func restoreArchivedSession(id: UUID) throws {
@@ -862,6 +864,7 @@ nonisolated final class WorkoutSessionRepository {
         try saveUserDataChanges()
         invalidateAnalyticsCache()
         publishWeeklyGoalWidgetProgress()
+        WorkoutHistoryChangeBroadcaster.post()
     }
 
     func cancelSession(sessionID: UUID) throws {
@@ -906,6 +909,10 @@ nonisolated final class WorkoutSessionRepository {
         if session.status != .completed {
             scheduleProjectionRebuild(for: sessionID)
         }
+        if session.status == .completed {
+            publishWeeklyGoalWidgetProgress()
+            WorkoutHistoryChangeBroadcaster.post()
+        }
     }
 
     @discardableResult
@@ -934,6 +941,7 @@ nonisolated final class WorkoutSessionRepository {
         try saveUserDataChanges()
         invalidateAnalyticsCache()
         publishWeeklyGoalWidgetProgress()
+        WorkoutHistoryChangeBroadcaster.post()
         return staleSessions.count
     }
 
@@ -959,6 +967,7 @@ nonisolated final class WorkoutSessionRepository {
         try saveUserDataChanges()
         invalidateAnalyticsCache()
         publishWeeklyGoalWidgetProgress()
+        WorkoutHistoryChangeBroadcaster.post()
     }
 
     private func template(id: UUID) throws -> WorkoutTemplate? {

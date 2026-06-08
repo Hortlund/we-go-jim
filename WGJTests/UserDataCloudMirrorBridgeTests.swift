@@ -664,6 +664,39 @@ struct UserDataCloudMirrorBridgeTests {
     }
 
     @Test
+    func bridgePostsWorkoutHistoryChangeForImportedCompletedWorkoutTombstone() async throws {
+        let sessionID = UUID()
+        let localContainer = try makeUserDataContainer("LocalSessionNotificationDelete")
+        let mirrorContainer = try makeUserDataContainer("MirrorSessionNotificationDelete")
+        let localContext = ModelContext(localContainer)
+        let mirrorContext = ModelContext(mirrorContainer)
+        let recorder = NotificationRecorder(name: .wgjWorkoutHistoryDidChange)
+        defer { recorder.invalidate() }
+
+        localContext.insert(WorkoutSession(
+            id: sessionID,
+            name: "Deleted Session",
+            status: .completed,
+            updatedAt: Date(timeIntervalSinceReferenceDate: 20)
+        ))
+        mirrorContext.insert(UserDataDeletionTombstone(
+            entityName: "WorkoutSession",
+            entityID: sessionID,
+            deletedAt: Date(timeIntervalSinceReferenceDate: 30)
+        ))
+        try localContext.save()
+        try mirrorContext.save()
+
+        try await UserDataCloudMirrorBridge(
+            localContainer: localContainer,
+            mirrorContainer: mirrorContainer,
+            projectionScheduler: { _, _ in }
+        ).syncLocalChangesToMirror()
+
+        #expect(recorder.count == 1)
+    }
+
+    @Test
     func bridgeAppliesTemplateTombstoneToMirrorInsteadOfResurrectingDeletedTemplate() async throws {
         let templateID = UUID()
         let localContainer = try makeUserDataContainer("LocalTemplateDelete")
@@ -903,5 +936,40 @@ private final class ProjectionScheduleRecorder: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         sessionIDs.formUnion(ids)
+    }
+}
+
+private final class NotificationRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var observer: NSObjectProtocol?
+    private var notificationCount = 0
+
+    init(name: Notification.Name) {
+        observer = NotificationCenter.default.addObserver(
+            forName: name,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            self?.record()
+        }
+    }
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return notificationCount
+    }
+
+    func invalidate() {
+        if let observer {
+            NotificationCenter.default.removeObserver(observer)
+            self.observer = nil
+        }
+    }
+
+    private func record() {
+        lock.lock()
+        notificationCount += 1
+        lock.unlock()
     }
 }

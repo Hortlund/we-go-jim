@@ -49,6 +49,8 @@ actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
         }
         if !projectionSessionIDs.isEmpty {
             projectionScheduler(projectionSessionIDs, localContainer)
+            WeeklyGoalWidgetPublisher.publishBestEffort(modelContext: localContext)
+            WorkoutHistoryChangeBroadcaster.post()
         }
     }
 

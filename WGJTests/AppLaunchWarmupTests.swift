@@ -616,6 +616,23 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
+    func contentViewInvalidatesProfileWhenWorkoutHistoryChanges() throws {
+        let source = try String(contentsOf: contentViewSourceURL(), encoding: .utf8)
+
+        #expect(source.contains(".publisher(for: .wgjWorkoutHistoryDidChange)"))
+        #expect(source.contains(".receive(on: RunLoop.main)"))
+        #expect(source.contains("handleWorkoutHistoryChanged()"))
+        #expect(source.contains("""
+    private func handleWorkoutHistoryChanged() {
+        guard appPhase == .main else { return }
+        appWarmupState.invalidateProfile()
+        scheduleWeeklyGoalWidgetPublish()
+        requestWarmups(trigger: .activeWorkoutEnded)
+    }
+"""))
+    }
+
+    @Test
     func profileViewReloadsWhenProfileWarmSnapshotIsInvalidated() throws {
         let source = try String(contentsOf: profileViewSourceURL(), encoding: .utf8)
 

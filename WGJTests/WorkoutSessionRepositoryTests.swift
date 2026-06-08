@@ -77,6 +77,20 @@ struct WorkoutSessionRepositoryTests {
     }
 
     @Test
+    func finishSessionPostsWorkoutHistoryChange() throws {
+        let context = try makeInMemoryContext()
+        let repository = WorkoutSessionRepository(modelContext: context)
+        let recorder = NotificationRecorder(name: .wgjWorkoutHistoryDidChange)
+        defer { recorder.invalidate() }
+
+        let session = try repository.createEmptySession(name: "Profile Refresh")
+
+        try repository.finishSession(sessionID: session.id)
+
+        #expect(recorder.count == 1)
+    }
+
+    @Test
     func addExerciseUsesPreferredWeightUnitForDefaultSets() throws {
         let context = try makeInMemoryContext()
         let profileRepository = ProfileRepository(modelContext: context)
@@ -787,6 +801,20 @@ struct WorkoutSessionRepositoryTests {
     }
 
     @Test
+    func deleteSessionPostsWorkoutHistoryChange() throws {
+        let context = try makeInMemoryContext()
+        let repository = WorkoutSessionRepository(modelContext: context)
+        let recorder = NotificationRecorder(name: .wgjWorkoutHistoryDidChange)
+        defer { recorder.invalidate() }
+
+        let session = try repository.createEmptySession(name: "Delete Profile Refresh")
+
+        try repository.deleteSession(id: session.id)
+
+        #expect(recorder.count == 1)
+    }
+
+    @Test
     func archiveAndRestoreCompletedSessionKeepsCanonicalHistory() throws {
         let context = try makeInMemoryContext()
         let repository = WorkoutSessionRepository(modelContext: context)
@@ -899,5 +927,40 @@ struct WorkoutSessionRepositoryTests {
         )
         descriptor.fetchLimit = 1
         return try context.fetch(descriptor).first
+    }
+}
+
+private final class NotificationRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var observer: NSObjectProtocol?
+    private var notificationCount = 0
+
+    init(name: Notification.Name) {
+        observer = NotificationCenter.default.addObserver(
+            forName: name,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            self?.record()
+        }
+    }
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return notificationCount
+    }
+
+    func invalidate() {
+        if let observer {
+            NotificationCenter.default.removeObserver(observer)
+            self.observer = nil
+        }
+    }
+
+    private func record() {
+        lock.lock()
+        notificationCount += 1
+        lock.unlock()
     }
 }

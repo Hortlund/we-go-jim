@@ -628,7 +628,14 @@ struct RestTimerNotificationDescriptor: Equatable {
 }
 
 extension Notification.Name {
-    static let wgjDidDeleteAllUserData = Notification.Name("wgj.didDeleteAllUserData")
+    nonisolated static let wgjDidDeleteAllUserData = Notification.Name("wgj.didDeleteAllUserData")
+    nonisolated static let wgjWorkoutHistoryDidChange = Notification.Name("wgj.workoutHistoryDidChange")
+}
+
+nonisolated enum WorkoutHistoryChangeBroadcaster {
+    static func post(notificationCenter: NotificationCenter = .default) {
+        notificationCenter.post(name: .wgjWorkoutHistoryDidChange, object: nil)
+    }
 }
 
 nonisolated enum AppPhase {

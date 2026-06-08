@@ -1,3 +1,4 @@
+import Combine
 import SwiftData
 import SwiftUI
 import UIKit
@@ -146,6 +147,13 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .wgjDidDeleteAllUserData)) { _ in
             resetToStartupFlow()
+        }
+        .onReceive(
+            NotificationCenter.default
+                .publisher(for: .wgjWorkoutHistoryDidChange)
+                .receive(on: RunLoop.main)
+        ) { _ in
+            handleWorkoutHistoryChanged()
         }
         .sheet(isPresented: $subscriptionState.isPaywallPresented) {
             RevenueCatPaywallSheet(subscriptionState: subscriptionState)
@@ -383,6 +391,13 @@ struct ContentView: View {
         startUserDataCloudMirrorIfReady()
         scheduleWeeklyGoalWidgetPublish()
         requestWarmups(trigger: .enteredMain)
+    }
+
+    private func handleWorkoutHistoryChanged() {
+        guard appPhase == .main else { return }
+        appWarmupState.invalidateProfile()
+        scheduleWeeklyGoalWidgetPublish()
+        requestWarmups(trigger: .activeWorkoutEnded)
     }
 
     private func startUserDataCloudMirrorIfReady() {

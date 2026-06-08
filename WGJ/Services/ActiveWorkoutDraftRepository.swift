@@ -875,6 +875,8 @@ nonisolated final class ActiveWorkoutDraftRepository {
             sessionID: completedSession.id,
             container: modelContext.container
         )
+        WeeklyGoalWidgetPublisher.publishBestEffort(modelContext: modelContext)
+        WorkoutHistoryChangeBroadcaster.post()
         try? CloudKitBrosSocialService.makeIfUserDataSyncEnabled(modelContext: modelContext)?
             .queueCompletedSessionPublish(sessionID: completedSession.id)
 
