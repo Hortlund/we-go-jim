@@ -36,6 +36,9 @@ nonisolated enum BoundaryCloudBackupScheduler {
 
         Task.detached(priority: .utility) {
             do {
+                await MainActor.run {
+                    AppRuntimeState.shared.updateUserDataSyncStatus(.pending())
+                }
                 try await UserDataCloudBackupService(
                     localContainer: container,
                     backupStore: CloudKitUserDataCloudBackupStore()

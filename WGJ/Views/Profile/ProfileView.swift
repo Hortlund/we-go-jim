@@ -50,6 +50,8 @@ struct ProfileView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.isTabActive) private var isTabActive
     @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
+    @Environment(\.cloudSyncErrorDescription) private var cloudSyncErrorDescription
+    @Environment(\.userDataSyncStatus) private var userDataSyncStatus
     @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(AppWarmupState.self) private var appWarmupState
 
@@ -82,6 +84,9 @@ struct ProfileView: View {
     @State private var lastLoadedProfileUpdatedAt: Date?
     @State private var lastRefreshAt: Date?
     @State private var lastHandledProfileInvalidationVersion = 0
+    @State private var cloudBackupSummary = ProfileCloudBackupSummary.empty
+    @State private var isLoadingCloudBackupSummary = false
+    @State private var isForcingCloudBackup = false
 
     @State private var errorMessage = ""
     @State private var showingError = false
@@ -93,6 +98,7 @@ struct ProfileView: View {
                 identityCard
                 highlightsCard
                 dashboardSection
+                cloudBackupSection
                 appSection
             }
             .padding(.top, 8)
@@ -104,6 +110,9 @@ struct ProfileView: View {
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {
             applyWarmProfileSnapshotIfAvailable()
+            Task {
+                await refreshCloudBackupSummary()
+            }
         }
         .task(id: isTabActive) {
             guard isTabActive else { return }
@@ -697,6 +706,73 @@ struct ProfileView: View {
         }
     }
 
+    private var cloudBackupSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            WGJActionHeader("Cloud Backup", subtitle: "Your core workout data backs up at save boundaries.") {
+                Button {
+                    Task {
+                        await forceCloudBackup()
+                    }
+                } label: {
+                    if isForcingCloudBackup {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Label("Back Up Now", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                }
+                .buttonStyle(WGJCompactGhostButtonStyle())
+                .disabled(!cloudSyncEnabled || isForcingCloudBackup)
+                .accessibilityIdentifier("profile-cloud-backup-now-button")
+            }
+
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: cloudBackupStatusIcon)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(cloudBackupStatusTint)
+                    .frame(width: 32, height: 32)
+                    .background {
+                        Circle()
+                            .fill(cloudBackupStatusTint.opacity(0.14))
+                    }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(cloudBackupStatusTitle)
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(WGJTheme.textPrimary)
+
+                    Text(cloudBackupStatusDetail)
+                        .font(.subheadline)
+                        .foregroundStyle(WGJTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            HStack(spacing: 10) {
+                ProfileCloudBackupStatTile(
+                    title: "Workouts",
+                    value: cloudBackupSummary.completedWorkoutCountText,
+                    isLoading: isLoadingCloudBackupSummary
+                )
+                ProfileCloudBackupStatTile(
+                    title: "Templates",
+                    value: cloudBackupSummary.templateCountText,
+                    isLoading: isLoadingCloudBackupSummary
+                )
+                ProfileCloudBackupStatTile(
+                    title: "Custom",
+                    value: cloudBackupSummary.customExerciseCountText,
+                    isLoading: isLoadingCloudBackupSummary
+                )
+            }
+        }
+        .padding(14)
+        .wgjCardContainer()
+        .accessibilityIdentifier("profile-cloud-backup-section")
+    }
+
     private var identityPreviewName: String {
         let trimmedName = currentProfile?.displayName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmedName.isEmpty ? "Athlete" : trimmedName
@@ -708,6 +784,58 @@ struct ProfileView: View {
         }
 
         return firstWorkoutDate.formatted(.dateTime.month(.abbreviated).year())
+    }
+
+    private var cloudBackupStatusTitle: String {
+        if isForcingCloudBackup {
+            return "Backing up now"
+        }
+        return userDataSyncStatus.title
+    }
+
+    private var cloudBackupStatusDetail: String {
+        if isForcingCloudBackup {
+            return "Uploading your current profile, templates, custom exercises, and workout history."
+        }
+        guard cloudSyncEnabled else {
+            return cloudSyncErrorDescription ?? userDataSyncStatus.detail
+        }
+        if let latestExport = userDataSyncStatus.latestSuccessfulExportAt {
+            return "Last cloud backup \(latestExport.formatted(.dateTime.month(.abbreviated).day().hour().minute()))."
+        }
+        return userDataSyncStatus.detail
+    }
+
+    private var cloudBackupStatusIcon: String {
+        if isForcingCloudBackup {
+            return "arrow.triangle.2.circlepath"
+        }
+        switch userDataSyncStatus.state {
+        case .backedUp:
+            return "checkmark.icloud.fill"
+        case .pending:
+            return "icloud.and.arrow.up"
+        case .degraded:
+            return "exclamationmark.icloud.fill"
+        case .localOnly:
+            return cloudSyncEnabled ? "icloud" : "internaldrive"
+        }
+    }
+
+    private var cloudBackupStatusTint: Color {
+        if isForcingCloudBackup {
+            return WGJTheme.accentBlue
+        }
+        switch userDataSyncStatus.state {
+        case .backedUp:
+            return WGJTheme.success
+        case .pending:
+            return WGJTheme.accentBlue
+        case .degraded:
+            return WGJTheme.accentGold
+        case .localOnly:
+            return cloudSyncEnabled ? WGJTheme.accentCyan : WGJTheme.textSecondary
+        }
     }
 
     private var topExerciseSummaryText: String {
@@ -823,6 +951,39 @@ struct ProfileView: View {
             guard profileReloadToken == reloadToken else { return }
             showError(error)
         }
+    }
+
+    @MainActor
+    private func refreshCloudBackupSummary() async {
+        isLoadingCloudBackupSummary = true
+        do {
+            let backgroundStore = profileBackgroundStore
+            cloudBackupSummary = try await backgroundStore.perform("profile.cloud-backup-summary") { context in
+                try ProfileCloudBackupSummary.load(context: context)
+            }
+        } catch {
+            cloudBackupSummary = .empty
+        }
+        isLoadingCloudBackupSummary = false
+    }
+
+    @MainActor
+    private func forceCloudBackup() async {
+        guard cloudSyncEnabled, !isForcingCloudBackup else { return }
+
+        isForcingCloudBackup = true
+        AppRuntimeState.shared.updateUserDataSyncStatus(.pending())
+        do {
+            try await UserDataCloudBackupService(
+                localContainer: modelContext.container,
+                backupStore: CloudKitUserDataCloudBackupStore()
+            ).exportCurrentBackup()
+            AppRuntimeState.shared.updateUserDataSyncStatus(.backedUp())
+            await refreshCloudBackupSummary()
+        } catch {
+            AppRuntimeState.shared.updateUserDataSyncStatus(.degraded("Manual cloud backup failed: \(error.localizedDescription)"))
+        }
+        isForcingCloudBackup = false
     }
 
     @MainActor
@@ -1498,6 +1659,65 @@ private struct ProfileQuickStatTile: View {
                 .lineLimit(2)
         }
         .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .wgjCardContainer(cornerRadius: WGJRadius.control)
+    }
+}
+
+private struct ProfileCloudBackupSummary: Equatable, Sendable {
+    static let empty = ProfileCloudBackupSummary(
+        completedWorkoutCount: 0,
+        templateCount: 0,
+        customExerciseCount: 0
+    )
+
+    let completedWorkoutCount: Int
+    let templateCount: Int
+    let customExerciseCount: Int
+
+    var completedWorkoutCountText: String { "\(completedWorkoutCount)" }
+    var templateCountText: String { "\(templateCount)" }
+    var customExerciseCountText: String { "\(customExerciseCount)" }
+
+    nonisolated static func load(context: ModelContext) throws -> ProfileCloudBackupSummary {
+        let workoutSessions = try context.fetch(FetchDescriptor<WorkoutSession>())
+        let templates = try context.fetch(FetchDescriptor<WorkoutTemplate>())
+        let exercises = try context.fetch(FetchDescriptor<ExerciseCatalogItem>())
+
+        return ProfileCloudBackupSummary(
+            completedWorkoutCount: workoutSessions.filter { $0.status == .completed }.count,
+            templateCount: templates.count,
+            customExerciseCount: exercises.filter(\.isCustomExercise).count
+        )
+    }
+}
+
+private struct ProfileCloudBackupStatTile: View {
+    let title: String
+    let value: String
+    let isLoading: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if isLoading {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(height: 24, alignment: .leading)
+            } else {
+                Text(value)
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(WGJTheme.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(WGJTheme.textSecondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .wgjCardContainer(cornerRadius: WGJRadius.control)
     }

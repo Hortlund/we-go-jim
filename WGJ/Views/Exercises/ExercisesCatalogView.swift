@@ -197,12 +197,13 @@ struct ExercisesCatalogView: View {
                                     emptyState
                                         .padding(.top, 6)
                                 } else {
-                                    LazyVStack(alignment: .leading, spacing: 0) {
+                                    LazyVStack(alignment: .leading, spacing: 2) {
                                         ForEach(controller.snapshot.sections) { section in
                                             VStack(alignment: .leading, spacing: 0) {
                                                 WGJCompactSectionHeader(section.title)
                                                     .id(section.id)
-                                                    .padding(.vertical, 8)
+                                                    .padding(.top, 2)
+                                                    .padding(.bottom, 6)
 
                                                 LazyVStack(alignment: .leading, spacing: 0) {
                                                     ForEach(section.rows) { row in
@@ -218,7 +219,8 @@ struct ExercisesCatalogView: View {
                             }
                             .padding(.horizontal, 16)
                             .padding(.trailing, contentTrailingPadding)
-                            .padding(.bottom, 16)
+                            .padding(.top, controller.snapshot.sections.isEmpty ? 0 : 4)
+                            .padding(.bottom, 104)
                         }
                         .scrollDismissesKeyboard(.interactively)
                         .modifier(ExercisesCatalogScrollOffsetModifier { offset in
@@ -741,7 +743,7 @@ struct ExercisesCatalogView: View {
     private func exerciseRow(
         _ exercise: ExerciseCatalogItemSnapshot
     ) -> some View {
-        return HStack(spacing: 10) {
+        return HStack(alignment: .center, spacing: 12) {
             NavigationLink {
                 ExerciseDetailDestinationView(
                     remoteUUID: exercise.remoteUUID,
@@ -769,10 +771,11 @@ struct ExercisesCatalogView: View {
                 Image(systemName: "plus.circle.fill")
             }
             .buttonStyle(WGJIconButtonStyle(tint: WGJTheme.accentBlue, background: WGJTheme.cardElevated))
+            .frame(width: 48, height: 48)
             .accessibilityLabel(isPickerMode ? "Select \(exercise.displayName)" : "Add \(exercise.displayName)")
             .accessibilityIdentifier(isPickerMode ? "exercise-picker-select-button" : "exercise-catalog-add-button")
         }
-        .padding(.vertical, 10)
+        .frame(minHeight: 76, alignment: .center)
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(WGJTheme.field)
