@@ -7,8 +7,6 @@ struct ProfileManagementView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
-    @Environment(AppNotificationRouter.self) private var notificationRouter
-    @Environment(AppWarmupState.self) private var appWarmupState
 
     @State private var displayName = ""
     @State private var savedDisplayName = ""
@@ -41,7 +39,7 @@ struct ProfileManagementView: View {
 
                     athleteTypePickerButton
 
-                    Text("Your name, avatar, and athlete type are shown in Bros.")
+                    Text("Your name, avatar, and athlete type shape your profile.")
                         .font(.caption)
                         .foregroundStyle(WGJTheme.textSecondary)
 
@@ -256,22 +254,6 @@ struct ProfileManagementView: View {
             )
             if let profile = try profileRepository.currentProfile() {
                 apply(profile: ProfileIdentitySnapshot(profile: profile))
-                let cacheKey = profile.brosMembershipID ?? profile.id.uuidString
-                if let avatarImageData {
-                    Task {
-                        await BrosAvatarCacheService.shared.prime(
-                            data: avatarImageData,
-                            for: cacheKey
-                        )
-                    }
-                } else {
-                    BrosAvatarCacheService.shared.remove(for: cacheKey)
-                }
-
-                if profile.brosMembershipID != nil {
-                    appWarmupState.invalidateBros()
-                    notificationRouter.requestBrosRefresh()
-                }
             }
             dismiss()
         } catch {
@@ -419,7 +401,6 @@ struct ProfileAvatarView: View {
         ExerciseCatalogSyncState.self,
         UserProfile.self,
         ProfileWidgetConfig.self,
-        BlockedBro.self,
         TemplateFolder.self,
         WorkoutTemplate.self,
         TemplateExercise.self,

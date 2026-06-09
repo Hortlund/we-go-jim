@@ -222,7 +222,7 @@ struct LoginGateView: View {
         case .unavailable(let reason):
             switch reason {
             case .noAccount:
-                return "Sign into iCloud in Settings to enable sync and Bros, or continue locally now."
+                return "Sign into iCloud in Settings to enable CloudKit backup, or continue locally now."
             case .restricted:
                 return "iCloud is restricted on this device. Continue locally and sync later."
             case .temporarilyUnavailable:

@@ -114,10 +114,9 @@ final class AppLaunchBootstrapState {
             errorDescription: bootstrap.cloudSyncErrorDescription
         )
         AppRuntimeState.shared.updateUserDataSyncStatus(
-            UserDataSyncTrackerBridge.configureForLaunch(
-                isCloudEnabled: bootstrap.userDataSyncEnabled,
-                errorDescription: bootstrap.cloudSyncErrorDescription
-            )
+            bootstrap.userDataSyncEnabled
+                ? .backedUp()
+                : .localOnly(reason: bootstrap.cloudSyncErrorDescription)
         )
         resolvedBootstrap = resolved
         resolutionTask = nil
@@ -309,7 +308,6 @@ final class AppLifecycleDiagnostics {
     private func purgeVolatileMemoryCaches() {
         ExerciseImageCacheService.clearMemoryCache()
         AvatarThumbnailCacheService.shared.clear()
-        BrosAvatarCacheService.shared.clear()
         ExerciseSearchService.clearCachedCatalogIndexes()
         HistoryAnalyticsCache.shared.clear()
     }

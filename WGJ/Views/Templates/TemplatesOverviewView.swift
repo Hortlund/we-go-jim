@@ -5,7 +5,6 @@ struct TemplatesOverviewView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(\.isTabActive) private var isTabActive
-    @Environment(SubscriptionState.self) private var subscriptionState
 
     @State private var folderFilter: FolderFilter = .all
     @State private var templateEditorContext: TemplateEditorContext?
@@ -283,14 +282,6 @@ struct TemplatesOverviewView: View {
     }
 
     private func createTemplate(folderID: UUID?) {
-        guard ProAccessPolicy.canCreateTemplate(
-            currentTemplateCount: controller.snapshot.templates.count,
-            isPro: subscriptionState.isPro
-        ) else {
-            subscriptionState.presentPaywall()
-            return
-        }
-
         templateEditorContext = TemplateEditorContext(
             folderID: folderID,
             templateID: nil
@@ -341,14 +332,6 @@ struct TemplatesOverviewView: View {
     }
 
     private func duplicateTemplate(_ template: TemplateOverviewTemplateSnapshot) {
-        guard ProAccessPolicy.canCreateTemplate(
-            currentTemplateCount: controller.snapshot.templates.count,
-            isPro: subscriptionState.isPro
-        ) else {
-            subscriptionState.presentPaywall()
-            return
-        }
-
         let backgroundStore = templatesOverviewBackgroundStore
         Task.detached(priority: .utility) {
             do {

@@ -1,38 +1,15 @@
 import Foundation
 import SwiftData
 
-nonisolated protocol BrosCloudDataDeleting {
-    func deleteCurrentUserData() async throws
-}
-
-nonisolated extension CloudKitBrosSocialService: BrosCloudDataDeleting { }
-
-enum AppDataDeletionError: LocalizedError {
-    case partialCloudCleanup(String)
-
-    var errorDescription: String? {
-        switch self {
-        case .partialCloudCleanup(let details):
-            return "Local data was deleted, but Bros cleanup in iCloud needs attention: \(details)"
-        }
-    }
-}
-
 nonisolated final class AppDataDeletionService {
     private let modelContext: ModelContext
     private let fileManager: FileManager
-    private let socialDataDeleter: BrosCloudDataDeleting?
-    private let socialDataDeleterFactory: @Sendable (ModelContext) -> BrosCloudDataDeleting?
     private let clearWeeklyGoalWidgetSnapshot: @Sendable () -> Void
     private let clearActiveWorkoutSnapshot: @Sendable () async throws -> Void
 
     init(
         modelContext: ModelContext,
         fileManager: FileManager = .default,
-        socialDataDeleter: BrosCloudDataDeleting? = nil,
-        socialDataDeleterFactory: @escaping @Sendable (ModelContext) -> BrosCloudDataDeleting? = { modelContext in
-            CloudKitBrosSocialService.makeIfContainerAvailable(modelContext: modelContext)
-        },
         clearWeeklyGoalWidgetSnapshot: @escaping @Sendable () -> Void = {
             WeeklyGoalWidgetPublisher()?.clear()
         },
@@ -42,33 +19,13 @@ nonisolated final class AppDataDeletionService {
     ) {
         self.modelContext = modelContext
         self.fileManager = fileManager
-        self.socialDataDeleter = socialDataDeleter
-        self.socialDataDeleterFactory = socialDataDeleterFactory
         self.clearWeeklyGoalWidgetSnapshot = clearWeeklyGoalWidgetSnapshot
         self.clearActiveWorkoutSnapshot = clearActiveWorkoutSnapshot
     }
 
     func deleteAllUserData() async throws {
-        var cloudCleanupError: Error?
-        let deleter = socialDataDeleter ?? socialDataDeleterFactory(modelContext)
-
         try deleteLocalData()
         try await clearLocalArtifacts()
-
-        if let deleter {
-            do {
-                try await deleter.deleteCurrentUserData()
-            } catch {
-                cloudCleanupError = error
-            }
-
-            try deleteLocalData()
-            try await clearLocalArtifacts()
-        }
-
-        if let cloudCleanupError {
-            throw AppDataDeletionError.partialCloudCleanup(cloudCleanupError.localizedDescription)
-        }
     }
 
     private func deleteLocalData() throws {
@@ -85,11 +42,8 @@ nonisolated final class AppDataDeletionService {
         try deleteAll(TemplateExercise.self)
         try deleteAll(WorkoutTemplate.self)
         try deleteAll(TemplateFolder.self)
-        try deleteAll(SocialOutboxItem.self)
-        try deleteAll(BlockedBro.self)
         try deleteAll(UserProfile.self)
         try modelContext.save()
-        UserDataSyncTrackerBridge.markLocalMutation()
     }
 
     private func clearLocalArtifacts() async throws {
@@ -163,14 +117,6 @@ nonisolated final class AppDataDeletionService {
             insertTombstoneIfNeeded(
                 entityName: "WorkoutSession",
                 entityID: session.id,
-                existingKeys: &existingKeys
-            )
-        }
-
-        for blocked in try modelContext.fetch(FetchDescriptor<BlockedBro>()) {
-            insertTombstoneIfNeeded(
-                entityName: "BlockedBro",
-                entityID: blocked.id,
                 existingKeys: &existingKeys
             )
         }

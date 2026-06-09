@@ -67,7 +67,6 @@ nonisolated final class ExerciseCatalogRepository: ExerciseCatalogRepositoryProt
 
     private func saveUserDataChanges() throws {
         try modelContext.save()
-        UserDataSyncTrackerBridge.markLocalMutation()
     }
 
     func ensureSeedImportedIfNeeded() throws {

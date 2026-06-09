@@ -62,7 +62,6 @@ nonisolated final class ProfileRepository {
             existing.displayName = preferredDisplayName
             existing.updatedAt = .now
             try saveUserDataChanges()
-            scheduleProfileSync()
             return existing
         }
 
@@ -125,7 +124,6 @@ nonisolated final class ProfileRepository {
         profile.avatarImageData = avatarImageData
         profile.updatedAt = .now
         try saveUserDataChanges()
-        scheduleProfileSync()
     }
 
     func updateWeeklyWorkoutGoal(_ goal: Int) throws {
@@ -211,16 +209,5 @@ nonisolated final class ProfileRepository {
 
     private func saveUserDataChanges() throws {
         try modelContext.save()
-        UserDataSyncTrackerBridge.markLocalMutation()
-    }
-
-    private func scheduleProfileSync() {
-        let container = modelContext.container
-        Task.detached(priority: .utility) {
-            let backgroundContext = ModelContext(container)
-            backgroundContext.autosaveEnabled = false
-            try? CloudKitBrosSocialService.makeIfUserDataSyncEnabled(modelContext: backgroundContext)?
-                .queueCurrentProfileSync()
-        }
     }
 }

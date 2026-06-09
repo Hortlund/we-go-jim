@@ -5,7 +5,6 @@ struct ProfileWidgetManagerView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(\.appBackgroundStore) private var appBackgroundStore
-    @Environment(SubscriptionState.self) private var subscriptionState
 
     @State private var configs: [ProfileWidgetConfigSnapshot] = []
     @State private var widgetListSnapshot = ProfileWidgetManagerListSnapshot.empty
@@ -123,9 +122,6 @@ struct ProfileWidgetManagerView: View {
         .task {
             await reloadInitialData()
         }
-        .onChange(of: subscriptionState.isPro) { _, _ in
-            rebuildWidgetListSnapshot()
-        }
         .onDisappear {
             cancelExercisePickerLoad()
         }
@@ -154,7 +150,7 @@ struct ProfileWidgetManagerView: View {
     }
 
     private func widgetRow(_ config: ProfileWidgetConfigSnapshot) -> some View {
-        let isLocked = isProLocked(config.kind)
+        let isLocked = false
 
         return HStack(alignment: .top, spacing: 12) {
             ZStack(alignment: .bottomTrailing) {
@@ -208,29 +204,7 @@ struct ProfileWidgetManagerView: View {
 
                     Spacer(minLength: 0)
 
-                    if isLocked && config.isEnabled {
-                        Button("Remove") {
-                            removeOrToggleConfig(config)
-                        }
-                        .buttonStyle(WGJCompactGhostButtonStyle())
-                        .accessibilityIdentifier("profile-widget-remove-\(accessibilityIDToken(for: config))")
-
-                        Button {
-                            subscriptionState.presentPaywall()
-                        } label: {
-                            Label("Unlock Pro", systemImage: "sparkles")
-                        }
-                        .buttonStyle(WGJCompactPrimaryButtonStyle())
-                        .accessibilityIdentifier("profile-widget-unlock-pro-\(config.kind.rawValue)")
-                    } else if isLocked {
-                        Button {
-                            subscriptionState.presentPaywall()
-                        } label: {
-                            Label("Unlock Pro", systemImage: "sparkles")
-                        }
-                        .buttonStyle(WGJCompactPrimaryButtonStyle())
-                        .accessibilityIdentifier("profile-widget-unlock-pro-\(config.kind.rawValue)")
-                    } else if config.isEnabled {
+                    if config.isEnabled {
                         Button("Remove") {
                             removeOrToggleConfig(config)
                         }
@@ -255,12 +229,11 @@ struct ProfileWidgetManagerView: View {
     }
 
     private var addExerciseTrendRow: some View {
-        let isLocked = isProLocked(.exerciseOneRMTrend)
         return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: "chart.line.uptrend.xyaxis")
                     .font(.headline.weight(.semibold))
-                    .foregroundStyle(isLocked ? WGJTheme.textSecondary : WGJTheme.accentCyan)
+                    .foregroundStyle(WGJTheme.accentCyan)
                     .frame(width: 42, height: 42)
                     .background {
                         Circle()
@@ -280,37 +253,21 @@ struct ProfileWidgetManagerView: View {
                 Spacer(minLength: 0)
             }
 
-            if isLocked {
-                HStack {
-                    Text("Pro widget")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(WGJTheme.accentGold)
-                    Spacer(minLength: 0)
-                    Button {
-                        subscriptionState.presentPaywall()
-                    } label: {
-                        Label("Unlock Pro", systemImage: "sparkles")
-                    }
-                    .buttonStyle(WGJCompactPrimaryButtonStyle())
-                    .accessibilityIdentifier("profile-widget-unlock-pro-exerciseTrend")
+            Picker("Metric", selection: $newTrendMetric) {
+                ForEach(ProfileExerciseTrendMetric.allCases) { metric in
+                    Text(metric.title).tag(metric)
                 }
-            } else {
-                Picker("Metric", selection: $newTrendMetric) {
-                    ForEach(ProfileExerciseTrendMetric.allCases) { metric in
-                        Text(metric.title).tag(metric)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .accessibilityIdentifier("profile-widget-new-trend-metric-picker")
-
-                Button {
-                    presentExercisePicker(for: .newTrend(metric: newTrendMetric))
-                } label: {
-                    Label("Add Exercise Trend", systemImage: "plus")
-                }
-                .buttonStyle(WGJCompactPrimaryButtonStyle())
-                .accessibilityIdentifier("profile-widget-add-exerciseTrend")
             }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("profile-widget-new-trend-metric-picker")
+
+            Button {
+                presentExercisePicker(for: .newTrend(metric: newTrendMetric))
+            } label: {
+                Label("Add Exercise Trend", systemImage: "plus")
+            }
+            .buttonStyle(WGJCompactPrimaryButtonStyle())
+            .accessibilityIdentifier("profile-widget-add-exerciseTrend")
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -436,11 +393,6 @@ struct ProfileWidgetManagerView: View {
     }
 
     private func toggleConfig(_ config: ProfileWidgetConfigSnapshot) {
-        guard canUseWidget(config.kind) || config.isEnabled else {
-            subscriptionState.presentPaywall()
-            return
-        }
-
         let backgroundStore = widgetBackgroundStore
         applyConfigs(configs.map { snapshot in
             guard snapshot.id == config.id else { return snapshot }
@@ -493,11 +445,6 @@ struct ProfileWidgetManagerView: View {
     }
 
     private func enableConfig(_ config: ProfileWidgetConfigSnapshot) {
-        guard canUseWidget(config.kind) else {
-            subscriptionState.presentPaywall()
-            return
-        }
-
         if config.kind.requiresExerciseSelection, config.selectedCatalogExerciseUUID == nil {
             presentExercisePicker(for: selectionTarget(for: config, enableAfterSelection: true))
             return
@@ -660,14 +607,6 @@ struct ProfileWidgetManagerView: View {
     private func showError(_ error: Error) {
         errorMessage = String(describing: error)
         showingError = true
-    }
-
-    private func canUseWidget(_ kind: ProfileWidgetKind) -> Bool {
-        !ProAccessPolicy.requiresPro(kind) || subscriptionState.isPro
-    }
-
-    private func isProLocked(_ kind: ProfileWidgetKind) -> Bool {
-        ProAccessPolicy.requiresPro(kind) && !subscriptionState.isPro
     }
 
     @MainActor

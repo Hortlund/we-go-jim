@@ -340,15 +340,22 @@ nonisolated final class TemplateRepository {
     private func saveUserDataChanges() throws {
         guard autoSaveChanges else { return }
         try modelContext.save()
-        UserDataSyncTrackerBridge.markLocalMutation()
         TemplateLibraryChangeBroadcaster.post()
+        BoundaryCloudBackupScheduler.exportBestEffort(
+            container: modelContext.container,
+            reason: .templateSaved
+        )
     }
 
     func finalizeDeferredUserDataChangesIfNeeded() throws {
         guard !autoSaveChanges else { return }
         guard modelContext.hasChanges else { return }
         try modelContext.save()
-        UserDataSyncTrackerBridge.markLocalMutation()
+        TemplateLibraryChangeBroadcaster.post()
+        BoundaryCloudBackupScheduler.exportBestEffort(
+            container: modelContext.container,
+            reason: .templateSaved
+        )
     }
 
     func folders() throws -> [TemplateFolder] {

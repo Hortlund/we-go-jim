@@ -34,10 +34,9 @@ nonisolated enum StartupWarmupGate {
 
     static func waitForWarmups(
         profileTask: Task<Void, Never>?,
-        brosTask: Task<Void, Never>?,
         timeout: Duration = defaultTimeout
     ) async {
-        let warmupTasks = [profileTask, brosTask].compactMap { $0 }
+        let warmupTasks = [profileTask].compactMap { $0 }
         guard !warmupTasks.isEmpty else { return }
 
         let completion = StartupWarmupCompletion()
@@ -69,12 +68,11 @@ nonisolated enum StartupWarmupLaunchPolicy {
     static func shouldStartNonblockingWarmups(
         skipsSplash: Bool,
         hasBackgroundStore: Bool,
-        shouldWarmProfile: Bool,
-        shouldWarmBros: Bool
+        shouldWarmProfile: Bool
     ) -> Bool {
         !skipsSplash
             && hasBackgroundStore
-            && (shouldWarmProfile || shouldWarmBros)
+            && shouldWarmProfile
     }
 
     static func shouldWaitForWarmupsBeforeMainEntry(
@@ -92,12 +90,10 @@ nonisolated enum FirstRunLocalBootstrapPolicy {
     static func shouldRunBeforeMainEntry(
         skipsSplash: Bool,
         hasBackgroundStore: Bool,
-        cloudSyncEnabled: Bool,
         hasCompletedBootstrap: Bool
     ) -> Bool {
         !skipsSplash
             && hasBackgroundStore
-            && !cloudSyncEnabled
             && !hasCompletedBootstrap
     }
 }
@@ -125,32 +121,9 @@ nonisolated enum FirstRunLocalBootstrapProgress {
 
 nonisolated enum PreMainStartupWorkPolicy {
     static func shouldPrepareLocalProfileIdentity(
-        cloudSyncEnabled: Bool,
         shouldRunFirstRunLocalBootstrap: Bool
     ) -> Bool {
-        !cloudSyncEnabled && !shouldRunFirstRunLocalBootstrap
-    }
-
-    static func shouldStartWarmSnapshots(cloudSyncEnabled: Bool) -> Bool {
-        !cloudSyncEnabled
-    }
-
-    static func shouldImportLegacyActiveWorkoutDraftsBeforeMainEntry(cloudSyncEnabled: Bool) -> Bool {
-        !cloudSyncEnabled
-    }
-
-    static func shouldRestoreActiveWorkoutBeforeMainEntry(cloudSyncEnabled: Bool) -> Bool {
-        !cloudSyncEnabled
-    }
-}
-
-nonisolated enum PostMainStartupWorkPolicy {
-    static func shouldDeferNoncriticalWork(cloudSyncEnabled: Bool) -> Bool {
-        cloudSyncEnabled
-    }
-
-    static func shouldDeferResumeCriticalMaintenance(cloudSyncEnabled: Bool) -> Bool {
-        cloudSyncEnabled
+        !shouldRunFirstRunLocalBootstrap
     }
 }
 
@@ -192,53 +165,6 @@ nonisolated enum ProfileInitialLoadPolicy {
     }
 }
 
-nonisolated enum BrosInitialActivationPolicy {
-    static func shouldDeferActivationRefresh(
-        hasCompletedInitialActivationRefresh: Bool,
-        isBrosWarmupActive: Bool,
-        hasFreshWarmSnapshot: Bool,
-        hasNotificationRefreshRequest: Bool
-    ) -> Bool {
-        !hasCompletedInitialActivationRefresh
-            && isBrosWarmupActive
-            && !hasFreshWarmSnapshot
-            && !hasNotificationRefreshRequest
-    }
-
-    static func shouldRunInitialActivationRefresh(
-        hasCompletedInitialActivationRefresh: Bool,
-        hasFreshWarmSnapshot: Bool,
-        hasNotificationRefreshRequest: Bool
-    ) -> Bool {
-        guard !hasNotificationRefreshRequest else { return true }
-        guard !hasCompletedInitialActivationRefresh else { return true }
-        return !hasFreshWarmSnapshot
-    }
-}
-
-nonisolated enum BrosWarmSnapshotPolicy {
-    static func stateBeforeRemoteFetch(
-        cloudSyncEnabled: Bool,
-        cloudSyncErrorDescription: String?,
-        allowsRemoteFetch: Bool,
-        unavailableMessage: String
-    ) -> BrosWarmStateSnapshot? {
-        guard cloudSyncEnabled else {
-            return .unavailable(cloudSyncErrorDescription ?? unavailableMessage)
-        }
-
-        if let cloudSyncErrorDescription, !cloudSyncErrorDescription.isEmpty {
-            return .unavailable(cloudSyncErrorDescription)
-        }
-
-        return allowsRemoteFetch ? nil : .loading
-    }
-}
-
-nonisolated enum FirstRunBrosBootstrapPolicy {
-    static let allowsRemoteFetchBeforeMainEntry = false
-}
-
 nonisolated enum FirstFrameTabPresentation: Equatable, Sendable {
     case empty
     case shell
@@ -256,8 +182,6 @@ nonisolated enum FirstFrameTabContentPolicy {
         case .profile:
             _ = hasFreshWarmSnapshot
             return false
-        case .bros:
-            return true
         case .history, .startWorkout, .exercises:
             return false
         }
@@ -289,9 +213,6 @@ nonisolated enum FirstFrameTabContentPolicy {
         switch tab {
         case .profile:
             return hasFreshWarmSnapshot || isWarmupActive
-        case .bros:
-            _ = isWarmupActive
-            return hasFreshWarmSnapshot
         case .history, .startWorkout, .exercises:
             return false
         }
@@ -352,57 +273,21 @@ struct ProfileWarmSnapshot: Sendable {
     let warmedAt: Date
 }
 
-enum BrosWarmStateSnapshot: Equatable, Sendable {
-    case loading
-    case unavailable(String)
-    case onboarding
-    case active(BrosFeedSnapshot)
-
-    var canSkipInitialActivationRefresh: Bool {
-        switch self {
-        case .active, .onboarding:
-            return true
-        case .loading, .unavailable:
-            return false
-        }
-    }
-
-    var needsRemoteHydration: Bool {
-        if case .loading = self {
-            return true
-        }
-        return false
-    }
-}
-
-struct BrosWarmSnapshot: Equatable, Sendable {
-    let state: BrosWarmStateSnapshot
-    let blockedUserRecordNames: Set<String>
-    let warmedAt: Date
-
-    func hasSameRenderableContent(as other: BrosWarmSnapshot) -> Bool {
-        state == other.state
-            && blockedUserRecordNames == other.blockedUserRecordNames
-    }
-}
-
 struct StartupWarmupRunIDs: Equatable, Sendable {
     let profileRunID: Int?
-    let brosRunID: Int?
 
     var hasAnyWarmup: Bool {
-        profileRunID != nil || brosRunID != nil
+        profileRunID != nil
     }
 }
 
 struct StartupWarmupTasks {
     let profileTask: Task<Void, Never>?
-    let brosTask: Task<Void, Never>?
 
-    static let none = StartupWarmupTasks(profileTask: nil, brosTask: nil)
+    static let none = StartupWarmupTasks(profileTask: nil)
 
     var hasAnyWarmup: Bool {
-        profileTask != nil || brosTask != nil
+        profileTask != nil
     }
 }
 
@@ -410,28 +295,18 @@ struct StartupWarmupTasks {
 @Observable
 final class AppWarmupState {
     nonisolated static let defaultProfileFreshnessInterval: TimeInterval = 300
-    nonisolated static let defaultBrosFreshnessInterval: TimeInterval = 300
 
     private(set) var latestProfile: ProfileWarmSnapshot?
-    private(set) var latestBros: BrosWarmSnapshot?
     private(set) var isProfileWarmupActive = false
-    private(set) var isBrosWarmupActive = false
     private(set) var profileCompletionVersion = 0
     private(set) var profileInvalidationVersion = 0
-    private(set) var brosCompletionVersion = 0
 
     @ObservationIgnored private var profileWarmupGeneration = 0
-    @ObservationIgnored private var brosWarmupGeneration = 0
     @ObservationIgnored private var activeProfileWarmupRunID: Int?
-    @ObservationIgnored private var activeBrosWarmupRunID: Int?
     @ObservationIgnored private var profileWarmupWaiters: [CheckedContinuation<Void, Never>] = []
 
     func storeProfile(_ snapshot: ProfileWarmSnapshot) {
         latestProfile = snapshot
-    }
-
-    func storeBros(_ snapshot: BrosWarmSnapshot) {
-        latestBros = snapshot
     }
 
     func freshProfile(
@@ -442,31 +317,12 @@ final class AppWarmupState {
         return now.timeIntervalSince(latestProfile.warmedAt) <= maxAge ? latestProfile : nil
     }
 
-    func freshBros(
-        now: Date = .now,
-        maxAge: TimeInterval = defaultBrosFreshnessInterval
-    ) -> BrosWarmSnapshot? {
-        guard let latestBros else { return nil }
-        return now.timeIntervalSince(latestBros.warmedAt) <= maxAge ? latestBros : nil
-    }
-
     func shouldWarmProfile(
         force: Bool = false,
         now: Date = .now,
         maxAge: TimeInterval = defaultProfileFreshnessInterval
     ) -> Bool {
         force || (activeProfileWarmupRunID == nil && freshProfile(now: now, maxAge: maxAge) == nil)
-    }
-
-    func shouldWarmBros(
-        force: Bool = false,
-        now: Date = .now,
-        maxAge: TimeInterval = defaultBrosFreshnessInterval
-    ) -> Bool {
-        if force { return true }
-        guard activeBrosWarmupRunID == nil else { return false }
-        guard let snapshot = freshBros(now: now, maxAge: maxAge) else { return true }
-        return snapshot.state.needsRemoteHydration
     }
 
     func beginProfileWarmup(
@@ -495,39 +351,10 @@ final class AppWarmupState {
         resumeProfileWarmupWaiters()
     }
 
-    func beginBrosWarmup(
-        force: Bool = false,
-        now: Date = .now,
-        maxAge: TimeInterval = defaultBrosFreshnessInterval
-    ) -> Int? {
-        guard shouldWarmBros(force: force, now: now, maxAge: maxAge) else {
-            return nil
-        }
-
-        brosWarmupGeneration += 1
-        activeBrosWarmupRunID = brosWarmupGeneration
-        isBrosWarmupActive = true
-        return activeBrosWarmupRunID
-    }
-
-    func beginStartupWarmups(
-        shouldWarmProfile: Bool,
-        shouldWarmBros: Bool
-    ) -> StartupWarmupRunIDs {
+    func beginStartupWarmups(shouldWarmProfile: Bool) -> StartupWarmupRunIDs {
         StartupWarmupRunIDs(
-            profileRunID: shouldWarmProfile ? beginProfileWarmup() : nil,
-            brosRunID: shouldWarmBros ? beginBrosWarmup() : nil
+            profileRunID: shouldWarmProfile ? beginProfileWarmup() : nil
         )
-    }
-
-    func finishBrosWarmup(runID: Int, snapshot: BrosWarmSnapshot?) {
-        guard activeBrosWarmupRunID == runID else { return }
-        if let snapshot {
-            latestBros = snapshot
-        }
-        activeBrosWarmupRunID = nil
-        isBrosWarmupActive = false
-        brosCompletionVersion += 1
     }
 
     func invalidateProfile() {
@@ -540,26 +367,13 @@ final class AppWarmupState {
         resumeProfileWarmupWaiters()
     }
 
-    func invalidateBros() {
-        latestBros = nil
-        activeBrosWarmupRunID = nil
-        isBrosWarmupActive = false
-        brosWarmupGeneration += 1
-        brosCompletionVersion += 1
-    }
-
     func reset() {
         latestProfile = nil
-        latestBros = nil
         activeProfileWarmupRunID = nil
-        activeBrosWarmupRunID = nil
         isProfileWarmupActive = false
-        isBrosWarmupActive = false
         profileWarmupGeneration = 0
-        brosWarmupGeneration = 0
         profileCompletionVersion = 0
         profileInvalidationVersion = 0
-        brosCompletionVersion = 0
         resumeProfileWarmupWaiters()
     }
 

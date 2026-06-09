@@ -10,12 +10,7 @@ struct WGJApp: App {
     init() {
         Self.configureNavigationTitleAppearance()
         RestTimerNotificationManager.shared.configureNotifications()
-        CloudSyncEventMonitor.shared.start()
         AppLifecycleDiagnostics.shared.start()
-        SubscriptionState.shared.configureIfNeeded()
-#if DEBUG
-        Self.applyUITestSubscriptionOverridesIfRequested()
-#endif
     }
 
     var body: some Scene {
@@ -27,9 +22,6 @@ struct WGJApp: App {
                         .environment(\.cloudSyncErrorDescription, resolvedBootstrap.bootstrap.cloudSyncErrorDescription)
                         .environment(\.userDataSyncStatus, AppRuntimeState.shared.userDataSyncStatus)
                         .environment(\.appBackgroundStore, resolvedBootstrap.backgroundStore)
-                        .environment(\.makeUserDataCloudMirrorContainer, {
-                            try Self.makeUserDataCloudMirrorContainer()
-                        })
                         .environment(AppNotificationRouter.shared)
                         .modelContainer(resolvedBootstrap.bootstrap.container)
                 } else {
@@ -76,22 +68,12 @@ struct WGJApp: App {
         )
     }
 
-#if DEBUG
-    @MainActor
-    private static func applyUITestSubscriptionOverridesIfRequested(processInfo: ProcessInfo = .processInfo) {
-        guard processInfo.arguments.contains("UITEST_FORCE_PRO_SUBSCRIPTION") else { return }
-        SubscriptionState.shared.forceCustomerInfoForUITesting(
-            SubscriptionCustomerInfoSnapshot(activeEntitlementIdentifiers: [RevenueCatConfig.entitlementIdentifier])
-        )
-    }
-#endif
-
     private static func makeCloudBackedContainer() throws -> ModelContainer {
         let appSchema = fullAppSchema()
         try AppStoreLayout.prepareAppGroupStoreDirectory()
         return try ModelContainer(
             for: appSchema,
-            configurations: storeConfigurations(userDataCloudKitDatabase: .automatic)
+            configurations: storeConfigurations()
         )
     }
 
@@ -100,7 +82,7 @@ struct WGJApp: App {
         try AppStoreLayout.prepareAppGroupStoreDirectory()
         return try ModelContainer(
             for: appSchema,
-            configurations: storeConfigurations(userDataCloudKitDatabase: .none)
+            configurations: storeConfigurations()
         )
     }
 
@@ -109,26 +91,7 @@ struct WGJApp: App {
         try AppStoreLayout.prepareAppGroupStoreDirectory()
         return try ModelContainer(
             for: appSchema,
-            configurations: storeConfigurations(
-                userDataCloudKitDatabase: .none,
-                userDataConfigurationName: AppStoreLayout.cloudFailureFallbackUserDataConfigurationName
-            )
-        )
-    }
-
-    nonisolated private static func makeUserDataCloudMirrorContainer() throws -> ModelContainer {
-        let userDataSchema = userDataCloudMirrorSchema()
-        try AppStoreLayout.prepareAppGroupStoreDirectory()
-        return try ModelContainer(
-            for: userDataSchema,
-            configurations: [
-                ModelConfiguration(
-                    AppStoreLayout.userDataCloudMirrorConfigurationName,
-                    schema: userDataSchema,
-                    isStoredInMemoryOnly: false,
-                    cloudKitDatabase: .automatic
-                )
-            ]
+            configurations: storeConfigurations()
         )
     }
 
@@ -220,39 +183,10 @@ struct WGJApp: App {
             WorkoutSessionSupersetGroup.self,
             WorkoutSessionDropStage.self,
             CompletedSetFact.self,
-            SocialOutboxItem.self,
-            BlockedBro.self,
         ])
     }
 
-    nonisolated private static func userDataCloudMirrorSchema() -> Schema {
-        Schema([
-            CustomExerciseCloudRecord.self,
-            BlockedBroCloudRecord.self,
-            UserProfile.self,
-            UserDataDeletionTombstone.self,
-            ProfileWidgetConfig.self,
-            TemplateFolder.self,
-            WorkoutTemplate.self,
-            TemplateCardioBlock.self,
-            TemplateExercise.self,
-            TemplateExerciseComponent.self,
-            TemplateExerciseSet.self,
-            TemplateSupersetGroup.self,
-            TemplateExerciseDropStage.self,
-            WorkoutSession.self,
-            WorkoutSessionCardioBlock.self,
-            WorkoutSessionExercise.self,
-            WorkoutSessionSet.self,
-            WorkoutSessionSupersetGroup.self,
-            WorkoutSessionDropStage.self,
-        ])
-    }
-
-    private static func storeConfigurations(
-        userDataCloudKitDatabase: ModelConfiguration.CloudKitDatabase,
-        userDataConfigurationName: String = AppStoreLayout.userDataConfigurationName
-    ) -> [ModelConfiguration] {
+    private static func storeConfigurations() -> [ModelConfiguration] {
         let localCatalogSchema = Schema([
             ExerciseCatalogItem.self,
             MuscleGroup.self,
@@ -292,11 +226,6 @@ struct WGJApp: App {
             ActiveWorkoutDraftDropStage.self,
         ])
 
-        let socialOutboxSchema = Schema([
-            SocialOutboxItem.self,
-            BlockedBro.self,
-        ])
-
         let historyProjectionSchema = Schema([
             CompletedSetFact.self,
             CachedCoachNarrative.self,
@@ -311,20 +240,14 @@ struct WGJApp: App {
                 cloudKitDatabase: .none
             ),
             ModelConfiguration(
-                userDataConfigurationName,
+                AppStoreLayout.userDataConfigurationName,
                 schema: userDataSchema,
-                isStoredInMemoryOnly: false,
-                cloudKitDatabase: userDataCloudKitDatabase
-            ),
-            ModelConfiguration(
-                AppStoreLayout.activeWorkoutDraftConfigurationName,
-                schema: activeWorkoutDraftSchema,
                 isStoredInMemoryOnly: false,
                 cloudKitDatabase: .none
             ),
             ModelConfiguration(
-                AppStoreLayout.socialOutboxConfigurationName,
-                schema: socialOutboxSchema,
+                AppStoreLayout.activeWorkoutDraftConfigurationName,
+                schema: activeWorkoutDraftSchema,
                 isStoredInMemoryOnly: false,
                 cloudKitDatabase: .none
             ),
@@ -390,17 +313,12 @@ nonisolated enum AppStoreLayout {
     static let appGroupIdentifier = WeeklyGoalWidgetStore.appGroupIdentifier
     static let localCatalogConfigurationName = "LocalCatalog"
     static let userDataConfigurationName = "UserData"
-    static let userDataCloudMirrorConfigurationName = "UserDataCloudMirror"
-    static let cloudFailureFallbackUserDataConfigurationName = "UserDataCloudFailureFallback"
     static let activeWorkoutDraftConfigurationName = "ActiveWorkoutDraft"
-    static let socialOutboxConfigurationName = "SocialOutbox"
     static let historyProjectionConfigurationName = "HistoryProjection"
     static let configurationNames = [
         localCatalogConfigurationName,
         userDataConfigurationName,
-        userDataCloudMirrorConfigurationName,
         activeWorkoutDraftConfigurationName,
-        socialOutboxConfigurationName,
         historyProjectionConfigurationName,
     ]
     static let storeFilePrefixes = configurationNames.map { "\($0).store" }

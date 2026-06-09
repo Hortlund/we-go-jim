@@ -5,7 +5,6 @@ struct FolderDetailView: View {
     @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(\.modelContext) private var modelContext
     @Environment(\.isTabActive) private var isTabActive
-    @Environment(SubscriptionState.self) private var subscriptionState
 
     private let folderID: UUID
     private let folderName: String
@@ -165,11 +164,6 @@ struct FolderDetailView: View {
 
     private var exportButton: some View {
         Button {
-            guard ProAccessPolicy.canExportTemplates(isPro: subscriptionState.isPro) else {
-                subscriptionState.presentPaywall()
-                return
-            }
-
             exportRequest = TemplateTransferExportRequest(target: .folder(folderID))
         } label: {
             Label("Export", systemImage: "square.and.arrow.up")
@@ -303,14 +297,6 @@ struct FolderDetailView: View {
     }
 
     private func createTemplate() {
-        guard ProAccessPolicy.canCreateTemplate(
-            currentTemplateCount: controller.snapshot.allTemplateCount,
-            isPro: subscriptionState.isPro
-        ) else {
-            subscriptionState.presentPaywall()
-            return
-        }
-
         templateEditorContext = FolderTemplateEditorContext(folderID: folderID, templateID: nil)
     }
 
@@ -366,11 +352,6 @@ struct FolderDetailView: View {
 
     private func exportFolder(format: TemplateTransferExportFormat) {
         guard exportRequest != nil else {
-            return
-        }
-        guard ProAccessPolicy.canExportTemplates(isPro: subscriptionState.isPro) else {
-            exportRequest = nil
-            subscriptionState.presentPaywall()
             return
         }
 

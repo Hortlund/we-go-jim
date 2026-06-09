@@ -6,7 +6,6 @@ struct TemplateEditorView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(SubscriptionState.self) private var subscriptionState
 
     private let folderID: UUID?
     private let templateID: UUID?
@@ -625,8 +624,7 @@ struct TemplateEditorView: View {
             name: templateName,
             notes: templateNotes,
             exerciseDrafts: exerciseDrafts.map(\.draft),
-            cardioDrafts: WorkoutCardioPhase.allCases.compactMap { cardioDraftsByPhase[$0] },
-            isPro: subscriptionState.isPro
+            cardioDrafts: WorkoutCardioPhase.allCases.compactMap { cardioDraftsByPhase[$0] }
         )
         let backgroundStore = templateEditorBackgroundStore
 
@@ -737,8 +735,6 @@ struct TemplateEditorView: View {
     private func handleSaveResult(_ result: TemplateEditorSaveOperationResult) {
         isSavingTemplate = false
         switch result {
-        case .requiresPaywall:
-            subscriptionState.presentPaywall()
         case .saved(let saveResult):
             onSaved(saveResult)
             dismiss()
@@ -1475,11 +1471,9 @@ nonisolated struct TemplateEditorSaveRequest: Sendable {
     let notes: String
     let exerciseDrafts: [TemplateExerciseDraft]
     let cardioDrafts: [TemplateCardioBlockDraft]
-    let isPro: Bool
 }
 
 nonisolated enum TemplateEditorSaveOperationResult: Sendable, Equatable {
-    case requiresPaywall
     case saved(TemplateEditorSaveResult)
 }
 
@@ -1501,13 +1495,6 @@ nonisolated enum TemplateEditorPersistence {
             )
             savedTemplateID = templateID
         } else {
-            guard ProAccessPolicy.canCreateTemplate(
-                currentTemplateCount: try repository.templates().count,
-                isPro: request.isPro
-            ) else {
-                return .requiresPaywall
-            }
-
             let created = try repository.createTemplate(
                 folderID: request.folderID,
                 name: request.name,

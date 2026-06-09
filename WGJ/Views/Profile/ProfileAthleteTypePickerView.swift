@@ -60,7 +60,7 @@ struct ProfileAthleteTypePickerView: View {
         ),
         AthleteTypePickerSection(
             title: "Meme Damage",
-            subtitle: "High flavor, high gym-brain energy, still readable enough to flex in Bros.",
+            subtitle: "High flavor, high gym-brain energy, still readable in your profile.",
             options: [
                 .athlete(.benchMerchant),
                 .athlete(.legDaySurvivor),

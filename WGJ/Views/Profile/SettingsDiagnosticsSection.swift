@@ -15,21 +15,11 @@ struct SettingsDiagnosticsSection: View {
     @State private var profileCount = 0
     @State private var templateCount = 0
     @State private var workoutCount = 0
-    @State private var currentProfileDisplayName: String?
-    @State private var lastProfileUpdate: Date?
-    @State private var isWritingCloudProbe = false
-    @State private var cloudProbe: CloudSyncDebugProbeDescriptor?
-    @State private var cloudProbeErrorDescription: String?
-    @State private var isVerifyingCloudProbe = false
-    @State private var cloudProbeVerification: CloudSyncDebugProbeVerification?
-
-    private var profileRepository: ProfileRepository {
-        ProfileRepository(modelContext: modelContext)
-    }
+    @State private var diagnosticsErrorDescription: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            WGJActionHeader("Debug", subtitle: "Developer-only utilities for local testing.") {
+            WGJActionHeader("Debug", subtitle: "Local state and boundary-backup status.") {
                 Button {
                     onClose()
                 } label: {
@@ -40,12 +30,8 @@ struct SettingsDiagnosticsSection: View {
 
             infoRow("App environment", value: AppRuntimeConfig.appEnvironment.displayName)
             infoRow("Bundle ID", value: Bundle.main.bundleIdentifier ?? "Unknown")
-            infoRow(
-                "RevenueCat",
-                value: RevenueCatAPIKeyPolicy.diagnosticDescription(for: RevenueCatConfig.apiKey)
-            )
-            infoRow("Cloud mode", value: cloudSyncEnabled ? "CloudKit enabled" : "Local fallback")
-            infoRow("User data sync", value: userDataSyncStatus.title)
+            infoRow("Storage mode", value: cloudSyncEnabled ? "CloudKit backup available" : "Local only")
+            infoRow("Boundary backup", value: userDataSyncStatus.title)
             infoRow("CloudKit environment", value: AppRuntimeConfig.cloudKitConsoleEnvironmentName)
             infoRow("iCloud account", value: cloudAccountStatusText)
             infoRow("Profiles", value: "\(profileCount)")
@@ -57,30 +43,6 @@ struct SettingsDiagnosticsSection: View {
                 .foregroundStyle(WGJTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if let lastProfileUpdate {
-                infoRow(
-                    "Last profile save",
-                    value: lastProfileUpdate.formatted(date: .abbreviated, time: .shortened)
-                )
-            }
-
-            if let latestEvent = appRuntimeState.latestCloudSyncEvent {
-                infoRow("Last cloud event", value: "\(latestEvent.typeLabel) \(latestEvent.statusLabel)")
-                infoRow("Cloud store", value: latestEvent.storeIdentifier)
-                infoRow(
-                    "Event time",
-                    value: (latestEvent.endedAt ?? latestEvent.startedAt)
-                        .formatted(date: .abbreviated, time: .shortened)
-                )
-
-                if let errorDescription = latestEvent.errorDescription, !errorDescription.isEmpty {
-                    Text(errorDescription)
-                        .font(.caption)
-                        .foregroundStyle(WGJTheme.warning)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-
             if let cloudSyncErrorDescription, !cloudSyncErrorDescription.isEmpty {
                 Text(cloudSyncErrorDescription)
                     .font(.caption)
@@ -88,84 +50,22 @@ struct SettingsDiagnosticsSection: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Button {
-                Task {
-                    await refreshCloudDiagnostics()
-                }
-            } label: {
-                Label("Refresh Cloud Status", systemImage: "icloud.and.arrow.down")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(WGJGhostButtonStyle())
-
-            Button {
-                Task {
-                    await writeCloudProbe()
-                }
-            } label: {
-                Group {
-                    if isWritingCloudProbe {
-                        ProgressView()
-                    } else {
-                        Label("Write Cloud Probe", systemImage: "externaldrive.badge.icloud")
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(WGJGhostButtonStyle())
-            .disabled(isWritingCloudProbe || !cloudSyncEnabled)
-
-            Button {
-                Task {
-                    await verifyCloudProbe()
-                }
-            } label: {
-                Group {
-                    if isVerifyingCloudProbe {
-                        ProgressView()
-                    } else {
-                        Label("Verify Cloud Probe", systemImage: "checkmark.icloud")
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(WGJGhostButtonStyle())
-            .disabled(isVerifyingCloudProbe || !cloudSyncEnabled)
-
-            if let cloudProbe {
-                infoRow("Probe record type", value: CloudSyncDebugProbeDescriptor.recordType)
-                infoRow("Probe record name", value: CloudSyncDebugProbeDescriptor.recordName)
-                infoRow("Probe zone", value: CloudSyncDebugProbeDescriptor.zoneName)
-                infoRow("Probe query field", value: "probeKey")
-                infoRow("Probe query value", value: CloudSyncDebugProbeDescriptor.recordName)
-                infoRow(
-                    "Probe updated",
-                    value: cloudProbe.updatedAt.formatted(date: .abbreviated, time: .shortened)
-                )
-
-                Text(
-                    "Cloud probe written. Check CloudKit Console for the probe record and index status."
-                )
-                .font(.caption)
-                .foregroundStyle(WGJTheme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-            }
-
-            if let cloudProbeVerification {
-                infoRow(
-                    "Probe verified",
-                    value: cloudProbeVerification.verifiedAt.formatted(date: .abbreviated, time: .shortened)
-                )
-                infoRow("Direct lookup", value: cloudProbeVerification.directLookupStatus)
-                infoRow("Indexed query", value: cloudProbeVerification.indexedQueryStatus)
-            }
-
-            if let cloudProbeErrorDescription, !cloudProbeErrorDescription.isEmpty {
-                Text(cloudProbeErrorDescription)
+            if let diagnosticsErrorDescription, !diagnosticsErrorDescription.isEmpty {
+                Text(diagnosticsErrorDescription)
                     .font(.caption)
                     .foregroundStyle(WGJTheme.warning)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            Button {
+                Task {
+                    await loadDiagnostics()
+                }
+            } label: {
+                Label("Refresh Status", systemImage: "arrow.clockwise")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(WGJGhostButtonStyle())
 
             Button {
                 seedDemoData()
@@ -206,15 +106,13 @@ struct SettingsDiagnosticsSection: View {
     private func loadDiagnostics() async {
         do {
             cloudAccountStatus = await AccountStatusService().fetchAccountStatus()
-            let currentProfile = try profileRepository.currentProfile()
-            currentProfileDisplayName = currentProfile?.displayName
-            lastProfileUpdate = currentProfile?.updatedAt
             profileCount = try modelContext.fetch(FetchDescriptor<UserProfile>()).count
             templateCount = try modelContext.fetch(FetchDescriptor<WorkoutTemplate>()).count
             workoutCount = try modelContext.fetch(FetchDescriptor<WorkoutSession>()).count
+            diagnosticsErrorDescription = nil
         } catch {
             cloudAccountStatus = .unavailable(.unknown)
-            cloudProbeErrorDescription = error.localizedDescription
+            diagnosticsErrorDescription = error.localizedDescription
         }
     }
 
@@ -236,67 +134,26 @@ struct SettingsDiagnosticsSection: View {
     }
 
     @MainActor
-    private func refreshCloudDiagnostics() async {
-        cloudAccountStatus = await AccountStatusService().fetchAccountStatus()
-    }
-
-    @MainActor
-    private func writeCloudProbe() async {
-        guard cloudSyncEnabled else { return }
-
-        isWritingCloudProbe = true
-        cloudProbeErrorDescription = nil
-        defer { isWritingCloudProbe = false }
-
-        do {
-            cloudProbe = try await CloudSyncDebugProbeService().writeProbe(
-                profileName: currentProfileDisplayName,
-                templateCount: templateCount,
-                workoutCount: workoutCount
-            )
-            await verifyCloudProbe()
-        } catch {
-            cloudProbe = nil
-            cloudProbeVerification = nil
-            cloudProbeErrorDescription = String(describing: error)
-        }
-    }
-
-    @MainActor
-    private func verifyCloudProbe() async {
-        guard cloudSyncEnabled else { return }
-
-        isVerifyingCloudProbe = true
-        defer { isVerifyingCloudProbe = false }
-
-        do {
-            cloudProbeVerification = try await CloudSyncDebugProbeService().verifyProbe()
-        } catch {
-            cloudProbeVerification = CloudSyncDebugProbeVerification(
-                verifiedAt: Date(),
-                directLookupStatus: "Failed",
-                indexedQueryStatus: String(describing: error)
-            )
-        }
-    }
-
-    @MainActor
     private func seedDemoData() {
         do {
-            let seeder = DemoSeedService(modelContext: modelContext)
-            try seeder.seedDemoDataIfEmpty()
+            try DemoSeedService(modelContext: modelContext).seedDemoDataIfEmpty()
+            Task {
+                await loadDiagnostics()
+            }
         } catch {
-            cloudProbeErrorDescription = error.localizedDescription
+            diagnosticsErrorDescription = error.localizedDescription
         }
     }
 
     @MainActor
     private func clearDemoData() {
         do {
-            let seeder = DemoSeedService(modelContext: modelContext)
-            try seeder.clearDemoData()
+            try DemoSeedService(modelContext: modelContext).clearDemoData()
+            Task {
+                await loadDiagnostics()
+            }
         } catch {
-            cloudProbeErrorDescription = error.localizedDescription
+            diagnosticsErrorDescription = error.localizedDescription
         }
     }
 }

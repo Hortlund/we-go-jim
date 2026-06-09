@@ -9,7 +9,6 @@ struct StartWorkoutHomeView: View {
     @Environment(\.isTabActive) private var isTabActive
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
-    @Environment(SubscriptionState.self) private var subscriptionState
     @Environment(TemplateFileOpenState.self) private var templateFileOpenState
 
     @State private var expandedFolderIDs = StartWorkoutFolderExpansionPersistence.load()
@@ -543,15 +542,6 @@ struct StartWorkoutHomeView: View {
 
     private var importTemplateButton: some View {
         Button {
-            guard ProAccessPolicy.canImportTemplates(
-                currentTemplateCount: controller.snapshot.templates.count,
-                importingCount: 1,
-                isPro: subscriptionState.isPro
-            ) else {
-                subscriptionState.presentPaywall()
-                return
-            }
-
             showingTemplateImporter = true
         } label: {
             StartWorkoutInlineActionLabel(
@@ -594,14 +584,6 @@ struct StartWorkoutHomeView: View {
     }
 
     private func createTemplate(in folderID: UUID?) {
-        guard ProAccessPolicy.canCreateTemplate(
-            currentTemplateCount: controller.snapshot.templates.count,
-            isPro: subscriptionState.isPro
-        ) else {
-            subscriptionState.presentPaywall()
-            return
-        }
-
         templateEditorContext = StartWorkoutTemplateEditorContext(
             folderID: folderID,
             templateID: nil
@@ -1095,23 +1077,8 @@ struct StartWorkoutHomeView: View {
 
     private func importTransfer(from fileURL: URL, clearingPendingRequestID requestID: UUID? = nil) {
         let backgroundStore = startWorkoutBackgroundStore
-        let currentTemplateCount = controller.snapshot.templates.count
-        let isPro = subscriptionState.isPro
         Task.detached(priority: .utility) {
             do {
-                let importingCount = try await backgroundStore.perform("start-workout.template.import-count") { backgroundContext in
-                    try TemplateTransferService(modelContext: backgroundContext)
-                        .importedTemplateCount(from: fileURL)
-                }
-                guard ProAccessPolicy.canImportTemplates(
-                    currentTemplateCount: currentTemplateCount,
-                    importingCount: importingCount,
-                    isPro: isPro
-                ) else {
-                    await handleTemplateImportRequiresPro(clearingPendingRequestID: requestID)
-                    return
-                }
-
                 let importResult = try await backgroundStore.performWrite("start-workout.template.import") { backgroundContext in
                     try TemplateTransferService(modelContext: backgroundContext)
                         .importTransfer(from: fileURL)
@@ -1131,12 +1098,6 @@ struct StartWorkoutHomeView: View {
                 await handleTemplateImportFailed(error, clearingPendingRequestID: requestID)
             }
         }
-    }
-
-    @MainActor
-    private func handleTemplateImportRequiresPro(clearingPendingRequestID requestID: UUID?) {
-        clearPendingTemplateFileRequest(requestID)
-        subscriptionState.presentPaywall()
     }
 
     @MainActor
@@ -1232,21 +1193,11 @@ struct StartWorkoutHomeView: View {
     }
 
     private func presentExportOptions(for target: TemplateTransferShareTarget) {
-        guard ProAccessPolicy.canExportTemplates(isPro: subscriptionState.isPro) else {
-            subscriptionState.presentPaywall()
-            return
-        }
-
         exportRequest = TemplateTransferExportRequest(target: target)
     }
 
     private func exportSelectedTransfer(format: TemplateTransferExportFormat) {
         guard let request = exportRequest else {
-            return
-        }
-        guard ProAccessPolicy.canExportTemplates(isPro: subscriptionState.isPro) else {
-            exportRequest = nil
-            subscriptionState.presentPaywall()
             return
         }
 

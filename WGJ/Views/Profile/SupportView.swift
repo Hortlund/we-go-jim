@@ -11,7 +11,7 @@ struct SupportView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                WGJRootHeader("Support", subtitle: "Best-effort support for app issues, privacy questions, purchases, and moderation reports.")
+                WGJRootHeader("Support", subtitle: "Best-effort support for app issues and privacy questions.")
 
                 VStack(alignment: .leading, spacing: 12) {
                     WGJSectionHeader("Support on X", subtitle: AppRuntimeConfig.supportXHandle)
@@ -58,7 +58,7 @@ struct SupportView: View {
                     title: "Support expectations",
                     lines: [
                         "WGJ is an independent hobby project, so support is provided when practical and response times are not guaranteed.",
-                        "App uptime, iCloud sync, Bros availability, notifications, and external services are not guaranteed.",
+                        "App uptime, CloudKit backup availability, notifications, and external services are not guaranteed.",
                         "Features may change, be limited, or be discontinued if they cannot be maintained safely or reliably.",
                     ]
                 )
@@ -67,9 +67,7 @@ struct SupportView: View {
                     title: "What to send",
                     lines: [
                         "App bugs, crashes, account state, iCloud sync, and local-only fallback issues.",
-                        "Privacy questions, data-deletion follow-up, account issues, and moderation concerns.",
-                        "Bros reports, blocks, abuse, harassment, unsafe content, and moderation concerns.",
-                        "Purchase, restore, subscription, and billing-support questions for We Go Jim Pro.",
+                        "Privacy questions, data-deletion follow-up, account issues, and backup issues.",
                     ]
                 )
 

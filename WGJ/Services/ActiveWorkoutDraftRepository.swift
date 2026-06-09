@@ -877,8 +877,10 @@ nonisolated final class ActiveWorkoutDraftRepository {
         )
         WeeklyGoalWidgetPublisher.publishBestEffort(modelContext: modelContext)
         WorkoutHistoryChangeBroadcaster.post()
-        try? CloudKitBrosSocialService.makeForLocalOutboxQueueing(modelContext: modelContext)
-            .queueCompletedSessionPublish(sessionID: completedSession.id)
+        BoundaryCloudBackupScheduler.exportBestEffort(
+            container: modelContext.container,
+            reason: .workoutCompleted
+        )
 
         return completedSession.id
     }

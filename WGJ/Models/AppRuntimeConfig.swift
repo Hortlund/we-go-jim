@@ -6,69 +6,6 @@ import SwiftUI
 import UIKit
 import UserNotifications
 
-nonisolated struct AppReviewPolicy {
-    let brosEnabled: Bool
-    let syncBrosAvatars: Bool
-}
-
-nonisolated enum CloudSyncEventType: Equatable, Sendable {
-    case setup
-    case `import`
-    case export
-    case unknown
-
-    var label: String {
-        switch self {
-        case .setup:
-            return "Setup"
-        case .import:
-            return "Import"
-        case .export:
-            return "Export"
-        case .unknown:
-            return "Unknown"
-        }
-    }
-}
-
-nonisolated enum CloudSyncEventStatus: Equatable, Sendable {
-    case running
-    case succeeded
-    case failed
-
-    var label: String {
-        switch self {
-        case .running:
-            return "Running"
-        case .succeeded:
-            return "Succeeded"
-        case .failed:
-            return "Failed"
-        }
-    }
-}
-
-nonisolated struct CloudSyncErrorSnapshot: Equatable, Sendable {
-    let domain: String
-    let code: Int
-    let underlyingDomain: String?
-    let underlyingCode: Int?
-    let description: String
-}
-
-nonisolated struct CloudSyncEventSummary: Equatable, Sendable {
-    let type: CloudSyncEventType
-    let status: CloudSyncEventStatus
-    let storeIdentifier: String
-    let startedAt: Date
-    let endedAt: Date?
-    let error: CloudSyncErrorSnapshot?
-
-    var typeLabel: String { type.label }
-    var statusLabel: String { status.label }
-    var errorDescription: String? { error?.description }
-}
-
 nonisolated enum CloudKitContainerAvailabilityError: Error, Sendable {
     case unavailable
 }
@@ -146,11 +83,6 @@ nonisolated enum AppRuntimeConfig {
     static let supportXURL = URL(string: "https://x.com/AndreasHortlund")
     static let privacyPolicyURL = URL(string: "https://highball.se/wgj/privacy/")
     static let supportURL = URL(string: "https://highball.se/wgj/index.html")
-    static let reviewPolicy = AppReviewPolicy(
-        brosEnabled: true,
-        syncBrosAvatars: true
-    )
-
     static var appEnvironment: AppEnvironment {
         guard let rawValue = infoString(for: InfoKey.appEnvironment)?.lowercased(),
               let environment = AppEnvironment(rawValue: rawValue)
@@ -257,70 +189,72 @@ nonisolated enum AppRuntimeConfig {
     }
 }
 
-nonisolated enum RevenueCatConfig {
-    static let entitlementIdentifier = "We Go Jim Pro"
-    static let defaultOfferingIdentifier = "default"
-    static let monthlyProductIdentifier = "monthly"
-    static let yearlyProductIdentifier = "yearly"
-
-    static var apiKey: String {
-        if let override = ProcessInfo.processInfo.environment["WGJ_REVENUECAT_API_KEY"] {
-            let normalizedOverride = override.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !normalizedOverride.isEmpty {
-                return normalizedOverride
-            }
-        }
-
-#if DEBUG
-        return "test_XUFcsPSSOoRjJduGqgMTQirLDjV"
-#else
-        guard let bundleKey = Bundle.main.object(forInfoDictionaryKey: "WGJRevenueCatAPIKey") as? String else {
-            return ""
-        }
-
-        return bundleKey.trimmingCharacters(in: .whitespacesAndNewlines)
-#endif
-    }
-
-    static func validateReleaseAPIKey(_ key: String = apiKey) throws {
-#if !DEBUG
-        if !RevenueCatAPIKeyPolicy.isValidReleaseKey(key) {
-            throw RevenueCatConfigurationError.invalidReleaseAPIKey
-        }
-#endif
-    }
+nonisolated enum UserDataSyncStateKind: Equatable, Sendable {
+    case localOnly
+    case backedUp
+    case pending
+    case degraded
 }
 
-nonisolated enum RevenueCatAPIKeyPolicy {
-    static func isValidReleaseKey(_ key: String) -> Bool {
-        let normalizedKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        return normalizedKey.hasPrefix("appl_") && normalizedKey.count > "appl_".count
-    }
+nonisolated struct UserDataSyncStatusSnapshot: Equatable, Sendable {
+    let state: UserDataSyncStateKind
+    let detail: String
+    let latestLocalMutationAt: Date?
+    let latestSuccessfulExportAt: Date?
+    let latestErrorDescription: String?
 
-    static func diagnosticDescription(for key: String) -> String {
-        let normalizedKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalizedKey.isEmpty else { return "Not configured" }
-
-        if normalizedKey.hasPrefix("test_") {
-            return "RevenueCat Test Store (\(maskedKey(normalizedKey)))"
+    var title: String {
+        switch state {
+        case .localOnly:
+            return "Saved locally"
+        case .pending:
+            return "Cloud backup pending"
+        case .backedUp:
+            return "Cloud backup updated"
+        case .degraded:
+            return "Cloud backup unavailable"
         }
-
-        if normalizedKey.hasPrefix("appl_") {
-            return "App Store/TestFlight (\(maskedKey(normalizedKey)))"
-        }
-
-        return "Unknown RevenueCat key (\(maskedKey(normalizedKey)))"
     }
 
-    private static func maskedKey(_ key: String) -> String {
-        let prefix = String(key.prefix(5))
-        let suffix = String(key.suffix(4))
-        return "\(prefix)...\(suffix)"
+    static func localOnly(reason: String?) -> UserDataSyncStatusSnapshot {
+        UserDataSyncStatusSnapshot(
+            state: .localOnly,
+            detail: reason ?? "Core workout data is saved locally. Cloud backup runs only after explicit saves.",
+            latestLocalMutationAt: nil,
+            latestSuccessfulExportAt: nil,
+            latestErrorDescription: reason
+        )
     }
-}
 
-nonisolated enum RevenueCatConfigurationError: Error, Equatable {
-    case invalidReleaseAPIKey
+    static func pending(at date: Date = .now) -> UserDataSyncStatusSnapshot {
+        UserDataSyncStatusSnapshot(
+            state: .pending,
+            detail: "Local changes are waiting for the next save-boundary cloud backup.",
+            latestLocalMutationAt: date,
+            latestSuccessfulExportAt: nil,
+            latestErrorDescription: nil
+        )
+    }
+
+    static func backedUp(at date: Date = .now) -> UserDataSyncStatusSnapshot {
+        UserDataSyncStatusSnapshot(
+            state: .backedUp,
+            detail: "The latest explicit save was exported to cloud backup.",
+            latestLocalMutationAt: nil,
+            latestSuccessfulExportAt: date,
+            latestErrorDescription: nil
+        )
+    }
+
+    static func degraded(_ description: String) -> UserDataSyncStatusSnapshot {
+        UserDataSyncStatusSnapshot(
+            state: .degraded,
+            detail: description,
+            latestLocalMutationAt: nil,
+            latestSuccessfulExportAt: nil,
+            latestErrorDescription: description
+        )
+    }
 }
 
 nonisolated enum RuntimeCloudAvailabilityRefreshPolicy {
@@ -358,7 +292,6 @@ final class AppRuntimeState {
     var cloudRuntimeMode: CloudRuntimeMode = .unavailable("CloudKit has not been checked yet.")
     var cloudSyncEnabled = false
     var cloudSyncErrorDescription: String?
-    var latestCloudSyncEvent: CloudSyncEventSummary?
     var userDataSyncStatus = UserDataSyncStatusSnapshot.localOnly(reason: nil)
     var workoutNotificationStyle: WorkoutNotificationStyle = .timeSensitive
     var keepsScreenAwake = false
@@ -401,10 +334,6 @@ final class AppRuntimeState {
             isEnabled: cloudSyncEnabled,
             errorDescription: errorDescription
         )
-    }
-
-    func updateLatestCloudSyncEvent(_ summary: CloudSyncEventSummary?) {
-        latestCloudSyncEvent = summary
     }
 
     func updateUserDataSyncStatus(_ snapshot: UserDataSyncStatusSnapshot) {
@@ -464,17 +393,6 @@ final class AppRuntimeState {
         }
 
         runtimeCloudAvailabilityRefreshTask = refreshTask
-    }
-
-    func isBrosCloudAvailable(cloudContainerAvailable: Bool) -> Bool {
-        AppRuntimeConfig.reviewPolicy.brosEnabled
-            && cloudSyncEnabled
-            && cloudRuntimeMode.allowsCloudAttempts
-            && cloudContainerAvailable
-    }
-
-    var isBrosCloudAvailable: Bool {
-        isBrosCloudAvailable(cloudContainerAvailable: AppRuntimeConfig.canUseConfiguredCloudKitContainer)
     }
 
     private static func runtimeErrorDescription(for reason: AccountUnavailableReason) -> String {
@@ -573,7 +491,6 @@ final class AppRuntimeState {
             hasResolvedRuntimeCloudAvailability = false
         case .available:
             updateCloudRuntimeError(nil)
-            updateUserDataSyncStatus(UserDataSyncTrackerBridge.recordRuntimeCloudAvailabilityRecovered())
             hasResolvedRuntimeCloudAvailability = true
         case .unavailable(let reason):
             updateCloudRuntimeError(Self.runtimeErrorDescription(for: reason))
@@ -656,7 +573,6 @@ nonisolated enum AppMainTab: Hashable {
     case history
     case startWorkout
     case exercises
-    case bros
 }
 
 nonisolated struct PendingTemplateFileOpen: Equatable, Identifiable {
@@ -748,39 +664,11 @@ final class AppNotificationRouter {
 
     var requestedTab: AppMainTab?
     var routeRequestID: UUID?
-    var brosRefreshRequestID: UUID?
-    var brosReactionBadgeClearRequestID: UUID?
 
     private init() { }
 
-    func openBros() {
-        requestBrosRefresh(openTab: true)
-        requestBrosReactionBadgeClear()
-    }
-
-    func requestBrosRefresh(openTab: Bool = false) {
-        if openTab {
-            requestedTab = .bros
-            routeRequestID = UUID()
-        }
-
-        brosRefreshRequestID = UUID()
-    }
-
-    func requestBrosReactionBadgeClear() {
-        brosReactionBadgeClearRequestID = UUID()
-    }
-
     func consumeRequestedTab() {
         requestedTab = nil
-    }
-
-    func consumeBrosRefreshRequest() {
-        brosRefreshRequestID = nil
-    }
-
-    func consumeBrosReactionBadgeClearRequest() {
-        brosReactionBadgeClearRequestID = nil
     }
 
 #if DEBUG
@@ -1820,7 +1708,6 @@ private actor RestTimerNotificationWorker {
 nonisolated final class AppNotificationManager {
     static let shared = AppNotificationManager()
 
-    nonisolated static let brosReactionCategoryIdentifier = "wgj.bros.reaction"
     static let restTimerIdentifierPrefix = "wgj.activeWorkout.restTimer"
 
     private init() { }
@@ -1828,14 +1715,7 @@ nonisolated final class AppNotificationManager {
     func configureNotifications() {
         let center = UNUserNotificationCenter.current()
         center.delegate = WGJNotificationCenterDelegate.shared
-        center.setNotificationCategories([
-            UNNotificationCategory(
-                identifier: Self.brosReactionCategoryIdentifier,
-                actions: [],
-                intentIdentifiers: [],
-                options: []
-            )
-        ])
+        center.setNotificationCategories([])
     }
 
     func requestAlertAuthorizationIfNeeded() async -> Bool {
@@ -1858,37 +1738,8 @@ nonisolated final class AppNotificationManager {
         }
     }
 
-    @MainActor
-    func enableRemoteReactionNotifications() async -> Bool {
-        let isAuthorized = await requestAlertAuthorizationIfNeeded()
-        guard isAuthorized else { return false }
-        UIApplication.shared.registerForRemoteNotifications()
-        return true
-    }
-
     func isRestTimerNotification(_ notification: UNNotification) -> Bool {
         notification.request.identifier.hasPrefix(Self.restTimerIdentifierPrefix)
-    }
-
-    func isBrosReactionNotification(_ notification: UNNotification) -> Bool {
-        notification.request.content.categoryIdentifier == Self.brosReactionCategoryIdentifier
-    }
-
-    func clearConsumedBrosReactionNotifications() async {
-        guard !AppRuntimeConfig.isRunningTests else {
-            return
-        }
-
-        let center = UNUserNotificationCenter.current()
-        let deliveredIdentifiers = await center.deliveredNotifications()
-            .filter { isBrosReactionNotification($0) }
-            .map(\.request.identifier)
-
-        if !deliveredIdentifiers.isEmpty {
-            center.removeDeliveredNotifications(withIdentifiers: deliveredIdentifiers)
-        }
-
-        try? await center.setBadgeCount(0)
     }
 }
 
@@ -1896,15 +1747,10 @@ nonisolated final class WGJNotificationCenterDelegate: NSObject, UNUserNotificat
     static let shared = WGJNotificationCenterDelegate()
 
     static func presentationOptions(
-        isRestTimerNotification: Bool,
-        isBrosReactionNotification: Bool
+        isRestTimerNotification: Bool
     ) -> UNNotificationPresentationOptions {
         if isRestTimerNotification {
             return []
-        }
-
-        if isBrosReactionNotification {
-            return [.banner, .list, .sound]
         }
 
         return [.banner, .list, .sound, .badge]
@@ -1917,8 +1763,7 @@ nonisolated final class WGJNotificationCenterDelegate: NSObject, UNUserNotificat
     ) {
         completionHandler(
             Self.presentationOptions(
-                isRestTimerNotification: AppNotificationManager.shared.isRestTimerNotification(notification),
-                isBrosReactionNotification: AppNotificationManager.shared.isBrosReactionNotification(notification)
+                isRestTimerNotification: AppNotificationManager.shared.isRestTimerNotification(notification)
             )
         )
     }
@@ -1928,18 +1773,7 @@ nonisolated final class WGJNotificationCenterDelegate: NSObject, UNUserNotificat
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier,
-              AppNotificationManager.shared.isBrosReactionNotification(response.notification)
-        else {
-            completionHandler()
-            return
-        }
-
-        Task { @MainActor in
-            await AppNotificationManager.shared.clearConsumedBrosReactionNotifications()
-            AppNotificationRouter.shared.openBros()
-            completionHandler()
-        }
+        completionHandler()
     }
 }
 

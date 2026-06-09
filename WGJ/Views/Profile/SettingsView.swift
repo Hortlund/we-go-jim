@@ -231,34 +231,16 @@ struct SettingsView: View {
                     WGJNavigationTile(
                         title: "Support",
                         systemImage: "envelope.fill",
-                        subtitle: "Best-effort contact for app, privacy, purchase, or moderation issues.",
+                        subtitle: "Best-effort contact for app, privacy, and support issues.",
                         accessibilityID: "settings-support-tile"
                     ) {
                         SupportView()
                     }
 
                     WGJNavigationTile(
-                        title: "Community Guidelines",
-                        systemImage: "person.3.sequence.fill",
-                        subtitle: "Review the content and behavior rules for Bros.",
-                        accessibilityID: "settings-community-guidelines-tile"
-                    ) {
-                        CommunityGuidelinesView()
-                    }
-
-                    WGJNavigationTile(
-                        title: "Blocked Bros",
-                        systemImage: "person.crop.circle.badge.xmark",
-                        subtitle: "Manage members you have hidden from Bros.",
-                        accessibilityID: "settings-blocked-bros-tile"
-                    ) {
-                        BlockedBrosView()
-                    }
-
-                    WGJNavigationTile(
                         title: "Delete My Data",
                         systemImage: "trash.fill",
-                        subtitle: "Remove local app data and your own synced Bros records.",
+                        subtitle: "Remove local app data.",
                         accessibilityID: "settings-delete-data-tile"
                     ) {
                         DeleteMyDataView()
@@ -591,7 +573,6 @@ private struct SettingsProfileSnapshot: Sendable {
         ExerciseCatalogSyncState.self,
         UserProfile.self,
         ProfileWidgetConfig.self,
-        BlockedBro.self,
         TemplateFolder.self,
         WorkoutTemplate.self,
         TemplateExercise.self,

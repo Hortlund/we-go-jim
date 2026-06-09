@@ -52,7 +52,6 @@ struct ProfileView: View {
     @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
     @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(AppWarmupState.self) private var appWarmupState
-    @Environment(SubscriptionState.self) private var subscriptionState
 
     private var profileBackgroundStore: AppBackgroundStore {
         appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
@@ -124,9 +123,6 @@ struct ProfileView: View {
             cancelTrendSeriesLoad()
             cancelCoachBriefLoad()
             cancelCoachFollowUpLoads()
-        }
-        .onChange(of: subscriptionState.isPro) { _, _ in
-            handleSubscriptionAccessChanged()
         }
         .sheet(isPresented: $showingWidgetManager) {
             NavigationStack {
@@ -303,43 +299,30 @@ struct ProfileView: View {
 
     @ViewBuilder
     private func dashboardWidget(_ config: ProfileWidgetConfigSnapshot) -> some View {
-        if isProLocked(config.kind) {
-            proLockedWidgetCard(for: config.kind)
-        } else {
-            switch config.kind {
-            case .prs:
-                prWidget
-            case .weeklyGoals:
-                weeklyGoalsWidget
-            case .weeklyMuscleHeatmap:
-                weeklyMuscleHeatmapWidget
-            case .coachBrief:
-                coachBriefWidget
-            case .exerciseOneRMTrend, .exerciseVolumeTrend:
-                exerciseTrendWidget(
-                    title: trendTitle(for: config.exerciseTrendMetric),
-                    subtitle: trendSubtitle(for: config),
-                    accent: trendAccent(for: config.exerciseTrendMetric),
-                    series: dashboardContent.trendSeriesByWidgetID[config.id],
-                    emptyMessage: trendEmptyMessage(for: config.exerciseTrendMetric)
-                )
-            case .streaks:
-                streaksWidget
-            case .topExercises:
-                topExercisesWidget
-            case .consistencyCalendar:
-                consistencyCalendarWidget
-            }
+        switch config.kind {
+        case .prs:
+            prWidget
+        case .weeklyGoals:
+            weeklyGoalsWidget
+        case .weeklyMuscleHeatmap:
+            weeklyMuscleHeatmapWidget
+        case .coachBrief:
+            coachBriefWidget
+        case .exerciseOneRMTrend, .exerciseVolumeTrend:
+            exerciseTrendWidget(
+                title: trendTitle(for: config.exerciseTrendMetric),
+                subtitle: trendSubtitle(for: config),
+                accent: trendAccent(for: config.exerciseTrendMetric),
+                series: dashboardContent.trendSeriesByWidgetID[config.id],
+                emptyMessage: trendEmptyMessage(for: config.exerciseTrendMetric)
+            )
+        case .streaks:
+            streaksWidget
+        case .topExercises:
+            topExercisesWidget
+        case .consistencyCalendar:
+            consistencyCalendarWidget
         }
-    }
-
-    private func proLockedWidgetCard(for kind: ProfileWidgetKind) -> some View {
-        ProLockedCard(
-            title: "\(kind.title) is Pro",
-            message: "Upgrade to customize your dashboard with advanced training trends, heatmaps, streaks, and coach insights.",
-            systemImage: "lock.fill"
-        )
-        .accessibilityIdentifier("profile-dashboard-pro-locked-\(kind.rawValue)")
     }
 
     private var dashboardDeferredPlaceholder: some View {
@@ -878,7 +861,6 @@ struct ProfileView: View {
 
     private func scheduleCoachBriefLoad(enabledWidgets: [ProfileWidgetConfigSnapshot]) {
         cancelCoachBriefLoad()
-        let enabledWidgets = usableDashboardWidgets(enabledWidgets)
         guard shouldRenderDashboardContent else {
             coachBriefLoadState = .idle
             return
@@ -1005,15 +987,6 @@ struct ProfileView: View {
         await reloadProfileIfNeeded(force: true)
     }
 
-    private func handleSubscriptionAccessChanged() {
-        guard shouldRenderDashboardContent else { return }
-        cancelCoachBriefLoad()
-        cancelTrendSeriesLoad()
-        coachBriefLoadState = .idle
-        scheduleCoachBriefLoad(enabledWidgets: dashboardContent.enabledWidgets)
-        scheduleTrendSeriesLoad()
-    }
-
     private func scheduleDashboardRender(enabledWidgets: [ProfileWidgetConfigSnapshot]) {
         cancelDashboardRender()
         cancelTrendSeriesLoad()
@@ -1067,7 +1040,7 @@ struct ProfileView: View {
     }
 
     private func scheduleTrendSeriesLoad() {
-        let enabledWidgets = usableDashboardWidgets(dashboardContent.enabledWidgets)
+        let enabledWidgets = dashboardContent.enabledWidgets
         let widgetsNeedingSeries = enabledWidgets.filter { config in
             config.kind.requiresExerciseSelection
                 && dashboardContent.trendSeriesByWidgetID[config.id] == nil
@@ -1228,13 +1201,6 @@ struct ProfileView: View {
         showingError = true
     }
 
-    private func usableDashboardWidgets(_ widgets: [ProfileWidgetConfigSnapshot]) -> [ProfileWidgetConfigSnapshot] {
-        widgets.filter { !isProLocked($0.kind) }
-    }
-
-    private func isProLocked(_ kind: ProfileWidgetKind) -> Bool {
-        ProAccessPolicy.requiresPro(kind) && !subscriptionState.isPro
-    }
 }
 
 @MainActor
@@ -1610,7 +1576,6 @@ private struct ProfileConsistencyDayCell: View {
         ExerciseCatalogSyncState.self,
         UserProfile.self,
         ProfileWidgetConfig.self,
-        BlockedBro.self,
         TemplateFolder.self,
         WorkoutTemplate.self,
         TemplateExercise.self,

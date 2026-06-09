@@ -753,18 +753,6 @@ nonisolated enum ProfileWidgetKind: String, Codable, CaseIterable, Equatable, Ha
     }
 }
 
-enum BroMembershipRole: String, Codable, CaseIterable, Equatable, Sendable {
-    case owner
-    case member
-}
-
-enum SocialOutboxOperationKind: String, Codable, CaseIterable, Equatable, Sendable {
-    case publishWorkoutEvent
-    case publishPREvent
-    case deleteRecord
-    case syncMembershipProfile
-}
-
 @Model
 final class UserProfile {
     var id: UUID = UUID()
@@ -777,23 +765,8 @@ final class UserProfile {
     var isTrainingGuidanceEnabled: Bool = true
     var keepsScreenAwake: Bool = false
     var isBozarModeEnabled: Bool = false
-    var brosCircleID: String?
-    var brosMembershipID: String?
-    var brosUserRecordName: String?
-    var brosJoinedAt: Date?
-    var brosRoleRaw: String?
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
-
-    var brosRole: BroMembershipRole? {
-        get {
-            guard let brosRoleRaw else { return nil }
-            return BroMembershipRole(rawValue: brosRoleRaw)
-        }
-        set {
-            brosRoleRaw = newValue?.rawValue
-        }
-    }
 
     var athleteType: ProfileAthleteType? {
         get {
@@ -830,11 +803,6 @@ final class UserProfile {
         isTrainingGuidanceEnabled: Bool = true,
         keepsScreenAwake: Bool = false,
         isBozarModeEnabled: Bool = false,
-        brosCircleID: String? = nil,
-        brosMembershipID: String? = nil,
-        brosUserRecordName: String? = nil,
-        brosJoinedAt: Date? = nil,
-        brosRole: BroMembershipRole? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now
     ) {
@@ -848,55 +816,8 @@ final class UserProfile {
         self.isTrainingGuidanceEnabled = isTrainingGuidanceEnabled
         self.keepsScreenAwake = keepsScreenAwake
         self.isBozarModeEnabled = isBozarModeEnabled
-        self.brosCircleID = brosCircleID
-        self.brosMembershipID = brosMembershipID
-        self.brosUserRecordName = brosUserRecordName
-        self.brosJoinedAt = brosJoinedAt
-        self.brosRoleRaw = brosRole?.rawValue
         self.createdAt = createdAt
         self.updatedAt = updatedAt
-    }
-
-    @discardableResult
-    func updateBrosMembership(
-        circleID: String,
-        membershipID: String,
-        userRecordName: String,
-        joinedAt: Date,
-        role: BroMembershipRole
-    ) -> Bool {
-        guard
-            brosCircleID != circleID
-                || brosMembershipID != membershipID
-                || brosUserRecordName != userRecordName
-                || brosJoinedAt != joinedAt
-                || brosRole != role
-        else {
-            return false
-        }
-
-        brosCircleID = circleID
-        brosMembershipID = membershipID
-        brosUserRecordName = userRecordName
-        brosJoinedAt = joinedAt
-        brosRole = role
-        updatedAt = .now
-        return true
-    }
-
-    @discardableResult
-    func clearBrosMembership() -> Bool {
-        guard brosCircleID != nil || brosMembershipID != nil || brosUserRecordName != nil || brosJoinedAt != nil || brosRole != nil else {
-            return false
-        }
-
-        brosCircleID = nil
-        brosMembershipID = nil
-        brosUserRecordName = nil
-        brosJoinedAt = nil
-        brosRole = nil
-        updatedAt = .now
-        return true
     }
 }
 
@@ -973,83 +894,6 @@ final class CustomExerciseCloudRecord {
         self.aliasesData = aliasesData
         self.primaryMusclesData = primaryMusclesData
         self.secondaryMusclesData = secondaryMusclesData
-    }
-}
-
-@Model
-final class BlockedBroCloudRecord {
-    var id: UUID = UUID()
-    var userRecordName: String = ""
-    var displayNameSnapshot: String = ""
-    var blockedAt: Date = Date()
-
-    init(
-        id: UUID = UUID(),
-        userRecordName: String,
-        displayNameSnapshot: String,
-        blockedAt: Date = .now
-    ) {
-        self.id = id
-        self.userRecordName = userRecordName
-        self.displayNameSnapshot = displayNameSnapshot
-        self.blockedAt = blockedAt
-    }
-}
-
-@Model
-final class SocialOutboxItem {
-    var id: UUID = UUID()
-    @Attribute(.unique) var idempotencyKey: String = ""
-    var operationRaw: String = SocialOutboxOperationKind.publishWorkoutEvent.rawValue
-    var payloadData: Data = Data()
-    var retryCount: Int = 0
-    var lastErrorMessage: String?
-    var createdAt: Date = Date()
-    var updatedAt: Date = Date()
-
-    var operation: SocialOutboxOperationKind {
-        get { SocialOutboxOperationKind(rawValue: operationRaw) ?? .publishWorkoutEvent }
-        set { operationRaw = newValue.rawValue }
-    }
-
-    init(
-        id: UUID = UUID(),
-        idempotencyKey: String,
-        operation: SocialOutboxOperationKind,
-        payloadData: Data,
-        retryCount: Int = 0,
-        lastErrorMessage: String? = nil,
-        createdAt: Date = .now,
-        updatedAt: Date = .now
-    ) {
-        self.id = id
-        self.idempotencyKey = idempotencyKey
-        self.operationRaw = operation.rawValue
-        self.payloadData = payloadData
-        self.retryCount = retryCount
-        self.lastErrorMessage = lastErrorMessage
-        self.createdAt = createdAt
-        self.updatedAt = updatedAt
-    }
-}
-
-@Model
-final class BlockedBro {
-    var id: UUID = UUID()
-    @Attribute(.unique) var userRecordName: String = ""
-    var displayNameSnapshot: String = ""
-    var blockedAt: Date = Date()
-
-    init(
-        id: UUID = UUID(),
-        userRecordName: String,
-        displayNameSnapshot: String,
-        blockedAt: Date = .now
-    ) {
-        self.id = id
-        self.userRecordName = userRecordName
-        self.displayNameSnapshot = displayNameSnapshot
-        self.blockedAt = blockedAt
     }
 }
 

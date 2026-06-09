@@ -15,14 +15,14 @@ struct DeleteMyDataView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                WGJRootHeader("Delete My Data", subtitle: "Remove local app data and request deletion of your own synced Bros data.")
+                WGJRootHeader("Delete My Data", subtitle: "Remove local app data.")
 
                 infoCard(
                     title: "This deletes",
                     lines: [
-                        "Your local profile, avatar, workouts, active-workout draft, templates, widgets, custom exercises, block list, and unsent Bros updates.",
+                        "Your local profile, avatar, workouts, active-workout draft, templates, widgets, and custom exercises.",
                         "Cached exercise images stored on-device.",
-                        "Your own Bros membership, reactions, workout events, PR events, and synced profile data when iCloud is available and reachable.",
+                        "Local workout history, projections, and profile progress data.",
                     ]
                 )
 
@@ -30,8 +30,7 @@ struct DeleteMyDataView: View {
                     title: "What it does not delete",
                     lines: [
                         "Exercise catalog seed data bundled with the app.",
-                        "Other members' data, posts, reactions, or records in a Bros circle.",
-                        "Data Apple or payment providers keep for account, purchase, refund, tax, security, or legal reasons.",
+                        "Data Apple may keep for account, backup, security, or legal reasons.",
                         "Copies already exported, screenshotted, backed up outside WGJ, or retained where deletion is not technically or legally possible.",
                     ]
                 )
@@ -158,7 +157,5 @@ struct DeleteMyDataView: View {
         WorkoutSession.self,
         WorkoutSessionExercise.self,
         WorkoutSessionSet.self,
-        SocialOutboxItem.self,
-        BlockedBro.self,
     ], inMemory: true)
 }

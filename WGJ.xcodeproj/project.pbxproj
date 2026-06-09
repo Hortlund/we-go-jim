@@ -10,8 +10,6 @@
 		8D9893B38D044AD3944CE69A /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7E452FB2BAC24120AC2DC115 /* WidgetKit.framework */; };
 		C85A32012F39A7B000217B62 /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C85A32002F39A7B000217B62 /* AppIntents.framework */; };
 		C85A32112F3AB00100217B62 /* MuscleMap in Frameworks */ = {isa = PBXBuildFile; productRef = C85A32102F3AB00100217B62 /* MuscleMap */; };
-		C85A32142F3AC00100217B62 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = C85A32122F3AC00100217B62 /* RevenueCat */; };
-		C85A32152F3AC00100217B62 /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = C85A32132F3AC00100217B62 /* RevenueCatUI */; };
 		EA880FACDBBD473798D3C753 /* WGJWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 31E5144B791046F1A717FFBB /* WGJWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
@@ -110,8 +108,6 @@
 			files = (
 				C85A32012F39A7B000217B62 /* AppIntents.framework in Frameworks */,
 				C85A32112F3AB00100217B62 /* MuscleMap in Frameworks */,
-				C85A32142F3AC00100217B62 /* RevenueCat in Frameworks */,
-				C85A32152F3AC00100217B62 /* RevenueCatUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -227,8 +223,6 @@
 			name = WGJ;
 			packageProductDependencies = (
 				C85A32102F3AB00100217B62 /* MuscleMap */,
-				C85A32122F3AC00100217B62 /* RevenueCat */,
-				C85A32132F3AC00100217B62 /* RevenueCatUI */,
 			);
 			productName = WGJ;
 			productReference = C85A31C52F367BAE00217B62 /* WGJ.app */;
@@ -339,7 +333,6 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				C85A320F2F3AB00100217B62 /* XCRemoteSwiftPackageReference "MuscleMap" */,
-				C85A32162F3AC00100217B62 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = C85A31C62F367BAE00217B62 /* Products */;
@@ -846,14 +839,6 @@
 				minimumVersion = 1.6.4;
 			};
 		};
-		C85A32162F3AC00100217B62 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/RevenueCat/purchases-ios-spm.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 5.0.0;
-			};
-		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -861,16 +846,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = C85A320F2F3AB00100217B62 /* XCRemoteSwiftPackageReference "MuscleMap" */;
 			productName = MuscleMap;
-		};
-		C85A32122F3AC00100217B62 /* RevenueCat */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = C85A32162F3AC00100217B62 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
-			productName = RevenueCat;
-		};
-		C85A32132F3AC00100217B62 /* RevenueCatUI */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = C85A32162F3AC00100217B62 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
-			productName = RevenueCatUI;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

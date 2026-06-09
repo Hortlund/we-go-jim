@@ -13,7 +13,6 @@ struct ActiveWorkoutView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(\.appBackgroundStore) private var appBackgroundStore
-    @Environment(SubscriptionState.self) private var subscriptionState
     @Environment(WorkoutCompletionPresentationState.self) private var workoutCompletionPresentationState
     @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
     @Environment(RestTimerState.self) private var restTimerState
@@ -1255,11 +1254,6 @@ struct ActiveWorkoutView: View {
 
         if result.completedTemplateID == nil {
             canSaveCompletedWorkoutAsTemplate = result.canCreateTemplateFromCompletedWorkout
-            guard result.canCreateTemplateFromCompletedWorkout else {
-                subscriptionState.presentPaywall()
-                presentWorkoutCompletionSummary()
-                return
-            }
 
             if templateNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 templateNameDraft = result.completedSessionName == "Empty Workout" ? "New Template" : result.completedSessionName
@@ -1979,12 +1973,6 @@ struct ActiveWorkoutView: View {
 
     private func saveSessionAsTemplate() {
         dismissKeyboard()
-        guard canSaveCompletedWorkoutAsTemplate else {
-            showingSaveTemplateSheet = false
-            subscriptionState.presentPaywall()
-            presentWorkoutCompletionSummary()
-            return
-        }
 
         let templateName = templateNameDraft
         let selectedFolderID = templateFolderID
@@ -2755,14 +2743,12 @@ struct ActiveWorkoutView: View {
         session: ActiveWorkoutRuntimeSession,
         notes: String
     ) async throws -> ActiveWorkoutFinishResult {
-        let isPro = subscriptionState.isPro
         return try await WGJPerformance.measureAsync("active-workout.finish") {
             let backgroundStore = persistenceBackgroundStore
             return try await backgroundStore.performWrite("active-workout.finish") { backgroundContext in
                 try Self.finishSession(
                     session: session,
                     notes: notes,
-                    isPro: isPro,
                     modelContext: backgroundContext
                 )
             }
@@ -2772,7 +2758,6 @@ struct ActiveWorkoutView: View {
     nonisolated private static func finishSession(
         session runtimeSession: ActiveWorkoutRuntimeSession,
         notes: String,
-        isPro: Bool,
         modelContext: ModelContext
     ) throws -> ActiveWorkoutFinishResult {
         let finishedSessionID = try ActiveWorkoutCompletionWriter(modelContext: modelContext)
@@ -2788,10 +2773,7 @@ struct ActiveWorkoutView: View {
         let canCreateTemplateFromCompletedWorkout: Bool
         if completedSession.templateID == nil {
             let templateRepository = TemplateRepository(modelContext: modelContext)
-            canCreateTemplateFromCompletedWorkout = ProAccessPolicy.canCreateTemplate(
-                currentTemplateCount: try templateRepository.templates().count,
-                isPro: isPro
-            )
+            canCreateTemplateFromCompletedWorkout = true
             folderSnapshots = try templateRepository.folders()
                 .map(ActiveWorkoutTemplateFolderSnapshot.init(folder:))
             templateUpdatePreview = nil

@@ -24,7 +24,6 @@ nonisolated final class ProfileWidgetRepository {
 
     private func saveUserDataChanges() throws {
         try modelContext.save()
-        UserDataSyncTrackerBridge.markLocalMutation()
     }
 
     func configurations() throws -> [ProfileWidgetConfig] {

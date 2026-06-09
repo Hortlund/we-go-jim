@@ -14,7 +14,7 @@ protocol UserDataCloudBackupStoring: Sendable {
 
 nonisolated enum UserDataCloudBackupDescriptor {
     static let recordType = "WGJUserDataBackup"
-    static let recordName = "current-user-data-backup-v1"
+    static let recordName = "current-user-data-backup-v2"
 
     enum Field {
         static let updatedAt = "updatedAt"
@@ -25,34 +25,49 @@ nonisolated enum UserDataCloudBackupDescriptor {
     }
 }
 
+nonisolated enum BoundaryCloudBackupReason: String, Sendable {
+    case workoutCompleted
+    case templateSaved
+}
+
+nonisolated enum BoundaryCloudBackupScheduler {
+    static func exportBestEffort(container: ModelContainer, reason: BoundaryCloudBackupReason) {
+        guard AppRuntimeConfig.canUseConfiguredCloudKitContainer else { return }
+
+        Task.detached(priority: .utility) {
+            do {
+                try await UserDataCloudBackupService(
+                    localContainer: container,
+                    backupStore: CloudKitUserDataCloudBackupStore()
+                ).exportCurrentBackup()
+                await MainActor.run {
+                    AppRuntimeState.shared.updateUserDataSyncStatus(.backedUp())
+                }
+            } catch {
+                await MainActor.run {
+                    AppRuntimeState.shared.updateUserDataSyncStatus(.degraded("Cloud backup failed after \(reason.rawValue): \(error.localizedDescription)"))
+                }
+            }
+        }
+    }
+}
+
 nonisolated final class UserDataCloudBackupService {
     private let localContainer: ModelContainer
-    private let mirrorContainer: ModelContainer
     private let backupStore: any UserDataCloudBackupStoring
-    private let projectionScheduler: UserDataCloudMirrorBridge.ProjectionScheduler
 
     init(
         localContainer: ModelContainer,
-        mirrorContainer: ModelContainer,
-        backupStore: any UserDataCloudBackupStoring,
-        projectionScheduler: @escaping UserDataCloudMirrorBridge.ProjectionScheduler = { _, _ in }
+        backupStore: any UserDataCloudBackupStoring
     ) {
         self.localContainer = localContainer
-        self.mirrorContainer = mirrorContainer
         self.backupStore = backupStore
-        self.projectionScheduler = projectionScheduler
     }
 
     func exportCurrentBackup() async throws {
-        try await mergeLatestBackupIntoMirrorIfAvailable()
-        try await UserDataCloudMirrorBridge(
-            localContainer: localContainer,
-            mirrorContainer: mirrorContainer,
-            projectionScheduler: projectionScheduler
-        ).syncLocalChangesToMirror()
-
-        let mirrorContext = ModelContext(mirrorContainer)
-        let payload = try UserDataCloudBackupPayload(context: mirrorContext)
+        let context = ModelContext(localContainer)
+        context.autosaveEnabled = false
+        let payload = try UserDataCloudBackupPayload(context: context)
         let payloadData = try Self.makeEncoder().encode(payload)
         try await backupStore.saveBackup(UserDataCloudBackupRemoteRecord(
             updatedAt: payload.generatedAt,
@@ -67,31 +82,13 @@ nonisolated final class UserDataCloudBackupService {
         }
 
         let payload = try Self.makeDecoder().decode(UserDataCloudBackupPayload.self, from: record.payloadData)
-        let mirrorContext = ModelContext(mirrorContainer)
-        try payload.mergeIntoMirrorContents(in: mirrorContext)
-        if mirrorContext.hasChanges {
-            try mirrorContext.save()
+        let context = ModelContext(localContainer)
+        context.autosaveEnabled = false
+        try payload.mergeIntoLocalStore(in: context)
+        if context.hasChanges {
+            try context.save()
         }
-
-        try await UserDataCloudMirrorBridge(
-            localContainer: localContainer,
-            mirrorContainer: mirrorContainer,
-            projectionScheduler: projectionScheduler
-        ).syncLocalChangesToMirror()
         return true
-    }
-
-    private func mergeLatestBackupIntoMirrorIfAvailable() async throws {
-        guard let record = try await backupStore.fetchBackup() else {
-            return
-        }
-
-        let payload = try Self.makeDecoder().decode(UserDataCloudBackupPayload.self, from: record.payloadData)
-        let mirrorContext = ModelContext(mirrorContainer)
-        try payload.mergeIntoMirrorContents(in: mirrorContext)
-        if mirrorContext.hasChanges {
-            try mirrorContext.save()
-        }
     }
 
     private static func makeEncoder() -> JSONEncoder {
@@ -154,10 +151,7 @@ nonisolated struct CloudKitUserDataCloudBackupStore: UserDataCloudBackupStoring 
         if let asset = record[UserDataCloudBackupDescriptor.Field.payloadAsset] as? CKAsset,
            let fileURL = asset.fileURL,
            let payloadData = try? Data(contentsOf: fileURL) {
-            return UserDataCloudBackupRemoteRecord(
-                updatedAt: updatedAt,
-                payloadData: payloadData
-            )
+            return UserDataCloudBackupRemoteRecord(updatedAt: updatedAt, payloadData: payloadData)
         }
         if let payloadData = record[UserDataCloudBackupDescriptor.Field.payloadData] as? Data {
             let compression = record[UserDataCloudBackupDescriptor.Field.payloadCompression] as? String
@@ -232,572 +226,187 @@ nonisolated struct CloudKitUserDataCloudBackupStore: UserDataCloudBackupStoring 
 }
 
 nonisolated private struct UserDataCloudBackupPayload: Codable {
-    static let schemaVersion = 1
+    static let schemaVersion = 2
 
     var schemaVersion: Int = Self.schemaVersion
     var generatedAt: Date = Date()
     var profiles: [Profile]
-    var tombstones: [Tombstone]
-    var customExercises: [CustomExercise]
     var profileWidgets: [ProfileWidget]
-    var blockedBros: [BlockedBroBackup]
+    var customExercises: [CustomExercise]
     var templateFolders: [TemplateFolderBackup]
     var workoutTemplates: [WorkoutTemplateBackup]
-    var templateSupersetGroups: [TemplateSupersetGroupBackup]
     var templateCardioBlocks: [TemplateCardioBlockBackup]
     var templateExercises: [TemplateExerciseBackup]
     var templateComponents: [TemplateComponentBackup]
     var templateSets: [TemplateSetBackup]
     var templateDropStages: [TemplateDropStageBackup]
     var workoutSessions: [WorkoutSessionBackup]
-    var workoutSupersetGroups: [WorkoutSupersetGroupBackup]
     var workoutCardioBlocks: [WorkoutCardioBlockBackup]
     var workoutExercises: [WorkoutExerciseBackup]
     var workoutSets: [WorkoutSetBackup]
     var workoutDropStages: [WorkoutDropStageBackup]
 
     init(context: ModelContext) throws {
-        profiles = try context.fetch(FetchDescriptor<UserProfile>()).map { Profile($0) }
-        tombstones = try context.fetch(FetchDescriptor<UserDataDeletionTombstone>()).map { Tombstone($0) }
-        customExercises = try context.fetch(FetchDescriptor<CustomExerciseCloudRecord>()).map { CustomExercise($0) }
-        profileWidgets = try context.fetch(FetchDescriptor<ProfileWidgetConfig>()).map { ProfileWidget($0) }
-        blockedBros = try context.fetch(FetchDescriptor<BlockedBroCloudRecord>()).map { BlockedBroBackup($0) }
-        templateFolders = try context.fetch(FetchDescriptor<TemplateFolder>()).map { TemplateFolderBackup($0) }
-        workoutTemplates = try context.fetch(FetchDescriptor<WorkoutTemplate>()).map { WorkoutTemplateBackup($0) }
-        templateSupersetGroups = try context.fetch(FetchDescriptor<TemplateSupersetGroup>())
-            .map { TemplateSupersetGroupBackup($0) }
-        templateCardioBlocks = try context.fetch(FetchDescriptor<TemplateCardioBlock>())
-            .map { TemplateCardioBlockBackup($0) }
-        templateExercises = try context.fetch(FetchDescriptor<TemplateExercise>()).map { TemplateExerciseBackup($0) }
-        templateComponents = try context.fetch(FetchDescriptor<TemplateExerciseComponent>())
-            .map { TemplateComponentBackup($0) }
-        templateSets = try context.fetch(FetchDescriptor<TemplateExerciseSet>()).map { TemplateSetBackup($0) }
-        templateDropStages = try context.fetch(FetchDescriptor<TemplateExerciseDropStage>())
-            .map { TemplateDropStageBackup($0) }
-        workoutSessions = try context.fetch(FetchDescriptor<WorkoutSession>()).map { WorkoutSessionBackup($0) }
-        workoutSupersetGroups = try context.fetch(FetchDescriptor<WorkoutSessionSupersetGroup>())
-            .map { WorkoutSupersetGroupBackup($0) }
-        workoutCardioBlocks = try context.fetch(FetchDescriptor<WorkoutSessionCardioBlock>())
-            .map { WorkoutCardioBlockBackup($0) }
-        workoutExercises = try context.fetch(FetchDescriptor<WorkoutSessionExercise>())
-            .map { WorkoutExerciseBackup($0) }
-        workoutSets = try context.fetch(FetchDescriptor<WorkoutSessionSet>()).map { WorkoutSetBackup($0) }
-        workoutDropStages = try context.fetch(FetchDescriptor<WorkoutSessionDropStage>())
-            .map { WorkoutDropStageBackup($0) }
-        compactInPlace()
+        profiles = try context.fetch(FetchDescriptor<UserProfile>()).map(Profile.init)
+        profileWidgets = try context.fetch(FetchDescriptor<ProfileWidgetConfig>()).map(ProfileWidget.init)
+        customExercises = try context.fetch(FetchDescriptor<ExerciseCatalogItem>()).filter(\.isCustomExercise).map(CustomExercise.init)
+        templateFolders = try context.fetch(FetchDescriptor<TemplateFolder>()).map(TemplateFolderBackup.init)
+        workoutTemplates = try context.fetch(FetchDescriptor<WorkoutTemplate>()).map(WorkoutTemplateBackup.init)
+        templateCardioBlocks = try context.fetch(FetchDescriptor<TemplateCardioBlock>()).map(TemplateCardioBlockBackup.init)
+        templateExercises = try context.fetch(FetchDescriptor<TemplateExercise>()).map(TemplateExerciseBackup.init)
+        templateComponents = try context.fetch(FetchDescriptor<TemplateExerciseComponent>()).map(TemplateComponentBackup.init)
+        templateSets = try context.fetch(FetchDescriptor<TemplateExerciseSet>()).map(TemplateSetBackup.init)
+        templateDropStages = try context.fetch(FetchDescriptor<TemplateExerciseDropStage>()).map(TemplateDropStageBackup.init)
+        workoutSessions = try context.fetch(FetchDescriptor<WorkoutSession>()).filter { $0.status == .completed }.map(WorkoutSessionBackup.init)
+        workoutCardioBlocks = try context.fetch(FetchDescriptor<WorkoutSessionCardioBlock>()).map(WorkoutCardioBlockBackup.init)
+        workoutExercises = try context.fetch(FetchDescriptor<WorkoutSessionExercise>()).map(WorkoutExerciseBackup.init)
+        workoutSets = try context.fetch(FetchDescriptor<WorkoutSessionSet>()).map(WorkoutSetBackup.init)
+        workoutDropStages = try context.fetch(FetchDescriptor<WorkoutSessionDropStage>()).map(WorkoutDropStageBackup.init)
     }
 
-    private static func latestByKey<Item, Key: Hashable>(
-        _ items: [Item],
-        key: (Item) -> Key,
-        isNewer: (Item, Item) -> Bool
-    ) -> [Item] {
-        Array(items.reduce(into: [Key: Item]()) { result, item in
-            let itemKey = key(item)
-            guard let existing = result[itemKey] else {
-                result[itemKey] = item
-                return
-            }
-            if isNewer(item, existing) {
-                result[itemKey] = item
-            }
-        }.values)
+    func mergeIntoLocalStore(in context: ModelContext) throws {
+        try upsertProfiles(in: context)
+        try upsertProfileWidgets(in: context)
+        try upsertCustomExercises(in: context)
+        try upsertTemplateFolders(in: context)
+        try upsertWorkoutTemplates(in: context)
+        try upsertTemplateCardioBlocks(in: context)
+        try upsertTemplateExercises(in: context)
+        try upsertTemplateComponents(in: context)
+        try upsertTemplateSets(in: context)
+        try upsertTemplateDropStages(in: context)
+        try upsertWorkoutSessions(in: context)
+        try upsertWorkoutCardioBlocks(in: context)
+        try upsertWorkoutExercises(in: context)
+        try upsertWorkoutSets(in: context)
+        try upsertWorkoutDropStages(in: context)
     }
 
-    func mergeIntoMirrorContents(in context: ModelContext) throws {
-        let payload = compacted()
-        if try payload.isMirrorEmpty(in: context) {
-            try payload.replaceMirrorContents(in: context)
-            return
-        }
-
-        try payload.mergeSimpleRecords(in: context)
-        try payload.mergeTemplateAggregates(in: context)
-        try payload.mergeWorkoutSessionAggregates(in: context)
-    }
-
-    private func compacted() -> Self {
-        var copy = self
-        copy.compactInPlace()
-        return copy
-    }
-
-    private mutating func compactInPlace() {
-        profiles = Self.latestByKey(
-            profiles,
-            key: \.id,
-            isNewer: { $0.updatedAt > $1.updatedAt }
-        ).sorted { $0.id.uuidString < $1.id.uuidString }
-        tombstones = Self.latestByKey(
-            tombstones,
-            key: \.key,
-            isNewer: { $0.deletedAt > $1.deletedAt }
-        ).sorted { $0.key < $1.key }
-        customExercises = Self.latestByKey(
-            customExercises,
-            key: \.remoteUUID,
-            isNewer: { $0.updatedAt > $1.updatedAt }
-        ).sorted { $0.remoteUUID < $1.remoteUUID }
-        profileWidgets = Self.latestByKey(
-            profileWidgets,
-            key: \.id,
-            isNewer: { $0.updatedAt > $1.updatedAt }
-        ).sorted { $0.id.uuidString < $1.id.uuidString }
-        blockedBros = Self.latestByKey(
-            blockedBros,
-            key: \.userRecordName,
-            isNewer: { $0.blockedAt > $1.blockedAt }
-        ).sorted { $0.userRecordName < $1.userRecordName }
-        templateFolders = Self.latestByKey(
-            templateFolders,
-            key: \.id,
-            isNewer: { $0.updatedAt > $1.updatedAt }
-        ).sorted { $0.id.uuidString < $1.id.uuidString }
-        workoutTemplates = Self.latestByKey(
-            workoutTemplates,
-            key: \.id,
-            isNewer: { $0.updatedAt > $1.updatedAt }
-        ).sorted { $0.id.uuidString < $1.id.uuidString }
-        templateSupersetGroups = Self.latestByKey(
-            templateSupersetGroups,
-            key: \.id,
-            isNewer: { $0.updatedAt > $1.updatedAt }
-        ).sorted { $0.id.uuidString < $1.id.uuidString }
-        templateCardioBlocks = Self.latestByKey(
-            templateCardioBlocks,
-            key: \.id,
-            isNewer: { $0.updatedAt > $1.updatedAt }
-        ).sorted { $0.id.uuidString < $1.id.uuidString }
-        templateExercises = Self.latestByKey(
-            templateExercises,
-            key: \.id,
-            isNewer: { $0.updatedAt > $1.updatedAt }
-        ).sorted { $0.id.uuidString < $1.id.uuidString }
-        templateComponents = Self.latestByKey(
-            templateComponents,
-            key: \.id,
-            isNewer: { $0.updatedAt > $1.updatedAt }
-        ).sorted { $0.id.uuidString < $1.id.uuidString }
-        templateSets = Self.latestByKey(
-            templateSets,
-            key: \.id,
-            isNewer: { $0.updatedAt > $1.updatedAt }
-        ).sorted { $0.id.uuidString < $1.id.uuidString }
-        templateDropStages = Self.latestByKey(
-            templateDropStages,
-            key: \.id,
-            isNewer: { $0.updatedAt > $1.updatedAt }
-        ).sorted { $0.id.uuidString < $1.id.uuidString }
-        workoutSessions = Self.latestByKey(
-            workoutSessions,
-            key: \.id,
-            isNewer: { $0.updatedAt > $1.updatedAt }
-        ).sorted { $0.id.uuidString < $1.id.uuidString }
-        workoutSupersetGroups = Self.latestByKey(
-            workoutSupersetGroups,
-            key: \.id,
-            isNewer: { $0.updatedAt > $1.updatedAt }
-        ).sorted { $0.id.uuidString < $1.id.uuidString }
-        workoutCardioBlocks = Self.latestByKey(
-            workoutCardioBlocks,
-            key: \.id,
-            isNewer: { $0.updatedAt > $1.updatedAt }
-        ).sorted { $0.id.uuidString < $1.id.uuidString }
-        workoutExercises = Self.latestByKey(
-            workoutExercises,
-            key: \.id,
-            isNewer: { $0.updatedAt > $1.updatedAt }
-        ).sorted { $0.id.uuidString < $1.id.uuidString }
-        workoutSets = Self.latestByKey(
-            workoutSets,
-            key: \.id,
-            isNewer: { $0.updatedAt > $1.updatedAt }
-        ).sorted { $0.id.uuidString < $1.id.uuidString }
-        workoutDropStages = Self.latestByKey(
-            workoutDropStages,
-            key: \.id,
-            isNewer: { $0.updatedAt > $1.updatedAt }
-        ).sorted { $0.id.uuidString < $1.id.uuidString }
-    }
-
-    private func replaceMirrorContents(in context: ModelContext) throws {
-        try clearMirrorContents(in: context)
-
-        for item in customExercises {
-            context.insert(item.model)
-        }
-        for item in blockedBros {
-            context.insert(item.model)
-        }
+    private func upsertProfiles(in context: ModelContext) throws {
+        var existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<UserProfile>()).map { ($0.id, $0) })
         for item in profiles {
-            context.insert(item.model)
+            if let model = existing[item.id] {
+                item.apply(to: model)
+            } else {
+                context.insert(item.model)
+            }
         }
+    }
+
+    private func upsertProfileWidgets(in context: ModelContext) throws {
+        var existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<ProfileWidgetConfig>()).map { ($0.id, $0) })
         for item in profileWidgets {
-            context.insert(item.model)
+            if let model = existing[item.id] {
+                item.apply(to: model)
+            } else {
+                context.insert(item.model)
+            }
         }
-        for item in tombstones {
-            context.insert(item.model)
-        }
+    }
 
-        var folders: [UUID: TemplateFolder] = [:]
+    private func upsertCustomExercises(in context: ModelContext) throws {
+        var existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<ExerciseCatalogItem>()).map { ($0.remoteUUID, $0) })
+        for item in customExercises {
+            if let model = existing[item.remoteUUID] {
+                item.apply(to: model)
+            } else {
+                context.insert(item.model)
+            }
+        }
+    }
+
+    private func upsertTemplateFolders(in context: ModelContext) throws {
+        var existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<TemplateFolder>()).map { ($0.id, $0) })
         for item in templateFolders {
-            let model = item.model
-            context.insert(model)
-            folders[item.id] = model
+            if let model = existing[item.id] { item.apply(to: model) } else { context.insert(item.model) }
         }
+    }
 
-        var templates: [UUID: WorkoutTemplate] = [:]
+    private func upsertWorkoutTemplates(in context: ModelContext) throws {
+        var existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<WorkoutTemplate>()).map { ($0.id, $0) })
         for item in workoutTemplates {
-            let model = item.model(folder: folders[item.folderID])
-            context.insert(model)
-            templates[item.id] = model
+            if let model = existing[item.id] { item.apply(to: model) } else { context.insert(item.model) }
         }
+    }
 
-        var templateGroups: [UUID: TemplateSupersetGroup] = [:]
-        for item in templateSupersetGroups {
-            let model = item.model(template: templates[item.templateID])
-            context.insert(model)
-            templateGroups[item.id] = model
-        }
-
+    private func upsertTemplateCardioBlocks(in context: ModelContext) throws {
+        var existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<TemplateCardioBlock>()).map { ($0.id, $0) })
         for item in templateCardioBlocks {
-            context.insert(item.model(template: templates[item.templateID]))
+            if let model = existing[item.id] { item.apply(to: model) } else { context.insert(item.model) }
         }
+    }
 
-        var templateExerciseModels: [UUID: TemplateExercise] = [:]
+    private func upsertTemplateExercises(in context: ModelContext) throws {
+        var existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<TemplateExercise>()).map { ($0.id, $0) })
         for item in templateExercises {
-            let model = item.model(
-                template: templates[item.templateID],
-                supersetGroup: item.supersetGroupID.flatMap { templateGroups[$0] }
-            )
-            context.insert(model)
-            templateExerciseModels[item.id] = model
+            if let model = existing[item.id] { item.apply(to: model) } else { context.insert(item.model) }
         }
+    }
 
+    private func upsertTemplateComponents(in context: ModelContext) throws {
+        var existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<TemplateExerciseComponent>()).map { ($0.id, $0) })
         for item in templateComponents {
-            context.insert(item.model(templateExercise: templateExerciseModels[item.templateExerciseID]))
+            if let model = existing[item.id] { item.apply(to: model) } else { context.insert(item.model) }
         }
+    }
 
-        var templateSetModels: [UUID: TemplateExerciseSet] = [:]
+    private func upsertTemplateSets(in context: ModelContext) throws {
+        var existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<TemplateExerciseSet>()).map { ($0.id, $0) })
         for item in templateSets {
-            let model = item.model(templateExercise: templateExerciseModels[item.templateExerciseID])
-            context.insert(model)
-            templateSetModels[item.id] = model
+            if let model = existing[item.id] { item.apply(to: model) } else { context.insert(item.model) }
         }
+    }
 
+    private func upsertTemplateDropStages(in context: ModelContext) throws {
+        var existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<TemplateExerciseDropStage>()).map { ($0.id, $0) })
         for item in templateDropStages {
-            context.insert(item.model(templateExerciseSet: templateSetModels[item.templateExerciseSetID]))
+            if let model = existing[item.id] { item.apply(to: model) } else { context.insert(item.model) }
         }
+    }
 
-        var sessions: [UUID: WorkoutSession] = [:]
+    private func upsertWorkoutSessions(in context: ModelContext) throws {
+        var existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<WorkoutSession>()).map { ($0.id, $0) })
         for item in workoutSessions {
-            let model = item.model
-            context.insert(model)
-            sessions[item.id] = model
+            if let model = existing[item.id] { item.apply(to: model) } else { context.insert(item.model) }
         }
+    }
 
-        var workoutGroups: [UUID: WorkoutSessionSupersetGroup] = [:]
-        for item in workoutSupersetGroups {
-            let model = item.model(session: sessions[item.sessionID])
-            context.insert(model)
-            workoutGroups[item.id] = model
-        }
-
+    private func upsertWorkoutCardioBlocks(in context: ModelContext) throws {
+        var existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<WorkoutSessionCardioBlock>()).map { ($0.id, $0) })
         for item in workoutCardioBlocks {
-            context.insert(item.model(session: sessions[item.sessionID]))
+            if let model = existing[item.id] { item.apply(to: model) } else { context.insert(item.model) }
         }
+    }
 
-        var workoutExerciseModels: [UUID: WorkoutSessionExercise] = [:]
+    private func upsertWorkoutExercises(in context: ModelContext) throws {
+        var existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<WorkoutSessionExercise>()).map { ($0.id, $0) })
         for item in workoutExercises {
-            let model = item.model(
-                session: sessions[item.sessionID],
-                supersetGroup: item.supersetGroupID.flatMap { workoutGroups[$0] }
-            )
-            context.insert(model)
-            workoutExerciseModels[item.id] = model
+            if let model = existing[item.id] { item.apply(to: model) } else { context.insert(item.model) }
         }
+    }
 
-        var workoutSetModels: [UUID: WorkoutSessionSet] = [:]
+    private func upsertWorkoutSets(in context: ModelContext) throws {
+        var existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<WorkoutSessionSet>()).map { ($0.id, $0) })
         for item in workoutSets {
-            let model = item.model(sessionExercise: workoutExerciseModels[item.sessionExerciseID])
-            context.insert(model)
-            workoutSetModels[item.id] = model
+            if let model = existing[item.id] { item.apply(to: model) } else { context.insert(item.model) }
         }
+    }
 
+    private func upsertWorkoutDropStages(in context: ModelContext) throws {
+        var existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<WorkoutSessionDropStage>()).map { ($0.id, $0) })
         for item in workoutDropStages {
-            context.insert(item.model(sessionSet: workoutSetModels[item.sessionSetID]))
+            if let model = existing[item.id] { item.apply(to: model) } else { context.insert(item.model) }
         }
-    }
-
-    private func mergeSimpleRecords(in context: ModelContext) throws {
-        try mergeCustomExercises(in: context)
-        try mergeBlockedBros(in: context)
-        try mergeProfiles(in: context)
-        try mergeProfileWidgets(in: context)
-        try mergeTombstones(in: context)
-        try mergeTemplateFolders(in: context)
-    }
-
-    private func mergeCustomExercises(in context: ModelContext) throws {
-        let existingRecords = try context.fetch(FetchDescriptor<CustomExerciseCloudRecord>())
-        for item in customExercises {
-            if let existing = existingRecords.first(where: { $0.remoteUUID == item.remoteUUID }) {
-                guard item.updatedAt > existing.updatedAt else { continue }
-                context.delete(existing)
-            }
-            context.insert(item.model)
-        }
-    }
-
-    private func mergeBlockedBros(in context: ModelContext) throws {
-        let existingRecords = try context.fetch(FetchDescriptor<BlockedBroCloudRecord>())
-        for item in blockedBros {
-            if let existing = existingRecords.first(where: { $0.userRecordName == item.userRecordName }) {
-                guard item.blockedAt > existing.blockedAt else { continue }
-                context.delete(existing)
-            }
-            context.insert(item.model)
-        }
-    }
-
-    private func mergeProfiles(in context: ModelContext) throws {
-        let existingProfiles = try context.fetch(FetchDescriptor<UserProfile>())
-        for item in profiles {
-            let model = item.model
-            if let existing = existingProfiles.first {
-                guard shouldPreferProfile(model, over: existing) else { continue }
-                for profile in existingProfiles {
-                    context.delete(profile)
-                }
-            }
-            context.insert(model)
-        }
-    }
-
-    private func mergeProfileWidgets(in context: ModelContext) throws {
-        let existingConfigs = try context.fetch(FetchDescriptor<ProfileWidgetConfig>())
-        for item in profileWidgets {
-            if let existing = existingConfigs.first(where: { $0.id == item.id }) {
-                guard item.updatedAt > existing.updatedAt else { continue }
-                context.delete(existing)
-            }
-            context.insert(item.model)
-        }
-    }
-
-    private func mergeTombstones(in context: ModelContext) throws {
-        let existingTombstones = try context.fetch(FetchDescriptor<UserDataDeletionTombstone>())
-        for item in tombstones {
-            if let existing = existingTombstones.first(where: { tombstoneKey($0) == item.key }) {
-                guard item.deletedAt > existing.deletedAt else { continue }
-                context.delete(existing)
-            }
-            context.insert(item.model)
-        }
-    }
-
-    private func mergeTemplateFolders(in context: ModelContext) throws {
-        let existingFolders = try context.fetch(FetchDescriptor<TemplateFolder>())
-        for item in templateFolders {
-            if let existing = existingFolders.first(where: { $0.id == item.id }) {
-                guard item.updatedAt > existing.updatedAt else { continue }
-                context.delete(existing)
-            }
-            context.insert(item.model)
-        }
-    }
-
-    private func mergeTemplateAggregates(in context: ModelContext) throws {
-        let existingTemplates = try context.fetch(FetchDescriptor<WorkoutTemplate>())
-        for item in workoutTemplates {
-            if let existing = existingTemplates.first(where: { $0.id == item.id }) {
-                guard item.updatedAt > existing.updatedAt else { continue }
-                try deleteTemplateAggregate(id: item.id, in: context)
-            }
-            try insertTemplateAggregate(item, in: context)
-        }
-    }
-
-    private func insertTemplateAggregate(_ item: WorkoutTemplateBackup, in context: ModelContext) throws {
-        let folders = newestFolderByID(try context.fetch(FetchDescriptor<TemplateFolder>()))
-        let model = item.model(folder: folders[item.folderID])
-        context.insert(model)
-        var templateGroups: [UUID: TemplateSupersetGroup] = [:]
-        for groupItem in templateSupersetGroups where groupItem.templateID == item.id {
-            let group = groupItem.model(template: model)
-            context.insert(group)
-            templateGroups[groupItem.id] = group
-        }
-        for cardioItem in templateCardioBlocks where cardioItem.templateID == item.id {
-            context.insert(cardioItem.model(template: model))
-        }
-        var exercises: [UUID: TemplateExercise] = [:]
-        for exerciseItem in templateExercises where exerciseItem.templateID == item.id {
-            let exercise = exerciseItem.model(
-                template: model,
-                supersetGroup: exerciseItem.supersetGroupID.flatMap { templateGroups[$0] }
-            )
-            context.insert(exercise)
-            exercises[exerciseItem.id] = exercise
-        }
-        for componentItem in templateComponents where exercises[componentItem.templateExerciseID] != nil {
-            context.insert(componentItem.model(templateExercise: exercises[componentItem.templateExerciseID]))
-        }
-        var sets: [UUID: TemplateExerciseSet] = [:]
-        for setItem in templateSets where exercises[setItem.templateExerciseID] != nil {
-            let set = setItem.model(templateExercise: exercises[setItem.templateExerciseID])
-            context.insert(set)
-            sets[setItem.id] = set
-        }
-        for stageItem in templateDropStages where sets[stageItem.templateExerciseSetID] != nil {
-            context.insert(stageItem.model(templateExerciseSet: sets[stageItem.templateExerciseSetID]))
-        }
-    }
-
-    private func mergeWorkoutSessionAggregates(in context: ModelContext) throws {
-        let existingSessions = try context.fetch(FetchDescriptor<WorkoutSession>())
-        for item in workoutSessions {
-            if let existing = existingSessions.first(where: { $0.id == item.id }) {
-                guard item.updatedAt > existing.updatedAt else { continue }
-                try deleteWorkoutSessionAggregate(id: item.id, in: context)
-            }
-            try insertWorkoutSessionAggregate(item, in: context)
-        }
-    }
-
-    private func insertWorkoutSessionAggregate(_ item: WorkoutSessionBackup, in context: ModelContext) throws {
-        let model = item.model
-        context.insert(model)
-        var workoutGroups: [UUID: WorkoutSessionSupersetGroup] = [:]
-        for groupItem in workoutSupersetGroups where groupItem.sessionID == item.id {
-            let group = groupItem.model(session: model)
-            context.insert(group)
-            workoutGroups[groupItem.id] = group
-        }
-        for cardioItem in workoutCardioBlocks where cardioItem.sessionID == item.id {
-            context.insert(cardioItem.model(session: model))
-        }
-        var exercises: [UUID: WorkoutSessionExercise] = [:]
-        for exerciseItem in workoutExercises where exerciseItem.sessionID == item.id {
-            let exercise = exerciseItem.model(
-                session: model,
-                supersetGroup: exerciseItem.supersetGroupID.flatMap { workoutGroups[$0] }
-            )
-            context.insert(exercise)
-            exercises[exerciseItem.id] = exercise
-        }
-        var sets: [UUID: WorkoutSessionSet] = [:]
-        for setItem in workoutSets where exercises[setItem.sessionExerciseID] != nil {
-            let set = setItem.model(sessionExercise: exercises[setItem.sessionExerciseID])
-            context.insert(set)
-            sets[setItem.id] = set
-        }
-        for stageItem in workoutDropStages where sets[stageItem.sessionSetID] != nil {
-            context.insert(stageItem.model(sessionSet: sets[stageItem.sessionSetID]))
-        }
-    }
-
-    private func isMirrorEmpty(in context: ModelContext) throws -> Bool {
-        try context.fetch(FetchDescriptor<UserProfile>()).isEmpty
-            && context.fetch(FetchDescriptor<UserDataDeletionTombstone>()).isEmpty
-            && context.fetch(FetchDescriptor<CustomExerciseCloudRecord>()).isEmpty
-            && context.fetch(FetchDescriptor<ProfileWidgetConfig>()).isEmpty
-            && context.fetch(FetchDescriptor<BlockedBroCloudRecord>()).isEmpty
-            && context.fetch(FetchDescriptor<TemplateFolder>()).isEmpty
-            && context.fetch(FetchDescriptor<WorkoutTemplate>()).isEmpty
-            && context.fetch(FetchDescriptor<WorkoutSession>()).isEmpty
-    }
-
-    private func clearMirrorContents(in context: ModelContext) throws {
-        try deleteAll(WorkoutSessionDropStage.self, in: context)
-        try deleteAll(WorkoutSessionSet.self, in: context)
-        try deleteAll(WorkoutSessionExercise.self, in: context)
-        try deleteAll(WorkoutSessionCardioBlock.self, in: context)
-        try deleteAll(WorkoutSessionSupersetGroup.self, in: context)
-        try deleteAll(WorkoutSession.self, in: context)
-        try deleteAll(TemplateExerciseDropStage.self, in: context)
-        try deleteAll(TemplateExerciseSet.self, in: context)
-        try deleteAll(TemplateExerciseComponent.self, in: context)
-        try deleteAll(TemplateExercise.self, in: context)
-        try deleteAll(TemplateCardioBlock.self, in: context)
-        try deleteAll(TemplateSupersetGroup.self, in: context)
-        try deleteAll(WorkoutTemplate.self, in: context)
-        try deleteAll(TemplateFolder.self, in: context)
-        try deleteAll(ProfileWidgetConfig.self, in: context)
-        try deleteAll(UserProfile.self, in: context)
-        try deleteAll(BlockedBroCloudRecord.self, in: context)
-        try deleteAll(CustomExerciseCloudRecord.self, in: context)
-        try deleteAll(UserDataDeletionTombstone.self, in: context)
-    }
-
-    private func deleteAll<T: PersistentModel>(_ modelType: T.Type, in context: ModelContext) throws {
-        for model in try context.fetch(FetchDescriptor<T>()) {
-            context.delete(model)
-        }
-    }
-
-    private func shouldPreferProfile(_ candidate: UserProfile, over other: UserProfile) -> Bool {
-        let candidateIsUntouchedBootstrap = isUntouchedBootstrapProfile(candidate)
-        let otherIsUntouchedBootstrap = isUntouchedBootstrapProfile(other)
-
-        if candidateIsUntouchedBootstrap != otherIsUntouchedBootstrap {
-            return !candidateIsUntouchedBootstrap
-        }
-
-        return candidate.updatedAt >= other.updatedAt
-    }
-
-    private func isUntouchedBootstrapProfile(_ profile: UserProfile) -> Bool {
-        abs(profile.updatedAt.timeIntervalSince(profile.createdAt)) <= 1
-            && profile.athleteTypeRaw == nil
-            && profile.avatarImageData == nil
-            && profile.preferredWeightUnitRaw == PreferredWeightUnit.kg.rawValue
-            && profile.workoutNotificationStyleRaw == WorkoutNotificationStyle.timeSensitive.rawValue
-            && profile.weeklyWorkoutGoal == 4
-            && profile.isTrainingGuidanceEnabled
-            && !profile.keepsScreenAwake
-            && !profile.isBozarModeEnabled
-            && profile.brosCircleID == nil
-            && profile.brosMembershipID == nil
-            && profile.brosUserRecordName == nil
-            && profile.brosJoinedAt == nil
-            && profile.brosRoleRaw == nil
-    }
-
-    private func newestFolderByID(_ folders: [TemplateFolder]) -> [UUID: TemplateFolder] {
-        folders.reduce(into: [:]) { result, folder in
-            guard let existing = result[folder.id] else {
-                result[folder.id] = folder
-                return
-            }
-            if folder.updatedAt > existing.updatedAt {
-                result[folder.id] = folder
-            }
-        }
-    }
-
-    private func deleteTemplateAggregate(id: UUID, in context: ModelContext) throws {
-        for template in try context.fetch(FetchDescriptor<WorkoutTemplate>()) where template.id == id {
-            context.delete(template)
-        }
-    }
-
-    private func deleteWorkoutSessionAggregate(id: UUID, in context: ModelContext) throws {
-        for session in try context.fetch(FetchDescriptor<WorkoutSession>()) where session.id == id {
-            context.delete(session)
-        }
-    }
-
-    private func tombstoneKey(_ tombstone: UserDataDeletionTombstone) -> String {
-        if let entityKey = tombstone.entityKey?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !entityKey.isEmpty {
-            return "\(tombstone.entityName):\(entityKey)"
-        }
-        return "\(tombstone.entityName):\(tombstone.entityID.uuidString)"
     }
 }
 
-nonisolated private struct Profile: Codable {
+private protocol BackupModel {
+    associatedtype Model
+    var model: Model { get }
+    func apply(to model: Model)
+}
+
+private struct Profile: Codable, BackupModel {
     var id: UUID
     var displayName: String
     var athleteTypeRaw: String?
@@ -808,11 +417,6 @@ nonisolated private struct Profile: Codable {
     var isTrainingGuidanceEnabled: Bool
     var keepsScreenAwake: Bool
     var isBozarModeEnabled: Bool
-    var brosCircleID: String?
-    var brosMembershipID: String?
-    var brosUserRecordName: String?
-    var brosJoinedAt: Date?
-    var brosRoleRaw: String?
     var createdAt: Date
     var updatedAt: Date
 
@@ -827,17 +431,12 @@ nonisolated private struct Profile: Codable {
         isTrainingGuidanceEnabled = model.isTrainingGuidanceEnabled
         keepsScreenAwake = model.keepsScreenAwake
         isBozarModeEnabled = model.isBozarModeEnabled
-        brosCircleID = model.brosCircleID
-        brosMembershipID = model.brosMembershipID
-        brosUserRecordName = model.brosUserRecordName
-        brosJoinedAt = model.brosJoinedAt
-        brosRoleRaw = model.brosRoleRaw
         createdAt = model.createdAt
         updatedAt = model.updatedAt
     }
 
     var model: UserProfile {
-        let profile = UserProfile(
+        UserProfile(
             id: id,
             displayName: displayName,
             athleteType: athleteTypeRaw.flatMap(ProfileAthleteType.init(rawValue:)),
@@ -848,100 +447,27 @@ nonisolated private struct Profile: Codable {
             isTrainingGuidanceEnabled: isTrainingGuidanceEnabled,
             keepsScreenAwake: keepsScreenAwake,
             isBozarModeEnabled: isBozarModeEnabled,
-            brosCircleID: brosCircleID,
-            brosMembershipID: brosMembershipID,
-            brosUserRecordName: brosUserRecordName,
-            brosJoinedAt: brosJoinedAt,
-            brosRole: brosRoleRaw.flatMap(BroMembershipRole.init(rawValue:)),
             createdAt: createdAt,
             updatedAt: updatedAt
         )
-        profile.athleteTypeRaw = athleteTypeRaw
-        profile.preferredWeightUnitRaw = preferredWeightUnitRaw
-        profile.workoutNotificationStyleRaw = workoutNotificationStyleRaw
-        profile.brosRoleRaw = brosRoleRaw
-        return profile
+    }
+
+    func apply(to model: UserProfile) {
+        model.displayName = displayName
+        model.athleteTypeRaw = athleteTypeRaw
+        model.avatarImageData = avatarImageData
+        model.preferredWeightUnitRaw = preferredWeightUnitRaw
+        model.workoutNotificationStyleRaw = workoutNotificationStyleRaw
+        model.weeklyWorkoutGoal = weeklyWorkoutGoal
+        model.isTrainingGuidanceEnabled = isTrainingGuidanceEnabled
+        model.keepsScreenAwake = keepsScreenAwake
+        model.isBozarModeEnabled = isBozarModeEnabled
+        model.createdAt = createdAt
+        model.updatedAt = updatedAt
     }
 }
 
-nonisolated private struct Tombstone: Codable {
-    var id: UUID
-    var entityName: String
-    var entityID: UUID
-    var entityKey: String?
-    var deletedAt: Date
-    var key: String { entityKey.map { "\(entityName):\($0)" } ?? "\(entityName):\(entityID.uuidString)" }
-
-    init(_ model: UserDataDeletionTombstone) {
-        id = model.id
-        entityName = model.entityName
-        entityID = model.entityID
-        entityKey = model.entityKey
-        deletedAt = model.deletedAt
-    }
-
-    var model: UserDataDeletionTombstone {
-        UserDataDeletionTombstone(
-            id: id,
-            entityName: entityName,
-            entityID: entityID,
-            entityKey: entityKey,
-            deletedAt: deletedAt
-        )
-    }
-}
-
-nonisolated private struct CustomExercise: Codable {
-    var id: UUID
-    var remoteUUID: String
-    var remoteID: Int?
-    var displayName: String
-    var categoryName: String
-    var equipmentSummary: String
-    var instructionText: String?
-    var isHidden: Bool
-    var lastUpdateGlobal: Date?
-    var updatedAt: Date
-    var aliasesData: Data?
-    var primaryMusclesData: Data?
-    var secondaryMusclesData: Data?
-
-    init(_ model: CustomExerciseCloudRecord) {
-        id = model.id
-        remoteUUID = model.remoteUUID
-        remoteID = model.remoteID
-        displayName = model.displayName
-        categoryName = model.categoryName
-        equipmentSummary = model.equipmentSummary
-        instructionText = model.instructionText
-        isHidden = model.isHidden
-        lastUpdateGlobal = model.lastUpdateGlobal
-        updatedAt = model.updatedAt
-        aliasesData = model.aliasesData
-        primaryMusclesData = model.primaryMusclesData
-        secondaryMusclesData = model.secondaryMusclesData
-    }
-
-    var model: CustomExerciseCloudRecord {
-        CustomExerciseCloudRecord(
-            id: id,
-            remoteUUID: remoteUUID,
-            remoteID: remoteID,
-            displayName: displayName,
-            categoryName: categoryName,
-            equipmentSummary: equipmentSummary,
-            instructionText: instructionText,
-            isHidden: isHidden,
-            lastUpdateGlobal: lastUpdateGlobal,
-            updatedAt: updatedAt,
-            aliasesData: aliasesData,
-            primaryMusclesData: primaryMusclesData,
-            secondaryMusclesData: secondaryMusclesData
-        )
-    }
-}
-
-nonisolated private struct ProfileWidget: Codable {
+private struct ProfileWidget: Codable, BackupModel {
     var id: UUID
     var kindRaw: String
     var isEnabled: Bool
@@ -977,32 +503,71 @@ nonisolated private struct ProfileWidget: Codable {
             updatedAt: updatedAt
         )
     }
+
+    func apply(to model: ProfileWidgetConfig) {
+        model.kindRaw = kindRaw
+        model.isEnabled = isEnabled
+        model.selectedCatalogExerciseUUID = selectedCatalogExerciseUUID
+        model.selectedExerciseNameSnapshot = selectedExerciseNameSnapshot
+        model.exerciseTrendMetricRaw = exerciseTrendMetricRaw
+        model.sortOrder = sortOrder
+        model.createdAt = createdAt
+        model.updatedAt = updatedAt
+    }
 }
 
-nonisolated private struct BlockedBroBackup: Codable {
-    var id: UUID
-    var userRecordName: String
-    var displayNameSnapshot: String
-    var blockedAt: Date
+private struct CustomExercise: Codable, BackupModel {
+    var remoteUUID: String
+    var remoteID: Int?
+    var displayName: String
+    var categoryName: String
+    var equipmentSummary: String
+    var instructionText: String?
+    var isHidden: Bool
+    var lastUpdateGlobal: Date?
+    var updatedAt: Date
 
-    init(_ model: BlockedBroCloudRecord) {
-        id = model.id
-        userRecordName = model.userRecordName
-        displayNameSnapshot = model.displayNameSnapshot
-        blockedAt = model.blockedAt
+    init(_ model: ExerciseCatalogItem) {
+        remoteUUID = model.remoteUUID
+        remoteID = model.remoteID
+        displayName = model.displayName
+        categoryName = model.categoryName
+        equipmentSummary = model.equipmentSummary
+        instructionText = model.instructionText
+        isHidden = model.isHidden
+        lastUpdateGlobal = model.lastUpdateGlobal
+        updatedAt = model.updatedAt
     }
 
-    var model: BlockedBroCloudRecord {
-        BlockedBroCloudRecord(
-            id: id,
-            userRecordName: userRecordName,
-            displayNameSnapshot: displayNameSnapshot,
-            blockedAt: blockedAt
+    var model: ExerciseCatalogItem {
+        ExerciseCatalogItem(
+            remoteUUID: remoteUUID,
+            remoteID: remoteID,
+            displayName: displayName,
+            categoryName: categoryName,
+            equipmentSummary: equipmentSummary,
+            instructionText: instructionText,
+            isCurated: false,
+            isHidden: isHidden,
+            sourceName: "custom",
+            lastUpdateGlobal: lastUpdateGlobal,
+            updatedAt: updatedAt
         )
     }
+
+    func apply(to model: ExerciseCatalogItem) {
+        model.remoteID = remoteID
+        model.displayName = displayName
+        model.categoryName = categoryName
+        model.equipmentSummary = equipmentSummary
+        model.instructionText = instructionText
+        model.isHidden = isHidden
+        model.lastUpdateGlobal = lastUpdateGlobal
+        model.updatedAt = updatedAt
+    }
 }
 
-nonisolated private struct TemplateFolderBackup: Codable {
+private struct TemplateFolderBackup: Codable, BackupModel {
     var id: UUID
     var name: String
     var sortOrder: Int
@@ -1020,9 +585,16 @@ nonisolated private struct TemplateFolderBackup: Codable {
     var model: TemplateFolder {
         TemplateFolder(id: id, name: name, sortOrder: sortOrder, createdAt: createdAt, updatedAt: updatedAt)
     }
+
+    func apply(to model: TemplateFolder) {
+        model.name = name
+        model.sortOrder = sortOrder
+        model.createdAt = createdAt
+        model.updatedAt = updatedAt
+    }
 }
 
-nonisolated private struct WorkoutTemplateBackup: Codable {
+private struct WorkoutTemplateBackup: Codable, BackupModel {
     var id: UUID
     var folderID: UUID
     var name: String
@@ -1041,48 +613,21 @@ nonisolated private struct WorkoutTemplateBackup: Codable {
         updatedAt = model.updatedAt
     }
 
-    func model(folder: TemplateFolder?) -> WorkoutTemplate {
-        WorkoutTemplate(
-            id: id,
-            folderID: folderID,
-            name: name,
-            notes: notes,
-            sortOrder: sortOrder,
-            createdAt: createdAt,
-            updatedAt: updatedAt,
-            folder: folder
-        )
+    var model: WorkoutTemplate {
+        WorkoutTemplate(id: id, folderID: folderID, name: name, notes: notes, sortOrder: sortOrder, createdAt: createdAt, updatedAt: updatedAt)
+    }
+
+    func apply(to model: WorkoutTemplate) {
+        model.folderID = folderID
+        model.name = name
+        model.notes = notes
+        model.sortOrder = sortOrder
+        model.createdAt = createdAt
+        model.updatedAt = updatedAt
     }
 }
 
-nonisolated private struct TemplateSupersetGroupBackup: Codable {
-    var id: UUID
-    var templateID: UUID
-    var roundRestSeconds: Int
-    var createdAt: Date
-    var updatedAt: Date
-
-    init(_ model: TemplateSupersetGroup) {
-        id = model.id
-        templateID = model.templateID
-        roundRestSeconds = model.roundRestSeconds
-        createdAt = model.createdAt
-        updatedAt = model.updatedAt
-    }
-
-    func model(template: WorkoutTemplate?) -> TemplateSupersetGroup {
-        TemplateSupersetGroup(
-            id: id,
-            templateID: templateID,
-            roundRestSeconds: roundRestSeconds,
-            createdAt: createdAt,
-            updatedAt: updatedAt,
-            template: template
-        )
-    }
-}
-
-nonisolated private struct TemplateCardioBlockBackup: Codable {
+private struct TemplateCardioBlockBackup: Codable, BackupModel {
     var id: UUID
     var templateID: UUID
     var phaseRaw: String
@@ -1107,7 +652,7 @@ nonisolated private struct TemplateCardioBlockBackup: Codable {
         updatedAt = model.updatedAt
     }
 
-    func model(template: WorkoutTemplate?) -> TemplateCardioBlock {
+    var model: TemplateCardioBlock {
         TemplateCardioBlock(
             id: id,
             templateID: templateID,
@@ -1118,13 +663,24 @@ nonisolated private struct TemplateCardioBlockBackup: Codable {
             muscleSummarySnapshot: muscleSummarySnapshot,
             targetDurationSeconds: targetDurationSeconds,
             createdAt: createdAt,
-            updatedAt: updatedAt,
-            template: template
+            updatedAt: updatedAt
         )
+    }
+
+    func apply(to model: TemplateCardioBlock) {
+        model.templateID = templateID
+        model.phaseRaw = phaseRaw
+        model.catalogExerciseUUID = catalogExerciseUUID
+        model.exerciseNameSnapshot = exerciseNameSnapshot
+        model.categorySnapshot = categorySnapshot
+        model.muscleSummarySnapshot = muscleSummarySnapshot
+        model.targetDurationSeconds = targetDurationSeconds
+        model.createdAt = createdAt
+        model.updatedAt = updatedAt
     }
 }
 
-nonisolated private struct TemplateExerciseBackup: Codable {
+private struct TemplateExerciseBackup: Codable, BackupModel {
     var id: UUID
     var templateID: UUID
     var catalogExerciseUUID: String
@@ -1159,7 +715,7 @@ nonisolated private struct TemplateExerciseBackup: Codable {
         updatedAt = model.updatedAt
     }
 
-    func model(template: WorkoutTemplate?, supersetGroup: TemplateSupersetGroup?) -> TemplateExercise {
+    var model: TemplateExercise {
         TemplateExercise(
             id: id,
             templateID: templateID,
@@ -1175,14 +731,29 @@ nonisolated private struct TemplateExerciseBackup: Codable {
             supersetPosition: supersetPositionRaw.flatMap(SupersetExercisePosition.init(rawValue:)),
             sortOrder: sortOrder,
             createdAt: createdAt,
-            updatedAt: updatedAt,
-            template: template,
-            supersetGroup: supersetGroup
+            updatedAt: updatedAt
         )
+    }
+
+    func apply(to model: TemplateExercise) {
+        model.templateID = templateID
+        model.catalogExerciseUUID = catalogExerciseUUID
+        model.exerciseNameSnapshot = exerciseNameSnapshot
+        model.categorySnapshot = categorySnapshot
+        model.muscleSummarySnapshot = muscleSummarySnapshot
+        model.notes = notes
+        model.targetRepMin = targetRepMin
+        model.targetRepMax = targetRepMax
+        model.restSeconds = restSeconds
+        model.supersetGroupID = supersetGroupID
+        model.supersetPositionRaw = supersetPositionRaw
+        model.sortOrder = sortOrder
+        model.createdAt = createdAt
+        model.updatedAt = updatedAt
     }
 }
 
-nonisolated private struct TemplateComponentBackup: Codable {
+private struct TemplateComponentBackup: Codable, BackupModel {
     var id: UUID
     var templateExerciseID: UUID
     var catalogExerciseUUID: String
@@ -1205,7 +776,7 @@ nonisolated private struct TemplateComponentBackup: Codable {
         updatedAt = model.updatedAt
     }
 
-    func model(templateExercise: TemplateExercise?) -> TemplateExerciseComponent {
+    var model: TemplateExerciseComponent {
         TemplateExerciseComponent(
             id: id,
             templateExerciseID: templateExerciseID,
@@ -1215,13 +786,23 @@ nonisolated private struct TemplateComponentBackup: Codable {
             muscleSummarySnapshot: muscleSummarySnapshot,
             sortOrder: sortOrder,
             createdAt: createdAt,
-            updatedAt: updatedAt,
-            templateExercise: templateExercise
+            updatedAt: updatedAt
         )
+    }
+
+    func apply(to model: TemplateExerciseComponent) {
+        model.templateExerciseID = templateExerciseID
+        model.catalogExerciseUUID = catalogExerciseUUID
+        model.exerciseNameSnapshot = exerciseNameSnapshot
+        model.categorySnapshot = categorySnapshot
+        model.muscleSummarySnapshot = muscleSummarySnapshot
+        model.sortOrder = sortOrder
+        model.createdAt = createdAt
+        model.updatedAt = updatedAt
     }
 }
 
-nonisolated private struct TemplateSetBackup: Codable {
+private struct TemplateSetBackup: Codable, BackupModel {
     var id: UUID
     var templateExerciseID: UUID
     var sortOrder: Int
@@ -1254,7 +835,7 @@ nonisolated private struct TemplateSetBackup: Codable {
         updatedAt = model.updatedAt
     }
 
-    func model(templateExercise: TemplateExercise?) -> TemplateExerciseSet {
+    var model: TemplateExerciseSet {
         TemplateExerciseSet(
             id: id,
             templateExerciseID: templateExerciseID,
@@ -1269,13 +850,28 @@ nonisolated private struct TemplateSetBackup: Codable {
             previousTargetWeight: previousTargetWeight,
             previousLoadUnit: TemplateLoadUnit(rawValue: previousLoadUnitRaw) ?? .kg,
             createdAt: createdAt,
-            updatedAt: updatedAt,
-            templateExercise: templateExercise
+            updatedAt: updatedAt
         )
+    }
+
+    func apply(to model: TemplateExerciseSet) {
+        model.templateExerciseID = templateExerciseID
+        model.sortOrder = sortOrder
+        model.targetReps = targetReps
+        model.targetWeight = targetWeight
+        model.loadUnitRaw = loadUnitRaw
+        model.restSeconds = restSeconds
+        model.isWarmup = isWarmup
+        model.isLocked = isLocked
+        model.previousTargetReps = previousTargetReps
+        model.previousTargetWeight = previousTargetWeight
+        model.previousLoadUnitRaw = previousLoadUnitRaw
+        model.createdAt = createdAt
+        model.updatedAt = updatedAt
     }
 }
 
-nonisolated private struct TemplateDropStageBackup: Codable {
+private struct TemplateDropStageBackup: Codable, BackupModel {
     var id: UUID
     var templateExerciseSetID: UUID
     var sortOrder: Int
@@ -1296,7 +892,7 @@ nonisolated private struct TemplateDropStageBackup: Codable {
         updatedAt = model.updatedAt
     }
 
-    func model(templateExerciseSet: TemplateExerciseSet?) -> TemplateExerciseDropStage {
+    var model: TemplateExerciseDropStage {
         TemplateExerciseDropStage(
             id: id,
             templateExerciseSetID: templateExerciseSetID,
@@ -1305,13 +901,22 @@ nonisolated private struct TemplateDropStageBackup: Codable {
             targetWeight: targetWeight,
             loadUnit: TemplateLoadUnit(rawValue: loadUnitRaw) ?? .kg,
             createdAt: createdAt,
-            updatedAt: updatedAt,
-            templateExerciseSet: templateExerciseSet
+            updatedAt: updatedAt
         )
+    }
+
+    func apply(to model: TemplateExerciseDropStage) {
+        model.templateExerciseSetID = templateExerciseSetID
+        model.sortOrder = sortOrder
+        model.targetReps = targetReps
+        model.targetWeight = targetWeight
+        model.loadUnitRaw = loadUnitRaw
+        model.createdAt = createdAt
+        model.updatedAt = updatedAt
     }
 }
 
-nonisolated private struct WorkoutSessionBackup: Codable {
+private struct WorkoutSessionBackup: Codable, BackupModel {
     var id: UUID
     var templateID: UUID?
     var name: String
@@ -1362,36 +967,25 @@ nonisolated private struct WorkoutSessionBackup: Codable {
             updatedAt: updatedAt
         )
     }
-}
 
-nonisolated private struct WorkoutSupersetGroupBackup: Codable {
-    var id: UUID
-    var sessionID: UUID
-    var roundRestSeconds: Int
-    var createdAt: Date
-    var updatedAt: Date
-
-    init(_ model: WorkoutSessionSupersetGroup) {
-        id = model.id
-        sessionID = model.sessionID
-        roundRestSeconds = model.roundRestSeconds
-        createdAt = model.createdAt
-        updatedAt = model.updatedAt
-    }
-
-    func model(session: WorkoutSession?) -> WorkoutSessionSupersetGroup {
-        WorkoutSessionSupersetGroup(
-            id: id,
-            sessionID: sessionID,
-            roundRestSeconds: roundRestSeconds,
-            createdAt: createdAt,
-            updatedAt: updatedAt,
-            session: session
-        )
+    func apply(to model: WorkoutSession) {
+        model.templateID = templateID
+        model.name = name
+        model.statusRaw = statusRaw
+        model.startedAt = startedAt
+        model.endedAt = endedAt
+        model.durationSeconds = durationSeconds
+        model.totalVolume = totalVolume
+        model.prHitsCount = prHitsCount
+        model.summaryMetricsVersion = summaryMetricsVersion
+        model.notes = notes
+        model.archivedAt = archivedAt
+        model.createdAt = createdAt
+        model.updatedAt = updatedAt
     }
 }
 
-nonisolated private struct WorkoutCardioBlockBackup: Codable {
+private struct WorkoutCardioBlockBackup: Codable, BackupModel {
     var id: UUID
     var sessionID: UUID
     var phaseRaw: String
@@ -1418,7 +1012,7 @@ nonisolated private struct WorkoutCardioBlockBackup: Codable {
         updatedAt = model.updatedAt
     }
 
-    func model(session: WorkoutSession?) -> WorkoutSessionCardioBlock {
+    var model: WorkoutSessionCardioBlock {
         WorkoutSessionCardioBlock(
             id: id,
             sessionID: sessionID,
@@ -1430,13 +1024,25 @@ nonisolated private struct WorkoutCardioBlockBackup: Codable {
             targetDurationSeconds: targetDurationSeconds,
             isCompleted: isCompleted,
             createdAt: createdAt,
-            updatedAt: updatedAt,
-            session: session
+            updatedAt: updatedAt
         )
+    }
+
+    func apply(to model: WorkoutSessionCardioBlock) {
+        model.sessionID = sessionID
+        model.phaseRaw = phaseRaw
+        model.catalogExerciseUUID = catalogExerciseUUID
+        model.exerciseNameSnapshot = exerciseNameSnapshot
+        model.categorySnapshot = categorySnapshot
+        model.muscleSummarySnapshot = muscleSummarySnapshot
+        model.targetDurationSeconds = targetDurationSeconds
+        model.isCompleted = isCompleted
+        model.createdAt = createdAt
+        model.updatedAt = updatedAt
     }
 }
 
-nonisolated private struct WorkoutExerciseBackup: Codable {
+private struct WorkoutExerciseBackup: Codable, BackupModel {
     var id: UUID
     var sessionID: UUID
     var templateExerciseID: UUID?
@@ -1479,7 +1085,7 @@ nonisolated private struct WorkoutExerciseBackup: Codable {
         updatedAt = model.updatedAt
     }
 
-    func model(session: WorkoutSession?, supersetGroup: WorkoutSessionSupersetGroup?) -> WorkoutSessionExercise {
+    var model: WorkoutSessionExercise {
         WorkoutSessionExercise(
             id: id,
             sessionID: sessionID,
@@ -1499,14 +1105,31 @@ nonisolated private struct WorkoutExerciseBackup: Codable {
             supersetPosition: supersetPositionRaw.flatMap(SupersetExercisePosition.init(rawValue:)),
             sortOrder: sortOrder,
             createdAt: createdAt,
-            updatedAt: updatedAt,
-            session: session,
-            supersetGroup: supersetGroup
+            updatedAt: updatedAt
         )
+    }
+
+    func apply(to model: WorkoutSessionExercise) {
+        model.sessionID = sessionID
+        model.templateExerciseID = templateExerciseID
+        model.catalogExerciseUUID = catalogExerciseUUID
+        model.exerciseNameSnapshot = exerciseNameSnapshot
+        model.categorySnapshot = categorySnapshot
+        model.muscleSummarySnapshot = muscleSummarySnapshot
+        model.notes = notes
+        model.targetRepMin = targetRepMin
+        model.targetRepMax = targetRepMax
+        model.restSeconds = restSeconds
+        model.updateSetSummary(totalSetCount: totalSetCount, completedSetCount: completedSetCount, hasDropsets: hasDropsets)
+        model.supersetGroupID = supersetGroupID
+        model.supersetPositionRaw = supersetPositionRaw
+        model.sortOrder = sortOrder
+        model.createdAt = createdAt
+        model.updatedAt = updatedAt
     }
 }
 
-nonisolated private struct WorkoutSetBackup: Codable {
+private struct WorkoutSetBackup: Codable, BackupModel {
     var id: UUID
     var sessionExerciseID: UUID
     var sortOrder: Int
@@ -1541,7 +1164,7 @@ nonisolated private struct WorkoutSetBackup: Codable {
         updatedAt = model.updatedAt
     }
 
-    func model(sessionExercise: WorkoutSessionExercise?) -> WorkoutSessionSet {
+    var model: WorkoutSessionSet {
         WorkoutSessionSet(
             id: id,
             sessionExerciseID: sessionExerciseID,
@@ -1557,13 +1180,29 @@ nonisolated private struct WorkoutSetBackup: Codable {
             isCompleted: isCompleted,
             isLocked: isLocked,
             createdAt: createdAt,
-            updatedAt: updatedAt,
-            sessionExercise: sessionExercise
+            updatedAt: updatedAt
         )
+    }
+
+    func apply(to model: WorkoutSessionSet) {
+        model.sessionExerciseID = sessionExerciseID
+        model.sortOrder = sortOrder
+        model.isWarmup = isWarmup
+        model.restSeconds = restSeconds
+        model.targetReps = targetReps
+        model.targetWeight = targetWeight
+        model.targetLoadUnitRaw = targetLoadUnitRaw
+        model.actualReps = actualReps
+        model.actualWeight = actualWeight
+        model.actualLoadUnitRaw = actualLoadUnitRaw
+        model.isCompleted = isCompleted
+        model.isLocked = isLocked
+        model.createdAt = createdAt
+        model.updatedAt = updatedAt
     }
 }
 
-nonisolated private struct WorkoutDropStageBackup: Codable {
+private struct WorkoutDropStageBackup: Codable, BackupModel {
     var id: UUID
     var sessionSetID: UUID
     var sortOrder: Int
@@ -1592,7 +1231,7 @@ nonisolated private struct WorkoutDropStageBackup: Codable {
         updatedAt = model.updatedAt
     }
 
-    func model(sessionSet: WorkoutSessionSet?) -> WorkoutSessionDropStage {
+    var model: WorkoutSessionDropStage {
         WorkoutSessionDropStage(
             id: id,
             sessionSetID: sessionSetID,
@@ -1605,8 +1244,21 @@ nonisolated private struct WorkoutDropStageBackup: Codable {
             actualLoadUnit: TemplateLoadUnit(rawValue: actualLoadUnitRaw) ?? .kg,
             isCompleted: isCompleted,
             createdAt: createdAt,
-            updatedAt: updatedAt,
-            sessionSet: sessionSet
+            updatedAt: updatedAt
         )
+    }
+
+    func apply(to model: WorkoutSessionDropStage) {
+        model.sessionSetID = sessionSetID
+        model.sortOrder = sortOrder
+        model.targetReps = targetReps
+        model.targetWeight = targetWeight
+        model.targetLoadUnitRaw = targetLoadUnitRaw
+        model.actualReps = actualReps
+        model.actualWeight = actualWeight
+        model.actualLoadUnitRaw = actualLoadUnitRaw
+        model.isCompleted = isCompleted
+        model.createdAt = createdAt
+        model.updatedAt = updatedAt
     }
 }

@@ -6,7 +6,7 @@ struct PrivacyOverviewView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                WGJRootHeader("Privacy", subtitle: "Review what WGJ stores, syncs, and lets you delete.")
+                WGJRootHeader("Privacy", subtitle: "Review what WGJ stores, backs up, and lets you delete.")
 
                 if let privacyPolicyURL = AppRuntimeConfig.privacyPolicyURL {
                     VStack(alignment: .leading, spacing: 12) {
@@ -35,25 +35,25 @@ struct PrivacyOverviewView: View {
                     lines: [
                         "Profile details such as display name, avatar, weekly goal, preferences, and dashboard widget choices.",
                         "Workout history, active-workout drafts, templates, folders, custom exercises, notes, timers, and training summaries.",
-                        "Bros circle membership, invite status, workout feed posts, PR posts, reactions, reports, and block-list data.",
+                        "Local projections used for profile stats, widgets, history, and workout summaries.",
                     ]
                 )
 
                 privacyCard(
                     title: "Where it lives",
                     lines: [
-                        "Core workout, template, exercise, and profile features work locally on your device.",
-                        "When iCloud is available, supported profile, workout, template, custom exercise, block-list, and Bros data may sync through Apple's iCloud and CloudKit services.",
-                        "Bundled exercise catalog data, cached exercise images, active-workout drafts, and unsent Bros updates stay on-device unless they need to be sent or rebuilt.",
+                        "Core workout, template, exercise, history, and profile features work locally on your device.",
+                        "When iCloud is available, WGJ may export a best-effort CloudKit backup after workout completion or template saves.",
+                        "Active-workout drafts stay local while the workout is active.",
                     ]
                 )
 
                 privacyCard(
                     title: "Your controls",
                     lines: [
-                        "You can use WGJ locally when iCloud or Bros is unavailable.",
-                        "You can report members or feed posts, block members locally, and contact support about privacy or moderation concerns.",
-                        "You can delete local app data and request deletion of your own synced Bros data from Settings at any time.",
+                        "You can use WGJ locally when iCloud or CloudKit is unavailable.",
+                        "You can delete local app data from Settings.",
+                        "Cloud backup failures do not block local saves.",
                     ]
                 )
             }

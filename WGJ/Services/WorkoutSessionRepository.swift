@@ -178,7 +178,6 @@ nonisolated final class WorkoutSessionRepository {
 
     private func saveUserDataChanges() throws {
         try modelContext.save()
-        UserDataSyncTrackerBridge.markLocalMutation()
     }
 
     private func scheduleProjectionRebuild(for sessionID: UUID) {
@@ -825,8 +824,10 @@ nonisolated final class WorkoutSessionRepository {
         scheduleProjectionRebuild(for: sessionID)
         publishWeeklyGoalWidgetProgress()
         WorkoutHistoryChangeBroadcaster.post()
-        try? CloudKitBrosSocialService.makeForLocalOutboxQueueing(modelContext: modelContext)
-            .queueCompletedSessionPublish(sessionID: sessionID)
+        BoundaryCloudBackupScheduler.exportBestEffort(
+            container: modelContext.container,
+            reason: .workoutCompleted
+        )
     }
 
     func archiveSession(id: UUID) throws {
@@ -962,7 +963,6 @@ nonisolated final class WorkoutSessionRepository {
             entityName: "WorkoutSession",
             entityID: id
         ))
-        try? CloudKitBrosSocialService.makeIfUserDataSyncEnabled(modelContext: modelContext)?.queueDeletedSession(sessionID: id)
         try historyProjectionRepository.deleteFacts(forSessionID: id, persistChanges: false)
         modelContext.delete(session)
         try saveUserDataChanges()

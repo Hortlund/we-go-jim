@@ -919,15 +919,16 @@ nonisolated final class ActiveWorkoutCompletionWriter {
         completedSession.summaryMetricsVersion = WorkoutMetricsService.currentSummaryMetricsVersion
 
         try modelContext.save()
-        UserDataSyncTrackerBridge.markLocalMutation()
         HistoryAnalyticsCache.shared.invalidate(container: modelContext.container)
         HistoryProjectionBackgroundReconciler.shared.scheduleRebuild(
             sessionID: completedSession.id,
             container: modelContext.container
         )
         WorkoutHistoryChangeBroadcaster.post()
-        try? CloudKitBrosSocialService.makeForLocalOutboxQueueing(modelContext: modelContext)
-            .queueCompletedSessionPublish(sessionID: completedSession.id)
+        BoundaryCloudBackupScheduler.exportBestEffort(
+            container: modelContext.container,
+            reason: .workoutCompleted
+        )
 
         return completedSession.id
     }
