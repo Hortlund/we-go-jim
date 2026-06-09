@@ -89,6 +89,9 @@ nonisolated final class UserDataCloudBackupService {
         let payload = try Self.makeDecoder().decode(UserDataCloudBackupPayload.self, from: record.payloadData)
         let context = ModelContext(localContainer)
         context.autosaveEnabled = false
+        guard try Self.isLocalUserDataEmpty(context: context) else {
+            return false
+        }
         try payload.mergeIntoLocalStore(in: context)
         if context.hasChanges {
             try context.save()
@@ -104,6 +107,15 @@ nonisolated final class UserDataCloudBackupService {
 
     private static func makeDecoder() -> JSONDecoder {
         JSONDecoder()
+    }
+
+    private static func isLocalUserDataEmpty(context: ModelContext) throws -> Bool {
+        let customExercises = try context.fetch(FetchDescriptor<ExerciseCatalogItem>())
+            .filter(\.isCustomExercise)
+        return try context.fetch(FetchDescriptor<UserProfile>()).isEmpty
+            && context.fetch(FetchDescriptor<WorkoutTemplate>()).isEmpty
+            && context.fetch(FetchDescriptor<WorkoutSession>()).isEmpty
+            && customExercises.isEmpty
     }
 }
 

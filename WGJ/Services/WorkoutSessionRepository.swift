@@ -360,6 +360,92 @@ nonisolated final class WorkoutSessionRepository {
         try completedSessions(before: nil, excludingSessionID: nil, includeArchived: includeArchived)
     }
 
+    func completedSessions(
+        before date: Date?,
+        limit: Int,
+        includeArchived: Bool = false
+    ) throws -> [WorkoutSession] {
+        try completedSessions(
+            before: date,
+            excludingSessionID: nil,
+            includeArchived: includeArchived,
+            limit: limit
+        )
+    }
+
+    func completedSessions(
+        onDay day: Date,
+        calendar: Calendar = .current,
+        includeArchived: Bool = false
+    ) throws -> [WorkoutSession] {
+        let completedStatus = WorkoutSessionStatus.completed.rawValue
+        let dayStart = calendar.startOfDay(for: day)
+        let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
+
+        let descriptor: FetchDescriptor<WorkoutSession>
+        if includeArchived {
+            descriptor = FetchDescriptor<WorkoutSession>(
+                predicate: #Predicate { session in
+                    session.statusRaw == completedStatus
+                        && session.startedAt >= dayStart
+                        && session.startedAt < dayEnd
+                },
+                sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+            )
+        } else {
+            descriptor = FetchDescriptor<WorkoutSession>(
+                predicate: #Predicate { session in
+                    session.statusRaw == completedStatus
+                        && session.archivedAt == nil
+                        && session.startedAt >= dayStart
+                        && session.startedAt < dayEnd
+                },
+                sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+            )
+        }
+
+        return try modelContext.fetch(descriptor)
+    }
+
+    func completedWorkoutCountsByDay(
+        inMonthContaining month: Date,
+        calendar: Calendar = .current,
+        includeArchived: Bool = false
+    ) throws -> [Date: Int] {
+        guard let monthInterval = calendar.dateInterval(of: .month, for: month) else {
+            return [:]
+        }
+        let completedStatus = WorkoutSessionStatus.completed.rawValue
+        let monthStart = monthInterval.start
+        let monthEnd = monthInterval.end
+
+        let descriptor: FetchDescriptor<WorkoutSession>
+        if includeArchived {
+            descriptor = FetchDescriptor<WorkoutSession>(
+                predicate: #Predicate { session in
+                    session.statusRaw == completedStatus
+                        && session.startedAt >= monthStart
+                        && session.startedAt < monthEnd
+                }
+            )
+        } else {
+            descriptor = FetchDescriptor<WorkoutSession>(
+                predicate: #Predicate { session in
+                    session.statusRaw == completedStatus
+                        && session.archivedAt == nil
+                        && session.startedAt >= monthStart
+                        && session.startedAt < monthEnd
+                }
+            )
+        }
+
+        var counts: [Date: Int] = [:]
+        for session in try modelContext.fetch(descriptor) {
+            counts[calendar.startOfDay(for: session.startedAt), default: 0] += 1
+        }
+        return counts
+    }
+
     func archivedSessions() throws -> [WorkoutSession] {
         try completedSessions(includeArchived: true)
             .filter { $0.archivedAt != nil }
@@ -988,7 +1074,8 @@ nonisolated final class WorkoutSessionRepository {
     private func completedSessions(
         before date: Date?,
         excludingSessionID: UUID?,
-        includeArchived: Bool = false
+        includeArchived: Bool = false,
+        limit: Int? = nil
     ) throws -> [WorkoutSession] {
         let completedStatus = WorkoutSessionStatus.completed.rawValue
 
@@ -1069,7 +1156,11 @@ nonisolated final class WorkoutSessionRepository {
             }
         }
 
-        return try modelContext.fetch(descriptor)
+        var limitedDescriptor = descriptor
+        if let limit {
+            limitedDescriptor.fetchLimit = limit
+        }
+        return try modelContext.fetch(limitedDescriptor)
     }
 
     private func defaultSessionSets(

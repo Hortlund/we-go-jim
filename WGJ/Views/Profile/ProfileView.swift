@@ -715,8 +715,14 @@ struct ProfileView: View {
     }
 
     private var cloudBackupSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            WGJActionHeader("Cloud Backup") {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 12) {
+                Text("Cloud Backup")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(WGJTheme.textPrimary)
+
+                Spacer(minLength: 12)
+
                 Button {
                     Task {
                         await forceCloudBackup()
@@ -734,11 +740,11 @@ struct ProfileView: View {
                 .accessibilityIdentifier("profile-cloud-backup-now-button")
             }
 
-            HStack(alignment: .top, spacing: 10) {
+            HStack(alignment: .center, spacing: 12) {
                 Image(systemName: cloudBackupStatusIcon)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(cloudBackupStatusTint)
-                    .frame(width: 32, height: 32)
+                    .frame(width: 38, height: 38)
                     .background {
                         Circle()
                             .fill(cloudBackupStatusTint.opacity(0.14))
@@ -757,6 +763,20 @@ struct ProfileView: View {
 
                 Spacer(minLength: 0)
             }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
+                    .fill(WGJTheme.field.opacity(0.58))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
+                            .stroke(WGJTheme.outline.opacity(0.26), lineWidth: 1)
+                    }
+            }
+
+            Text("Included in backup")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(WGJTheme.textSecondary)
 
             HStack(spacing: 10) {
                 ProfileCloudBackupStatTile(
@@ -1705,14 +1725,14 @@ private struct ProfileCloudBackupStatTile: View {
     let isLoading: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             if isLoading {
                 ProgressView()
                     .controlSize(.small)
-                    .frame(height: 24, alignment: .leading)
+                    .frame(height: 22, alignment: .leading)
             } else {
                 Text(value)
-                    .font(.headline.weight(.bold))
+                    .font(.title3.weight(.bold))
                     .foregroundStyle(WGJTheme.textPrimary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
@@ -1724,7 +1744,8 @@ private struct ProfileCloudBackupStatTile: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
         }
-        .padding(10)
+        .padding(12)
+        .frame(minHeight: 70, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .leading)
         .wgjCardContainer(cornerRadius: WGJRadius.control)
     }

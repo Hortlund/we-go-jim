@@ -3,6 +3,8 @@ import SwiftData
 import SwiftUI
 
 struct HistoryOverviewView: View {
+    nonisolated private static let historyPageSize = 40
+
     @Environment(\.modelContext) private var modelContext
     @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(\.isTabActive) private var isTabActive
@@ -18,6 +20,8 @@ struct HistoryOverviewView: View {
     @State private var needsExplicitRefresh = true
     @State private var lastLoadedContentUpdatedAt: Date?
     @State private var lastRefreshAt: Date?
+    @State private var isLoadingMoreHistory = false
+    @State private var isLoadingCalendarMonth = false
     @State private var errorMessage = ""
     @State private var showingError = false
 
@@ -65,6 +69,10 @@ struct HistoryOverviewView: View {
                         }
                     }
                 }
+
+                if selectedDayFilter == nil, controller.hasMorePages {
+                    historyLoadMoreSentinel
+                }
             }
             .padding(.top, 8)
             .padding(16)
@@ -90,7 +98,20 @@ struct HistoryOverviewView: View {
             await reloadSnapshotIfNeeded(force: false)
         }
         .onChange(of: selectedDayFilter) { _, newDayFilter in
-            controller.applyDayFilter(newDayFilter)
+            Task {
+                await reloadSnapshotIfNeeded(force: true)
+            }
+            if let newDayFilter {
+                displayedCalendarMonth = startOfMonth(for: newDayFilter)
+                Task {
+                    await loadCalendarMonthIfNeeded(newDayFilter)
+                }
+            }
+        }
+        .onChange(of: displayedCalendarMonth) { _, newMonth in
+            Task {
+                await loadCalendarMonthIfNeeded(newMonth)
+            }
         }
         .alert("History Error", isPresented: $showingError) {
             Button("OK", role: .cancel) { }
@@ -104,11 +125,32 @@ struct HistoryOverviewView: View {
             HistoryWorkoutCalendarSheet(
                 displayedMonth: $displayedCalendarMonth,
                 selectedDay: $selectedDayFilter,
-                workoutCountsByDay: controller.snapshot.workoutCountsByDay,
+                workoutCountsByDay: controller.calendarWorkoutCountsByDay,
+                isLoadingMonth: isLoadingCalendarMonth,
                 onClose: { showingWorkoutCalendar = false }
             )
         }
         .presentationDetents([.large])
+    }
+
+    private var historyLoadMoreSentinel: some View {
+        HStack {
+            Spacer()
+            if isLoadingMoreHistory {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Text("Loading more history")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(WGJTheme.textSecondary)
+            }
+            Spacer()
+        }
+        .padding(.vertical, 12)
+        .task {
+            await loadMoreHistoryIfNeeded()
+        }
+        .accessibilityIdentifier("history-load-more-sentinel")
     }
 
     private func historyCard(_ card: HistorySessionCardData) -> some View {
@@ -124,11 +166,14 @@ struct HistoryOverviewView: View {
             ?? Date()
         displayedCalendarMonth = startOfMonth(for: referenceDate)
         showingWorkoutCalendar = true
+        Task {
+            await loadCalendarMonthIfNeeded(referenceDate)
+        }
     }
 
     private func selectedDayFilterCard(_ day: Date) -> some View {
         let dayStart = startOfDay(for: day)
-        let workoutCount = controller.snapshot.workoutCountsByDay[dayStart, default: 0]
+        let workoutCount = controller.calendarWorkoutCountsByDay[dayStart, default: controller.snapshot.workoutCountsByDay[dayStart, default: 0]]
 
         return HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
@@ -216,7 +261,8 @@ struct HistoryOverviewView: View {
             loaded = try await backgroundStore.perform("history-overview.snapshot.reload") { backgroundContext in
                 try HistoryOverviewSnapshotLoader.load(
                     modelContext: backgroundContext,
-                    selectedDayFilter: dayFilter
+                    selectedDayFilter: dayFilter,
+                    pageSize: Self.historyPageSize
                 )
             }
             controller.apply(loaded)
@@ -224,6 +270,58 @@ struct HistoryOverviewView: View {
             needsExplicitRefresh = false
             lastLoadedContentUpdatedAt = contentUpdatedAt
             lastRefreshAt = .now
+        } catch {
+            errorMessage = String(describing: error)
+            showingError = true
+        }
+    }
+
+    @MainActor
+    private func loadMoreHistoryIfNeeded() async {
+        guard selectedDayFilter == nil,
+              controller.hasMorePages,
+              !isLoadingMoreHistory
+        else {
+            return
+        }
+
+        guard let oldestLoadedDate = controller.oldestLoadedDate else { return }
+        isLoadingMoreHistory = true
+        defer { isLoadingMoreHistory = false }
+
+        do {
+            let backgroundStore = historyBackgroundStore
+            let loaded = try await backgroundStore.perform("history-overview.snapshot.load-more") { backgroundContext in
+                try HistoryOverviewSnapshotLoader.loadPage(
+                    modelContext: backgroundContext,
+                    before: oldestLoadedDate,
+                    pageSize: Self.historyPageSize
+                )
+            }
+            controller.appendPage(loaded)
+        } catch {
+            errorMessage = String(describing: error)
+            showingError = true
+        }
+    }
+
+    @MainActor
+    private func loadCalendarMonthIfNeeded(_ month: Date) async {
+        let monthStart = startOfMonth(for: month)
+        guard !controller.hasCalendarCounts(for: monthStart) else { return }
+
+        isLoadingCalendarMonth = true
+        defer { isLoadingCalendarMonth = false }
+
+        do {
+            let backgroundStore = historyBackgroundStore
+            let counts = try await backgroundStore.perform("history.calendar-month-counts") { backgroundContext in
+                try HistoryOverviewSnapshotLoader.loadWorkoutCountsByDay(
+                    modelContext: backgroundContext,
+                    month: monthStart
+                )
+            }
+            controller.mergeCalendarWorkoutCounts(counts, month: monthStart)
         } catch {
             errorMessage = String(describing: error)
             showingError = true
@@ -313,16 +411,41 @@ nonisolated struct HistoryOverviewPreparedSnapshots: Sendable {
 final class HistoryOverviewController {
     var completedSessions: [HistoryOverviewSessionSnapshot] = []
     var snapshot = HistoryOverviewSnapshot.empty
+    var calendarWorkoutCountsByDay: [Date: Int] = [:]
+    var hasMorePages = false
     private var preparedSnapshots = HistoryOverviewPreparedSnapshots.empty
+    private var loadedCalendarMonths: Set<Date> = []
+
+    var oldestLoadedDate: Date? {
+        completedSessions.last?.displayDate
+    }
 
     func apply(_ loaded: HistoryOverviewLoadedSnapshot) {
         completedSessions = loaded.completedSessions
         preparedSnapshots = loaded.preparedSnapshots
         snapshot = preparedSnapshots.snapshot(for: loaded.selectedDayFilter)
+        calendarWorkoutCountsByDay = loaded.calendarWorkoutCountsByDay
+        loadedCalendarMonths = loaded.loadedCalendarMonths
+        hasMorePages = loaded.hasMorePages
     }
 
-    func applyDayFilter(_ selectedDayFilter: Date?) {
-        snapshot = preparedSnapshots.snapshot(for: selectedDayFilter)
+    func appendPage(_ loaded: HistoryOverviewLoadedSnapshot) {
+        var existingIDs = Set(completedSessions.map(\.id))
+        completedSessions.append(contentsOf: loaded.completedSessions.filter { existingIDs.insert($0.id).inserted })
+        preparedSnapshots = HistoryOverviewSnapshotBuilder.buildPreparedSnapshots(sessions: completedSessions)
+        snapshot = preparedSnapshots.snapshot(for: nil)
+        calendarWorkoutCountsByDay.merge(loaded.calendarWorkoutCountsByDay) { current, _ in current }
+        loadedCalendarMonths.formUnion(loaded.loadedCalendarMonths)
+        hasMorePages = loaded.hasMorePages
+    }
+
+    func hasCalendarCounts(for month: Date) -> Bool {
+        loadedCalendarMonths.contains(month)
+    }
+
+    func mergeCalendarWorkoutCounts(_ counts: [Date: Int], month: Date) {
+        calendarWorkoutCountsByDay.merge(counts) { _, new in new }
+        loadedCalendarMonths.insert(month)
     }
 }
 
@@ -330,6 +453,9 @@ nonisolated struct HistoryOverviewLoadedSnapshot: Sendable {
     let completedSessions: [HistoryOverviewSessionSnapshot]
     let preparedSnapshots: HistoryOverviewPreparedSnapshots
     let selectedDayFilter: Date?
+    let calendarWorkoutCountsByDay: [Date: Int]
+    let loadedCalendarMonths: Set<Date>
+    let hasMorePages: Bool
 
     var snapshot: HistoryOverviewSnapshot {
         preparedSnapshots.snapshot(for: selectedDayFilter)
@@ -339,20 +465,74 @@ nonisolated struct HistoryOverviewLoadedSnapshot: Sendable {
 nonisolated enum HistoryOverviewSnapshotLoader {
     nonisolated static func load(
         modelContext: ModelContext,
-        selectedDayFilter: Date?
+        selectedDayFilter: Date?,
+        pageSize: Int
     ) throws -> HistoryOverviewLoadedSnapshot {
-        let completedSessions = try WorkoutSessionRepository(modelContext: modelContext)
-            .completedSessions()
-            .filter { $0.archivedAt == nil }
+        let repository = WorkoutSessionRepository(modelContext: modelContext)
+        let completedSessions: [HistoryOverviewSessionSnapshot]
+        let hasMorePages: Bool
+        if let selectedDayFilter {
+            completedSessions = try repository
+                .completedSessions(onDay: selectedDayFilter)
+                .map(HistoryOverviewSessionSnapshot.init(session:))
+            hasMorePages = false
+        } else {
+            let page = try repository
+                .completedSessions(before: nil, limit: pageSize + 1)
+                .map(HistoryOverviewSessionSnapshot.init(session:))
+            completedSessions = Array(page.prefix(pageSize))
+            hasMorePages = page.count > pageSize
+        }
+        let preparedSnapshots = HistoryOverviewSnapshotBuilder.buildPreparedSnapshots(
+            sessions: completedSessions
+        )
+        let calendarMonth = selectedDayFilter ?? completedSessions.first?.displayDate ?? Date()
+        let month = startOfMonth(for: calendarMonth)
+        let counts = try repository.completedWorkoutCountsByDay(inMonthContaining: month)
+        return HistoryOverviewLoadedSnapshot(
+            completedSessions: completedSessions,
+            preparedSnapshots: preparedSnapshots,
+            selectedDayFilter: selectedDayFilter,
+            calendarWorkoutCountsByDay: counts,
+            loadedCalendarMonths: [month],
+            hasMorePages: hasMorePages
+        )
+    }
+
+    nonisolated static func loadPage(
+        modelContext: ModelContext,
+        before date: Date,
+        pageSize: Int
+    ) throws -> HistoryOverviewLoadedSnapshot {
+        let repository = WorkoutSessionRepository(modelContext: modelContext)
+        let page = try repository
+            .completedSessions(before: date, limit: pageSize + 1)
             .map(HistoryOverviewSessionSnapshot.init(session:))
+        let completedSessions = Array(page.prefix(pageSize))
         let preparedSnapshots = HistoryOverviewSnapshotBuilder.buildPreparedSnapshots(
             sessions: completedSessions
         )
         return HistoryOverviewLoadedSnapshot(
             completedSessions: completedSessions,
             preparedSnapshots: preparedSnapshots,
-            selectedDayFilter: selectedDayFilter
+            selectedDayFilter: nil,
+            calendarWorkoutCountsByDay: [:],
+            loadedCalendarMonths: [],
+            hasMorePages: page.count > pageSize
         )
+    }
+
+    nonisolated static func loadWorkoutCountsByDay(
+        modelContext: ModelContext,
+        month: Date
+    ) throws -> [Date: Int] {
+        try WorkoutSessionRepository(modelContext: modelContext)
+            .completedWorkoutCountsByDay(inMonthContaining: month)
+    }
+
+    nonisolated private static func startOfMonth(for date: Date, calendar: Calendar = .current) -> Date {
+        let components = calendar.dateComponents([.year, .month], from: date)
+        return calendar.date(from: components) ?? date
     }
 }
 
@@ -879,6 +1059,7 @@ private struct HistoryWorkoutCalendarSheet: View {
     @Binding var selectedDay: Date?
 
     let workoutCountsByDay: [Date: Int]
+    let isLoadingMonth: Bool
     let onClose: () -> Void
 
     private let calendar = Calendar.current
@@ -948,9 +1129,16 @@ private struct HistoryWorkoutCalendarSheet: View {
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(WGJTheme.textSecondary)
 
-                        Text(monthTitle)
-                            .font(.title3.weight(.semibold))
-                            .foregroundStyle(WGJTheme.textPrimary)
+                        HStack(spacing: 8) {
+                            Text(monthTitle)
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(WGJTheme.textPrimary)
+
+                            if isLoadingMonth {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                        }
                     }
 
                     Spacer()
