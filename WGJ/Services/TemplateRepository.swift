@@ -31,11 +31,15 @@ nonisolated struct TemplateExerciseComponentDraft: Identifiable, Equatable, Send
     }
 
     init(catalogItem: ExerciseCatalogItem) {
+        self.init(selection: ExerciseCatalogSelection(catalogItem: catalogItem))
+    }
+
+    init(selection: ExerciseCatalogSelection) {
         self.id = UUID()
-        self.catalogExerciseUUID = catalogItem.remoteUUID
-        self.exerciseNameSnapshot = catalogItem.displayName
-        self.categorySnapshot = catalogItem.categoryName
-        self.muscleSummarySnapshot = catalogItem.primaryMuscleNames
+        self.catalogExerciseUUID = selection.remoteUUID
+        self.exerciseNameSnapshot = selection.displayName
+        self.categorySnapshot = selection.categoryName
+        self.muscleSummarySnapshot = selection.primaryMuscleNames
     }
 }
 
@@ -197,19 +201,26 @@ nonisolated struct TemplateExerciseDraft: Identifiable, Equatable, Sendable {
     }
 
     init(catalogItem: ExerciseCatalogItem, preferredLoadUnit: TemplateLoadUnit = .kg) {
+        self.init(
+            selection: ExerciseCatalogSelection(catalogItem: catalogItem),
+            preferredLoadUnit: preferredLoadUnit
+        )
+    }
+
+    init(selection: ExerciseCatalogSelection, preferredLoadUnit: TemplateLoadUnit = .kg) {
         self.id = UUID()
-        self.catalogExerciseUUID = catalogItem.remoteUUID
-        self.exerciseNameSnapshot = catalogItem.displayName
-        self.categorySnapshot = catalogItem.categoryName
-        self.muscleSummarySnapshot = catalogItem.primaryMuscleNames
+        self.catalogExerciseUUID = selection.remoteUUID
+        self.exerciseNameSnapshot = selection.displayName
+        self.categorySnapshot = selection.categoryName
+        self.muscleSummarySnapshot = selection.primaryMuscleNames
         self.notes = ""
         self.targetRepMin = nil
         self.targetRepMax = nil
         self.restSeconds = 120
-        self.components = [TemplateExerciseComponentDraft(catalogItem: catalogItem)]
+        self.components = [TemplateExerciseComponentDraft(selection: selection)]
         self.setDrafts = Self.defaultSetDrafts(
             restSeconds: self.restSeconds,
-            loadUnit: TemplateLoadUnit.inferredDefault(fromEquipmentSummary: catalogItem.equipmentSummary)
+            loadUnit: TemplateLoadUnit.inferredDefault(fromEquipmentSummary: selection.equipmentSummary)
                 ?? preferredLoadUnit
         )
         self.superset = nil
@@ -264,8 +275,18 @@ nonisolated struct TemplateExerciseDraft: Identifiable, Equatable, Sendable {
         with catalogItem: ExerciseCatalogItem,
         preferredLoadUnit: TemplateLoadUnit
     ) -> TemplateExerciseDraft {
+        replacingExercise(
+            with: ExerciseCatalogSelection(catalogItem: catalogItem),
+            preferredLoadUnit: preferredLoadUnit
+        )
+    }
+
+    func replacingExercise(
+        with selection: ExerciseCatalogSelection,
+        preferredLoadUnit: TemplateLoadUnit
+    ) -> TemplateExerciseDraft {
         let replacement = TemplateExerciseDraft(
-            catalogItem: catalogItem,
+            selection: selection,
             preferredLoadUnit: preferredLoadUnit
         )
 
@@ -297,7 +318,7 @@ nonisolated enum TemplateRepositoryError: Error {
 }
 
 nonisolated final class TemplateRepository {
-    nonisolated static let unfiledFolderID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+    nonisolated static let unfiledFolderID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1))
 
     private let modelContext: ModelContext
     private let autoSaveChanges: Bool

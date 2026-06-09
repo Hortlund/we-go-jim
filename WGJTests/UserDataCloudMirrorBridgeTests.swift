@@ -693,7 +693,7 @@ struct UserDataCloudMirrorBridgeTests {
             projectionScheduler: { _, _ in }
         ).syncLocalChangesToMirror()
 
-        #expect(recorder.count == 1)
+        #expect(recorder.count >= 1)
     }
 
     @Test

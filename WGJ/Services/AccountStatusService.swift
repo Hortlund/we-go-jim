@@ -1,14 +1,14 @@
 import CloudKit
 import Foundation
 
-enum AccountUnavailableReason: Equatable {
+enum AccountUnavailableReason: Equatable, Sendable {
     case noAccount
     case restricted
     case temporarilyUnavailable
     case unknown
 }
 
-enum AccountStatus: Equatable {
+enum AccountStatus: Equatable, Sendable {
     case checking
     case available
     case unavailable(AccountUnavailableReason)

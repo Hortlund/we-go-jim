@@ -1,9 +1,8 @@
 import Foundation
-import Observation
 import SwiftData
 import SwiftUI
 
-enum UserDataCloudMirrorCoordinatorState: Equatable, Sendable {
+nonisolated enum UserDataCloudMirrorCoordinatorState: Equatable, Sendable {
     case idle
     case unavailable(String)
     case preparing
@@ -19,29 +18,28 @@ nonisolated enum UserDataCloudMirrorStartupPolicy {
     ]
 }
 
-@MainActor
-@Observable
-final class UserDataCloudMirrorCoordinator {
+actor UserDataCloudMirrorCoordinator {
     private(set) var state: UserDataCloudMirrorCoordinatorState = .idle
+    private(set) var lastUserDataSyncSnapshot: UserDataSyncStatusSnapshot?
 
-    @ObservationIgnored private let makeBackupStore: @MainActor () -> any UserDataCloudBackupStoring
-    @ObservationIgnored private let isCloudBackupEnabled: @MainActor () -> Bool
-    @ObservationIgnored private let postStartHydrationDelays: [Duration]
-    @ObservationIgnored private var localContainer: ModelContainer?
-    @ObservationIgnored private var mirrorContainer: ModelContainer?
-    @ObservationIgnored private var mirrorBridge: (any UserDataCloudMirrorBridging)?
-    @ObservationIgnored private var makeMirrorContainer: (@Sendable () throws -> ModelContainer)?
-    @ObservationIgnored private var makeBridge: (@MainActor (ModelContainer, ModelContainer) -> any UserDataCloudMirrorBridging)?
-    @ObservationIgnored private var startTask: Task<Void, Never>?
-    @ObservationIgnored private var syncTask: Task<Void, Never>?
-    @ObservationIgnored private var postStartHydrationTask: Task<Void, Never>?
-    @ObservationIgnored private var lastHandledCloudImportAt: Date?
+    private let makeBackupStore: @Sendable () -> any UserDataCloudBackupStoring
+    private let isCloudBackupEnabled: @Sendable () -> Bool
+    private let postStartHydrationDelays: [Duration]
+    private var localContainer: ModelContainer?
+    private var mirrorContainer: ModelContainer?
+    private var mirrorBridge: (any UserDataCloudMirrorBridging)?
+    private var makeMirrorContainer: (@Sendable () throws -> ModelContainer)?
+    private var makeBridge: (@Sendable (ModelContainer, ModelContainer) -> any UserDataCloudMirrorBridging)?
+    private var startTask: Task<Void, Never>?
+    private var syncTask: Task<Void, Never>?
+    private var postStartHydrationTask: Task<Void, Never>?
+    private var lastHandledCloudImportAt: Date?
 
     init(
-        makeBackupStore: @escaping @MainActor () -> any UserDataCloudBackupStoring = {
+        makeBackupStore: @escaping @Sendable () -> any UserDataCloudBackupStoring = {
             CloudKitUserDataCloudBackupStore()
         },
-        isCloudBackupEnabled: @escaping @MainActor () -> Bool = {
+        isCloudBackupEnabled: @escaping @Sendable () -> Bool = {
             UserDataCloudMirrorCoordinator.defaultCloudBackupEnabled
         },
         postStartHydrationDelays: [Duration] = UserDataCloudMirrorStartupPolicy.postStartHydrationDelays
@@ -62,7 +60,7 @@ final class UserDataCloudMirrorCoordinator {
         cloudRuntimeMode: CloudRuntimeMode,
         canUseConfiguredCloudKitContainer: Bool,
         makeMirrorContainer: @escaping @Sendable () throws -> ModelContainer,
-        makeBridge: @escaping @MainActor (ModelContainer, ModelContainer) -> any UserDataCloudMirrorBridging = {
+        makeBridge: @escaping @Sendable (ModelContainer, ModelContainer) -> any UserDataCloudMirrorBridging = {
             UserDataCloudMirrorBridge(localContainer: $0, mirrorContainer: $1)
         }
     ) async {
@@ -92,22 +90,23 @@ final class UserDataCloudMirrorCoordinator {
                     try makeMirrorContainer()
                 }.value
                 let bridge = makeBridge(localContainer, container)
-                if self?.isCloudBackupEnabled() ?? true {
+                let isCloudBackupEnabled = await self?.isDirectBackupEnabled() ?? true
+                if isCloudBackupEnabled {
                     _ = try? await UserDataCloudBackupService(
                         localContainer: localContainer,
                         mirrorContainer: container,
-                        backupStore: self?.makeBackupStore() ?? CloudKitUserDataCloudBackupStore()
+                        backupStore: await self?.makeDirectBackupStore() ?? CloudKitUserDataCloudBackupStore()
                     ).restoreLatestBackup()
                 }
                 try await bridge.syncLocalChangesToMirror()
-                if self?.isCloudBackupEnabled() ?? true {
+                if isCloudBackupEnabled {
                     _ = try? await UserDataCloudBackupService(
                         localContainer: localContainer,
                         mirrorContainer: container,
-                        backupStore: self?.makeBackupStore() ?? CloudKitUserDataCloudBackupStore()
+                        backupStore: await self?.makeDirectBackupStore() ?? CloudKitUserDataCloudBackupStore()
                     ).exportCurrentBackup()
                 }
-                self?.finishStart(
+                await self?.finishStart(
                     localContainer: localContainer,
                     mirrorContainer: container,
                     bridge: bridge,
@@ -115,7 +114,7 @@ final class UserDataCloudMirrorCoordinator {
                     makeBridge: makeBridge
                 )
             } catch {
-                self?.failStart(errorDescription: String(describing: error))
+                await self?.failStart(errorDescription: String(describing: error))
             }
         }
         startTask = task
@@ -132,20 +131,10 @@ final class UserDataCloudMirrorCoordinator {
         let task = Task { [weak self, mirrorBridge] in
             do {
                 try await mirrorBridge.syncLocalChangesToMirror()
-                if let self,
-                   let localContainer = self.localContainer,
-                   let mirrorContainer = self.mirrorContainer,
-                   self.isCloudBackupEnabled() {
-                    try? await UserDataCloudBackupService(
-                        localContainer: localContainer,
-                        mirrorContainer: mirrorContainer,
-                        backupStore: self.makeBackupStore()
-                    ).exportCurrentBackup()
-                }
             } catch {
-                self?.failStart(errorDescription: String(describing: error))
+                await self?.failStart(errorDescription: String(describing: error))
             }
-            self?.syncTask = nil
+            await self?.clearSyncTask()
         }
         syncTask = task
         await task.value
@@ -182,9 +171,9 @@ final class UserDataCloudMirrorCoordinator {
             do {
                 try await self?.rebuildMirrorBridgeAndSync()
             } catch {
-                self?.failStart(errorDescription: String(describing: error))
+                await self?.failStart(errorDescription: String(describing: error))
             }
-            self?.syncTask = nil
+            await self?.clearSyncTask()
         }
         syncTask = task
         await task.value
@@ -195,7 +184,7 @@ final class UserDataCloudMirrorCoordinator {
         mirrorContainer: ModelContainer,
         bridge: any UserDataCloudMirrorBridging,
         makeMirrorContainer: @escaping @Sendable () throws -> ModelContainer,
-        makeBridge: @escaping @MainActor (ModelContainer, ModelContainer) -> any UserDataCloudMirrorBridging
+        makeBridge: @escaping @Sendable (ModelContainer, ModelContainer) -> any UserDataCloudMirrorBridging
     ) {
         self.localContainer = localContainer
         self.mirrorContainer = mirrorContainer
@@ -207,7 +196,10 @@ final class UserDataCloudMirrorCoordinator {
             isCloudEnabled: true,
             errorDescription: nil
         )
-        AppRuntimeState.shared.updateUserDataSyncStatus(snapshot)
+        lastUserDataSyncSnapshot = snapshot
+        Task { @MainActor in
+            AppRuntimeState.shared.updateUserDataSyncStatus(snapshot)
+        }
         schedulePostStartHydrationPasses()
         startTask = nil
     }
@@ -226,19 +218,19 @@ final class UserDataCloudMirrorCoordinator {
         let refreshedBridge = makeBridge(localContainer, refreshedMirrorContainer)
         mirrorContainer = refreshedMirrorContainer
         mirrorBridge = refreshedBridge
-        if isCloudBackupEnabled() {
+        if isDirectBackupEnabled() {
             _ = try? await UserDataCloudBackupService(
                 localContainer: localContainer,
                 mirrorContainer: refreshedMirrorContainer,
-                backupStore: makeBackupStore()
+                backupStore: makeDirectBackupStore()
             ).restoreLatestBackup()
         }
         try await refreshedBridge.syncLocalChangesToMirror()
-        if isCloudBackupEnabled() {
+        if isDirectBackupEnabled() {
             _ = try? await UserDataCloudBackupService(
                 localContainer: localContainer,
                 mirrorContainer: refreshedMirrorContainer,
-                backupStore: makeBackupStore()
+                backupStore: makeDirectBackupStore()
             ).exportCurrentBackup()
         }
     }
@@ -247,14 +239,30 @@ final class UserDataCloudMirrorCoordinator {
         guard !postStartHydrationDelays.isEmpty else { return }
         postStartHydrationTask?.cancel()
         let delays = postStartHydrationDelays
-        postStartHydrationTask = Task { @MainActor [weak self, delays] in
+        postStartHydrationTask = Task.detached(priority: .utility) { [weak self, delays] in
             for delay in delays {
                 try? await Task.sleep(for: delay)
                 guard !Task.isCancelled else { return }
                 await self?.syncFromFreshMirrorIfActive()
             }
-            self?.postStartHydrationTask = nil
+            await self?.clearPostStartHydrationTask()
         }
+    }
+
+    private func clearPostStartHydrationTask() {
+        postStartHydrationTask = nil
+    }
+
+    private func clearSyncTask() {
+        syncTask = nil
+    }
+
+    private func isDirectBackupEnabled() -> Bool {
+        isCloudBackupEnabled()
+    }
+
+    private func makeDirectBackupStore() -> any UserDataCloudBackupStoring {
+        makeBackupStore()
     }
 
     private func failStart(errorDescription: String) {
@@ -269,7 +277,10 @@ final class UserDataCloudMirrorCoordinator {
             isCloudEnabled: false,
             errorDescription: errorDescription
         )
-        AppRuntimeState.shared.updateUserDataSyncStatus(snapshot)
+        lastUserDataSyncSnapshot = snapshot
+        Task { @MainActor in
+            AppRuntimeState.shared.updateUserDataSyncStatus(snapshot)
+        }
         startTask = nil
     }
 
@@ -282,7 +293,10 @@ final class UserDataCloudMirrorCoordinator {
             isCloudEnabled: false,
             errorDescription: reason
         )
-        AppRuntimeState.shared.updateUserDataSyncStatus(snapshot)
+        lastUserDataSyncSnapshot = snapshot
+        Task { @MainActor in
+            AppRuntimeState.shared.updateUserDataSyncStatus(snapshot)
+        }
     }
 
     private nonisolated static var defaultCloudBackupEnabled: Bool {

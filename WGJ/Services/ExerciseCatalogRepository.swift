@@ -55,7 +55,7 @@ nonisolated final class ExerciseCatalogRepository: ExerciseCatalogRepositoryProt
             seedLoader: seedLoader
         )
         self.searchService = ExerciseSearchService(modelContext: modelContext)
-        self.imageCacheService = ExerciseImageCacheService(modelContext: modelContext)
+        self.imageCacheService = ExerciseImageCacheService()
     }
 
     convenience init(modelContext: ModelContext) {

@@ -1251,7 +1251,6 @@ nonisolated final class ActiveWorkoutDraftRepository {
 
     private func saveUserDataMutation() throws {
         try modelContext.save()
-        UserDataSyncTrackerBridge.markLocalMutation()
     }
 
     private func sessionExercise(id: UUID) throws -> ActiveWorkoutDraftExercise? {

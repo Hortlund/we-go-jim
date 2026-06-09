@@ -135,16 +135,23 @@ struct WGJResponsiveTextField: View {
             return
         }
 
-        pendingCommitTask = Task { @MainActor in
+        let delay = commitDelay
+        pendingCommitTask = Task.detached(priority: .utility) {
             do {
-                try await Task.sleep(for: commitDelay)
+                try await Task.sleep(for: delay)
             } catch {
                 return
             }
 
             guard !Task.isCancelled else { return }
-            commitNow()
+            await commitPendingTextAfterDelayIfStillCurrent()
         }
+    }
+
+    @MainActor
+    private func commitPendingTextAfterDelayIfStillCurrent() {
+        guard !Task.isCancelled else { return }
+        commitNow()
     }
 
     private func commitNow() {

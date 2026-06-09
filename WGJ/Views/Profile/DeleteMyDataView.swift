@@ -3,6 +3,7 @@ import SwiftUI
 
 struct DeleteMyDataView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.appBackgroundStore) private var appBackgroundStore
 
     @State private var isDeleting = false
     @State private var showingConfirmation = false
@@ -87,10 +88,13 @@ struct DeleteMyDataView: View {
         isDeleting = true
         defer { isDeleting = false }
 
-        let service = AppDataDeletionService(modelContext: modelContext)
+        let backgroundStore = appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
 
         do {
-            try await service.deleteAllUserData()
+            try await backgroundStore.performAsync("profile.delete-all-data") { backgroundContext in
+                let service = AppDataDeletionService(modelContext: backgroundContext)
+                try await service.deleteAllUserData()
+            }
             alertTitle = "Data Deleted"
             alertMessage = "All local app data was deleted. The app will restart after you dismiss this alert."
             shouldResetAfterAlert = true

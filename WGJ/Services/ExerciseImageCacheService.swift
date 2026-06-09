@@ -1,16 +1,10 @@
 import Foundation
 import ImageIO
-import SwiftData
 import UIKit
 
 nonisolated final class ExerciseImageCacheService {
-    private let modelContext: ModelContext
     private let fileManager: FileManager
-    private let metadataFlushDelay: Duration = .seconds(6)
-    private let minimumAccessUpdateInterval: TimeInterval = 180
     private let decodedThumbnailMaxPixelSize = 640
-    private var metadataSaveTask: Task<Void, Never>?
-    private var hasPendingMetadataSave = false
 
     private static let sharedMemoryImageCache: NSCache<NSString, UIImage> = {
         let cache = NSCache<NSString, UIImage>()
@@ -19,16 +13,8 @@ nonisolated final class ExerciseImageCacheService {
         return cache
     }()
 
-    init(
-        modelContext: ModelContext,
-        fileManager: FileManager = .default
-    ) {
-        self.modelContext = modelContext
+    init(fileManager: FileManager = .default) {
         self.fileManager = fileManager
-    }
-
-    deinit {
-        metadataSaveTask?.cancel()
     }
 
     static func clearMemoryCache() {
@@ -43,17 +29,42 @@ nonisolated final class ExerciseImageCacheService {
         let cacheToken = imageAsset.localPath ?? imageAsset.remoteURL
         let cacheKey = NSString(string: cacheToken)
         if let cached = Self.sharedMemoryImageCache.object(forKey: cacheKey) {
-            markAssetAccessed(imageAsset)
             return cached
         }
 
         if let cached = await loadCachedImage(from: imageAsset) {
             Self.sharedMemoryImageCache.setObject(cached, forKey: cacheKey)
-            markAssetAccessed(imageAsset)
             return cached
         }
 
         return nil
+    }
+
+    func image(for snapshot: ExerciseCatalogImageSnapshot?) async -> UIImage? {
+        guard let snapshot else {
+            return nil
+        }
+
+        let cacheToken = snapshot.localPath ?? snapshot.remoteURL
+        let cacheKey = NSString(string: cacheToken)
+        if let cached = Self.sharedMemoryImageCache.object(forKey: cacheKey) {
+            return cached
+        }
+
+        guard let localPath = snapshot.localPath else {
+            return nil
+        }
+
+        let fileURL = makeFileURL(for: localPath)
+        guard fileManager.fileExists(atPath: fileURL.path),
+              let data = await readData(from: fileURL),
+              let image = await decodeImage(from: data)
+        else {
+            return nil
+        }
+
+        Self.sharedMemoryImageCache.setObject(image, forKey: cacheKey)
+        return image
     }
 
     private func loadCachedImage(from asset: ExerciseImageAsset) async -> UIImage? {
@@ -68,46 +79,15 @@ nonisolated final class ExerciseImageCacheService {
         else {
             asset.localPath = nil
             asset.fileSizeBytes = 0
-            scheduleMetadataSave()
             return nil
         }
 
         return image
     }
 
-    private func markAssetAccessed(_ asset: ExerciseImageAsset) {
-        let now = Date()
-        if now.timeIntervalSince(asset.lastAccessedAt) < minimumAccessUpdateInterval {
-            return
-        }
-        asset.lastAccessedAt = now
-        scheduleMetadataSave()
-    }
-
-    private func scheduleMetadataSave() {
-        hasPendingMetadataSave = true
-        guard metadataSaveTask == nil else { return }
-
-        metadataSaveTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: self?.metadataFlushDelay ?? .seconds(4))
-            guard let self else { return }
-            self.flushMetadataSave()
-        }
-    }
-
-    private func flushMetadataSave() {
-        guard hasPendingMetadataSave else {
-            metadataSaveTask = nil
-            return
-        }
-
-        hasPendingMetadataSave = false
-        try? modelContext.save()
-        metadataSaveTask = nil
-    }
-
     private var cacheDirectoryURL: URL {
-        let base = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        let base = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? fileManager.temporaryDirectory
         return base.appendingPathComponent("ExerciseImages", isDirectory: true)
     }
 

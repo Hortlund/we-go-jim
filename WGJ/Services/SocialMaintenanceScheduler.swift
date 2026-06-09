@@ -1,17 +1,16 @@
 import Foundation
 
-@MainActor
-final class SocialMaintenanceScheduler {
+actor SocialMaintenanceScheduler {
     private let debounceDuration: Duration
-    private let sleep: @MainActor (Duration) async -> Void
+    private let sleep: @Sendable (Duration) async -> Void
     private var scheduledTask: Task<Void, Never>?
     private var activeTask: Task<Void, Never>?
-    private var latestOperation: (@MainActor () async -> Void)?
+    private var latestOperation: (@Sendable () async -> Void)?
     private var shouldRunAgain = false
 
     init(
         debounceDuration: Duration = .milliseconds(280),
-        sleep: @escaping @MainActor (Duration) async -> Void = { duration in
+        sleep: @escaping @Sendable (Duration) async -> Void = { duration in
             try? await Task.sleep(for: duration)
         }
     ) {
@@ -21,7 +20,7 @@ final class SocialMaintenanceScheduler {
 
     func schedule(
         after delay: Duration? = nil,
-        operation: @escaping @MainActor () async -> Void
+        operation: @escaping @Sendable () async -> Void
     ) {
         latestOperation = operation
 
@@ -31,9 +30,11 @@ final class SocialMaintenanceScheduler {
         }
 
         scheduledTask?.cancel()
-        scheduledTask = Task { @MainActor [weak self] in
+        let sleep = sleep
+        let resolvedDelay = delay ?? debounceDuration
+        scheduledTask = Task.detached(priority: .utility) { [weak self, sleep, resolvedDelay] in
             guard let self else { return }
-            await self.sleep(delay ?? self.debounceDuration)
+            await sleep(resolvedDelay)
             guard !Task.isCancelled else { return }
             await self.runPendingOperation()
         }
@@ -50,32 +51,57 @@ final class SocialMaintenanceScheduler {
 
 #if DEBUG
     func waitForIdleForTesting() async {
-        await scheduledTask?.value
-        await activeTask?.value
+        while true {
+            let scheduledTask = scheduledTask
+            let activeTask = activeTask
+
+            await scheduledTask?.value
+            await activeTask?.value
+
+            if self.scheduledTask == nil, self.activeTask == nil {
+                return
+            }
+        }
     }
 #endif
 
-    private func runPendingOperation() async {
+    private func runPendingOperation() {
         guard activeTask == nil else {
             shouldRunAgain = true
             return
         }
 
         scheduledTask = nil
-        let task = Task { @MainActor [weak self] in
+        let task = Task.detached(priority: .utility) { [weak self] in
             guard let self else { return }
 
-            repeat {
-                self.shouldRunAgain = false
-                if let latestOperation = self.latestOperation {
-                    await latestOperation()
+            while !Task.isCancelled {
+                guard let operation = await self.nextOperationIteration() else {
+                    break
                 }
-            } while self.shouldRunAgain && !Task.isCancelled
+                await operation()
 
-            self.activeTask = nil
+                guard await self.shouldContinueAfterOperation(), !Task.isCancelled else {
+                    break
+                }
+            }
+
+            await self.clearActiveTask()
         }
 
         activeTask = task
-        await task.value
+    }
+
+    private func nextOperationIteration() -> (@Sendable () async -> Void)? {
+        shouldRunAgain = false
+        return latestOperation
+    }
+
+    private func shouldContinueAfterOperation() -> Bool {
+        shouldRunAgain
+    }
+
+    private func clearActiveTask() {
+        activeTask = nil
     }
 }

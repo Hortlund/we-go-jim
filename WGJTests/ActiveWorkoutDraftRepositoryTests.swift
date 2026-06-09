@@ -6,6 +6,13 @@ import Testing
 @MainActor
 struct ActiveWorkoutDraftRepositoryTests {
     @Test
+    func activeDraftSavesDoNotWakeUserDataCloudSync() throws {
+        let source = try String(contentsOf: activeWorkoutDraftRepositorySourceURL(), encoding: .utf8)
+
+        #expect(!source.contains("UserDataSyncTrackerBridge.markLocalMutation()"))
+    }
+
+    @Test
     func createEmptySessionStartsLocalDraft() throws {
         let context = try makeInMemoryContext()
         let repository = ActiveWorkoutDraftRepository(modelContext: context)
@@ -868,5 +875,14 @@ struct ActiveWorkoutDraftRepositoryTests {
         )
         context.insert(item)
         return item
+    }
+
+    private func activeWorkoutDraftRepositorySourceURL() -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("WGJ")
+            .appendingPathComponent("Services")
+            .appendingPathComponent("ActiveWorkoutDraftRepository.swift")
     }
 }

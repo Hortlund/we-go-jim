@@ -65,7 +65,7 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private let restPresets = [10, 15, 20, 30, 45, 60, 75, 90, 105, 120, 150, 180, 210, 240]
     private let displayRefreshDebounce = Duration.milliseconds(90)
-    private let commitDebounce = Duration.milliseconds(400)
+    private let commitDebounce = Duration.milliseconds(150)
 
     private struct SetInputFocus: Hashable {
         let setID: UUID
@@ -197,9 +197,19 @@ struct WorkoutSessionExerciseGridEditor: View {
             }
         }
         .padding(16)
-        .background { cardBackgroundLayer }
+        .background {
+            cardBackgroundLayer
+                .transaction { transaction in
+                    transaction.animation = nil
+                }
+        }
         .wgjCardContainer(strong: true)
-        .overlay { cardOverlayLayer }
+        .overlay {
+            cardOverlayLayer
+                .transaction { transaction in
+                    transaction.animation = nil
+                }
+        }
         .shadow(
             color: shouldEmphasizeCompletedExercise ? WGJTheme.success.opacity(0.12) : .clear,
             radius: 16,
@@ -271,23 +281,19 @@ struct WorkoutSessionExerciseGridEditor: View {
         previousPerformanceResolution.previousBySetIndex
     }
 
-    @ViewBuilder
     private var cardBackgroundLayer: some View {
-        if shouldEmphasizeCompletedExercise {
-            RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
-                .fill(completedExerciseCardFill)
-        }
+        RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
+            .fill(completedExerciseBackgroundStyle)
     }
 
-    @ViewBuilder
     private var cardOverlayLayer: some View {
-        if isExerciseCompleted {
-            RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
-                .stroke(
-                    WGJTheme.success.opacity(shouldEmphasizeCompletedExercise ? 0.60 : 0.34),
-                    lineWidth: shouldEmphasizeCompletedExercise ? 2 : 1.2
-                )
-        }
+        RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
+            .stroke(
+                isExerciseCompleted
+                    ? WGJTheme.success.opacity(shouldEmphasizeCompletedExercise ? 0.60 : 0.34)
+                    : Color.clear,
+                lineWidth: shouldEmphasizeCompletedExercise ? 2 : 1.2
+            )
     }
 
     @ViewBuilder
@@ -329,10 +335,6 @@ struct WorkoutSessionExerciseGridEditor: View {
                         resolution: componentSummaryResolution,
                         accessibilityIdentifierPrefix: componentSummaryAccessibilityIdentifierPrefix
                     )
-                }
-
-                if shouldEmphasizeCompletedExercise {
-                    completedExerciseBadge
                 }
 
                 if let guidance {
@@ -887,7 +889,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     @ViewBuilder
     private func repsField(at index: Int) -> some View {
         if setDrafts.indices.contains(index) {
-            let overlayState = repsFieldDisplayState(at: index)
+            let overlayState = isInputFocused(.reps, at: index) ? nil : repsFieldDisplayState(at: index)
 
             ZStack {
                 if let overlayState {
@@ -971,7 +973,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     private func loadField(at index: Int) -> some View {
         if setDrafts.indices.contains(index) {
             let isLocked = setDrafts[index].isLocked
-            let overlayState = weightFieldDisplayState(at: index)
+            let overlayState = isInputFocused(.weight, at: index) ? nil : weightFieldDisplayState(at: index)
 
             HStack(spacing: 6) {
                 ZStack {
@@ -1343,20 +1345,10 @@ struct WorkoutSessionExerciseGridEditor: View {
         )
     }
 
-    private var completedExerciseBadge: some View {
-        Label("Exercise complete", systemImage: "checkmark.seal.fill")
-            .font(.caption.weight(.bold))
-            .foregroundStyle(WGJTheme.success)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(
-                Capsule()
-                    .fill(WGJTheme.success.opacity(0.14))
-                    .overlay(
-                        Capsule()
-                            .stroke(WGJTheme.success.opacity(0.28), lineWidth: 1)
-                    )
-            )
+    private var completedExerciseBackgroundStyle: AnyShapeStyle {
+        shouldEmphasizeCompletedExercise
+            ? AnyShapeStyle(completedExerciseCardFill)
+            : AnyShapeStyle(Color.clear)
     }
 
     private func toggleExpanded() {
@@ -1563,7 +1555,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                 guard setDrafts.indices.contains(index) else { return }
                 let setID = setDrafts[index].id
                 metricInputDraftBuffer.stage(newValue, for: setID, metric: .reps)
-                markEditorDirty()
+                scheduleBufferedInputCommit()
             }
         )
     }
@@ -1588,7 +1580,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                 guard setDrafts.indices.contains(index) else { return }
                 let setID = setDrafts[index].id
                 metricInputDraftBuffer.stage(newValue, for: setID, metric: .weight)
-                markEditorDirty()
+                scheduleBufferedInputCommit()
             }
         )
     }
@@ -1778,12 +1770,19 @@ struct WorkoutSessionExerciseGridEditor: View {
         }
 
         pendingDisplayRefreshTask?.cancel()
-        pendingDisplayRefreshTask = Task { @MainActor in
-            try? await Task.sleep(for: displayRefreshDebounce)
+        let delay = displayRefreshDebounce
+        pendingDisplayRefreshTask = Task.detached(priority: .utility) {
+            try? await Task.sleep(for: delay)
             guard !Task.isCancelled else { return }
-            pendingDisplayRefreshTask = nil
-            refreshDisplayRows()
+            await refreshDisplayRowsAfterDebounceIfStillNeeded()
         }
+    }
+
+    @MainActor
+    private func refreshDisplayRowsAfterDebounceIfStillNeeded() {
+        guard !Task.isCancelled else { return }
+        pendingDisplayRefreshTask = nil
+        refreshDisplayRows()
     }
 
     private func flushPendingDisplayRefresh() {
@@ -1797,7 +1796,8 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func flushPendingEditorState() {
         pendingBozarCompletionSetIDs.removeAll()
-        if commitAllBufferedInput(clearsText: true) {
+        let hadPendingCommit = pendingCommitTask != nil
+        if commitAllBufferedInput(clearsText: true) || hadPendingCommit {
             requestImmediateCommitForCurrentState()
         }
         if focusedInput != nil {
@@ -2652,14 +2652,42 @@ struct WorkoutSessionExerciseGridEditor: View {
         case .debounced:
             pendingCommitTask?.cancel()
             markEditorDirty()
-            pendingCommitTask = Task { @MainActor in
-                try? await Task.sleep(for: commitDebounce)
+            let delay = commitDebounce
+            pendingCommitTask = Task.detached(priority: .utility) {
+                try? await Task.sleep(for: delay)
                 guard !Task.isCancelled else { return }
-                pendingCommitTask = nil
-                requestCommitForCurrentState()
-                markEditorClean()
+                await commitCurrentStateAfterDebounceIfStillNeeded()
             }
         }
+    }
+
+    private func scheduleBufferedInputCommit() {
+        pendingCommitTask?.cancel()
+        markEditorDirty()
+        let delay = commitDebounce
+        pendingCommitTask = Task.detached(priority: .utility) {
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            await commitBufferedInputAfterDebounceIfStillNeeded()
+        }
+    }
+
+    @MainActor
+    private func commitCurrentStateAfterDebounceIfStillNeeded() {
+        guard !Task.isCancelled else { return }
+        pendingCommitTask = nil
+        requestCommitForCurrentState()
+        markEditorClean()
+    }
+
+    @MainActor
+    private func commitBufferedInputAfterDebounceIfStillNeeded() {
+        guard !Task.isCancelled else { return }
+        pendingCommitTask = nil
+        if commitAllBufferedInput(clearsText: false) {
+            requestCommitForCurrentState()
+        }
+        markEditorClean()
     }
 
     private func markEditorDirty() {

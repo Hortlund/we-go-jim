@@ -4,7 +4,6 @@ struct ProfileAthleteTypePickerView: View {
     @Environment(\.dismiss) private var dismiss
 
     @Binding var selectedAthleteType: ProfileAthleteType?
-    @State private var hasScrolledToSelection = false
 
     private static let sections: [AthleteTypePickerSection] = [
         AthleteTypePickerSection(
@@ -85,39 +84,28 @@ struct ProfileAthleteTypePickerView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 22) {
-                        ForEach(Self.sections) { section in
-                            VStack(alignment: .leading, spacing: 10) {
-                                sectionHeader(section.title, subtitle: section.subtitle)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 22) {
+                    ForEach(Self.sections) { section in
+                        VStack(alignment: .leading, spacing: 10) {
+                            sectionHeader(section.title, subtitle: section.subtitle)
 
-                                LazyVStack(spacing: 8) {
-                                    ForEach(section.options) { option in
-                                        optionRow(option)
-                                            .id(option.id)
-                                    }
+                            LazyVStack(spacing: 8) {
+                                ForEach(section.options) { option in
+                                    optionRow(option)
                                 }
-                                .padding(.top, 2)
                             }
+                            .padding(.top, 2)
                         }
                     }
-                    .padding(.top, 8)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 28)
                 }
-                .scrollIndicators(.hidden)
-                .scrollBounceBehavior(.basedOnSize)
-                .wgjScreenBackground()
-                .task {
-                    guard !hasScrolledToSelection, let selectedAthleteType else { return }
-                    hasScrolledToSelection = true
-                    try? await Task.sleep(for: .milliseconds(120))
-                    withAnimation(.easeInOut(duration: 0.28)) {
-                        proxy.scrollTo(selectedAthleteType.id, anchor: .center)
-                    }
-                }
+                .padding(.top, 8)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 28)
             }
+            .scrollIndicators(.hidden)
+            .scrollBounceBehavior(.basedOnSize)
+            .wgjScreenBackground()
             .wgjNavigationChrome()
             .navigationTitle("Athlete Type")
             .navigationBarTitleDisplayMode(.inline)

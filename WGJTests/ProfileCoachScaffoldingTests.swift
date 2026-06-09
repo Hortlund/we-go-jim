@@ -254,7 +254,6 @@ struct ProfileCoachScaffoldingTests {
     }
 }
 
-@MainActor
 private struct NoopCloudDataDeleter: BrosCloudDataDeleting {
     func deleteCurrentUserData() async throws { }
 }

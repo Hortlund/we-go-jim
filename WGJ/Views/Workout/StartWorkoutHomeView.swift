@@ -36,15 +36,11 @@ struct StartWorkoutHomeView: View {
     @State private var errorMessage = ""
     @State private var showingError = false
 
-    private var templateRepository: TemplateRepository {
-        TemplateRepository(modelContext: modelContext)
+    private var startWorkoutBackgroundStore: AppBackgroundStore {
+        appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
     }
 
-    private var templateTransferService: TemplateTransferService {
-        TemplateTransferService(modelContext: modelContext)
-    }
-
-    private var folders: [TemplateFolder] {
+    private var folders: [StartWorkoutFolderSnapshot] {
         controller.snapshot.folders
     }
 
@@ -186,6 +182,9 @@ struct StartWorkoutHomeView: View {
         }
         .task(id: pendingTemplateFileTaskKey) {
             importPendingTemplateFileIfNeeded()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .wgjTemplateLibraryDidChange)) { _ in
+            markHomeDirtyAndReloadIfActive()
         }
     }
 
@@ -364,7 +363,7 @@ struct StartWorkoutHomeView: View {
         }
     }
 
-    private func templateRow(_ template: WorkoutTemplate) -> some View {
+    private func templateRow(_ template: StartWorkoutTemplateRowSnapshot) -> some View {
         let destinationFolders = folders.filter { $0.id != template.folderID }
 
         return VStack(alignment: .leading, spacing: 12) {
@@ -441,7 +440,7 @@ struct StartWorkoutHomeView: View {
         .padding(14)
     }
 
-    private func templateMetadataRow(_ template: WorkoutTemplate) -> some View {
+    private func templateMetadataRow(_ template: StartWorkoutTemplateRowSnapshot) -> some View {
         HStack(spacing: 12) {
             templateMetadataItem(systemImage: "list.bullet", text: exerciseCountText(for: template))
 
@@ -462,9 +461,9 @@ struct StartWorkoutHomeView: View {
             .minimumScaleFactor(0.8)
     }
 
-    private func startButton(for template: WorkoutTemplate) -> some View {
+    private func startButton(for template: StartWorkoutTemplateRowSnapshot) -> some View {
         Button {
-            selectedTemplatePreview = makeTemplatePreview(for: template)
+            presentTemplatePreview(templateID: template.id)
         } label: {
             Text("Start")
                 .frame(maxWidth: .infinity)
@@ -472,7 +471,7 @@ struct StartWorkoutHomeView: View {
         .buttonStyle(WGJCompactPrimaryButtonStyle())
     }
 
-    private func editButton(for template: WorkoutTemplate) -> some View {
+    private func editButton(for template: StartWorkoutTemplateRowSnapshot) -> some View {
         Button {
             editTemplate(template)
         } label: {
@@ -485,7 +484,7 @@ struct StartWorkoutHomeView: View {
         )
     }
 
-    private func folderActionsMenu(for folder: TemplateFolder) -> some View {
+    private func folderActionsMenu(for folder: StartWorkoutFolderSnapshot) -> some View {
         WGJActionMenuButton("Folder Actions") {
             Button {
                 beginEditing(folder: folder)
@@ -659,7 +658,7 @@ struct StartWorkoutHomeView: View {
         )
     }
 
-    private func editTemplate(_ template: WorkoutTemplate) {
+    private func editTemplate(_ template: StartWorkoutTemplateRowSnapshot) {
         editTemplate(templateID: template.id, folderID: template.folderID)
     }
 
@@ -670,9 +669,8 @@ struct StartWorkoutHomeView: View {
         )
     }
 
-    private func optionalNotes(for template: WorkoutTemplate) -> String? {
-        let trimmed = template.notes.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+    private func optionalNotes(for template: StartWorkoutTemplateRowSnapshot) -> String? {
+        template.notes
     }
 
     private func templateAccessibilityKey(_ templateName: String) -> String {
@@ -683,8 +681,8 @@ struct StartWorkoutHomeView: View {
             .joined(separator: "-")
     }
 
-    private func exerciseCountText(for template: WorkoutTemplate) -> String {
-        let count = (template.exercises ?? []).count
+    private func exerciseCountText(for template: StartWorkoutTemplateRowSnapshot) -> String {
+        let count = template.exerciseCount
         return "\(count) exercise" + (count == 1 ? "" : "s")
     }
 
@@ -751,14 +749,9 @@ struct StartWorkoutHomeView: View {
             )
         }
 
-        let importedLegacy: ActiveWorkoutRuntimeSession?
-        if let appBackgroundStore {
-            importedLegacy = try await appBackgroundStore.performWrite("start-workout.import-legacy-active-session") { backgroundContext in
-                try ActiveWorkoutSessionFactory(modelContext: backgroundContext)
-                    .importLegacyActiveSessionIfNeeded()
-            }
-        } else {
-            importedLegacy = try ActiveWorkoutSessionFactory(modelContext: modelContext)
+        let backgroundStore = startWorkoutBackgroundStore
+        let importedLegacy = try await backgroundStore.performWrite("start-workout.import-legacy-active-session") { backgroundContext in
+            try ActiveWorkoutSessionFactory(modelContext: backgroundContext)
                 .importLegacyActiveSessionIfNeeded()
         }
 
@@ -773,13 +766,8 @@ struct StartWorkoutHomeView: View {
             )
         }
 
-        let runtimePreparation: ActiveWorkoutStartRuntimePreparation
-        if let appBackgroundStore {
-            runtimePreparation = try await appBackgroundStore.perform("start-workout.prepare-runtime-session") { backgroundContext in
-                try Self.prepareActiveWorkoutStart(templateID: templateID, modelContext: backgroundContext)
-            }
-        } else {
-            runtimePreparation = try Self.prepareActiveWorkoutStart(templateID: templateID, modelContext: modelContext)
+        let runtimePreparation = try await backgroundStore.perform("start-workout.prepare-runtime-session") { backgroundContext in
+            try Self.prepareActiveWorkoutStart(templateID: templateID, modelContext: backgroundContext)
         }
 
         try await ActiveWorkoutSnapshotStore.shared.save(
@@ -854,23 +842,31 @@ struct StartWorkoutHomeView: View {
         showingFolderEditor = true
     }
 
-    private func beginEditing(folder: TemplateFolder) {
+    private func beginEditing(folder: StartWorkoutFolderSnapshot) {
         editingFolderID = folder.id
         folderNameDraft = folder.name
         showingFolderEditor = true
     }
 
     private func saveFolderDraft() {
-        do {
-            if let folderID = editingFolderID {
-                try templateRepository.renameFolder(id: folderID, name: folderNameDraft)
-            } else {
-                try templateRepository.createFolder(name: folderNameDraft)
+        let folderID = editingFolderID
+        let name = folderNameDraft
+        Task { @MainActor in
+            do {
+                let backgroundStore = startWorkoutBackgroundStore
+                try await backgroundStore.performWrite("start-workout.folder.save") { backgroundContext in
+                    let repository = TemplateRepository(modelContext: backgroundContext)
+                    if let folderID {
+                        try repository.renameFolder(id: folderID, name: name)
+                    } else {
+                        try repository.createFolder(name: name)
+                    }
+                }
+                showingFolderEditor = false
+                markHomeDirtyAndReloadIfActive()
+            } catch {
+                showError(error)
             }
-            showingFolderEditor = false
-            markHomeDirtyAndReloadIfActive()
-        } catch {
-            showError(error)
         }
     }
 
@@ -879,47 +875,70 @@ struct StartWorkoutHomeView: View {
             return
         }
 
-        do {
-            try templateRepository.moveFolder(id: folderID, toIndex: currentIndex + delta)
-            markHomeDirtyAndReloadIfActive()
-        } catch {
-            showError(error)
+        Task { @MainActor in
+            do {
+                let destinationIndex = currentIndex + delta
+                let backgroundStore = startWorkoutBackgroundStore
+                try await backgroundStore.performWrite("start-workout.folder.move") { backgroundContext in
+                    try TemplateRepository(modelContext: backgroundContext)
+                        .moveFolder(id: folderID, toIndex: destinationIndex)
+                }
+                markHomeDirtyAndReloadIfActive()
+            } catch {
+                showError(error)
+            }
         }
     }
 
-    private func requestFolderDeletion(_ folder: TemplateFolder) {
+    private func requestFolderDeletion(_ folder: StartWorkoutFolderSnapshot) {
         pendingFolderDeletion = StartWorkoutPendingFolderDeletion(
             id: folder.id,
             name: folder.name,
-            templateCount: (folder.templates ?? []).count
+            templateCount: folder.templateCount
         )
     }
 
     private func deleteFolder(_ folderID: UUID) {
-        do {
-            try templateRepository.deleteFolder(id: folderID)
-            pendingFolderDeletion = nil
-            markHomeDirtyAndReloadIfActive()
-        } catch {
-            showError(error)
+        Task { @MainActor in
+            do {
+                let backgroundStore = startWorkoutBackgroundStore
+                try await backgroundStore.performWrite("start-workout.folder.delete") { backgroundContext in
+                    try TemplateRepository(modelContext: backgroundContext).deleteFolder(id: folderID)
+                }
+                pendingFolderDeletion = nil
+                markHomeDirtyAndReloadIfActive()
+            } catch {
+                showError(error)
+            }
         }
     }
 
     private func moveTemplate(templateID: UUID, toFolderID folderID: UUID?) {
-        do {
-            try templateRepository.moveTemplate(id: templateID, toFolderID: folderID)
-            markHomeDirtyAndReloadIfActive()
-        } catch {
-            showError(error)
+        Task { @MainActor in
+            do {
+                let backgroundStore = startWorkoutBackgroundStore
+                try await backgroundStore.performWrite("start-workout.template.move") { backgroundContext in
+                    try TemplateRepository(modelContext: backgroundContext)
+                        .moveTemplate(id: templateID, toFolderID: folderID)
+                }
+                markHomeDirtyAndReloadIfActive()
+            } catch {
+                showError(error)
+            }
         }
     }
 
     private func deleteTemplate(_ templateID: UUID) {
-        do {
-            try templateRepository.deleteTemplate(id: templateID)
-            markHomeDirtyAndReloadIfActive()
-        } catch {
-            showError(error)
+        Task { @MainActor in
+            do {
+                let backgroundStore = startWorkoutBackgroundStore
+                try await backgroundStore.performWrite("start-workout.template.delete") { backgroundContext in
+                    try TemplateRepository(modelContext: backgroundContext).deleteTemplate(id: templateID)
+                }
+                markHomeDirtyAndReloadIfActive()
+            } catch {
+                showError(error)
+            }
         }
     }
 
@@ -970,7 +989,7 @@ struct StartWorkoutHomeView: View {
         await Task.yield()
         guard !Task.isCancelled else { return }
 
-        let currentContentUpdatedAt = currentHomeContentUpdatedAt()
+        let currentContentUpdatedAt = await currentHomeContentUpdatedAt()
         guard force || TimestampedReloadPolicy.shouldReload(
             hasLoaded: hasLoadedSnapshot,
             needsExplicitRefresh: needsExplicitRefresh,
@@ -987,9 +1006,11 @@ struct StartWorkoutHomeView: View {
     @MainActor
     private func reloadHomeSnapshot(contentUpdatedAt: Date?) async {
         do {
-            try WGJPerformance.measure("start-workout.snapshot.reload") {
-                try controller.reload(modelContext: modelContext)
+            let backgroundStore = startWorkoutBackgroundStore
+            let snapshot = try await backgroundStore.perform("start-workout.snapshot.reload") { backgroundContext in
+                try StartWorkoutHomeSnapshotLoader.load(modelContext: backgroundContext)
             }
+            controller.apply(snapshot)
             hasLoadedSnapshot = true
             needsExplicitRefresh = false
             lastLoadedContentUpdatedAt = contentUpdatedAt
@@ -1000,15 +1021,19 @@ struct StartWorkoutHomeView: View {
     }
 
     @MainActor
-    private func currentHomeContentUpdatedAt() -> Date? {
-        let latestFolderUpdate = try? templateRepository.latestFolderUpdatedAt()
-        let latestTemplateUpdate = try? templateRepository.latestTemplateUpdatedAt()
-        let latestCompletedSessionUpdate = try? WorkoutSessionRepository(modelContext: modelContext)
-            .latestCompletedSessionUpdatedAt()
+    private func currentHomeContentUpdatedAt() async -> Date? {
+        let backgroundStore = startWorkoutBackgroundStore
+        return try? await backgroundStore.perform("start-workout.latest-updated-at") { backgroundContext in
+            let templateRepository = TemplateRepository(modelContext: backgroundContext)
+            let latestFolderUpdate = try? templateRepository.latestFolderUpdatedAt()
+            let latestTemplateUpdate = try? templateRepository.latestTemplateUpdatedAt()
+            let latestCompletedSessionUpdate = try? WorkoutSessionRepository(modelContext: backgroundContext)
+                .latestCompletedSessionUpdatedAt()
 
-        return [latestFolderUpdate, latestTemplateUpdate, latestCompletedSessionUpdate]
-            .compactMap { $0 }
-            .max()
+            return [latestFolderUpdate, latestTemplateUpdate, latestCompletedSessionUpdate]
+                .compactMap { $0 }
+                .max()
+        }
     }
 
     private func showError(_ error: Error) {
@@ -1056,7 +1081,11 @@ struct StartWorkoutHomeView: View {
             }
 
             do {
-                let importingCount = try templateTransferService.importedTemplateCount(from: fileURL)
+                let backgroundStore = startWorkoutBackgroundStore
+                let importingCount = try await backgroundStore.perform("start-workout.template.import-count") { backgroundContext in
+                    try TemplateTransferService(modelContext: backgroundContext)
+                        .importedTemplateCount(from: fileURL)
+                }
                 guard ProAccessPolicy.canImportTemplates(
                     currentTemplateCount: controller.snapshot.templates.count,
                     importingCount: importingCount,
@@ -1066,20 +1095,18 @@ struct StartWorkoutHomeView: View {
                     return
                 }
 
-                let importResult: TemplateTransferImportResult
-                if let appBackgroundStore {
-                    importResult = try await appBackgroundStore.performWrite("start-workout.template.import") { backgroundContext in
-                        try TemplateTransferService(modelContext: backgroundContext)
-                            .importTransfer(from: fileURL)
-                    }
-                } else {
-                    importResult = try templateTransferService.importTransfer(from: fileURL)
+                let importResult = try await backgroundStore.performWrite("start-workout.template.import") { backgroundContext in
+                    try TemplateTransferService(modelContext: backgroundContext)
+                        .importTransfer(from: fileURL)
                 }
 
-                try controller.reload(modelContext: modelContext)
+                let snapshot = try await backgroundStore.perform("start-workout.snapshot.reload") { backgroundContext in
+                    try StartWorkoutHomeSnapshotLoader.load(modelContext: backgroundContext)
+                }
+                controller.apply(snapshot)
                 hasLoadedSnapshot = true
                 needsExplicitRefresh = false
-                lastLoadedContentUpdatedAt = currentHomeContentUpdatedAt()
+                lastLoadedContentUpdatedAt = await currentHomeContentUpdatedAt()
                 lastRefreshAt = .now
                 applyImportedTransfer(importResult)
             } catch {
@@ -1089,41 +1116,52 @@ struct StartWorkoutHomeView: View {
     }
 
     @MainActor
-    private func makeTemplatePreview(for template: WorkoutTemplate) -> StartWorkoutTemplatePreview {
-        let componentRotationResolver = TemplateExerciseComponentRotationResolver(modelContext: modelContext)
-        var componentResolutionByExerciseID: [UUID: ExerciseComponentRotationResolution] = [:]
-
-        for exercise in (template.exercises ?? []) {
-            guard let resolution = try? componentRotationResolver.resolution(
-                for: template,
-                exercise: exercise
-            ) else {
-                continue
+    private func presentTemplatePreview(templateID: UUID) {
+        Task { @MainActor in
+            do {
+                guard let preview = try await makeTemplatePreview(templateID: templateID) else {
+                    selectedTemplatePreview = nil
+                    return
+                }
+                selectedTemplatePreview = preview
+            } catch {
+                showError(error)
             }
-
-            componentResolutionByExerciseID[exercise.id] = resolution
         }
-
-        return StartWorkoutTemplatePreview(
-            template: template,
-            componentResolutionByExerciseID: componentResolutionByExerciseID
-        )
     }
 
-    @MainActor
-    private func selectImportedTemplatePreview(templateID: UUID) {
-        guard let importedTemplate = try? templateRepository.template(id: templateID) else {
-            selectedTemplatePreview = nil
-            return
-        }
+    private func makeTemplatePreview(templateID: UUID) async throws -> StartWorkoutTemplatePreview? {
+        let backgroundStore = startWorkoutBackgroundStore
+        return try await backgroundStore.perform("start-workout.template.preview") { backgroundContext in
+            guard let template = try TemplateRepository(modelContext: backgroundContext).template(id: templateID) else {
+                return nil
+            }
 
-        selectedTemplatePreview = makeTemplatePreview(for: importedTemplate)
+            let componentRotationResolver = TemplateExerciseComponentRotationResolver(modelContext: backgroundContext)
+            var componentResolutionByExerciseID: [UUID: ExerciseComponentRotationResolution] = [:]
+
+            for exercise in (template.exercises ?? []) {
+                guard let resolution = try? componentRotationResolver.resolution(
+                    for: template,
+                    exercise: exercise
+                ) else {
+                    continue
+                }
+
+                componentResolutionByExerciseID[exercise.id] = resolution
+            }
+
+            return StartWorkoutTemplatePreview(
+                template: template,
+                componentResolutionByExerciseID: componentResolutionByExerciseID
+            )
+        }
     }
 
     @MainActor
     private func refreshSelectedTemplatePreviewIfNeeded(templateID: UUID) {
         guard selectedTemplatePreview?.templateID == templateID else { return }
-        selectImportedTemplatePreview(templateID: templateID)
+        presentTemplatePreview(templateID: templateID)
     }
 
     @MainActor
@@ -1132,7 +1170,7 @@ struct StartWorkoutHomeView: View {
         case .template(let templateID):
             expandedFolderIDs[TemplateRepository.unfiledFolderID] = true
             persistExpandedFolderState()
-            selectImportedTemplatePreview(templateID: templateID)
+            presentTemplatePreview(templateID: templateID)
         case .folder(let folderID):
             expandedFolderIDs[folderID] = true
             persistExpandedFolderState()
@@ -1163,24 +1201,15 @@ struct StartWorkoutHomeView: View {
 
         Task { @MainActor in
             do {
-                let fileURL: URL
-                if let appBackgroundStore {
-                    fileURL = try await appBackgroundStore.performWrite("start-workout.template.export") { backgroundContext in
-                        let transferService = TemplateTransferService(modelContext: backgroundContext)
+                let backgroundStore = startWorkoutBackgroundStore
+                let fileURL = try await backgroundStore.performWrite("start-workout.template.export") { backgroundContext in
+                    let transferService = TemplateTransferService(modelContext: backgroundContext)
 
-                        switch request.target {
-                        case .template(let templateID):
-                            return try transferService.writeExportFile(templateID: templateID, format: format)
-                        case .folder(let folderID):
-                            return try transferService.writeExportFile(folderID: folderID, format: format)
-                        }
-                    }
-                } else {
                     switch request.target {
                     case .template(let templateID):
-                        fileURL = try templateTransferService.writeExportFile(templateID: templateID, format: format)
+                        return try transferService.writeExportFile(templateID: templateID, format: format)
                     case .folder(let folderID):
-                        fileURL = try templateTransferService.writeExportFile(folderID: folderID, format: format)
+                        return try transferService.writeExportFile(folderID: folderID, format: format)
                     }
                 }
                 shareSheetItem = TemplateTransferShareSheetItem(fileURL: fileURL)
@@ -1205,7 +1234,7 @@ struct StartWorkoutHomeView: View {
         StartWorkoutFolderExpansionPersistence.save(expandedFolderIDs)
     }
 
-    private func folder(for folderID: UUID) -> TemplateFolder? {
+    private func folder(for folderID: UUID) -> StartWorkoutFolderSnapshot? {
         folders.first(where: { $0.id == folderID })
     }
 
@@ -1236,17 +1265,48 @@ struct StartWorkoutHomeView: View {
     }
 }
 
-struct StartWorkoutHomeSnapshot {
-    let folders: [TemplateFolder]
-    let templates: [WorkoutTemplate]
-    let completedSessions: [WorkoutSession]
+nonisolated struct StartWorkoutFolderSnapshot: Identifiable, Equatable, Sendable {
+    let id: UUID
+    let name: String
+    let sortOrder: Int
+    let templateCount: Int
+
+    init(folder: TemplateFolder) {
+        id = folder.id
+        name = folder.name
+        sortOrder = folder.sortOrder
+        templateCount = (folder.templates ?? []).count
+    }
+}
+
+nonisolated struct StartWorkoutTemplateRowSnapshot: Identifiable, Equatable, Sendable {
+    let id: UUID
+    let folderID: UUID
+    let name: String
+    let notes: String?
+    let sortOrder: Int
+    let exerciseCount: Int
+
+    init(template: WorkoutTemplate) {
+        id = template.id
+        folderID = template.folderID
+        name = template.name
+        let trimmedNotes = template.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        notes = trimmedNotes.isEmpty ? nil : trimmedNotes
+        sortOrder = template.sortOrder
+        exerciseCount = (template.exercises ?? []).count
+    }
+}
+
+nonisolated struct StartWorkoutHomeSnapshot: Sendable {
+    let folders: [StartWorkoutFolderSnapshot]
+    let templates: [StartWorkoutTemplateRowSnapshot]
     let sections: [StartWorkoutTemplateSection]
     let lastCompletedByTemplateID: [UUID: Date]
 
     static let empty = StartWorkoutHomeSnapshot(
         folders: [],
         templates: [],
-        completedSessions: [],
         sections: [],
         lastCompletedByTemplateID: [:]
     )
@@ -1257,12 +1317,12 @@ struct StartWorkoutHomeSnapshot {
 final class StartWorkoutHomeController {
     var snapshot = StartWorkoutHomeSnapshot.empty
 
-    func reload(modelContext: ModelContext) throws {
-        snapshot = try StartWorkoutHomeSnapshotLoader.load(modelContext: modelContext)
+    func apply(_ snapshot: StartWorkoutHomeSnapshot) {
+        self.snapshot = snapshot
     }
 }
 
-enum StartWorkoutHomeSnapshotLoader {
+nonisolated enum StartWorkoutHomeSnapshotLoader {
     static func load(modelContext: ModelContext) throws -> StartWorkoutHomeSnapshot {
         let templateRepository = TemplateRepository(modelContext: modelContext)
         let sessionRepository = WorkoutSessionRepository(modelContext: modelContext)
@@ -1274,26 +1334,30 @@ enum StartWorkoutHomeSnapshotLoader {
     }
 }
 
-enum StartWorkoutHomeSnapshotBuilder {
+nonisolated enum StartWorkoutHomeSnapshotBuilder {
     static func build(
         folders: [TemplateFolder],
         templates: [WorkoutTemplate],
         completedSessions: [WorkoutSession]
     ) -> StartWorkoutHomeSnapshot {
-        let orderedTemplates = orderTemplates(templates, folders: folders)
-        let sections = buildSections(folders: folders, templates: orderedTemplates)
+        let folderSnapshots = folders.map(StartWorkoutFolderSnapshot.init(folder:))
+        let templateSnapshots = templates.map(StartWorkoutTemplateRowSnapshot.init(template:))
+        let orderedTemplates = orderTemplates(templateSnapshots, folders: folderSnapshots)
+        let sections = buildSections(folders: folderSnapshots, templates: orderedTemplates)
         let lastCompletedByTemplateID = buildLastCompletedByTemplateID(completedSessions)
 
         return StartWorkoutHomeSnapshot(
-            folders: folders,
+            folders: folderSnapshots,
             templates: orderedTemplates,
-            completedSessions: completedSessions,
             sections: sections,
             lastCompletedByTemplateID: lastCompletedByTemplateID
         )
     }
 
-    private static func orderTemplates(_ templates: [WorkoutTemplate], folders: [TemplateFolder]) -> [WorkoutTemplate] {
+    private static func orderTemplates(
+        _ templates: [StartWorkoutTemplateRowSnapshot],
+        folders: [StartWorkoutFolderSnapshot]
+    ) -> [StartWorkoutTemplateRowSnapshot] {
         let folderOrderByID = Dictionary(
             folders.enumerated().map { ($0.element.id, $0.offset) },
             uniquingKeysWith: { existing, _ in existing }
@@ -1317,8 +1381,8 @@ enum StartWorkoutHomeSnapshotBuilder {
     }
 
     private static func buildSections(
-        folders: [TemplateFolder],
-        templates: [WorkoutTemplate]
+        folders: [StartWorkoutFolderSnapshot],
+        templates: [StartWorkoutTemplateRowSnapshot]
     ) -> [StartWorkoutTemplateSection] {
         let templatesByFolderID = Dictionary(grouping: templates, by: \.folderID)
         var sections: [StartWorkoutTemplateSection] = []
@@ -1373,12 +1437,12 @@ enum StartWorkoutHomeSnapshotBuilder {
     }
 }
 
-struct StartWorkoutTemplateSection: Identifiable {
+nonisolated struct StartWorkoutTemplateSection: Identifiable, Equatable, Sendable {
     let id: UUID
     let title: String
     let systemImage: String
     let folderIDForCreation: UUID?
-    let templates: [WorkoutTemplate]
+    let templates: [StartWorkoutTemplateRowSnapshot]
 
     var isUnfiled: Bool {
         folderIDForCreation == nil
@@ -1497,9 +1561,8 @@ private struct StartWorkoutInlineActionLabel: View {
     }
 }
 
-@MainActor
-struct StartWorkoutTemplatePreview: Identifiable, Equatable {
-    struct CardioBlock: Identifiable, Equatable {
+nonisolated struct StartWorkoutTemplatePreview: Identifiable, Equatable, Sendable {
+    struct CardioBlock: Identifiable, Equatable, Sendable {
         let id: UUID
         let phase: WorkoutCardioPhase
         let exerciseName: String
@@ -1523,7 +1586,7 @@ struct StartWorkoutTemplatePreview: Identifiable, Equatable {
         }
     }
 
-    struct Exercise: Identifiable, Equatable {
+    struct Exercise: Identifiable, Equatable, Sendable {
         let id: UUID
         let sortOrder: Int
         let exerciseName: String

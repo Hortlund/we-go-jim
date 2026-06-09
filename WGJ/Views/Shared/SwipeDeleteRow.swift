@@ -182,11 +182,18 @@ struct SwipeDeleteRow<Content: View>: View {
             offset = -max(420, rowWidth)
         }
 
-        Task { @MainActor in
+        Task.detached(priority: .utility) {
             try? await Task.sleep(for: .milliseconds(reduceMotion ? 20 : 170))
-            onDelete()
-            isRemoving = false
-            offset = 0
+            guard !Task.isCancelled else { return }
+            await self.completeDismissRowAfterDelay()
         }
+    }
+
+    @MainActor
+    private func completeDismissRowAfterDelay() {
+        guard !Task.isCancelled else { return }
+        onDelete()
+        isRemoving = false
+        offset = 0
     }
 }

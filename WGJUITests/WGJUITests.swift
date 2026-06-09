@@ -117,7 +117,10 @@ final class WGJUITests: XCTestCase {
 
     @MainActor
     func testExercisesSearchAndFilterSmoke() throws {
-        let app = launchApp(mode: .localInMemory)
+        let app = launchApp(
+            mode: .localInMemory,
+            launchArguments: ["UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT"]
+        )
 
         tapTab("Exercises", in: app)
 
@@ -285,7 +288,10 @@ final class WGJUITests: XCTestCase {
 
     @MainActor
     func testExerciseDetailShowsMuscleMap() throws {
-        let app = launchApp(mode: .localInMemory)
+        let app = launchApp(
+            mode: .localInMemory,
+            launchArguments: ["UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT"]
+        )
 
         tapTab("Exercises", in: app)
 
@@ -1530,7 +1536,10 @@ final class WGJUITests: XCTestCase {
 
     @MainActor
     func testExerciseCatalogAddAttachesToMinimizedActiveWorkout() throws {
-        let app = launchApp()
+        let app = launchApp(
+            mode: .localInMemory,
+            launchArguments: ["UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT"]
+        )
 
         tapTab("Start Workout", in: app)
         let startButton = app.buttons["start-workout-empty-button"]
@@ -1548,7 +1557,8 @@ final class WGJUITests: XCTestCase {
         searchField.tap()
         searchField.typeText("bench")
 
-        let addButton = identifiedElement("exercise-catalog-add-button", in: app)
+        XCTAssertTrue(app.staticTexts["Barbell Bench Press"].waitForExistence(timeout: 5))
+        let addButton = app.buttons["Add Barbell Bench Press"]
         XCTAssertTrue(addButton.waitForExistence(timeout: 15))
         addButton.tap()
 
@@ -1790,30 +1800,40 @@ final class WGJUITests: XCTestCase {
 
     @MainActor
     func testWorkoutFinishShowsCelebrationBeforeHistory() throws {
-        let app = launchApp()
+        let app = launchApp(
+            mode: .localInMemory,
+            launchArguments: ["UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT"],
+            launchEnvironment: [
+                "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                    name: "Finish Celebration Smoke",
+                    notes: "Verify finish routes through celebration before History.",
+                    exercises: [
+                        templatePayloadExercise(
+                            catalogExerciseUUID: "finish-celebration-bench",
+                            exerciseNameSnapshot: "Bench Press",
+                            categorySnapshot: "Chest",
+                            muscleSummarySnapshot: "Chest",
+                            targetRepMin: 6,
+                            targetRepMax: 8,
+                            restSeconds: 120,
+                            sets: [
+                                templatePayloadSet(
+                                    targetReps: 8,
+                                    targetWeight: 100,
+                                    loadUnit: "kg",
+                                    restSeconds: 120,
+                                    isWarmup: false
+                                ),
+                            ]
+                        ),
+                    ]
+                ),
+            ]
+        )
 
-        tapTab("Start Workout", in: app)
+        startPreviewedTemplateWorkout(in: app)
 
-        let startButton = app.buttons["start-workout-empty-button"]
-        XCTAssertTrue(startButton.waitForExistence(timeout: 5))
-        startButton.tap()
-
-        let addExerciseButton = app.buttons["active-workout-empty-add-exercise-button"]
-        XCTAssertTrue(addExerciseButton.waitForExistence(timeout: 5))
-        addExerciseButton.tap()
-
-        let searchField = app.textFields["exercises-search-field"]
-        XCTAssertTrue(searchField.waitForExistence(timeout: 5))
-        searchField.tap()
-        searchField.typeText("bench")
-
-        let selectExerciseButton = identifiedElement("exercise-picker-select-button", in: app)
-        XCTAssertTrue(selectExerciseButton.waitForExistence(timeout: 15))
-        selectExerciseButton.tap()
-
-        let completeSetButton = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
-        ).firstMatch
+        let completeSetButton = identifiedElement("workout-set-0-completion-button", in: app)
         XCTAssertTrue(completeSetButton.waitForExistence(timeout: 5))
         completeSetButton.tap()
 
@@ -1865,9 +1885,7 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(selectExerciseButton.waitForExistence(timeout: 15))
         selectExerciseButton.tap()
 
-        let completeSetButton = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
-        ).firstMatch
+        let completeSetButton = activeWorkoutSetCompletionButton(in: app)
         XCTAssertTrue(completeSetButton.waitForExistence(timeout: 5))
         completeSetButton.tap()
 
@@ -2053,31 +2071,38 @@ final class WGJUITests: XCTestCase {
 
     @MainActor
     func testActiveWorkoutRestTimerStartsOnSetCompletion() throws {
-        let app = launchApp()
+        let app = launchApp(mode: .localInMemory, launchArguments: [
+            "UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT",
+        ], launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Rest Timer Workout",
+                notes: "Rest timer should start after completing a working set.",
+                exercises: [
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "rest-timer-bench",
+                        exerciseNameSnapshot: "Bench Press",
+                        categorySnapshot: "Chest",
+                        muscleSummarySnapshot: "Chest",
+                        targetRepMin: 6,
+                        targetRepMax: 8,
+                        restSeconds: 120,
+                        sets: [
+                            templatePayloadSet(
+                                targetReps: 6,
+                                targetWeight: 100,
+                                loadUnit: "kg",
+                                restSeconds: 120,
+                                isWarmup: false
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+        ])
 
-        tapTab("Start Workout", in: app)
+        startPreviewedTemplateWorkout(in: app)
 
-        let startButton = app.buttons["start-workout-empty-button"]
-        XCTAssertTrue(startButton.waitForExistence(timeout: 5))
-        startButton.tap()
-
-        let addExerciseButton = app.buttons["active-workout-empty-add-exercise-button"]
-        XCTAssertTrue(addExerciseButton.waitForExistence(timeout: 5))
-        addExerciseButton.tap()
-
-        let searchField = app.textFields["exercises-search-field"]
-        XCTAssertTrue(searchField.waitForExistence(timeout: 5))
-        searchField.tap()
-        searchField.typeText("bench")
-
-        let selectExerciseButton = identifiedElement("exercise-picker-select-button", in: app)
-        XCTAssertTrue(selectExerciseButton.waitForExistence(timeout: 15))
-        selectExerciseButton.tap()
-        expandFirstActiveWorkoutExerciseIfNeeded(in: app)
-
-        let completeSetButton = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
-        ).firstMatch
+        let completeSetButton = activeWorkoutSetCompletionButton(in: app)
         XCTAssertTrue(completeSetButton.waitForExistence(timeout: 5))
         completeSetButton.tap()
 
@@ -2180,15 +2205,14 @@ final class WGJUITests: XCTestCase {
         let completeSetButton = identifiedElement("workout-set-0-completion-button", in: app)
         XCTAssertTrue(completeSetButton.waitForExistence(timeout: 5))
         revealElement(completeSetButton, in: app)
-        XCTAssertEqual(completeSetButton.label, "Complete Set + Rest 1:30")
+        XCTAssertEqual(completeSetButton.label, "Complete set")
         XCTAssertFalse(app.buttons["Complete Set + Rest 2:00"].exists)
 
         completeSetButton.tap()
 
         let restTimer = identifiedElement("active-workout-rest-timer", in: app)
         XCTAssertTrue(restTimer.waitForExistence(timeout: 5))
-        XCTAssertTrue(restTimer.label.contains("1:"))
-        XCTAssertFalse(restTimer.label.contains("2:"))
+        assertRestTimerShowsNinetySecondRest(restTimer)
     }
 
     @MainActor
@@ -2354,9 +2378,7 @@ final class WGJUITests: XCTestCase {
             hideKeyboardButton.tap()
         }
 
-        let completeSetButton = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
-        ).firstMatch
+        let completeSetButton = activeWorkoutSetCompletionButton(in: app)
         XCTAssertTrue(completeSetButton.waitForExistence(timeout: 5))
         completeSetButton.tap()
 
@@ -2454,9 +2476,7 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(selectExerciseButton.waitForExistence(timeout: 15))
         selectExerciseButton.tap()
 
-        let completeSetButton = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
-        ).firstMatch
+        let completeSetButton = activeWorkoutSetCompletionButton(in: app)
         XCTAssertTrue(completeSetButton.waitForExistence(timeout: 5))
         completeSetButton.tap()
 
@@ -2487,9 +2507,7 @@ final class WGJUITests: XCTestCase {
 
         startPreviewedTemplateWorkout(in: app)
 
-        let firstCompleteSetButton = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
-        ).firstMatch
+        let firstCompleteSetButton = activeWorkoutSetCompletionButton(in: app)
         XCTAssertTrue(firstCompleteSetButton.waitForExistence(timeout: 5))
         firstCompleteSetButton.tap()
 
@@ -2549,9 +2567,7 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(weightGhost.waitForExistence(timeout: 5))
         XCTAssertTrue(repsGhost.waitForExistence(timeout: 5))
 
-        let secondCompleteSetButton = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
-        ).firstMatch
+        let secondCompleteSetButton = activeWorkoutSetCompletionButton(in: app)
         XCTAssertTrue(secondCompleteSetButton.waitForExistence(timeout: 5))
         secondCompleteSetButton.tap()
 
@@ -2606,9 +2622,7 @@ final class WGJUITests: XCTestCase {
 
         startPreviewedTemplateWorkout(in: app)
 
-        let firstCompleteSetButton = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
-        ).firstMatch
+        let firstCompleteSetButton = activeWorkoutSetCompletionButton(in: app)
         XCTAssertTrue(firstCompleteSetButton.waitForExistence(timeout: 5))
         firstCompleteSetButton.tap()
 
@@ -2656,9 +2670,7 @@ final class WGJUITests: XCTestCase {
         repsField.tap()
         repsField.typeText("6")
 
-        let completeSetButton = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
-        ).firstMatch
+        let completeSetButton = activeWorkoutSetCompletionButton(in: app)
         XCTAssertTrue(completeSetButton.waitForExistence(timeout: 5))
         completeSetButton.tap()
 
@@ -2703,9 +2715,7 @@ final class WGJUITests: XCTestCase {
 
         startPreviewedTemplateWorkout(in: app)
 
-        let firstCompleteSetButton = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
-        ).firstMatch
+        let firstCompleteSetButton = activeWorkoutSetCompletionButton(in: app)
         XCTAssertTrue(firstCompleteSetButton.waitForExistence(timeout: 5))
         firstCompleteSetButton.tap()
 
@@ -2748,9 +2758,7 @@ final class WGJUITests: XCTestCase {
         weightField.tap()
         weightField.typeText("95")
 
-        let completeSetButton = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
-        ).firstMatch
+        let completeSetButton = activeWorkoutSetCompletionButton(in: app)
         XCTAssertTrue(completeSetButton.waitForExistence(timeout: 5))
         completeSetButton.tap()
 
@@ -2808,9 +2816,7 @@ final class WGJUITests: XCTestCase {
             hideKeyboardButton.tap()
         }
 
-        let firstCompleteSetButton = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
-        ).firstMatch
+        let firstCompleteSetButton = activeWorkoutSetCompletionButton(in: app)
         XCTAssertTrue(firstCompleteSetButton.waitForExistence(timeout: 5))
         firstCompleteSetButton.tap()
 
@@ -2839,9 +2845,7 @@ final class WGJUITests: XCTestCase {
         weightField.tap()
         clearTextField(weightField, replacement: "95")
 
-        let completeSetButton = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
-        ).firstMatch
+        let completeSetButton = activeWorkoutSetCompletionButton(in: app)
         XCTAssertTrue(completeSetButton.waitForExistence(timeout: 5))
         completeSetButton.tap()
 
@@ -2877,9 +2881,7 @@ final class WGJUITests: XCTestCase {
 
         startPreviewedTemplateWorkout(in: app)
 
-        let firstCompleteSetButton = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
-        ).firstMatch
+        let firstCompleteSetButton = activeWorkoutSetCompletionButton(in: app)
         XCTAssertTrue(firstCompleteSetButton.waitForExistence(timeout: 5))
         firstCompleteSetButton.tap()
 
@@ -2949,9 +2951,7 @@ final class WGJUITests: XCTestCase {
 
         startPreviewedTemplateWorkout(in: app)
 
-        let firstCompleteSetButton = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
-        ).firstMatch
+        let firstCompleteSetButton = activeWorkoutSetCompletionButton(in: app)
         XCTAssertTrue(firstCompleteSetButton.waitForExistence(timeout: 5))
         firstCompleteSetButton.tap()
 
@@ -3021,9 +3021,7 @@ final class WGJUITests: XCTestCase {
 
         startPreviewedTemplateWorkout(in: app)
 
-        let firstCompleteSetButton = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
-        ).firstMatch
+        let firstCompleteSetButton = activeWorkoutSetCompletionButton(in: app)
         XCTAssertTrue(firstCompleteSetButton.waitForExistence(timeout: 5))
         firstCompleteSetButton.tap()
 
@@ -3064,10 +3062,7 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(secondRepsGhost.waitForExistence(timeout: 5))
         XCTAssertTrue(secondUseLastButton.waitForExistence(timeout: 5))
 
-        let completeSetButtons = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
-        )
-        let secondCompleteSetButton = completeSetButtons.element(boundBy: 1)
+        let secondCompleteSetButton = activeWorkoutSetCompletionButton(in: app, setIndex: 1)
         revealElement(secondCompleteSetButton, in: app)
         XCTAssertTrue(secondCompleteSetButton.waitForExistence(timeout: 5))
         secondCompleteSetButton.tap()
@@ -3110,9 +3105,7 @@ final class WGJUITests: XCTestCase {
 
         startPreviewedTemplateWorkout(in: app)
 
-        let firstCompleteSetButton = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
-        ).firstMatch
+        let firstCompleteSetButton = activeWorkoutSetCompletionButton(in: app)
         XCTAssertTrue(firstCompleteSetButton.waitForExistence(timeout: 5))
         firstCompleteSetButton.tap()
 
@@ -3152,9 +3145,7 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(selectExerciseButton.waitForExistence(timeout: 15))
         selectExerciseButton.tap()
 
-        let secondCompleteSetButton = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
-        ).firstMatch
+        let secondCompleteSetButton = activeWorkoutSetCompletionButton(in: app)
         XCTAssertTrue(secondCompleteSetButton.waitForExistence(timeout: 5))
         secondCompleteSetButton.tap()
 
@@ -3614,32 +3605,36 @@ final class WGJUITests: XCTestCase {
 
     @MainActor
     func testActiveWorkoutNotesPersistAcrossMinimizeRestore() throws {
-        let app = launchApp(launchEnvironment: [
-            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
-                name: "Minimize Workout Notes",
-                notes: "Original reusable note",
-                exercises: [
-                    templatePayloadExercise(
-                        catalogExerciseUUID: "template-notes-minimize-bench",
-                        exerciseNameSnapshot: "Bench Press",
-                        categorySnapshot: "Chest",
-                        muscleSummarySnapshot: "Chest",
-                        targetRepMin: 6,
-                        targetRepMax: 8,
-                        restSeconds: 120,
-                        sets: [
-                            templatePayloadSet(
-                                targetReps: 6,
-                                targetWeight: 100,
-                                loadUnit: "kg",
-                                restSeconds: 120,
-                                isWarmup: false
-                            ),
-                        ]
-                    ),
-                ]
-            ),
-        ])
+        let app = launchApp(
+            mode: .localInMemory,
+            launchArguments: ["UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT"],
+            launchEnvironment: [
+                "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                    name: "Minimize Workout Notes",
+                    notes: "Original reusable note",
+                    exercises: [
+                        templatePayloadExercise(
+                            catalogExerciseUUID: "template-notes-minimize-bench",
+                            exerciseNameSnapshot: "Bench Press",
+                            categorySnapshot: "Chest",
+                            muscleSummarySnapshot: "Chest",
+                            targetRepMin: 6,
+                            targetRepMax: 8,
+                            restSeconds: 120,
+                            sets: [
+                                templatePayloadSet(
+                                    targetReps: 6,
+                                    targetWeight: 100,
+                                    loadUnit: "kg",
+                                    restSeconds: 120,
+                                    isWarmup: false
+                                ),
+                            ]
+                        ),
+                    ]
+                ),
+            ]
+        )
 
         startPreviewedTemplateWorkout(in: app)
 
@@ -3837,9 +3832,7 @@ final class WGJUITests: XCTestCase {
             "Next Wrist Curl"
         )
 
-        let completeSetButton = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
-        ).firstMatch
+        let completeSetButton = activeWorkoutSetCompletionButton(in: app)
         XCTAssertTrue(completeSetButton.waitForExistence(timeout: 5))
         completeSetButton.tap()
 
@@ -3944,9 +3937,7 @@ final class WGJUITests: XCTestCase {
                 .waitForExistence(timeout: 5)
         )
 
-        let completeSetButton = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH %@", "Complete Set")
-        ).firstMatch
+        let completeSetButton = activeWorkoutSetCompletionButton(in: app)
         XCTAssertTrue(completeSetButton.waitForExistence(timeout: 5))
         completeSetButton.tap()
 
@@ -4368,6 +4359,44 @@ final class WGJUITests: XCTestCase {
         app.descendants(matching: .any)
             .matching(identifier: "workout-set-0-completion-button")
             .count
+    }
+
+    private func activeWorkoutSetCompletionButton(
+        in app: XCUIApplication,
+        setIndex: Int = 0
+    ) -> XCUIElement {
+        identifiedElement("workout-set-\(setIndex)-completion-button", in: app)
+    }
+
+    private func assertRestTimerShowsNinetySecondRest(
+        _ restTimer: XCUIElement,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let timerText = [
+            restTimer.label,
+            restTimer.value as? String,
+        ]
+        .compactMap(\.self)
+        .joined(separator: " ")
+        .lowercased()
+        let showsNinetySecondRest = timerText.contains("1:")
+            || timerText.contains("1 minute")
+            || timerText.contains("90")
+            || timerText.contains("89")
+            || timerText.contains("88")
+        XCTAssertTrue(
+            showsNinetySecondRest,
+            "Expected rest timer to show a 90-second rest, got '\(timerText)'.",
+            file: file,
+            line: line
+        )
+        XCTAssertFalse(
+            timerText.contains("2:") || timerText.contains("2 minute") || timerText.contains("120"),
+            "Expected rest timer not to use the stale 120-second set rest, got '\(timerText)'.",
+            file: file,
+            line: line
+        )
     }
 
     private func makeTemplateOpenPayloadBase64(

@@ -28,12 +28,8 @@ struct FolderDetailView: View {
     @State private var errorMessage = ""
     @State private var showingError = false
 
-    private var repository: TemplateRepository {
-        TemplateRepository(modelContext: modelContext)
-    }
-
-    private var templateTransferService: TemplateTransferService {
-        TemplateTransferService(modelContext: modelContext)
+    private var folderBackgroundStore: AppBackgroundStore {
+        appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
     }
 
     init(folderID: UUID, folderName: String) {
@@ -306,18 +302,31 @@ struct FolderDetailView: View {
     }
 
     private func deleteTemplate(_ templateID: UUID) {
-        do {
-            try repository.deleteTemplate(id: templateID)
-        } catch {
-            showError(error)
+        let backgroundStore = folderBackgroundStore
+        Task { @MainActor in
+            do {
+                try await backgroundStore.performWrite("folder-detail.template.delete") { backgroundContext in
+                    try TemplateRepository(modelContext: backgroundContext).deleteTemplate(id: templateID)
+                }
+            } catch {
+                showError(error)
+            }
         }
     }
 
     private func moveTemplate(templateID: UUID, toFolderID destinationFolderID: UUID?) {
-        do {
-            try repository.moveTemplate(id: templateID, toFolderID: destinationFolderID)
-        } catch {
-            showError(error)
+        let backgroundStore = folderBackgroundStore
+        Task { @MainActor in
+            do {
+                try await backgroundStore.performWrite("folder-detail.template.move") { backgroundContext in
+                    try TemplateRepository(modelContext: backgroundContext).moveTemplate(
+                        id: templateID,
+                        toFolderID: destinationFolderID
+                    )
+                }
+            } catch {
+                showError(error)
+            }
         }
     }
 
@@ -379,14 +388,10 @@ struct FolderDetailView: View {
 
         Task { @MainActor in
             do {
-                let fileURL: URL
-                if let appBackgroundStore {
-                    fileURL = try await appBackgroundStore.performWrite("folder-detail.folder.export") { backgroundContext in
-                        try TemplateTransferService(modelContext: backgroundContext)
-                            .writeExportFile(folderID: folderID, format: format)
-                    }
-                } else {
-                    fileURL = try templateTransferService.writeExportFile(folderID: folderID, format: format)
+                let backgroundStore = folderBackgroundStore
+                let fileURL = try await backgroundStore.performWrite("folder-detail.folder.export") { backgroundContext in
+                    try TemplateTransferService(modelContext: backgroundContext)
+                        .writeExportFile(folderID: folderID, format: format)
                 }
 
                 shareSheetItem = TemplateTransferShareSheetItem(fileURL: fileURL)

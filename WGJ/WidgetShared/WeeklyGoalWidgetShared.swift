@@ -178,7 +178,13 @@ nonisolated enum WeeklyGoalWidgetContentPolicy {
 }
 
 nonisolated enum WeeklyGoalWidgetDeepLink {
-    static let profileWeeklyGoalURL = URL(string: "wgj://profile/weekly-goal")!
+    static let profileWeeklyGoalURL: URL = {
+        var components = URLComponents()
+        components.scheme = "wgj"
+        components.host = "profile"
+        components.path = "/weekly-goal"
+        return components.url ?? URL(fileURLWithPath: "/profile/weekly-goal")
+    }()
 }
 
 nonisolated enum WeeklyGoalWidgetDescriptor {

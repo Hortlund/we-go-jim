@@ -59,6 +59,93 @@ struct BrosViewModelTests {
     }
 
     @Test
+    func brosViewPassesBackgroundStoreToRefreshEntrypoints() throws {
+        let source = try String(contentsOf: brosViewSourceURL(), encoding: .utf8)
+        let activeHydrationStart = try #require(source.range(of: "private func hydrateActiveSnapshot"))
+        let activeHydrationRemainder = source[activeHydrationStart.lowerBound...]
+        let fetchStart = try #require(source.range(of: "private func fetchSnapshot("))
+        let fetchRemainder = source[fetchStart.lowerBound...]
+        let fetchEnd = try #require(fetchRemainder.range(of: "\n    nonisolated private static func fetchAccountStatus"))
+        let fetchMethodSource = String(fetchRemainder[..<fetchEnd.lowerBound])
+
+        #expect(source.contains("@Environment(\\.appBackgroundStore) private var appBackgroundStore"))
+        #expect(source.contains("private var brosBackgroundStore: AppBackgroundStore"))
+        #expect(source.contains("appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)"))
+        #expect(!source.contains("backgroundStore: appBackgroundStore"))
+        #expect(!source.contains("pendingOutboxHydration"))
+        #expect(!source.contains("hydrateSnapshotAfterOutboxFlush"))
+        #expect(source.components(separatedBy: "backgroundStore: brosBackgroundStore").count - 1 >= 11)
+        #expect(fetchMethodSource.contains("backgroundStore.performAsync(\"bros.snapshot-refresh\")"))
+        #expect(activeHydrationRemainder.contains("backgroundStore: backgroundStore"))
+    }
+
+    @Test
+    func cloudKitBrosServiceOperationsAreNotMainActorIsolated() throws {
+        let source = try String(contentsOf: brosSocialServiceSourceURL(), encoding: .utf8)
+        #expect(!source.contains("@MainActor\nprotocol BrosSocialService"))
+
+        let classStart = try #require(source.range(of: "nonisolated final class CloudKitBrosSocialService"))
+        let classSource = source[classStart.lowerBound...]
+        let operations = [
+            "fetchSnapshot",
+            "createCircle",
+            "joinCircle",
+            "updateCircleMemberLimit",
+            "leaveCircle",
+            "deleteCurrentUserData",
+            "removeMember",
+            "setReaction",
+        ]
+
+        for operation in operations {
+            let start = try #require(classSource.range(of: "func \(operation)"))
+            let prefix = classSource[..<start.lowerBound]
+            let lastMainActor = prefix.range(of: "@MainActor", options: .backwards)
+            let lastFunction = prefix.range(of: "\n    func ", options: .backwards)
+
+            if let lastMainActor, let lastFunction {
+                #expect(lastMainActor.lowerBound < lastFunction.lowerBound)
+            }
+        }
+    }
+
+    @Test
+    func brosDelayedRefreshAndFeedbackTasksDoNotSleepOnMainActor() throws {
+        let source = try String(contentsOf: brosViewSourceURL(), encoding: .utf8)
+        let feedbackStart = try #require(source.range(of: "private func showMemberLimitSaveSuccess"))
+        let feedbackRemainder = source[feedbackStart.lowerBound...]
+        let feedbackEnd = try #require(feedbackRemainder.range(of: "\n    private func optimisticSnapshotByTogglingReaction"))
+        let feedbackSource = String(feedbackRemainder[..<feedbackEnd.lowerBound])
+        let activationStart = try #require(source.range(of: "private func scheduleActivationRefreshIfNeeded"))
+        let activationRemainder = source[activationStart.lowerBound...]
+        let activationEnd = try #require(activationRemainder.range(of: "\n    @MainActor\n    private func handleRuntimeCloudErrorChanged"))
+        let activationSource = String(activationRemainder[..<activationEnd.lowerBound])
+
+        #expect(feedbackSource.contains("memberLimitFeedbackTask = Task.detached(priority: .utility)"))
+        #expect(activationSource.contains("activationRefreshTask = Task.detached(priority: .utility)"))
+        #expect(!feedbackSource.contains("memberLimitFeedbackTask = Task { @MainActor"))
+        #expect(!activationSource.contains("activationRefreshTask = Task { @MainActor"))
+    }
+
+    @Test
+    func brosProductionMutationsUseBackgroundStoreOperations() throws {
+        let source = try String(contentsOf: brosViewSourceURL(), encoding: .utf8)
+        for operation in [
+            "bros.create-circle",
+            "bros.join-circle",
+            "bros.update-member-limit",
+            "bros.leave-circle",
+            "bros.remove-member",
+            "bros.set-reaction",
+            "bros.outbox-flush",
+            "bros.reaction-subscription-sync",
+        ] {
+            #expect(source.contains("backgroundStore.performAsync(\"\(operation)\")"))
+        }
+        #expect(!source.contains("let service = try await MainActor.run { try self.service(modelContext: modelContext) }"))
+    }
+
+    @Test
     func warmSnapshotIsClearedWhenRuntimeCloudBecomesUnavailable() async throws {
         let context = try makeInMemoryContext()
         let service = StubBrosSocialService()
@@ -79,6 +166,35 @@ struct BrosViewModelTests {
 
         #expect(viewModel.state == .unavailable("iCloud is unavailable for this session."))
         #expect(service.fetchSnapshotCallCount == 0)
+    }
+
+    @Test
+    func runtimeCloudDropPreservesAuthoritativeActiveSnapshot() async throws {
+        let context = try makeInMemoryContext()
+        let service = StubBrosSocialService()
+        let snapshot = makeSnapshot(displayName: "Atlas")
+        service.snapshot = snapshot
+        let viewModel = BrosViewModel(
+            accountStatusProvider: { .available },
+            serviceFactory: { _ in service }
+        )
+
+        await viewModel.refresh(
+            modelContext: context,
+            cloudSyncEnabled: true,
+            cloudSyncErrorDescription: nil,
+            force: true
+        )
+        await viewModel.refresh(
+            modelContext: context,
+            cloudSyncEnabled: false,
+            cloudSyncErrorDescription: "iCloud is temporarily unavailable.",
+            force: true
+        )
+
+        #expect(viewModel.state == .active(snapshot))
+        #expect(viewModel.errorMessage == nil)
+        #expect(service.fetchSnapshotCallCount == 1)
     }
 
     @Test
@@ -175,6 +291,58 @@ struct BrosViewModelTests {
 
         #expect(service.fetchSnapshotCallCount == 1)
         #expect(viewModel.state == .active(refreshedSnapshot))
+    }
+
+    @Test
+    func refreshChecksAccountStatusAwayFromMainThread() async throws {
+        let context = try makeInMemoryContext()
+        let service = StubBrosSocialService()
+        let recorder = LockedThreadRecorder()
+        let refreshedSnapshot = makeSnapshot(displayName: "Custom Bro")
+        service.snapshot = refreshedSnapshot
+
+        let viewModel = BrosViewModel(
+            accountStatusProvider: {
+                recorder.record(isRunningOnMainThread())
+                return .available
+            },
+            serviceFactory: { _ in service }
+        )
+
+        await viewModel.refresh(
+            modelContext: context,
+            cloudSyncEnabled: true,
+            cloudSyncErrorDescription: nil,
+            force: true
+        )
+
+        #expect(recorder.recordedValues == [false])
+        #expect(viewModel.state == .active(refreshedSnapshot))
+    }
+
+    @Test
+    func refreshSkipsServiceCreationWhenAccountStatusIsUnavailable() async throws {
+        let context = try makeInMemoryContext()
+        let service = StubBrosSocialService()
+        var serviceFactoryCallCount = 0
+        let viewModel = BrosViewModel(
+            accountStatusProvider: { .unavailable(.noAccount) },
+            serviceFactory: { _ in
+                serviceFactoryCallCount += 1
+                return service
+            }
+        )
+
+        await viewModel.refresh(
+            modelContext: context,
+            cloudSyncEnabled: true,
+            cloudSyncErrorDescription: nil,
+            force: true
+        )
+
+        #expect(serviceFactoryCallCount == 0)
+        #expect(service.fetchSnapshotCallCount == 0)
+        #expect(viewModel.state == .unavailable("Sign into iCloud to create or join a bro circle. The rest of the app still works locally."))
     }
 
     @Test
@@ -704,6 +872,46 @@ struct BrosViewModelTests {
     }
 }
 
+private nonisolated func isRunningOnMainThread() -> Bool {
+    Thread.isMainThread
+}
+
+private final class LockedThreadRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [Bool] = []
+
+    var recordedValues: [Bool] {
+        lock.lock()
+        defer { lock.unlock() }
+        return values
+    }
+
+    func record(_ isMainThread: Bool) {
+        lock.lock()
+        values.append(isMainThread)
+        lock.unlock()
+    }
+}
+
+private func brosViewSourceURL() -> URL {
+    URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("WGJ")
+        .appendingPathComponent("Views")
+        .appendingPathComponent("Bros")
+        .appendingPathComponent("BrosView.swift")
+}
+
+private func brosSocialServiceSourceURL() -> URL {
+    URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("WGJ")
+        .appendingPathComponent("Services")
+        .appendingPathComponent("BrosSocialService.swift")
+}
+
 nonisolated private final class StubBrosSocialService: BrosSocialService, BrosSocialMaintenanceService {
     var didRefreshLocalMembershipState = false
     var didFlushOutbox = false
@@ -722,7 +930,6 @@ nonisolated private final class StubBrosSocialService: BrosSocialService, BrosSo
         didRefreshLocalMembershipState = true
     }
 
-    @MainActor
     func fetchSnapshot() async throws -> BrosFeedSnapshot? {
         fetchSnapshotCallCount += 1
         if shouldSuspendFetch {
@@ -740,31 +947,24 @@ nonisolated private final class StubBrosSocialService: BrosSocialService, BrosSo
         fetchContinuation = nil
     }
 
-    @MainActor
     func createCircle(memberLimit: Int) async throws -> BrosFeedSnapshot {
         return try #require(snapshot)
     }
 
-    @MainActor
     func joinCircle(inviteCode: String, maximumMemberCount: Int?) async throws -> BrosFeedSnapshot {
         return try #require(snapshot)
     }
 
-    @MainActor
     func updateCircleMemberLimit(_ memberLimit: Int) async throws -> BrosFeedSnapshot {
         return try #require(snapshot)
     }
 
-    @MainActor
     func leaveCircle() async throws { }
 
-    @MainActor
     func deleteCurrentUserData() async throws { }
 
-    @MainActor
     func removeMember(membershipID: String) async throws { }
 
-    @MainActor
     func setReaction(eventID: String, kind: BroReactionKind) async throws {
         setReactionEventIDs.append(eventID)
         setReactionKinds.append(kind)

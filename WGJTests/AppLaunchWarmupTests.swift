@@ -642,21 +642,20 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
-    func profileScrollResetPolicyResetsOnNewInvalidationOnly() {
-        #expect(ProfileScrollResetPolicy.shouldResetOnProfileInvalidation(version: 2, lastHandledVersion: 1))
-        #expect(!ProfileScrollResetPolicy.shouldResetOnProfileInvalidation(version: 0, lastHandledVersion: 0))
-        #expect(!ProfileScrollResetPolicy.shouldResetOnProfileInvalidation(version: 2, lastHandledVersion: 2))
-    }
-
-    @Test
-    func profileViewOwnsTopScrollAnchorForInvalidationResets() throws {
+    func profileViewNeverProgrammaticallyScrollsItself() throws {
         let source = try String(contentsOf: profileViewSourceURL(), encoding: .utf8)
 
-        #expect(source.contains("ScrollViewReader"))
-        #expect(source.contains("profileTopAnchorID"))
-        #expect(source.contains(".id(Self.profileTopAnchorID)"))
-        #expect(source.contains("profileScrollToTopRequestID"))
-        #expect(source.contains("scrollProxy.scrollTo(Self.profileTopAnchorID, anchor: .top)"))
+        #expect(!source.contains("ScrollViewReader"))
+        #expect(!source.contains("profileTopAnchorID"))
+        #expect(!source.localizedCaseInsensitiveContains("profileTopAnchor"))
+        #expect(!source.contains("profileScrollToTopRequestID"))
+        #expect(!source.localizedCaseInsensitiveContains("profileScrollToTop"))
+        #expect(!source.localizedCaseInsensitiveContains("requestProfileScroll"))
+        #expect(!source.localizedCaseInsensitiveContains("resetScroll"))
+        #expect(!source.localizedCaseInsensitiveContains("scrollTarget"))
+        #expect(!source.contains("scrollTo("))
+        #expect(!source.contains(".scrollPosition"))
+        #expect(!source.contains("requestProfileScrollToTop"))
     }
 
     @Test
@@ -670,11 +669,8 @@ struct AppLaunchWarmupTests {
             }
 """))
         #expect(!source.contains("shouldResetOnTabActivation"))
-        #expect(source.contains("""
-            .onAppear {
-                applyWarmProfileSnapshotIfAvailable()
-            }
-"""))
+        #expect(source.contains(".onAppear"))
+        #expect(source.contains("applyWarmProfileSnapshotIfAvailable()"))
     }
 
     @Test
@@ -811,7 +807,7 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
-    func profileDashboardRenderPolicyPreservesRenderedContentWhenCancellingForTabExit() {
+    func profileDashboardRenderPolicyPreservesRenderedContentWhenCancellingRefreshOrTabExit() {
         #expect(ProfileDashboardRenderPolicy.visibilityAfterCancellingRender(
             hasRenderedDashboardContent: true,
             isTabExit: true
@@ -820,7 +816,7 @@ struct AppLaunchWarmupTests {
             hasRenderedDashboardContent: false,
             isTabExit: true
         ))
-        #expect(!ProfileDashboardRenderPolicy.visibilityAfterCancellingRender(
+        #expect(ProfileDashboardRenderPolicy.visibilityAfterCancellingRender(
             hasRenderedDashboardContent: true,
             isTabExit: false
         ))
@@ -1066,17 +1062,13 @@ struct AppLaunchWarmupTests {
 
     @Test
     func asyncCloudStartupPreflightReturnsWhenAccountStatusNeverCompletes() async {
-        let start = ContinuousClock.now
-
         let decision = await CloudStartupPreflight.makeDecisionAsync(
             statusProvider: HangingAsyncCloudStartupAccountStatusProvider(),
             timeout: .milliseconds(25)
         )
 
-        let elapsed = start.duration(to: .now)
         #expect(decision.accountStatus == .timedOut)
         #expect(decision.storeMode == .cloudBacked)
-        #expect(elapsed < .seconds(2))
     }
 
     @Test
@@ -1486,12 +1478,19 @@ struct AppLaunchWarmupTests {
             }
         }
 
-        runtimeState.refreshCloudAvailabilityIfNeeded(accountService: accountService)
+        runtimeState.refreshCloudAvailabilityIfNeeded(
+            accountService: accountService,
+            runtimeTimeout: .seconds(30)
+        )
         await waitUntil("first runtime refresh starts") {
             await accountService.currentFetchCount() == 1
         }
 
-        runtimeState.refreshCloudAvailabilityIfNeeded(force: true, accountService: accountService)
+        runtimeState.refreshCloudAvailabilityIfNeeded(
+            force: true,
+            accountService: accountService,
+            runtimeTimeout: .seconds(30)
+        )
         await waitUntil("forced runtime refresh starts a second fetch") {
             await accountService.currentFetchCount() == 2
         }

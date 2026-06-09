@@ -55,17 +55,16 @@ final class BrosViewModel {
     private var hasLoaded = false
     private var isSnapshotRefreshInFlight = false
     @ObservationIgnored private var snapshotRefreshWaiters: [CheckedContinuation<Void, Never>] = []
-    private var pendingOutboxHydration = false
     private var pendingReactionEventIDs: Set<String> = []
     private var outboxFlushTask: Task<Void, Never>?
     private var memberLimitFeedbackTask: Task<Void, Never>?
     private(set) var lastSuccessfulSnapshotRefreshAt: Date?
     private let snapshotFreshnessInterval: TimeInterval = 60
-    private let accountStatusProvider: @MainActor () async -> AccountStatus
+    private let accountStatusProvider: @Sendable () async -> AccountStatus
     private let serviceFactory: @MainActor (ModelContext) -> (any BrosSocialService & BrosSocialMaintenanceService)?
 
     init(
-        accountStatusProvider: @escaping @MainActor () async -> AccountStatus = {
+        accountStatusProvider: @escaping @Sendable () async -> AccountStatus = {
             await AccountStatusService().fetchAccountStatus()
         },
         serviceFactory: @escaping @MainActor (ModelContext) -> (any BrosSocialService & BrosSocialMaintenanceService)? = { modelContext in
@@ -78,6 +77,7 @@ final class BrosViewModel {
 
     func loadIfNeeded(
         modelContext: ModelContext,
+        backgroundStore: AppBackgroundStore? = nil,
         cloudSyncEnabled: Bool,
         cloudSyncErrorDescription: String?
     ) async {
@@ -86,6 +86,7 @@ final class BrosViewModel {
         _ = cloudSyncErrorDescription
         await refresh(
             modelContext: modelContext,
+            backgroundStore: backgroundStore,
             cloudSyncEnabled: cloudSyncEnabled,
             cloudSyncErrorDescription: cloudSyncErrorDescription,
             force: true
@@ -138,6 +139,7 @@ final class BrosViewModel {
 
     func refresh(
         modelContext: ModelContext,
+        backgroundStore: AppBackgroundStore? = nil,
         cloudSyncEnabled: Bool,
         cloudSyncErrorDescription: String?,
         force: Bool = false
@@ -168,15 +170,8 @@ final class BrosViewModel {
             resumeSnapshotRefreshWaiters()
         }
 
-        guard serviceFactory(modelContext) != nil else {
-            if !hasRenderableState {
-                state = .unavailable(BrosSocialServiceError.unavailable.localizedDescription)
-            }
-            return
-        }
-
         let shouldReplaceCurrentStateWithLoading = !hasRenderableState
-        let accountStatus = await accountStatusProvider()
+        let accountStatus = await Self.fetchAccountStatus(using: accountStatusProvider)
         switch accountStatus {
         case .available:
             break
@@ -192,17 +187,26 @@ final class BrosViewModel {
             return
         }
 
+        guard serviceFactory(modelContext) != nil else {
+            if !hasRenderableState {
+                state = .unavailable(BrosSocialServiceError.unavailable.localizedDescription)
+            }
+            return
+        }
+
         if shouldReplaceCurrentStateWithLoading {
             state = .loading
         }
-        scheduleOutboxFlush(modelContext: modelContext)
+        scheduleOutboxFlush(
+            modelContext: modelContext,
+            backgroundStore: backgroundStore
+        )
 
         do {
-            let snapshot = try await Task { [weak self] () throws -> BrosFeedSnapshot? in
-                guard let self else { return nil }
-                let service = try await MainActor.run { try self.service(modelContext: modelContext) }
-                return try await service.fetchSnapshot()
-            }.value
+            let snapshot = try await fetchSnapshot(
+                modelContext: modelContext,
+                backgroundStore: backgroundStore
+            )
 
             try await applyFetchedSnapshot(
                 snapshot,
@@ -213,11 +217,6 @@ final class BrosViewModel {
             if !hasRenderableState {
                 state = .unavailable(error.localizedDescription)
             }
-        }
-
-        if pendingOutboxHydration {
-            pendingOutboxHydration = false
-            await hydrateSnapshotAfterOutboxFlush(modelContext: modelContext)
         }
     }
 
@@ -235,28 +234,48 @@ final class BrosViewModel {
         waiters.forEach { $0.resume() }
     }
 
-    func createCircle(modelContext: ModelContext) async {
+    func createCircle(
+        modelContext: ModelContext,
+        backgroundStore: AppBackgroundStore? = nil
+    ) async {
         clearMemberLimitSaveFeedback()
+        let memberLimit = circleMemberLimit
         await runMutation(.createCircle) { [self] in
-            let service = try service(modelContext: modelContext)
-            let snapshot = try await service.createCircle(memberLimit: self.circleMemberLimit)
+            let snapshot = try await createCircleSnapshot(
+                memberLimit: memberLimit,
+                modelContext: modelContext,
+                backgroundStore: backgroundStore
+            )
             await self.primeAvatarThumbnails(in: snapshot)
             self.state = .active(snapshot)
             self.markCurrentSnapshotAuthoritative()
             self.joinCode = ""
             self.circleMemberLimit = BrosSocialRules.defaultMemberLimit
-            self.scheduleReactionNotificationSync(modelContext: modelContext)
-            self.scheduleBackgroundHydration(modelContext: modelContext)
+            self.scheduleReactionNotificationSync(
+                modelContext: modelContext,
+                backgroundStore: backgroundStore
+            )
+            self.scheduleBackgroundHydration(
+                modelContext: modelContext,
+                backgroundStore: backgroundStore
+            )
         }
     }
 
-    func updateCircleMemberLimit(_ memberLimit: Int, modelContext: ModelContext) async {
+    func updateCircleMemberLimit(
+        _ memberLimit: Int,
+        modelContext: ModelContext,
+        backgroundStore: AppBackgroundStore? = nil
+    ) async {
         clearMemberLimitSaveFeedback()
         memberLimitSaveState = .saving(memberLimit)
 
         let didUpdate = await runMutation(.updateCircleMemberLimit) { [self] in
-            let service = try service(modelContext: modelContext)
-            let snapshot = try await service.updateCircleMemberLimit(memberLimit)
+            let snapshot = try await updateCircleMemberLimitSnapshot(
+                memberLimit,
+                modelContext: modelContext,
+                backgroundStore: backgroundStore
+            )
             await self.primeAvatarThumbnails(in: snapshot)
             self.state = .active(snapshot)
             self.markCurrentSnapshotAuthoritative()
@@ -274,38 +293,67 @@ final class BrosViewModel {
         }
     }
 
-    func joinCircle(modelContext: ModelContext, maximumMemberCount: Int? = nil) async {
+    func joinCircle(
+        modelContext: ModelContext,
+        backgroundStore: AppBackgroundStore? = nil,
+        maximumMemberCount: Int? = nil
+    ) async {
         clearMemberLimitSaveFeedback()
+        let inviteCode = joinCode
         await runMutation(.joinCircle) { [self] in
-            let service = try service(modelContext: modelContext)
-            let snapshot = try await service
-                .joinCircle(inviteCode: self.joinCode, maximumMemberCount: maximumMemberCount)
+            let snapshot = try await joinCircleSnapshot(
+                inviteCode: inviteCode,
+                maximumMemberCount: maximumMemberCount,
+                modelContext: modelContext,
+                backgroundStore: backgroundStore
+            )
             await self.primeAvatarThumbnails(in: snapshot)
             self.state = .active(snapshot)
             self.markCurrentSnapshotAuthoritative()
             self.joinCode = ""
-            self.scheduleReactionNotificationSync(modelContext: modelContext)
-            self.scheduleBackgroundHydration(modelContext: modelContext)
+            self.scheduleReactionNotificationSync(
+                modelContext: modelContext,
+                backgroundStore: backgroundStore
+            )
+            self.scheduleBackgroundHydration(
+                modelContext: modelContext,
+                backgroundStore: backgroundStore
+            )
         }
     }
 
-    func leaveCircle(modelContext: ModelContext) async {
+    func leaveCircle(
+        modelContext: ModelContext,
+        backgroundStore: AppBackgroundStore? = nil
+    ) async {
         clearMemberLimitSaveFeedback()
         await runMutation(.leaveCircle) { [self] in
-            let service = try service(modelContext: modelContext)
-            try await service.leaveCircle()
+            try await leaveCircleInService(
+                modelContext: modelContext,
+                backgroundStore: backgroundStore
+            )
             self.state = .onboarding
             self.joinCode = ""
             self.circleMemberLimit = BrosSocialRules.defaultMemberLimit
-            self.scheduleReactionNotificationSync(modelContext: modelContext)
+            self.scheduleReactionNotificationSync(
+                modelContext: modelContext,
+                backgroundStore: backgroundStore
+            )
         }
     }
 
-    func removeMember(membershipID: String, modelContext: ModelContext) async {
+    func removeMember(
+        membershipID: String,
+        modelContext: ModelContext,
+        backgroundStore: AppBackgroundStore? = nil
+    ) async {
         clearMemberLimitSaveFeedback()
         await runMutation(.removeMember) { [self] in
-            let service = try service(modelContext: modelContext)
-            try await service.removeMember(membershipID: membershipID)
+            try await removeMemberInService(
+                membershipID: membershipID,
+                modelContext: modelContext,
+                backgroundStore: backgroundStore
+            )
             if case .active(let snapshot) = self.state {
                 let updatedSnapshot = BrosFeedSnapshot(
                     circle: snapshot.circle,
@@ -317,11 +365,19 @@ final class BrosViewModel {
                 self.state = .active(updatedSnapshot)
                 self.markCurrentSnapshotAuthoritative()
             }
-            self.scheduleBackgroundHydration(modelContext: modelContext)
+            self.scheduleBackgroundHydration(
+                modelContext: modelContext,
+                backgroundStore: backgroundStore
+            )
         }
     }
 
-    func toggleReaction(eventID: String, emoji: BroReactionKind, modelContext: ModelContext) async {
+    func toggleReaction(
+        eventID: String,
+        emoji: BroReactionKind,
+        modelContext: ModelContext,
+        backgroundStore: AppBackgroundStore? = nil
+    ) async {
         clearMemberLimitSaveFeedback()
         guard !pendingReactionEventIDs.contains(eventID) else { return }
         guard case .active(let snapshot) = state else { return }
@@ -337,16 +393,44 @@ final class BrosViewModel {
         state = .active(optimisticSnapshot)
         pendingReactionEventIDs.insert(eventID)
 
-        Task { @MainActor [weak self] in
+        if let backgroundStore {
+            Task.detached(priority: .utility) { [weak self] in
+                do {
+                    let snapshot = try await Self.setReactionAndFetchSnapshot(
+                        eventID: eventID,
+                        kind: emoji,
+                        backgroundStore: backgroundStore
+                    )
+                    guard !Task.isCancelled else { return }
+                    await self?.applyReactionSnapshot(
+                        snapshot,
+                        eventID: eventID
+                    )
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    await self?.restoreReactionState(
+                        eventID: eventID,
+                        originalReactions: originalReactions,
+                        error: error
+                    )
+                }
+            }
+            return
+        }
+
+        Task { [weak self] in
             guard let self else { return }
 
             do {
-                let service = try self.service(modelContext: modelContext)
-                try await service.setReaction(eventID: eventID, kind: emoji)
+                let snapshot = try await self.setReactionAndFetchSnapshot(
+                    eventID: eventID,
+                    kind: emoji,
+                    modelContext: modelContext,
+                    backgroundStore: backgroundStore
+                )
                 self.pendingReactionEventIDs.remove(eventID)
                 self.lastSuccessfulSnapshotRefreshAt = nil
                 guard !Task.isCancelled else { return }
-                let snapshot = try await service.fetchSnapshot()
                 try await self.applyFetchedSnapshot(
                     snapshot,
                     preservingPendingReactions: true
@@ -365,20 +449,28 @@ final class BrosViewModel {
 
     func refreshIfStale(
         modelContext: ModelContext,
+        backgroundStore: AppBackgroundStore? = nil,
         cloudSyncEnabled: Bool,
         cloudSyncErrorDescription: String?
     ) async {
         await refresh(
             modelContext: modelContext,
+            backgroundStore: backgroundStore,
             cloudSyncEnabled: cloudSyncEnabled,
             cloudSyncErrorDescription: cloudSyncErrorDescription,
             force: false
         )
     }
 
-    func refreshActiveSnapshotIfNeeded(modelContext: ModelContext) async {
+    func refreshActiveSnapshotIfNeeded(
+        modelContext: ModelContext,
+        backgroundStore: AppBackgroundStore? = nil
+    ) async {
         guard pendingAction == nil, pendingReactionEventIDs.isEmpty, !isSnapshotRefreshInFlight else { return }
-        await hydrateActiveSnapshot(modelContext: modelContext)
+        await hydrateActiveSnapshot(
+            modelContext: modelContext,
+            backgroundStore: backgroundStore
+        )
     }
 
     func isReactionPending(eventID: String) -> Bool {
@@ -403,26 +495,41 @@ final class BrosViewModel {
         }
     }
 
-    private func scheduleBackgroundHydration(modelContext: ModelContext) {
+    private func scheduleBackgroundHydration(
+        modelContext: ModelContext,
+        backgroundStore: AppBackgroundStore?
+    ) {
         Task { @MainActor [weak self] in
-            await self?.refreshActiveSnapshotIfNeeded(modelContext: modelContext)
+            await self?.refreshActiveSnapshotIfNeeded(
+                modelContext: modelContext,
+                backgroundStore: backgroundStore
+            )
         }
     }
 
-    private func scheduleReactionNotificationSync(modelContext: ModelContext) {
-        Task { [weak self] in
-            guard let self else { return }
-
+    private func scheduleReactionNotificationSync(
+        modelContext: ModelContext,
+        backgroundStore: AppBackgroundStore?
+    ) {
+        Task {
             do {
-                let service = try await MainActor.run { try self.service(modelContext: modelContext) }
-                try await service.syncReactionNotificationSubscription()
+                let backgroundStore = backgroundStore ?? AppBackgroundStore(container: modelContext.container)
+                try await backgroundStore.performAsync("bros.reaction-subscription-sync") { backgroundContext in
+                    guard let service = CloudKitBrosSocialService.makeIfContainerAvailable(modelContext: backgroundContext) else {
+                        throw BrosSocialServiceError.unavailable
+                    }
+                    try await service.syncReactionNotificationSubscription()
+                }
             } catch {
                 // Leave the current screen state alone if notification sync fails.
             }
         }
     }
 
-    private func scheduleOutboxFlush(modelContext: ModelContext) {
+    private func scheduleOutboxFlush(
+        modelContext: ModelContext,
+        backgroundStore: AppBackgroundStore?
+    ) {
         guard outboxFlushTask == nil else { return }
 
         outboxFlushTask = Task { [weak self] in
@@ -434,45 +541,23 @@ final class BrosViewModel {
             }
 
             do {
-                let service = try await MainActor.run { try self.service(modelContext: modelContext) }
-                await service.flushOutbox()
-                guard !Task.isCancelled else { return }
-                let shouldDeferHydration = await MainActor.run { self.isSnapshotRefreshInFlight }
-                guard !shouldDeferHydration else {
-                    await MainActor.run { self.pendingOutboxHydration = true }
-                    return
+                let backgroundStore = backgroundStore ?? AppBackgroundStore(container: modelContext.container)
+                try await backgroundStore.performAsync("bros.outbox-flush") { backgroundContext in
+                    guard let service = CloudKitBrosSocialService.makeIfContainerAvailable(modelContext: backgroundContext) else {
+                        throw BrosSocialServiceError.unavailable
+                    }
+                    await service.flushOutbox()
                 }
-                await self.hydrateSnapshotAfterOutboxFlush(modelContext: modelContext)
             } catch {
                 // Preserve the current screen state if background sync fails.
             }
         }
     }
 
-    private func hydrateSnapshotAfterOutboxFlush(modelContext: ModelContext) async {
-        guard pendingAction == nil, pendingReactionEventIDs.isEmpty, !isSnapshotRefreshInFlight else { return }
-
-        isSnapshotRefreshInFlight = true
-        defer { isSnapshotRefreshInFlight = false }
-
-        let task = Task { [weak self] in
-            guard let self else { return }
-            do {
-                let service = try await MainActor.run { try self.service(modelContext: modelContext) }
-                let snapshot = try await service.fetchSnapshot()
-                try await self.applyFetchedSnapshot(
-                    snapshot,
-                    preservingPendingReactions: false
-                )
-            } catch {
-                // Keep the current state if the follow-up hydration fails.
-            }
-        }
-
-        await task.value
-    }
-
-    private func hydrateActiveSnapshot(modelContext: ModelContext) async {
+    private func hydrateActiveSnapshot(
+        modelContext: ModelContext,
+        backgroundStore: AppBackgroundStore?
+    ) async {
         guard case .active = state else { return }
         guard pendingReactionEventIDs.isEmpty, !isSnapshotRefreshInFlight else { return }
         guard shouldRefreshSnapshot(force: false) else { return }
@@ -483,8 +568,10 @@ final class BrosViewModel {
         let task = Task { [weak self] in
             guard let self else { return }
             do {
-                let service = try await MainActor.run { try self.service(modelContext: modelContext) }
-                let snapshot = try await service.fetchSnapshot()
+                let snapshot = try await self.fetchSnapshot(
+                    modelContext: modelContext,
+                    backgroundStore: backgroundStore
+                )
                 try await self.applyFetchedSnapshot(
                     snapshot,
                     preservingPendingReactions: true
@@ -526,14 +613,200 @@ final class BrosViewModel {
         return service
     }
 
+    private func fetchSnapshot(
+        modelContext: ModelContext,
+        backgroundStore: AppBackgroundStore?
+    ) async throws -> BrosFeedSnapshot? {
+        if let backgroundStore {
+            return try await backgroundStore.performAsync("bros.snapshot-refresh") { backgroundContext in
+                guard let service = CloudKitBrosSocialService.makeIfContainerAvailable(modelContext: backgroundContext) else {
+                    throw BrosSocialServiceError.unavailable
+                }
+                return try await service.fetchSnapshot()
+            }
+        }
+
+        let service = try service(modelContext: modelContext)
+        return try await service.fetchSnapshot()
+    }
+
+    private func createCircleSnapshot(
+        memberLimit: Int,
+        modelContext: ModelContext,
+        backgroundStore: AppBackgroundStore?
+    ) async throws -> BrosFeedSnapshot {
+        if let backgroundStore {
+            return try await backgroundStore.performAsync("bros.create-circle") { backgroundContext in
+                guard let service = CloudKitBrosSocialService.makeIfContainerAvailable(modelContext: backgroundContext) else {
+                    throw BrosSocialServiceError.unavailable
+                }
+                return try await service.createCircle(memberLimit: memberLimit)
+            }
+        }
+
+        let service = try service(modelContext: modelContext)
+        return try await service.createCircle(memberLimit: memberLimit)
+    }
+
+    private func joinCircleSnapshot(
+        inviteCode: String,
+        maximumMemberCount: Int?,
+        modelContext: ModelContext,
+        backgroundStore: AppBackgroundStore?
+    ) async throws -> BrosFeedSnapshot {
+        if let backgroundStore {
+            return try await backgroundStore.performAsync("bros.join-circle") { backgroundContext in
+                guard let service = CloudKitBrosSocialService.makeIfContainerAvailable(modelContext: backgroundContext) else {
+                    throw BrosSocialServiceError.unavailable
+                }
+                return try await service.joinCircle(
+                    inviteCode: inviteCode,
+                    maximumMemberCount: maximumMemberCount
+                )
+            }
+        }
+
+        let service = try service(modelContext: modelContext)
+        return try await service.joinCircle(
+            inviteCode: inviteCode,
+            maximumMemberCount: maximumMemberCount
+        )
+    }
+
+    private func updateCircleMemberLimitSnapshot(
+        _ memberLimit: Int,
+        modelContext: ModelContext,
+        backgroundStore: AppBackgroundStore?
+    ) async throws -> BrosFeedSnapshot {
+        if let backgroundStore {
+            return try await backgroundStore.performAsync("bros.update-member-limit") { backgroundContext in
+                guard let service = CloudKitBrosSocialService.makeIfContainerAvailable(modelContext: backgroundContext) else {
+                    throw BrosSocialServiceError.unavailable
+                }
+                return try await service.updateCircleMemberLimit(memberLimit)
+            }
+        }
+
+        let service = try service(modelContext: modelContext)
+        return try await service.updateCircleMemberLimit(memberLimit)
+    }
+
+    private func leaveCircleInService(
+        modelContext: ModelContext,
+        backgroundStore: AppBackgroundStore?
+    ) async throws {
+        if let backgroundStore {
+            try await backgroundStore.performAsync("bros.leave-circle") { backgroundContext in
+                guard let service = CloudKitBrosSocialService.makeIfContainerAvailable(modelContext: backgroundContext) else {
+                    throw BrosSocialServiceError.unavailable
+                }
+                try await service.leaveCircle()
+            }
+            return
+        }
+
+        let service = try service(modelContext: modelContext)
+        try await service.leaveCircle()
+    }
+
+    private func removeMemberInService(
+        membershipID: String,
+        modelContext: ModelContext,
+        backgroundStore: AppBackgroundStore?
+    ) async throws {
+        if let backgroundStore {
+            try await backgroundStore.performAsync("bros.remove-member") { backgroundContext in
+                guard let service = CloudKitBrosSocialService.makeIfContainerAvailable(modelContext: backgroundContext) else {
+                    throw BrosSocialServiceError.unavailable
+                }
+                try await service.removeMember(membershipID: membershipID)
+            }
+            return
+        }
+
+        let service = try service(modelContext: modelContext)
+        try await service.removeMember(membershipID: membershipID)
+    }
+
+    private func setReactionAndFetchSnapshot(
+        eventID: String,
+        kind: BroReactionKind,
+        modelContext: ModelContext,
+        backgroundStore: AppBackgroundStore?
+    ) async throws -> BrosFeedSnapshot? {
+        if let backgroundStore {
+            return try await backgroundStore.performAsync("bros.set-reaction") { backgroundContext in
+                guard let service = CloudKitBrosSocialService.makeIfContainerAvailable(modelContext: backgroundContext) else {
+                    throw BrosSocialServiceError.unavailable
+                }
+                try await service.setReaction(eventID: eventID, kind: kind)
+                return try await service.fetchSnapshot()
+            }
+        }
+
+        let service = try service(modelContext: modelContext)
+        try await service.setReaction(eventID: eventID, kind: kind)
+        return try await service.fetchSnapshot()
+    }
+
+    nonisolated private static func setReactionAndFetchSnapshot(
+        eventID: String,
+        kind: BroReactionKind,
+        backgroundStore: AppBackgroundStore
+    ) async throws -> BrosFeedSnapshot? {
+        try await backgroundStore.performAsync("bros.set-reaction") { backgroundContext in
+            guard let service = CloudKitBrosSocialService.makeIfContainerAvailable(modelContext: backgroundContext) else {
+                throw BrosSocialServiceError.unavailable
+            }
+            try await service.setReaction(eventID: eventID, kind: kind)
+            return try await service.fetchSnapshot()
+        }
+    }
+
+    private func applyReactionSnapshot(
+        _ snapshot: BrosFeedSnapshot?,
+        eventID: String
+    ) async {
+        pendingReactionEventIDs.remove(eventID)
+        lastSuccessfulSnapshotRefreshAt = nil
+        guard !Task.isCancelled else { return }
+        try? await applyFetchedSnapshot(
+            snapshot,
+            preservingPendingReactions: true
+        )
+    }
+
+    private func restoreReactionState(
+        eventID: String,
+        originalReactions: [BroReactionSummary],
+        error: Error
+    ) {
+        pendingReactionEventIDs.remove(eventID)
+        restoreReactionState(forEventID: eventID, reactions: originalReactions)
+        errorMessage = error.localizedDescription
+    }
+
+    nonisolated private static func fetchAccountStatus(
+        using provider: @escaping @Sendable () async -> AccountStatus
+    ) async -> AccountStatus {
+        await Task.detached(priority: .utility) {
+            await provider()
+        }.value
+    }
+
     private func setRuntimeUnavailable(_ message: String) {
+        let shouldKeepCurrentRenderableState = hasAuthoritativeRenderableState
         outboxFlushTask?.cancel()
         outboxFlushTask = nil
-        pendingOutboxHydration = false
         pendingReactionEventIDs.removeAll()
-        lastSuccessfulSnapshotRefreshAt = nil
         errorMessage = nil
+        guard !shouldKeepCurrentRenderableState else { return }
+        lastSuccessfulSnapshotRefreshAt = nil
         state = .unavailable(message)
+    }
+
+    private var hasAuthoritativeRenderableState: Bool {
+        hasRenderableState && (hasLoaded || lastSuccessfulSnapshotRefreshAt != nil)
     }
 
     private func shouldRefreshSnapshot(force: Bool) -> Bool {
@@ -600,12 +873,17 @@ final class BrosViewModel {
         memberLimitFeedbackTask?.cancel()
         memberLimitSaveState = .saved(limit)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
-        memberLimitFeedbackTask = Task { @MainActor [weak self] in
+        memberLimitFeedbackTask = Task.detached(priority: .utility) { [weak self] in
             try? await Task.sleep(for: .seconds(2.4))
             guard !Task.isCancelled else { return }
-            self?.memberLimitSaveState = .idle
-            self?.memberLimitFeedbackTask = nil
+            await self?.clearMemberLimitSaveFeedbackAfterDelay()
         }
+    }
+
+    private func clearMemberLimitSaveFeedbackAfterDelay() {
+        guard !Task.isCancelled else { return }
+        memberLimitSaveState = .idle
+        memberLimitFeedbackTask = nil
     }
 
     private func optimisticSnapshotByTogglingReaction(
@@ -898,6 +1176,7 @@ nonisolated enum BrosRuntimeCloudRecoveryPolicy {
 
 struct BrosView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(AppNotificationRouter.self) private var notificationRouter
     @Environment(AppWarmupState.self) private var appWarmupState
     @Environment(\.isTabActive) private var isTabActive
@@ -921,6 +1200,10 @@ struct BrosView: View {
 
     private var blockedRepository: BlockedBroRepository {
         BlockedBroRepository(modelContext: modelContext)
+    }
+
+    private var brosBackgroundStore: AppBackgroundStore {
+        appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
     }
 
     var body: some View {
@@ -947,6 +1230,7 @@ struct BrosView: View {
             reloadBlockedBros()
             await viewModel.refresh(
                 modelContext: modelContext,
+                backgroundStore: brosBackgroundStore,
                 cloudSyncEnabled: cloudSyncEnabled,
                 cloudSyncErrorDescription: cloudSyncErrorDescription,
                 force: true
@@ -982,6 +1266,7 @@ struct BrosView: View {
             reloadBlockedBros()
             await viewModel.refresh(
                 modelContext: modelContext,
+                backgroundStore: brosBackgroundStore,
                 cloudSyncEnabled: cloudSyncEnabled,
                 cloudSyncErrorDescription: cloudSyncErrorDescription,
                 force: true
@@ -1084,6 +1369,7 @@ struct BrosView: View {
         if notificationRouter.brosRefreshRequestID != nil {
             await viewModel.refresh(
                 modelContext: modelContext,
+                backgroundStore: brosBackgroundStore,
                 cloudSyncEnabled: cloudSyncEnabled,
                 cloudSyncErrorDescription: cloudSyncErrorDescription,
                 force: true
@@ -1094,11 +1380,13 @@ struct BrosView: View {
 
         await viewModel.loadIfNeeded(
             modelContext: modelContext,
+            backgroundStore: brosBackgroundStore,
             cloudSyncEnabled: cloudSyncEnabled,
             cloudSyncErrorDescription: cloudSyncErrorDescription
         )
         await viewModel.refreshIfStale(
             modelContext: modelContext,
+            backgroundStore: brosBackgroundStore,
             cloudSyncEnabled: cloudSyncEnabled,
             cloudSyncErrorDescription: cloudSyncErrorDescription
         )
@@ -1122,17 +1410,23 @@ struct BrosView: View {
 
         guard activationRefreshTask == nil else { return }
         let delay: Duration = hasCompletedInitialActivationRefresh ? .milliseconds(100) : .zero
-        activationRefreshTask = Task { @MainActor in
+        activationRefreshTask = Task.detached(priority: .utility) {
             try? await Task.sleep(for: delay)
-            guard !Task.isCancelled, isTabActive else { return }
-            await WGJPerformance.measureAsync("bros.activation-hydration") {
-                await reloadForCurrentActivation()
-            }
-            guard !Task.isCancelled, isTabActive else { return }
-            hasCompletedInitialActivationRefresh = true
-            activationRefreshTask = nil
-            rebuildFilteredSnapshot()
+            guard !Task.isCancelled else { return }
+            await runActivationRefreshIfStillNeeded()
         }
+    }
+
+    @MainActor
+    private func runActivationRefreshIfStillNeeded() async {
+        guard !Task.isCancelled, isTabActive else { return }
+        await WGJPerformance.measureAsync("bros.activation-hydration") {
+            await reloadForCurrentActivation()
+        }
+        guard !Task.isCancelled, isTabActive else { return }
+        hasCompletedInitialActivationRefresh = true
+        activationRefreshTask = nil
+        rebuildFilteredSnapshot()
     }
 
     @MainActor
@@ -1151,6 +1445,7 @@ struct BrosView: View {
             await WGJPerformance.measureAsync("bros.runtime-cloud-recovery") {
                 await viewModel.refresh(
                     modelContext: modelContext,
+                    backgroundStore: brosBackgroundStore,
                     cloudSyncEnabled: cloudSyncEnabled,
                     cloudSyncErrorDescription: currentError,
                     force: true
@@ -1229,7 +1524,10 @@ struct BrosView: View {
 
                         Task {
                             viewModel.circleMemberLimit = clampedOnboardingMemberLimit
-                            await viewModel.createCircle(modelContext: modelContext)
+                            await viewModel.createCircle(
+                                modelContext: modelContext,
+                                backgroundStore: brosBackgroundStore
+                            )
                         }
                     } label: {
                         Label(
@@ -1258,6 +1556,7 @@ struct BrosView: View {
                     Task {
                         await viewModel.joinCircle(
                             modelContext: modelContext,
+                            backgroundStore: brosBackgroundStore,
                             maximumMemberCount: subscriptionState.isPro ? nil : ProAccessPolicy.freeBrosMemberLimit
                         )
                     }
@@ -1441,7 +1740,11 @@ struct BrosView: View {
 
                             Button(role: .destructive) {
                                 Task {
-                                    await viewModel.removeMember(membershipID: member.id, modelContext: modelContext)
+                                    await viewModel.removeMember(
+                                        membershipID: member.id,
+                                        modelContext: modelContext,
+                                        backgroundStore: brosBackgroundStore
+                                    )
                                 }
                             } label: {
                                 Label("Remove Bro", systemImage: "person.crop.circle.badge.minus")
@@ -1520,12 +1823,19 @@ struct BrosView: View {
                 presentation: presentation,
                 onLeaveCircle: {
                     Task {
-                        await viewModel.leaveCircle(modelContext: modelContext)
+                        await viewModel.leaveCircle(
+                            modelContext: modelContext,
+                            backgroundStore: brosBackgroundStore
+                        )
                     }
                 },
                 onRemoveMember: { member in
                     Task {
-                        await viewModel.removeMember(membershipID: member.id, modelContext: modelContext)
+                        await viewModel.removeMember(
+                            membershipID: member.id,
+                            modelContext: modelContext,
+                            backgroundStore: brosBackgroundStore
+                        )
                     }
                 },
                 onReportMember: { member in
@@ -1542,7 +1852,11 @@ struct BrosView: View {
                     }
 
                     Task {
-                        await viewModel.updateCircleMemberLimit(memberLimit, modelContext: modelContext)
+                        await viewModel.updateCircleMemberLimit(
+                            memberLimit,
+                            modelContext: modelContext,
+                            backgroundStore: brosBackgroundStore
+                        )
                     }
                 },
                 onBlockedBrosChanged: {
@@ -1859,7 +2173,8 @@ struct BrosView: View {
                     await viewModel.toggleReaction(
                         eventID: event.id,
                         emoji: emoji,
-                        modelContext: modelContext
+                        modelContext: modelContext,
+                        backgroundStore: brosBackgroundStore
                     )
                 }
             } label: {

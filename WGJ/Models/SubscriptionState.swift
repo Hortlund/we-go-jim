@@ -160,12 +160,18 @@ final class SubscriptionState {
             return
         }
 
-        purchaseThankYouPresentationTask = Task { @MainActor in
+        purchaseThankYouPresentationTask = Task.detached(priority: .utility) {
             try? await Task.sleep(for: .milliseconds(350))
             guard !Task.isCancelled else { return }
-            isPurchaseThankYouPresented = true
-            purchaseThankYouPresentationTask = nil
+            await self.presentPurchaseThankYouAfterDelayIfStillNeeded()
         }
+    }
+
+    @MainActor
+    private func presentPurchaseThankYouAfterDelayIfStillNeeded() {
+        guard !Task.isCancelled else { return }
+        isPurchaseThankYouPresented = true
+        purchaseThankYouPresentationTask = nil
     }
 
 #if DEBUG

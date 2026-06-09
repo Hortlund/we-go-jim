@@ -641,6 +641,7 @@ nonisolated enum ProfileDashboardRenderPolicy {
         hasRenderedDashboardContent: Bool,
         isTabExit: Bool
     ) -> Bool {
-        isTabExit && hasRenderedDashboardContent
+        _ = isTabExit
+        return hasRenderedDashboardContent
     }
 }

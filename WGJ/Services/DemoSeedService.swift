@@ -2,8 +2,7 @@
 import Foundation
 import SwiftData
 
-@MainActor
-final class DemoSeedService {
+nonisolated final class DemoSeedService {
     private let modelContext: ModelContext
     private let profileRepository: ProfileRepository
     private let templateRepository: TemplateRepository
@@ -106,19 +105,19 @@ final class DemoSeedService {
     }
 }
 
-private struct DemoSeedExerciseReference {
+nonisolated private struct DemoSeedExerciseReference {
     let uuid: String
     let fallbackName: String
 }
 
-private struct DemoSeedTemplateDefinition {
+nonisolated private struct DemoSeedTemplateDefinition {
     let folderName: String
     let name: String
     let notes: String
     let exercises: [DemoSeedExerciseReference]
 }
 
-private enum DemoSeedCatalog {
+nonisolated private enum DemoSeedCatalog {
     static let folderNames = ["Push", "Pull", "Legs"]
 
     static let templates: [DemoSeedTemplateDefinition] = [

@@ -25,14 +25,11 @@ nonisolated enum UserDataCloudBackupDescriptor {
     }
 }
 
-@MainActor
-final class UserDataCloudBackupService {
+nonisolated final class UserDataCloudBackupService {
     private let localContainer: ModelContainer
     private let mirrorContainer: ModelContainer
     private let backupStore: any UserDataCloudBackupStoring
     private let projectionScheduler: UserDataCloudMirrorBridge.ProjectionScheduler
-    private let encoder = JSONEncoder()
-    private let decoder = JSONDecoder()
 
     init(
         localContainer: ModelContainer,
@@ -44,7 +41,6 @@ final class UserDataCloudBackupService {
         self.mirrorContainer = mirrorContainer
         self.backupStore = backupStore
         self.projectionScheduler = projectionScheduler
-        encoder.outputFormatting = [.sortedKeys]
     }
 
     func exportCurrentBackup() async throws {
@@ -57,7 +53,7 @@ final class UserDataCloudBackupService {
 
         let mirrorContext = ModelContext(mirrorContainer)
         let payload = try UserDataCloudBackupPayload(context: mirrorContext)
-        let payloadData = try encoder.encode(payload)
+        let payloadData = try Self.makeEncoder().encode(payload)
         try await backupStore.saveBackup(UserDataCloudBackupRemoteRecord(
             updatedAt: payload.generatedAt,
             payloadData: payloadData
@@ -70,7 +66,7 @@ final class UserDataCloudBackupService {
             return false
         }
 
-        let payload = try decoder.decode(UserDataCloudBackupPayload.self, from: record.payloadData)
+        let payload = try Self.makeDecoder().decode(UserDataCloudBackupPayload.self, from: record.payloadData)
         let mirrorContext = ModelContext(mirrorContainer)
         try payload.mergeIntoMirrorContents(in: mirrorContext)
         if mirrorContext.hasChanges {
@@ -90,25 +86,33 @@ final class UserDataCloudBackupService {
             return
         }
 
-        let payload = try decoder.decode(UserDataCloudBackupPayload.self, from: record.payloadData)
+        let payload = try Self.makeDecoder().decode(UserDataCloudBackupPayload.self, from: record.payloadData)
         let mirrorContext = ModelContext(mirrorContainer)
         try payload.mergeIntoMirrorContents(in: mirrorContext)
         if mirrorContext.hasChanges {
             try mirrorContext.save()
         }
     }
+
+    private static func makeEncoder() -> JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return encoder
+    }
+
+    private static func makeDecoder() -> JSONDecoder {
+        JSONDecoder()
+    }
 }
 
-struct CloudKitUserDataCloudBackupStore: UserDataCloudBackupStoring {
+nonisolated struct CloudKitUserDataCloudBackupStore: UserDataCloudBackupStoring {
     private static let inlinePayloadFallbackLimitBytes = 900_000
     private static let lzfsePayloadCompression = "lzfse"
 
     private let database: CKDatabase?
-    private let fileManager: FileManager
 
-    init(container: CKContainer? = nil, fileManager: FileManager = .default) {
+    init(container: CKContainer? = nil) {
         self.database = (container ?? AppRuntimeConfig.makeCloudKitContainer())?.privateCloudDatabase
-        self.fileManager = fileManager
     }
 
     func saveBackup(_ backup: UserDataCloudBackupRemoteRecord) async throws {
@@ -118,7 +122,7 @@ struct CloudKitUserDataCloudBackupStore: UserDataCloudBackupStoring {
             ?? CKRecord(recordType: UserDataCloudBackupDescriptor.recordType, recordID: recordID)
         let payloadURL = try writeTemporaryPayload(backup.payloadData)
         defer {
-            try? fileManager.removeItem(at: payloadURL)
+            try? FileManager.default.removeItem(at: payloadURL)
         }
 
         record[UserDataCloudBackupDescriptor.Field.updatedAt] = backup.updatedAt as CKRecordValue
@@ -211,9 +215,9 @@ struct CloudKitUserDataCloudBackupStore: UserDataCloudBackupStoring {
     }
 
     private func writeTemporaryPayload(_ data: Data) throws -> URL {
-        let directory = fileManager.temporaryDirectory
+        let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("WGJUserDataCloudBackups", isDirectory: true)
-        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appendingPathComponent("\(UUID().uuidString).json")
         try data.write(to: url, options: [.atomic])
         return url
@@ -227,8 +231,7 @@ struct CloudKitUserDataCloudBackupStore: UserDataCloudBackupStoring {
     }
 }
 
-@MainActor
-private struct UserDataCloudBackupPayload: Codable {
+nonisolated private struct UserDataCloudBackupPayload: Codable {
     static let schemaVersion = 1
 
     var schemaVersion: Int = Self.schemaVersion
@@ -794,7 +797,7 @@ private struct UserDataCloudBackupPayload: Codable {
     }
 }
 
-private struct Profile: Codable {
+nonisolated private struct Profile: Codable {
     var id: UUID
     var displayName: String
     var athleteTypeRaw: String?
@@ -861,7 +864,7 @@ private struct Profile: Codable {
     }
 }
 
-private struct Tombstone: Codable {
+nonisolated private struct Tombstone: Codable {
     var id: UUID
     var entityName: String
     var entityID: UUID
@@ -888,7 +891,7 @@ private struct Tombstone: Codable {
     }
 }
 
-private struct CustomExercise: Codable {
+nonisolated private struct CustomExercise: Codable {
     var id: UUID
     var remoteUUID: String
     var remoteID: Int?
@@ -938,7 +941,7 @@ private struct CustomExercise: Codable {
     }
 }
 
-private struct ProfileWidget: Codable {
+nonisolated private struct ProfileWidget: Codable {
     var id: UUID
     var kindRaw: String
     var isEnabled: Bool
@@ -976,7 +979,7 @@ private struct ProfileWidget: Codable {
     }
 }
 
-private struct BlockedBroBackup: Codable {
+nonisolated private struct BlockedBroBackup: Codable {
     var id: UUID
     var userRecordName: String
     var displayNameSnapshot: String
@@ -999,7 +1002,7 @@ private struct BlockedBroBackup: Codable {
     }
 }
 
-private struct TemplateFolderBackup: Codable {
+nonisolated private struct TemplateFolderBackup: Codable {
     var id: UUID
     var name: String
     var sortOrder: Int
@@ -1019,7 +1022,7 @@ private struct TemplateFolderBackup: Codable {
     }
 }
 
-private struct WorkoutTemplateBackup: Codable {
+nonisolated private struct WorkoutTemplateBackup: Codable {
     var id: UUID
     var folderID: UUID
     var name: String
@@ -1052,7 +1055,7 @@ private struct WorkoutTemplateBackup: Codable {
     }
 }
 
-private struct TemplateSupersetGroupBackup: Codable {
+nonisolated private struct TemplateSupersetGroupBackup: Codable {
     var id: UUID
     var templateID: UUID
     var roundRestSeconds: Int
@@ -1079,7 +1082,7 @@ private struct TemplateSupersetGroupBackup: Codable {
     }
 }
 
-private struct TemplateCardioBlockBackup: Codable {
+nonisolated private struct TemplateCardioBlockBackup: Codable {
     var id: UUID
     var templateID: UUID
     var phaseRaw: String
@@ -1121,7 +1124,7 @@ private struct TemplateCardioBlockBackup: Codable {
     }
 }
 
-private struct TemplateExerciseBackup: Codable {
+nonisolated private struct TemplateExerciseBackup: Codable {
     var id: UUID
     var templateID: UUID
     var catalogExerciseUUID: String
@@ -1179,7 +1182,7 @@ private struct TemplateExerciseBackup: Codable {
     }
 }
 
-private struct TemplateComponentBackup: Codable {
+nonisolated private struct TemplateComponentBackup: Codable {
     var id: UUID
     var templateExerciseID: UUID
     var catalogExerciseUUID: String
@@ -1218,7 +1221,7 @@ private struct TemplateComponentBackup: Codable {
     }
 }
 
-private struct TemplateSetBackup: Codable {
+nonisolated private struct TemplateSetBackup: Codable {
     var id: UUID
     var templateExerciseID: UUID
     var sortOrder: Int
@@ -1272,7 +1275,7 @@ private struct TemplateSetBackup: Codable {
     }
 }
 
-private struct TemplateDropStageBackup: Codable {
+nonisolated private struct TemplateDropStageBackup: Codable {
     var id: UUID
     var templateExerciseSetID: UUID
     var sortOrder: Int
@@ -1308,7 +1311,7 @@ private struct TemplateDropStageBackup: Codable {
     }
 }
 
-private struct WorkoutSessionBackup: Codable {
+nonisolated private struct WorkoutSessionBackup: Codable {
     var id: UUID
     var templateID: UUID?
     var name: String
@@ -1361,7 +1364,7 @@ private struct WorkoutSessionBackup: Codable {
     }
 }
 
-private struct WorkoutSupersetGroupBackup: Codable {
+nonisolated private struct WorkoutSupersetGroupBackup: Codable {
     var id: UUID
     var sessionID: UUID
     var roundRestSeconds: Int
@@ -1388,7 +1391,7 @@ private struct WorkoutSupersetGroupBackup: Codable {
     }
 }
 
-private struct WorkoutCardioBlockBackup: Codable {
+nonisolated private struct WorkoutCardioBlockBackup: Codable {
     var id: UUID
     var sessionID: UUID
     var phaseRaw: String
@@ -1433,7 +1436,7 @@ private struct WorkoutCardioBlockBackup: Codable {
     }
 }
 
-private struct WorkoutExerciseBackup: Codable {
+nonisolated private struct WorkoutExerciseBackup: Codable {
     var id: UUID
     var sessionID: UUID
     var templateExerciseID: UUID?
@@ -1503,7 +1506,7 @@ private struct WorkoutExerciseBackup: Codable {
     }
 }
 
-private struct WorkoutSetBackup: Codable {
+nonisolated private struct WorkoutSetBackup: Codable {
     var id: UUID
     var sessionExerciseID: UUID
     var sortOrder: Int
@@ -1560,7 +1563,7 @@ private struct WorkoutSetBackup: Codable {
     }
 }
 
-private struct WorkoutDropStageBackup: Codable {
+nonisolated private struct WorkoutDropStageBackup: Codable {
     var id: UUID
     var sessionSetID: UUID
     var sortOrder: Int

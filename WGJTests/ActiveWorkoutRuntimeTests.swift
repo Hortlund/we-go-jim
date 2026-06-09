@@ -102,6 +102,46 @@ struct ActiveWorkoutRuntimeTests {
     }
 
     @Test
+    func snapshotStorePersistsActiveWorkoutScrollTarget() async throws {
+        let directory = try temporaryDirectory()
+        let store = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        let session = makeRuntimeSession()
+        let exerciseID = try #require(session.exercises.first?.id)
+
+        try await store.save(
+            session,
+            presentationMode: .presented,
+            scrollTarget: .exercise(exerciseID),
+            preservesExistingPresentationMode: false,
+            preservesExistingScrollTarget: false
+        )
+
+        let storedSnapshot = try #require(try await store.loadStoredSnapshot())
+        #expect(storedSnapshot.presentationMode == .presented)
+        #expect(storedSnapshot.scrollTarget == .exercise(exerciseID))
+    }
+
+    @Test
+    func snapshotStorePreservesScrollTargetWhenSessionOnlyCallSitesSave() async throws {
+        let directory = try temporaryDirectory()
+        let store = ActiveWorkoutSnapshotStore(baseDirectory: directory)
+        var session = makeRuntimeSession()
+        let exerciseID = try #require(session.exercises.first?.id)
+
+        try await store.save(
+            session,
+            scrollTarget: .exercise(exerciseID),
+            preservesExistingScrollTarget: false
+        )
+        session.notes = "Updated elsewhere"
+        try await store.save(session)
+
+        let storedSnapshot = try #require(try await store.loadStoredSnapshot())
+        #expect(storedSnapshot.session.notes == "Updated elsewhere")
+        #expect(storedSnapshot.scrollTarget == .exercise(exerciseID))
+    }
+
+    @Test
     func snapshotStorePreservesPresentationModeWhenSessionOnlyCallSitesSave() async throws {
         let directory = try temporaryDirectory()
         let store = ActiveWorkoutSnapshotStore(baseDirectory: directory)
@@ -391,6 +431,34 @@ struct ActiveWorkoutRuntimeTests {
         #expect(state.activeSessionID == session.id)
         #expect(state.isActiveWorkoutPresented)
         #expect(!state.isActiveWorkoutStripCollapsed)
+    }
+
+    @Test
+    func activeWorkoutRestoreStagesStoredScrollTarget() async throws {
+        ActiveWorkoutSnapshotStore.deleteDefaultSnapshotFileForUITests()
+        defer {
+            ActiveWorkoutSnapshotStore.deleteDefaultSnapshotFileForUITests()
+        }
+
+        let context = try makeInMemoryContext()
+        let session = makeRuntimeSession()
+        let exerciseID = try #require(session.exercises.first?.id)
+        try await ActiveWorkoutSnapshotStore.shared.save(
+            session,
+            presentationMode: .presented,
+            scrollTarget: .exercise(exerciseID),
+            preservesExistingPresentationMode: false,
+            preservesExistingScrollTarget: false
+        )
+        let state = ActiveWorkoutPresentationState()
+
+        await state.restoreActiveSessionIfMissing(
+            modelContext: context,
+            allowsLegacyDraftImport: false
+        )
+
+        #expect(state.activeSessionID == session.id)
+        #expect(state.preparedScrollTarget(for: session.id) == .exercise(exerciseID))
     }
 
     @Test

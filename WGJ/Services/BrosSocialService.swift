@@ -424,7 +424,6 @@ nonisolated enum BrosCloudRecordCoder {
     }
 }
 
-@MainActor
 protocol BrosSocialService {
     func fetchSnapshot() async throws -> BrosFeedSnapshot?
     func createCircle(memberLimit: Int) async throws -> BrosFeedSnapshot
@@ -770,14 +769,14 @@ nonisolated final class CloudKitBrosSocialService: BrosSocialService, BrosSocial
         return CloudKitBrosSocialService(modelContext: modelContext)
     }
 
-    static func makeIfUserDataSyncEnabled(modelContext: ModelContext) -> CloudKitBrosSocialService? {
+    nonisolated static func makeIfUserDataSyncEnabled(modelContext: ModelContext) -> CloudKitBrosSocialService? {
         guard UserDataSyncTracker.shared.currentSnapshot().allowsDirectCloudOperations else {
             return nil
         }
         return CloudKitBrosSocialService(modelContext: modelContext)
     }
 
-    static func makeIfContainerAvailable(modelContext: ModelContext) -> CloudKitBrosSocialService? {
+    nonisolated static func makeIfContainerAvailable(modelContext: ModelContext) -> CloudKitBrosSocialService? {
         CloudKitBrosSocialService(modelContext: modelContext)
     }
 
@@ -847,7 +846,6 @@ nonisolated final class CloudKitBrosSocialService: BrosSocialService, BrosSocial
         }
     }
 
-    @MainActor
     func fetchSnapshot() async throws -> BrosFeedSnapshot? {
         let userRecordName = try await currentUserRecordName()
         let localProfile = try? loadOrCreateLocalProfile()
@@ -1015,7 +1013,6 @@ nonisolated final class CloudKitBrosSocialService: BrosSocialService, BrosSocial
         }
     }
 
-    @MainActor
     func createCircle(memberLimit: Int) async throws -> BrosFeedSnapshot {
         let userRecordName = try await currentUserRecordName()
         let localProfile = try? loadOrCreateLocalProfile()
@@ -1092,7 +1089,6 @@ nonisolated final class CloudKitBrosSocialService: BrosSocialService, BrosSocial
         )
     }
 
-    @MainActor
     func joinCircle(inviteCode: String, maximumMemberCount: Int? = nil) async throws -> BrosFeedSnapshot {
         let cleanedCode = inviteCode
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1198,7 +1194,6 @@ nonisolated final class CloudKitBrosSocialService: BrosSocialService, BrosSocial
         )
     }
 
-    @MainActor
     func leaveCircle() async throws {
         let userRecordName = try await currentUserRecordName()
         let membershipRecord = try await currentMembershipRecordForMutation(userRecordName: userRecordName)
@@ -1266,7 +1261,6 @@ nonisolated final class CloudKitBrosSocialService: BrosSocialService, BrosSocial
         try? clearLocalMembershipStateIfNeeded()
     }
 
-    @MainActor
     func updateCircleMemberLimit(_ memberLimit: Int) async throws -> BrosFeedSnapshot {
         let userRecordName = try await currentUserRecordName()
         let currentMembershipRecord = try await currentMembershipRecordForMutation(userRecordName: userRecordName)
@@ -1298,7 +1292,6 @@ nonisolated final class CloudKitBrosSocialService: BrosSocialService, BrosSocial
         return snapshot
     }
 
-    @MainActor
     func deleteCurrentUserData() async throws {
         let userRecordName = try await currentUserRecordName()
         let membershipRecord: CKRecord
@@ -1425,7 +1418,6 @@ nonisolated final class CloudKitBrosSocialService: BrosSocialService, BrosSocial
         try? clearLocalMembershipStateIfNeeded()
     }
 
-    @MainActor
     func removeMember(membershipID: String) async throws {
         let userRecordName = try await currentUserRecordName()
         let currentMembershipRecord = try await currentMembershipRecordForMutation(userRecordName: userRecordName)
@@ -1472,7 +1464,6 @@ nonisolated final class CloudKitBrosSocialService: BrosSocialService, BrosSocial
         }
     }
 
-    @MainActor
     func setReaction(eventID: String, kind: BroReactionKind) async throws {
         let userRecordName = try await currentUserRecordName()
         let currentMembershipRecord = try await currentMembershipRecordForMutation(userRecordName: userRecordName)

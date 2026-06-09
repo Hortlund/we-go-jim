@@ -60,6 +60,7 @@ nonisolated struct ActiveWorkoutStoredSnapshot: Equatable, Codable, Sendable {
     let session: ActiveWorkoutRuntimeSession
     let restTimer: RestTimerSnapshot?
     let presentationMode: ActiveWorkoutStoredPresentationMode?
+    let scrollTarget: ActiveWorkoutScrollTarget?
 }
 
 nonisolated extension ActiveWorkoutRuntimeSession {
@@ -316,17 +317,29 @@ nonisolated extension ActiveWorkoutRuntimeExercise {
         preferredLoadUnit: TemplateLoadUnit,
         date: Date = .now
     ) -> ActiveWorkoutRuntimeExercise {
+        replacingExercise(
+            with: ExerciseCatalogSelection(catalogItem: catalogItem),
+            preferredLoadUnit: preferredLoadUnit,
+            date: date
+        )
+    }
+
+    func replacingExercise(
+        with selection: ExerciseCatalogSelection,
+        preferredLoadUnit: TemplateLoadUnit,
+        date: Date = .now
+    ) -> ActiveWorkoutRuntimeExercise {
         let restSeconds = 120
-        let loadUnit = TemplateLoadUnit.inferredDefault(fromEquipmentSummary: catalogItem.equipmentSummary)
+        let loadUnit = TemplateLoadUnit.inferredDefault(fromEquipmentSummary: selection.equipmentSummary)
             ?? preferredLoadUnit
 
         return ActiveWorkoutRuntimeExercise(
             id: id,
             templateExerciseID: templateExerciseID,
-            catalogExerciseUUID: catalogItem.remoteUUID,
-            exerciseNameSnapshot: catalogItem.displayName,
-            categorySnapshot: catalogItem.categoryName,
-            muscleSummarySnapshot: catalogItem.primaryMuscleNames,
+            catalogExerciseUUID: selection.remoteUUID,
+            exerciseNameSnapshot: selection.displayName,
+            categorySnapshot: selection.categoryName,
+            muscleSummarySnapshot: selection.primaryMuscleNames,
             notes: "",
             targetRepMin: nil,
             targetRepMax: nil,
@@ -334,10 +347,10 @@ nonisolated extension ActiveWorkoutRuntimeExercise {
             sortOrder: sortOrder,
             components: [
                 ActiveWorkoutRuntimeExerciseComponent(
-                    catalogExerciseUUID: catalogItem.remoteUUID,
-                    exerciseNameSnapshot: catalogItem.displayName,
-                    categorySnapshot: catalogItem.categoryName,
-                    muscleSummarySnapshot: catalogItem.primaryMuscleNames,
+                    catalogExerciseUUID: selection.remoteUUID,
+                    exerciseNameSnapshot: selection.displayName,
+                    categorySnapshot: selection.categoryName,
+                    muscleSummarySnapshot: selection.primaryMuscleNames,
                     createdAt: date,
                     updatedAt: date
                 ),
@@ -345,6 +358,28 @@ nonisolated extension ActiveWorkoutRuntimeExercise {
             setDrafts: Self.defaultSetDrafts(restSeconds: restSeconds, loadUnit: loadUnit),
             superset: superset,
             createdAt: createdAt,
+            updatedAt: date
+        )
+    }
+
+    static func catalogExercise(
+        from selection: ExerciseCatalogSelection,
+        sortOrder: Int,
+        restSeconds: Int = 120,
+        preferredLoadUnit: TemplateLoadUnit,
+        date: Date = .now
+    ) -> ActiveWorkoutRuntimeExercise {
+        let loadUnit = TemplateLoadUnit.inferredDefault(fromEquipmentSummary: selection.equipmentSummary)
+            ?? preferredLoadUnit
+        return ActiveWorkoutRuntimeExercise(
+            catalogExerciseUUID: selection.remoteUUID,
+            exerciseNameSnapshot: selection.displayName,
+            categorySnapshot: selection.categoryName,
+            muscleSummarySnapshot: selection.primaryMuscleNames,
+            restSeconds: restSeconds,
+            sortOrder: sortOrder,
+            setDrafts: Self.defaultSetDrafts(restSeconds: restSeconds, loadUnit: loadUnit),
+            createdAt: date,
             updatedAt: date
         )
     }
@@ -469,21 +504,24 @@ actor ActiveWorkoutSnapshotStore {
             return ActiveWorkoutStoredSnapshot(
                 session: session,
                 restTimer: storedSnapshot.restTimer,
-                presentationMode: storedSnapshot.presentationMode
+                presentationMode: storedSnapshot.presentationMode,
+                scrollTarget: storedSnapshot.scrollTarget
             )
         }
 
         var session = try decoder.decode(ActiveWorkoutRuntimeSession.self, from: data)
         session.normalizeSetRestToExerciseDefaults()
-        return ActiveWorkoutStoredSnapshot(session: session, restTimer: nil, presentationMode: nil)
+        return ActiveWorkoutStoredSnapshot(session: session, restTimer: nil, presentationMode: nil, scrollTarget: nil)
     }
 
     func save(
         _ session: ActiveWorkoutRuntimeSession,
         restTimer: RestTimerSnapshot? = nil,
         presentationMode: ActiveWorkoutStoredPresentationMode? = nil,
+        scrollTarget: ActiveWorkoutScrollTarget? = nil,
         preservesExistingRestTimer: Bool = true,
-        preservesExistingPresentationMode: Bool = true
+        preservesExistingPresentationMode: Bool = true,
+        preservesExistingScrollTarget: Bool = true
     ) throws {
         try Task.checkCancellation()
         try FileManager.default.createDirectory(
@@ -493,19 +531,24 @@ actor ActiveWorkoutSnapshotStore {
         var normalizedSession = session
         normalizedSession.normalizeSetRestToExerciseDefaults()
         try Task.checkCancellation()
-        let existingSnapshot = preservesExistingRestTimer || preservesExistingPresentationMode
+        let existingSnapshot = preservesExistingRestTimer
+            || preservesExistingPresentationMode
+            || preservesExistingScrollTarget
             ? (try? loadStoredSnapshot())
             : nil
         let existingRestTimer = preservesExistingRestTimer ? existingSnapshot?.restTimer : nil
         let existingPresentationMode = preservesExistingPresentationMode
             ? existingSnapshot?.presentationMode
             : nil
+        let existingScrollTarget = preservesExistingScrollTarget ? existingSnapshot?.scrollTarget : nil
         let resolvedRestTimer = restTimer ?? existingRestTimer
         let resolvedPresentationMode = presentationMode ?? existingPresentationMode
+        let resolvedScrollTarget = scrollTarget ?? existingScrollTarget
         let storedSnapshot = ActiveWorkoutStoredSnapshot(
             session: normalizedSession,
             restTimer: resolvedRestTimer?.isExpired == true ? nil : resolvedRestTimer,
-            presentationMode: resolvedPresentationMode
+            presentationMode: resolvedPresentationMode,
+            scrollTarget: resolvedScrollTarget
         )
         try Task.checkCancellation()
         let data = try encoder.encode(storedSnapshot)

@@ -11,6 +11,7 @@ struct MainTabView: View {
     @Environment(\.userDataSyncStatus) private var userDataSyncStatus
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isKeyboardVisible = false
+    @State private var dismissedSyncBannerFingerprint: String?
 
     private var overlayAnimation: Animation {
         WGJMotion.overlayAnimation(reduceMotion: reduceMotion)
@@ -287,14 +288,14 @@ struct MainTabView: View {
                     message: syncBannerMessage,
                     icon: "arrow.triangle.2.circlepath.icloud.fill",
                     tint: WGJTheme.accentBlue,
-                    topSafeAreaInset: topSafeAreaInset
+                    topSafeAreaInset: topSafeAreaInset,
+                    onDismiss: dismissSyncBanner
                 )
                 .transition(.move(edge: .top).combined(with: .opacity))
                 .accessibilityIdentifier("user-data-sync-banner")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .allowsHitTesting(false)
         .ignoresSafeArea(.container, edges: .top)
     }
 
@@ -323,7 +324,8 @@ struct MainTabView: View {
         MainTabSyncBannerPolicy.shouldShow(
             status: userDataSyncStatus,
             isActiveWorkoutPresented: activeWorkoutPresentationState.isActiveWorkoutPresented,
-            isKeyboardVisible: isKeyboardVisible
+            isKeyboardVisible: isKeyboardVisible,
+            dismissedFingerprint: dismissedSyncBannerFingerprint
         )
     }
 
@@ -332,7 +334,11 @@ struct MainTabView: View {
     }
 
     private var syncBannerMessage: String {
-        userDataSyncStatus.detail
+        MainTabSyncBannerPolicy.message(for: userDataSyncStatus)
+    }
+
+    private func dismissSyncBanner() {
+        dismissedSyncBannerFingerprint = MainTabSyncBannerPolicy.dismissalFingerprint(for: userDataSyncStatus)
     }
 
     private func activeWorkoutStripBottomLift(size: CGSize, bottomSafeAreaInset: CGFloat) -> CGFloat {
@@ -398,11 +404,37 @@ nonisolated enum MainTabSyncBannerPolicy {
     static func shouldShow(
         status: UserDataSyncStatusSnapshot,
         isActiveWorkoutPresented: Bool,
-        isKeyboardVisible: Bool
+        isKeyboardVisible: Bool,
+        dismissedFingerprint: String? = nil
     ) -> Bool {
-        status.state == .syncing
-            && !isActiveWorkoutPresented
-            && !isKeyboardVisible
+        guard status.state == .syncing,
+              !isActiveWorkoutPresented,
+              !isKeyboardVisible
+        else {
+            return false
+        }
+        guard let fingerprint = dismissalFingerprint(for: status) else {
+            return true
+        }
+        return fingerprint != dismissedFingerprint
+    }
+
+    static func dismissalFingerprint(for status: UserDataSyncStatusSnapshot) -> String? {
+        guard status.state == .syncing else { return nil }
+        let event = status.runningCloudEventType.map { String(describing: $0) } ?? "generic"
+        let localMutation = status.latestLocalMutationAt?.timeIntervalSinceReferenceDate ?? 0
+        let latestImport = status.latestSuccessfulImportAt?.timeIntervalSinceReferenceDate ?? 0
+        let latestExport = status.latestSuccessfulExportAt?.timeIntervalSinceReferenceDate ?? 0
+        return "\(event)-\(localMutation)-\(latestImport)-\(latestExport)"
+    }
+
+    static func message(for status: UserDataSyncStatusSnapshot) -> String {
+        guard let runningCloudEventType = status.runningCloudEventType,
+              runningCloudEventType != .unknown
+        else {
+            return "iCloud data is catching up in the background."
+        }
+        return "\(runningCloudEventType.label) is catching up in the background."
     }
 }
 
@@ -412,6 +444,7 @@ private struct WGJTopAttachedSyncBanner: View {
     let icon: String
     let tint: Color
     let topSafeAreaInset: CGFloat
+    let onDismiss: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -439,6 +472,8 @@ private struct WGJTopAttachedSyncBanner: View {
                 }
 
                 Spacer(minLength: 12)
+
+                WGJTopAttachedSyncBannerDismissButton(action: onDismiss)
             }
             .padding(.horizontal, WGJSpacing.page)
             .padding(.top, 10)
@@ -485,6 +520,23 @@ private struct WGJTopAttachedSyncBanner: View {
             }
             .shadow(color: WGJTheme.shadowStrong.opacity(0.55), radius: 18, x: 0, y: 10)
         }
+    }
+}
+
+private struct WGJTopAttachedSyncBannerDismissButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(WGJTheme.textSecondary)
+                .frame(width: 32, height: 32)
+                .background(Circle().fill(WGJTheme.cardElevated.opacity(0.86)))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Dismiss iCloud sync banner")
+        .accessibilityIdentifier("dismiss-user-data-sync-banner")
     }
 }
 
@@ -665,13 +717,19 @@ private struct LazyTabContainer<Content: View, FirstFrameShell: View>: View {
 
     private func scheduleSelectionObservationReadiness() {
         guard selectionObservationTask == nil else { return }
-        selectionObservationTask = Task { @MainActor in
+        selectionObservationTask = Task.detached(priority: .utility) {
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }
-            isSelectionObservationReady = true
-            selectionObservationTask = nil
-            handleSelectionChange(isSelectionChange: true)
+            await markSelectionObservationReadyIfStillPending()
         }
+    }
+
+    @MainActor
+    private func markSelectionObservationReadyIfStillPending() {
+        guard !Task.isCancelled else { return }
+        isSelectionObservationReady = true
+        selectionObservationTask = nil
+        handleSelectionChange(isSelectionChange: true)
     }
 
     private func handleSelectionChange(isSelectionChange: Bool) {
@@ -712,21 +770,27 @@ private struct LazyTabContainer<Content: View, FirstFrameShell: View>: View {
 
     private func scheduleInitialContentMount() {
         guard initialContentMountTask == nil else { return }
-        initialContentMountTask = Task { @MainActor in
-            let delayMilliseconds = resolvedInitialContentMountDelayMilliseconds()
+        let delayMilliseconds = resolvedInitialContentMountDelayMilliseconds()
+        initialContentMountTask = Task.detached(priority: .utility) {
             if delayMilliseconds > 0 {
                 try? await Task.sleep(for: .milliseconds(delayMilliseconds))
             } else {
                 await Task.yield()
             }
-            guard !Task.isCancelled, tabState.selectedTab == tab else {
-                initialContentMountTask = nil
-                return
-            }
-
-            mountInitialContentNow()
-            initialContentMountTask = nil
+            guard !Task.isCancelled else { return }
+            await mountInitialContentIfStillSelected()
         }
+    }
+
+    @MainActor
+    private func mountInitialContentIfStillSelected() {
+        guard !Task.isCancelled, tabState.selectedTab == tab else {
+            initialContentMountTask = nil
+            return
+        }
+
+        mountInitialContentNow()
+        initialContentMountTask = nil
     }
 
     private func resolvedInitialContentMountDelayMilliseconds() -> Int {

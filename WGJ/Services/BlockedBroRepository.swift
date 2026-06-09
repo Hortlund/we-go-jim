@@ -12,8 +12,7 @@ enum BlockedBroRepositoryError: LocalizedError {
     }
 }
 
-@MainActor
-final class BlockedBroRepository {
+nonisolated final class BlockedBroRepository {
     private let modelContext: ModelContext
 
     init(modelContext: ModelContext) {

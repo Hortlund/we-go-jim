@@ -38,6 +38,10 @@ struct TemplateDetailView: View {
         TemplateRepository(modelContext: modelContext)
     }
 
+    private var templateBackgroundStore: AppBackgroundStore {
+        appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
+    }
+
     private var currentProfile: UserProfile? {
         UserProfileSelection.currentProfile(in: profiles)
     }
@@ -479,25 +483,15 @@ struct TemplateDetailView: View {
             defer { isSavingDraftChanges = false }
 
             do {
-                if let appBackgroundStore {
-                    try await appBackgroundStore.performWrite("template-detail.save-drafts") { backgroundContext in
-                        let backgroundRepository = TemplateRepository(
-                            modelContext: backgroundContext,
-                            autoSaveChanges: false
-                        )
-                        try draftStoreToSave.save(
-                            templateID: templateID,
-                            repository: backgroundRepository
-                        )
-                    }
-                } else {
-                    let deferredRepository = TemplateRepository(
-                        modelContext: modelContext,
+                let backgroundStore = templateBackgroundStore
+                try await backgroundStore.performWrite("template-detail.save-drafts") { backgroundContext in
+                    let backgroundRepository = TemplateRepository(
+                        modelContext: backgroundContext,
                         autoSaveChanges: false
                     )
                     try draftStoreToSave.save(
                         templateID: templateID,
-                        repository: deferredRepository
+                        repository: backgroundRepository
                     )
                 }
 
@@ -525,7 +519,7 @@ struct TemplateDetailView: View {
 
     private func templateRecommendation(
         for exercise: TemplateExercise,
-        catalogByUUID: [String: ExerciseCatalogItem]
+        catalogByUUID: [String: TrainingGuidanceCatalogSnapshot]
     ) -> TemplateExerciseRecommendation? {
         guard isTrainingGuidanceEnabled else { return nil }
         if let catalogExercise = catalogByUUID[exercise.catalogExerciseUUID] {
@@ -562,8 +556,11 @@ struct TemplateDetailView: View {
         }
 
         do {
-            let matches = try ExerciseCatalogRepository(modelContext: modelContext)
-                .exerciseMap(for: requestedCatalogUUIDs)
+            let backgroundStore = templateBackgroundStore
+            let matches = try await backgroundStore.perform("template-detail.catalog-matches") { backgroundContext in
+                try ExerciseCatalogRepository(modelContext: backgroundContext)
+                    .exerciseSnapshotMap(for: requestedCatalogUUIDs)
+            }
             recommendationByExerciseID = Dictionary(
                 templateExercises.map { exercise in
                     (exercise.id, templateRecommendation(for: exercise, catalogByUUID: matches))
@@ -692,12 +689,13 @@ struct TemplateDetailView: View {
 
 private struct TemplateExerciseDetailDestinationView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.appBackgroundStore) private var appBackgroundStore
 
     @Query private var catalogMatches: [ExerciseCatalogItem]
 
     let templateExercise: TemplateExercise
 
-    @State private var availableMuscles: [MuscleGroup] = []
+    @State private var availableMuscles: [ExerciseMuscleSnapshot] = []
     @State private var suggestedCategories: [String] = []
     @State private var didLoadCatalogMetadata = false
 
@@ -715,8 +713,7 @@ private struct TemplateExerciseDetailDestinationView: View {
         Group {
             if let catalogExercise = catalogMatches.first {
                 ExerciseDetailDestinationView(
-                    exercise: catalogExercise,
-                    repository: ExerciseCatalogRepository(modelContext: modelContext),
+                    remoteUUID: catalogExercise.remoteUUID,
                     availableMuscles: availableMuscles,
                     suggestedCategories: suggestedCategories
                 )
@@ -725,8 +722,12 @@ private struct TemplateExerciseDetailDestinationView: View {
             }
         }
         .task {
-            loadCatalogMetadataIfNeeded()
+            await loadCatalogMetadataIfNeeded()
         }
+    }
+
+    private var templateDetailBackgroundStore: AppBackgroundStore {
+        appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
     }
 
     private var fallbackSnapshotDetail: some View {
@@ -761,13 +762,26 @@ private struct TemplateExerciseDetailDestinationView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    private func loadCatalogMetadataIfNeeded() {
+    @MainActor
+    private func loadCatalogMetadataIfNeeded() async {
         guard !didLoadCatalogMetadata else { return }
         didLoadCatalogMetadata = true
 
-        let repository = ExerciseCatalogRepository(modelContext: modelContext)
-        availableMuscles = (try? repository.availableMuscles()) ?? []
-        suggestedCategories = (try? repository.availableCategories(includeUncurated: true)) ?? []
+        do {
+            let backgroundStore = templateDetailBackgroundStore
+            let metadata = try await backgroundStore.perform("template-exercise-detail.catalog-metadata") { backgroundContext in
+                let repository = ExerciseCatalogRepository(modelContext: backgroundContext)
+                return (
+                    muscles: try repository.availableMuscles().map(ExerciseMuscleSnapshot.init(muscle:)),
+                    categories: try repository.availableCategories(includeUncurated: true)
+                )
+            }
+            availableMuscles = metadata.muscles
+            suggestedCategories = metadata.categories
+        } catch {
+            availableMuscles = []
+            suggestedCategories = []
+        }
     }
 
     private func snapshotInfoRow(title: String, value: String) -> some View {

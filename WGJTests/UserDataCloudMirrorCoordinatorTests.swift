@@ -6,7 +6,6 @@ import Testing
 @Suite(.serialized)
 struct UserDataCloudMirrorCoordinatorTests {
     @Test
-    @MainActor
     func coordinatorEnablesUserDataSyncOnlyAfterMirrorContainerIsBuilt() async throws {
         let tracker = UserDataSyncTracker.shared
         _ = tracker.configureForLaunch(isCloudEnabled: false, errorDescription: "Local launch")
@@ -39,15 +38,14 @@ struct UserDataCloudMirrorCoordinatorTests {
 
         #expect(buildRecorder.didBuild)
         #expect(await bridge.syncCount == 1)
-        #expect(coordinator.state == .active)
-        let snapshot = tracker.currentSnapshot()
+        #expect(await coordinator.state == .active)
+        let snapshot = try #require(await coordinator.lastUserDataSyncSnapshot)
         #expect(snapshot.cloudSyncEnabled)
         #expect(snapshot.state == .caughtUp)
         #expect(snapshot.latestLocalMutationAt == nil)
     }
 
     @Test
-    @MainActor
     func coordinatorKeepsUserDataSyncLocalOnlyWhenCloudKitCannotBeUsed() async throws {
         let tracker = UserDataSyncTracker.shared
         _ = tracker.configureForLaunch(isCloudEnabled: false, errorDescription: nil)
@@ -67,12 +65,12 @@ struct UserDataCloudMirrorCoordinatorTests {
             }
         )
 
-        #expect(coordinator.state == .unavailable("No iCloud account is signed in."))
-        #expect(!tracker.currentSnapshot().cloudSyncEnabled)
+        #expect(await coordinator.state == .unavailable("No iCloud account is signed in."))
+        let snapshot = try #require(await coordinator.lastUserDataSyncSnapshot)
+        #expect(!snapshot.cloudSyncEnabled)
     }
 
     @Test
-    @MainActor
     func coordinatorRunsActiveBridgeAgainWhenExplicitSyncIsRequested() async throws {
         let container = try makeContainer()
         let bridge = CountingMirrorBridge()
@@ -98,7 +96,6 @@ struct UserDataCloudMirrorCoordinatorTests {
     }
 
     @Test
-    @MainActor
     func coordinatorCanDisableDirectBackupWithoutDisablingMirrorBridge() async throws {
         let container = try makeContainer()
         let bridge = CountingMirrorBridge()
@@ -132,7 +129,42 @@ struct UserDataCloudMirrorCoordinatorTests {
     }
 
     @Test
-    @MainActor
+    func routineActiveSyncDoesNotRunDirectBackupExport() async throws {
+        let container = try makeContainer()
+        let bridge = CountingMirrorBridge()
+        let backupStore = CountingBackupStore()
+        let coordinator = UserDataCloudMirrorCoordinator(
+            makeBackupStore: {
+                backupStore
+            },
+            isCloudBackupEnabled: {
+                true
+            },
+            postStartHydrationDelays: []
+        )
+
+        await coordinator.startIfNeeded(
+            localContainer: container,
+            cloudRuntimeMode: .available,
+            canUseConfiguredCloudKitContainer: true,
+            makeMirrorContainer: {
+                container
+            },
+            makeBridge: { _, _ in
+                bridge
+            }
+        )
+        let fetchCountAfterStart = await backupStore.fetchCount
+        let saveCountAfterStart = await backupStore.saveCount
+
+        await coordinator.syncIfActive()
+
+        #expect(await bridge.syncCount == 2)
+        #expect(await backupStore.fetchCount == fetchCountAfterStart)
+        #expect(await backupStore.saveCount == saveCountAfterStart)
+    }
+
+    @Test
     func coordinatorRunsActiveBridgeWhenCloudImportCompletes() async throws {
         let container = try makeContainer()
         let bridge = CountingMirrorBridge()
@@ -158,7 +190,6 @@ struct UserDataCloudMirrorCoordinatorTests {
     }
 
     @Test
-    @MainActor
     func coordinatorDeduplicatesAlreadyHandledCloudImport() async throws {
         let container = try makeContainer()
         let bridge = CountingMirrorBridge()
@@ -267,6 +298,29 @@ private struct UnusedBackupStore: UserDataCloudBackupStoring {
 
     func fetchBackup() async throws -> UserDataCloudBackupRemoteRecord? {
         Issue.record("Backup store should not fetch when direct backup is disabled.")
+        return nil
+    }
+}
+
+private actor CountingBackupStore: UserDataCloudBackupStoring {
+    private var fetched = 0
+    private var saved = 0
+
+    var fetchCount: Int {
+        fetched
+    }
+
+    var saveCount: Int {
+        saved
+    }
+
+    func saveBackup(_ record: UserDataCloudBackupRemoteRecord) async throws {
+        _ = record
+        saved += 1
+    }
+
+    func fetchBackup() async throws -> UserDataCloudBackupRemoteRecord? {
+        fetched += 1
         return nil
     }
 }

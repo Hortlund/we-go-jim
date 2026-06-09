@@ -108,7 +108,6 @@ struct TemplateEditorView: View {
             }
             .sheet(item: $pickerTarget) { target in
                 ExercisePickerView(
-                    repository: catalogRepository,
                     title: target.pickerTitle,
                     actionTitle: target.pickerActionTitle
                 ) { selected in
@@ -333,14 +332,14 @@ struct TemplateEditorView: View {
         }
     }
 
-    private func appendExercise(catalogItem: ExerciseCatalogItem) -> ExercisePickerSelectionResult {
+    private func appendExercise(catalogItem: ExerciseCatalogSelection) -> ExercisePickerSelectionResult {
         guard !containsComponentCatalogUUID(catalogItem.remoteUUID) else {
             return duplicateExerciseRejectedResult(for: catalogItem)
         }
 
         let draftStore = TemplateExerciseDraftStore(
             draft: TemplateExerciseDraft(
-                catalogItem: catalogItem,
+                selection: catalogItem,
                 preferredLoadUnit: preferredLoadUnit
             ),
             isExpanded: true
@@ -351,7 +350,7 @@ struct TemplateEditorView: View {
         return .accepted
     }
 
-    private func handlePickedExercise(_ item: ExerciseCatalogItem, target: TemplateEditorPickerTarget) -> ExercisePickerSelectionResult {
+    private func handlePickedExercise(_ item: ExerciseCatalogSelection, target: TemplateEditorPickerTarget) -> ExercisePickerSelectionResult {
         switch target {
         case .exercise:
             return appendExercise(catalogItem: item)
@@ -364,7 +363,7 @@ struct TemplateEditorView: View {
         }
     }
 
-    private func replaceExercise(with catalogItem: ExerciseCatalogItem, exerciseID: UUID) -> ExercisePickerSelectionResult {
+    private func replaceExercise(with catalogItem: ExerciseCatalogSelection, exerciseID: UUID) -> ExercisePickerSelectionResult {
         let duplicateResult = ExerciseReplacementSelectionPolicy.result(
             catalogExerciseUUID: catalogItem.remoteUUID,
             exerciseName: catalogItem.displayName,
@@ -392,7 +391,7 @@ struct TemplateEditorView: View {
         return .accepted
     }
 
-    private func appendComponent(catalogItem: ExerciseCatalogItem, to exerciseID: UUID) -> ExercisePickerSelectionResult {
+    private func appendComponent(catalogItem: ExerciseCatalogSelection, to exerciseID: UUID) -> ExercisePickerSelectionResult {
         guard !containsComponentCatalogUUID(catalogItem.remoteUUID) else {
             return duplicateExerciseRejectedResult(for: catalogItem)
         }
@@ -400,14 +399,14 @@ struct TemplateEditorView: View {
             return .accepted
         }
 
-        draftStore.components.append(TemplateExerciseComponentDraft(catalogItem: catalogItem))
+        draftStore.components.append(TemplateExerciseComponentDraft(selection: catalogItem))
         draftStore.isExpanded = true
         return .accepted
     }
 
     private func upsertCardioBlock(
         phase: WorkoutCardioPhase,
-        catalogItem: ExerciseCatalogItem
+        catalogItem: ExerciseCatalogSelection
     ) -> ExercisePickerSelectionResult {
         let existing = cardioDraftsByPhase[phase]
         let duplicateResult = ExerciseReplacementSelectionPolicy.result(
@@ -615,7 +614,7 @@ struct TemplateEditorView: View {
         }
     }
 
-    private func duplicateExerciseRejectedResult(for catalogItem: ExerciseCatalogItem) -> ExercisePickerSelectionResult {
+    private func duplicateExerciseRejectedResult(for catalogItem: ExerciseCatalogSelection) -> ExercisePickerSelectionResult {
         .rejected(
             ExerciseSelectionDuplicateNotice(
                 exerciseName: catalogItem.displayName,

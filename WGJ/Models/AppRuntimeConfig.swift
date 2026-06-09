@@ -450,13 +450,13 @@ final class AppRuntimeState {
 
         let statusProvider = accountService ?? AccountStatusService()
 
-        let refreshTask = Task(priority: .utility) { [weak self, statusProvider] in
+        let refreshTask = Task.detached(priority: .utility) { [weak self, statusProvider] in
             let status = await Self.accountStatus(
                 from: statusProvider,
                 timeout: runtimeTimeout
             )
             guard let self else { return }
-            self.finishRuntimeCloudAvailabilityRefresh(
+            await self.finishRuntimeCloudAvailabilityRefresh(
                 refreshGeneration: refreshGeneration,
                 status: status,
                 taskWasCancelled: Task.isCancelled
@@ -588,7 +588,7 @@ final class AppRuntimeState {
 }
 
 extension WorkoutNotificationStyle {
-    var notificationInterruptionLevel: UNNotificationInterruptionLevel {
+    nonisolated var notificationInterruptionLevel: UNNotificationInterruptionLevel {
         switch self {
         case .standard:
             return .active
@@ -598,7 +598,7 @@ extension WorkoutNotificationStyle {
     }
 
     // Foreground rest timer feedback stays haptic-only so external audio keeps playing.
-    var foregroundRestTimerAlertPolicy: RestTimerForegroundAlertPolicy {
+    nonisolated var foregroundRestTimerAlertPolicy: RestTimerForegroundAlertPolicy {
         switch self {
         case .standard:
             return RestTimerForegroundAlertPolicy(
@@ -630,11 +630,18 @@ struct RestTimerNotificationDescriptor: Equatable {
 extension Notification.Name {
     nonisolated static let wgjDidDeleteAllUserData = Notification.Name("wgj.didDeleteAllUserData")
     nonisolated static let wgjWorkoutHistoryDidChange = Notification.Name("wgj.workoutHistoryDidChange")
+    nonisolated static let wgjTemplateLibraryDidChange = Notification.Name("wgj.templateLibraryDidChange")
 }
 
 nonisolated enum WorkoutHistoryChangeBroadcaster {
     static func post(notificationCenter: NotificationCenter = .default) {
         notificationCenter.post(name: .wgjWorkoutHistoryDidChange, object: nil)
+    }
+}
+
+nonisolated enum TemplateLibraryChangeBroadcaster {
+    static func post(notificationCenter: NotificationCenter = .default) {
+        notificationCenter.post(name: .wgjTemplateLibraryDidChange, object: nil)
     }
 }
 
@@ -789,7 +796,7 @@ struct WorkoutCompletionPresentation: Identifiable, Equatable {
     var id: UUID { sessionID }
 }
 
-enum ActiveWorkoutScrollTarget: Hashable {
+nonisolated enum ActiveWorkoutScrollTarget: Hashable, Codable, Sendable {
     case header
     case preWorkoutCardio
     case exercise(UUID)
@@ -955,6 +962,17 @@ nonisolated enum MainTabOverlayLayoutPolicy {
 nonisolated struct ActiveWorkoutRestoredPresentation: Equatable, Sendable {
     let sessionID: UUID
     let presentationMode: ActiveWorkoutStoredPresentationMode?
+    let scrollTarget: ActiveWorkoutScrollTarget?
+
+    init(
+        sessionID: UUID,
+        presentationMode: ActiveWorkoutStoredPresentationMode?,
+        scrollTarget: ActiveWorkoutScrollTarget? = nil
+    ) {
+        self.sessionID = sessionID
+        self.presentationMode = presentationMode
+        self.scrollTarget = scrollTarget
+    }
 }
 
 @MainActor
@@ -1154,6 +1172,7 @@ final class ActiveWorkoutPresentationState {
 
         if let restoredPresentation {
             activeSessionID = restoredPresentation.sessionID
+            stageScrollTarget(restoredPresentation.scrollTarget, for: restoredPresentation.sessionID)
             switch restoredPresentation.presentationMode {
             case .some(.presented):
                 isActiveWorkoutPresented = true
@@ -1179,7 +1198,8 @@ final class ActiveWorkoutPresentationState {
             if let snapshot = try await ActiveWorkoutSnapshotStore.shared.loadStoredSnapshot() {
                 return ActiveWorkoutRestoredPresentation(
                     sessionID: snapshot.session.id,
-                    presentationMode: snapshot.presentationMode
+                    presentationMode: snapshot.presentationMode,
+                    scrollTarget: snapshot.scrollTarget
                 )
             }
         } catch {
@@ -1352,12 +1372,17 @@ final class RestTimerState {
         restTimerExpirationTask = nil
         guard isEnabled, let delay = RestTimerExpiryPolicy.expirationDelay(seconds: seconds) else { return }
 
-        restTimerExpirationTask = Task { @MainActor in
+        restTimerExpirationTask = Task.detached(priority: .utility) {
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled else { return }
-            handleRestTimerExpirationIfNeeded()
-            restTimerExpirationTask = nil
+            await self.handleRestTimerExpirationAfterDelayIfStillNeeded()
         }
+    }
+
+    private func handleRestTimerExpirationAfterDelayIfStillNeeded() {
+        guard !Task.isCancelled else { return }
+        handleRestTimerExpirationIfNeeded()
+        restTimerExpirationTask = nil
     }
 
     private func showRestTimerPopup(exerciseName: String?, setLabel: String?) {
@@ -1378,12 +1403,18 @@ final class RestTimerState {
         let popup = RestTimerPopup(title: "Rest complete", message: message)
         restTimerPopup = popup
 
-        restTimerPopupDismissTask = Task { @MainActor in
+        let popupID = popup.id
+        restTimerPopupDismissTask = Task.detached(priority: .utility) {
             try? await Task.sleep(for: .seconds(3.2))
-            guard !Task.isCancelled, restTimerPopup?.id == popup.id else { return }
-            restTimerPopup = nil
-            restTimerPopupDismissTask = nil
+            guard !Task.isCancelled else { return }
+            await self.dismissRestTimerPopupAfterDelayIfStillCurrent(popupID: popupID)
         }
+    }
+
+    private func dismissRestTimerPopupAfterDelayIfStillCurrent(popupID: UUID) {
+        guard !Task.isCancelled, restTimerPopup?.id == popupID else { return }
+        restTimerPopup = nil
+        restTimerPopupDismissTask = nil
     }
 }
 
@@ -1453,20 +1484,31 @@ final class WorkoutFeedbackCenter {
 
     private func runHapticPattern(_ steps: [HapticStep]) {
         hapticPatternTask?.cancel()
-        hapticPatternTask = Task { @MainActor [weak self] in
+        let patternSteps = steps
+        hapticPatternTask = Task.detached(priority: .utility) { [weak self, patternSteps] in
             guard let self else { return }
 
-            for step in steps {
+            for step in patternSteps {
                 if step.delay > .zero {
                     try? await Task.sleep(for: step.delay)
                 }
                 guard !Task.isCancelled else { return }
-                self.perform(step.command)
+                await self.performHapticStepAfterDelayIfStillNeeded(step.command)
             }
 
-            self.hapticPatternTask = nil
-            self.prepareGenerators()
+            await self.finishHapticPatternAfterDelayIfStillNeeded()
         }
+    }
+
+    private func performHapticStepAfterDelayIfStillNeeded(_ command: HapticCommand) {
+        guard !Task.isCancelled else { return }
+        perform(command)
+    }
+
+    private func finishHapticPatternAfterDelayIfStillNeeded() {
+        guard !Task.isCancelled else { return }
+        hapticPatternTask = nil
+        prepareGenerators()
     }
 
     private func perform(_ command: HapticCommand) {
@@ -1537,14 +1579,15 @@ extension EnvironmentValues {
     }
 }
 
-@MainActor
-final class RestTimerNotificationManager {
+nonisolated final class RestTimerNotificationManager: @unchecked Sendable {
     static let shared = RestTimerNotificationManager()
 
-    private let notificationIdentifierPrefix = AppNotificationManager.restTimerIdentifierPrefix
-    private var schedulingTask: Task<Void, Never>?
-    private var schedulingGeneration = 0
-    private var currentNotificationIdentifier: String?
+    private let worker = RestTimerNotificationWorker(
+        notificationIdentifierPrefix: AppNotificationManager.restTimerIdentifierPrefix
+    )
+    private let operationLock = NSLock()
+    private var operationChain: Task<Void, Never>?
+    private var operationChainGeneration = 0
 
     private init() { }
 
@@ -1556,65 +1599,14 @@ final class RestTimerNotificationManager {
         seconds: Int,
         style: WorkoutNotificationStyle
     ) {
-        schedulingGeneration += 1
-        let generation = schedulingGeneration
-        clearCurrentRestTimerNotifications()
-        let notificationIdentifier = "\(notificationIdentifierPrefix).\(generation)"
-        currentNotificationIdentifier = notificationIdentifier
-        schedulingTask?.cancel()
-
-        schedulingTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            let center = UNUserNotificationCenter.current()
-            let isAuthorized = await AppNotificationManager.shared.requestAlertAuthorizationIfNeeded()
-
-            guard isAuthorized else {
-                if self.currentNotificationIdentifier == notificationIdentifier {
-                    self.currentNotificationIdentifier = nil
-                }
-                self.schedulingTask = nil
-                return
-            }
-            guard !Task.isCancelled, generation == self.schedulingGeneration else { return }
-
-            let descriptor = Self.notificationDescriptor(style: style)
-            let content = Self.makeNotificationContent(from: descriptor)
-            await self.clearAllRestTimerNotifications(using: center)
-            guard !Task.isCancelled, generation == self.schedulingGeneration else { return }
-
-            let trigger = UNTimeIntervalNotificationTrigger(
-                timeInterval: TimeInterval(max(1, seconds)),
-                repeats: false
-            )
-            let request = UNNotificationRequest(
-                identifier: notificationIdentifier,
-                content: content,
-                trigger: trigger
-            )
-
-            try? await center.add(request)
-            if generation != self.schedulingGeneration || self.currentNotificationIdentifier != notificationIdentifier {
-                self.clearRestTimerNotifications(
-                    using: center,
-                    identifier: notificationIdentifier
-                )
-            }
-            if self.currentNotificationIdentifier == notificationIdentifier {
-                self.schedulingTask = nil
-            }
+        enqueue { worker in
+            await worker.scheduleRestTimer(seconds: seconds, style: style)
         }
     }
 
     func cancelRestTimerNotification() {
-        schedulingGeneration += 1
-        let generation = schedulingGeneration
-        schedulingTask?.cancel()
-        schedulingTask = nil
-        clearCurrentRestTimerNotifications()
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            guard generation == self.schedulingGeneration else { return }
-            await self.clearAllRestTimerNotifications(using: UNUserNotificationCenter.current())
+        enqueue { worker in
+            await worker.cancelRestTimerNotification()
         }
     }
 
@@ -1630,7 +1622,7 @@ final class RestTimerNotificationManager {
         )
     }
 
-    private static func makeNotificationContent(from descriptor: RestTimerNotificationDescriptor) -> UNMutableNotificationContent {
+    static func makeNotificationContent(from descriptor: RestTimerNotificationDescriptor) -> UNMutableNotificationContent {
         let content = UNMutableNotificationContent()
         content.title = descriptor.title
         content.subtitle = descriptor.subtitle
@@ -1640,17 +1632,123 @@ final class RestTimerNotificationManager {
         return content
     }
 
+    private func enqueue(
+        _ operation: @escaping @Sendable (RestTimerNotificationWorker) async -> Void
+    ) {
+        operationLock.lock()
+        operationChainGeneration += 1
+        let chainGeneration = operationChainGeneration
+        let previous = operationChain
+        let worker = worker
+        let next = Task.detached(priority: .utility) { [weak self] in
+            await previous?.value
+            await operation(worker)
+            self?.clearOperationChainIfCurrent(chainGeneration)
+        }
+        operationChain = next
+        operationLock.unlock()
+    }
+
+    private func clearOperationChainIfCurrent(_ generation: Int) {
+        operationLock.lock()
+        if operationChainGeneration == generation {
+            operationChain = nil
+        }
+        operationLock.unlock()
+    }
+}
+
+private actor RestTimerNotificationWorker {
+    private let notificationIdentifierPrefix: String
+    private var schedulingTask: Task<Void, Never>?
+    private var schedulingGeneration = 0
+    private var currentNotificationIdentifier: String?
+
+    init(notificationIdentifierPrefix: String) {
+        self.notificationIdentifierPrefix = notificationIdentifierPrefix
+    }
+
+    func scheduleRestTimer(
+        seconds: Int,
+        style: WorkoutNotificationStyle
+    ) {
+        schedulingGeneration += 1
+        let generation = schedulingGeneration
+        clearCurrentRestTimerNotifications()
+        let notificationIdentifier = "\(notificationIdentifierPrefix).\(generation)"
+        currentNotificationIdentifier = notificationIdentifier
+        schedulingTask?.cancel()
+
+        schedulingTask = Task.detached(priority: .utility) { [notificationIdentifierPrefix] in
+            let center = UNUserNotificationCenter.current()
+            let isAuthorized = await AppNotificationManager.shared.requestAlertAuthorizationIfNeeded()
+
+            guard isAuthorized else {
+                await self.finishSchedulingWithoutAuthorization(
+                    generation: generation,
+                    notificationIdentifier: notificationIdentifier
+                )
+                return
+            }
+            guard await self.isCurrent(generation: generation, notificationIdentifier: notificationIdentifier) else {
+                return
+            }
+
+            let descriptor = RestTimerNotificationManager.notificationDescriptor(style: style)
+            let content = RestTimerNotificationManager.makeNotificationContent(from: descriptor)
+            await Self.clearAllRestTimerNotifications(
+                using: center,
+                notificationIdentifierPrefix: notificationIdentifierPrefix
+            )
+            guard await self.isCurrent(generation: generation, notificationIdentifier: notificationIdentifier) else {
+                return
+            }
+
+            let trigger = UNTimeIntervalNotificationTrigger(
+                timeInterval: TimeInterval(max(1, seconds)),
+                repeats: false
+            )
+            let request = UNNotificationRequest(
+                identifier: notificationIdentifier,
+                content: content,
+                trigger: trigger
+            )
+
+            try? await center.add(request)
+            await self.finishScheduling(
+                generation: generation,
+                notificationIdentifier: notificationIdentifier,
+                center: center
+            )
+        }
+    }
+
+    func cancelRestTimerNotification() {
+        schedulingGeneration += 1
+        let generation = schedulingGeneration
+        schedulingTask?.cancel()
+        schedulingTask = nil
+        clearCurrentRestTimerNotifications()
+
+        Task.detached(priority: .utility) { [notificationIdentifierPrefix] in
+            guard await self.isGenerationCurrent(generation) else { return }
+            await Self.clearAllRestTimerNotifications(
+                using: UNUserNotificationCenter.current(),
+                notificationIdentifierPrefix: notificationIdentifierPrefix
+            )
+        }
+    }
+
     private func clearCurrentRestTimerNotifications() {
         guard let currentNotificationIdentifier else { return }
-        let center = UNUserNotificationCenter.current()
-        clearRestTimerNotifications(
-            using: center,
+        Self.clearRestTimerNotifications(
+            using: UNUserNotificationCenter.current(),
             identifier: currentNotificationIdentifier
         )
         self.currentNotificationIdentifier = nil
     }
 
-    private func clearRestTimerNotifications(
+    private static func clearRestTimerNotifications(
         using center: UNUserNotificationCenter,
         identifier: String
     ) {
@@ -1658,7 +1756,10 @@ final class RestTimerNotificationManager {
         center.removeDeliveredNotifications(withIdentifiers: [identifier])
     }
 
-    private func clearAllRestTimerNotifications(using center: UNUserNotificationCenter) async {
+    private static func clearAllRestTimerNotifications(
+        using center: UNUserNotificationCenter,
+        notificationIdentifierPrefix: String
+    ) async {
         let pendingIdentifiers = await center.pendingNotificationRequests()
             .map(\.identifier)
             .filter { $0.hasPrefix(notificationIdentifierPrefix) }
@@ -1673,9 +1774,50 @@ final class RestTimerNotificationManager {
             center.removeDeliveredNotifications(withIdentifiers: deliveredIdentifiers)
         }
     }
+
+    private func finishSchedulingWithoutAuthorization(
+        generation: Int,
+        notificationIdentifier: String
+    ) {
+        if currentNotificationIdentifier == notificationIdentifier {
+            currentNotificationIdentifier = nil
+        }
+        if generation == schedulingGeneration {
+            schedulingTask = nil
+        }
+    }
+
+    private func finishScheduling(
+        generation: Int,
+        notificationIdentifier: String,
+        center: UNUserNotificationCenter
+    ) {
+        if generation != schedulingGeneration || currentNotificationIdentifier != notificationIdentifier {
+            Self.clearRestTimerNotifications(
+                using: center,
+                identifier: notificationIdentifier
+            )
+            return
+        }
+
+        schedulingTask = nil
+    }
+
+    private func isCurrent(
+        generation: Int,
+        notificationIdentifier: String
+    ) -> Bool {
+        generation == schedulingGeneration
+            && currentNotificationIdentifier == notificationIdentifier
+            && !Task.isCancelled
+    }
+
+    private func isGenerationCurrent(_ generation: Int) -> Bool {
+        generation == schedulingGeneration
+    }
 }
 
-final class AppNotificationManager {
+nonisolated final class AppNotificationManager {
     static let shared = AppNotificationManager()
 
     nonisolated static let brosReactionCategoryIdentifier = "wgj.bros.reaction"
@@ -1683,7 +1825,6 @@ final class AppNotificationManager {
 
     private init() { }
 
-    @MainActor
     func configureNotifications() {
         let center = UNUserNotificationCenter.current()
         center.delegate = WGJNotificationCenterDelegate.shared
@@ -1697,7 +1838,6 @@ final class AppNotificationManager {
         ])
     }
 
-    @MainActor
     func requestAlertAuthorizationIfNeeded() async -> Bool {
         guard !AppRuntimeConfig.isRunningTests else {
             return false
@@ -1752,7 +1892,7 @@ final class AppNotificationManager {
     }
 }
 
-final class WGJNotificationCenterDelegate: NSObject, UNUserNotificationCenterDelegate {
+nonisolated final class WGJNotificationCenterDelegate: NSObject, UNUserNotificationCenterDelegate {
     static let shared = WGJNotificationCenterDelegate()
 
     static func presentationOptions(

@@ -96,21 +96,32 @@ nonisolated enum CloudSyncEventHealthClassifier {
     }
 }
 
-@MainActor
-final class CloudSyncEventMonitor {
+nonisolated final class CloudSyncEventMonitor {
     static let shared = CloudSyncEventMonitor()
 
+    private let eventQueue: OperationQueue
+    private let lock = NSLock()
     private var observer: NSObjectProtocol?
 
-    private init() { }
+    private init() {
+        let eventQueue = OperationQueue()
+        eventQueue.name = "se.highball.WeGoJim.cloud-sync-events"
+        eventQueue.qualityOfService = .utility
+        eventQueue.maxConcurrentOperationCount = 1
+        self.eventQueue = eventQueue
+    }
 
     func start() {
-        guard observer == nil else { return }
+        lock.lock()
+        guard observer == nil else {
+            lock.unlock()
+            return
+        }
 
-        observer = NotificationCenter.default.addObserver(
+        let observer = NotificationCenter.default.addObserver(
             forName: NSPersistentCloudKitContainer.eventChangedNotification,
             object: nil,
-            queue: .main
+            queue: eventQueue
         ) { notification in
             guard
                 let event = notification.userInfo?[NSPersistentCloudKitContainer.eventNotificationUserInfoKey]
@@ -121,18 +132,34 @@ final class CloudSyncEventMonitor {
 
             let summary = Self.summary(from: event)
             let resolution = CloudSyncEventHealthClassifier.resolution(for: summary)
-            Task { @MainActor in
-                AppRuntimeState.shared.updateLatestCloudSyncEvent(summary)
-                UserDataSyncTrackerBridge.recordCloudEvent(summary)
-                switch resolution {
-                case .noChange:
-                    break
-                case .clearRuntimeError:
-                    AppRuntimeState.shared.updateCloudRuntimeError(nil)
-                case .setRuntimeError(let description):
-                    AppRuntimeState.shared.updateCloudRuntimeError(description)
-                }
+            let syncSnapshot = UserDataSyncTrackerBridge.recordCloudEventSnapshot(summary)
+            Task.detached(priority: .utility) {
+                await Self.publish(
+                    summary: summary,
+                    syncSnapshot: syncSnapshot,
+                    resolution: resolution
+                )
             }
+        }
+        self.observer = observer
+        lock.unlock()
+    }
+
+    @MainActor
+    private static func publish(
+        summary: CloudSyncEventSummary,
+        syncSnapshot: UserDataSyncStatusSnapshot,
+        resolution: CloudSyncEventHealthResolution
+    ) {
+        AppRuntimeState.shared.updateLatestCloudSyncEvent(summary)
+        AppRuntimeState.shared.updateUserDataSyncStatus(syncSnapshot)
+        switch resolution {
+        case .noChange:
+            break
+        case .clearRuntimeError:
+            AppRuntimeState.shared.updateCloudRuntimeError(nil)
+        case .setRuntimeError(let description):
+            AppRuntimeState.shared.updateCloudRuntimeError(description)
         }
     }
 

@@ -287,7 +287,8 @@ nonisolated final class ExerciseCatalogSyncService {
         if localPath.hasPrefix("/") {
             fileURL = URL(fileURLWithPath: localPath)
         } else {
-            let cachesRoot = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+            let cachesRoot = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+                ?? FileManager.default.temporaryDirectory
             fileURL = cachesRoot
                 .appendingPathComponent("ExerciseImages", isDirectory: true)
                 .appendingPathComponent(localPath)

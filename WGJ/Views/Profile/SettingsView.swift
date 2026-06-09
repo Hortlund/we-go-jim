@@ -3,6 +3,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
     @Environment(AppWarmupState.self) private var appWarmupState
 
@@ -24,12 +25,8 @@ struct SettingsView: View {
     @State private var errorMessage = ""
     @State private var showingError = false
 
-    private var catalogRepository: ExerciseCatalogRepository {
-        ExerciseCatalogRepository(modelContext: modelContext)
-    }
-
-    private var profileRepository: ProfileRepository {
-        ProfileRepository(modelContext: modelContext)
+    private var settingsBackgroundStore: AppBackgroundStore {
+        appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
     }
 
     var body: some View {
@@ -355,11 +352,20 @@ struct SettingsView: View {
     }
 
     private func bootstrapCatalog() async {
+        let backgroundStore = settingsBackgroundStore
         do {
-            try catalogRepository.ensureSeedImportedIfNeeded()
-            visibleExerciseCount = try catalogRepository.allExercises().filter { !$0.isHidden }.count
-            refreshLibraryStatusText()
+            let summary = try await backgroundStore.perform("settings.catalog.bootstrap") { backgroundContext in
+                let repository = ExerciseCatalogRepository(modelContext: backgroundContext)
+                try repository.ensureSeedImportedIfNeeded()
+                return SettingsCatalogSummary(
+                    visibleExerciseCount: try repository.allExercises().filter { !$0.isHidden }.count,
+                    libraryStatusText: Self.libraryStatusText(for: repository.syncState())
+                )
+            }
+            visibleExerciseCount = summary.visibleExerciseCount
+            libraryStatusText = summary.libraryStatusText
         } catch {
+            libraryStatusText = "Import failed"
             showError(error)
         }
     }
@@ -368,62 +374,85 @@ struct SettingsView: View {
         guard !hasLoadedProfile else { return }
         hasLoadedProfile = true
 
+        let backgroundStore = settingsBackgroundStore
+        let cloudSyncEnabled = cloudSyncEnabled
         do {
-            let profile = try await profileRepository.bootstrapProfileIdentity(cloudSyncEnabled: cloudSyncEnabled)
-            weeklyGoal = profile.weeklyWorkoutGoal
-            savedWeeklyGoal = profile.weeklyWorkoutGoal
-            isTrainingGuidanceEnabled = profile.isTrainingGuidanceEnabled
-            keepsScreenAwake = profile.keepsScreenAwake
-            isBozarModeEnabled = profile.isBozarModeEnabled
-            preferredWeightUnit = profile.preferredWeightUnit
-            workoutNotificationStyle = profile.workoutNotificationStyle
+            let snapshot = try await backgroundStore.performAsync("settings.profile.load") { backgroundContext in
+                SettingsProfileSnapshot(
+                    profile: try await ProfileRepository(modelContext: backgroundContext)
+                        .bootstrapProfileIdentity(cloudSyncEnabled: cloudSyncEnabled)
+                )
+            }
+            applyProfileSnapshot(snapshot)
         } catch {
             showError(error)
         }
     }
 
-    private func refreshLibraryStatusText() {
-        guard let state = catalogRepository.syncState() else {
-            libraryStatusText = "Not loaded yet"
-            return
-        }
-
+    nonisolated private static func libraryStatusText(for state: ExerciseCatalogSyncState?) -> String {
+        guard let state else { return "Not loaded yet" }
         if let error = state.lastErrorMessage, !error.isEmpty {
-            libraryStatusText = "Import failed"
-            return
+            return "Import failed"
         }
 
         if let importedAt = state.seedImportedAt {
             let versionText = state.seedVersion > 0 ? "v\(state.seedVersion)" : "unknown version"
-            libraryStatusText = "\(versionText), on device since \(importedAt.formatted(date: .abbreviated, time: .shortened))"
-            return
+            return "\(versionText), on device since \(importedAt.formatted(date: .abbreviated, time: .shortened))"
         }
 
-        libraryStatusText = "Bundled library ready"
+        return "Bundled library ready"
+    }
+
+    @MainActor
+    private func applyProfileSnapshot(_ snapshot: SettingsProfileSnapshot) {
+        weeklyGoal = snapshot.weeklyGoal
+        savedWeeklyGoal = snapshot.weeklyGoal
+        isTrainingGuidanceEnabled = snapshot.isTrainingGuidanceEnabled
+        keepsScreenAwake = snapshot.keepsScreenAwake
+        isBozarModeEnabled = snapshot.isBozarModeEnabled
+        preferredWeightUnit = snapshot.preferredWeightUnit
+        workoutNotificationStyle = snapshot.workoutNotificationStyle
     }
 
     private func saveWeeklyGoal() {
-        do {
-            try profileRepository.updateWeeklyWorkoutGoal(weeklyGoal)
-            let normalizedGoal = max(1, min(14, weeklyGoal))
-            weeklyGoal = normalizedGoal
-            savedWeeklyGoal = normalizedGoal
-            appWarmupState.invalidateProfile()
-            showWeeklyGoalSaveFeedback()
-        } catch {
-            showError(error)
+        let goal = weeklyGoal
+        let backgroundStore = settingsBackgroundStore
+        Task.detached(priority: .utility) {
+            do {
+                let normalizedGoal = try await backgroundStore.perform("settings.weekly-goal.save") { backgroundContext in
+                    try ProfileRepository(modelContext: backgroundContext).updateWeeklyWorkoutGoal(goal)
+                    return max(1, min(14, goal))
+                }
+                await self.applyWeeklyGoalSave(normalizedGoal)
+            } catch {
+                await self.showError(error)
+            }
         }
+    }
+
+    @MainActor
+    private func applyWeeklyGoalSave(_ normalizedGoal: Int) {
+        weeklyGoal = normalizedGoal
+        savedWeeklyGoal = normalizedGoal
+        appWarmupState.invalidateProfile()
+        showWeeklyGoalSaveFeedback()
     }
 
     private func showWeeklyGoalSaveFeedback() {
         weeklyGoalSaveMessage = "Weekly goal updated"
         weeklyGoalSaveFeedbackTask?.cancel()
-        weeklyGoalSaveFeedbackTask = Task { @MainActor in
+        weeklyGoalSaveFeedbackTask = Task.detached(priority: .utility) {
             try? await Task.sleep(for: .seconds(2))
             guard !Task.isCancelled else { return }
-            weeklyGoalSaveMessage = nil
-            weeklyGoalSaveFeedbackTask = nil
+            await self.clearWeeklyGoalSaveFeedbackAfterDelayIfStillNeeded()
         }
+    }
+
+    @MainActor
+    private func clearWeeklyGoalSaveFeedbackAfterDelayIfStillNeeded() {
+        guard !Task.isCancelled else { return }
+        weeklyGoalSaveMessage = nil
+        weeklyGoalSaveFeedbackTask = nil
     }
 
     private func clearWeeklyGoalSaveFeedback() {
@@ -433,51 +462,119 @@ struct SettingsView: View {
     }
 
     private func saveTrainingGuidancePreference(_ isEnabled: Bool) {
-        do {
-            try profileRepository.updateTrainingGuidanceEnabled(isEnabled)
-        } catch {
-            showError(error)
+        let backgroundStore = settingsBackgroundStore
+        Task.detached(priority: .utility) {
+            do {
+                try await backgroundStore.perform("settings.training-guidance.save") { backgroundContext in
+                    try ProfileRepository(modelContext: backgroundContext).updateTrainingGuidanceEnabled(isEnabled)
+                }
+                await self.invalidateProfileWarmup()
+            } catch {
+                await self.showError(error)
+            }
         }
     }
 
     private func saveKeepsScreenAwakePreference(_ isEnabled: Bool) {
-        do {
-            try profileRepository.updateKeepsScreenAwake(isEnabled)
-            AppRuntimeState.shared.keepsScreenAwake = isEnabled
-        } catch {
-            showError(error)
+        let backgroundStore = settingsBackgroundStore
+        Task.detached(priority: .utility) {
+            do {
+                try await backgroundStore.perform("settings.keeps-screen-awake.save") { backgroundContext in
+                    try ProfileRepository(modelContext: backgroundContext).updateKeepsScreenAwake(isEnabled)
+                }
+                await self.applyKeepsScreenAwakePreference(isEnabled)
+            } catch {
+                await self.showError(error)
+            }
         }
     }
 
     private func saveBozarModePreference(_ isEnabled: Bool) {
-        do {
-            try profileRepository.updateBozarModeEnabled(isEnabled)
-        } catch {
-            showError(error)
+        let backgroundStore = settingsBackgroundStore
+        Task.detached(priority: .utility) {
+            do {
+                try await backgroundStore.perform("settings.bozar-mode.save") { backgroundContext in
+                    try ProfileRepository(modelContext: backgroundContext).updateBozarModeEnabled(isEnabled)
+                }
+                await self.invalidateProfileWarmup()
+            } catch {
+                await self.showError(error)
+            }
         }
     }
 
     private func savePreferredWeightUnitPreference(_ unit: PreferredWeightUnit) {
-        do {
-            try profileRepository.updatePreferredWeightUnit(unit)
-        } catch {
-            showError(error)
+        let backgroundStore = settingsBackgroundStore
+        Task.detached(priority: .utility) {
+            do {
+                try await backgroundStore.perform("settings.weight-unit.save") { backgroundContext in
+                    try ProfileRepository(modelContext: backgroundContext).updatePreferredWeightUnit(unit)
+                }
+                await self.invalidateProfileWarmup()
+            } catch {
+                await self.showError(error)
+            }
         }
     }
 
     private func saveWorkoutNotificationStylePreference(_ style: WorkoutNotificationStyle) {
-        do {
-            try profileRepository.updateWorkoutNotificationStyle(style)
-            AppRuntimeState.shared.updateWorkoutNotificationStyle(style)
-        } catch {
-            showError(error)
+        let backgroundStore = settingsBackgroundStore
+        Task.detached(priority: .utility) {
+            do {
+                try await backgroundStore.perform("settings.notification-style.save") { backgroundContext in
+                    try ProfileRepository(modelContext: backgroundContext).updateWorkoutNotificationStyle(style)
+                }
+                await self.applyWorkoutNotificationStylePreference(style)
+            } catch {
+                await self.showError(error)
+            }
         }
     }
 
+    @MainActor
+    private func invalidateProfileWarmup() {
+        appWarmupState.invalidateProfile()
+    }
+
+    @MainActor
+    private func applyKeepsScreenAwakePreference(_ isEnabled: Bool) {
+        appWarmupState.invalidateProfile()
+        AppRuntimeState.shared.keepsScreenAwake = isEnabled
+    }
+
+    @MainActor
+    private func applyWorkoutNotificationStylePreference(_ style: WorkoutNotificationStyle) {
+        appWarmupState.invalidateProfile()
+        AppRuntimeState.shared.updateWorkoutNotificationStyle(style)
+    }
+
+    @MainActor
     private func showError(_ error: Error) {
         errorMessage = String(describing: error)
         showingError = true
-        refreshLibraryStatusText()
+    }
+}
+
+private struct SettingsCatalogSummary: Sendable {
+    let visibleExerciseCount: Int
+    let libraryStatusText: String
+}
+
+private struct SettingsProfileSnapshot: Sendable {
+    let weeklyGoal: Int
+    let isTrainingGuidanceEnabled: Bool
+    let keepsScreenAwake: Bool
+    let isBozarModeEnabled: Bool
+    let preferredWeightUnit: PreferredWeightUnit
+    let workoutNotificationStyle: WorkoutNotificationStyle
+
+    nonisolated init(profile: UserProfile) {
+        weeklyGoal = profile.weeklyWorkoutGoal
+        isTrainingGuidanceEnabled = profile.isTrainingGuidanceEnabled
+        keepsScreenAwake = profile.keepsScreenAwake
+        isBozarModeEnabled = profile.isBozarModeEnabled
+        preferredWeightUnit = profile.preferredWeightUnit
+        workoutNotificationStyle = profile.workoutNotificationStyle
     }
 }
 

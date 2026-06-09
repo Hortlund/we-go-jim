@@ -40,18 +40,7 @@ nonisolated enum ProfileWeeklyGoalChartScalePolicy {
     }
 }
 
-nonisolated enum ProfileScrollResetPolicy {
-    static func shouldResetOnProfileInvalidation(
-        version: Int,
-        lastHandledVersion: Int
-    ) -> Bool {
-        version > 0 && version != lastHandledVersion
-    }
-}
-
 struct ProfileView: View {
-    private static let profileTopAnchorID = "profile-top"
-
     private enum CoachBriefLoadState {
         case idle
         case loading
@@ -64,6 +53,10 @@ struct ProfileView: View {
     @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(AppWarmupState.self) private var appWarmupState
     @Environment(SubscriptionState.self) private var subscriptionState
+
+    private var profileBackgroundStore: AppBackgroundStore {
+        appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
+    }
 
     @State private var currentProfile: ProfileIdentitySnapshot?
     @State private var dashboardContent = ProfileDashboardContent.empty
@@ -90,98 +83,87 @@ struct ProfileView: View {
     @State private var lastLoadedProfileUpdatedAt: Date?
     @State private var lastRefreshAt: Date?
     @State private var lastHandledProfileInvalidationVersion = 0
-    @State private var profileScrollToTopRequestID: UUID?
 
     @State private var errorMessage = ""
     @State private var showingError = false
     var body: some View {
-        ScrollViewReader { scrollProxy in
-            ScrollView {
-                Color.clear
-                    .frame(height: 0)
-                    .id(Self.profileTopAnchorID)
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 16) {
+                WGJRootHeader("Profile", subtitle: "Your training snapshot, progress, and app controls.")
 
-                LazyVStack(alignment: .leading, spacing: 16) {
-                    WGJRootHeader("Profile", subtitle: "Your training snapshot, progress, and app controls.")
-
-                    identityCard
-                    highlightsCard
-                    dashboardSection
-                    appSection
-                }
-                .padding(.top, 8)
-                .padding(16)
+                identityCard
+                highlightsCard
+                dashboardSection
+                appSection
             }
-            .scrollDismissesKeyboard(.interactively)
-            .wgjScreenBackground()
-            .accessibilityIdentifier("profile-content-root")
-            .toolbar(.hidden, for: .navigationBar)
-            .onAppear {
-                applyWarmProfileSnapshotIfAvailable()
+            .padding(.top, 8)
+            .padding(16)
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .wgjScreenBackground()
+        .accessibilityIdentifier("profile-content-root")
+        .toolbar(.hidden, for: .navigationBar)
+        .onAppear {
+            applyWarmProfileSnapshotIfAvailable()
+        }
+        .task(id: isTabActive) {
+            guard isTabActive else { return }
+            await handleInitialActivation()
+        }
+        .task(id: appWarmupState.profileCompletionVersion) {
+            guard appWarmupState.profileCompletionVersion > 0 else { return }
+            applyWarmProfileSnapshotIfAvailable()
+            guard isTabActive else { return }
+            await hydrateProfileIfNeeded(force: false)
+        }
+        .task(id: appWarmupState.profileInvalidationVersion) {
+            await handleProfileInvalidated(version: appWarmupState.profileInvalidationVersion)
+        }
+        .onDisappear {
+            cancelDashboardRender(isTabExit: true)
+            cancelTrendSeriesLoad()
+            cancelCoachBriefLoad()
+            cancelCoachFollowUpLoads()
+        }
+        .onChange(of: subscriptionState.isPro) { _, _ in
+            handleSubscriptionAccessChanged()
+        }
+        .sheet(isPresented: $showingWidgetManager) {
+            NavigationStack {
+                ProfileWidgetManagerView()
             }
-            .onChange(of: profileScrollToTopRequestID) { _, requestID in
-                guard requestID != nil else { return }
-                scrollProfileToTop(using: scrollProxy)
-            }
-            .task(id: isTabActive) {
-                guard isTabActive else { return }
-                await handleInitialActivation()
-            }
-            .task(id: appWarmupState.profileCompletionVersion) {
-                guard appWarmupState.profileCompletionVersion > 0 else { return }
-                applyWarmProfileSnapshotIfAvailable()
-                guard isTabActive else { return }
-                await hydrateProfileIfNeeded(force: false)
-            }
-            .task(id: appWarmupState.profileInvalidationVersion) {
-                await handleProfileInvalidated(version: appWarmupState.profileInvalidationVersion)
-            }
+            .wgjSheetSurface()
             .onDisappear {
-                cancelDashboardRender(isTabExit: true)
-                cancelTrendSeriesLoad()
-                cancelCoachBriefLoad()
-                cancelCoachFollowUpLoads()
+                markProfileDirtyAndReloadIfActive()
             }
-            .onChange(of: subscriptionState.isPro) { _, _ in
-                handleSubscriptionAccessChanged()
+        }
+        .sheet(isPresented: $showingProfileManagement) {
+            NavigationStack {
+                ProfileManagementView()
             }
-            .sheet(isPresented: $showingWidgetManager) {
-                NavigationStack {
-                    ProfileWidgetManagerView()
-                }
+            .wgjSheetSurface()
+            .onDisappear {
+                markProfileDirtyAndReloadIfActive()
+            }
+        }
+        .sheet(isPresented: $showingCoachAnalysis) {
+            if let coachBrief = dashboardContent.coachBrief {
+                ProfileCoachAnalysisSheet(
+                    presentation: coachBrief,
+                    followUpSummaries: coachFollowUpSummaries,
+                    loadingKinds: loadingCoachFollowUps,
+                    runFollowUp: loadCoachFollowUp
+                )
                 .wgjSheetSurface()
                 .onDisappear {
-                    markProfileDirtyAndReloadIfActive()
+                    cancelCoachFollowUpLoads()
                 }
             }
-            .sheet(isPresented: $showingProfileManagement) {
-                NavigationStack {
-                    ProfileManagementView()
-                }
-                .wgjSheetSurface()
-                .onDisappear {
-                    markProfileDirtyAndReloadIfActive()
-                }
-            }
-            .sheet(isPresented: $showingCoachAnalysis) {
-                if let coachBrief = dashboardContent.coachBrief {
-                    ProfileCoachAnalysisSheet(
-                        presentation: coachBrief,
-                        followUpSummaries: coachFollowUpSummaries,
-                        loadingKinds: loadingCoachFollowUps,
-                        runFollowUp: loadCoachFollowUp
-                    )
-                    .wgjSheetSurface()
-                    .onDisappear {
-                        cancelCoachFollowUpLoads()
-                    }
-                }
-            }
-            .alert("Profile Error", isPresented: $showingError) {
-                Button("OK", role: .cancel) { }
-            } message: {
-                Text(errorMessage)
-            }
+        }
+        .alert("Profile Error", isPresented: $showingError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(errorMessage)
         }
     }
 
@@ -834,31 +816,19 @@ struct ProfileView: View {
             coachFollowUpSummaries = [:]
             cancelCoachFollowUpLoads()
 
-            let profile: ProfileIdentitySnapshot
-            if appBackgroundStore != nil {
-                profile = try await controller.loadPublishedProfileIdentity(
-                    modelContext: modelContext,
-                    cloudSyncEnabled: cloudSyncEnabled,
-                    backgroundStore: appBackgroundStore
-                )
-            } else {
-                let localProfile = try controller.loadLocalProfileIdentity(modelContext: modelContext)
-                guard profileReloadToken == reloadToken else { return }
-                currentProfile = localProfile
-                dashboardContent.weeklyGoal = localProfile.weeklyWorkoutGoal
-                profile = (try? await controller.loadPublishedProfileIdentity(
-                    modelContext: modelContext,
-                    cloudSyncEnabled: cloudSyncEnabled,
-                    backgroundStore: appBackgroundStore
-                )) ?? localProfile
-            }
+            let backgroundStore = profileBackgroundStore
+            let profile = try await controller.loadPublishedProfileIdentity(
+                modelContext: modelContext,
+                cloudSyncEnabled: cloudSyncEnabled,
+                backgroundStore: backgroundStore
+            )
             guard profileReloadToken == reloadToken else { return }
             currentProfile = profile
             dashboardContent.weeklyGoal = profile.weeklyWorkoutGoal
             let dashboardContent = try await controller.loadDashboardContent(
                 modelContext: modelContext,
                 profile: profile,
-                backgroundStore: appBackgroundStore
+                backgroundStore: backgroundStore
             )
             guard profileReloadToken == reloadToken else { return }
             self.dashboardContent = dashboardContent
@@ -928,7 +898,7 @@ struct ProfileView: View {
                 let coachBrief = try await controller.loadCoachBriefPresentation(
                     modelContext: modelContext,
                     enabledWidgets: enabledWidgets,
-                    backgroundStore: appBackgroundStore
+                    backgroundStore: profileBackgroundStore
                 )
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
@@ -988,7 +958,7 @@ struct ProfileView: View {
                     modelContext: modelContext,
                     kind: kind,
                     snapshot: coachBrief.snapshot,
-                    backgroundStore: appBackgroundStore
+                    backgroundStore: profileBackgroundStore
                 )
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
@@ -1022,28 +992,14 @@ struct ProfileView: View {
 
     @MainActor
     private func handleProfileInvalidated(version: Int) async {
-        guard ProfileScrollResetPolicy.shouldResetOnProfileInvalidation(
-            version: version,
-            lastHandledVersion: lastHandledProfileInvalidationVersion
-        ) else {
+        guard version > 0, version != lastHandledProfileInvalidationVersion else {
             return
         }
         lastHandledProfileInvalidationVersion = version
-        requestProfileScrollToTop()
         needsExplicitRefresh = true
         shouldRenderDashboardContent = hasRenderedDashboardContent
         guard isTabActive else { return }
         await reloadProfileIfNeeded(force: true)
-    }
-
-    private func requestProfileScrollToTop() {
-        profileScrollToTopRequestID = UUID()
-    }
-
-    private func scrollProfileToTop(using scrollProxy: ScrollViewProxy) {
-        withAnimation(.easeInOut(duration: 0.2)) {
-            scrollProxy.scrollTo(Self.profileTopAnchorID, anchor: .top)
-        }
     }
 
     private func handleSubscriptionAccessChanged() {
@@ -1062,7 +1018,7 @@ struct ProfileView: View {
         coachBriefLoadState = .idle
 
         guard isTabActive else {
-            shouldRenderDashboardContent = false
+            shouldRenderDashboardContent = hasRenderedDashboardContent
             return
         }
 
@@ -1130,7 +1086,7 @@ struct ProfileView: View {
                     modelContext: modelContext,
                     enabledWidgets: enabledWidgets,
                     cacheOwner: loadToken,
-                    backgroundStore: appBackgroundStore
+                    backgroundStore: profileBackgroundStore
                 )
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
@@ -1297,58 +1253,26 @@ final class ProfileViewController {
         trendSeriesCacheOwner = owner
     }
 
-    func loadLocalProfileIdentity(
-        modelContext: ModelContext,
-    ) throws -> ProfileIdentitySnapshot {
-        let profileRepository = ProfileRepository(modelContext: modelContext)
-        if let snapshot = try profileRepository.currentProfileSnapshot() {
-            return snapshot
-        }
-
-        return ProfileIdentitySnapshot(profile: try profileRepository.loadOrCreateProfile())
-    }
-
     func loadPublishedProfileIdentity(
         modelContext: ModelContext,
         cloudSyncEnabled: Bool,
-        backgroundStore: AppBackgroundStore?
+        backgroundStore: AppBackgroundStore
     ) async throws -> ProfileIdentitySnapshot {
-        if let backgroundStore {
-            return try await backgroundStore.performAsync("profile.identity") { backgroundContext in
-                try await ProfileRepository(modelContext: backgroundContext).bootstrapProfileIdentitySnapshot(
-                    cloudSyncEnabled: cloudSyncEnabled
-                )
-            }
+        try await backgroundStore.performAsync("profile.identity") { backgroundContext in
+            try await ProfileRepository(modelContext: backgroundContext).bootstrapProfileIdentitySnapshot(
+                cloudSyncEnabled: cloudSyncEnabled
+            )
         }
-
-        let profileRepository = ProfileRepository(modelContext: modelContext)
-        return try await profileRepository.bootstrapProfileIdentitySnapshot(cloudSyncEnabled: cloudSyncEnabled)
     }
 
     func loadDashboardContent(
         modelContext: ModelContext,
         profile: ProfileIdentitySnapshot,
-        backgroundStore: AppBackgroundStore?
+        backgroundStore: AppBackgroundStore
     ) async throws -> ProfileDashboardContent {
-        if let backgroundStore {
-            return try await backgroundStore.perform("profile.dashboard") { backgroundContext in
-                let widgetRepository = ProfileWidgetRepository(modelContext: backgroundContext)
-                let metricsService = WorkoutMetricsService(modelContext: backgroundContext)
-                let enabled = try widgetRepository.enabledConfigurationSnapshots()
-                let dashboard = try metricsService.profileDashboardSnapshot(prLimit: 5, weeks: 8)
-                var nextContent = ProfileDashboardContent.make(
-                    enabledWidgets: enabled,
-                    dashboard: dashboard,
-                    trendSeriesByWidgetID: [:]
-                )
-                nextContent.weeklyGoal = profile.weeklyWorkoutGoal
-                return nextContent
-            }
-        }
-
-        return try WGJPerformance.measure("profile.dashboard") {
-            let widgetRepository = ProfileWidgetRepository(modelContext: modelContext)
-            let metricsService = WorkoutMetricsService(modelContext: modelContext)
+        try await backgroundStore.perform("profile.dashboard") { backgroundContext in
+            let widgetRepository = ProfileWidgetRepository(modelContext: backgroundContext)
+            let metricsService = WorkoutMetricsService(modelContext: backgroundContext)
             let enabled = try widgetRepository.enabledConfigurationSnapshots()
             let dashboard = try metricsService.profileDashboardSnapshot(prLimit: 5, weeks: 8)
             var nextContent = ProfileDashboardContent.make(
@@ -1365,58 +1289,11 @@ final class ProfileViewController {
         modelContext: ModelContext,
         enabledWidgets: [ProfileWidgetConfigSnapshot],
         cacheOwner: UUID,
-        backgroundStore: AppBackgroundStore?
+        backgroundStore: AppBackgroundStore
     ) async throws -> [UUID: ExerciseMetricSeries] {
-        if let backgroundStore {
-            let cachedSeries = trendSeriesCache
-            let result = try await backgroundStore.perform("profile.trends") { backgroundContext in
-                let metricsService = WorkoutMetricsService(modelContext: backgroundContext)
-                var trendSeriesByWidgetID: [UUID: ExerciseMetricSeries] = [:]
-                var nextCache = cachedSeries
-                var currentCacheKeys: Set<TrendSeriesCacheKey> = []
-
-                for config in enabledWidgets {
-                    guard config.kind.isExerciseTrend else { continue }
-                    guard let selectedExerciseUUID = config.selectedCatalogExerciseUUID else { continue }
-                    let cacheKey = TrendSeriesCacheKey(
-                        metric: config.exerciseTrendMetric,
-                        catalogExerciseUUID: selectedExerciseUUID
-                    )
-                    currentCacheKeys.insert(cacheKey)
-
-                    if let cachedSeries = nextCache[cacheKey] {
-                        trendSeriesByWidgetID[config.id] = cachedSeries.withPreferredName(
-                            config.selectedExerciseNameSnapshot
-                        )
-                        continue
-                    }
-
-                    let series = try metricsService.exerciseMetricTrend(
-                        for: selectedExerciseUUID,
-                        metric: config.exerciseTrendMetric,
-                        preferredExerciseName: config.selectedExerciseNameSnapshot,
-                        limit: 8
-                    )
-
-                    nextCache[cacheKey] = series
-                    trendSeriesByWidgetID[config.id] = series
-                }
-
-                nextCache = nextCache.filter { currentCacheKeys.contains($0.key) }
-                return TrendSeriesLoadResult(
-                    trendSeriesByWidgetID: trendSeriesByWidgetID,
-                    cache: nextCache
-                )
-            }
-            if trendSeriesCacheOwner == cacheOwner {
-                trendSeriesCache = result.cache
-            }
-            return result.trendSeriesByWidgetID
-        }
-
         let cachedSeries = trendSeriesCache
-        let result = try WGJPerformance.measure("profile.trends") {
-            let metricsService = WorkoutMetricsService(modelContext: modelContext)
+        let result = try await backgroundStore.perform("profile.trends") { backgroundContext in
+            let metricsService = WorkoutMetricsService(modelContext: backgroundContext)
             var trendSeriesByWidgetID: [UUID: ExerciseMetricSeries] = [:]
             var nextCache = cachedSeries
             var currentCacheKeys: Set<TrendSeriesCacheKey> = []
@@ -1464,46 +1341,32 @@ final class ProfileViewController {
     func loadCoachBriefPresentation(
         modelContext: ModelContext,
         enabledWidgets: [ProfileWidgetConfigSnapshot],
-        backgroundStore: AppBackgroundStore?
+        backgroundStore: AppBackgroundStore
     ) async throws -> ProfileCoachPresentation? {
         guard enabledWidgets.contains(where: { $0.kind == .coachBrief }) else {
             return nil
         }
 
-        if let backgroundStore {
-            return try await backgroundStore.performAsync("profile.coach.presentation") { backgroundContext in
-                try await Self.loadCoachBriefPresentation(
-                    modelContext: backgroundContext,
-                    enabledWidgets: enabledWidgets
-                )
-            }
+        return try await backgroundStore.performAsync("profile.coach.presentation") { backgroundContext in
+            try await Self.loadCoachBriefPresentation(
+                modelContext: backgroundContext,
+                enabledWidgets: enabledWidgets
+            )
         }
-
-        return try await Self.loadCoachBriefPresentation(
-            modelContext: modelContext,
-            enabledWidgets: enabledWidgets
-        )
     }
 
     func loadCoachFollowUpSummary(
         modelContext: ModelContext,
         kind: CoachFollowUpKind,
         snapshot: WeeklyCoachInsightSnapshot,
-        backgroundStore: AppBackgroundStore?
+        backgroundStore: AppBackgroundStore
     ) async throws -> CoachNarrativeSummary {
-        if let backgroundStore {
-            return try await backgroundStore.performAsync("profile.coach.followup") { backgroundContext in
-                try await AppleCoachNarrativeService(modelContext: backgroundContext).followUp(
-                    for: kind,
-                    snapshot: snapshot
-                )
-            }
+        try await backgroundStore.performAsync("profile.coach.followup") { backgroundContext in
+            try await AppleCoachNarrativeService(modelContext: backgroundContext).followUp(
+                for: kind,
+                snapshot: snapshot
+            )
         }
-
-        return try await AppleCoachNarrativeService(modelContext: modelContext).followUp(
-            for: kind,
-            snapshot: snapshot
-        )
     }
 
     private static func loadCoachBriefPresentation(

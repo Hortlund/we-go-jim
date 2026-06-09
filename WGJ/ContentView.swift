@@ -40,6 +40,10 @@ struct ContentView: View {
     @State private var uiTestCloudRestoreProbeStatusID: String?
     @State private var uiTestCloudRestoreProbeMirrorContainer: ModelContainer?
 
+    private var rootBackgroundStore: AppBackgroundStore {
+        appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
+    }
+
     var body: some View {
         @Bindable var subscriptionState = subscriptionState
 
@@ -68,7 +72,6 @@ struct ContentView: View {
         .environment(restTimerState)
         .environment(catalogSyncCoordinator)
         .environment(appWarmupState)
-        .environment(userDataCloudMirrorCoordinator)
         .environment(subscriptionState)
         .tint(WGJTheme.accent)
         .preferredColorScheme(.dark)
@@ -235,7 +238,7 @@ struct ContentView: View {
         ) {
             await activeWorkoutPresentationState.restoreActiveSessionIfMissing(
                 modelContext: modelContext,
-                backgroundStore: appBackgroundStore,
+                backgroundStore: rootBackgroundStore,
                 allowsLegacyDraftImport: PreMainStartupWorkPolicy.shouldImportLegacyActiveWorkoutDraftsBeforeMainEntry(
                     cloudSyncEnabled: cloudFeaturesEnabled
                 )
@@ -360,12 +363,18 @@ struct ContentView: View {
             return
         }
 
-        enteredMainResumeCriticalMaintenanceTask = Task { @MainActor in
+        enteredMainResumeCriticalMaintenanceTask = Task.detached(priority: .utility) {
             try? await Task.sleep(for: AppMaintenancePolicy.enteredMainDeferredDelay)
-            guard !Task.isCancelled, appPhase == .main else { return }
-            scheduleResumeCriticalMaintenanceIfNeeded()
-            enteredMainResumeCriticalMaintenanceTask = nil
+            guard !Task.isCancelled else { return }
+            await resumeCriticalMaintenanceAfterEnteredMainDelayIfNeeded()
         }
+    }
+
+    @MainActor
+    private func resumeCriticalMaintenanceAfterEnteredMainDelayIfNeeded() {
+        guard !Task.isCancelled, appPhase == .main else { return }
+        scheduleResumeCriticalMaintenanceIfNeeded()
+        enteredMainResumeCriticalMaintenanceTask = nil
     }
 
     private func scheduleEnteredMainNoncriticalWork() {
@@ -378,12 +387,18 @@ struct ContentView: View {
             return
         }
 
-        enteredMainNoncriticalWorkTask = Task { @MainActor in
+        enteredMainNoncriticalWorkTask = Task.detached(priority: .utility) {
             try? await Task.sleep(for: AppMaintenancePolicy.enteredMainDeferredDelay)
-            guard !Task.isCancelled, appPhase == .main else { return }
-            performEnteredMainNoncriticalWork()
-            enteredMainNoncriticalWorkTask = nil
+            guard !Task.isCancelled else { return }
+            await performEnteredMainNoncriticalWorkAfterDelayIfNeeded()
         }
+    }
+
+    @MainActor
+    private func performEnteredMainNoncriticalWorkAfterDelayIfNeeded() {
+        guard !Task.isCancelled, appPhase == .main else { return }
+        performEnteredMainNoncriticalWork()
+        enteredMainNoncriticalWorkTask = nil
     }
 
     private func performEnteredMainNoncriticalWork() {
@@ -859,19 +874,15 @@ struct ContentView: View {
     }
 
     private func scheduleWeeklyGoalWidgetPublish() {
-        if let appBackgroundStore {
-            Task {
-                await appBackgroundStore.scheduleCoalesced(
-                    key: .feature("weekly-goal-widget.publish"),
-                    operationName: "weekly-goal-widget.publish"
-                ) { backgroundContext in
-                    WeeklyGoalWidgetPublisher.publishBestEffort(modelContext: backgroundContext)
-                }
+        let backgroundStore = rootBackgroundStore
+        Task {
+            await backgroundStore.scheduleCoalesced(
+                key: .feature("weekly-goal-widget.publish"),
+                operationName: "weekly-goal-widget.publish"
+            ) { backgroundContext in
+                WeeklyGoalWidgetPublisher.publishBestEffort(modelContext: backgroundContext)
             }
-            return
         }
-
-        WeeklyGoalWidgetPublisher.publishBestEffort(modelContext: modelContext)
     }
 
     private func clearWeeklyGoalWidgetSnapshot() {
@@ -880,17 +891,24 @@ struct ContentView: View {
 
     private func scheduleEnteredMainDeferredMaintenance() {
         enteredMainDeferredMaintenanceTask?.cancel()
-        enteredMainDeferredMaintenanceTask = Task { @MainActor in
+        enteredMainDeferredMaintenanceTask = Task.detached(priority: .utility) {
             await Task.yield()
             try? await Task.sleep(for: AppMaintenancePolicy.enteredMainDeferredDelay)
-            guard !Task.isCancelled, appPhase == .main else { return }
-            requestDeferredMaintenance(trigger: .enteredMain)
-            enteredMainDeferredMaintenanceTask = nil
+            guard !Task.isCancelled else { return }
+            await requestEnteredMainDeferredMaintenanceAfterDelayIfNeeded()
         }
     }
 
-    private func scheduleDeferredMaintenance(trigger: AppMaintenanceTrigger) {
-        deferredMaintenanceScheduler.schedule {
+    @MainActor
+    private func requestEnteredMainDeferredMaintenanceAfterDelayIfNeeded() {
+        guard !Task.isCancelled, appPhase == .main else { return }
+        requestDeferredMaintenance(trigger: .enteredMain)
+        enteredMainDeferredMaintenanceTask = nil
+    }
+
+    private func scheduleDeferredMaintenance(trigger: AppMaintenanceTrigger) async {
+        let scheduler = deferredMaintenanceScheduler
+        await scheduler.schedule {
             await performDeferredMaintenanceIfNeeded(trigger: trigger)
         }
     }
@@ -931,7 +949,7 @@ struct ContentView: View {
         }
         await activeWorkoutPresentationState.restoreActiveSessionIfMissing(
             modelContext: modelContext,
-            backgroundStore: appBackgroundStore,
+            backgroundStore: rootBackgroundStore,
             shouldApplyRestoredSession: {
                 !Task.isCancelled && resumeCriticalMaintenanceTracker.isCurrent(runID)
             }
@@ -946,7 +964,7 @@ struct ContentView: View {
 
         appRuntimeState.refreshCloudAvailabilityIfNeeded()
         if deferredMaintenanceState.isPending {
-            scheduleDeferredMaintenance(trigger: .sceneActivated)
+            await scheduleDeferredMaintenance(trigger: .sceneActivated)
         }
     }
 
@@ -985,7 +1003,7 @@ struct ContentView: View {
             return
         }
 
-        scheduleDeferredMaintenance(trigger: trigger)
+        await scheduleDeferredMaintenance(trigger: trigger)
     }
 
     @MainActor
@@ -1023,67 +1041,44 @@ struct ContentView: View {
 
         if localWork.hasWork {
             await WGJPerformance.measureAsync("app.maintenance") {
-                if let appBackgroundStore {
-                    let outcome = await ((try? appBackgroundStore.performAsync("app.maintenance.work") { backgroundContext in
-                        if localWork.shouldApplyCleanStart {
-                            BrosCleanStartPolicy.applyIfNeeded(modelContext: backgroundContext)
-                        }
-
-                        if localWork.shouldPrimeCatalog {
-                            try? ExerciseCatalogRepository(modelContext: backgroundContext).ensureSeedImportedIfNeeded()
-                        }
-
-                        if localWork.shouldBackfillHistoryProjection {
-                            _ = try? HistoryProjectionRepository(modelContext: backgroundContext).backfillIfNeeded(
-                                persistChanges: true
-                            )
-                        }
-
-                        if localWork.shouldBackfillSessionSummaries {
-                            _ = try? WorkoutSessionRepository(modelContext: backgroundContext)
-                                .backfillCompletedSessionSummariesIfNeeded()
-                        }
-
-                        return DeferredMaintenanceExecutionOutcome(
-                            didApplyCleanStart: localWork.shouldApplyCleanStart,
-                            didPrimeCatalog: localWork.shouldPrimeCatalog
-                        )
-                    })) ?? .none
-
-                    if outcome.didApplyCleanStart {
-                        deferredMaintenanceState.markCleanStartApplied()
-                    }
-                    if outcome.didPrimeCatalog {
-                        catalogSyncCoordinator.markPrimed()
-                    }
-                } else {
+                let backgroundStore = rootBackgroundStore
+                let outcome = await ((try? backgroundStore.performAsync("app.maintenance.work") { backgroundContext in
                     if localWork.shouldApplyCleanStart {
-                        BrosCleanStartPolicy.applyIfNeeded(modelContext: modelContext)
-                        deferredMaintenanceState.markCleanStartApplied()
+                        BrosCleanStartPolicy.applyIfNeeded(modelContext: backgroundContext)
                     }
 
                     if localWork.shouldPrimeCatalog {
-                        catalogSyncCoordinator.primeLocalCatalogIfNeeded(modelContext: modelContext)
+                        try? ExerciseCatalogRepository(modelContext: backgroundContext).ensureSeedImportedIfNeeded()
                     }
 
                     if localWork.shouldBackfillHistoryProjection {
-                        let rebuiltProjectionCount = (try? HistoryProjectionRepository(modelContext: modelContext).backfillIfNeeded(
-                            persistChanges: false
-                        )) ?? 0
-                        if rebuiltProjectionCount > 0 {
-                            try? modelContext.save()
-                        }
+                        _ = try? HistoryProjectionRepository(modelContext: backgroundContext).backfillIfNeeded(
+                            persistChanges: true
+                        )
                     }
 
                     if localWork.shouldBackfillSessionSummaries {
-                        _ = try? WorkoutSessionRepository(modelContext: modelContext).backfillCompletedSessionSummariesIfNeeded()
+                        _ = try? WorkoutSessionRepository(modelContext: backgroundContext)
+                            .backfillCompletedSessionSummariesIfNeeded()
                     }
+
+                    return DeferredMaintenanceExecutionOutcome(
+                        didApplyCleanStart: localWork.shouldApplyCleanStart,
+                        didPrimeCatalog: localWork.shouldPrimeCatalog
+                    )
+                })) ?? .none
+
+                if outcome.didApplyCleanStart {
+                    deferredMaintenanceState.markCleanStartApplied()
+                }
+                if outcome.didPrimeCatalog {
+                    catalogSyncCoordinator.markPrimed()
                 }
             }
         }
 
         if work.shouldRunSocialMaintenance {
-            scheduleSocialMaintenanceIfNeeded(trigger: trigger)
+            await scheduleSocialMaintenanceIfNeeded(trigger: trigger)
         }
 
         if deferredMaintenanceRunTracker.markCompleted(runID: runID) {
@@ -1121,24 +1116,19 @@ struct ContentView: View {
         )
     }
 
-    private func scheduleSocialMaintenanceIfNeeded(trigger: AppMaintenanceTrigger) {
+    private func scheduleSocialMaintenanceIfNeeded(trigger: AppMaintenanceTrigger) async {
+        let backgroundStore = rootBackgroundStore
         let delay = socialMaintenanceDelay(for: trigger)
-        socialMaintenanceScheduler.schedule(after: delay) {
-            if let appBackgroundStore {
-                await appBackgroundStore.scheduleCoalesced(
-                    key: .feature("social.maintenance"),
-                    operationName: "app.maintenance.social",
-                    priority: .utility
-                ) { backgroundContext in
-                    await WGJPerformance.measureAsync("app.maintenance.social") {
-                        await Self.runSocialMaintenance(modelContext: backgroundContext)
-                    }
+        let scheduler = socialMaintenanceScheduler
+        await scheduler.schedule(after: delay) {
+            await backgroundStore.scheduleCoalesced(
+                key: .feature("social.maintenance"),
+                operationName: "app.maintenance.social",
+                priority: .utility
+            ) { backgroundContext in
+                await WGJPerformance.measureAsync("app.maintenance.social") {
+                    await Self.runSocialMaintenance(modelContext: backgroundContext)
                 }
-                return
-            }
-
-            await WGJPerformance.measureAsync("app.maintenance.social") {
-                await Self.runSocialMaintenance(modelContext: modelContext)
             }
         }
     }
@@ -1157,15 +1147,8 @@ struct ContentView: View {
         let hasPrimedCatalog = catalogSyncCoordinator.hasPrimedLocalCatalog
         let brosCloudAvailable = appRuntimeState.isBrosCloudAvailable
 
-        guard let appBackgroundStore else {
-            return currentDeferredMaintenanceWorkFallback(
-                hasAppliedCleanStart: hasAppliedCleanStart,
-                hasPrimedCatalog: hasPrimedCatalog,
-                brosCloudAvailable: brosCloudAvailable
-            )
-        }
-
-        return (try? await appBackgroundStore.perform("app.maintenance.plan") { backgroundContext in
+        let backgroundStore = rootBackgroundStore
+        return (try? await backgroundStore.perform("app.maintenance.plan") { backgroundContext in
             let historyProjectionRepository = HistoryProjectionRepository(modelContext: backgroundContext)
             let workoutRepository = WorkoutSessionRepository(modelContext: backgroundContext)
 
@@ -1180,37 +1163,22 @@ struct ContentView: View {
                 shouldRunSocialMaintenance: brosCloudAvailable
                     && Self.shouldRunSocialMaintenance(modelContext: backgroundContext)
             )
-        }) ?? currentDeferredMaintenanceWorkFallback(
+        }) ?? AppDeferredMaintenancePlanner.plan(
             hasAppliedCleanStart: hasAppliedCleanStart,
             hasPrimedCatalog: hasPrimedCatalog,
-            brosCloudAvailable: brosCloudAvailable
-        )
-    }
-
-    private func currentDeferredMaintenanceWorkFallback(
-        hasAppliedCleanStart: Bool,
-        hasPrimedCatalog: Bool,
-        brosCloudAvailable: Bool
-    ) -> AppDeferredMaintenanceWork {
-        let historyProjectionRepository = HistoryProjectionRepository(modelContext: modelContext)
-        let workoutRepository = WorkoutSessionRepository(modelContext: modelContext)
-
-        let shouldBackfillHistoryProjection = (try? historyProjectionRepository.needsBackfill()) ?? false
-        let shouldBackfillSessionSummaries = (try? workoutRepository.hasStaleCompletedSessionSummaries()) ?? false
-
-        return AppDeferredMaintenancePlanner.plan(
-            hasAppliedCleanStart: hasAppliedCleanStart,
-            hasPrimedCatalog: hasPrimedCatalog,
-            needsHistoryProjectionBackfill: shouldBackfillHistoryProjection,
-            needsSessionSummaryBackfill: shouldBackfillSessionSummaries,
-            shouldRunSocialMaintenance: brosCloudAvailable
-                && Self.shouldRunSocialMaintenance(modelContext: modelContext)
+            needsHistoryProjectionBackfill: false,
+            needsSessionSummaryBackfill: false,
+            shouldRunSocialMaintenance: false
         )
     }
 
     private func resetToStartupFlow() {
-        deferredMaintenanceScheduler.cancel()
-        socialMaintenanceScheduler.cancel()
+        let deferredMaintenanceScheduler = deferredMaintenanceScheduler
+        let socialMaintenanceScheduler = socialMaintenanceScheduler
+        Task {
+            await deferredMaintenanceScheduler.cancel()
+            await socialMaintenanceScheduler.cancel()
+        }
         resetResumeCriticalMaintenanceCycle()
         enteredMainDeferredMaintenanceTask?.cancel()
         enteredMainDeferredMaintenanceTask = nil
@@ -1302,7 +1270,7 @@ struct ContentView: View {
         let shouldWarmBros = appWarmupState.shouldWarmBros() && !hasBrosHydrationPlaceholder
         guard StartupWarmupLaunchPolicy.shouldStartNonblockingWarmups(
             skipsSplash: ProcessInfo.processInfo.arguments.contains(AppStartupRouting.skipSplashArgument),
-            hasBackgroundStore: appBackgroundStore != nil,
+            hasBackgroundStore: true,
             shouldWarmProfile: shouldWarmProfile,
             shouldWarmBros: shouldWarmBros
         ) else {
@@ -1334,16 +1302,12 @@ struct ContentView: View {
 
     @MainActor
     private func prepareStartupProfileWarmSnapshot(runID: Int) async {
-        guard let appBackgroundStore else {
-            appWarmupState.finishProfileWarmup(runID: runID, snapshot: nil)
-            return
-        }
-
         await Self.sleepForUITestStartupWarmupDelayIfNeeded(
             environmentKey: "UITEST_PROFILE_STARTUP_WARMUP_DELAY_MS"
         )
 
-        let snapshot = try? await appBackgroundStore.performAsync("profile.startup-warmup") { backgroundContext in
+        let backgroundStore = rootBackgroundStore
+        let snapshot = try? await backgroundStore.performAsync("profile.startup-warmup") { backgroundContext in
             try await Self.buildProfileWarmSnapshot(
                 modelContext: backgroundContext,
                 cloudSyncEnabled: appRuntimeState.cloudSyncEnabled
@@ -1362,18 +1326,14 @@ struct ContentView: View {
 
     @MainActor
     private func prepareStartupBrosWarmSnapshot(runID: Int) async {
-        guard let appBackgroundStore else {
-            appWarmupState.finishBrosWarmup(runID: runID, snapshot: nil)
-            return
-        }
-
         await Self.sleepForUITestStartupWarmupDelayIfNeeded(
             environmentKey: "UITEST_BROS_STARTUP_WARMUP_DELAY_MS"
         )
 
         let cloudSyncEnabled = appRuntimeState.cloudSyncEnabled
         let cloudSyncErrorDescription = appRuntimeState.cloudSyncErrorDescription
-        let snapshot = try? await appBackgroundStore.performAsync("bros.startup-warmup") { backgroundContext in
+        let backgroundStore = rootBackgroundStore
+        let snapshot = try? await backgroundStore.performAsync("bros.startup-warmup") { backgroundContext in
             try await Self.buildBrosWarmSnapshot(
                 modelContext: backgroundContext,
                 cloudSyncEnabled: cloudSyncEnabled,
@@ -1405,13 +1365,13 @@ struct ContentView: View {
 
     @discardableResult
     private func scheduleProfileWarmupIfNeeded(force: Bool) -> Bool {
-        guard let appBackgroundStore else { return false }
         guard let runID = appWarmupState.beginProfileWarmup(force: force) else { return false }
 
         let cloudSyncEnabled = appRuntimeState.cloudSyncEnabled
+        let backgroundStore = rootBackgroundStore
 
         Task {
-            await appBackgroundStore.scheduleCoalesced(
+            await backgroundStore.scheduleCoalesced(
                 key: .feature("profile.warmup"),
                 operationName: "profile.warmup",
                 priority: .utility,
@@ -1438,14 +1398,14 @@ struct ContentView: View {
 
     @discardableResult
     private func scheduleBrosWarmupIfNeeded(force: Bool) -> Bool {
-        guard let appBackgroundStore else { return false }
         guard let runID = appWarmupState.beginBrosWarmup(force: force) else { return false }
 
         let cloudSyncEnabled = appRuntimeState.cloudSyncEnabled
         let cloudSyncErrorDescription = appRuntimeState.cloudSyncErrorDescription
+        let backgroundStore = rootBackgroundStore
 
         Task {
-            await appBackgroundStore.scheduleCoalesced(
+            await backgroundStore.scheduleCoalesced(
                 key: .feature("bros.warmup"),
                 operationName: "bros.warmup",
                 priority: .utility,
@@ -1468,9 +1428,9 @@ struct ContentView: View {
     }
 
     private func scheduleCoachWarmupIfNeeded() {
-        guard let appBackgroundStore else { return }
+        let backgroundStore = rootBackgroundStore
         Task {
-            await appBackgroundStore.scheduleCoalesced(
+            await backgroundStore.scheduleCoalesced(
                 key: .feature("profile.coach.warmup"),
                 operationName: "profile.coach.warmup",
                 priority: .utility
@@ -1503,35 +1463,21 @@ struct ContentView: View {
 
     private func prepareLocalProfileIdentityIfNeeded() async {
         do {
-            if let appBackgroundStore {
-                let snapshot = try await appBackgroundStore.perform("profile.bootstrap.local") { backgroundContext in
-                    let repository = ProfileRepository(modelContext: backgroundContext)
-                    if let existing = try repository.currentProfileSnapshot() {
-                        return existing
-                    }
-
-                    return ProfileIdentitySnapshot(profile: try repository.loadOrCreateProfile())
+            let backgroundStore = rootBackgroundStore
+            let snapshot = try await backgroundStore.perform("profile.bootstrap.local") { backgroundContext in
+                let repository = ProfileRepository(modelContext: backgroundContext)
+                if let existing = try repository.currentProfileSnapshot() {
+                    return existing
                 }
-                AppRuntimeState.shared.updateWorkoutRuntimePreferences(
-                    notificationStyle: snapshot.workoutNotificationStyle,
-                    keepsScreenAwake: snapshot.keepsScreenAwake
-                )
-            } else {
-                let repository = ProfileRepository(modelContext: modelContext)
-                let profile = try repository.currentProfileSnapshot()
-                    ?? ProfileIdentitySnapshot(profile: repository.loadOrCreateProfile())
-                AppRuntimeState.shared.updateWorkoutRuntimePreferences(
-                    notificationStyle: profile.workoutNotificationStyle,
-                    keepsScreenAwake: profile.keepsScreenAwake
-                )
+
+                return ProfileIdentitySnapshot(profile: try repository.loadOrCreateProfile())
             }
+            AppRuntimeState.shared.updateWorkoutRuntimePreferences(
+                notificationStyle: snapshot.workoutNotificationStyle,
+                keepsScreenAwake: snapshot.keepsScreenAwake
+            )
         } catch {
-            if let profile = try? ProfileRepository(modelContext: modelContext).loadOrCreateProfile() {
-                AppRuntimeState.shared.updateWorkoutRuntimePreferences(
-                    notificationStyle: profile.workoutNotificationStyle,
-                    keepsScreenAwake: profile.keepsScreenAwake
-                )
-            }
+            return
         }
     }
 
@@ -1539,7 +1485,7 @@ struct ContentView: View {
     private func shouldRunFirstRunLocalBootstrapBeforeMainEntry(skipsSplash: Bool) -> Bool {
         FirstRunLocalBootstrapPolicy.shouldRunBeforeMainEntry(
             skipsSplash: skipsSplash,
-            hasBackgroundStore: appBackgroundStore != nil,
+            hasBackgroundStore: true,
             cloudSyncEnabled: appRuntimeState.cloudSyncEnabled,
             hasCompletedBootstrap: FirstRunLocalBootstrapProgress.isCompleted()
         )
@@ -1551,11 +1497,11 @@ struct ContentView: View {
             return
         }
 
-        guard let appBackgroundStore else { return }
+        let backgroundStore = rootBackgroundStore
         let cloudSyncEnabled = false
         let cloudSyncErrorDescription: String? = nil
 
-        let result = try? await appBackgroundStore.performAsync("app.first-run.local-bootstrap") { backgroundContext in
+        let result = try? await backgroundStore.performAsync("app.first-run.local-bootstrap") { backgroundContext in
             BrosCleanStartPolicy.applyIfNeeded(modelContext: backgroundContext)
             try ExerciseCatalogRepository(modelContext: backgroundContext).ensureSeedImportedIfNeeded()
             let profileWarmSnapshot = try? await Self.buildProfileWarmSnapshot(

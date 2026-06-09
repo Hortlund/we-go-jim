@@ -65,11 +65,11 @@ final class TemplateExerciseEditingCoordinator {
 
     func scheduleNotesCommit(_ notes: String) {
         pendingNotesCommitTask?.cancel()
-        pendingNotesCommitTask = Task { @MainActor in
-            try? await Task.sleep(for: commitDebounce)
+        let delay = commitDebounce
+        pendingNotesCommitTask = Task.detached(priority: .utility) { [weak self] in
+            try? await Task.sleep(for: delay)
             guard !Task.isCancelled else { return }
-            pendingNotesCommitTask = nil
-            commitNotesIfNeeded(notes)
+            await self?.commitNotesAfterDebounceIfStillPending(notes)
         }
     }
 
@@ -78,32 +78,62 @@ final class TemplateExerciseEditingCoordinator {
         targetRepMax: Int?
     ) {
         pendingRepRangeCommitTask?.cancel()
-        pendingRepRangeCommitTask = Task { @MainActor in
-            try? await Task.sleep(for: commitDebounce)
+        let delay = commitDebounce
+        pendingRepRangeCommitTask = Task.detached(priority: .utility) { [weak self] in
+            try? await Task.sleep(for: delay)
             guard !Task.isCancelled else { return }
-            pendingRepRangeCommitTask = nil
-            commitRepRangeIfNeeded(targetRepMin: targetRepMin, targetRepMax: targetRepMax)
+            await self?.commitRepRangeAfterDebounceIfStillPending(
+                targetRepMin: targetRepMin,
+                targetRepMax: targetRepMax
+            )
         }
     }
 
     func scheduleRestCommit(_ restSeconds: Int) {
         pendingRestCommitTask?.cancel()
-        pendingRestCommitTask = Task { @MainActor in
-            try? await Task.sleep(for: commitDebounce)
+        let delay = commitDebounce
+        pendingRestCommitTask = Task.detached(priority: .utility) { [weak self] in
+            try? await Task.sleep(for: delay)
             guard !Task.isCancelled else { return }
-            pendingRestCommitTask = nil
-            commitRestIfNeeded(restSeconds)
+            await self?.commitRestAfterDebounceIfStillPending(restSeconds)
         }
     }
 
     func scheduleSetDraftCommit(_ setDrafts: [TemplateExerciseSetDraft]) {
         pendingSetDraftCommitTask?.cancel()
-        pendingSetDraftCommitTask = Task { @MainActor in
-            try? await Task.sleep(for: commitDebounce)
+        let delay = commitDebounce
+        pendingSetDraftCommitTask = Task.detached(priority: .utility) { [weak self] in
+            try? await Task.sleep(for: delay)
             guard !Task.isCancelled else { return }
-            pendingSetDraftCommitTask = nil
-            commitSetDraftsIfNeeded(setDrafts)
+            await self?.commitSetDraftsAfterDebounceIfStillPending(setDrafts)
         }
+    }
+
+    private func commitNotesAfterDebounceIfStillPending(_ notes: String) {
+        guard !Task.isCancelled else { return }
+        pendingNotesCommitTask = nil
+        commitNotesIfNeeded(notes)
+    }
+
+    private func commitRepRangeAfterDebounceIfStillPending(
+        targetRepMin: Int?,
+        targetRepMax: Int?
+    ) {
+        guard !Task.isCancelled else { return }
+        pendingRepRangeCommitTask = nil
+        commitRepRangeIfNeeded(targetRepMin: targetRepMin, targetRepMax: targetRepMax)
+    }
+
+    private func commitRestAfterDebounceIfStillPending(_ restSeconds: Int) {
+        guard !Task.isCancelled else { return }
+        pendingRestCommitTask = nil
+        commitRestIfNeeded(restSeconds)
+    }
+
+    private func commitSetDraftsAfterDebounceIfStillPending(_ setDrafts: [TemplateExerciseSetDraft]) {
+        guard !Task.isCancelled else { return }
+        pendingSetDraftCommitTask = nil
+        commitSetDraftsIfNeeded(setDrafts)
     }
 
     func requestImmediateCommit(

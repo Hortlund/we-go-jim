@@ -212,10 +212,10 @@ struct ReviewReadinessTests {
             modelContext: context,
             socialDataDeleter: NoopCloudDataDeleter(),
             clearWeeklyGoalWidgetSnapshot: {
-                artifactTracker.widgetClearCount += 1
+                artifactTracker.recordWidgetClear()
             },
             clearActiveWorkoutSnapshot: {
-                artifactTracker.activeSnapshotClearCount += 1
+                artifactTracker.recordActiveSnapshotClear()
             }
         )
         try await service.deleteAllUserData()
@@ -284,7 +284,7 @@ struct ReviewReadinessTests {
         let service = AppDataDeletionService(
             modelContext: context,
             socialDataDeleterFactory: { _ in
-                cleanupTracker.factoryCallCount += 1
+                cleanupTracker.recordFactoryCall()
                 return FailingCloudDataDeleter(
                     tracker: cleanupTracker,
                     error: TestCloudCleanupError.remoteUnavailable
@@ -478,25 +478,46 @@ struct ReviewReadinessTests {
     }
 }
 
-@MainActor
-private final class LocalDeletionArtifactTracker {
-    var widgetClearCount = 0
-    var activeSnapshotClearCount = 0
+private final class LocalDeletionArtifactTracker: @unchecked Sendable {
+    private let lock = NSLock()
+    private var widgetClears = 0
+    private var activeSnapshotClears = 0
+
+    var widgetClearCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return widgetClears
+    }
+
+    var activeSnapshotClearCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return activeSnapshotClears
+    }
+
+    func recordWidgetClear() {
+        lock.lock()
+        widgetClears += 1
+        lock.unlock()
+    }
+
+    func recordActiveSnapshotClear() {
+        lock.lock()
+        activeSnapshotClears += 1
+        lock.unlock()
+    }
 }
 
-@MainActor
 private struct NoopCloudDataDeleter: BrosCloudDataDeleting {
     func deleteCurrentUserData() async throws { }
 }
 
-@MainActor
 private struct HangingCloudDataDeleter: BrosCloudDataDeleting {
     func deleteCurrentUserData() async throws {
         try await withUnsafeThrowingContinuation { (_: UnsafeContinuation<Void, any Error>) in }
     }
 }
 
-@MainActor
 private struct RecreatingCloudDataDeleter: BrosCloudDataDeleting {
     let modelContext: ModelContext
 
@@ -506,19 +527,42 @@ private struct RecreatingCloudDataDeleter: BrosCloudDataDeleting {
     }
 }
 
-@MainActor
-private final class CloudCleanupTracker {
-    var factoryCallCount = 0
-    var deleteCallCount = 0
+private final class CloudCleanupTracker: @unchecked Sendable {
+    private let lock = NSLock()
+    private var factoryCalls = 0
+    private var deleteCalls = 0
+
+    var factoryCallCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return factoryCalls
+    }
+
+    var deleteCallCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return deleteCalls
+    }
+
+    func recordFactoryCall() {
+        lock.lock()
+        factoryCalls += 1
+        lock.unlock()
+    }
+
+    func recordDeleteCall() {
+        lock.lock()
+        deleteCalls += 1
+        lock.unlock()
+    }
 }
 
-@MainActor
 private struct FailingCloudDataDeleter: BrosCloudDataDeleting {
     let tracker: CloudCleanupTracker
     let error: any Error
 
     func deleteCurrentUserData() async throws {
-        tracker.deleteCallCount += 1
+        tracker.recordDeleteCall()
         throw error
     }
 }

@@ -3,11 +3,37 @@ import SwiftUI
 
 enum ExercisesCatalogMode {
     case browse
-    case pick(actionTitle: String, onSelect: (ExerciseCatalogItem) -> Void)
+    case pick(actionTitle: String, onSelect: (ExerciseCatalogSelection) -> Void)
+}
+
+private struct ExerciseRuntimeAppendInput: Sendable {
+    let remoteUUID: String
+    let displayName: String
+    let categoryName: String
+    let equipmentSummary: String
+    let primaryMuscleNames: String
+
+    @MainActor
+    init(exercise: ExerciseCatalogItem) {
+        self.remoteUUID = exercise.remoteUUID
+        self.displayName = exercise.displayName
+        self.categoryName = exercise.categoryName
+        self.equipmentSummary = exercise.equipmentSummary
+        self.primaryMuscleNames = exercise.primaryMuscleNames
+    }
+
+    init(exercise: ExerciseCatalogItemSnapshot) {
+        self.remoteUUID = exercise.remoteUUID
+        self.displayName = exercise.displayName
+        self.categoryName = exercise.categoryName
+        self.equipmentSummary = exercise.equipmentSummary
+        self.primaryMuscleNames = exercise.primaryMuscleNames
+    }
 }
 
 struct ExercisesCatalogView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(\.isTabActive) private var isTabActive
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -25,7 +51,7 @@ struct ExercisesCatalogView: View {
     @State private var customExerciseDraft = CustomExerciseDraft.empty
 
     @State private var showingCreateSessionPrompt = false
-    @State private var pendingExerciseForAdd: ExerciseCatalogItem?
+    @State private var pendingExerciseForAdd: ExerciseCatalogItemSnapshot?
 
     @State private var errorMessage = ""
     @State private var showingError = false
@@ -61,7 +87,7 @@ struct ExercisesCatalogView: View {
         return false
     }
 
-    private var pickerSelectAction: ((ExerciseCatalogItem) -> Void)? {
+    private var pickerSelectAction: ((ExerciseCatalogSelection) -> Void)? {
         if case .pick(_, let onSelect) = mode {
             return onSelect
         }
@@ -103,6 +129,10 @@ struct ExercisesCatalogView: View {
 
     private var shouldLoadCatalog: Bool {
         isPickerMode || isTabActive
+    }
+
+    private var exercisesBackgroundStore: AppBackgroundStore {
+        appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
     }
 
     private var headerSearchSpacing: CGFloat {
@@ -151,8 +181,6 @@ struct ExercisesCatalogView: View {
     }
 
     var body: some View {
-        let catalogRepository = ExerciseCatalogRepository(modelContext: modelContext)
-
         ScrollViewReader { proxy in
             GeometryReader { geometry in
                 VStack(alignment: .leading, spacing: 0) {
@@ -179,7 +207,7 @@ struct ExercisesCatalogView: View {
                                                 LazyVStack(alignment: .leading, spacing: 0) {
                                                     ForEach(section.rows) { row in
                                                         if let exercise = controller.snapshot.exerciseByUUID[row.id] {
-                                                            exerciseRow(exercise, repository: catalogRepository)
+                                                            exerciseRow(exercise)
                                                         }
                                                     }
                                                 }
@@ -327,9 +355,10 @@ struct ExercisesCatalogView: View {
 
             if hasAttemptedBootstrap {
                 do {
-                    try WGJPerformance.measure("exercises.snapshot.reload") {
-                        try controller.reload(modelContext: modelContext)
+                    let snapshot = try await exercisesBackgroundStore.perform("exercises.snapshot.reload") { backgroundContext in
+                        try ExercisesCatalogSnapshotLoader.load(modelContext: backgroundContext)
                     }
+                    controller.apply(snapshot)
                     applyCurrentFilters()
                 } catch {
                     showError(error)
@@ -440,11 +469,7 @@ struct ExercisesCatalogView: View {
                     HStack(spacing: 8) {
                         bodyPartFilter
                         categoryFilter
-                    }
-
-                    HStack(spacing: 8) {
                         sortButton
-                        Spacer(minLength: 0)
                     }
                     activeFilterDropdownPanel
                 }
@@ -714,14 +739,12 @@ struct ExercisesCatalogView: View {
     }
 
     private func exerciseRow(
-        _ exercise: ExerciseCatalogItem,
-        repository: ExerciseCatalogRepository
+        _ exercise: ExerciseCatalogItemSnapshot
     ) -> some View {
         return HStack(spacing: 10) {
             NavigationLink {
                 ExerciseDetailDestinationView(
-                    exercise: exercise,
-                    repository: repository,
+                    remoteUUID: exercise.remoteUUID,
                     availableMuscles: controller.snapshot.muscleGroups,
                     suggestedCategories: controller.snapshot.availableCategories,
                     actionTitle: isPickerMode ? pickerActionTitle : "Add to Workout",
@@ -736,7 +759,7 @@ struct ExercisesCatalogView: View {
                     }
                 )
             } label: {
-                ExerciseCatalogRowContent(exercise: exercise, repository: repository)
+                ExerciseCatalogRowContent(exercise: exercise)
             }
             .buttonStyle(.plain)
 
@@ -854,26 +877,27 @@ struct ExercisesCatalogView: View {
         applyCurrentFilters()
     }
 
-    private func handleSelection(_ exercise: ExerciseCatalogItem) {
+    private func handleSelection(_ exercise: ExerciseCatalogItemSnapshot) {
         isSearchFieldFocused = false
         isSearchToolbarExpanded = false
         activeFilterDropdown = nil
         WGJKeyboard.dismiss()
 
         if let pickerSelectAction {
-            pickerSelectAction(exercise)
+            pickerSelectAction(exercise.selection)
             return
         }
 
         addExerciseToSessionOrPrompt(exercise)
     }
 
-    private func addExerciseToSessionOrPrompt(_ exercise: ExerciseCatalogItem) {
+    private func addExerciseToSessionOrPrompt(_ exercise: ExerciseCatalogItemSnapshot) {
+        let appendInput = ExerciseRuntimeAppendInput(exercise: exercise)
         Task { @MainActor in
             do {
                 let hadActivePresentation = activeWorkoutPresentationState.activeSessionID != nil
                 if let activeSession = try await resolvedActiveRuntimeSessionForAdd() {
-                    try await saveRuntimeSessionByAppending(exercise, to: activeSession)
+                    try await saveRuntimeSessionByAppending(appendInput, to: activeSession)
                     if !hadActivePresentation {
                         presentActiveWorkout(sessionID: activeSession.id)
                     }
@@ -895,6 +919,7 @@ struct ExercisesCatalogView: View {
     private func startSessionAndAddPendingExercise() {
         Task { @MainActor in
             guard let pendingExerciseForAdd else { return }
+            let appendInput = ExerciseRuntimeAppendInput(exercise: pendingExerciseForAdd)
             self.pendingExerciseForAdd = nil
             isSearchFieldFocused = false
             isSearchToolbarExpanded = false
@@ -902,15 +927,14 @@ struct ExercisesCatalogView: View {
 
             do {
                 if let activeSession = try await resolvedActiveRuntimeSessionForAdd() {
-                    try await saveRuntimeSessionByAppending(pendingExerciseForAdd, to: activeSession)
+                    try await saveRuntimeSessionByAppending(appendInput, to: activeSession)
                     presentActiveWorkout(sessionID: activeSession.id)
                     appTabState.selectedTab = .startWorkout
                     return
                 }
 
-                let createdSession = ActiveWorkoutSessionFactory(modelContext: modelContext)
-                    .createEmptySession()
-                try await saveRuntimeSessionByAppending(pendingExerciseForAdd, to: createdSession)
+                let createdSession = Self.makeEmptyRuntimeSession()
+                try await saveRuntimeSessionByAppending(appendInput, to: createdSession)
                 presentActiveWorkout(sessionID: createdSession.id)
                 appTabState.selectedTab = .startWorkout
             } catch {
@@ -934,8 +958,10 @@ struct ExercisesCatalogView: View {
             return snapshot
         }
 
-        if let importedLegacy = try ActiveWorkoutSessionFactory(modelContext: modelContext)
-            .importLegacyActiveSessionIfNeeded() {
+        let backgroundStore = exercisesBackgroundStore
+        if let importedLegacy = try await backgroundStore.performWrite("exercises.import-legacy-active-session", { backgroundContext in
+            try ActiveWorkoutSessionFactory(modelContext: backgroundContext).importLegacyActiveSessionIfNeeded()
+        }) {
             try await ActiveWorkoutSnapshotStore.shared.save(importedLegacy)
             activeWorkoutPresentationState.activeSessionID = importedLegacy.id
             return importedLegacy
@@ -949,21 +975,78 @@ struct ExercisesCatalogView: View {
 
     @MainActor
     private func saveRuntimeSessionByAppending(
-        _ exercise: ExerciseCatalogItem,
+        _ exercise: ExerciseRuntimeAppendInput,
         to session: ActiveWorkoutRuntimeSession
     ) async throws {
         var updatedSession = session
         let sortOrder = updatedSession.exercises.count
-        let runtimeExercise = ActiveWorkoutSessionFactory(modelContext: modelContext)
-            .createExercise(from: exercise, sortOrder: sortOrder)
+        let backgroundStore = exercisesBackgroundStore
+        let preferredLoadUnit = try await backgroundStore.perform("exercises.preferred-load-unit") { backgroundContext in
+            (try? ProfileRepository(modelContext: backgroundContext).currentProfile()?.preferredLoadUnit) ?? .kg
+        }
+        let runtimeExercise = Self.makeRuntimeExercise(
+            from: exercise,
+            sortOrder: sortOrder,
+            preferredLoadUnit: preferredLoadUnit
+        )
         updatedSession.exercises.append(runtimeExercise)
         updatedSession.normalizeExerciseSortOrder()
         updatedSession.touch()
+        let expandedExerciseIDs = activeWorkoutPresentationState
+            .preparedExpandedExerciseIDs(for: updatedSession.id)
+            .union([runtimeExercise.id])
         try await ActiveWorkoutSnapshotStore.shared.save(
             updatedSession,
             presentationMode: .presented,
             preservesExistingPresentationMode: false
         )
+        activeWorkoutPresentationState.stageRuntimeSession(updatedSession, for: updatedSession.id)
+        activeWorkoutPresentationState.stageExpandedExerciseIDs(expandedExerciseIDs, for: updatedSession.id)
+    }
+
+    nonisolated private static func makeEmptyRuntimeSession() -> ActiveWorkoutRuntimeSession {
+        let now = Date()
+        return ActiveWorkoutRuntimeSession(
+            name: "Empty Workout",
+            startedAt: now,
+            createdAt: now,
+            updatedAt: now
+        )
+    }
+
+    nonisolated private static func makeRuntimeExercise(
+        from exercise: ExerciseRuntimeAppendInput,
+        sortOrder: Int,
+        preferredLoadUnit: TemplateLoadUnit
+    ) -> ActiveWorkoutRuntimeExercise {
+        let now = Date()
+        let loadUnit = TemplateLoadUnit.inferredDefault(fromEquipmentSummary: exercise.equipmentSummary)
+            ?? preferredLoadUnit
+        return ActiveWorkoutRuntimeExercise(
+            catalogExerciseUUID: exercise.remoteUUID,
+            exerciseNameSnapshot: exercise.displayName,
+            categorySnapshot: exercise.categoryName,
+            muscleSummarySnapshot: exercise.primaryMuscleNames,
+            restSeconds: 120,
+            sortOrder: sortOrder,
+            setDrafts: defaultRuntimeSetDrafts(restSeconds: 120, loadUnit: loadUnit),
+            createdAt: now,
+            updatedAt: now
+        )
+    }
+
+    nonisolated private static func defaultRuntimeSetDrafts(
+        restSeconds: Int,
+        loadUnit: TemplateLoadUnit
+    ) -> [WorkoutSessionSetDraft] {
+        [0, 1, 2].map { index in
+            WorkoutSessionSetDraft(
+                isWarmup: index == 0,
+                restSeconds: restSeconds,
+                targetLoadUnit: loadUnit,
+                actualLoadUnit: loadUnit
+            )
+        }
     }
 
     private func scrollToTop(using proxy: ScrollViewProxy) {
@@ -990,19 +1073,22 @@ struct ExercisesCatalogView: View {
         loadState = .loading
         isBootstrappingCatalog = true
         defer { isBootstrappingCatalog = false }
-        let catalogRepository = ExerciseCatalogRepository(modelContext: modelContext)
         var bootstrapError: Error?
+        let backgroundStore = exercisesBackgroundStore
 
         do {
-            try catalogRepository.ensureSeedImportedIfNeeded()
+            try await backgroundStore.performWrite("exercises.seed-import") { backgroundContext in
+                try ExerciseCatalogRepository(modelContext: backgroundContext).ensureSeedImportedIfNeeded()
+            }
         } catch {
             bootstrapError = error
         }
 
         do {
-            try WGJPerformance.measure("exercises.snapshot.reload") {
-                try controller.reload(modelContext: modelContext)
+            let snapshot = try await backgroundStore.perform("exercises.snapshot.reload") { backgroundContext in
+                try ExercisesCatalogSnapshotLoader.load(modelContext: backgroundContext)
             }
+            controller.apply(snapshot)
         } catch {
             loadState = .failed
             showError(bootstrapError ?? error)
@@ -1020,35 +1106,49 @@ struct ExercisesCatalogView: View {
     }
 
     private func saveCustomExercise() {
-        let catalogRepository = ExerciseCatalogRepository(modelContext: modelContext)
+        let draft = customExerciseDraft
+        Task { @MainActor in
+            do {
+                let backgroundStore = exercisesBackgroundStore
+                let created = try await backgroundStore.performWrite("exercises.custom.create") { backgroundContext in
+                    let created = try ExerciseCatalogRepository(modelContext: backgroundContext)
+                        .createCustomExercise(draft: draft)
+                    return ExerciseCatalogItemSnapshot(exercise: created)
+                }
+                let snapshot = try await backgroundStore.perform("exercises.snapshot.reload") { backgroundContext in
+                    try ExercisesCatalogSnapshotLoader.load(modelContext: backgroundContext)
+                }
+                controller.apply(snapshot)
+                showingCustomExerciseSheet = false
+                customExerciseDraft = .empty
 
-        do {
-            let created = try catalogRepository.createCustomExercise(draft: customExerciseDraft)
-            try controller.reload(modelContext: modelContext)
-            showingCustomExerciseSheet = false
-            customExerciseDraft = .empty
+                if let pickerSelectAction {
+                    pickerSelectAction(created.selection)
+                    return
+                }
 
-            if let pickerSelectAction {
-                pickerSelectAction(created)
-                return
+                searchState.selectedPrimaryMuscleID = nil
+                searchState.selectedCategory = nil
+                searchState.sortDescending = false
+                searchState.updateDebouncedQuery(created.displayName)
+                applyCurrentFilters()
+            } catch {
+                showError(error)
             }
-
-            searchState.selectedPrimaryMuscleID = nil
-            searchState.selectedCategory = nil
-            searchState.sortDescending = false
-            searchState.updateDebouncedQuery(created.displayName)
-            applyCurrentFilters()
-        } catch {
-            showError(error)
         }
     }
 
     private func reloadCatalogAfterExerciseDeletion() {
-        do {
-            try controller.reload(modelContext: modelContext)
-            applyCurrentFilters()
-        } catch {
-            showError(error)
+        Task { @MainActor in
+            do {
+                let snapshot = try await exercisesBackgroundStore.perform("exercises.snapshot.reload") { backgroundContext in
+                    try ExercisesCatalogSnapshotLoader.load(modelContext: backgroundContext)
+                }
+                controller.apply(snapshot)
+                applyCurrentFilters()
+            } catch {
+                showError(error)
+            }
         }
     }
 
@@ -1127,8 +1227,8 @@ private struct ExercisesCatalogScrollOffsetModifier: ViewModifier {
 final class ExercisesCatalogController {
     var snapshot = ExercisesCatalogSnapshot.empty
 
-    func reload(modelContext: ModelContext) throws {
-        snapshot = try ExercisesCatalogSnapshotLoader.load(modelContext: modelContext)
+    func apply(_ snapshot: ExercisesCatalogSnapshot) {
+        self.snapshot = snapshot
     }
 
     func applyFilters(
@@ -1150,7 +1250,7 @@ final class ExercisesCatalogController {
     }
 }
 
-enum ExercisesCatalogSnapshotLoader {
+nonisolated enum ExercisesCatalogSnapshotLoader {
     static func load(modelContext: ModelContext) throws -> ExercisesCatalogSnapshot {
         let repository = ExerciseCatalogRepository(modelContext: modelContext)
         var snapshot = ExercisesCatalogSnapshot.empty
@@ -1162,13 +1262,80 @@ enum ExercisesCatalogSnapshotLoader {
     }
 }
 
-@MainActor
-struct ExercisesCatalogSnapshot {
-    var catalogExercises: [ExerciseCatalogItem] = []
-    var muscleGroups: [MuscleGroup] = []
-    var exerciseByUUID: [String: ExerciseCatalogItem] = [:]
+nonisolated struct ExerciseMuscleSnapshot: Identifiable, Equatable, Sendable {
+    let id: Int
+    let remoteID: Int
+    let name: String
+
+    init(muscle: MuscleGroup) {
+        self.id = muscle.remoteID
+        self.remoteID = muscle.remoteID
+        self.name = muscle.name
+    }
+}
+
+nonisolated struct ExerciseCatalogImageSnapshot: Equatable, Sendable {
+    let localPath: String?
+    let remoteURL: String
+}
+
+nonisolated struct ExerciseCatalogItemSnapshot: Identifiable, Equatable, Sendable {
+    let id: String
+    let remoteUUID: String
+    let displayName: String
+    let categoryName: String
+    let equipmentSummary: String
+    let primaryMuscleNames: String
+    let secondaryMuscleNames: String
+    let primaryMuscleIDs: Set<Int>
+    let secondaryMuscleIDs: Set<Int>
+    let instructionSteps: [String]
+    let isHidden: Bool
+    let isCustomExercise: Bool
+    let searchBlob: String
+    let image: ExerciseCatalogImageSnapshot?
+
+    var selection: ExerciseCatalogSelection {
+        ExerciseCatalogSelection(
+            remoteUUID: remoteUUID,
+            displayName: displayName,
+            categoryName: categoryName,
+            equipmentSummary: equipmentSummary,
+            primaryMuscleNames: primaryMuscleNames
+        )
+    }
+
+    init(exercise: ExerciseCatalogItem) {
+        id = exercise.remoteUUID
+        remoteUUID = exercise.remoteUUID
+        displayName = exercise.displayName
+        categoryName = exercise.categoryName
+        equipmentSummary = exercise.equipmentSummary
+        primaryMuscleNames = exercise.primaryMuscleNames
+        secondaryMuscleNames = exercise.secondaryMuscleNames
+        primaryMuscleIDs = Set(exercise.primaryMuscles.map(\.remoteID))
+        secondaryMuscleIDs = Set(exercise.secondaryMuscles.map(\.remoteID))
+        instructionSteps = exercise.instructionSteps
+        isHidden = exercise.isHidden
+        isCustomExercise = exercise.isCustomExercise
+        searchBlob = exercise.searchableTerms
+            .joined(separator: " ")
+            .lowercased()
+        image = exercise.images.first.map {
+            ExerciseCatalogImageSnapshot(
+                localPath: $0.localPath,
+                remoteURL: $0.remoteURL
+            )
+        }
+    }
+}
+
+nonisolated struct ExercisesCatalogSnapshot: Sendable {
+    var catalogExercises: [ExerciseCatalogItemSnapshot] = []
+    var muscleGroups: [ExerciseMuscleSnapshot] = []
+    var exerciseByUUID: [String: ExerciseCatalogItemSnapshot] = [:]
     var availableMuscleNamesByID: [Int: String] = [:]
-    var availableMuscles: [(id: Int, name: String)] = []
+    var availableMuscles: [ExerciseMuscleSnapshot] = []
     var availableCategories: [String] = []
     var sections: [ExercisesSectionSnapshot] = []
     var totalSectionCount = 0
@@ -1177,13 +1344,14 @@ struct ExercisesCatalogSnapshot {
     static let empty = ExercisesCatalogSnapshot()
 
     mutating func rebuild(from exercises: [ExerciseCatalogItem], muscleGroups: [MuscleGroup]) {
+        let muscleSnapshots = muscleGroups.map(ExerciseMuscleSnapshot.init(muscle:))
         var seenExerciseUUIDs: Set<String> = []
-        let uniqueExercises = exercises.filter { exercise in
+        let uniqueExercises = exercises.map(ExerciseCatalogItemSnapshot.init(exercise:)).filter { exercise in
             seenExerciseUUIDs.insert(exercise.remoteUUID).inserted
         }
 
         catalogExercises = uniqueExercises
-        self.muscleGroups = muscleGroups
+        self.muscleGroups = muscleSnapshots
         exerciseByUUID = Dictionary(
             uniqueExercises.map { ($0.remoteUUID, $0) },
             uniquingKeysWith: { first, _ in first }
@@ -1195,16 +1363,14 @@ struct ExercisesCatalogSnapshot {
         rows.reserveCapacity(uniqueExercises.count)
 
         for exercise in uniqueExercises where !exercise.isHidden {
-            for muscle in exercise.primaryMuscles {
-                muscleNameByID[muscle.remoteID] = muscle.name
+            for muscleID in exercise.primaryMuscleIDs {
+                if let muscle = muscleSnapshots.first(where: { $0.remoteID == muscleID }) {
+                    muscleNameByID[muscle.remoteID] = muscle.name
+                }
             }
             if !exercise.categoryName.isEmpty {
                 categories.insert(exercise.categoryName)
             }
-
-            let searchBlob = exercise.searchableTerms
-                .joined(separator: " ")
-                .lowercased()
 
             let indexKey: String
             if let first = exercise.displayName.first {
@@ -1218,17 +1384,17 @@ struct ExercisesCatalogSnapshot {
                     id: exercise.remoteUUID,
                     displayName: exercise.displayName,
                     categoryName: exercise.categoryName,
-                    searchBlob: searchBlob,
-                    primaryMuscleIDs: Set(exercise.primaryMuscles.map(\.remoteID)),
+                    searchBlob: exercise.searchBlob,
+                    primaryMuscleIDs: exercise.primaryMuscleIDs,
                     indexKey: indexKey
                 )
             )
         }
 
         availableMuscleNamesByID = muscleNameByID
-        availableMuscles = muscleNameByID
-            .map { ($0.key, $0.value) }
-            .sorted { $0.1.localizedStandardCompare($1.1) == .orderedAscending }
+        availableMuscles = muscleSnapshots
+            .filter { muscleNameByID[$0.remoteID] != nil }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         availableCategories = categories
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
         totalSectionCount = Set(rows.map(\.indexKey)).count
@@ -1306,7 +1472,7 @@ struct ExercisesCatalogSnapshot {
     }
 }
 
-struct ExerciseCatalogRowSnapshot: Identifiable, Equatable {
+nonisolated struct ExerciseCatalogRowSnapshot: Identifiable, Equatable, Sendable {
     let id: String
     let displayName: String
     let categoryName: String
@@ -1315,7 +1481,7 @@ struct ExerciseCatalogRowSnapshot: Identifiable, Equatable {
     let indexKey: String
 }
 
-struct ExercisesSectionSnapshot: Identifiable, Equatable {
+nonisolated struct ExercisesSectionSnapshot: Identifiable, Equatable, Sendable {
     let id: String
     let title: String
     let rows: [ExerciseCatalogRowSnapshot]
@@ -1374,26 +1540,34 @@ private struct ExercisesCatalogSearchField: View {
     private func debounceQuery(_ value: String) {
         debounceTask?.cancel()
         guard value != committedQuery else { return }
-        debounceTask = Task { @MainActor in
+        debounceTask = Task.detached(priority: .utility) {
             try? await Task.sleep(for: .milliseconds(140))
             guard !Task.isCancelled else { return }
-            committedQuery = value
+            await commitSearchQueryAfterDebounceIfStillNeeded(value)
         }
+    }
+
+    @MainActor
+    private func commitSearchQueryAfterDebounceIfStillNeeded(_ value: String) {
+        guard !Task.isCancelled else { return }
+        committedQuery = value
     }
 }
 
 struct ExerciseDetailDestinationView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(\.dismiss) private var dismiss
 
-    let exercise: ExerciseCatalogItem
-    let repository: ExerciseCatalogRepository
-    let availableMuscles: [MuscleGroup]
+    let remoteUUID: String
+    let availableMuscles: [ExerciseMuscleSnapshot]
     let suggestedCategories: [String]
     var actionTitle: String?
     var onSelect: (() -> Void)? = nil
     var onUpdate: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
+
+    @Query private var exercises: [ExerciseCatalogItem]
 
     @State private var showingCustomExerciseEditor = false
     @State private var customExerciseDraft = CustomExerciseDraft.empty
@@ -1402,83 +1576,54 @@ struct ExerciseDetailDestinationView: View {
     @State private var errorMessage = ""
     @State private var showingError = false
 
+    init(
+        remoteUUID: String,
+        availableMuscles: [ExerciseMuscleSnapshot],
+        suggestedCategories: [String],
+        actionTitle: String? = nil,
+        onSelect: (() -> Void)? = nil,
+        onUpdate: (() -> Void)? = nil,
+        onDelete: (() -> Void)? = nil
+    ) {
+        self.remoteUUID = remoteUUID
+        self.availableMuscles = availableMuscles
+        self.suggestedCategories = suggestedCategories
+        self.actionTitle = actionTitle
+        self.onSelect = onSelect
+        self.onUpdate = onUpdate
+        self.onDelete = onDelete
+        _exercises = Query(filter: #Predicate<ExerciseCatalogItem> { item in
+            item.remoteUUID == remoteUUID
+        })
+    }
+
+    private var exercise: ExerciseCatalogItem? {
+        exercises.first
+    }
+
+    private var detailBackgroundStore: AppBackgroundStore {
+        appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
+    }
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text(exercise.displayName)
-                    .font(.largeTitle.weight(.bold))
-                    .foregroundStyle(WGJTheme.textPrimary)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.82)
-                    .accessibilityIdentifier("exercise-detail-title")
-
-                ExerciseBodyMapSection(
-                    primaryMuscleIDs: Set(exercise.primaryMuscles.map(\.remoteID)),
-                    secondaryMuscleIDs: Set(exercise.secondaryMuscles.map(\.remoteID)),
-                    showsTitle: false
+            if let exercise {
+                detailContent(for: exercise)
+            } else {
+                WGJEmptyStateCard(
+                    title: "Exercise unavailable",
+                    message: "This exercise is no longer in your catalog.",
+                    icon: "dumbbell.fill"
                 )
-
-                if !exercise.categoryName.isEmpty {
-                    detailInfoRow(title: "Category", value: exercise.categoryName)
-                }
-
-                if !exercise.equipmentSummary.isEmpty {
-                    detailInfoRow(title: "Equipment", value: exercise.equipmentSummary)
-                }
-
-                if !exercise.primaryMuscleNames.isEmpty {
-                    detailInfoRow(title: "Primary muscles", value: exercise.primaryMuscleNames)
-                }
-
-                if !exercise.secondaryMuscleNames.isEmpty {
-                    detailInfoRow(title: "Secondary muscles", value: exercise.secondaryMuscleNames)
-                }
-
-                ExerciseDetailStatsSection(snapshot: statsSnapshot)
-
-                if !exercise.instructionSteps.isEmpty {
-                    detailStepList(title: "How to perform", steps: exercise.instructionSteps)
-                }
-
-                if let attribution = detailAttribution {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Attribution")
-                            .font(.headline)
-                            .foregroundStyle(WGJTheme.textPrimary)
-                        Text("Source: \(attribution.sourceName)")
-                        Text("License: \(attribution.licenseName)")
-                        if !attribution.authorName.isEmpty {
-                            Text("Author: \(attribution.authorName)")
-                        }
-                        if let url = URL(string: attribution.sourceURL), !attribution.sourceURL.isEmpty {
-                            Link("Source URL", destination: url)
-                        }
-                        if let licenseURL = URL(string: attribution.licenseURL), !attribution.licenseURL.isEmpty {
-                            Link("License URL", destination: licenseURL)
-                        }
-                    }
-                    .font(.subheadline)
-                    .foregroundStyle(WGJTheme.textSecondary)
-                }
-
-                if let actionTitle, let onSelect {
-                    Button {
-                        onSelect()
-                    } label: {
-                        Label(actionTitle, systemImage: "plus.circle.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(WGJPrimaryButtonStyle())
-                }
+                .padding(16)
             }
-            .padding(16)
         }
         .wgjScreenBackground()
         .wgjNavigationChrome()
         .navigationTitle("Exercise")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if exercise.isCustomExercise {
+            if exercise?.isCustomExercise == true {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button(role: .destructive) {
                         showingDeleteConfirmation = true
@@ -1530,11 +1675,82 @@ struct ExerciseDetailDestinationView: View {
 
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("This removes \(exercise.displayName) from your exercises. Built-in exercises cannot be deleted.")
+            Text("This removes \(exercise?.displayName ?? "this exercise") from your exercises. Built-in exercises cannot be deleted.")
         }
-        .task(id: exercise.remoteUUID) {
+        .task(id: remoteUUID) {
             loadStatsSnapshot()
         }
+    }
+
+    private func detailContent(for exercise: ExerciseCatalogItem) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(exercise.displayName)
+                .font(.largeTitle.weight(.bold))
+                .foregroundStyle(WGJTheme.textPrimary)
+                .lineLimit(2)
+                .minimumScaleFactor(0.82)
+                .accessibilityIdentifier("exercise-detail-title")
+
+            ExerciseBodyMapSection(
+                primaryMuscleIDs: Set(exercise.primaryMuscles.map(\.remoteID)),
+                secondaryMuscleIDs: Set(exercise.secondaryMuscles.map(\.remoteID)),
+                showsTitle: false
+            )
+
+            if !exercise.categoryName.isEmpty {
+                detailInfoRow(title: "Category", value: exercise.categoryName)
+            }
+
+            if !exercise.equipmentSummary.isEmpty {
+                detailInfoRow(title: "Equipment", value: exercise.equipmentSummary)
+            }
+
+            if !exercise.primaryMuscleNames.isEmpty {
+                detailInfoRow(title: "Primary muscles", value: exercise.primaryMuscleNames)
+            }
+
+            if !exercise.secondaryMuscleNames.isEmpty {
+                detailInfoRow(title: "Secondary muscles", value: exercise.secondaryMuscleNames)
+            }
+
+            ExerciseDetailStatsSection(snapshot: statsSnapshot)
+
+            if !exercise.instructionSteps.isEmpty {
+                detailStepList(title: "How to perform", steps: exercise.instructionSteps)
+            }
+
+            if let attribution = detailAttribution(for: exercise) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Attribution")
+                        .font(.headline)
+                        .foregroundStyle(WGJTheme.textPrimary)
+                    Text("Source: \(attribution.sourceName)")
+                    Text("License: \(attribution.licenseName)")
+                    if !attribution.authorName.isEmpty {
+                        Text("Author: \(attribution.authorName)")
+                    }
+                    if let url = URL(string: attribution.sourceURL), !attribution.sourceURL.isEmpty {
+                        Link("Source URL", destination: url)
+                    }
+                    if let licenseURL = URL(string: attribution.licenseURL), !attribution.licenseURL.isEmpty {
+                        Link("License URL", destination: licenseURL)
+                    }
+                }
+                .font(.subheadline)
+                .foregroundStyle(WGJTheme.textSecondary)
+            }
+
+            if let actionTitle, let onSelect {
+                Button {
+                    onSelect()
+                } label: {
+                    Label(actionTitle, systemImage: "plus.circle.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(WGJPrimaryButtonStyle())
+            }
+        }
+        .padding(16)
     }
 
     private func detailInfoRow(title: String, value: String) -> some View {
@@ -1569,7 +1785,7 @@ struct ExerciseDetailDestinationView: View {
         }
     }
 
-    private var detailAttribution: ExerciseAttribution? {
+    private func detailAttribution(for exercise: ExerciseCatalogItem) -> ExerciseAttribution? {
         guard let attribution = exercise.primaryAttribution else {
             return nil
         }
@@ -1582,51 +1798,88 @@ struct ExerciseDetailDestinationView: View {
     }
 
     private func presentCustomExerciseEditor() {
+        guard let exercise else { return }
         customExerciseDraft = CustomExerciseDraft(exercise: exercise)
         showingCustomExerciseEditor = true
     }
 
     private func saveCustomExerciseChanges() {
-        do {
-            try repository.updateCustomExercise(exercise, draft: customExerciseDraft)
-            onUpdate?()
-            loadStatsSnapshot()
-            showingCustomExerciseEditor = false
-        } catch {
-            errorMessage = String(describing: error)
-            showingError = true
+        guard let remoteUUID = exercise?.remoteUUID else { return }
+        let draft = customExerciseDraft
+
+        Task { @MainActor in
+            do {
+                let backgroundStore = detailBackgroundStore
+                try await backgroundStore.performWrite("exercise-detail.custom.update") { backgroundContext in
+                    let repository = ExerciseCatalogRepository(modelContext: backgroundContext)
+                    guard let exercise = try repository.exerciseMap(for: [remoteUUID])[remoteUUID] else {
+                        throw ExerciseDetailMutationError.missingExercise
+                    }
+                    try repository.updateCustomExercise(exercise, draft: draft)
+                }
+                onUpdate?()
+                loadStatsSnapshot()
+                showingCustomExerciseEditor = false
+            } catch {
+                errorMessage = String(describing: error)
+                showingError = true
+            }
         }
     }
 
     private func deleteCustomExercise() {
-        do {
-            try repository.deleteCustomExercise(exercise)
-            onDelete?()
-            dismiss()
-        } catch {
-            errorMessage = String(describing: error)
-            showingError = true
+        guard let remoteUUID = exercise?.remoteUUID else { return }
+
+        Task { @MainActor in
+            do {
+                let backgroundStore = detailBackgroundStore
+                try await backgroundStore.performWrite("exercise-detail.custom.delete") { backgroundContext in
+                    let repository = ExerciseCatalogRepository(modelContext: backgroundContext)
+                    guard let exercise = try repository.exerciseMap(for: [remoteUUID])[remoteUUID] else {
+                        throw ExerciseDetailMutationError.missingExercise
+                    }
+                    try repository.deleteCustomExercise(exercise)
+                }
+                onDelete?()
+                dismiss()
+            } catch {
+                errorMessage = String(describing: error)
+                showingError = true
+            }
         }
     }
 
     private func loadStatsSnapshot() {
-        do {
-            statsSnapshot = try WorkoutMetricsService(modelContext: modelContext).exerciseDetailStats(
-                for: exercise.remoteUUID,
-                preferredExerciseName: exercise.displayName,
-                limit: 8
-            )
-        } catch {
-            errorMessage = String(describing: error)
-            showingError = true
+        let preferredExerciseName = exercise?.displayName ?? ""
+        Task { @MainActor in
+            do {
+                statsSnapshot = try await detailBackgroundStore.perform("exercise-detail.stats") { backgroundContext in
+                    try WorkoutMetricsService(modelContext: backgroundContext).exerciseDetailStats(
+                        for: remoteUUID,
+                        preferredExerciseName: preferredExerciseName,
+                        limit: 8
+                    )
+                }
+            } catch {
+                errorMessage = String(describing: error)
+                showingError = true
+            }
         }
+    }
+}
+
+private enum ExerciseDetailMutationError: LocalizedError {
+    case missingExercise
+
+    var errorDescription: String? {
+        "This exercise is no longer in your catalog."
     }
 }
 
 private struct CustomExerciseEditorView: View {
     @Binding var draft: CustomExerciseDraft
 
-    let availableMuscles: [MuscleGroup]
+    let availableMuscles: [ExerciseMuscleSnapshot]
     let suggestedCategories: [String]
     let title: String
     let subtitle: String
@@ -1636,7 +1889,7 @@ private struct CustomExerciseEditorView: View {
 
     init(
         draft: Binding<CustomExerciseDraft>,
-        availableMuscles: [MuscleGroup],
+        availableMuscles: [ExerciseMuscleSnapshot],
         suggestedCategories: [String],
         title: String = "New Exercise",
         subtitle: String = "Save a custom exercise for future workouts.",
@@ -1850,12 +2103,11 @@ private struct CustomExerciseEditorView: View {
 }
 
 private struct ExerciseCatalogRowContent: View {
-    let exercise: ExerciseCatalogItem
-    let repository: ExerciseCatalogRepository
+    let exercise: ExerciseCatalogItemSnapshot
 
     var body: some View {
         HStack(spacing: 10) {
-            ExerciseCatalogThumbnail(exercise: exercise, repository: repository)
+            ExerciseCatalogThumbnail(exercise: exercise)
                 .frame(width: 56, height: 56)
                 .background(WGJTheme.field)
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -1878,12 +2130,12 @@ private struct ExerciseCatalogRowContent: View {
 }
 
 private struct ExerciseCatalogThumbnail: View {
-    let exercise: ExerciseCatalogItem
-    let repository: ExerciseCatalogRepository
+    let exercise: ExerciseCatalogItemSnapshot
     var placeholderPadding: CGFloat = 12
 
     @State private var image: UIImage?
     @State private var currentRemoteUUID = ""
+    private let imageCacheService = ExerciseImageCacheService()
 
     var body: some View {
         Group {
@@ -1905,7 +2157,7 @@ private struct ExerciseCatalogThumbnail: View {
             currentRemoteUUID = remoteUUID
             image = nil
 
-            let loadedImage = await repository.image(for: exercise)
+            let loadedImage = await imageCacheService.image(for: exercise.image)
             guard !Task.isCancelled, currentRemoteUUID == remoteUUID else { return }
             image = loadedImage
         }

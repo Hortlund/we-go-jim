@@ -9,14 +9,15 @@ final class CatalogSyncCoordinator {
 
     init() {}
 
-    func primeLocalCatalogIfNeeded(modelContext: ModelContext) {
+    func primeLocalCatalogIfNeeded(backgroundStore: AppBackgroundStore) async {
         guard !hasPrimedLocalCatalog, !isPrimingLocalCatalog else { return }
         isPrimingLocalCatalog = true
         defer { isPrimingLocalCatalog = false }
 
-        let repository = ExerciseCatalogRepository(modelContext: modelContext)
         do {
-            try repository.ensureSeedImportedIfNeeded()
+            try await backgroundStore.perform("catalog.prime-local") { backgroundContext in
+                try ExerciseCatalogRepository(modelContext: backgroundContext).ensureSeedImportedIfNeeded()
+            }
             hasPrimedLocalCatalog = true
         } catch {
             // Priming errors are surfaced by view-level empty/retry states.

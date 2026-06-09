@@ -38,8 +38,8 @@ struct HistoryDetailView: View {
     @State private var errorMessage = ""
     @State private var showingError = false
 
-    private var sessionRepository: WorkoutSessionRepository {
-        WorkoutSessionRepository(modelContext: modelContext)
+    private var historyBackgroundStore: AppBackgroundStore {
+        appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
     }
 
     private var session: HistoryDetailSnapshotBuilder.SessionSnapshot? {
@@ -59,8 +59,6 @@ struct HistoryDetailView: View {
     }
 
     var body: some View {
-        let catalogRepository = ExerciseCatalogRepository(modelContext: modelContext)
-
         ScrollViewReader { scrollProxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: WGJSpacing.section) {
@@ -139,7 +137,7 @@ struct HistoryDetailView: View {
             }
         }
         .sheet(isPresented: $showingExercisePicker) {
-            ExercisePickerView(repository: catalogRepository) { item in
+            ExercisePickerView { item in
                 addExercise(item)
                 return .accepted
             }
@@ -344,12 +342,9 @@ struct HistoryDetailView: View {
     private func reloadSnapshot() async {
         do {
             let loadedSnapshot: HistoryDetailSnapshotBuilder.Snapshot
-            if let appBackgroundStore {
-                loadedSnapshot = try await appBackgroundStore.perform("history-detail.snapshot") { backgroundContext in
-                    try Self.loadSnapshot(modelContext: backgroundContext, sessionID: sessionID)
-                }
-            } else {
-                loadedSnapshot = try Self.loadSnapshot(modelContext: modelContext, sessionID: sessionID)
+            let backgroundStore = historyBackgroundStore
+            loadedSnapshot = try await backgroundStore.perform("history-detail.snapshot") { backgroundContext in
+                try Self.loadSnapshot(modelContext: backgroundContext, sessionID: sessionID)
             }
 
             applySnapshot(loadedSnapshot)
@@ -567,92 +562,114 @@ struct HistoryDetailView: View {
     private func saveChanges() {
         guard !isSavingChanges else { return }
         isSavingChanges = true
+        sessionHeaderFlushCoordinator.flushDirty()
+        rowFlushCoordinator.flushDirty()
+        let command = makeSaveCommand()
+        let backgroundStore = historyBackgroundStore
 
-        Task { @MainActor in
-            defer {
-                isSavingChanges = false
-            }
-
+        Task.detached(priority: .utility) {
             do {
-                sessionHeaderFlushCoordinator.flushDirty()
-                rowFlushCoordinator.flushDirty()
-                let command = makeSaveCommand()
-                let didPersistChanges: Bool
-                if let appBackgroundStore {
-                    didPersistChanges = try await appBackgroundStore.performWrite("history-detail.save") { backgroundContext in
-                        try Self.saveChanges(
-                            command: command,
-                            modelContext: backgroundContext
-                        )
-                    }
-                } else {
-                    didPersistChanges = try Self.saveChanges(
+                let didPersistChanges = try await backgroundStore.performWrite("history-detail.save") { backgroundContext in
+                    try Self.saveChanges(
                         command: command,
-                        modelContext: modelContext
+                        modelContext: backgroundContext
                     )
                 }
 
-                if didPersistChanges {
-                    hasPendingSummaryRebuild = false
-                }
-                await reloadSnapshot()
-                scrollToTopRequestID = UUID()
+                await handleSaveChangesCompleted(didPersistChanges: didPersistChanges)
             } catch {
-                showError(error)
+                await handleSaveChangesFailed(error)
             }
         }
     }
 
-    private func addExercise(_ item: ExerciseCatalogItem) {
-        var capturedError: Error?
-
-        do {
-            try sessionRepository.addExercise(sessionID: sessionID, catalogItem: item)
-            hasPendingSummaryRebuild = true
-        } catch {
-            capturedError = error
+    @MainActor
+    private func handleSaveChangesCompleted(didPersistChanges: Bool) async {
+        isSavingChanges = false
+        if didPersistChanges {
+            hasPendingSummaryRebuild = false
         }
+        await reloadSnapshot()
+        scrollToTopRequestID = UUID()
+    }
 
-        if let capturedError {
-            showError(capturedError)
-        } else {
-            Task { @MainActor in
-                await reloadSnapshot()
+    @MainActor
+    private func handleSaveChangesFailed(_ error: Error) {
+        isSavingChanges = false
+        showError(error)
+    }
+
+    private func addExercise(_ item: ExerciseCatalogSelection) {
+        let backgroundStore = historyBackgroundStore
+        let catalogExerciseUUID = item.remoteUUID
+        Task.detached(priority: .utility) {
+            do {
+                try await backgroundStore.performWrite("history-detail.add-exercise") { backgroundContext in
+                    try Self.addExercise(
+                        sessionID: sessionID,
+                        catalogExerciseUUID: catalogExerciseUUID,
+                        modelContext: backgroundContext
+                    )
+                }
+                await handleExerciseAdded()
+            } catch {
+                await showError(error)
             }
         }
+    }
+
+    @MainActor
+    private func handleExerciseAdded() async {
+        hasPendingSummaryRebuild = true
+        await reloadSnapshot()
     }
 
     private func removeExercise(exerciseID: UUID) {
-        var capturedError: Error?
-
-        do {
-            try sessionRepository.removeExercise(sessionID: sessionID, sessionExerciseID: exerciseID)
-            clearLocalState(for: exerciseID)
-            hydrationPayloadByExerciseID.removeValue(forKey: exerciseID)
-            loadingHydrationExerciseIDs.remove(exerciseID)
-            hasPendingSummaryRebuild = true
-        } catch {
-            capturedError = error
-        }
-
-        if let capturedError {
-            showError(capturedError)
-        } else {
-            Task { @MainActor in
-                await reloadSnapshot()
+        let backgroundStore = historyBackgroundStore
+        Task.detached(priority: .utility) {
+            do {
+                try await backgroundStore.performWrite("history-detail.remove-exercise") { backgroundContext in
+                    try WorkoutSessionRepository(modelContext: backgroundContext).removeExercise(
+                        sessionID: sessionID,
+                        sessionExerciseID: exerciseID
+                    )
+                }
+                await handleExerciseRemoved(exerciseID: exerciseID)
+            } catch {
+                await showError(error)
             }
         }
     }
 
+    @MainActor
+    private func handleExerciseRemoved(exerciseID: UUID) async {
+        clearLocalState(for: exerciseID)
+        hydrationPayloadByExerciseID.removeValue(forKey: exerciseID)
+        loadingHydrationExerciseIDs.remove(exerciseID)
+        hasPendingSummaryRebuild = true
+        await reloadSnapshot()
+    }
+
     private func archiveSession() {
-        do {
-            try sessionRepository.archiveSession(id: sessionID)
-            dismiss()
-        } catch {
-            showError(error)
+        let backgroundStore = historyBackgroundStore
+        Task.detached(priority: .utility) {
+            do {
+                try await backgroundStore.performWrite("history-detail.archive") { backgroundContext in
+                    try WorkoutSessionRepository(modelContext: backgroundContext).archiveSession(id: sessionID)
+                }
+                await dismissArchivedSession()
+            } catch {
+                await showError(error)
+            }
         }
     }
 
+    @MainActor
+    private func dismissArchivedSession() {
+        dismiss()
+    }
+
+    @MainActor
     private func syncExpandedExerciseState() {
         let orderedIDs = sessionExercises.map(\.id)
         let validIDs = Set(orderedIDs)
@@ -664,11 +681,13 @@ struct HistoryDetailView: View {
         }
     }
 
+    @MainActor
     private func showError(_ error: Error) {
         errorMessage = String(describing: error)
         showingError = true
     }
 
+    @MainActor
     private func clearLocalState(for exerciseID: UUID) {
         setDraftsByExerciseID.removeValue(forKey: exerciseID)
         restByExerciseID.removeValue(forKey: exerciseID)
@@ -740,20 +759,12 @@ struct HistoryDetailView: View {
 
         let generation = hydrationLoadGeneration
         loadingHydrationExerciseIDs.formUnion(pendingExerciseIDs)
+        let backgroundStore = historyBackgroundStore
         Task { @MainActor in
             do {
-                let payloads: [UUID: HistoryDetailSnapshotBuilder.ExerciseHydrationPayload]
-                if let appBackgroundStore {
-                    payloads = try await appBackgroundStore.perform("history-detail.hydration") { backgroundContext in
-                        try Self.loadHydrationPayloads(
-                            modelContext: backgroundContext,
-                            sessionID: sessionID,
-                            exerciseIDs: pendingExerciseIDs
-                        )
-                    }
-                } else {
-                    payloads = try Self.loadHydrationPayloads(
-                        modelContext: modelContext,
+                let payloads = try await backgroundStore.perform("history-detail.hydration") { backgroundContext in
+                    try Self.loadHydrationPayloads(
+                        modelContext: backgroundContext,
                         sessionID: sessionID,
                         exerciseIDs: pendingExerciseIDs
                     )
@@ -857,6 +868,22 @@ struct HistoryDetailView: View {
         }
 
         return didPersistChanges
+    }
+
+    nonisolated private static func addExercise(
+        sessionID: UUID,
+        catalogExerciseUUID: String,
+        modelContext: ModelContext
+    ) throws {
+        guard let catalogItem = try ExerciseCatalogRepository(modelContext: modelContext)
+            .exerciseMap(for: [catalogExerciseUUID])[catalogExerciseUUID] else {
+            throw WorkoutSessionRepositoryError.invalidSessionState
+        }
+
+        try WorkoutSessionRepository(modelContext: modelContext).addExercise(
+            sessionID: sessionID,
+            catalogItem: catalogItem
+        )
     }
 
     private func cardioDescriptor(category: String, muscleSummary: String) -> String? {

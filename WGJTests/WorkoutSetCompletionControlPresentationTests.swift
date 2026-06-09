@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import WGJ
 
@@ -160,4 +161,28 @@ struct WorkoutSetCompletionControlPresentationTests {
             targetIsCompleted: true
         ))
     }
+
+    @Test
+    func completedExerciseEmphasisDoesNotInsertLayoutBadgeOrAnimatedBackground() throws {
+        let source = try String(contentsOf: workoutGridEditorSourceURL(), encoding: .utf8)
+
+        #expect(!source.contains("completedExerciseBadge"))
+        #expect(!source.contains("""
+                if shouldEmphasizeCompletedExercise {
+                    completedExerciseBadge
+                }
+"""))
+        #expect(source.contains("private var completedExerciseBackgroundStyle: AnyShapeStyle"))
+        #expect(source.contains("transaction.animation = nil"))
+    }
+}
+
+private func workoutGridEditorSourceURL() -> URL {
+    URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("WGJ")
+        .appendingPathComponent("Views")
+        .appendingPathComponent("Workout")
+        .appendingPathComponent("WorkoutSessionExerciseGridEditor.swift")
 }

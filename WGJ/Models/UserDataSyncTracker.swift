@@ -271,17 +271,22 @@ nonisolated enum UserDataSyncTrackerBridge {
 
     static func markLocalMutation(at date: Date = .now) {
         let snapshot = UserDataSyncTracker.shared.markLocalUserDataMutation(at: date)
-        Task { @MainActor in
-            AppRuntimeState.shared.updateUserDataSyncStatus(snapshot)
+        Task {
+            await publishUserDataSyncStatus(snapshot)
         }
     }
 
     static func recordCloudEvent(_ summary: CloudSyncEventSummary) {
-        let snapshot = UserDataSyncTracker.shared.recordCloudEvent(summary)
-        Task { @MainActor in
-            AppRuntimeState.shared.updateUserDataSyncStatus(snapshot)
+        let snapshot = recordCloudEventSnapshot(summary)
+        Task {
+            await publishUserDataSyncStatus(snapshot)
         }
+    }
+
+    static func recordCloudEventSnapshot(_ summary: CloudSyncEventSummary) -> UserDataSyncStatusSnapshot {
+        let snapshot = UserDataSyncTracker.shared.recordCloudEvent(summary)
         scheduleRunningEventExpiryIfNeeded(for: snapshot)
+        return snapshot
     }
 
     static func recordRuntimeCloudAvailabilityRecovered() -> UserDataSyncStatusSnapshot {
@@ -296,9 +301,12 @@ nonisolated enum UserDataSyncTrackerBridge {
                 + UserDataSyncTrackerPolicy.runningCloudEventExpiryWakeupLeeway
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             let refreshedSnapshot = UserDataSyncTracker.shared.currentSnapshot()
-            await MainActor.run {
-                AppRuntimeState.shared.updateUserDataSyncStatus(refreshedSnapshot)
-            }
+            await publishUserDataSyncStatus(refreshedSnapshot)
         }
+    }
+
+    @MainActor
+    private static func publishUserDataSyncStatus(_ snapshot: UserDataSyncStatusSnapshot) {
+        AppRuntimeState.shared.updateUserDataSyncStatus(snapshot)
     }
 }

@@ -418,14 +418,20 @@ struct WorkoutCompletionSummaryView: View {
         )
         confettiBursts.append(burst)
         confettiDismissTasks[burst.id]?.cancel()
-        confettiDismissTasks[burst.id] = Task { @MainActor in
+        confettiDismissTasks[burst.id] = Task.detached(priority: .utility) {
             try? await Task.sleep(for: .seconds(2.8))
             guard !Task.isCancelled else { return }
-            withAnimation(.easeOut(duration: 0.25)) {
-                confettiBursts.removeAll { $0.id == burst.id }
-            }
-            confettiDismissTasks[burst.id] = nil
+            await self.removeConfettiBurstAfterDelayIfStillNeeded(id: burst.id)
         }
+    }
+
+    @MainActor
+    private func removeConfettiBurstAfterDelayIfStillNeeded(id: UUID) {
+        guard !Task.isCancelled else { return }
+        withAnimation(.easeOut(duration: 0.25)) {
+            confettiBursts.removeAll { $0.id == id }
+        }
+        confettiDismissTasks[id] = nil
     }
 
     private func confettiOrigin(for location: CGPoint) -> CGPoint {

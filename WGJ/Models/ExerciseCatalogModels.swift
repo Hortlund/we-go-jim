@@ -53,6 +53,38 @@ final class ExerciseCatalogItem {
     }
 }
 
+nonisolated struct ExerciseCatalogSelection: Equatable, Sendable {
+    let remoteUUID: String
+    let displayName: String
+    let categoryName: String
+    let equipmentSummary: String
+    let primaryMuscleNames: String
+
+    init(
+        remoteUUID: String,
+        displayName: String,
+        categoryName: String,
+        equipmentSummary: String,
+        primaryMuscleNames: String
+    ) {
+        self.remoteUUID = remoteUUID
+        self.displayName = displayName
+        self.categoryName = categoryName
+        self.equipmentSummary = equipmentSummary
+        self.primaryMuscleNames = primaryMuscleNames
+    }
+
+    init(catalogItem: ExerciseCatalogItem) {
+        self.init(
+            remoteUUID: catalogItem.remoteUUID,
+            displayName: catalogItem.displayName,
+            categoryName: catalogItem.categoryName,
+            equipmentSummary: catalogItem.equipmentSummary,
+            primaryMuscleNames: catalogItem.primaryMuscleNames
+        )
+    }
+}
+
 @Model
 final class MuscleGroup {
     @Attribute(.unique) var remoteID: Int

@@ -5,7 +5,7 @@ protocol UserDataCloudMirrorBridging: Sendable {
     func syncLocalChangesToMirror() async throws
 }
 
-actor UserDataCloudMirrorBridge: UserDataCloudMirrorBridging {
+nonisolated final class UserDataCloudMirrorBridge: UserDataCloudMirrorBridging, @unchecked Sendable {
     typealias ProjectionScheduler = @Sendable (_ sessionIDs: Set<UUID>, _ localContainer: ModelContainer) -> Void
 
     private let localContainer: ModelContainer

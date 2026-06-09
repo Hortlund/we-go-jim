@@ -21,6 +21,10 @@ struct HistoryOverviewView: View {
     @State private var errorMessage = ""
     @State private var showingError = false
 
+    private var historyBackgroundStore: AppBackgroundStore {
+        appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
+    }
+
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
@@ -166,15 +170,18 @@ struct HistoryOverviewView: View {
     }
 
     private func archiveSession(_ id: UUID) {
-        do {
-            try WorkoutSessionRepository(modelContext: modelContext).archiveSession(id: id)
-            needsExplicitRefresh = true
-            Task {
+        let backgroundStore = historyBackgroundStore
+        Task { @MainActor in
+            do {
+                try await backgroundStore.performWrite("history-overview.archive") { backgroundContext in
+                    try WorkoutSessionRepository(modelContext: backgroundContext).archiveSession(id: id)
+                }
+                needsExplicitRefresh = true
                 await reloadSnapshotIfNeeded(force: true)
+            } catch {
+                errorMessage = String(describing: error)
+                showingError = true
             }
-        } catch {
-            errorMessage = String(describing: error)
-            showingError = true
         }
     }
 
@@ -183,7 +190,7 @@ struct HistoryOverviewView: View {
         await Task.yield()
         guard !Task.isCancelled else { return }
 
-        let currentContentUpdatedAt = currentHistoryContentUpdatedAt()
+        let currentContentUpdatedAt = await currentHistoryContentUpdatedAt()
         guard force || TimestampedReloadPolicy.shouldReload(
             hasLoaded: hasLoadedSnapshot,
             needsExplicitRefresh: needsExplicitRefresh,
@@ -202,20 +209,12 @@ struct HistoryOverviewView: View {
         do {
             let loaded: HistoryOverviewLoadedSnapshot
             let dayFilter = selectedDayFilter
-            if let appBackgroundStore {
-                loaded = try await appBackgroundStore.perform("history-overview.snapshot.reload") { backgroundContext in
-                    try HistoryOverviewSnapshotLoader.load(
-                        modelContext: backgroundContext,
-                        selectedDayFilter: dayFilter
-                    )
-                }
-            } else {
-                loaded = try WGJPerformance.measure("history-overview.snapshot.reload") {
-                    try HistoryOverviewSnapshotLoader.load(
-                        modelContext: modelContext,
-                        selectedDayFilter: dayFilter
-                    )
-                }
+            let backgroundStore = historyBackgroundStore
+            loaded = try await backgroundStore.perform("history-overview.snapshot.reload") { backgroundContext in
+                try HistoryOverviewSnapshotLoader.load(
+                    modelContext: backgroundContext,
+                    selectedDayFilter: dayFilter
+                )
             }
             controller.apply(loaded)
             hasLoadedSnapshot = true
@@ -229,8 +228,11 @@ struct HistoryOverviewView: View {
     }
 
     @MainActor
-    private func currentHistoryContentUpdatedAt() -> Date? {
-        try? WorkoutSessionRepository(modelContext: modelContext).latestCompletedSessionUpdatedAt()
+    private func currentHistoryContentUpdatedAt() async -> Date? {
+        let backgroundStore = historyBackgroundStore
+        return try? await backgroundStore.perform("history-overview.latest-updated-at") { backgroundContext in
+            try WorkoutSessionRepository(modelContext: backgroundContext).latestCompletedSessionUpdatedAt()
+        }
     }
 }
 
@@ -568,11 +570,16 @@ nonisolated struct HistorySessionSummaryRow: Identifiable, Equatable, Sendable {
 private struct HistoryArchivedWorkoutsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.appBackgroundStore) private var appBackgroundStore
 
-    @State private var archivedSessions: [WorkoutSession] = []
+    @State private var archivedSessions: [ArchivedWorkoutSnapshot] = []
     @State private var pendingDeletion: ArchivedWorkoutDeletionCandidate?
     @State private var errorMessage = ""
     @State private var showingError = false
+
+    private var historyBackgroundStore: AppBackgroundStore {
+        appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
+    }
 
     var body: some View {
         ScrollView {
@@ -628,7 +635,7 @@ private struct HistoryArchivedWorkoutsSheet: View {
         }
     }
 
-    private func archivedSessionCard(_ session: WorkoutSession) -> some View {
+    private func archivedSessionCard(_ session: ArchivedWorkoutSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(session.name)
                 .font(.title3.weight(.semibold))
@@ -672,7 +679,7 @@ private struct HistoryArchivedWorkoutsSheet: View {
         )
     }
 
-    private func restoreWorkoutButton(for session: WorkoutSession) -> some View {
+    private func restoreWorkoutButton(for session: ArchivedWorkoutSnapshot) -> some View {
         Button {
             restoreSession(session.id)
         } label: {
@@ -683,7 +690,7 @@ private struct HistoryArchivedWorkoutsSheet: View {
         .accessibilityIdentifier("history-hidden-restore-button")
     }
 
-    private func deleteWorkoutButton(for session: WorkoutSession) -> some View {
+    private func deleteWorkoutButton(for session: ArchivedWorkoutSnapshot) -> some View {
         Button {
             pendingDeletion = ArchivedWorkoutDeletionCandidate(id: session.id)
         } label: {
@@ -697,7 +704,10 @@ private struct HistoryArchivedWorkoutsSheet: View {
     @MainActor
     private func loadArchivedSessions() async {
         do {
-            archivedSessions = try WorkoutSessionRepository(modelContext: modelContext).archivedSessions()
+            let backgroundStore = historyBackgroundStore
+            archivedSessions = try await backgroundStore.perform("history-hidden.snapshot") { backgroundContext in
+                try Self.loadArchivedSnapshots(modelContext: backgroundContext)
+            }
         } catch {
             errorMessage = String(describing: error)
             showingError = true
@@ -705,23 +715,48 @@ private struct HistoryArchivedWorkoutsSheet: View {
     }
 
     private func restoreSession(_ sessionID: UUID) {
-        do {
-            try WorkoutSessionRepository(modelContext: modelContext).restoreArchivedSession(id: sessionID)
-            archivedSessions.removeAll { $0.id == sessionID }
-        } catch {
-            errorMessage = String(describing: error)
-            showingError = true
+        let backgroundStore = historyBackgroundStore
+        Task { @MainActor in
+            do {
+                try await backgroundStore.performWrite("history-hidden.restore") { backgroundContext in
+                    try WorkoutSessionRepository(modelContext: backgroundContext).restoreArchivedSession(id: sessionID)
+                }
+                archivedSessions.removeAll { $0.id == sessionID }
+            } catch {
+                errorMessage = String(describing: error)
+                showingError = true
+            }
         }
     }
 
     private func deleteSession(_ sessionID: UUID) {
-        do {
-            try WorkoutSessionRepository(modelContext: modelContext).deleteSession(id: sessionID)
-            archivedSessions.removeAll { $0.id == sessionID }
-            pendingDeletion = nil
-        } catch {
-            errorMessage = String(describing: error)
-            showingError = true
+        let backgroundStore = historyBackgroundStore
+        Task { @MainActor in
+            do {
+                try await backgroundStore.performWrite("history-hidden.delete") { backgroundContext in
+                    try WorkoutSessionRepository(modelContext: backgroundContext).deleteSession(id: sessionID)
+                }
+                archivedSessions.removeAll { $0.id == sessionID }
+                pendingDeletion = nil
+            } catch {
+                errorMessage = String(describing: error)
+                showingError = true
+            }
+        }
+    }
+
+    nonisolated private static func loadArchivedSnapshots(
+        modelContext: ModelContext
+    ) throws -> [ArchivedWorkoutSnapshot] {
+        try WorkoutSessionRepository(modelContext: modelContext).archivedSessions().map {
+            ArchivedWorkoutSnapshot(
+                id: $0.id,
+                name: $0.name,
+                startedAt: $0.startedAt,
+                endedAt: $0.endedAt,
+                durationSeconds: $0.durationSeconds,
+                totalVolume: $0.totalVolume
+            )
         }
     }
 
@@ -741,6 +776,15 @@ private struct HistoryArchivedWorkoutsSheet: View {
         }
         return "\(WGJFormatters.integerString(volume)) kg"
     }
+}
+
+private struct ArchivedWorkoutSnapshot: Identifiable, Equatable, Sendable {
+    let id: UUID
+    let name: String
+    let startedAt: Date
+    let endedAt: Date?
+    let durationSeconds: Int
+    let totalVolume: Double
 }
 
 private struct ArchivedWorkoutDeletionCandidate: Identifiable {

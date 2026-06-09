@@ -155,6 +155,15 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 - Root Cause: The previous Profile empty-screen fix reset scroll in `ProfileView.onAppear`, and `NavigationStack` pops from Settings trigger the root Profile view's appearance lifecycle without meaning the user changed tabs or requested a content reset.
 - Durable Rule: Profile may keep a top anchor and may reset for explicit profile invalidation or reshaped content, but do not reset Profile scroll from plain view reappearance, navigation return, or tab re-entry. Settings and other Profile round trips should preserve the user's scroll offset.
 - How to Verify Next Time: Run `WGJTests/AppLaunchWarmupTests`, `WGJUITests/WGJUITests/testProfileSettingsBackPreservesScrollPosition`, and `WGJUITests/WGJUITests/testProfileTabReentryKeepsDeepContentVisible`; manually scroll Profile to Settings, open Settings, tap Back, and confirm the Settings tile remains visible and hittable without showing the old blank lower screen.
+- Status: superseded by `2026-06-08 - Profile Must Never Programmatically Scroll Itself`. Explicit invalidation resets still moved the user's viewport unexpectedly.
+
+## 2026-06-08 - Profile Must Never Programmatically Scroll Itself
+
+- Date: 2026-06-08
+- Trigger/Problem: The user clarified that Profile must not randomly jump to the top and said "dont let profile scroll it self ever."
+- Root Cause: Even after removing appearance/tab-entry resets, Profile still owned a `ScrollViewReader` and could issue scroll-to-top requests when profile invalidation reshaped content.
+- Durable Rule: `ProfileView` must not own programmatic scroll controls. Do not add `ScrollViewReader`, top anchors, `.scrollPosition`, or `scrollTo` to Profile for refresh, invalidation, navigation return, tab re-entry, or content reshaping. Preserve the user's viewport and fix content/diffing issues without moving scroll position.
+- How to Verify Next Time: Run `WGJTests/AppLaunchWarmupTests` and the Profile UI smokes. Also scan `ProfileView.swift` for `ScrollViewReader`, `scrollTo(`, `profileTopAnchor`, `profileScrollToTop`, and `.scrollPosition`.
 - Status: active
 
 ## 2026-06-07 - UI Copy Must Not Sound Like Implementation Notes
@@ -787,4 +796,13 @@ Promote a lesson here only when it clears the bar above.
 - Root Cause: The real pressure came from redundant sync/projection work, broad SwiftData reads, and social maintenance competing with early tab interaction, not from a single slow account-status call.
 - Durable Rule: Do not mask app-wide loading or sync slowness with arbitrary timeouts unless the timeout is part of a product-defined fallback contract. First inspect logs/tests, remove redundant work, narrow persistence reads, and move non-critical maintenance outside interaction-critical windows.
 - How to Verify Next Time: Reproduce on iPhone 13 / iOS 17.5, check performance logs for startup/tab timings and background maintenance, and require focused tests around the scheduler/persistence policy that changed.
+- Status: active
+
+## 2026-06-08 - MainActor Is Only For UI State Publication
+
+- Date: 2026-06-08
+- Trigger/Problem: Active Workout, Profile, Bros, and sync regressions showed UI freezes, random refreshes, and layout/scroll instability while some persistence, CloudKit, snapshot, and hydration paths were still typed or scheduled through `MainActor`.
+- Root Cause: In a default-main-actor app target, service protocols, scheduled tasks, and view-model helpers can accidentally inherit or reintroduce main-actor execution even when the actual work is SwiftData, CloudKit, file IO, or background sync.
+- Durable Rule: Keep SwiftUI state mutation and presentation on `MainActor`, but persistence writes, CloudKit reads/writes, sync bridge work, snapshot/file IO, account checks, image decode/cache work, and hydration must use normal actors, utility tasks, or `AppBackgroundStore`/background `ModelContext` paths. Do not mark service protocols `@MainActor` unless every requirement is truly UI-only.
+- How to Verify Next Time: Search hot paths for `@MainActor`, `Task { @MainActor`, `MainActor.run`, direct main-context saves, and service protocols with global actor annotations; add source or behavior tests proving production routes use `AppBackgroundStore.performAsync`/`performWrite` and concrete non-main services before claiming lag/freeze fixes.
 - Status: active

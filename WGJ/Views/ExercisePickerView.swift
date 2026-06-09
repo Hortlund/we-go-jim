@@ -8,18 +8,16 @@ struct ExercisePickerView: View {
 
     let title: String
     let actionTitle: String
-    let onSelect: (ExerciseCatalogItem) -> ExercisePickerSelectionResult
+    let onSelect: (ExerciseCatalogSelection) -> ExercisePickerSelectionResult
 
     @State private var duplicateNotice: ExerciseSelectionDuplicateNotice?
     @State private var duplicateNoticeClearTask: Task<Void, Never>?
 
     init(
-        repository: ExerciseCatalogRepository,
         title: String = "Add Exercise",
         actionTitle: String? = nil,
-        onSelect: @escaping (ExerciseCatalogItem) -> ExercisePickerSelectionResult
+        onSelect: @escaping (ExerciseCatalogSelection) -> ExercisePickerSelectionResult
     ) {
-        _ = repository
         self.title = title
         self.actionTitle = actionTitle ?? title
         self.onSelect = onSelect
@@ -62,7 +60,7 @@ struct ExercisePickerView: View {
         }
     }
 
-    private func handleSelection(_ selected: ExerciseCatalogItem) {
+    private func handleSelection(_ selected: ExerciseCatalogSelection) {
         WGJKeyboard.dismiss()
 
         let result = onSelect(selected)
@@ -83,13 +81,19 @@ struct ExercisePickerView: View {
             duplicateNotice = notice
         }
 
-        duplicateNoticeClearTask = Task { @MainActor in
+        duplicateNoticeClearTask = Task.detached(priority: .utility) {
             try? await Task.sleep(for: .seconds(2.4))
             guard !Task.isCancelled else { return }
-            withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
-                duplicateNotice = nil
-            }
-            duplicateNoticeClearTask = nil
+            await self.clearDuplicateNoticeAfterDelayIfStillNeeded()
         }
+    }
+
+    @MainActor
+    private func clearDuplicateNoticeAfterDelayIfStillNeeded() {
+        guard !Task.isCancelled else { return }
+        withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
+            duplicateNotice = nil
+        }
+        duplicateNoticeClearTask = nil
     }
 }

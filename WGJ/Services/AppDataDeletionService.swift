@@ -1,12 +1,11 @@
 import Foundation
 import SwiftData
 
-@MainActor
-protocol BrosCloudDataDeleting {
+nonisolated protocol BrosCloudDataDeleting {
     func deleteCurrentUserData() async throws
 }
 
-extension CloudKitBrosSocialService: BrosCloudDataDeleting { }
+nonisolated extension CloudKitBrosSocialService: BrosCloudDataDeleting { }
 
 enum AppDataDeletionError: LocalizedError {
     case partialCloudCleanup(String)
@@ -19,26 +18,25 @@ enum AppDataDeletionError: LocalizedError {
     }
 }
 
-@MainActor
-final class AppDataDeletionService {
+nonisolated final class AppDataDeletionService {
     private let modelContext: ModelContext
     private let fileManager: FileManager
     private let socialDataDeleter: BrosCloudDataDeleting?
-    private let socialDataDeleterFactory: @MainActor (ModelContext) -> BrosCloudDataDeleting?
-    private let clearWeeklyGoalWidgetSnapshot: @MainActor () -> Void
-    private let clearActiveWorkoutSnapshot: @MainActor () async throws -> Void
+    private let socialDataDeleterFactory: @Sendable (ModelContext) -> BrosCloudDataDeleting?
+    private let clearWeeklyGoalWidgetSnapshot: @Sendable () -> Void
+    private let clearActiveWorkoutSnapshot: @Sendable () async throws -> Void
 
     init(
         modelContext: ModelContext,
         fileManager: FileManager = .default,
         socialDataDeleter: BrosCloudDataDeleting? = nil,
-        socialDataDeleterFactory: @escaping @MainActor (ModelContext) -> BrosCloudDataDeleting? = { modelContext in
+        socialDataDeleterFactory: @escaping @Sendable (ModelContext) -> BrosCloudDataDeleting? = { modelContext in
             CloudKitBrosSocialService.makeIfContainerAvailable(modelContext: modelContext)
         },
-        clearWeeklyGoalWidgetSnapshot: @escaping @MainActor () -> Void = {
+        clearWeeklyGoalWidgetSnapshot: @escaping @Sendable () -> Void = {
             WeeklyGoalWidgetPublisher()?.clear()
         },
-        clearActiveWorkoutSnapshot: @escaping @MainActor () async throws -> Void = {
+        clearActiveWorkoutSnapshot: @escaping @Sendable () async throws -> Void = {
             try ActiveWorkoutSnapshotStore.shared.delete()
         }
     ) {

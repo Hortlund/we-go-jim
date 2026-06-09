@@ -1123,7 +1123,9 @@ struct WGJTests {
             accountService: accountService,
             now: firstRefreshAt
         )
-        await waitForRuntimeRefresh(fetchCount: 1, accountService: accountService)
+        await waitForRuntimeRefresh(fetchCount: 1, accountService: accountService) {
+            runtimeState.cloudSyncErrorDescription?.contains("temporarily unavailable") == true
+        }
 
         #expect(
             runtimeState.cloudSyncErrorDescription?.contains("temporarily unavailable") == true
@@ -1134,7 +1136,9 @@ struct WGJTests {
             accountService: accountService,
             now: firstRefreshAt.addingTimeInterval(RuntimeCloudAvailabilityRefreshPolicy.unresolvedRetryInterval)
         )
-        await waitForRuntimeRefresh(fetchCount: 2, accountService: accountService)
+        await waitForRuntimeRefresh(fetchCount: 2, accountService: accountService) {
+            runtimeState.cloudSyncErrorDescription == nil
+        }
 
         #expect(runtimeState.cloudSyncErrorDescription == nil)
         #expect(accountService.fetchCount == 2)
@@ -1154,7 +1158,9 @@ struct WGJTests {
             accountService: accountService,
             now: firstRefreshAt
         )
-        await waitForRuntimeRefresh(fetchCount: 1, accountService: accountService)
+        await waitForRuntimeRefresh(fetchCount: 1, accountService: accountService) {
+            runtimeState.cloudSyncErrorDescription?.contains("No iCloud account") == true
+        }
 
         #expect(runtimeState.cloudSyncErrorDescription?.contains("No iCloud account") == true)
         #expect(accountService.fetchCount == 1)
@@ -1163,7 +1169,9 @@ struct WGJTests {
             accountService: accountService,
             now: firstRefreshAt.addingTimeInterval(RuntimeCloudAvailabilityRefreshPolicy.unresolvedRetryInterval)
         )
-        await waitForRuntimeRefresh(fetchCount: 2, accountService: accountService)
+        await waitForRuntimeRefresh(fetchCount: 2, accountService: accountService) {
+            runtimeState.cloudSyncErrorDescription == nil
+        }
 
         #expect(runtimeState.cloudSyncErrorDescription == nil)
         #expect(accountService.fetchCount == 2)
@@ -1179,7 +1187,9 @@ struct WGJTests {
         ])
 
         runtimeState.refreshCloudAvailabilityIfNeeded(accountService: accountService)
-        await waitForRuntimeRefresh(fetchCount: 1, accountService: accountService)
+        await waitForRuntimeRefresh(fetchCount: 1, accountService: accountService) {
+            runtimeState.cloudSyncErrorDescription == nil
+        }
 
         runtimeState.refreshCloudAvailabilityIfNeeded(accountService: accountService)
         await waitForRuntimeRefresh(fetchCount: 1, accountService: accountService)
@@ -1317,16 +1327,18 @@ struct WGJTests {
 
     private func waitForRuntimeRefresh(
         fetchCount expectedFetchCount: Int,
-        accountService: MockRuntimeAccountStatusProvider
+        accountService: MockRuntimeAccountStatusProvider,
+        until condition: @escaping @MainActor () -> Bool = { true }
     ) async {
-        for _ in 0..<20 {
-            if accountService.fetchCount >= expectedFetchCount {
+        for _ in 0..<50 {
+            let conditionMet = await MainActor.run {
+                condition()
+            }
+            if accountService.fetchCount >= expectedFetchCount, conditionMet {
                 break
             }
-            try? await Task.sleep(for: .milliseconds(10))
+            try? await Task.sleep(for: .milliseconds(20))
         }
-
-        await Task.yield()
     }
 
     private func makeInMemoryContext() throws -> ModelContext {
@@ -1420,28 +1432,46 @@ private struct MockCloudStartupAccountStatusProvider: CloudStartupAccountStatusP
 }
 
 private final class MockRuntimeAccountStatusProvider: AccountStatusProviding {
+    private let lock = NSLock()
     private var statuses: [AccountStatus]
-    private(set) var fetchCount = 0
+    private var storedFetchCount = 0
+
+    var fetchCount: Int {
+        lock.withLock {
+            storedFetchCount
+        }
+    }
 
     init(statuses: [AccountStatus]) {
         self.statuses = statuses
     }
 
     func fetchAccountStatus() async -> AccountStatus {
-        fetchCount += 1
-        guard statuses.count > 1 else {
-            return statuses.first ?? .checking
-        }
+        lock.withLock {
+            storedFetchCount += 1
+            guard statuses.count > 1 else {
+                return statuses.first ?? .checking
+            }
 
-        return statuses.removeFirst()
+            return statuses.removeFirst()
+        }
     }
 }
 
 private final class HangingRuntimeAccountStatusProvider: AccountStatusProviding {
-    private(set) var fetchCount = 0
+    private let lock = NSLock()
+    private var storedFetchCount = 0
+
+    var fetchCount: Int {
+        lock.withLock {
+            storedFetchCount
+        }
+    }
 
     func fetchAccountStatus() async -> AccountStatus {
-        fetchCount += 1
+        lock.withLock {
+            storedFetchCount += 1
+        }
         return await withUnsafeContinuation { (_: UnsafeContinuation<AccountStatus, Never>) in }
     }
 }
