@@ -4,11 +4,6 @@ import SwiftData
 import SwiftUI
 import UIKit
 
-@MainActor
-private final class ActiveWorkoutScrollPositionCache {
-    var currentTarget: ActiveWorkoutScrollTarget?
-}
-
 struct ActiveWorkoutView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
@@ -47,8 +42,6 @@ struct ActiveWorkoutView: View {
     @State private var renderProjection = ActiveWorkoutRenderProjection.empty
     @State private var isBatchingRenderProjectionRefresh = false
     @State private var needsBatchedRenderProjectionRefresh = false
-    @State private var restoredScrollTarget: ActiveWorkoutScrollTarget?
-    @State private var scrollPositionCache = ActiveWorkoutScrollPositionCache()
     @State private var profilePreferences = ActiveWorkoutProfilePreferences.default
 
     @State private var sessionNameDraft = ""
@@ -90,13 +83,6 @@ struct ActiveWorkoutView: View {
         appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
     }
 
-    private var activeWorkoutScrollPositionBinding: Binding<ActiveWorkoutScrollTarget?> {
-        Binding(
-            get: { scrollPositionCache.currentTarget },
-            set: { scrollPositionCache.currentTarget = $0 }
-        )
-    }
-
     init(sessionID: UUID) {
         self.sessionID = sessionID
     }
@@ -110,7 +96,6 @@ struct ActiveWorkoutView: View {
                 .scrollTargetLayout()
                 .padding(16)
             }
-            .scrollPosition(id: activeWorkoutScrollPositionBinding, anchor: .top)
             .scrollDismissesKeyboard(.interactively)
             .wgjScreenBackground()
             .wgjNavigationChrome()
@@ -213,7 +198,6 @@ struct ActiveWorkoutView: View {
             }
             .task(id: session?.id) {
                 await reconcileSessionLifecycleIfNeeded()
-                restorePreparedScrollTargetIfNeeded(using: scrollProxy)
             }
             .task(id: exerciseHydrationStamp) {
                 await loadExerciseStateIfNeeded()
@@ -240,9 +224,6 @@ struct ActiveWorkoutView: View {
                 isKeyboardVisible = false
                 isMetricInputFocused = false
                 focusedMetricInputExerciseID = nil
-            }
-            .onAppear {
-                restorePreparedScrollTargetIfNeeded(using: scrollProxy)
             }
             .onDisappear {
                 isCancelArmed = false
@@ -624,7 +605,6 @@ struct ActiveWorkoutView: View {
                     setDrafts: drafts,
                     isExpanded: cardStateController.isExpanded(for: exerciseID),
                     manualCompletionMode: true,
-                    isBozarModeEnabled: profilePreferences.isBozarModeEnabled,
                     isSetEditingEnabled: true,
                     isSetCompletionEnabled: true,
                     setCompletionGatePresentation: nil,
@@ -977,7 +957,7 @@ struct ActiveWorkoutView: View {
             Self.profilePreferences(modelContext: backgroundContext)
         }
 
-        let resolvedPreferences = Self.resolvedUITestProfilePreferences(loadedPreferences ?? .default)
+        let resolvedPreferences = loadedPreferences ?? .default
         guard profilePreferences != resolvedPreferences else {
             preferredLoadUnit = resolvedPreferences.preferredLoadUnit
             return
@@ -993,25 +973,9 @@ struct ActiveWorkoutView: View {
             return .default
         }
 
-        return resolvedUITestProfilePreferences(ActiveWorkoutProfilePreferences(
-            preferredLoadUnit: profile.preferredLoadUnit,
-            isBozarModeEnabled: profile.isBozarModeEnabled,
-            isTrainingGuidanceEnabled: profile.isTrainingGuidanceEnabled
-        ))
-    }
-
-    nonisolated private static func resolvedUITestProfilePreferences(
-        _ preferences: ActiveWorkoutProfilePreferences,
-        environment: [String: String] = ProcessInfo.processInfo.environment
-    ) -> ActiveWorkoutProfilePreferences {
-        guard environment["UITEST_ENABLE_BOZAR_MODE"] == "1" else {
-            return preferences
-        }
-
         return ActiveWorkoutProfilePreferences(
-            preferredLoadUnit: preferences.preferredLoadUnit,
-            isBozarModeEnabled: true,
-            isTrainingGuidanceEnabled: preferences.isTrainingGuidanceEnabled
+            preferredLoadUnit: profile.preferredLoadUnit,
+            isTrainingGuidanceEnabled: profile.isTrainingGuidanceEnabled
         )
     }
 
@@ -1531,6 +1495,9 @@ struct ActiveWorkoutView: View {
             )
             if isCompleted {
                 WorkoutFeedbackCenter.shared.exerciseCompleted()
+                withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
+                    cardStateController.setExpanded(false, for: exercise.id)
+                }
             }
         }
         let refreshesProjectionImmediately = ActiveWorkoutRenderProjectionRefreshPolicy.shouldRefreshImmediately(
@@ -2115,13 +2082,7 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func minimizedScrollRestoreTarget() -> ActiveWorkoutScrollTarget? {
-        ActiveWorkoutMinimizeScrollRestorePolicy.target(
-            currentScrollTarget: scrollPositionCache.currentTarget,
-            expandedExerciseIDs: cardStateController.expandedExerciseIDs(),
-            orderedExerciseIDs: sessionExercises.map(\.id),
-            hasPreWorkoutCardio: preWorkoutCardio != nil,
-            hasPostWorkoutCardio: postWorkoutCardio != nil
-        )
+        nil
     }
 
     private func presentActiveWorkout() {
@@ -2841,30 +2802,6 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
-    private func restorePreparedScrollTargetIfNeeded(using scrollProxy: ScrollViewProxy) {
-        guard hasWorkoutContent else { return }
-        guard let target = activeWorkoutPresentationState.preparedScrollTarget(for: sessionID) else { return }
-        guard restoredScrollTarget != target else { return }
-        restoredScrollTarget = target
-
-        var immediateTransaction = Transaction()
-        immediateTransaction.disablesAnimations = true
-        withTransaction(immediateTransaction) {
-            scrollProxy.scrollTo(target, anchor: .top)
-        }
-
-        Task { @MainActor in
-            await Task.yield()
-            await Task.yield()
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                scrollProxy.scrollTo(target, anchor: .top)
-            }
-        }
-    }
-
-    @MainActor
     private func canToggleCompletion(for cardioBlock: ActiveWorkoutRuntimeCardioBlock) -> Bool {
         WorkoutCardioCompletionPolicy.canToggleCompletion(
             phase: cardioBlock.phase,
@@ -3260,12 +3197,10 @@ private struct ActiveWorkoutCancelSection: View {
 
 private struct ActiveWorkoutProfilePreferences: Equatable {
     let preferredLoadUnit: TemplateLoadUnit
-    let isBozarModeEnabled: Bool
     let isTrainingGuidanceEnabled: Bool
 
     nonisolated static let `default` = ActiveWorkoutProfilePreferences(
         preferredLoadUnit: .kg,
-        isBozarModeEnabled: false,
         isTrainingGuidanceEnabled: true
     )
 }

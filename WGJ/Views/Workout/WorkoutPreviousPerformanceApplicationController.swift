@@ -30,35 +30,7 @@ nonisolated enum WorkoutPreviousPerformanceResolution: Equatable, Sendable {
     }
 }
 
-nonisolated enum WorkoutSetBozarCompletionDecision: Equatable, Sendable {
-    case waitForPreviousPerformance(setID: UUID)
-    case completeImmediately([WorkoutSessionSetDraft])
-}
-
-nonisolated enum WorkoutSetBozarCompletionController {
-    static func decision(
-        drafts: [WorkoutSessionSetDraft],
-        at index: Int,
-        previousResolution: WorkoutPreviousPerformanceResolution
-    ) -> WorkoutSetBozarCompletionDecision? {
-        guard drafts.indices.contains(index) else {
-            return nil
-        }
-
-        switch previousResolution {
-        case .loading:
-            return .waitForPreviousPerformance(setID: drafts[index].id)
-        case .resolved:
-            let updatedDrafts = applyPreviousPerformance(
-                to: drafts,
-                at: index,
-                previousResolution: previousResolution,
-                mode: .fillMissing
-            ) ?? drafts
-            return .completeImmediately(updatedDrafts)
-        }
-    }
-
+nonisolated enum WorkoutSetPreviousPerformanceApplicationController {
     static func applyPreviousPerformance(
         to drafts: [WorkoutSessionSetDraft],
         at index: Int,
@@ -72,7 +44,7 @@ nonisolated enum WorkoutSetBozarCompletionController {
         }
 
         var updatedDrafts = drafts
-        updatedDrafts[index] = WorkoutSetBozarCompletionResolver.resolve(
+        updatedDrafts[index] = WorkoutSetPreviousPerformanceApplicationResolver.resolve(
             draft: updatedDrafts[index],
             previous: previous,
             mode: mode

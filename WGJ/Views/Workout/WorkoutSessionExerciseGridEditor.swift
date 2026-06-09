@@ -34,7 +34,6 @@ struct WorkoutSessionExerciseGridEditor: View {
     var showsInlineExerciseControls: Bool
     var showsSetProgressChip: Bool
     var manualCompletionMode: Bool
-    var isBozarModeEnabled: Bool
     var isSetEditingEnabled: Bool
     var isSetCompletionEnabled: Bool
     var setCompletionGatePresentation: WorkoutSetCompletionGatePresentation?
@@ -66,7 +65,6 @@ struct WorkoutSessionExerciseGridEditor: View {
     @State private var setSwipeOffsets: [UUID: CGFloat] = [:]
     @State private var setSwipeRemoving: [UUID: Bool] = [:]
     @State private var metricInputDraftBuffer = WorkoutMetricInputDraftStore()
-    @State private var pendingBozarCompletionSetIDs: Set<UUID> = []
     @State private var revealedCompletionGateSetIDs: Set<UUID> = []
     @State private var pendingDisplayRefreshTask: Task<Void, Never>?
     @State private var pendingCommitTask: Task<Void, Never>?
@@ -111,7 +109,6 @@ struct WorkoutSessionExerciseGridEditor: View {
         showsInlineExerciseControls: Bool = true,
         showsSetProgressChip: Bool = true,
         manualCompletionMode: Bool = false,
-        isBozarModeEnabled: Bool = false,
         isSetEditingEnabled: Bool = true,
         isSetCompletionEnabled: Bool = true,
         setCompletionGatePresentation: WorkoutSetCompletionGatePresentation? = nil,
@@ -155,7 +152,6 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.showsInlineExerciseControls = showsInlineExerciseControls
         self.showsSetProgressChip = showsSetProgressChip
         self.manualCompletionMode = manualCompletionMode
-        self.isBozarModeEnabled = isBozarModeEnabled
         self.isSetEditingEnabled = isSetEditingEnabled
         self.isSetCompletionEnabled = isSetCompletionEnabled
         self.setCompletionGatePresentation = setCompletionGatePresentation
@@ -1496,6 +1492,7 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func weightFieldDisplayState(at index: Int) -> MetricFieldDisplayState? {
         guard setDrafts.indices.contains(index), !isInputFocused(.weight, at: index) else { return nil }
+        guard setDrafts[index].actualWeight == nil else { return nil }
         guard let ghostText = weightGhostText(at: index) else { return nil }
         return MetricFieldDisplayState(
             text: ghostText,
@@ -1506,6 +1503,7 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func repsFieldDisplayState(at index: Int) -> MetricFieldDisplayState? {
         guard setDrafts.indices.contains(index), !isInputFocused(.reps, at: index) else { return nil }
+        guard setDrafts[index].actualReps == nil else { return nil }
         guard let ghostText = repsGhostText(at: index) else { return nil }
         return MetricFieldDisplayState(
             text: ghostText,
@@ -1798,7 +1796,6 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func flushPendingEditorState() {
-        pendingBozarCompletionSetIDs.removeAll()
         let hadPendingCommit = pendingCommitTask != nil
         if commitAllBufferedInput(clearsText: true) || hadPendingCommit {
             requestImmediateCommitForCurrentState()
@@ -1829,8 +1826,6 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func handlePreviousPerformanceResolutionChange() {
-        prunePendingBozarCompletions()
-        resolvePendingBozarCompletionsIfNeeded()
         guard isExpanded else { return }
         refreshDisplayRows()
     }
@@ -1975,16 +1970,19 @@ struct WorkoutSessionExerciseGridEditor: View {
     private func applyPreviousPerformance(at index: Int) {
         guard setDrafts.indices.contains(index) else { return }
         guard isSetEditingEnabled, !setDrafts[index].isLocked else { return }
-        guard let updatedDrafts = WorkoutSetBozarCompletionController.applyPreviousPerformance(
+        let targetSetID = setDrafts[index].id
+        guard let updatedDrafts = WorkoutSetPreviousPerformanceApplicationController.applyPreviousPerformance(
             to: setDrafts,
             at: index,
             previousResolution: previousPerformanceResolution
         ) else {
             return
         }
-        let focusedSetInput = focusedInput?.setID == setDrafts[index].id ? focusedInput : nil
-        if let focusedSetInput {
-            syncInputDraft(for: focusedSetInput, using: updatedDrafts[index])
+
+        pendingCommitTask?.cancel()
+        pendingCommitTask = nil
+        clearInputDrafts(for: targetSetID)
+        if focusedInput?.setID == targetSetID {
             dismissInputFocus(suppressCommit: true)
         }
 
@@ -2235,8 +2233,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             manualCompletionMode: manualCompletionMode,
             isSetCompletionEnabled: isSetCompletionEnabled,
             gatePresentation: setCompletionGatePresentation,
-            isGateRevealed: revealedCompletionGateSetIDs.contains(row.id),
-            isPendingBozarCompletion: pendingBozarCompletionSetIDs.contains(row.id)
+            isGateRevealed: revealedCompletionGateSetIDs.contains(row.id)
         )
     }
 
@@ -2246,30 +2243,6 @@ struct WorkoutSessionExerciseGridEditor: View {
         for row: WorkoutSessionExerciseSetRowDisplaySnapshot
     ) -> some View {
         switch supplementalRow {
-        case .pendingBozarCompletion:
-            HStack(spacing: 10) {
-                ProgressView()
-                    .controlSize(.small)
-
-                Text("Loading previous set...")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(WGJTheme.textPrimary)
-                    .wgjSingleLineText(scale: 0.9)
-
-                Spacer(minLength: 8)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 9)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(WGJTheme.field.opacity(0.70))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(WGJTheme.outline.opacity(0.58), lineWidth: 1)
-                    )
-            )
-            .accessibilityIdentifier("workout-set-\(row.index)-bozar-pending")
         case .gateNotice(let presentation):
             completionGateNotice(
                 presentation,
@@ -2397,46 +2370,14 @@ struct WorkoutSessionExerciseGridEditor: View {
             if focusedSetInput != nil {
                 dismissInputFocus(suppressCommit: true)
             }
-            pendingBozarCompletionSetIDs.remove(targetSetID)
             setCompletion(false, at: index)
             return
         }
 
-        guard manualCompletionMode, isBozarModeEnabled else {
-            if focusedSetInput != nil {
-                dismissInputFocus(suppressCommit: true)
-            }
-            pendingBozarCompletionSetIDs.remove(targetSetID)
-            setCompletion(true, at: index)
-            return
-        }
-
         if let focusedSetInput {
-            _ = commitBufferedInput(for: focusedSetInput, clearsText: false)
+            _ = commitBufferedInput(for: focusedSetInput, clearsText: true)
         }
-
-        guard let resolvedIndex = setDrafts.firstIndex(where: { $0.id == targetSetID }) else {
-            return
-        }
-
-        guard let decision = WorkoutSetBozarCompletionController.decision(
-            drafts: setDrafts,
-            at: resolvedIndex,
-            previousResolution: previousPerformanceResolution
-        ) else {
-            return
-        }
-
-        switch decision {
-        case .waitForPreviousPerformance(let setID):
-            if focusedSetInput != nil {
-                dismissInputFocus(suppressCommit: true)
-            }
-            pendingBozarCompletionSetIDs.insert(setID)
-        case .completeImmediately(let updatedDrafts):
-            pendingBozarCompletionSetIDs.remove(targetSetID)
-            completeSetUsingBozar(at: resolvedIndex, draftOverride: updatedDrafts)
-        }
+        setCompletion(true, at: index)
     }
 
     private func setCompletion(
@@ -2453,7 +2394,6 @@ struct WorkoutSessionExerciseGridEditor: View {
 
         let setID = updatedDrafts[index].id
         let dropStageIDs = updatedDrafts[index].dropStages.map(\.id)
-        pendingBozarCompletionSetIDs.remove(setID)
         guard updatedDrafts[index].isCompleted != isCompleted else { return }
         let setRestSeconds = restSeconds
         updatedDrafts = canonicalizedSetDrafts(updatedDrafts)
@@ -2561,9 +2501,6 @@ struct WorkoutSessionExerciseGridEditor: View {
             current: currentValue
         )
 
-        if changeSummary.hasMeaningfulChange {
-            prunePendingBozarCompletions()
-        }
         if changeSummary.hasCompletionChange {
             syncCompletedSetCount(using: currentValue)
         }
@@ -2731,70 +2668,6 @@ struct WorkoutSessionExerciseGridEditor: View {
         }
     }
 
-    private func prunePendingBozarCompletions() {
-        let validSetIDs = Set(
-            setDrafts
-                .filter { !$0.isCycleCompleted }
-                .map(\.id)
-        )
-        pendingBozarCompletionSetIDs = pendingBozarCompletionSetIDs.filter { validSetIDs.contains($0) }
-    }
-
-    private func resolvePendingBozarCompletionsIfNeeded() {
-        guard !previousPerformanceResolution.isLoading, !pendingBozarCompletionSetIDs.isEmpty else {
-            return
-        }
-
-        let pendingSetIDs = pendingBozarCompletionSetIDs
-        for setID in pendingSetIDs {
-            guard let index = setDrafts.firstIndex(where: { $0.id == setID }) else {
-                pendingBozarCompletionSetIDs.remove(setID)
-                continue
-            }
-
-            guard let decision = WorkoutSetBozarCompletionController.decision(
-                drafts: setDrafts,
-                at: index,
-                previousResolution: previousPerformanceResolution
-            ) else {
-                pendingBozarCompletionSetIDs.remove(setID)
-                continue
-            }
-
-            switch decision {
-            case .waitForPreviousPerformance:
-                break
-            case .completeImmediately(let updatedDrafts):
-                completeSetUsingBozar(at: index, draftOverride: updatedDrafts)
-            }
-        }
-    }
-
-    private func completeSetUsingBozar(
-        at index: Int,
-        draftOverride: [WorkoutSessionSetDraft]? = nil
-    ) {
-        guard setDrafts.indices.contains(index) else { return }
-
-        let updatedDrafts =
-            draftOverride
-            ?? WorkoutSetBozarCompletionController.applyPreviousPerformance(
-                to: setDrafts,
-                at: index,
-                previousResolution: previousPerformanceResolution,
-                mode: .fillMissing
-            )
-            ?? setDrafts
-        guard updatedDrafts.indices.contains(index) else { return }
-
-        if let focusedSetInput = focusedInput, focusedSetInput.setID == updatedDrafts[index].id {
-            syncInputDraft(for: focusedSetInput, using: updatedDrafts[index])
-            dismissInputFocus(suppressCommit: true)
-        }
-
-        setCompletion(true, at: index, draftOverride: updatedDrafts)
-    }
-
     private func syncInputDraft(for focus: SetInputFocus, using draft: WorkoutSessionSetDraft) {
         guard focus.setID == draft.id else { return }
 
@@ -2804,6 +2677,11 @@ struct WorkoutSessionExerciseGridEditor: View {
         case .reps:
             metricInputDraftBuffer.sync(setID: draft.id, metric: .reps, draft: draft)
         }
+    }
+
+    private func clearInputDrafts(for setID: UUID) {
+        metricInputDraftBuffer.clear(for: setID, metric: .weight)
+        metricInputDraftBuffer.clear(for: setID, metric: .reps)
     }
 
     private func setSwipeOffsetBinding(for setID: UUID) -> Binding<CGFloat> {
@@ -3219,7 +3097,6 @@ nonisolated struct WorkoutSetCompletionControlPresentation: Equatable {
     }
 
     enum SupplementalRow: Equatable {
-        case pendingBozarCompletion
         case gateNotice(WorkoutSetCompletionGatePresentation)
     }
 
@@ -3234,8 +3111,7 @@ nonisolated struct WorkoutSetCompletionControlPresentation: Equatable {
         manualCompletionMode: Bool,
         isSetCompletionEnabled: Bool,
         gatePresentation: WorkoutSetCompletionGatePresentation?,
-        isGateRevealed: Bool,
-        isPendingBozarCompletion: Bool
+        isGateRevealed: Bool
     ) -> WorkoutSetCompletionControlPresentation? {
         guard manualCompletionMode else {
             return nil
@@ -3249,9 +3125,7 @@ nonisolated struct WorkoutSetCompletionControlPresentation: Equatable {
         )
 
         let supplementalRow: SupplementalRow?
-        if isPendingBozarCompletion {
-            supplementalRow = .pendingBozarCompletion
-        } else if !isSetCompletionEnabled, isGateRevealed, let gatePresentation {
+        if !isSetCompletionEnabled, isGateRevealed, let gatePresentation {
             supplementalRow = .gateNotice(gatePresentation)
         } else {
             supplementalRow = nil
@@ -3343,7 +3217,7 @@ private extension WorkoutSetCompletionControlPresentation.Tone {
     }
 }
 
-nonisolated enum WorkoutSetBozarCompletionResolver {
+nonisolated enum WorkoutSetPreviousPerformanceApplicationResolver {
     static func resolve(
         draft: WorkoutSessionSetDraft,
         previous: WorkoutPreviousSetSnapshot?,

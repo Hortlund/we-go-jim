@@ -16,7 +16,6 @@ struct SettingsView: View {
     @State private var weeklyGoalSaveFeedbackTask: Task<Void, Never>?
     @State private var isTrainingGuidanceEnabled = true
     @State private var keepsScreenAwake = false
-    @State private var isBozarModeEnabled = false
     @State private var preferredWeightUnit: PreferredWeightUnit = .kg
     @State private var workoutNotificationStyle: WorkoutNotificationStyle = .timeSensitive
     @State private var hasLoadedProfile = false
@@ -105,33 +104,6 @@ struct SettingsView: View {
                         }
                     }
                     .tint(WGJTheme.accentBlue)
-
-                    Toggle(isOn: $isBozarModeEnabled) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(spacing: 8) {
-                                Text("Bozar Mode")
-                                    .foregroundStyle(WGJTheme.textPrimary)
-
-                                Text("Beta")
-                                    .font(.caption2.weight(.bold))
-                                    .textCase(.uppercase)
-                                    .foregroundStyle(WGJTheme.warning)
-                                    .padding(.horizontal, 7)
-                                    .padding(.vertical, 3)
-                                    .background(
-                                        Capsule()
-                                            .fill(WGJTheme.warning.opacity(0.14))
-                                    )
-                                    .accessibilityLabel("Beta")
-                            }
-
-                            Text("Lets you complete a set with empty fields and fills missing reps or weight from your last performance when available.")
-                                .font(.caption)
-                                .foregroundStyle(WGJTheme.textSecondary)
-                        }
-                    }
-                    .tint(WGJTheme.accentBlue)
-                    .accessibilityIdentifier("settings-bozar-mode-toggle")
 
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Default weight unit")
@@ -284,10 +256,6 @@ struct SettingsView: View {
             guard hasLoadedProfile else { return }
             saveKeepsScreenAwakePreference(newValue)
         }
-        .onChange(of: isBozarModeEnabled) { _, newValue in
-            guard hasLoadedProfile else { return }
-            saveBozarModePreference(newValue)
-        }
         .onChange(of: preferredWeightUnit) { _, newValue in
             guard hasLoadedProfile else { return }
             savePreferredWeightUnitPreference(newValue)
@@ -376,7 +344,6 @@ struct SettingsView: View {
         savedWeeklyGoal = snapshot.weeklyGoal
         isTrainingGuidanceEnabled = snapshot.isTrainingGuidanceEnabled
         keepsScreenAwake = snapshot.keepsScreenAwake
-        isBozarModeEnabled = snapshot.isBozarModeEnabled
         preferredWeightUnit = snapshot.preferredWeightUnit
         workoutNotificationStyle = snapshot.workoutNotificationStyle
     }
@@ -456,20 +423,6 @@ struct SettingsView: View {
         }
     }
 
-    private func saveBozarModePreference(_ isEnabled: Bool) {
-        let backgroundStore = settingsBackgroundStore
-        Task.detached(priority: .utility) {
-            do {
-                try await backgroundStore.perform("settings.bozar-mode.save") { backgroundContext in
-                    try ProfileRepository(modelContext: backgroundContext).updateBozarModeEnabled(isEnabled)
-                }
-                await self.invalidateProfileWarmup()
-            } catch {
-                await self.showError(error)
-            }
-        }
-    }
-
     private func savePreferredWeightUnitPreference(_ unit: PreferredWeightUnit) {
         let backgroundStore = settingsBackgroundStore
         Task.detached(priority: .utility) {
@@ -531,7 +484,6 @@ private struct SettingsProfileSnapshot: Sendable {
     let weeklyGoal: Int
     let isTrainingGuidanceEnabled: Bool
     let keepsScreenAwake: Bool
-    let isBozarModeEnabled: Bool
     let preferredWeightUnit: PreferredWeightUnit
     let workoutNotificationStyle: WorkoutNotificationStyle
 
@@ -539,7 +491,6 @@ private struct SettingsProfileSnapshot: Sendable {
         weeklyGoal = profile.weeklyWorkoutGoal
         isTrainingGuidanceEnabled = profile.isTrainingGuidanceEnabled
         keepsScreenAwake = profile.keepsScreenAwake
-        isBozarModeEnabled = profile.isBozarModeEnabled
         preferredWeightUnit = profile.preferredWeightUnit
         workoutNotificationStyle = profile.workoutNotificationStyle
     }

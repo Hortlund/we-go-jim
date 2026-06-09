@@ -23,7 +23,6 @@ struct WorkoutExerciseRowHostView: View, Equatable {
     let showsInlineExerciseControls: Bool
     let showsSetProgressChip: Bool
     let manualCompletionMode: Bool
-    let isBozarModeEnabled: Bool
     let isSetEditingEnabled: Bool
     let isSetCompletionEnabled: Bool
     let setCompletionGatePresentation: WorkoutSetCompletionGatePresentation?
@@ -75,7 +74,6 @@ struct WorkoutExerciseRowHostView: View, Equatable {
         showsInlineExerciseControls: Bool = false,
         showsSetProgressChip: Bool = false,
         manualCompletionMode: Bool = true,
-        isBozarModeEnabled: Bool = false,
         isSetEditingEnabled: Bool = true,
         isSetCompletionEnabled: Bool = true,
         setCompletionGatePresentation: WorkoutSetCompletionGatePresentation? = nil,
@@ -121,7 +119,6 @@ struct WorkoutExerciseRowHostView: View, Equatable {
         self.showsInlineExerciseControls = showsInlineExerciseControls
         self.showsSetProgressChip = showsSetProgressChip
         self.manualCompletionMode = manualCompletionMode
-        self.isBozarModeEnabled = isBozarModeEnabled
         self.isSetEditingEnabled = isSetEditingEnabled
         self.isSetCompletionEnabled = isSetCompletionEnabled
         self.setCompletionGatePresentation = setCompletionGatePresentation
@@ -204,7 +201,6 @@ struct WorkoutExerciseRowHostView: View, Equatable {
             showsInlineExerciseControls: showsInlineExerciseControls,
             showsSetProgressChip: showsSetProgressChip,
             manualCompletionMode: manualCompletionMode,
-            isBozarModeEnabled: isBozarModeEnabled,
             isSetEditingEnabled: isSetEditingEnabled,
             isSetCompletionEnabled: isSetCompletionEnabled,
             setCompletionGatePresentation: setCompletionGatePresentation,
@@ -302,7 +298,6 @@ struct WorkoutExerciseRowHostView: View, Equatable {
             && lhs.showsInlineExerciseControls == rhs.showsInlineExerciseControls
             && lhs.showsSetProgressChip == rhs.showsSetProgressChip
             && lhs.manualCompletionMode == rhs.manualCompletionMode
-            && lhs.isBozarModeEnabled == rhs.isBozarModeEnabled
             && lhs.isSetEditingEnabled == rhs.isSetEditingEnabled
             && lhs.isSetCompletionEnabled == rhs.isSetCompletionEnabled
             && lhs.setCompletionGatePresentation == rhs.setCompletionGatePresentation

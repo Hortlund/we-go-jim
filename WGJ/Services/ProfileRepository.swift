@@ -148,13 +148,6 @@ nonisolated final class ProfileRepository {
         try saveUserDataChanges()
     }
 
-    func updateBozarModeEnabled(_ isEnabled: Bool) throws {
-        let profile = try loadOrCreateProfile()
-        profile.isBozarModeEnabled = isEnabled
-        profile.updatedAt = .now
-        try saveUserDataChanges()
-    }
-
     func updatePreferredWeightUnit(_ unit: PreferredWeightUnit) throws {
         let profile = try loadOrCreateProfile()
         profile.preferredWeightUnit = unit

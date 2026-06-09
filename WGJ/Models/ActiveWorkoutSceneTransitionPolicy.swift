@@ -74,7 +74,7 @@ nonisolated enum ActiveWorkoutBottomDockPlacementPolicy {
 }
 
 nonisolated enum ActiveWorkoutInteractionWorkPolicy {
-    static let defaultPreviousPerformanceHydrationDelay: Duration = .milliseconds(650)
+    static let defaultPreviousPerformanceHydrationDelay: Duration = .milliseconds(0)
     static let defaultGuidanceRefreshDelay: Duration = .milliseconds(900)
     static let foregroundResumeGraceDelay: Duration = .milliseconds(2_500)
 
