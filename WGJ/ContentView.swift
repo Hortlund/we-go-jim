@@ -1,3 +1,4 @@
+import Combine
 import SwiftData
 import SwiftUI
 import UIKit
@@ -371,7 +372,7 @@ struct ContentView: View {
 
         appRuntimeState.refreshCloudAvailabilityIfNeeded()
         if deferredMaintenanceState.isPending {
-            await scheduleDeferredMaintenance(trigger: .sceneActivated)
+            await scheduleDeferredMaintenanceIfNeeded(trigger: .sceneActivated)
         }
     }
 

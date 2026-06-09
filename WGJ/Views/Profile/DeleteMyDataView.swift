@@ -98,11 +98,6 @@ struct DeleteMyDataView: View {
             alertMessage = "All local app data was deleted. The app will restart after you dismiss this alert."
             shouldResetAfterAlert = true
             showingAlert = true
-        } catch let error as AppDataDeletionError {
-            alertTitle = "Local Data Deleted"
-            alertMessage = "\(error.localizedDescription)\n\nThe app will restart after you dismiss this alert."
-            shouldResetAfterAlert = true
-            showingAlert = true
         } catch {
             alertTitle = "Delete Failed"
             alertMessage = error.localizedDescription

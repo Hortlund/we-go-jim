@@ -64,6 +64,7 @@ nonisolated final class UserDataCloudBackupService {
         self.backupStore = backupStore
     }
 
+    @MainActor
     func exportCurrentBackup() async throws {
         let context = ModelContext(localContainer)
         context.autosaveEnabled = false
@@ -76,6 +77,7 @@ nonisolated final class UserDataCloudBackupService {
     }
 
     @discardableResult
+    @MainActor
     func restoreLatestBackup() async throws -> Bool {
         guard let record = try await backupStore.fetchBackup() else {
             return false
@@ -225,7 +227,8 @@ nonisolated struct CloudKitUserDataCloudBackupStore: UserDataCloudBackupStoring 
     }
 }
 
-nonisolated private struct UserDataCloudBackupPayload: Codable {
+@MainActor
+private struct UserDataCloudBackupPayload: Codable {
     static let schemaVersion = 2
 
     var schemaVersion: Int = Self.schemaVersion
@@ -283,7 +286,7 @@ nonisolated private struct UserDataCloudBackupPayload: Codable {
     }
 
     private func upsertProfiles(in context: ModelContext) throws {
-        var existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<UserProfile>()).map { ($0.id, $0) })
+        let existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<UserProfile>()).map { ($0.id, $0) })
         for item in profiles {
             if let model = existing[item.id] {
                 item.apply(to: model)
@@ -294,7 +297,7 @@ nonisolated private struct UserDataCloudBackupPayload: Codable {
     }
 
     private func upsertProfileWidgets(in context: ModelContext) throws {
-        var existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<ProfileWidgetConfig>()).map { ($0.id, $0) })
+        let existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<ProfileWidgetConfig>()).map { ($0.id, $0) })
         for item in profileWidgets {
             if let model = existing[item.id] {
                 item.apply(to: model)
@@ -305,7 +308,7 @@ nonisolated private struct UserDataCloudBackupPayload: Codable {
     }
 
     private func upsertCustomExercises(in context: ModelContext) throws {
-        var existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<ExerciseCatalogItem>()).map { ($0.remoteUUID, $0) })
+        let existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<ExerciseCatalogItem>()).map { ($0.remoteUUID, $0) })
         for item in customExercises {
             if let model = existing[item.remoteUUID] {
                 item.apply(to: model)
@@ -316,84 +319,84 @@ nonisolated private struct UserDataCloudBackupPayload: Codable {
     }
 
     private func upsertTemplateFolders(in context: ModelContext) throws {
-        var existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<TemplateFolder>()).map { ($0.id, $0) })
+        let existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<TemplateFolder>()).map { ($0.id, $0) })
         for item in templateFolders {
             if let model = existing[item.id] { item.apply(to: model) } else { context.insert(item.model) }
         }
     }
 
     private func upsertWorkoutTemplates(in context: ModelContext) throws {
-        var existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<WorkoutTemplate>()).map { ($0.id, $0) })
+        let existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<WorkoutTemplate>()).map { ($0.id, $0) })
         for item in workoutTemplates {
             if let model = existing[item.id] { item.apply(to: model) } else { context.insert(item.model) }
         }
     }
 
     private func upsertTemplateCardioBlocks(in context: ModelContext) throws {
-        var existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<TemplateCardioBlock>()).map { ($0.id, $0) })
+        let existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<TemplateCardioBlock>()).map { ($0.id, $0) })
         for item in templateCardioBlocks {
             if let model = existing[item.id] { item.apply(to: model) } else { context.insert(item.model) }
         }
     }
 
     private func upsertTemplateExercises(in context: ModelContext) throws {
-        var existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<TemplateExercise>()).map { ($0.id, $0) })
+        let existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<TemplateExercise>()).map { ($0.id, $0) })
         for item in templateExercises {
             if let model = existing[item.id] { item.apply(to: model) } else { context.insert(item.model) }
         }
     }
 
     private func upsertTemplateComponents(in context: ModelContext) throws {
-        var existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<TemplateExerciseComponent>()).map { ($0.id, $0) })
+        let existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<TemplateExerciseComponent>()).map { ($0.id, $0) })
         for item in templateComponents {
             if let model = existing[item.id] { item.apply(to: model) } else { context.insert(item.model) }
         }
     }
 
     private func upsertTemplateSets(in context: ModelContext) throws {
-        var existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<TemplateExerciseSet>()).map { ($0.id, $0) })
+        let existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<TemplateExerciseSet>()).map { ($0.id, $0) })
         for item in templateSets {
             if let model = existing[item.id] { item.apply(to: model) } else { context.insert(item.model) }
         }
     }
 
     private func upsertTemplateDropStages(in context: ModelContext) throws {
-        var existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<TemplateExerciseDropStage>()).map { ($0.id, $0) })
+        let existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<TemplateExerciseDropStage>()).map { ($0.id, $0) })
         for item in templateDropStages {
             if let model = existing[item.id] { item.apply(to: model) } else { context.insert(item.model) }
         }
     }
 
     private func upsertWorkoutSessions(in context: ModelContext) throws {
-        var existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<WorkoutSession>()).map { ($0.id, $0) })
+        let existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<WorkoutSession>()).map { ($0.id, $0) })
         for item in workoutSessions {
             if let model = existing[item.id] { item.apply(to: model) } else { context.insert(item.model) }
         }
     }
 
     private func upsertWorkoutCardioBlocks(in context: ModelContext) throws {
-        var existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<WorkoutSessionCardioBlock>()).map { ($0.id, $0) })
+        let existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<WorkoutSessionCardioBlock>()).map { ($0.id, $0) })
         for item in workoutCardioBlocks {
             if let model = existing[item.id] { item.apply(to: model) } else { context.insert(item.model) }
         }
     }
 
     private func upsertWorkoutExercises(in context: ModelContext) throws {
-        var existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<WorkoutSessionExercise>()).map { ($0.id, $0) })
+        let existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<WorkoutSessionExercise>()).map { ($0.id, $0) })
         for item in workoutExercises {
             if let model = existing[item.id] { item.apply(to: model) } else { context.insert(item.model) }
         }
     }
 
     private func upsertWorkoutSets(in context: ModelContext) throws {
-        var existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<WorkoutSessionSet>()).map { ($0.id, $0) })
+        let existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<WorkoutSessionSet>()).map { ($0.id, $0) })
         for item in workoutSets {
             if let model = existing[item.id] { item.apply(to: model) } else { context.insert(item.model) }
         }
     }
 
     private func upsertWorkoutDropStages(in context: ModelContext) throws {
-        var existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<WorkoutSessionDropStage>()).map { ($0.id, $0) })
+        let existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<WorkoutSessionDropStage>()).map { ($0.id, $0) })
         for item in workoutDropStages {
             if let model = existing[item.id] { item.apply(to: model) } else { context.insert(item.model) }
         }

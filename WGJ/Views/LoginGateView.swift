@@ -192,16 +192,14 @@ struct LoginGateView: View {
             return "Checking your iCloud account status."
         case .available:
             switch userDataSyncStatus.state {
-            case .syncing:
-                return "iCloud is available. Templates, profile, and workout data are still syncing."
-            case .caughtUp:
-                return "iCloud is available and durable user data looks caught up."
-            case .pendingExport:
-                return "iCloud is available. Recent local changes are still waiting to export."
+            case .pending:
+                return "iCloud is available. Recent local changes are waiting for backup."
+            case .backedUp:
+                return "iCloud is available for boundary backups."
             case .degraded:
                 return userDataSyncStatus.detail
             case .localOnly:
-                return "iCloud is available for account features, but this session is currently local-only."
+                return "iCloud is available, but this session is currently local-only."
             }
         case .unavailable(let reason):
             switch reason {

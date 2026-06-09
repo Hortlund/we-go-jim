@@ -613,9 +613,7 @@ struct ProfileWidgetManagerView: View {
     private func rebuildWidgetListSnapshot() {
         widgetListSnapshot = ProfileWidgetManagerListSnapshot.make(
             configs: configs,
-            canUseWidget: { kind in
-                canUseWidget(kind)
-            }
+            canUseWidget: { _ in true }
         )
     }
 

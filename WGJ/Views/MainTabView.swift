@@ -139,6 +139,7 @@ struct MainTabView: View {
     ) -> some View {
         content()
             .contentMargins(.bottom, activeWorkoutOverlayBottomInset, for: .scrollContent)
+            .environment(\.isTabActive, tabState.selectedTab == tab)
             .tabItem {
                 Label(title, systemImage: systemImage)
             }
