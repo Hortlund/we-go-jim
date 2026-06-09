@@ -50,7 +50,6 @@ struct ProfileView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.isTabActive) private var isTabActive
     @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
-    @Environment(\.cloudSyncErrorDescription) private var cloudSyncErrorDescription
     @Environment(\.userDataSyncStatus) private var userDataSyncStatus
     @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(AppWarmupState.self) private var appWarmupState
@@ -98,8 +97,8 @@ struct ProfileView: View {
                 identityCard
                 highlightsCard
                 dashboardSection
-                cloudBackupSection
                 appSection
+                cloudBackupSection
             }
             .padding(.top, 8)
             .padding(16)
@@ -268,6 +267,7 @@ struct ProfileView: View {
             ProfileHighlightsMetaRow(title: "Top Exercise", value: topExerciseSummaryText)
         }
         .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .wgjCardContainer()
     }
 
@@ -380,6 +380,7 @@ struct ProfileView: View {
             }
         }
         .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .wgjCardContainer()
     }
 
@@ -427,6 +428,7 @@ struct ProfileView: View {
             }
         }
         .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .wgjCardContainer()
     }
 
@@ -448,6 +450,7 @@ struct ProfileView: View {
                     }
                 }
                 .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .wgjCardContainer()
             } else {
                 VStack(alignment: .leading, spacing: 10) {
@@ -458,6 +461,7 @@ struct ProfileView: View {
                         .foregroundStyle(WGJTheme.textSecondary)
                 }
                 .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .wgjCardContainer()
             }
         }
@@ -496,6 +500,7 @@ struct ProfileView: View {
             .frame(maxWidth: .infinity)
         }
         .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .wgjCardContainer()
     }
 
@@ -535,6 +540,7 @@ struct ProfileView: View {
             }
         }
         .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .wgjCardContainer()
     }
 
@@ -574,6 +580,7 @@ struct ProfileView: View {
             }
         }
         .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .wgjCardContainer()
     }
 
@@ -688,6 +695,7 @@ struct ProfileView: View {
             }
         }
         .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .wgjCardContainer()
     }
 
@@ -708,7 +716,7 @@ struct ProfileView: View {
 
     private var cloudBackupSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            WGJActionHeader("Cloud Backup", subtitle: "Your core workout data backs up at save boundaries.") {
+            WGJActionHeader("Cloud Backup") {
                 Button {
                     Task {
                         await forceCloudBackup()
@@ -769,6 +777,7 @@ struct ProfileView: View {
             }
         }
         .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .wgjCardContainer()
         .accessibilityIdentifier("profile-cloud-backup-section")
     }
@@ -794,16 +803,14 @@ struct ProfileView: View {
     }
 
     private var cloudBackupStatusDetail: String {
-        if isForcingCloudBackup {
-            return "Uploading your current profile, templates, custom exercises, and workout history."
-        }
-        guard cloudSyncEnabled else {
-            return cloudSyncErrorDescription ?? userDataSyncStatus.detail
-        }
+        "Last backup: \(latestCloudBackupText)"
+    }
+
+    private var latestCloudBackupText: String {
         if let latestExport = userDataSyncStatus.latestSuccessfulExportAt {
-            return "Last cloud backup \(latestExport.formatted(.dateTime.month(.abbreviated).day().hour().minute()))."
+            return latestExport.formatted(.dateTime.month(.abbreviated).day().hour().minute())
         }
-        return userDataSyncStatus.detail
+        return "Never"
     }
 
     private var cloudBackupStatusIcon: String {

@@ -104,8 +104,7 @@ struct ExercisesCatalogView: View {
     private let indexRailWidth: CGFloat = 28
 
     private var contentTrailingPadding: CGFloat {
-        // Keep the content width stable even while search temporarily hides the rail.
-        reservesIndexRailSpace ? indexRailWidth : 0
+        shouldShowIndexRail ? indexRailWidth : 0
     }
 
     private var shouldUseCompactFilterLayout: Bool {
@@ -202,7 +201,7 @@ struct ExercisesCatalogView: View {
                                             VStack(alignment: .leading, spacing: 0) {
                                                 WGJCompactSectionHeader(section.title)
                                                     .id(section.id)
-                                                    .padding(.top, 2)
+                                                    .padding(.top, 0)
                                                     .padding(.bottom, 6)
 
                                                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -219,7 +218,6 @@ struct ExercisesCatalogView: View {
                             }
                             .padding(.horizontal, 16)
                             .padding(.trailing, contentTrailingPadding)
-                            .padding(.top, controller.snapshot.sections.isEmpty ? 0 : 4)
                             .padding(.bottom, 104)
                         }
                         .scrollDismissesKeyboard(.interactively)
@@ -236,7 +234,7 @@ struct ExercisesCatalogView: View {
                                 .accessibilityHidden(true)
                         }
 
-                        if reservesIndexRailSpace {
+                        if shouldShowIndexRail {
                             VStack(spacing: 4) {
                                 ForEach(controller.snapshot.sections) { section in
                                     Button(section.title) {

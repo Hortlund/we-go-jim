@@ -45,6 +45,7 @@ struct ProfileWeeklyMuscleHeatmapWidget: View {
             }
         }
         .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .wgjCardContainer()
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("profile-weekly-muscle-heatmap-widget")
