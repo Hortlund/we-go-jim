@@ -3,19 +3,9 @@ import SwiftUI
 
 struct TemplatesOverviewView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.appBackgroundStore) private var appBackgroundStore
+    @Environment(\.isTabActive) private var isTabActive
     @Environment(SubscriptionState.self) private var subscriptionState
-
-    @Query(sort: [
-        SortDescriptor(\WorkoutTemplate.sortOrder, order: .forward),
-        SortDescriptor(\WorkoutTemplate.name, order: .forward),
-    ])
-    private var allTemplates: [WorkoutTemplate]
-
-    @Query(sort: [
-        SortDescriptor(\TemplateFolder.sortOrder, order: .forward),
-        SortDescriptor(\TemplateFolder.name, order: .forward),
-    ])
-    private var folders: [TemplateFolder]
 
     @State private var folderFilter: FolderFilter = .all
     @State private var templateEditorContext: TemplateEditorContext?
@@ -26,17 +16,22 @@ struct TemplatesOverviewView: View {
 
     @State private var errorMessage = ""
     @State private var showingError = false
+    @State private var controller = TemplatesOverviewController()
+    @State private var hasLoadedSnapshot = false
+    @State private var isReloadingSnapshot = false
+    @State private var lastLoadedContentUpdatedAt: Date?
 
-    private var repository: TemplateRepository {
-        TemplateRepository(modelContext: modelContext)
+    private var templatesOverviewBackgroundStore: AppBackgroundStore {
+        appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
     }
 
     var body: some View {
         let visibleTemplates = displayedTemplates
-        let folderLookup = folderNameByID
+        let folderLookup = controller.snapshot.folderNameByID
+        let destinationFoldersByTemplateID = controller.snapshot.destinationFoldersByTemplateID
 
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 16) {
                 WGJRootHeader(
                     "Templates",
                     subtitle: "Reusable plans for the sessions you come back to."
@@ -51,7 +46,7 @@ struct TemplatesOverviewView: View {
                         HStack(spacing: 8) {
                             folderChip(.all, title: "All")
                             folderChip(.unfiled, title: "Unfiled")
-                            ForEach(folders) { folder in
+                            ForEach(controller.snapshot.folders) { folder in
                                 folderChip(.folder(folder.id), title: folder.name)
                             }
                         }
@@ -61,10 +56,10 @@ struct TemplatesOverviewView: View {
                 .padding(14)
                 .wgjCardContainer(strong: true)
 
-                LazyVStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 10) {
                     WGJSectionHeader("Template Library", subtitle: "Saved plans ready to edit, organize, or start.")
 
-                    if displayedTemplates.isEmpty {
+                    if visibleTemplates.isEmpty {
                         WGJEmptyStateCard(
                             title: "No templates for this filter",
                             message: "Create a new template or switch folders to browse saved workout plans.",
@@ -73,14 +68,18 @@ struct TemplatesOverviewView: View {
                     }
 
                     ForEach(visibleTemplates) { template in
-                        templateCard(template, folderNameByID: folderLookup)
+                        templateCard(
+                            template,
+                            folderNameByID: folderLookup,
+                            destinationFoldersByTemplateID: destinationFoldersByTemplateID
+                        )
                     }
                 }
 
-                LazyVStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 10) {
                     WGJSectionHeader("Folders", subtitle: "Groups for splits, goals, and training blocks.")
 
-                    if folders.isEmpty {
+                    if controller.snapshot.folders.isEmpty {
                         WGJEmptyStateCard(
                             title: "No folders yet",
                             message: "Group templates by split, goal, or training block.",
@@ -88,7 +87,7 @@ struct TemplatesOverviewView: View {
                         )
                     }
 
-                    ForEach(folders) { folder in
+                    ForEach(controller.snapshot.folders) { folder in
                         folderCard(folder)
                     }
                 }
@@ -98,7 +97,11 @@ struct TemplatesOverviewView: View {
         }
         .wgjScreenBackground()
         .toolbar(.hidden, for: .navigationBar)
-        .sheet(item: $templateEditorContext) { context in
+        .sheet(item: $templateEditorContext, onDismiss: {
+            Task {
+                await reloadSnapshotIfNeeded(force: true)
+            }
+        }) { context in
             TemplateEditorView(folderID: context.folderID, templateID: context.templateID)
         }
         .sheet(isPresented: $showingFolderEditor) {
@@ -115,6 +118,13 @@ struct TemplatesOverviewView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(errorMessage)
+        }
+        .task(id: isTabActive) {
+            guard isTabActive else { return }
+            await reloadSnapshotIfNeeded(force: false)
+        }
+        .task {
+            await reloadSnapshotIfNeeded(force: false)
         }
     }
 
@@ -164,12 +174,271 @@ struct TemplatesOverviewView: View {
     }
 
     private func templateCard(
-        _ template: WorkoutTemplate,
-        folderNameByID: [UUID: String]
+        _ template: TemplateOverviewTemplateSnapshot,
+        folderNameByID: [UUID: String],
+        destinationFoldersByTemplateID: [UUID: [TemplateOverviewFolderSnapshot]]
     ) -> some View {
-        let destinationFolders = folders.filter { $0.id != template.folderID }
+        TemplateOverviewTemplateCardView(
+            template: template,
+            folderLabel: folderLabel(for: template, folderNameByID: folderNameByID),
+            destinationFolders: destinationFoldersByTemplateID[template.id, default: []],
+            onEdit: {
+                templateEditorContext = TemplateEditorContext(
+                    folderID: template.folderID == TemplateRepository.unfiledFolderID ? nil : template.folderID,
+                    templateID: template.id
+                )
+            },
+            onMove: { destinationFolderID in
+                moveTemplate(templateID: template.id, toFolderID: destinationFolderID)
+            },
+            onDuplicate: {
+                duplicateTemplate(template)
+            },
+            onDelete: {
+                deleteTemplate(template.id)
+            }
+        )
+        .equatable()
+    }
 
-        return VStack(alignment: .leading, spacing: 10) {
+    private func folderCard(_ folder: TemplateOverviewFolderSnapshot) -> some View {
+        TemplateOverviewFolderCardView(
+            folder: folder,
+            onEdit: {
+                beginEditing(folder: folder)
+            },
+            onDelete: {
+                deleteFolder(folder.id)
+            }
+        )
+        .equatable()
+    }
+
+    private var displayedTemplates: [TemplateOverviewTemplateSnapshot] {
+        let snapshot = controller.snapshot
+        switch folderFilter {
+        case .all:
+            return snapshot.templates
+        case .unfiled:
+            return snapshot.unfiledTemplates
+        case .folder(let folderID):
+            return snapshot.templatesByFolderID[folderID, default: []]
+        }
+    }
+
+    private var activeFolderIDForCreation: UUID? {
+        switch folderFilter {
+        case .folder(let id):
+            return id
+        case .all, .unfiled:
+            return nil
+        }
+    }
+
+    private func folderLabel(for template: TemplateOverviewTemplateSnapshot, folderNameByID: [UUID: String]) -> String {
+        if template.folderID == TemplateRepository.unfiledFolderID {
+            return "Unfiled"
+        }
+
+        if let folderName = folderNameByID[template.folderID] {
+            return folderName
+        }
+
+        return "Unknown folder"
+    }
+
+    private func beginCreatingFolder() {
+        editingFolderID = nil
+        folderNameDraft = ""
+        showingFolderEditor = true
+    }
+
+    private func beginEditing(folder: TemplateOverviewFolderSnapshot) {
+        editingFolderID = folder.id
+        folderNameDraft = folder.name
+        showingFolderEditor = true
+    }
+
+    private func saveFolderDraft() {
+        let folderID = editingFolderID
+        let folderName = folderNameDraft
+        let backgroundStore = templatesOverviewBackgroundStore
+
+        Task.detached(priority: .utility) {
+            do {
+                try await backgroundStore.performWrite("templates-overview.folder.save") { backgroundContext in
+                    let repository = TemplateRepository(modelContext: backgroundContext)
+                    if let folderID {
+                        try repository.renameFolder(id: folderID, name: folderName)
+                    } else {
+                        try repository.createFolder(name: folderName)
+                    }
+                }
+                await closeFolderEditor()
+                await reloadSnapshotIfNeeded(force: true)
+            } catch {
+                await showError(error)
+            }
+        }
+    }
+
+    private func createTemplate(folderID: UUID?) {
+        guard ProAccessPolicy.canCreateTemplate(
+            currentTemplateCount: controller.snapshot.templates.count,
+            isPro: subscriptionState.isPro
+        ) else {
+            subscriptionState.presentPaywall()
+            return
+        }
+
+        templateEditorContext = TemplateEditorContext(
+            folderID: folderID,
+            templateID: nil
+        )
+    }
+
+    private func deleteFolder(_ folderID: UUID) {
+        let backgroundStore = templatesOverviewBackgroundStore
+        Task.detached(priority: .utility) {
+            do {
+                try await backgroundStore.performWrite("templates-overview.folder.delete") { backgroundContext in
+                    try TemplateRepository(modelContext: backgroundContext).deleteFolder(id: folderID)
+                }
+                await reloadSnapshotIfNeeded(force: true)
+            } catch {
+                await showError(error)
+            }
+        }
+    }
+
+    private func deleteTemplate(_ templateID: UUID) {
+        let backgroundStore = templatesOverviewBackgroundStore
+        Task.detached(priority: .utility) {
+            do {
+                try await backgroundStore.performWrite("templates-overview.template.delete") { backgroundContext in
+                    try TemplateRepository(modelContext: backgroundContext).deleteTemplate(id: templateID)
+                }
+                await reloadSnapshotIfNeeded(force: true)
+            } catch {
+                await showError(error)
+            }
+        }
+    }
+
+    private func moveTemplate(templateID: UUID, toFolderID folderID: UUID?) {
+        let backgroundStore = templatesOverviewBackgroundStore
+        Task.detached(priority: .utility) {
+            do {
+                try await backgroundStore.performWrite("templates-overview.template.move") { backgroundContext in
+                    try TemplateRepository(modelContext: backgroundContext)
+                        .moveTemplate(id: templateID, toFolderID: folderID)
+                }
+                await reloadSnapshotIfNeeded(force: true)
+            } catch {
+                await showError(error)
+            }
+        }
+    }
+
+    private func duplicateTemplate(_ template: TemplateOverviewTemplateSnapshot) {
+        guard ProAccessPolicy.canCreateTemplate(
+            currentTemplateCount: controller.snapshot.templates.count,
+            isPro: subscriptionState.isPro
+        ) else {
+            subscriptionState.presentPaywall()
+            return
+        }
+
+        let backgroundStore = templatesOverviewBackgroundStore
+        Task.detached(priority: .utility) {
+            do {
+                try await backgroundStore.performWrite("templates-overview.template.duplicate") { backgroundContext in
+                    _ = try TemplateRepository(modelContext: backgroundContext).duplicateTemplate(id: template.id)
+                }
+                await reloadSnapshotIfNeeded(force: true)
+            } catch {
+                await showError(error)
+            }
+        }
+    }
+
+    @MainActor
+    private func closeFolderEditor() {
+        showingFolderEditor = false
+    }
+
+    private func reloadSnapshotIfNeeded(force: Bool) async {
+        guard force || !hasLoadedSnapshot || !isReloadingSnapshot else { return }
+        if !force,
+           let latestContentUpdatedAt = await latestContentUpdatedAt(),
+           latestContentUpdatedAt == lastLoadedContentUpdatedAt {
+            return
+        }
+        await reloadSnapshot()
+    }
+
+    private func reloadSnapshot() async {
+        guard !isReloadingSnapshot else { return }
+        isReloadingSnapshot = true
+        defer { isReloadingSnapshot = false }
+
+        do {
+            let backgroundStore = templatesOverviewBackgroundStore
+            let snapshot = try await backgroundStore.perform("templates-overview.snapshot.reload") { backgroundContext in
+                try TemplatesOverviewSnapshotLoader.load(modelContext: backgroundContext)
+            }
+            controller.apply(snapshot)
+            lastLoadedContentUpdatedAt = snapshot.contentUpdatedAt
+            hasLoadedSnapshot = true
+        } catch {
+            showError(error)
+        }
+    }
+
+    private func latestContentUpdatedAt() async -> Date? {
+        let backgroundStore = templatesOverviewBackgroundStore
+        return try? await backgroundStore.perform("templates-overview.latest-updated-at") { backgroundContext in
+            let repository = TemplateRepository(modelContext: backgroundContext)
+            return TemplatesOverviewSnapshotBuilder.latestContentUpdatedAt(
+                latestFolderUpdatedAt: try repository.latestFolderUpdatedAt(),
+                latestTemplateUpdatedAt: try repository.latestTemplateUpdatedAt()
+            )
+        }
+    }
+
+    @MainActor
+    private func showError(_ error: Error) {
+        errorMessage = String(describing: error)
+        showingError = true
+    }
+}
+
+private enum FolderFilter: Equatable {
+    case all
+    case unfiled
+    case folder(UUID)
+}
+
+private struct TemplateOverviewTemplateCardView: View, Equatable {
+    let template: TemplateOverviewTemplateSnapshot
+    let folderLabel: String
+    let destinationFolders: [TemplateOverviewFolderSnapshot]
+    let onEdit: () -> Void
+    let onMove: (UUID?) -> Void
+    let onDuplicate: () -> Void
+    let onDelete: () -> Void
+
+    static func == (
+        lhs: TemplateOverviewTemplateCardView,
+        rhs: TemplateOverviewTemplateCardView
+    ) -> Bool {
+        lhs.template == rhs.template
+            && lhs.folderLabel == rhs.folderLabel
+            && lhs.destinationFolders == rhs.destinationFolders
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
             NavigationLink {
                 TemplateDetailView(templateID: template.id)
             } label: {
@@ -191,23 +460,20 @@ struct TemplatesOverviewView: View {
             .buttonStyle(.plain)
 
             HStack {
-                Text(folderLabel(for: template, folderNameByID: folderNameByID))
+                Text(folderLabel)
                     .font(.caption)
                     .foregroundStyle(WGJTheme.accentCyan)
 
                 Spacer()
 
-                Text("\((template.exercises ?? []).count) exercises")
+                Text("\(template.exerciseCount) exercises")
                     .font(.caption)
                     .foregroundStyle(WGJTheme.textSecondary)
             }
 
             HStack(spacing: 8) {
                 Button {
-                    templateEditorContext = TemplateEditorContext(
-                        folderID: template.folderID == TemplateRepository.unfiledFolderID ? nil : template.folderID,
-                        templateID: template.id
-                    )
+                    onEdit()
                 } label: {
                     Label("Edit", systemImage: "pencil")
                 }
@@ -216,13 +482,13 @@ struct TemplatesOverviewView: View {
                 WGJActionMenuButton("Move Template") {
                     if template.folderID != TemplateRepository.unfiledFolderID {
                         Button("Unfiled") {
-                            moveTemplate(templateID: template.id, toFolderID: nil)
+                            onMove(nil)
                         }
                     }
 
                     ForEach(destinationFolders) { folder in
                         Button(folder.name) {
-                            moveTemplate(templateID: template.id, toFolderID: folder.id)
+                            onMove(folder.id)
                         }
                     }
                 } label: {
@@ -235,7 +501,7 @@ struct TemplatesOverviewView: View {
                 }
 
                 Button {
-                    duplicateTemplate(template)
+                    onDuplicate()
                 } label: {
                     Label("Duplicate", systemImage: "doc.on.doc")
                 }
@@ -244,7 +510,7 @@ struct TemplatesOverviewView: View {
                 Spacer()
 
                 Button {
-                    deleteTemplate(template.id)
+                    onDelete()
                 } label: {
                     Image(systemName: "trash")
                 }
@@ -254,8 +520,21 @@ struct TemplatesOverviewView: View {
         .padding(14)
         .wgjCardContainer(strong: true)
     }
+}
 
-    private func folderCard(_ folder: TemplateFolder) -> some View {
+private struct TemplateOverviewFolderCardView: View, Equatable {
+    let folder: TemplateOverviewFolderSnapshot
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+
+    static func == (
+        lhs: TemplateOverviewFolderCardView,
+        rhs: TemplateOverviewFolderCardView
+    ) -> Bool {
+        lhs.folder == rhs.folder
+    }
+
+    var body: some View {
         HStack(spacing: 10) {
             NavigationLink {
                 FolderDetailView(folderID: folder.id, folderName: folder.name)
@@ -265,7 +544,7 @@ struct TemplatesOverviewView: View {
                         .font(.headline.weight(.semibold))
                         .foregroundStyle(WGJTheme.textPrimary)
 
-                    Text("\((folder.templates ?? []).count) templates")
+                    Text("\(folder.templateCount) templates")
                         .font(.caption)
                         .foregroundStyle(WGJTheme.textSecondary)
                 }
@@ -274,14 +553,14 @@ struct TemplatesOverviewView: View {
             .buttonStyle(.plain)
 
             Button {
-                beginEditing(folder: folder)
+                onEdit()
             } label: {
                 Image(systemName: "pencil")
             }
             .buttonStyle(WGJIconButtonStyle())
 
             Button {
-                deleteFolder(folder.id)
+                onDelete()
             } label: {
                 Image(systemName: "trash")
             }
@@ -290,136 +569,133 @@ struct TemplatesOverviewView: View {
         .padding(14)
         .wgjCardContainer()
     }
+}
 
-    private var displayedTemplates: [WorkoutTemplate] {
-        switch folderFilter {
-        case .all:
-            return allTemplates
-        case .unfiled:
-            return allTemplates.filter { $0.folderID == TemplateRepository.unfiledFolderID }
-        case .folder(let folderID):
-            return allTemplates.filter { $0.folderID == folderID }
-        }
-    }
+nonisolated struct TemplatesOverviewSnapshot: Sendable, Equatable {
+    let folders: [TemplateOverviewFolderSnapshot]
+    let templates: [TemplateOverviewTemplateSnapshot]
+    let unfiledTemplates: [TemplateOverviewTemplateSnapshot]
+    let templatesByFolderID: [UUID: [TemplateOverviewTemplateSnapshot]]
+    let folderNameByID: [UUID: String]
+    let destinationFoldersByTemplateID: [UUID: [TemplateOverviewFolderSnapshot]]
+    let contentUpdatedAt: Date?
 
-    private var activeFolderIDForCreation: UUID? {
-        switch folderFilter {
-        case .folder(let id):
-            return id
-        case .all, .unfiled:
-            return nil
-        }
-    }
+    static let empty = TemplatesOverviewSnapshot(
+        folders: [],
+        templates: [],
+        unfiledTemplates: [],
+        templatesByFolderID: [:],
+        folderNameByID: [:],
+        destinationFoldersByTemplateID: [:],
+        contentUpdatedAt: nil
+    )
+}
 
-    private var folderNameByID: [UUID: String] {
-        Dictionary(
-            folders.map { ($0.id, $0.name) },
-            uniquingKeysWith: { first, _ in first }
-        )
-    }
+nonisolated struct TemplateOverviewFolderSnapshot: Identifiable, Sendable, Equatable {
+    let id: UUID
+    let name: String
+    let templateCount: Int
+}
 
-    private func folderLabel(for template: WorkoutTemplate, folderNameByID: [UUID: String]) -> String {
-        if template.folderID == TemplateRepository.unfiledFolderID {
-            return "Unfiled"
-        }
+nonisolated struct TemplateOverviewTemplateSnapshot: Identifiable, Sendable, Equatable {
+    let id: UUID
+    let folderID: UUID
+    let name: String
+    let notes: String
+    let exerciseCount: Int
+}
 
-        if let folderName = folderNameByID[template.folderID] {
-            return folderName
-        }
+@Observable
+private final class TemplatesOverviewController {
+    var snapshot = TemplatesOverviewSnapshot.empty
 
-        return "Unknown folder"
-    }
-
-    private func beginCreatingFolder() {
-        editingFolderID = nil
-        folderNameDraft = ""
-        showingFolderEditor = true
-    }
-
-    private func beginEditing(folder: TemplateFolder) {
-        editingFolderID = folder.id
-        folderNameDraft = folder.name
-        showingFolderEditor = true
-    }
-
-    private func saveFolderDraft() {
-        do {
-            if let folderID = editingFolderID {
-                try repository.renameFolder(id: folderID, name: folderNameDraft)
-            } else {
-                try repository.createFolder(name: folderNameDraft)
-            }
-            showingFolderEditor = false
-        } catch {
-            showError(error)
-        }
-    }
-
-    private func createTemplate(folderID: UUID?) {
-        guard ProAccessPolicy.canCreateTemplate(
-            currentTemplateCount: allTemplates.count,
-            isPro: subscriptionState.isPro
-        ) else {
-            subscriptionState.presentPaywall()
-            return
-        }
-
-        templateEditorContext = TemplateEditorContext(
-            folderID: folderID,
-            templateID: nil
-        )
-    }
-
-    private func deleteFolder(_ folderID: UUID) {
-        do {
-            try repository.deleteFolder(id: folderID)
-        } catch {
-            showError(error)
-        }
-    }
-
-    private func deleteTemplate(_ templateID: UUID) {
-        do {
-            try repository.deleteTemplate(id: templateID)
-        } catch {
-            showError(error)
-        }
-    }
-
-    private func moveTemplate(templateID: UUID, toFolderID folderID: UUID?) {
-        do {
-            try repository.moveTemplate(id: templateID, toFolderID: folderID)
-        } catch {
-            showError(error)
-        }
-    }
-
-    private func duplicateTemplate(_ template: WorkoutTemplate) {
-        guard ProAccessPolicy.canCreateTemplate(
-            currentTemplateCount: allTemplates.count,
-            isPro: subscriptionState.isPro
-        ) else {
-            subscriptionState.presentPaywall()
-            return
-        }
-
-        do {
-            _ = try repository.duplicateTemplate(id: template.id)
-        } catch {
-            showError(error)
-        }
-    }
-
-    private func showError(_ error: Error) {
-        errorMessage = String(describing: error)
-        showingError = true
+    func apply(_ snapshot: TemplatesOverviewSnapshot) {
+        self.snapshot = snapshot
     }
 }
 
-private enum FolderFilter: Equatable {
-    case all
-    case unfiled
-    case folder(UUID)
+nonisolated enum TemplatesOverviewSnapshotLoader {
+    static func load(modelContext: ModelContext) throws -> TemplatesOverviewSnapshot {
+        let repository = TemplateRepository(modelContext: modelContext)
+        return try TemplatesOverviewSnapshotBuilder.build(
+            folders: repository.folders(),
+            templates: repository.templates(),
+            latestFolderUpdatedAt: repository.latestFolderUpdatedAt(),
+            latestTemplateUpdatedAt: repository.latestTemplateUpdatedAt()
+        )
+    }
+}
+
+nonisolated enum TemplatesOverviewSnapshotBuilder {
+    static func build(
+        folders: [TemplateFolder],
+        templates: [WorkoutTemplate],
+        latestFolderUpdatedAt: Date?,
+        latestTemplateUpdatedAt: Date?
+    ) -> TemplatesOverviewSnapshot {
+        let templateCountsByFolderID = Dictionary(
+            grouping: templates,
+            by: \.folderID
+        ).mapValues(\.count)
+        let folderSnapshots = folders.map { folder in
+            TemplateOverviewFolderSnapshot(
+                id: folder.id,
+                name: folder.name,
+                templateCount: templateCountsByFolderID[folder.id, default: 0]
+            )
+        }
+        let templateSnapshots = templates.map { template in
+            TemplateOverviewTemplateSnapshot(
+                id: template.id,
+                folderID: template.folderID,
+                name: template.name,
+                notes: template.notes,
+                exerciseCount: template.exercises?.count ?? 0
+            )
+        }
+        let templatesByFolderID = Dictionary(
+            grouping: templateSnapshots,
+            by: \.folderID
+        )
+        let folderNameByID = Dictionary(
+            folderSnapshots.map { ($0.id, $0.name) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let destinationFoldersByTemplateID = Dictionary(
+            uniqueKeysWithValues: templateSnapshots.map { template in
+                (template.id, folderSnapshots.filter { $0.id != template.folderID })
+            }
+        )
+
+        return TemplatesOverviewSnapshot(
+            folders: folderSnapshots,
+            templates: templateSnapshots,
+            unfiledTemplates: templatesByFolderID[TemplateRepository.unfiledFolderID, default: []],
+            templatesByFolderID: templatesByFolderID,
+            folderNameByID: folderNameByID,
+            destinationFoldersByTemplateID: destinationFoldersByTemplateID,
+            contentUpdatedAt: latestContentUpdatedAt(
+                latestFolderUpdatedAt: latestFolderUpdatedAt,
+                latestTemplateUpdatedAt: latestTemplateUpdatedAt
+            )
+        )
+    }
+
+    static func latestContentUpdatedAt(
+        latestFolderUpdatedAt: Date?,
+        latestTemplateUpdatedAt: Date?
+    ) -> Date? {
+        switch (latestFolderUpdatedAt, latestTemplateUpdatedAt) {
+        case let (folder?, template?):
+            return max(folder, template)
+        case let (folder?, nil):
+            return folder
+        case let (nil, template?):
+            return template
+        case (nil, nil):
+            return nil
+        }
+    }
 }
 
 private struct TemplateEditorContext: Identifiable {
@@ -503,6 +779,7 @@ struct TemplateFolderEditorSheet: View {
                 }
                 .background(WGJTheme.bgBase.opacity(0.97))
             }
+            .wgjMinimalKeyboardToolbar()
         }
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)

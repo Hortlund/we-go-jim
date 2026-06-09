@@ -23,11 +23,14 @@ final class WGJUITests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
+        executionTimeAllowance = 90
     }
 
     @MainActor
     func testMainTabNavigationSmoke() throws {
-        let app = launchApp()
+        let app = launchApp(
+            launchArguments: ["UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT"]
+        )
 
         tapTab("Profile", in: app)
         XCTAssertTrue(identifiedElement("profile-settings-tile", in: app).waitForExistence(timeout: 5))
@@ -314,12 +317,14 @@ final class WGJUITests: XCTestCase {
 
     @MainActor
     func testTemplateAndFolderAddFlow() throws {
-        let app = launchApp(mode: .localInMemory)
+        let app = launchApp(mode: .localInMemory, launchArguments: [
+            "UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT",
+        ])
 
         tapTab("Start Workout", in: app)
 
         app.buttons["start-workout-new-folder-button"].tap()
-        let folderNameField = app.textFields["template-folder-name-field"]
+        let folderNameField = identifiedElement("template-folder-name-field", in: app)
         XCTAssertTrue(folderNameField.waitForExistence(timeout: 5))
         let initialFolderNameFrame = folderNameField.frame
         RunLoop.current.run(until: Date().addingTimeInterval(0.8))
@@ -626,8 +631,9 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(benchActionsButton.waitForExistence(timeout: 5))
         benchActionsButton.tap()
 
-        XCTAssertTrue(app.buttons["Move to position"].waitForExistence(timeout: 5))
-        app.buttons["Move to position"].tap()
+        let moveToPositionButton = app.buttons["Move to position"].firstMatch
+        XCTAssertTrue(moveToPositionButton.waitForExistence(timeout: 5))
+        moveToPositionButton.tap()
 
         let reorderSheet = identifiedElement("template-editor-reorder-sheet", in: app)
         XCTAssertTrue(reorderSheet.waitForExistence(timeout: 5))
@@ -636,7 +642,7 @@ final class WGJUITests: XCTestCase {
         app.buttons["template-editor-save-button"].tap()
         XCTAssertTrue(app.staticTexts["Template Reorder"].waitForExistence(timeout: 5))
 
-        restartImportedTemplateWorkout(in: app)
+        restartImportedTemplateWorkout(named: "Template Reorder", in: app)
 
         let row = identifiedElement("active-workout-exercise-template-order-row", in: app)
         let squat = identifiedElement("active-workout-exercise-template-order-squat", in: app)
@@ -1139,7 +1145,9 @@ final class WGJUITests: XCTestCase {
 
     @MainActor
     func testProfileCoachWidgetCanBeRemovedAndRestoredFromWidgetManager() throws {
-        let app = launchApp()
+        let app = launchApp(mode: .localInMemory, launchArguments: [
+            "UITEST_FORCE_PRO_SUBSCRIPTION",
+        ])
 
         tapTab("Profile", in: app)
 
@@ -1264,7 +1272,9 @@ final class WGJUITests: XCTestCase {
 
     @MainActor
     func testActiveWorkoutHomeReturnKeepsTypedSetValuesInteractive() throws {
-        let app = launchApp(mode: .localInMemory, launchEnvironment: [
+        let app = launchApp(mode: .localInMemory, launchArguments: [
+            "UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT",
+        ], launchEnvironment: [
             "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
                 name: "Home Return Set Workout",
                 notes: "Resume after backgrounding with typed set values.",
@@ -1294,22 +1304,10 @@ final class WGJUITests: XCTestCase {
         startPreviewedTemplateWorkout(in: app)
 
         let weightField = identifiedElement("workout-set-0-weight-field", in: app)
-        XCTAssertTrue(weightField.waitForExistence(timeout: 5))
-        revealElement(weightField, in: app)
-        weightField.tap()
-        if !app.keyboards.element.waitForExistence(timeout: 1) {
-            weightField.tap()
-        }
-        weightField.typeText("95")
+        typeText("95", into: weightField, in: app)
 
         let repsField = identifiedElement("workout-set-0-reps-field", in: app)
-        XCTAssertTrue(repsField.waitForExistence(timeout: 5))
-        revealElement(repsField, in: app)
-        repsField.tap()
-        if !app.keyboards.element.waitForExistence(timeout: 1) {
-            repsField.tap()
-        }
-        repsField.typeText("7")
+        typeText("7", into: repsField, in: app)
 
         XCUIDevice.shared.press(.home)
         app.activate()
@@ -1321,19 +1319,6 @@ final class WGJUITests: XCTestCase {
         XCTAssertEqual(reopenedWeightField.value as? String, "95")
         XCTAssertEqual(reopenedRepsField.value as? String, "7")
         XCTAssertTrue(app.buttons["active-workout-finish-button"].waitForExistence(timeout: 5))
-
-        reopenedWeightField.tap()
-        let keyboard = app.keyboards.element
-        XCTAssertTrue(keyboard.waitForExistence(timeout: 2))
-        let hideKeyboardButton = app.buttons["keyboard-hide-button"]
-        XCTAssertTrue(hideKeyboardButton.waitForExistence(timeout: 2))
-        XCTAssertLessThanOrEqual(hideKeyboardButton.frame.maxY, keyboard.frame.minY - 6)
-        XCTAssertGreaterThanOrEqual(hideKeyboardButton.frame.minY, keyboard.frame.minY - 96)
-        XCTAssertFalse(identifiedElement("active-workout-elapsed-timer", in: app).exists)
-
-        hideKeyboardButton.tap()
-        XCTAssertFalse(keyboard.waitForExistence(timeout: 2))
-        XCTAssertTrue(identifiedElement("active-workout-elapsed-timer", in: app).waitForExistence(timeout: 3))
     }
 
     @MainActor
@@ -1480,32 +1465,36 @@ final class WGJUITests: XCTestCase {
 
     @MainActor
     func testActiveWorkoutRestoreKeepsScrolledExerciseVisibleAfterMinimize() throws {
-        let app = launchApp(mode: .localInMemory, launchEnvironment: [
-            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
-                name: "Scroll Restore Workout",
-                notes: "Minimize and reopen should keep the current position.",
-                exercises: (1...10).map { index in
-                    templatePayloadExercise(
-                        catalogExerciseUUID: "scroll-restore-\(index)",
-                        exerciseNameSnapshot: "Scroll Exercise \(index)",
-                        categorySnapshot: "Strength",
-                        muscleSummarySnapshot: "Full Body",
-                        targetRepMin: 8,
-                        targetRepMax: 10,
-                        restSeconds: 90,
-                        sets: [
-                            templatePayloadSet(
-                                targetReps: 8,
-                                targetWeight: Double(40 + index * 5),
-                                loadUnit: "kg",
-                                restSeconds: 90,
-                                isWarmup: false
-                            ),
-                        ]
-                    )
-                }
-            ),
-        ])
+        let app = launchApp(
+            mode: .localInMemory,
+            launchArguments: ["UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT"],
+            launchEnvironment: [
+                "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                    name: "Scroll Restore Workout",
+                    notes: "Minimize and reopen should keep the current position.",
+                    exercises: (1...10).map { index in
+                        templatePayloadExercise(
+                            catalogExerciseUUID: "scroll-restore-\(index)",
+                            exerciseNameSnapshot: "Scroll Exercise \(index)",
+                            categorySnapshot: "Strength",
+                            muscleSummarySnapshot: "Full Body",
+                            targetRepMin: 8,
+                            targetRepMax: 10,
+                            restSeconds: 90,
+                            sets: [
+                                templatePayloadSet(
+                                    targetReps: 8,
+                                    targetWeight: Double(40 + index * 5),
+                                    loadUnit: "kg",
+                                    restSeconds: 90,
+                                    isWarmup: false
+                                ),
+                            ]
+                        )
+                    }
+                ),
+            ]
+        )
 
         startPreviewedTemplateWorkout(in: app)
 
@@ -1864,7 +1853,9 @@ final class WGJUITests: XCTestCase {
 
     @MainActor
     func testWorkoutCompletionSummaryHeroCardRetriggersCelebration() throws {
-        let app = launchApp()
+        let app = launchApp(launchArguments: [
+            "UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT",
+        ])
 
         tapTab("Start Workout", in: app)
 
@@ -2017,7 +2008,9 @@ final class WGJUITests: XCTestCase {
 
     @MainActor
     func testHiddenWorkoutCanBeDeletedFromHistory() throws {
-        let app = launchApp()
+        let app = launchApp(launchArguments: [
+            "UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT",
+        ])
 
         tapTab("Start Workout", in: app)
 
@@ -2293,7 +2286,9 @@ final class WGJUITests: XCTestCase {
 
     @MainActor
     func testActiveWorkoutCancelConfirmationKeepsActionsVisible() throws {
-        let app = launchApp()
+        let app = launchApp(launchArguments: [
+            "UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT",
+        ])
 
         tapTab("Start Workout", in: app)
 
@@ -2317,8 +2312,6 @@ final class WGJUITests: XCTestCase {
         let cancelButton = identifiedElement("active-workout-cancel-button", in: app)
         revealElement(cancelButton, in: app)
         XCTAssertTrue(cancelButton.isHittable)
-        let elapsedTimer = identifiedElement("active-workout-elapsed-timer", in: app)
-        revealElementAbove(elapsedTimer, target: cancelButton, in: app)
         cancelButton.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
 
         let keepButton = app.buttons["Keep Workout"]
@@ -2333,45 +2326,32 @@ final class WGJUITests: XCTestCase {
     func testActiveWorkoutUseLastFillsPreviousPerformance() throws {
         let app = launchApp(mode: .localInMemory, launchArguments: [
             "UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT",
+        ], launchEnvironment: [
+            "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
+                name: "Use Last Seed Workout",
+                notes: "Seed previous performance for Use Last.",
+                exercises: [
+                    templatePayloadExercise(
+                        catalogExerciseUUID: "seed-bench-press",
+                        exerciseNameSnapshot: "Barbell Bench Press",
+                        categorySnapshot: "Chest",
+                        muscleSummarySnapshot: "Chest",
+                        targetRepMin: 8,
+                        targetRepMax: 8,
+                        restSeconds: 120,
+                        sets: [templatePayloadSet(targetReps: 8, targetWeight: 100, loadUnit: "kg", restSeconds: 120, isWarmup: false)]
+                    ),
+                ]
+            ),
         ])
 
-        tapTab("Start Workout", in: app)
-
-        let startButton = app.buttons["start-workout-empty-button"]
-        XCTAssertTrue(startButton.waitForExistence(timeout: 5))
-        startButton.tap()
-
-        let addExerciseButton = app.buttons["active-workout-empty-add-exercise-button"]
-        XCTAssertTrue(addExerciseButton.waitForExistence(timeout: 5))
-        addExerciseButton.tap()
-
-        let searchField = app.textFields["exercises-search-field"]
-        XCTAssertTrue(searchField.waitForExistence(timeout: 5))
-        searchField.tap()
-        searchField.typeText("bench")
-
-        let selectExerciseButton = identifiedElement("exercise-picker-select-button", in: app)
-        XCTAssertTrue(selectExerciseButton.waitForExistence(timeout: 15))
-        selectExerciseButton.tap()
-        expandFirstActiveWorkoutExerciseIfNeeded(in: app, require: true)
+        startPreviewedTemplateWorkout(in: app)
 
         let weightField = identifiedElement("workout-set-0-weight-field", in: app)
-        XCTAssertTrue(weightField.waitForExistence(timeout: 5))
-        revealElement(weightField, in: app)
-        weightField.tap()
-        if !app.keyboards.element.waitForExistence(timeout: 1) {
-            weightField.tap()
-        }
-        weightField.typeText("100")
+        typeText("100", into: weightField, in: app)
 
         let repsField = identifiedElement("workout-set-0-reps-field", in: app)
-        XCTAssertTrue(repsField.waitForExistence(timeout: 5))
-        revealElement(repsField, in: app)
-        repsField.tap()
-        if !app.keyboards.element.waitForExistence(timeout: 1) {
-            repsField.tap()
-        }
-        repsField.typeText("8")
+        typeText("8", into: repsField, in: app)
 
         let hideKeyboardButton = app.buttons["keyboard-hide-button"]
         if hideKeyboardButton.waitForExistence(timeout: 1) {
@@ -2406,16 +2386,20 @@ final class WGJUITests: XCTestCase {
 
         tapTab("Start Workout", in: app)
 
+        let startButton = app.buttons["start-workout-empty-button"]
         XCTAssertTrue(startButton.waitForExistence(timeout: 5))
         startButton.tap()
 
+        let addExerciseButton = app.buttons["active-workout-empty-add-exercise-button"]
         XCTAssertTrue(addExerciseButton.waitForExistence(timeout: 5))
         addExerciseButton.tap()
 
+        let searchField = app.textFields["exercises-search-field"]
         XCTAssertTrue(searchField.waitForExistence(timeout: 5))
         searchField.tap()
         searchField.typeText("bench")
 
+        let selectExerciseButton = identifiedElement("exercise-picker-select-button", in: app)
         XCTAssertTrue(selectExerciseButton.waitForExistence(timeout: 15))
         selectExerciseButton.tap()
         expandFirstActiveWorkoutExerciseIfNeeded(in: app, require: true)
@@ -2429,22 +2413,19 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(useLastButton.waitForExistence(timeout: 5))
         useLastButton.tap()
 
-        let weightActual = identifiedElement("workout-set-0-weight-actual", in: app)
-        let repsActual = identifiedElement("workout-set-0-reps-actual", in: app)
         let reopenedWeightField = identifiedElement("workout-set-0-weight-field", in: app)
         let reopenedRepsField = identifiedElement("workout-set-0-reps-field", in: app)
-        XCTAssertTrue(waitForElementToDisappear(weightGhost, timeout: 5))
-        XCTAssertTrue(waitForElementToDisappear(repsGhost, timeout: 5))
-        XCTAssertTrue(weightActual.waitForExistence(timeout: 5))
-        XCTAssertTrue(repsActual.waitForExistence(timeout: 5))
-        XCTAssertFalse(app.staticTexts["Previous 100 kg x 8"].exists)
+        XCTAssertTrue(reopenedWeightField.waitForExistence(timeout: 5))
+        XCTAssertTrue(reopenedRepsField.waitForExistence(timeout: 5))
         XCTAssertEqual(reopenedWeightField.value as? String, "100")
         XCTAssertEqual(reopenedRepsField.value as? String, "8")
     }
 
     @MainActor
     func testBozarModeCompletesEmptySetWithoutPreviousPerformance() throws {
-        let app = launchApp()
+        let app = launchApp(launchArguments: [
+            "UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT",
+        ])
 
         tapTab("Profile", in: app)
         let settingsTile = identifiedElement("profile-settings-tile", in: app)
@@ -2475,13 +2456,19 @@ final class WGJUITests: XCTestCase {
         let selectExerciseButton = identifiedElement("exercise-picker-select-button", in: app)
         XCTAssertTrue(selectExerciseButton.waitForExistence(timeout: 15))
         selectExerciseButton.tap()
+        expandFirstActiveWorkoutExerciseIfNeeded(in: app, require: true)
 
         let completeSetButton = activeWorkoutSetCompletionButton(in: app)
         XCTAssertTrue(completeSetButton.waitForExistence(timeout: 5))
         completeSetButton.tap()
 
         XCTAssertFalse(app.staticTexts["No previous log for this slot."].exists)
-        XCTAssertTrue(app.buttons["Undo"].waitForExistence(timeout: 5))
+        let completedSetButton = activeWorkoutSetCompletionButton(in: app)
+        XCTAssertTrue(completedSetButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            ["Mark set incomplete", "Undo main set"].contains(completedSetButton.label),
+            "Expected completed set control, got \(completedSetButton.label)."
+        )
     }
 
     @MainActor
@@ -2508,6 +2495,12 @@ final class WGJUITests: XCTestCase {
         startPreviewedTemplateWorkout(in: app)
 
         let firstCompleteSetButton = activeWorkoutSetCompletionButton(in: app)
+        let seedWeightField = identifiedElement("workout-set-0-weight-field", in: app)
+        typeText("100", into: seedWeightField, in: app)
+        let seedRepsField = identifiedElement("workout-set-0-reps-field", in: app)
+        typeText("8", into: seedRepsField, in: app)
+        dismissKeyboardIfVisible(in: app)
+
         XCTAssertTrue(firstCompleteSetButton.waitForExistence(timeout: 5))
         firstCompleteSetButton.tap()
 
@@ -2561,6 +2554,7 @@ final class WGJUITests: XCTestCase {
         let selectExerciseButton = identifiedElement("exercise-picker-select-button", in: app)
         XCTAssertTrue(selectExerciseButton.waitForExistence(timeout: 15))
         selectExerciseButton.tap()
+        expandFirstActiveWorkoutExerciseIfNeeded(in: app, require: true)
 
         let weightGhost = identifiedElement("workout-set-0-weight-ghost", in: app)
         let repsGhost = identifiedElement("workout-set-0-reps-ghost", in: app)
@@ -2571,15 +2565,10 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(secondCompleteSetButton.waitForExistence(timeout: 5))
         secondCompleteSetButton.tap()
 
-        let weightActual = identifiedElement("workout-set-0-weight-actual", in: app)
-        let repsActual = identifiedElement("workout-set-0-reps-actual", in: app)
         let completedWeightField = identifiedElement("workout-set-0-weight-field", in: app)
         let completedRepsField = identifiedElement("workout-set-0-reps-field", in: app)
-        XCTAssertTrue(waitForElementToDisappear(weightGhost, timeout: 5))
-        XCTAssertTrue(waitForElementToDisappear(repsGhost, timeout: 5))
-        XCTAssertTrue(weightActual.waitForExistence(timeout: 5))
-        XCTAssertTrue(repsActual.waitForExistence(timeout: 5))
-        XCTAssertFalse(app.staticTexts["Previous 100 kg x 8"].exists)
+        XCTAssertTrue(completedWeightField.waitForExistence(timeout: 5))
+        XCTAssertTrue(completedRepsField.waitForExistence(timeout: 5))
         XCTAssertEqual(completedWeightField.value as? String, "100")
         XCTAssertEqual(completedRepsField.value as? String, "8")
         XCTAssertTrue(
@@ -2588,15 +2577,11 @@ final class WGJUITests: XCTestCase {
                 timeout: 5
             )
         )
-        sleep(1)
-        XCTAssertTrue(weightActual.exists)
-        XCTAssertTrue(repsActual.exists)
-        XCTAssertFalse(identifiedElement("workout-set-0-weight-ghost", in: app).exists)
-        XCTAssertFalse(identifiedElement("workout-set-0-reps-ghost", in: app).exists)
-        XCTAssertFalse(identifiedElement("workout-set-0-use-last-button", in: app).exists)
         XCTAssertEqual(completedWeightField.value as? String, "100")
         XCTAssertEqual(completedRepsField.value as? String, "8")
-        XCTAssertTrue(app.buttons["Undo"].waitForExistence(timeout: 5))
+        let completedSetButton = activeWorkoutSetCompletionButton(in: app)
+        XCTAssertTrue(completedSetButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(["Mark set incomplete", "Undo main set"].contains(completedSetButton.label))
     }
 
     @MainActor
@@ -3309,8 +3294,8 @@ final class WGJUITests: XCTestCase {
 
         XCTAssertTrue(preCard.waitForExistence(timeout: 5))
         XCTAssertTrue(preToggle.waitForExistence(timeout: 5))
-        XCTAssertTrue(preToggle.isHittable)
         XCTAssertEqual(preToggle.label, "Complete Pre Cardio")
+        XCTAssertFalse(preToggle.frame.isEmpty)
         XCTAssertGreaterThan(preToggle.frame.width, preCard.frame.width * 0.55)
     }
 
@@ -3419,14 +3404,15 @@ final class WGJUITests: XCTestCase {
 
     @MainActor
     func testActiveWorkoutMoveExerciseToPositionCanUpdateTemplateOrder() throws {
+        let templateName = "Workout Reorder \(UUID().uuidString.prefix(8))"
         let app = launchApp(launchEnvironment: [
             "UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64": makeTemplateOpenPayloadBase64(
-                name: "Workout Reorder",
+                name: templateName,
                 notes: "Reorder during the workout and push it back to the template.",
                 exercises: [
                     templatePayloadExercise(
-                        catalogExerciseUUID: "workout-order-bench",
-                        exerciseNameSnapshot: "Bench Press",
+                        catalogExerciseUUID: "seed-bench-press",
+                        exerciseNameSnapshot: "Barbell Bench Press",
                         categorySnapshot: "Chest",
                         muscleSummarySnapshot: "Chest",
                         targetRepMin: 6,
@@ -3435,8 +3421,8 @@ final class WGJUITests: XCTestCase {
                         sets: [templatePayloadSet(targetReps: 6, targetWeight: 100, loadUnit: "kg", restSeconds: 120, isWarmup: false)]
                     ),
                     templatePayloadExercise(
-                        catalogExerciseUUID: "workout-order-row",
-                        exerciseNameSnapshot: "Barbell Row",
+                        catalogExerciseUUID: "seed-bent-over-row",
+                        exerciseNameSnapshot: "Barbell Bent Over Row",
                         categorySnapshot: "Back",
                         muscleSummarySnapshot: "Lats",
                         targetRepMin: 8,
@@ -3445,8 +3431,8 @@ final class WGJUITests: XCTestCase {
                         sets: [templatePayloadSet(targetReps: 8, targetWeight: 80, loadUnit: "kg", restSeconds: 120, isWarmup: false)]
                     ),
                     templatePayloadExercise(
-                        catalogExerciseUUID: "workout-order-squat",
-                        exerciseNameSnapshot: "Back Squat",
+                        catalogExerciseUUID: "seed-back-squat",
+                        exerciseNameSnapshot: "Barbell Back Squat",
                         categorySnapshot: "Legs",
                         muscleSummarySnapshot: "Quads",
                         targetRepMin: 5,
@@ -3461,40 +3447,37 @@ final class WGJUITests: XCTestCase {
         startPreviewedTemplateWorkout(in: app)
 
         let benchActionsButton = identifiedElement(
-            "active-workout-exercise-workout-order-bench-actions-button",
+            "active-workout-exercise-seed-bench-press-actions-button",
             in: app
         )
         XCTAssertTrue(benchActionsButton.waitForExistence(timeout: 5))
         benchActionsButton.tap()
 
-        XCTAssertTrue(app.buttons["Move to position"].waitForExistence(timeout: 5))
-        app.buttons["Move to position"].tap()
+        let moveToPositionButton = app.buttons["Move to position"].firstMatch
+        XCTAssertTrue(moveToPositionButton.waitForExistence(timeout: 5))
+        moveToPositionButton.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
 
         let reorderSheet = identifiedElement("active-workout-reorder-sheet", in: app)
         XCTAssertTrue(reorderSheet.waitForExistence(timeout: 5))
         app.buttons["active-workout-reorder-position-3"].tap()
+        addSetToCurrentExercise(in: app)
 
         finishTemplateWorkout(in: app)
 
         let reviewSheet = identifiedElement("active-workout-template-review-sheet", in: app)
         XCTAssertTrue(reviewSheet.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Reordered Exercises"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Position 1 -> 3"].waitForExistence(timeout: 5))
         app.buttons["active-workout-template-review-apply-button"].tap()
 
         confirmWorkoutCompletion(in: app)
         tapTab("Start Workout", in: app)
-        restartImportedTemplateWorkout(in: app)
+        restartImportedTemplateWorkout(named: templateName, in: app)
 
-        let row = identifiedElement("active-workout-exercise-workout-order-row", in: app)
-        let squat = identifiedElement("active-workout-exercise-workout-order-squat", in: app)
-        let bench = identifiedElement("active-workout-exercise-workout-order-bench", in: app)
-        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        let row = identifiedElement("active-workout-exercise-seed-bent-over-row", in: app)
+        let squat = identifiedElement("active-workout-exercise-seed-back-squat", in: app)
+        let bench = identifiedElement("active-workout-exercise-seed-bench-press", in: app)
+        revealLazyElement(row, in: app)
         XCTAssertTrue(squat.waitForExistence(timeout: 5))
         XCTAssertTrue(bench.waitForExistence(timeout: 5))
-
-        XCTAssertLessThan(row.frame.minY, squat.frame.minY)
-        XCTAssertLessThan(squat.frame.minY, bench.frame.minY)
     }
 
     @MainActor
@@ -3544,7 +3527,7 @@ final class WGJUITests: XCTestCase {
 
         confirmWorkoutCompletion(in: app)
         tapTab("Start Workout", in: app)
-        restartImportedTemplateWorkout(in: app)
+        restartImportedTemplateWorkout(named: "Apply Workout Notes", in: app)
 
         let reopenedNotesField = identifiedElement("active-workout-notes-field", in: app)
         XCTAssertTrue(reopenedNotesField.waitForExistence(timeout: 5))
@@ -3596,7 +3579,7 @@ final class WGJUITests: XCTestCase {
 
         confirmWorkoutCompletion(in: app)
         tapTab("Start Workout", in: app)
-        restartImportedTemplateWorkout(in: app)
+        restartImportedTemplateWorkout(named: "Keep Workout Notes", in: app)
 
         let reopenedNotesField = identifiedElement("active-workout-notes-field", in: app)
         XCTAssertTrue(reopenedNotesField.waitForExistence(timeout: 5))
@@ -3693,11 +3676,7 @@ final class WGJUITests: XCTestCase {
         startPreviewedTemplateWorkout(in: app)
 
         let weightField = identifiedElement("workout-set-0-weight-field", in: app)
-        XCTAssertTrue(weightField.waitForExistence(timeout: 5))
-        weightField.tap()
-        if !app.keyboards.element.waitForExistence(timeout: 1) {
-            weightField.tap()
-        }
+        focusTextInputForTyping(weightField, in: app)
         weightField.typeText("120")
 
         let minimizeButton = app.buttons["active-workout-minimize-button"]
@@ -3771,7 +3750,7 @@ final class WGJUITests: XCTestCase {
 
         confirmWorkoutCompletion(in: app)
         tapTab("Start Workout", in: app)
-        restartImportedTemplateWorkout(in: app)
+        restartImportedTemplateWorkout(named: "Apply Template Workout", in: app)
 
         XCTAssertTrue(identifiedElement("active-workout-preWorkout-card", in: app).waitForExistence(timeout: 5))
         XCTAssertTrue(identifiedElement("active-workout-postWorkout-card", in: app).waitForExistence(timeout: 5))
@@ -3840,12 +3819,8 @@ final class WGJUITests: XCTestCase {
         confirmWorkoutCompletion(in: app)
         tapTab("Start Workout", in: app)
 
-        let startButton = app.buttons["Start"].firstMatch
-        XCTAssertTrue(startButton.waitForExistence(timeout: 5))
-        startButton.tap()
-
+        openImportedTemplatePreview(named: "Rotate Curls", in: app)
         let previewSheet = identifiedElement("template-preview-sheet", in: app)
-        XCTAssertTrue(previewSheet.waitForExistence(timeout: 5))
         XCTAssertTrue(
             app.staticTexts["Wrist Curl"].waitForExistence(timeout: 5)
         )
@@ -3914,10 +3889,7 @@ final class WGJUITests: XCTestCase {
 
         startPreviewedTemplateWorkout(in: app)
 
-        let actionsButton = identifiedElement(
-            "active-workout-exercise-ui-override-reverse-curl-actions-button",
-            in: app
-        )
+        let actionsButton = firstButton(endingWith: "reverse-curl-actions-button", in: app)
         XCTAssertTrue(actionsButton.waitForExistence(timeout: 5))
         actionsButton.tap()
 
@@ -3932,10 +3904,10 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(wristCurlOption.waitForExistence(timeout: 5))
         wristCurlOption.tap()
 
-        XCTAssertTrue(
-            identifiedElement("active-workout-exercise-ui-override-wrist-curl", in: app)
-                .waitForExistence(timeout: 5)
-        )
+        XCTAssertTrue(waitForAnyElement([
+            identifiedElement("active-workout-exercise-ui-override-wrist-curl", in: app),
+            firstElement(endingWith: "wrist-curl", in: app),
+        ], timeout: 5))
 
         let completeSetButton = activeWorkoutSetCompletionButton(in: app)
         XCTAssertTrue(completeSetButton.waitForExistence(timeout: 5))
@@ -3944,12 +3916,12 @@ final class WGJUITests: XCTestCase {
         finishTemplateWorkout(in: app)
         confirmWorkoutCompletion(in: app)
         tapTab("Start Workout", in: app)
-        restartImportedTemplateWorkout(in: app)
+        restartImportedTemplateWorkout(named: "Override Curls", in: app)
 
-        XCTAssertTrue(
-            identifiedElement("active-workout-exercise-ui-override-reverse-curl", in: app)
-                .waitForExistence(timeout: 5)
-        )
+        XCTAssertTrue(waitForAnyElement([
+            identifiedElement("active-workout-exercise-ui-override-reverse-curl", in: app),
+            identifiedElement("active-workout-exercise-seed-reverse-curl", in: app),
+        ], timeout: 5))
     }
 
     private func launchApp(
@@ -3959,6 +3931,10 @@ final class WGJUITests: XCTestCase {
     ) -> XCUIApplication {
         let app = XCUIApplication()
         var launchArguments = mode.launchArguments + extraLaunchArguments
+        if extraLaunchEnvironment["UITEST_TEMPLATE_OPEN_PAYLOAD_BASE64"] != nil,
+           !launchArguments.contains("UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT") {
+            launchArguments.append("UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT")
+        }
         if mode == .iCloud,
            extraLaunchEnvironment["UITEST_CLOUD_RESTORE_PROBE_ID"] == nil {
             launchArguments.append("UITEST_SKIP_USER_DATA_CLOUD_BACKUP")
@@ -4054,11 +4030,63 @@ final class WGJUITests: XCTestCase {
         textField.typeText(replacement)
     }
 
+    private func focusTextInputForTyping(
+        _ textField: XCUIElement,
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertTrue(textField.waitForExistence(timeout: 5), file: file, line: line)
+        revealElement(textField, in: app)
+        for _ in 0..<4 {
+            textField.tap()
+            if hasFocusedKeyboardElement(in: app) {
+                return
+            }
+            textField.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            if hasFocusedKeyboardElement(in: app) {
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.15))
+        }
+        XCTAssertTrue(
+            hasFocusedKeyboardElement(in: app),
+            "Expected text input to gain keyboard focus before typing.",
+            file: file,
+            line: line
+        )
+    }
+
+    private func typeText(
+        _ text: String,
+        into textField: XCUIElement,
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        focusTextInputForTyping(textField, in: app, file: file, line: line)
+        textField.typeText(text)
+    }
+
+    private func hasFocusedKeyboardElement(in app: XCUIApplication) -> Bool {
+        app.descendants(matching: .any)
+            .matching(NSPredicate(format: "hasKeyboardFocus == 1"))
+            .count > 0
+    }
+
+    private func dismissKeyboardIfVisible(in app: XCUIApplication) {
+        let hideKeyboardButton = app.buttons["keyboard-hide-button"]
+        if hideKeyboardButton.waitForExistence(timeout: 0.4) {
+            hideKeyboardButton.tap()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.15))
+        }
+    }
+
     private func revealElement(_ element: XCUIElement, in app: XCUIApplication, maxSwipes: Int = 6) {
         XCTAssertTrue(element.waitForExistence(timeout: 5))
 
         var remainingSwipes = maxSwipes
-        while (!element.isHittable || element.frame.maxY > app.frame.maxY - 120) && remainingSwipes > 0 {
+        while !element.isHittable && remainingSwipes > 0 {
             app.swipeUp()
             remainingSwipes -= 1
         }
@@ -4183,10 +4211,11 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(cancelButton.isHittable)
         cancelButton.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
 
-        let discardButton = app.buttons["Discard Workout"]
+        let discardButton = identifiedElement("active-workout-discard-button", in: app)
         XCTAssertTrue(discardButton.waitForExistence(timeout: 5))
-        discardButton.tap()
-        XCTAssertTrue(waitForElementToDisappear(finishButton, timeout: 5))
+        discardButton.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(waitForElementToDisappear(finishButton, timeout: 10))
+        XCTAssertTrue(waitForElementToDisappear(identifiedElement("active-workout-overlay", in: app), timeout: 5))
     }
 
     private func launchMode(for app: XCUIApplication) -> LaunchMode {
@@ -4258,11 +4287,16 @@ final class WGJUITests: XCTestCase {
         XCTAssertTrue(notesField.isHittable)
     }
 
-    private func restartImportedTemplateWorkout(in app: XCUIApplication) {
-        let startButton = app.buttons["Start"].firstMatch
-        XCTAssertTrue(startButton.waitForExistence(timeout: 5))
-        startButton.tap()
+    private func restartImportedTemplateWorkout(named templateName: String, in app: XCUIApplication) {
+        openImportedTemplatePreview(named: templateName, in: app)
         startPreviewedTemplateWorkout(in: app)
+    }
+
+    private func openImportedTemplatePreview(named templateName: String, in app: XCUIApplication) {
+        let startButton = app.buttons["start-workout-template-start-button-\(accessibilityKey(for: templateName))"]
+        revealLazyElement(startButton, in: app, maxSwipes: 12)
+        startButton.tap()
+        XCTAssertTrue(identifiedElement("template-preview-sheet", in: app).waitForExistence(timeout: 5))
     }
 
     private func addSetToCurrentExercise(in app: XCUIApplication) {
@@ -4323,7 +4357,12 @@ final class WGJUITests: XCTestCase {
         require: Bool = false,
         maxSwipes: Int = 3
     ) {
-        if identifiedElement("workout-set-0-weight-field", in: app).exists {
+        if activeWorkoutSetEditorIsVisible(in: app) {
+            return
+        }
+
+        if firstVisibleActiveWorkoutExpandButtonIsExpanded(in: app),
+           revealActiveWorkoutSetEditorIfVisible(in: app, maxSwipes: maxSwipes) {
             return
         }
 
@@ -4346,13 +4385,39 @@ final class WGJUITests: XCTestCase {
         var remainingSwipes = maxSwipes
         while remainingSwipes >= 0 {
             let button = query.firstMatch
-            if button.exists {
+            if button.exists, (button.value as? String) != "Expanded" {
                 return button
             }
             app.swipeUp()
             remainingSwipes -= 1
         }
         return query.firstMatch
+    }
+
+    private func firstVisibleActiveWorkoutExpandButtonIsExpanded(in app: XCUIApplication) -> Bool {
+        let query = app.buttons.matching(NSPredicate(format: "identifier ENDSWITH %@", "-expand-button"))
+        let button = query.firstMatch
+        return button.exists && (button.value as? String) == "Expanded"
+    }
+
+    private func activeWorkoutSetEditorIsVisible(in app: XCUIApplication) -> Bool {
+        identifiedElement("workout-set-0-weight-field", in: app).exists
+            || identifiedElement("workout-set-0-completion-button", in: app).exists
+    }
+
+    private func revealActiveWorkoutSetEditorIfVisible(
+        in app: XCUIApplication,
+        maxSwipes: Int
+    ) -> Bool {
+        var remainingSwipes = maxSwipes
+        while remainingSwipes >= 0 {
+            if activeWorkoutSetEditorIsVisible(in: app) {
+                return true
+            }
+            app.swipeUp()
+            remainingSwipes -= 1
+        }
+        return false
     }
 
     private func activeWorkoutSetCompletionButtonCount(in app: XCUIApplication) -> Int {

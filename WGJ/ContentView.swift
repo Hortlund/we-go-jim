@@ -109,8 +109,7 @@ struct ContentView: View {
             updateIdleTimerState()
         }
         .onChange(of: appRuntimeState.cloudRuntimeMode) { _, _ in
-            guard appPhase == .main else { return }
-            startUserDataCloudMirrorIfReady()
+            handleCloudRuntimeModeChanged()
         }
         .onChange(of: appRuntimeState.userDataSyncStatus.latestLocalMutationAt) { _, _ in
             guard appPhase == .main else { return }
@@ -411,8 +410,32 @@ struct ContentView: View {
     private func handleWorkoutHistoryChanged() {
         guard appPhase == .main else { return }
         appWarmupState.invalidateProfile()
+        appWarmupState.invalidateBros()
+        AppNotificationRouter.shared.requestBrosRefresh()
         scheduleWeeklyGoalWidgetPublish()
         requestWarmups(trigger: .activeWorkoutEnded)
+        scheduleSocialMaintenanceAfterWorkoutHistoryChangeIfNeeded()
+    }
+
+    private func handleCloudRuntimeModeChanged() {
+        guard appPhase == .main else { return }
+        startUserDataCloudMirrorIfReady()
+        scheduleSocialMaintenanceAfterCloudAvailabilityChangeIfNeeded()
+    }
+
+    private func scheduleSocialMaintenanceAfterWorkoutHistoryChangeIfNeeded() {
+        guard appRuntimeState.isBrosCloudAvailable else { return }
+        Task {
+            await scheduleSocialMaintenanceIfNeeded(trigger: .activeWorkoutEnded)
+        }
+    }
+
+    private func scheduleSocialMaintenanceAfterCloudAvailabilityChangeIfNeeded() {
+        guard appRuntimeState.isBrosCloudAvailable else { return }
+        AppNotificationRouter.shared.requestBrosRefresh()
+        Task {
+            await scheduleSocialMaintenanceIfNeeded(trigger: .activeWorkoutEnded)
+        }
     }
 
     private func startUserDataCloudMirrorIfReady() {
@@ -1096,6 +1119,7 @@ struct ContentView: View {
 
         await service.refreshLocalMembershipState()
         try? await service.syncReactionNotificationSubscription()
+        try? await service.repairMissingCompletedSessionPublishes()
         await service.flushOutbox()
     }
 
@@ -1129,6 +1153,11 @@ struct ContentView: View {
                 await WGJPerformance.measureAsync("app.maintenance.social") {
                     await Self.runSocialMaintenance(modelContext: backgroundContext)
                 }
+            }
+            guard trigger == .activeWorkoutEnded else { return }
+            await MainActor.run {
+                appWarmupState.invalidateBros()
+                AppNotificationRouter.shared.requestBrosRefresh()
             }
         }
     }

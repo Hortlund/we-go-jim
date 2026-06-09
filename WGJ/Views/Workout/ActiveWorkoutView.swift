@@ -4,6 +4,11 @@ import SwiftData
 import SwiftUI
 import UIKit
 
+@MainActor
+private final class ActiveWorkoutScrollPositionCache {
+    var currentTarget: ActiveWorkoutScrollTarget?
+}
+
 struct ActiveWorkoutView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
@@ -43,8 +48,8 @@ struct ActiveWorkoutView: View {
     @State private var renderProjection = ActiveWorkoutRenderProjection.empty
     @State private var isBatchingRenderProjectionRefresh = false
     @State private var needsBatchedRenderProjectionRefresh = false
-    @State private var currentScrollTarget: ActiveWorkoutScrollTarget?
     @State private var restoredScrollTarget: ActiveWorkoutScrollTarget?
+    @State private var scrollPositionCache = ActiveWorkoutScrollPositionCache()
     @State private var profilePreferences = ActiveWorkoutProfilePreferences.default
 
     @State private var sessionNameDraft = ""
@@ -72,9 +77,11 @@ struct ActiveWorkoutView: View {
 
     @State private var errorMessage = ""
     @State private var showingError = false
+    @State private var keyboardDismissToken = ActiveWorkoutKeyboardDismissToken()
     @State private var isKeyboardVisible = false
-    @State private var keyboardBottomOverlap: CGFloat = 0
     @State private var isMetricInputFocused = false
+    @State private var focusedMetricInputExerciseID: UUID?
+    @State private var keyboardDismissTargetExerciseID: UUID?
 
     private let cancelSectionFocusSpacerHeight: CGFloat = 160
     private let cancelSectionDockClearanceHeight: CGFloat = 96
@@ -82,6 +89,13 @@ struct ActiveWorkoutView: View {
 
     private var persistenceBackgroundStore: AppBackgroundStore {
         appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
+    }
+
+    private var activeWorkoutScrollPositionBinding: Binding<ActiveWorkoutScrollTarget?> {
+        Binding(
+            get: { scrollPositionCache.currentTarget },
+            set: { scrollPositionCache.currentTarget = $0 }
+        )
     }
 
     init(sessionID: UUID) {
@@ -97,7 +111,7 @@ struct ActiveWorkoutView: View {
                 .scrollTargetLayout()
                 .padding(16)
             }
-            .scrollPosition(id: $currentScrollTarget, anchor: .top)
+            .scrollPosition(id: activeWorkoutScrollPositionBinding, anchor: .top)
             .scrollDismissesKeyboard(.interactively)
             .wgjScreenBackground()
             .wgjNavigationChrome()
@@ -117,16 +131,16 @@ struct ActiveWorkoutView: View {
                     finishToolbarButton
                 }
             }
-            .wgjMinimalKeyboardToolbar()
+            .wgjMinimalKeyboardToolbar(isEnabled: true, onDismiss: dismissKeyboard)
             .overlay(alignment: .bottom) {
                 if ActiveWorkoutBottomDockPlacementPolicy.shouldPinToScreenOverlay(
                     hasSession: session != nil,
-                    isEndingSession: isEndingSession
+                    isEndingSession: isEndingSession,
+                    isCancelArmed: isCancelArmed
                 ) {
                     ActiveWorkoutKeyboardAwareBottomDock(
                         session: session,
                         isEndingSession: isEndingSession,
-                        restTimerPopupID: restTimerState.restTimerPopup?.id,
                         reduceMotion: reduceMotion,
                         isKeyboardVisible: isKeyboardVisible,
                         isMetricInputFocused: isMetricInputFocused,
@@ -135,17 +149,6 @@ struct ActiveWorkoutView: View {
                         }
                     )
                 }
-            }
-            .overlay(alignment: .bottomTrailing) {
-                ActiveWorkoutFloatingKeyboardDismissButton(
-                    isKeyboardVisible: isKeyboardVisible,
-                    isMetricInputFocused: isMetricInputFocused,
-                    keyboardBottomOverlap: keyboardBottomOverlap,
-                    reduceMotion: reduceMotion,
-                    onDismiss: {
-                        dismissKeyboard()
-                    }
-                )
             }
             .sheet(item: $pickerTarget, onDismiss: {
                 dismissKeyboard()
@@ -223,7 +226,9 @@ struct ActiveWorkoutView: View {
                 handleScenePhaseChange(newPhase)
             }
             .onChange(of: isMetricInputFocused) { _, isFocused in
-                guard !isFocused, canRunNonCriticalInteractionWork else { return }
+                guard !isFocused else { return }
+                flushBatchedRenderProjectionIfNeeded()
+                guard canRunNonCriticalInteractionWork else { return }
                 scheduleForegroundNonCriticalInteractionWorkResume()
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
@@ -234,8 +239,8 @@ struct ActiveWorkoutView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
                 isKeyboardVisible = false
-                keyboardBottomOverlap = 0
                 isMetricInputFocused = false
+                focusedMetricInputExerciseID = nil
             }
             .onAppear {
                 restorePreparedScrollTargetIfNeeded(using: scrollProxy)
@@ -348,9 +353,6 @@ struct ActiveWorkoutView: View {
         if session != nil && !isEndingSession {
             ActiveWorkoutCancelSection(
                 isCancelArmed: isCancelArmed,
-                onCancelConfirmationPresented: {
-                    focusCancelSection(using: scrollProxy)
-                },
                 onArmCancel: {
                     dismissKeyboard()
                     showingFinishConfirmation = false
@@ -441,7 +443,8 @@ struct ActiveWorkoutView: View {
     private var shouldShowBottomDock: Bool {
         ActiveWorkoutBottomDockPlacementPolicy.shouldReserveScrollClearance(
             hasSession: session != nil,
-            isEndingSession: isEndingSession
+            isEndingSession: isEndingSession,
+            isCancelArmed: isCancelArmed
         )
     }
 
@@ -454,20 +457,7 @@ struct ActiveWorkoutView: View {
     }
 
     private var exerciseHydrationStamp: ActiveWorkoutExerciseInteractionStamp {
-        ActiveWorkoutExerciseInteractionStamp(
-            entries: renderProjection.sessionExercises.map { exercise in
-                ActiveWorkoutExerciseInteractionStamp.Entry(
-                    id: exercise.id,
-                    catalogExerciseUUID: exercise.catalogExerciseUUID,
-                    restSeconds: exercise.restSeconds,
-                    targetRepMin: exercise.targetRepMin,
-                    targetRepMax: exercise.targetRepMax,
-                    supersetGroupID: exercise.supersetGroupID,
-                    supersetPositionRaw: exercise.supersetPositionRaw
-                )
-            },
-            invalidation: exerciseHydrationInvalidation
-        )
+        renderProjection.exerciseHydrationStamp.withInvalidation(exerciseHydrationInvalidation)
     }
 
     private var exercisesSectionHeader: some View {
@@ -698,10 +688,12 @@ struct ActiveWorkoutView: View {
                         removeExercise(exerciseID: exerciseID)
                     },
                     flushCoordinator: rowFlushCoordinator,
+                    keyboardDismissToken: keyboardDismissToken(for: exerciseID),
                     onInputFocusChange: { isFocused in
-                        isMetricInputFocused = isFocused
+                        handleMetricInputFocusChange(isFocused, exerciseID: exerciseID)
                     }
                 )
+                .equatable()
             } else {
                 ActiveWorkoutExerciseLoadingCard(
                     exerciseAccessibilityIdentifier: "active-workout-exercise-\(exercise.catalogExerciseUUID)",
@@ -777,7 +769,7 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func resolvedDrafts(for exercise: ActiveWorkoutRuntimeExercise) -> [WorkoutSessionSetDraft] {
-        renderableDrafts(for: exercise.id) ?? []
+        renderableDrafts(for: exercise.id) ?? exercise.setDrafts
     }
 
     @MainActor
@@ -799,11 +791,19 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
-    private func updateDraftsValue(_ updated: [WorkoutSessionSetDraft], for exerciseID: UUID) {
+    private func updateDraftsValue(
+        _ updated: [WorkoutSessionSetDraft],
+        for exerciseID: UUID,
+        refreshProjectionImmediately: Bool = true
+    ) {
         guard setDraftsByExerciseID[exerciseID] != updated else { return }
         setDraftsByExerciseID[exerciseID] = updated
         scheduleGuidanceRefresh(for: exerciseID)
-        refreshRenderProjection()
+        if refreshProjectionImmediately {
+            refreshRenderProjection()
+        } else {
+            needsBatchedRenderProjectionRefresh = true
+        }
     }
 
     @MainActor
@@ -1164,7 +1164,7 @@ struct ActiveWorkoutView: View {
         let hydrationDelay = previousPerformanceHydrationDelay
         let backgroundStore = persistenceBackgroundStore
         let hydrationWorker = ActiveWorkoutDeferredHydrationWorker()
-        deferredHydrationTask = Task.detached(priority: .utility) {
+        deferredHydrationTask = Task.detached(priority: .userInitiated) {
             guard await runDeferredHydrationIfStillAllowed(stamp: stamp) else { return }
 
             let loadedHydration: ActiveWorkoutDeferredHydrationResult
@@ -1528,7 +1528,6 @@ struct ActiveWorkoutView: View {
             previous: previousDrafts,
             current: drafts
         )
-        updateDraftsValue(drafts, for: exercise.id)
         let isCompleted = isExerciseCompleted(drafts)
         let previouslyCompleted = cardStateController.didCompleteCurrentCycle(for: exercise.id)
         if previouslyCompleted != isCompleted {
@@ -1540,6 +1539,15 @@ struct ActiveWorkoutView: View {
                 WorkoutFeedbackCenter.shared.exerciseCompleted()
             }
         }
+        let refreshesProjectionImmediately = ActiveWorkoutRenderProjectionRefreshPolicy.shouldRefreshImmediately(
+            changeSummary: changeSummary,
+            isMetricInputFocused: isMetricInputFocused
+        )
+        updateDraftsValue(
+            drafts,
+            for: exercise.id,
+            refreshProjectionImmediately: refreshesProjectionImmediately
+        )
         persistCommittedUserEditSnapshot(
             writeDurableSnapshot: ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(
                 for: changeSummary
@@ -2096,7 +2104,7 @@ struct ActiveWorkoutView: View {
         let restTimerSnapshot = restTimerState.restTimerSnapshot()
         let scrollTarget = minimizedScrollRestoreTarget()
         pendingMinimizedSnapshotTask?.cancel()
-        pendingMinimizedSnapshotTask = Task.detached(priority: .utility) {
+        pendingMinimizedSnapshotTask = Task.detached(priority: .userInitiated) {
             guard !Task.isCancelled else { return }
             do {
                 try await ActiveWorkoutSnapshotStore.shared.save(
@@ -2120,7 +2128,7 @@ struct ActiveWorkoutView: View {
     @MainActor
     private func minimizedScrollRestoreTarget() -> ActiveWorkoutScrollTarget? {
         ActiveWorkoutMinimizeScrollRestorePolicy.target(
-            currentScrollTarget: currentScrollTarget,
+            currentScrollTarget: scrollPositionCache.currentTarget,
             expandedExerciseIDs: cardStateController.expandedExerciseIDs(),
             orderedExerciseIDs: sessionExercises.map(\.id),
             hasPreWorkoutCardio: preWorkoutCardio != nil,
@@ -2143,16 +2151,19 @@ struct ActiveWorkoutView: View {
             guard !isEndingSession else { return }
             isEndingSession = true
             rowFlushCoordinator.flushAll()
-            await awaitPendingSnapshotWrites(cancelMinimizedWrite: true)
+            let pendingSnapshotWrites = cancelPendingSnapshotWrites(cancelMinimizedWrite: true)
             restTimerState.clearRestTimer()
+            activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
+            dismiss()
 
-            do {
-                try await ActiveWorkoutSnapshotStore.shared.delete()
-                activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
-                dismiss()
-            } catch {
-                isEndingSession = false
-                showError(error)
+            Task.detached(priority: .utility) {
+                await pendingSnapshotWrites.userEdit?.value
+                await pendingSnapshotWrites.minimized?.value
+                do {
+                    try await ActiveWorkoutSnapshotStore.shared.delete()
+                } catch {
+                    NSLog("WGJ active workout snapshot cleanup failed after discard: \(error.localizedDescription)")
+                }
             }
         }
     }
@@ -2203,8 +2214,37 @@ struct ActiveWorkoutView: View {
         }
     }
 
+    private func keyboardDismissToken(for exerciseID: UUID) -> ActiveWorkoutKeyboardDismissToken {
+        guard focusedMetricInputExerciseID == exerciseID || keyboardDismissTargetExerciseID == exerciseID else {
+            return ActiveWorkoutKeyboardDismissToken()
+        }
+
+        return keyboardDismissToken
+    }
+
     private func dismissKeyboard() {
+        if let focusedMetricInputExerciseID {
+            keyboardDismissTargetExerciseID = focusedMetricInputExerciseID
+        }
+        keyboardDismissToken.requestDismiss()
         WGJKeyboard.dismiss()
+    }
+
+    private func handleMetricInputFocusChange(_ isFocused: Bool, exerciseID: UUID) {
+        if isFocused {
+            isMetricInputFocused = true
+            focusedMetricInputExerciseID = exerciseID
+            keyboardDismissTargetExerciseID = nil
+            return
+        }
+
+        if focusedMetricInputExerciseID == exerciseID {
+            focusedMetricInputExerciseID = nil
+        }
+        if keyboardDismissTargetExerciseID == exerciseID {
+            keyboardDismissTargetExerciseID = nil
+        }
+        isMetricInputFocused = focusedMetricInputExerciseID != nil
     }
 
     private var exerciseReorderItems: [ExerciseReorderListItem] {
@@ -2568,10 +2608,10 @@ struct ActiveWorkoutView: View {
     @MainActor
     private func handleScenePhaseChange(_ newPhase: ScenePhase) {
         if ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: newPhase) {
-            isKeyboardVisible = false
-            keyboardBottomOverlap = 0
-            isMetricInputFocused = false
             dismissKeyboard()
+            isKeyboardVisible = false
+            isMetricInputFocused = false
+            focusedMetricInputExerciseID = nil
         }
 
         // Foreground return must stay memory-only; non-critical work resumes from explicit user interactions.
@@ -2583,18 +2623,21 @@ struct ActiveWorkoutView: View {
             return
         }
 
-        Task { @MainActor in
-            _ = await flushDirtyWritesNow(checkpoint: .sceneTransition)
+        Task.detached(priority: .userInitiated) {
+            await flushDirtyWritesForSceneTransitionIfStillCurrent()
         }
+    }
+
+    @MainActor
+    private func flushDirtyWritesForSceneTransitionIfStillCurrent() async {
+        guard scenePhase == .background else { return }
+        _ = await flushDirtyWritesNow(checkpoint: .sceneTransition)
     }
 
     @MainActor
     private func updateKeyboardFrameState(from notification: Notification) {
         let keyboardIsVisible = WGJKeyboard.isVisible(from: notification)
         isKeyboardVisible = keyboardIsVisible
-        keyboardBottomOverlap = keyboardIsVisible
-            ? WGJKeyboard.bottomOverlap(from: notification)
-            : 0
     }
 
     @MainActor
@@ -2614,7 +2657,7 @@ struct ActiveWorkoutView: View {
         }
 
         foregroundNonCriticalInteractionWorkTask?.cancel()
-        foregroundNonCriticalInteractionWorkTask = Task.detached(priority: .utility) {
+        foregroundNonCriticalInteractionWorkTask = Task.detached(priority: .userInitiated) {
             try? await Task.sleep(for: ActiveWorkoutInteractionWorkPolicy.foregroundResumeGraceDelay)
             guard !Task.isCancelled else { return }
 
@@ -2664,7 +2707,7 @@ struct ActiveWorkoutView: View {
 
         pendingUserEditSnapshotTask?.cancel()
         let restTimerSnapshot = restTimerState.restTimerSnapshot()
-        pendingUserEditSnapshotTask = Task.detached(priority: .utility) {
+        pendingUserEditSnapshotTask = Task.detached(priority: .userInitiated) {
             guard !Task.isCancelled else { return }
             do {
                 try await ActiveWorkoutSnapshotStore.shared.save(
@@ -2687,6 +2730,15 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func awaitPendingSnapshotWrites(cancelMinimizedWrite: Bool) async {
+        let pendingSnapshotWrites = cancelPendingSnapshotWrites(cancelMinimizedWrite: cancelMinimizedWrite)
+        await pendingSnapshotWrites.userEdit?.value
+        await pendingSnapshotWrites.minimized?.value
+    }
+
+    @MainActor
+    private func cancelPendingSnapshotWrites(
+        cancelMinimizedWrite: Bool
+    ) -> (userEdit: Task<Void, Never>?, minimized: Task<Void, Never>?) {
         let pendingUserEditSnapshotTask = pendingUserEditSnapshotTask
         self.pendingUserEditSnapshotTask = nil
         let pendingMinimizedSnapshotTask = pendingMinimizedSnapshotTask
@@ -2696,8 +2748,7 @@ struct ActiveWorkoutView: View {
         if cancelMinimizedWrite {
             pendingMinimizedSnapshotTask?.cancel()
         }
-        await pendingUserEditSnapshotTask?.value
-        await pendingMinimizedSnapshotTask?.value
+        return (pendingUserEditSnapshotTask, pendingMinimizedSnapshotTask)
     }
 
     private func performFinishCommand(
@@ -3150,7 +3201,6 @@ private struct ActiveWorkoutBottomDock: View {
 
 private struct ActiveWorkoutCancelSection: View {
     let isCancelArmed: Bool
-    let onCancelConfirmationPresented: () -> Void
     let onArmCancel: () -> Void
     let onKeepWorkout: () -> Void
     let onDiscardWorkout: () -> Void
@@ -3210,9 +3260,9 @@ private struct ActiveWorkoutCancelSection: View {
                     .accessibilityIdentifier("active-workout-discard-button")
             }
         }
-        .onAppear(perform: onCancelConfirmationPresented)
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("active-workout-cancel-confirmation")
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -3775,45 +3825,12 @@ private struct ActiveWorkoutCompletionSourceContext {
     let completesSetCycle: Bool
 }
 
-private struct ActiveWorkoutFloatingKeyboardDismissButton: View {
-    let isKeyboardVisible: Bool
-    let isMetricInputFocused: Bool
-    let keyboardBottomOverlap: CGFloat
-    let reduceMotion: Bool
-    let onDismiss: () -> Void
-
-    var body: some View {
-        if ActiveWorkoutKeyboardChromePolicy.shouldShowFloatingKeyboardDismissButton(
-            isKeyboardVisible: isKeyboardVisible,
-            isMetricInputFocused: isMetricInputFocused
-        ) {
-            Button(action: onDismiss) {
-                Image(systemName: WGJKeyboardHideControl.systemImage)
-                    .accessibilityHidden(true)
-            }
-            .buttonStyle(
-                WGJIconButtonStyle(
-                    tint: WGJKeyboardHideControl.foregroundStyle,
-                    background: WGJTheme.cardStrong,
-                    outline: WGJTheme.outline
-                )
-            )
-            .accessibilityLabel(WGJKeyboardHideControl.accessibilityLabel)
-            .accessibilityIdentifier("active-workout-floating-keyboard-hide-button")
-            .padding(.trailing, 16)
-            .padding(.bottom, keyboardBottomOverlap + 12)
-            .transition(WGJMotion.cardTransition(reduceMotion: reduceMotion))
-            .ignoresSafeArea(.keyboard, edges: .bottom)
-        }
-    }
-}
-
 private struct ActiveWorkoutKeyboardAwareBottomDock: View {
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(RestTimerState.self) private var restTimerState
 
     let session: ActiveWorkoutRuntimeSession?
     let isEndingSession: Bool
-    let restTimerPopupID: UUID?
     let reduceMotion: Bool
     let isKeyboardVisible: Bool
     let isMetricInputFocused: Bool
@@ -3831,7 +3848,7 @@ private struct ActiveWorkoutKeyboardAwareBottomDock: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .bottomTrailing)
-        .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: restTimerPopupID)
+        .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: restTimerState.restTimerPopup?.id)
         .animation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion), value: shouldShowDock)
     }
 

@@ -341,6 +341,7 @@ nonisolated final class TemplateRepository {
         guard autoSaveChanges else { return }
         try modelContext.save()
         UserDataSyncTrackerBridge.markLocalMutation()
+        TemplateLibraryChangeBroadcaster.post()
     }
 
     func finalizeDeferredUserDataChangesIfNeeded() throws {

@@ -825,7 +825,8 @@ nonisolated final class WorkoutSessionRepository {
         scheduleProjectionRebuild(for: sessionID)
         publishWeeklyGoalWidgetProgress()
         WorkoutHistoryChangeBroadcaster.post()
-        try? CloudKitBrosSocialService.makeIfUserDataSyncEnabled(modelContext: modelContext)?.queueCompletedSessionPublish(sessionID: sessionID)
+        try? CloudKitBrosSocialService.makeForLocalOutboxQueueing(modelContext: modelContext)
+            .queueCompletedSessionPublish(sessionID: sessionID)
     }
 
     func archiveSession(id: UUID) throws {

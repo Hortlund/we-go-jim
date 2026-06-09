@@ -512,7 +512,7 @@ struct TemplateExercisePrescriptionEditor: View {
                     .padding(.vertical, 6)
             }
 
-            LazyVStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 14) {
                 ForEach(presentation.rows) { row in
                     SwipeDeleteRow(
                         offset: setSwipeOffsetBinding(for: row.id),

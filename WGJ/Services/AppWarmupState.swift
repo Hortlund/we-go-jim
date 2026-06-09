@@ -627,7 +627,7 @@ nonisolated enum ProfileReloadPolicy {
 }
 
 nonisolated enum ProfileDashboardRenderPolicy {
-    static let initialRenderDelay: Duration = .milliseconds(450)
+    static let initialRenderDelay: Duration = .zero
 
     static func renderDelay(
         hasRenderedDashboardContent: Bool,

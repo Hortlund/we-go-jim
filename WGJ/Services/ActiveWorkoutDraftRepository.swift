@@ -877,7 +877,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
         )
         WeeklyGoalWidgetPublisher.publishBestEffort(modelContext: modelContext)
         WorkoutHistoryChangeBroadcaster.post()
-        try? CloudKitBrosSocialService.makeIfUserDataSyncEnabled(modelContext: modelContext)?
+        try? CloudKitBrosSocialService.makeForLocalOutboxQueueing(modelContext: modelContext)
             .queueCompletedSessionPublish(sessionID: completedSession.id)
 
         return completedSession.id

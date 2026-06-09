@@ -46,6 +46,7 @@ nonisolated enum WorkoutCompletionConfettiPolicy {
 
 struct WorkoutCompletionSummaryView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(AppTabState.self) private var appTabState
     @Environment(WorkoutCompletionPresentationState.self) private var workoutCompletionPresentationState
@@ -59,6 +60,10 @@ struct WorkoutCompletionSummaryView: View {
     @State private var confettiBursts: [WorkoutCompletionConfettiBurst] = []
     @State private var confettiDismissTasks: [UUID: Task<Void, Never>] = [:]
     @State private var heroCardFrame: CGRect = .zero
+
+    private var completionBackgroundStore: AppBackgroundStore {
+        appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
+    }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -380,12 +385,17 @@ struct WorkoutCompletionSummaryView: View {
     @MainActor
     private func loadSnapshotIfNeeded() async {
         guard snapshot == nil else { return }
+        let backgroundStore = completionBackgroundStore
 
         do {
-            guard let builtSnapshot = try WorkoutCompletionSnapshotBuilder.build(
-                sessionID: sessionID,
-                modelContext: modelContext
-            ) else {
+            let builtSnapshot = try await backgroundStore.perform("workout-completion.summary") { backgroundContext in
+                try WorkoutCompletionSnapshotBuilder.build(
+                    sessionID: sessionID,
+                    modelContext: backgroundContext
+                )
+            }
+            guard !Task.isCancelled else { return }
+            guard let builtSnapshot else {
                 continueToHistory()
                 return
             }
@@ -454,7 +464,7 @@ struct WorkoutCompletionSummaryView: View {
     }
 }
 
-struct WorkoutCompletionSnapshot: Equatable {
+struct WorkoutCompletionSnapshot: Equatable, Sendable {
     let sessionID: UUID
     let sessionName: String
     let celebrationTitle: String
@@ -472,14 +482,14 @@ struct WorkoutCompletionSnapshot: Equatable {
     let exerciseRecap: [WorkoutCompletionExerciseRecap]
 }
 
-struct WorkoutCompletionPersonalRecord: Identifiable, Equatable {
+struct WorkoutCompletionPersonalRecord: Identifiable, Equatable, Sendable {
     let id: String
     let exerciseName: String
     let performanceText: String
     let detailText: String
 }
 
-struct WorkoutCompletionExerciseRecap: Identifiable, Equatable {
+struct WorkoutCompletionExerciseRecap: Identifiable, Equatable, Sendable {
     let id: UUID
     let exerciseName: String
     let completedSetCount: Int
@@ -488,7 +498,7 @@ struct WorkoutCompletionExerciseRecap: Identifiable, Equatable {
     let structure: WorkoutExerciseStructurePresentation
 }
 
-struct WorkoutCompletionCardioRecap: Identifiable, Equatable {
+struct WorkoutCompletionCardioRecap: Identifiable, Equatable, Sendable {
     let id: String
     let phase: WorkoutCardioPhase
     let exerciseName: String
@@ -497,13 +507,12 @@ struct WorkoutCompletionCardioRecap: Identifiable, Equatable {
     let isCompleted: Bool
 }
 
-private struct WorkoutCompletionExerciseData {
+private struct WorkoutCompletionExerciseData: Sendable {
     let completedSetCount: Int
     let recap: WorkoutCompletionExerciseRecap
 }
 
-@MainActor
-enum WorkoutCompletionSnapshotBuilder {
+nonisolated enum WorkoutCompletionSnapshotBuilder {
     static func build(sessionID: UUID, modelContext: ModelContext) throws -> WorkoutCompletionSnapshot? {
         let repository = WorkoutSessionRepository(modelContext: modelContext)
         guard let session = try repository.session(id: sessionID), session.status == .completed else {

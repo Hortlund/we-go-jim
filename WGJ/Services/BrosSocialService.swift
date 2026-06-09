@@ -2,7 +2,7 @@ import CloudKit
 import Foundation
 import SwiftData
 
-nonisolated enum BroReactionKind: String, Codable, CaseIterable, Equatable, Identifiable {
+nonisolated enum BroReactionKind: String, Codable, CaseIterable, Equatable, Identifiable, Sendable {
     case flex = "💪"
     case fire = "🔥"
     case clap = "👏"
@@ -13,12 +13,12 @@ nonisolated enum BroReactionKind: String, Codable, CaseIterable, Equatable, Iden
     var id: String { rawValue }
 }
 
-nonisolated enum BroFeedEventKind: String, Codable, Equatable {
+nonisolated enum BroFeedEventKind: String, Codable, Equatable, Sendable {
     case workoutCompleted
     case prHit
 }
 
-nonisolated struct BroCircleSummary: Equatable {
+nonisolated struct BroCircleSummary: Equatable, Sendable {
     let circleID: String
     let ownerUserRecordName: String
     let inviteCode: String
@@ -27,7 +27,7 @@ nonisolated struct BroCircleSummary: Equatable {
     let updatedAt: Date
 }
 
-nonisolated struct BroMemberSummary: Identifiable, Equatable {
+nonisolated struct BroMemberSummary: Identifiable, Equatable, Sendable {
     let id: String
     let circleID: String
     let userRecordName: String
@@ -67,7 +67,7 @@ nonisolated struct BroMemberSummary: Identifiable, Equatable {
     }
 }
 
-nonisolated struct BroWorkoutFeedSnapshot: Equatable {
+nonisolated struct BroWorkoutFeedSnapshot: Equatable, Sendable {
     let workoutName: String
     let durationSeconds: Int
     let totalVolume: Double
@@ -75,7 +75,7 @@ nonisolated struct BroWorkoutFeedSnapshot: Equatable {
     let exercisePreview: [String]
 }
 
-nonisolated struct BroPRFeedSnapshot: Equatable {
+nonisolated struct BroPRFeedSnapshot: Equatable, Sendable {
     let catalogExerciseUUID: String
     let exerciseName: String
     let estimatedOneRepMax: Double
@@ -84,13 +84,13 @@ nonisolated struct BroPRFeedSnapshot: Equatable {
     let loadUnit: TemplateLoadUnit
 }
 
-nonisolated struct BroReactionSummary: Equatable {
+nonisolated struct BroReactionSummary: Equatable, Sendable {
     let userRecordName: String
     let emoji: BroReactionKind
     let displayName: String?
 }
 
-nonisolated struct BroFeedEvent: Identifiable, Equatable {
+nonisolated struct BroFeedEvent: Identifiable, Equatable, Sendable {
     let id: String
     let circleID: String
     let actorUserRecordName: String
@@ -153,7 +153,7 @@ nonisolated private func resolvedAvatarCacheKey(
     return "\(fallbackKey)#\(avatarImageData.hashValue)"
 }
 
-nonisolated struct BrosFeedSnapshot: Equatable {
+nonisolated struct BrosFeedSnapshot: Equatable, Sendable {
     let circle: BroCircleSummary
     let currentMember: BroMemberSummary
     let members: [BroMemberSummary]
@@ -438,6 +438,7 @@ protocol BrosSocialService {
 nonisolated protocol BrosSocialMaintenanceService {
     func refreshLocalMembershipState() async
     func syncReactionNotificationSubscription() async throws
+    func repairMissingCompletedSessionPublishes() async throws
     func flushOutbox() async
 }
 
@@ -634,7 +635,46 @@ nonisolated struct CloudKitBrosCloudStore: BrosCloudStore {
     }
 }
 
+nonisolated private struct LocalOutboxOnlyBrosCloudStore: BrosCloudStore {
+    func currentUserRecordName() async throws -> String {
+        throw BrosSocialServiceError.unavailable
+    }
+
+    func queryRecords(
+        query: BrosCloudRecordQuery,
+        request: BrosCloudKitRequestProfile
+    ) async throws -> [CKRecord] {
+        throw BrosSocialServiceError.unavailable
+    }
+
+    func fetchRecord(
+        recordType: String,
+        recordName: String,
+        request: BrosCloudKitRequestProfile
+    ) async throws -> CKRecord? {
+        throw BrosSocialServiceError.unavailable
+    }
+
+    func fetchRecords(
+        recordType: String,
+        recordNames: [String],
+        request: BrosCloudKitRequestProfile
+    ) async throws -> [CKRecord] {
+        throw BrosSocialServiceError.unavailable
+    }
+
+    func save(records: [CKRecord], deleting recordIDs: [CKRecord.ID]) async throws {
+        throw BrosSocialServiceError.unavailable
+    }
+
+    func save(subscriptions: [CKSubscription], deleting subscriptionIDs: [CKSubscription.ID]) async throws {
+        throw BrosSocialServiceError.unavailable
+    }
+}
+
 nonisolated final class CloudKitBrosSocialService: BrosSocialService, BrosSocialMaintenanceService, BrosSocialOutboxQueueing {
+    private static let completedSessionPublishRepairLimit = 80
+
     private enum RecordType {
         static let circle = "BroCircle"
         static let inviteLookup = "BroInviteLookup"
@@ -774,6 +814,13 @@ nonisolated final class CloudKitBrosSocialService: BrosSocialService, BrosSocial
             return nil
         }
         return CloudKitBrosSocialService(modelContext: modelContext)
+    }
+
+    nonisolated static func makeForLocalOutboxQueueing(modelContext: ModelContext) -> CloudKitBrosSocialService {
+        CloudKitBrosSocialService(
+            modelContext: modelContext,
+            cloudStore: LocalOutboxOnlyBrosCloudStore()
+        )
     }
 
     nonisolated static func makeIfContainerAvailable(modelContext: ModelContext) -> CloudKitBrosSocialService? {
@@ -1568,8 +1615,11 @@ nonisolated final class CloudKitBrosSocialService: BrosSocialService, BrosSocial
             operation: .publishWorkoutEvent,
             payload: workoutPayload
         )
+        try modelContext.save()
 
         let achievements = try sessionPRAchievements(sessionID: sessionID)
+        guard !achievements.isEmpty else { return }
+
         for achievement in achievements {
             let payload = PendingPREventPayload(
                 recordName: BrosRecordNames.prEventRecordName(
@@ -1599,6 +1649,52 @@ nonisolated final class CloudKitBrosSocialService: BrosSocialService, BrosSocial
         }
 
         try modelContext.save()
+    }
+
+    func repairMissingCompletedSessionPublishes() async throws {
+        let profile = try loadOrCreateLocalProfile()
+        guard
+            profile.brosCircleID != nil,
+            profile.brosMembershipID != nil,
+            let userRecordName = profile.brosUserRecordName
+        else {
+            return
+        }
+
+        let sessions = try recentCompletedSessionsForSocialRepair(joinedAt: profile.brosJoinedAt)
+        guard !sessions.isEmpty else { return }
+
+        let remoteEventRecordNames = Set(
+            try await feedEventRecords(actorUserRecordName: userRecordName)
+                .map(\.recordID.recordName)
+        )
+        let localOutboxRecordNames = try pendingPublishRecordNames()
+
+        for session in sessions {
+            let workoutRecordName = BrosRecordNames.workoutEventRecordName(sessionID: session.id)
+            if !remoteEventRecordNames.contains(workoutRecordName),
+               !localOutboxRecordNames.contains(workoutRecordName)
+            {
+                try queueCompletedSessionPublish(sessionID: session.id)
+                continue
+            }
+
+            let achievements = try sessionPRAchievements(sessionID: session.id)
+            let prRecordNames = achievements.map {
+                BrosRecordNames.prEventRecordName(
+                    sessionID: session.id,
+                    catalogExerciseUUID: $0.catalogExerciseUUID
+                )
+            }
+            let hasMissingPublish = prRecordNames.contains { recordName in
+                !remoteEventRecordNames.contains(recordName)
+                    && !localOutboxRecordNames.contains(recordName)
+            }
+
+            if hasMissingPublish {
+                try queueCompletedSessionPublish(sessionID: session.id)
+            }
+        }
     }
 
     func queueDeletedSession(sessionID: UUID) throws {
@@ -2622,6 +2718,34 @@ nonisolated final class CloudKitBrosSocialService: BrosSocialService, BrosSocial
             }
         )
         return try modelContext.fetch(descriptor).first
+    }
+
+    private func pendingPublishRecordNames() throws -> Set<String> {
+        let publishWorkoutOperation = SocialOutboxOperationKind.publishWorkoutEvent.rawValue
+        let publishPROperation = SocialOutboxOperationKind.publishPREvent.rawValue
+        let descriptor = FetchDescriptor<SocialOutboxItem>(
+            predicate: #Predicate { item in
+                item.operationRaw == publishWorkoutOperation || item.operationRaw == publishPROperation
+            }
+        )
+        return Set(try modelContext.fetch(descriptor).map(\.idempotencyKey))
+    }
+
+    private func recentCompletedSessionsForSocialRepair(joinedAt: Date?) throws -> [WorkoutSession] {
+        let completedStatus = WorkoutSessionStatus.completed.rawValue
+        var descriptor = FetchDescriptor<WorkoutSession>(
+            predicate: #Predicate { session in
+                session.statusRaw == completedStatus
+            },
+            sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+        )
+        descriptor.fetchLimit = Self.completedSessionPublishRepairLimit
+
+        return try modelContext.fetch(descriptor).filter { session in
+            let createdAt = session.endedAt ?? session.startedAt
+            guard let joinedAt else { return true }
+            return createdAt >= joinedAt
+        }
     }
 
     private func makeAsset(data: Data, fileExtension: String) throws -> CKAsset {

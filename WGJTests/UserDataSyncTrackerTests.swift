@@ -49,7 +49,7 @@ struct UserDataSyncTrackerTests {
 
     @Test
     func userDataSyncTrackerMovesThroughPendingExportCaughtUpAndDegradedStates() {
-        let tracker = UserDataSyncTracker.shared
+        let tracker = UserDataSyncTracker.makeForTesting()
 
         let configured = tracker.configureForLaunch(isCloudEnabled: true, errorDescription: nil)
         #expect(configured.state == .caughtUp)
@@ -107,7 +107,7 @@ struct UserDataSyncTrackerTests {
 
     @Test
     func runtimeCloudRecoveryClearsLaunchDegradationWithoutDroppingPendingExport() {
-        let tracker = UserDataSyncTracker.shared
+        let tracker = UserDataSyncTracker.makeForTesting()
 
         let degraded = tracker.configureForLaunch(
             isCloudEnabled: true,
@@ -130,7 +130,7 @@ struct UserDataSyncTrackerTests {
 
     @Test
     func runtimeCloudRecoveryDoesNotClearCloudEventFailures() {
-        let tracker = UserDataSyncTracker.shared
+        let tracker = UserDataSyncTracker.makeForTesting()
 
         _ = tracker.configureForLaunch(isCloudEnabled: true, errorDescription: nil)
         let failedExport = tracker.recordCloudEvent(
@@ -159,7 +159,7 @@ struct UserDataSyncTrackerTests {
 
     @Test
     func userDataSyncTrackerDoesNotDegradeForAccountAuthFrameworkEvents() {
-        let tracker = UserDataSyncTracker.shared
+        let tracker = UserDataSyncTracker.makeForTesting()
 
         let configured = tracker.configureForLaunch(isCloudEnabled: true, errorDescription: nil)
         #expect(configured.state == .caughtUp)
@@ -199,7 +199,7 @@ struct UserDataSyncTrackerTests {
 
     @Test
     func userDataSyncTrackerStopsShowingSyncingForStaleRunningFrameworkEvents() {
-        let tracker = UserDataSyncTracker.shared
+        let tracker = UserDataSyncTracker.makeForTesting()
 
         let configured = tracker.configureForLaunch(isCloudEnabled: true, errorDescription: nil)
         #expect(configured.state == .caughtUp)

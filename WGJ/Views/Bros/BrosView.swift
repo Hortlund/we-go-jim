@@ -61,18 +61,27 @@ final class BrosViewModel {
     private(set) var lastSuccessfulSnapshotRefreshAt: Date?
     private let snapshotFreshnessInterval: TimeInterval = 60
     private let accountStatusProvider: @Sendable () async -> AccountStatus
-    private let serviceFactory: @MainActor (ModelContext) -> (any BrosSocialService & BrosSocialMaintenanceService)?
+    private let serviceFactory: (ModelContext) -> (any BrosSocialService & BrosSocialMaintenanceService)?
+    private let reactionSnapshotWorker: @Sendable (String, BroReactionKind, AppBackgroundStore) async throws -> BrosFeedSnapshot?
 
     init(
         accountStatusProvider: @escaping @Sendable () async -> AccountStatus = {
             await AccountStatusService().fetchAccountStatus()
         },
-        serviceFactory: @escaping @MainActor (ModelContext) -> (any BrosSocialService & BrosSocialMaintenanceService)? = { modelContext in
-            CloudKitBrosSocialService.makeIfAvailable(modelContext: modelContext)
+        serviceFactory: @escaping (ModelContext) -> (any BrosSocialService & BrosSocialMaintenanceService)? = { modelContext in
+            CloudKitBrosSocialService.makeIfContainerAvailable(modelContext: modelContext)
+        },
+        reactionSnapshotWorker: @escaping @Sendable (String, BroReactionKind, AppBackgroundStore) async throws -> BrosFeedSnapshot? = { eventID, kind, backgroundStore in
+            try await BrosViewModel.setReactionAndFetchSnapshot(
+                eventID: eventID,
+                kind: kind,
+                backgroundStore: backgroundStore
+            )
         }
     ) {
         self.accountStatusProvider = accountStatusProvider
         self.serviceFactory = serviceFactory
+        self.reactionSnapshotWorker = reactionSnapshotWorker
     }
 
     func loadIfNeeded(
@@ -104,7 +113,7 @@ final class BrosViewModel {
         hasLoaded = false
         errorMessage = nil
         lastSuccessfulSnapshotRefreshAt = nil
-        Task {
+        Task.detached(priority: .utility) {
             await BrosAvatarCacheService.shared.primeVisibleAvatars(in: snapshot)
         }
     }
@@ -119,7 +128,7 @@ final class BrosViewModel {
             state = .onboarding
         case .active(let feedSnapshot):
             state = .active(feedSnapshot)
-            Task {
+            Task.detached(priority: .utility) {
                 await BrosAvatarCacheService.shared.primeVisibleAvatars(in: feedSnapshot)
             }
         }
@@ -183,13 +192,6 @@ final class BrosViewModel {
         case .unavailable(let reason):
             if !hasRenderableState {
                 state = .unavailable(message(for: reason))
-            }
-            return
-        }
-
-        guard serviceFactory(modelContext) != nil else {
-            if !hasRenderableState {
-                state = .unavailable(BrosSocialServiceError.unavailable.localizedDescription)
             }
             return
         }
@@ -392,53 +394,24 @@ final class BrosViewModel {
         let originalReactions = reactions(forEventID: eventID, in: snapshot)
         state = .active(optimisticSnapshot)
         pendingReactionEventIDs.insert(eventID)
+        let resolvedBackgroundStore = backgroundStore ?? AppBackgroundStore(container: modelContext.container)
 
-        if let backgroundStore {
-            Task.detached(priority: .utility) { [weak self] in
-                do {
-                    let snapshot = try await Self.setReactionAndFetchSnapshot(
-                        eventID: eventID,
-                        kind: emoji,
-                        backgroundStore: backgroundStore
-                    )
-                    guard !Task.isCancelled else { return }
-                    await self?.applyReactionSnapshot(
-                        snapshot,
-                        eventID: eventID
-                    )
-                } catch {
-                    guard !Task.isCancelled else { return }
-                    await self?.restoreReactionState(
-                        eventID: eventID,
-                        originalReactions: originalReactions,
-                        error: error
-                    )
-                }
-            }
-            return
-        }
-
-        Task { [weak self] in
+        Task.detached(priority: .utility) { [weak self] in
             guard let self else { return }
-
             do {
-                let snapshot = try await self.setReactionAndFetchSnapshot(
-                    eventID: eventID,
-                    kind: emoji,
-                    modelContext: modelContext,
-                    backgroundStore: backgroundStore
-                )
-                self.pendingReactionEventIDs.remove(eventID)
-                self.lastSuccessfulSnapshotRefreshAt = nil
+                let snapshot = try await self.reactionSnapshotWorker(eventID, emoji, resolvedBackgroundStore)
                 guard !Task.isCancelled else { return }
-                try await self.applyFetchedSnapshot(
+                await self.applyReactionSnapshot(
                     snapshot,
-                    preservingPendingReactions: true
+                    eventID: eventID
                 )
             } catch {
-                self.pendingReactionEventIDs.remove(eventID)
-                self.restoreReactionState(forEventID: eventID, reactions: originalReactions)
-                self.errorMessage = error.localizedDescription
+                guard !Task.isCancelled else { return }
+                await self.restoreReactionState(
+                    eventID: eventID,
+                    originalReactions: originalReactions,
+                    error: error
+                )
             }
         }
     }
@@ -462,6 +435,10 @@ final class BrosViewModel {
         )
     }
 
+    func invalidateSnapshotFreshnessForSocialEvents() {
+        lastSuccessfulSnapshotRefreshAt = nil
+    }
+
     func refreshActiveSnapshotIfNeeded(
         modelContext: ModelContext,
         backgroundStore: AppBackgroundStore? = nil
@@ -471,6 +448,13 @@ final class BrosViewModel {
             modelContext: modelContext,
             backgroundStore: backgroundStore
         )
+    }
+
+    func refreshActiveSnapshotIfNeeded(
+        backgroundStore: AppBackgroundStore
+    ) async {
+        guard pendingAction == nil, pendingReactionEventIDs.isEmpty, !isSnapshotRefreshInFlight else { return }
+        await hydrateActiveSnapshot(backgroundStore: backgroundStore)
     }
 
     func isReactionPending(eventID: String) -> Bool {
@@ -499,10 +483,10 @@ final class BrosViewModel {
         modelContext: ModelContext,
         backgroundStore: AppBackgroundStore?
     ) {
-        Task { @MainActor [weak self] in
+        let resolvedBackgroundStore = backgroundStore ?? AppBackgroundStore(container: modelContext.container)
+        Task.detached(priority: .utility) { [weak self] in
             await self?.refreshActiveSnapshotIfNeeded(
-                modelContext: modelContext,
-                backgroundStore: backgroundStore
+                backgroundStore: resolvedBackgroundStore
             )
         }
     }
@@ -511,10 +495,10 @@ final class BrosViewModel {
         modelContext: ModelContext,
         backgroundStore: AppBackgroundStore?
     ) {
-        Task {
+        let resolvedBackgroundStore = backgroundStore ?? AppBackgroundStore(container: modelContext.container)
+        Task.detached(priority: .utility) {
             do {
-                let backgroundStore = backgroundStore ?? AppBackgroundStore(container: modelContext.container)
-                try await backgroundStore.performAsync("bros.reaction-subscription-sync") { backgroundContext in
+                try await resolvedBackgroundStore.performAsync("bros.reaction-subscription-sync") { backgroundContext in
                     guard let service = CloudKitBrosSocialService.makeIfContainerAvailable(modelContext: backgroundContext) else {
                         throw BrosSocialServiceError.unavailable
                     }
@@ -532,26 +516,31 @@ final class BrosViewModel {
     ) {
         guard outboxFlushTask == nil else { return }
 
-        outboxFlushTask = Task { [weak self] in
+        let resolvedBackgroundStore = backgroundStore ?? AppBackgroundStore(container: modelContext.container)
+        outboxFlushTask = Task.detached(priority: .utility) { [weak self] in
             guard let self else { return }
-            defer {
-                Task { @MainActor [weak self] in
-                    self?.outboxFlushTask = nil
-                }
-            }
 
             do {
-                let backgroundStore = backgroundStore ?? AppBackgroundStore(container: modelContext.container)
-                try await backgroundStore.performAsync("bros.outbox-flush") { backgroundContext in
+                try await resolvedBackgroundStore.performAsync("bros.outbox-flush") { backgroundContext in
                     guard let service = CloudKitBrosSocialService.makeIfContainerAvailable(modelContext: backgroundContext) else {
                         throw BrosSocialServiceError.unavailable
                     }
+                    try? await service.repairMissingCompletedSessionPublishes()
                     await service.flushOutbox()
                 }
+                await self.invalidateSnapshotFreshnessForSocialEvents()
+                await self.refreshActiveSnapshotIfNeeded(
+                    backgroundStore: resolvedBackgroundStore
+                )
             } catch {
                 // Preserve the current screen state if background sync fails.
             }
+            await self.clearOutboxFlushTask()
         }
+    }
+
+    private func clearOutboxFlushTask() {
+        outboxFlushTask = nil
     }
 
     private func hydrateActiveSnapshot(
@@ -582,6 +571,25 @@ final class BrosViewModel {
         }
 
         await task.value
+    }
+
+    private func hydrateActiveSnapshot(backgroundStore: AppBackgroundStore) async {
+        guard case .active = state else { return }
+        guard pendingReactionEventIDs.isEmpty, !isSnapshotRefreshInFlight else { return }
+        guard shouldRefreshSnapshot(force: false) else { return }
+
+        isSnapshotRefreshInFlight = true
+        defer { isSnapshotRefreshInFlight = false }
+
+        do {
+            let snapshot = try await Self.fetchSnapshot(backgroundStore: backgroundStore)
+            try await applyFetchedSnapshot(
+                snapshot,
+                preservingPendingReactions: true
+            )
+        } catch {
+            // Keep the optimistic active state instead of regressing to unavailable.
+        }
     }
 
     private func message(for reason: AccountUnavailableReason) -> String {
@@ -618,16 +626,20 @@ final class BrosViewModel {
         backgroundStore: AppBackgroundStore?
     ) async throws -> BrosFeedSnapshot? {
         if let backgroundStore {
-            return try await backgroundStore.performAsync("bros.snapshot-refresh") { backgroundContext in
-                guard let service = CloudKitBrosSocialService.makeIfContainerAvailable(modelContext: backgroundContext) else {
-                    throw BrosSocialServiceError.unavailable
-                }
-                return try await service.fetchSnapshot()
-            }
+            return try await Self.fetchSnapshot(backgroundStore: backgroundStore)
         }
 
         let service = try service(modelContext: modelContext)
         return try await service.fetchSnapshot()
+    }
+
+    nonisolated private static func fetchSnapshot(backgroundStore: AppBackgroundStore) async throws -> BrosFeedSnapshot? {
+        try await backgroundStore.performAsync("bros.snapshot-refresh") { backgroundContext in
+            guard let service = CloudKitBrosSocialService.makeIfContainerAvailable(modelContext: backgroundContext) else {
+                throw BrosSocialServiceError.unavailable
+            }
+            return try await service.fetchSnapshot()
+        }
     }
 
     private func createCircleSnapshot(
@@ -854,8 +866,8 @@ final class BrosViewModel {
     }
 
     private func scheduleRemainingAvatarThumbnailPrime(in snapshot: BrosFeedSnapshot) {
-        Task {
-            await primeAvatarThumbnails(in: snapshot)
+        Task.detached(priority: .utility) {
+            await BrosAvatarCacheService.shared.primeVisibleAvatars(in: snapshot)
         }
     }
 
@@ -1195,6 +1207,8 @@ struct BrosView: View {
     @State private var reactionDetailPresentation: BroReactionDetailPresentation?
     @State private var selectedFeedEvent: BroFeedEvent?
     @State private var activationRefreshTask: Task<Void, Never>?
+    @State private var filterSnapshotTask: Task<Void, Never>?
+    @State private var filterSnapshotToken: UUID?
     @State private var hasCompletedInitialActivationRefresh = false
     @State private var hasPresentedInitialShell = false
 
@@ -1208,7 +1222,7 @@ struct BrosView: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: WGJSpacing.section) {
+            VStack(alignment: .leading, spacing: WGJSpacing.section) {
                 WGJRootHeader("Bros", subtitle: "Private feed and PR updates for your circle.")
 
                 switch viewModel.state {
@@ -1263,6 +1277,7 @@ struct BrosView: View {
         }
         .task(id: notificationRouter.brosRefreshRequestID) {
             guard notificationRouter.brosRefreshRequestID != nil else { return }
+            viewModel.invalidateSnapshotFreshnessForSocialEvents()
             reloadBlockedBros()
             await viewModel.refresh(
                 modelContext: modelContext,
@@ -1440,22 +1455,28 @@ struct BrosView: View {
         }
 
         cancelActivationRefresh()
-        activationRefreshTask = Task { @MainActor in
-            reloadBlockedBros()
-            await WGJPerformance.measureAsync("bros.runtime-cloud-recovery") {
-                await viewModel.refresh(
-                    modelContext: modelContext,
-                    backgroundStore: brosBackgroundStore,
-                    cloudSyncEnabled: cloudSyncEnabled,
-                    cloudSyncErrorDescription: currentError,
-                    force: true
-                )
-            }
-            guard !Task.isCancelled, isTabActive else { return }
-            hasCompletedInitialActivationRefresh = true
-            activationRefreshTask = nil
-            rebuildFilteredSnapshot()
+        activationRefreshTask = Task.detached(priority: .utility) {
+            await runRuntimeCloudRecoveryIfStillActive(currentError: currentError)
         }
+    }
+
+    @MainActor
+    private func runRuntimeCloudRecoveryIfStillActive(currentError: String?) async {
+        guard !Task.isCancelled, isTabActive else { return }
+        reloadBlockedBros()
+        await WGJPerformance.measureAsync("bros.runtime-cloud-recovery") {
+            await viewModel.refresh(
+                modelContext: modelContext,
+                backgroundStore: brosBackgroundStore,
+                cloudSyncEnabled: cloudSyncEnabled,
+                cloudSyncErrorDescription: currentError,
+                force: true
+            )
+        }
+        guard !Task.isCancelled, isTabActive else { return }
+        hasCompletedInitialActivationRefresh = true
+        activationRefreshTask = nil
+        rebuildFilteredSnapshot()
     }
 
     @MainActor
@@ -1580,16 +1601,40 @@ struct BrosView: View {
     }
 
     private func rebuildFilteredSnapshot() {
+        filterSnapshotTask?.cancel()
+
         switch viewModel.state {
         case .active(let snapshot):
-            filteredActiveSnapshot = WGJPerformance.measure("bros.filtered-snapshot") {
-                BrosSocialRules.filteredSnapshot(
-                    snapshot,
-                    blockedUserRecordNames: blockedUserRecordNames
-                )
+            guard !blockedUserRecordNames.isEmpty else {
+                filteredActiveSnapshot = snapshot
+                filterSnapshotTask = nil
+                filterSnapshotToken = nil
+                return
+            }
+
+            let blockedUserRecordNames = blockedUserRecordNames
+            let token = UUID()
+            filterSnapshotToken = token
+            filterSnapshotTask = Task.detached(priority: .utility) {
+                let filteredSnapshot = WGJPerformance.measure("bros.filtered-snapshot") {
+                    BrosSocialRules.filteredSnapshot(
+                        snapshot,
+                        blockedUserRecordNames: blockedUserRecordNames
+                    )
+                }
+                guard !Task.isCancelled else { return }
+
+                await MainActor.run {
+                    guard filterSnapshotToken == token else { return }
+                    filteredActiveSnapshot = filteredSnapshot
+                    filterSnapshotTask = nil
+                    filterSnapshotToken = nil
+                }
             }
         case .loading, .unavailable, .onboarding:
             filteredActiveSnapshot = nil
+            filterSnapshotTask = nil
+            filterSnapshotToken = nil
         }
     }
 
@@ -1635,7 +1680,7 @@ struct BrosView: View {
             memberLimit: snapshot.circle.memberLimit,
             isPro: subscriptionState.isPro
         ) {
-            LazyVStack(alignment: .leading, spacing: WGJSpacing.section) {
+            VStack(alignment: .leading, spacing: WGJSpacing.section) {
                 membersCard(snapshot)
 
                 LazyVStack(alignment: .leading, spacing: 12) {
@@ -1668,7 +1713,7 @@ struct BrosView: View {
     }
 
     private func lockedBrosCircleContent(_ snapshot: BrosFeedSnapshot) -> some View {
-        LazyVStack(alignment: .leading, spacing: WGJSpacing.section) {
+        VStack(alignment: .leading, spacing: WGJSpacing.section) {
             membersCard(snapshot)
 
             ProLockedCard(

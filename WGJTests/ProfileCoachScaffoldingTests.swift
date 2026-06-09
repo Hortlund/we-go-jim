@@ -160,14 +160,12 @@ struct ProfileCoachScaffoldingTests {
     @Test
     func profileCoachBriefCanLoadThroughBackgroundStore() async throws {
         let container = try makeInMemoryContainer()
-        let context = ModelContext(container)
         let backgroundStore = AppBackgroundStore(container: container)
         let enabledWidgets = [
             ProfileWidgetConfigSnapshot(config: ProfileWidgetConfig(kind: .coachBrief, sortOrder: 0)),
         ]
 
         let presentation = try await ProfileViewController().loadCoachBriefPresentation(
-            modelContext: context,
             enabledWidgets: enabledWidgets,
             backgroundStore: backgroundStore
         )

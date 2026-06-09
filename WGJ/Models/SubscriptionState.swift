@@ -31,6 +31,9 @@ final class SubscriptionState {
     private var isAwaitingOfferCodeVerification = false
     private var customerInfoObservationTask: Task<Void, Never>?
     private var purchaseThankYouPresentationTask: Task<Void, Never>?
+#if DEBUG
+    private var forcedCustomerInfoForTesting: SubscriptionCustomerInfoSnapshot?
+#endif
 
     var isPro: Bool {
         SubscriptionEntitlementPolicy.isPro(customerInfo)
@@ -85,6 +88,13 @@ final class SubscriptionState {
     }
 
     func applyCustomerInfo(_ customerInfo: SubscriptionCustomerInfoSnapshot) {
+#if DEBUG
+        if let forcedCustomerInfoForTesting {
+            self.customerInfo = forcedCustomerInfoForTesting
+            errorMessage = nil
+            return
+        }
+#endif
         self.customerInfo = customerInfo
         errorMessage = nil
     }
@@ -176,6 +186,12 @@ final class SubscriptionState {
 
 #if DEBUG
     func applyForTesting(_ customerInfo: SubscriptionCustomerInfoSnapshot) {
+        self.customerInfo = customerInfo
+        errorMessage = nil
+    }
+
+    func forceCustomerInfoForUITesting(_ customerInfo: SubscriptionCustomerInfoSnapshot) {
+        forcedCustomerInfoForTesting = customerInfo
         self.customerInfo = customerInfo
         errorMessage = nil
     }

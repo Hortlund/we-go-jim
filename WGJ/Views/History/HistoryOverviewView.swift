@@ -27,7 +27,7 @@ struct HistoryOverviewView: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 16) {
                 WGJRootHeader("History", subtitle: "Completed sessions, volume, and best sets.") {
                     Button("Calendar") {
                         openWorkoutCalendar()
@@ -89,8 +89,8 @@ struct HistoryOverviewView: View {
             guard isTabActive else { return }
             await reloadSnapshotIfNeeded(force: false)
         }
-        .onChange(of: selectedDayFilter) { _, _ in
-            recomputeSnapshot()
+        .onChange(of: selectedDayFilter) { _, newDayFilter in
+            controller.applyDayFilter(newDayFilter)
         }
         .alert("History Error", isPresented: $showingError) {
             Button("OK", role: .cancel) { }
@@ -116,13 +116,6 @@ struct HistoryOverviewView: View {
             archiveSession(card.sessionID)
         }
         .equatable()
-    }
-
-    private func recomputeSnapshot() {
-        controller.snapshot = HistoryOverviewSnapshotBuilder.build(
-            sessions: controller.completedSessions,
-            selectedDayFilter: selectedDayFilter
-        )
     }
 
     private func openWorkoutCalendar() {
@@ -171,18 +164,28 @@ struct HistoryOverviewView: View {
 
     private func archiveSession(_ id: UUID) {
         let backgroundStore = historyBackgroundStore
-        Task { @MainActor in
+        Task.detached(priority: .utility) {
             do {
                 try await backgroundStore.performWrite("history-overview.archive") { backgroundContext in
                     try WorkoutSessionRepository(modelContext: backgroundContext).archiveSession(id: id)
                 }
-                needsExplicitRefresh = true
+                await markNeedsExplicitRefresh()
                 await reloadSnapshotIfNeeded(force: true)
             } catch {
-                errorMessage = String(describing: error)
-                showingError = true
+                await showError(error)
             }
         }
+    }
+
+    @MainActor
+    private func markNeedsExplicitRefresh() {
+        needsExplicitRefresh = true
+    }
+
+    @MainActor
+    private func showError(_ error: Error) {
+        errorMessage = String(describing: error)
+        showingError = true
     }
 
     @MainActor
@@ -236,7 +239,7 @@ struct HistoryOverviewView: View {
     }
 }
 
-struct HistoryMonthSection: Identifiable {
+struct HistoryMonthSection: Identifiable, Equatable, Sendable {
     let id: String
     let title: String
     let cards: [HistorySessionCardData]
@@ -280,21 +283,57 @@ nonisolated struct HistoryOverviewSnapshot: Sendable {
     )
 }
 
+nonisolated struct HistoryOverviewPreparedSnapshots: Sendable {
+    let allSnapshot: HistoryOverviewSnapshot
+    let sectionsByDayStart: [Date: [HistoryMonthSection]]
+
+    static let empty = HistoryOverviewPreparedSnapshots(
+        allSnapshot: .empty,
+        sectionsByDayStart: [:]
+    )
+
+    func snapshot(
+        for selectedDayFilter: Date?,
+        calendar: Calendar = .current
+    ) -> HistoryOverviewSnapshot {
+        guard let selectedDayFilter else {
+            return allSnapshot
+        }
+
+        let dayStart = calendar.startOfDay(for: selectedDayFilter)
+        return HistoryOverviewSnapshot(
+            workoutCountsByDay: allSnapshot.workoutCountsByDay,
+            sections: sectionsByDayStart[dayStart, default: []]
+        )
+    }
+}
+
 @MainActor
 @Observable
 final class HistoryOverviewController {
     var completedSessions: [HistoryOverviewSessionSnapshot] = []
     var snapshot = HistoryOverviewSnapshot.empty
+    private var preparedSnapshots = HistoryOverviewPreparedSnapshots.empty
 
     func apply(_ loaded: HistoryOverviewLoadedSnapshot) {
         completedSessions = loaded.completedSessions
-        snapshot = loaded.snapshot
+        preparedSnapshots = loaded.preparedSnapshots
+        snapshot = preparedSnapshots.snapshot(for: loaded.selectedDayFilter)
+    }
+
+    func applyDayFilter(_ selectedDayFilter: Date?) {
+        snapshot = preparedSnapshots.snapshot(for: selectedDayFilter)
     }
 }
 
 nonisolated struct HistoryOverviewLoadedSnapshot: Sendable {
     let completedSessions: [HistoryOverviewSessionSnapshot]
-    let snapshot: HistoryOverviewSnapshot
+    let preparedSnapshots: HistoryOverviewPreparedSnapshots
+    let selectedDayFilter: Date?
+
+    var snapshot: HistoryOverviewSnapshot {
+        preparedSnapshots.snapshot(for: selectedDayFilter)
+    }
 }
 
 nonisolated enum HistoryOverviewSnapshotLoader {
@@ -306,12 +345,13 @@ nonisolated enum HistoryOverviewSnapshotLoader {
             .completedSessions()
             .filter { $0.archivedAt == nil }
             .map(HistoryOverviewSessionSnapshot.init(session:))
+        let preparedSnapshots = HistoryOverviewSnapshotBuilder.buildPreparedSnapshots(
+            sessions: completedSessions
+        )
         return HistoryOverviewLoadedSnapshot(
             completedSessions: completedSessions,
-            snapshot: HistoryOverviewSnapshotBuilder.build(
-                sessions: completedSessions,
-                selectedDayFilter: selectedDayFilter
-            )
+            preparedSnapshots: preparedSnapshots,
+            selectedDayFilter: selectedDayFilter
         )
     }
 }
@@ -322,37 +362,66 @@ nonisolated enum HistoryOverviewSnapshotBuilder {
         selectedDayFilter: Date?,
         calendar: Calendar = .current
     ) -> HistoryOverviewSnapshot {
+        buildPreparedSnapshots(sessions: sessions, calendar: calendar)
+            .snapshot(for: selectedDayFilter, calendar: calendar)
+    }
+
+    nonisolated static func buildPreparedSnapshots(
+        sessions: [HistoryOverviewSessionSnapshot],
+        calendar: Calendar = .current
+    ) -> HistoryOverviewPreparedSnapshots {
         let completedSessions = sessions
-        let selectedDayStart = selectedDayFilter.map { startOfDay(for: $0, calendar: calendar) }
 
         var workoutCountsByDay: [Date: Int] = [:]
         var sessionsByMonth: [Date: [HistoryOverviewSessionSnapshot]] = [:]
+        var sessionsByDayStartAndMonth: [Date: [Date: [HistoryOverviewSessionSnapshot]]] = [:]
         for session in completedSessions {
             let sessionDate = session.displayDate
             let day = startOfDay(for: sessionDate, calendar: calendar)
             workoutCountsByDay[day, default: 0] += 1
-            let shouldIncludeSession = selectedDayStart.map { $0 == day } ?? true
-            if shouldIncludeSession {
-                let month = startOfMonth(for: sessionDate, calendar: calendar)
-                sessionsByMonth[month, default: []].append(session)
-            }
+            let month = startOfMonth(for: sessionDate, calendar: calendar)
+            sessionsByMonth[month, default: []].append(session)
+            sessionsByDayStartAndMonth[day, default: [:]][month, default: []].append(session)
         }
 
-        let sections = sessionsByMonth.keys.sorted(by: >).map { key in
-            let orderedSessions = sessionsByMonth[key, default: []].sorted { lhs, rhs in
-                lhs.displayDate > rhs.displayDate
+        let sectionsByDayStart = Dictionary(
+            uniqueKeysWithValues: sessionsByDayStartAndMonth.map { dayStart, sessionsByMonth in
+                (dayStart, makeSections(from: sessionsByMonth))
             }
+        )
 
-            return HistoryMonthSection(
-                id: key.formatted(date: .numeric, time: .omitted),
-                title: key.formatted(.dateTime.year().month(.wide)),
-                cards: orderedSessions.map(makeCardData)
+        return HistoryOverviewPreparedSnapshots(
+            allSnapshot: HistoryOverviewSnapshot(
+                workoutCountsByDay: workoutCountsByDay,
+                sections: makeSections(from: sessionsByMonth)
+            ),
+            sectionsByDayStart: sectionsByDayStart
+        )
+    }
+
+    nonisolated private static func makeSections(
+        from sessionsByMonth: [Date: [HistoryOverviewSessionSnapshot]]
+    ) -> [HistoryMonthSection] {
+        sessionsByMonth.keys.sorted(by: >).map { key in
+            makeSection(
+                monthStart: key,
+                sessions: sessionsByMonth[key, default: []]
             )
         }
+    }
 
-        return HistoryOverviewSnapshot(
-            workoutCountsByDay: workoutCountsByDay,
-            sections: sections
+    nonisolated private static func makeSection(
+        monthStart: Date,
+        sessions: [HistoryOverviewSessionSnapshot]
+    ) -> HistoryMonthSection {
+        let orderedSessions = sessions.sorted { lhs, rhs in
+            lhs.displayDate > rhs.displayDate
+        }
+
+        return HistoryMonthSection(
+            id: monthStart.formatted(date: .numeric, time: .omitted),
+            title: monthStart.formatted(.dateTime.year().month(.wide)),
+            cards: orderedSessions.map(makeCardData)
         )
     }
 
@@ -716,33 +785,47 @@ private struct HistoryArchivedWorkoutsSheet: View {
 
     private func restoreSession(_ sessionID: UUID) {
         let backgroundStore = historyBackgroundStore
-        Task { @MainActor in
+        Task.detached(priority: .utility) {
             do {
                 try await backgroundStore.performWrite("history-hidden.restore") { backgroundContext in
                     try WorkoutSessionRepository(modelContext: backgroundContext).restoreArchivedSession(id: sessionID)
                 }
-                archivedSessions.removeAll { $0.id == sessionID }
+                await removeArchivedSession(id: sessionID)
             } catch {
-                errorMessage = String(describing: error)
-                showingError = true
+                await showError(error)
             }
         }
     }
 
     private func deleteSession(_ sessionID: UUID) {
         let backgroundStore = historyBackgroundStore
-        Task { @MainActor in
+        Task.detached(priority: .utility) {
             do {
                 try await backgroundStore.performWrite("history-hidden.delete") { backgroundContext in
                     try WorkoutSessionRepository(modelContext: backgroundContext).deleteSession(id: sessionID)
                 }
-                archivedSessions.removeAll { $0.id == sessionID }
-                pendingDeletion = nil
+                await removeDeletedArchivedSession(id: sessionID)
             } catch {
-                errorMessage = String(describing: error)
-                showingError = true
+                await showError(error)
             }
         }
+    }
+
+    @MainActor
+    private func removeArchivedSession(id sessionID: UUID) {
+        archivedSessions.removeAll { $0.id == sessionID }
+    }
+
+    @MainActor
+    private func removeDeletedArchivedSession(id sessionID: UUID) {
+        archivedSessions.removeAll { $0.id == sessionID }
+        pendingDeletion = nil
+    }
+
+    @MainActor
+    private func showError(_ error: Error) {
+        errorMessage = String(describing: error)
+        showingError = true
     }
 
     nonisolated private static func loadArchivedSnapshots(

@@ -32,6 +32,7 @@ struct StartWorkoutHomeView: View {
     @State private var lastLoadedContentUpdatedAt: Date?
     @State private var lastRefreshAt: Date?
     @State private var isPreparingActiveWorkoutStart = false
+    @State private var pendingTemplateSaveResults: [UUID: TemplateEditorSaveResult] = [:]
 
     @State private var errorMessage = ""
     @State private var showingError = false
@@ -46,7 +47,7 @@ struct StartWorkoutHomeView: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 20) {
                 WGJRootHeader("Start Workout", subtitle: "Pick a template or start fresh.")
 
                 quickStartSection
@@ -59,7 +60,7 @@ struct StartWorkoutHomeView: View {
                         icon: "folder"
                     )
                 } else {
-                    LazyVStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 12) {
                         ForEach(controller.snapshot.sections) { section in
                             templateSectionCard(section)
                         }
@@ -92,8 +93,8 @@ struct StartWorkoutHomeView: View {
             }
         }
         .sheet(item: $templateEditorContext, onDismiss: markHomeDirtyAndReloadIfActive) { context in
-            TemplateEditorView(folderID: context.folderID, templateID: context.templateID) { savedTemplateID in
-                handleTemplateEditorSaved(templateID: savedTemplateID)
+            TemplateEditorView(folderID: context.folderID, templateID: context.templateID) { result in
+                handleTemplateEditorSaved(result)
             }
         }
         .sheet(isPresented: $showingFolderEditor, onDismiss: markHomeDirtyAndReloadIfActive) {
@@ -366,78 +367,27 @@ struct StartWorkoutHomeView: View {
     private func templateRow(_ template: StartWorkoutTemplateRowSnapshot) -> some View {
         let destinationFolders = folders.filter { $0.id != template.folderID }
 
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(template.name)
-                        .font(.headline.weight(.semibold))
-                        .foregroundStyle(WGJTheme.textPrimary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    if let notes = optionalNotes(for: template) {
-                        Text(notes)
-                            .font(.caption)
-                            .foregroundStyle(WGJTheme.textSecondary)
-                            .lineLimit(2)
-                    }
-
-                    templateMetadataRow(template)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                WGJActionMenuButton("Template Actions") {
-                    Button {
-                        editTemplate(template)
-                    } label: {
-                        Label("Edit", systemImage: "pencil")
-                    }
-                    .accessibilityIdentifier("start-workout-template-edit-menu-button")
-
-                    Button {
-                        presentExportOptions(for: .template(template.id))
-                    } label: {
-                        Label("Export / Share", systemImage: "square.and.arrow.up")
-                    }
-                    .accessibilityIdentifier("start-workout-template-export-button")
-
-                    if template.folderID != TemplateRepository.unfiledFolderID {
-                        Button("Move to Unfiled") {
-                            moveTemplate(templateID: template.id, toFolderID: nil)
-                        }
-                    }
-
-                    ForEach(destinationFolders) { folder in
-                        Button("Move to \(folder.name)") {
-                            moveTemplate(templateID: template.id, toFolderID: folder.id)
-                        }
-                    }
-
-                    Button(role: .destructive) {
-                        deleteTemplate(template.id)
-                    } label: {
-                        Label("Delete", systemImage: "trash")
-                    }
-                } label: {
-                    StartWorkoutUtilityIcon(systemImage: "ellipsis", tint: WGJTheme.textSecondary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("start-workout-template-actions-button")
+        return StartWorkoutTemplateRowView(
+            template: template,
+            destinationFolders: destinationFolders,
+            lastPerformedAt: lastPerformedDate(for: template.id),
+            onStart: {
+                presentTemplatePreview(templateID: template.id)
+            },
+            onEdit: {
+                editTemplate(template)
+            },
+            onExport: {
+                presentExportOptions(for: .template(template.id))
+            },
+            onMove: { destinationFolderID in
+                moveTemplate(templateID: template.id, toFolderID: destinationFolderID)
+            },
+            onDelete: {
+                deleteTemplate(template.id)
             }
-
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) {
-                    editButton(for: template)
-                    startButton(for: template)
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    startButton(for: template)
-                    editButton(for: template)
-                }
-            }
-        }
-        .padding(14)
+        )
+        .equatable()
     }
 
     private func templateMetadataRow(_ template: StartWorkoutTemplateRowSnapshot) -> some View {
@@ -702,14 +652,17 @@ struct StartWorkoutHomeView: View {
 
     private func startEmptyWorkout() {
         isPreparingActiveWorkoutStart = true
-        Task { @MainActor in
+        let backgroundStore = startWorkoutBackgroundStore
+        Task.detached(priority: .userInitiated) {
             do {
-                let preparation = try await prepareActiveWorkoutStart(templateID: nil)
-                handlePreparedActiveWorkoutStart(preparation)
+                let preparation = try await Self.prepareActiveWorkoutStart(
+                    templateID: nil,
+                    backgroundStore: backgroundStore
+                )
+                await handleActiveWorkoutStartCompleted(preparation)
             } catch {
-                showError(error)
+                await handleActiveWorkoutStartFailed(error)
             }
-            isPreparingActiveWorkoutStart = false
         }
     }
 
@@ -726,19 +679,31 @@ struct StartWorkoutHomeView: View {
 
     private func startFromTemplate(templateID: UUID) {
         isPreparingActiveWorkoutStart = true
-        Task { @MainActor in
+        let backgroundStore = startWorkoutBackgroundStore
+        Task.detached(priority: .userInitiated) {
             do {
-                let preparation = try await prepareActiveWorkoutStart(templateID: templateID)
-                handlePreparedActiveWorkoutStart(preparation)
-                selectedTemplatePreview = nil
+                let preparation = try await Self.prepareActiveWorkoutStart(
+                    templateID: templateID,
+                    backgroundStore: backgroundStore
+                )
+                await handleActiveWorkoutStartCompleted(preparation, clearSelectedTemplatePreview: true)
             } catch {
-                showError(error)
+                await handleActiveWorkoutStartFailed(error)
             }
-            isPreparingActiveWorkoutStart = false
         }
     }
 
     private func prepareActiveWorkoutStart(templateID: UUID?) async throws -> ActiveWorkoutStartPreparation {
+        try await Self.prepareActiveWorkoutStart(
+            templateID: templateID,
+            backgroundStore: startWorkoutBackgroundStore
+        )
+    }
+
+    nonisolated private static func prepareActiveWorkoutStart(
+        templateID: UUID?,
+        backgroundStore: AppBackgroundStore
+    ) async throws -> ActiveWorkoutStartPreparation {
         if let snapshot = try await ActiveWorkoutSnapshotStore.shared.loadDiscardingCorruptSnapshot() {
             return ActiveWorkoutStartPreparation(
                 sessionID: snapshot.id,
@@ -749,7 +714,6 @@ struct StartWorkoutHomeView: View {
             )
         }
 
-        let backgroundStore = startWorkoutBackgroundStore
         let importedLegacy = try await backgroundStore.performWrite("start-workout.import-legacy-active-session") { backgroundContext in
             try ActiveWorkoutSessionFactory(modelContext: backgroundContext)
                 .importLegacyActiveSessionIfNeeded()
@@ -825,6 +789,24 @@ struct StartWorkoutHomeView: View {
         presentActiveWorkout(sessionID: preparation.sessionID)
     }
 
+    @MainActor
+    private func handleActiveWorkoutStartCompleted(
+        _ preparation: ActiveWorkoutStartPreparation,
+        clearSelectedTemplatePreview: Bool = false
+    ) {
+        handlePreparedActiveWorkoutStart(preparation)
+        if clearSelectedTemplatePreview {
+            selectedTemplatePreview = nil
+        }
+        isPreparingActiveWorkoutStart = false
+    }
+
+    @MainActor
+    private func handleActiveWorkoutStartFailed(_ error: Error) {
+        showError(error)
+        isPreparingActiveWorkoutStart = false
+    }
+
     private func lastPerformedDate(for templateID: UUID) -> Date? {
         controller.snapshot.lastCompletedByTemplateID[templateID]
     }
@@ -851,9 +833,9 @@ struct StartWorkoutHomeView: View {
     private func saveFolderDraft() {
         let folderID = editingFolderID
         let name = folderNameDraft
-        Task { @MainActor in
+        let backgroundStore = startWorkoutBackgroundStore
+        Task.detached(priority: .utility) {
             do {
-                let backgroundStore = startWorkoutBackgroundStore
                 try await backgroundStore.performWrite("start-workout.folder.save") { backgroundContext in
                     let repository = TemplateRepository(modelContext: backgroundContext)
                     if let folderID {
@@ -862,10 +844,9 @@ struct StartWorkoutHomeView: View {
                         try repository.createFolder(name: name)
                     }
                 }
-                showingFolderEditor = false
-                markHomeDirtyAndReloadIfActive()
+                await handleTemplateLibraryMutationCompleted(clearFolderEditor: true)
             } catch {
-                showError(error)
+                await showError(error)
             }
         }
     }
@@ -875,17 +856,17 @@ struct StartWorkoutHomeView: View {
             return
         }
 
-        Task { @MainActor in
+        let destinationIndex = currentIndex + delta
+        let backgroundStore = startWorkoutBackgroundStore
+        Task.detached(priority: .utility) {
             do {
-                let destinationIndex = currentIndex + delta
-                let backgroundStore = startWorkoutBackgroundStore
                 try await backgroundStore.performWrite("start-workout.folder.move") { backgroundContext in
                     try TemplateRepository(modelContext: backgroundContext)
                         .moveFolder(id: folderID, toIndex: destinationIndex)
                 }
-                markHomeDirtyAndReloadIfActive()
+                await handleTemplateLibraryMutationCompleted()
             } catch {
-                showError(error)
+                await showError(error)
             }
         }
     }
@@ -899,45 +880,44 @@ struct StartWorkoutHomeView: View {
     }
 
     private func deleteFolder(_ folderID: UUID) {
-        Task { @MainActor in
+        let backgroundStore = startWorkoutBackgroundStore
+        Task.detached(priority: .utility) {
             do {
-                let backgroundStore = startWorkoutBackgroundStore
                 try await backgroundStore.performWrite("start-workout.folder.delete") { backgroundContext in
                     try TemplateRepository(modelContext: backgroundContext).deleteFolder(id: folderID)
                 }
-                pendingFolderDeletion = nil
-                markHomeDirtyAndReloadIfActive()
+                await handleTemplateLibraryMutationCompleted(clearPendingFolderDeletion: true)
             } catch {
-                showError(error)
+                await showError(error)
             }
         }
     }
 
     private func moveTemplate(templateID: UUID, toFolderID folderID: UUID?) {
-        Task { @MainActor in
+        let backgroundStore = startWorkoutBackgroundStore
+        Task.detached(priority: .utility) {
             do {
-                let backgroundStore = startWorkoutBackgroundStore
                 try await backgroundStore.performWrite("start-workout.template.move") { backgroundContext in
                     try TemplateRepository(modelContext: backgroundContext)
                         .moveTemplate(id: templateID, toFolderID: folderID)
                 }
-                markHomeDirtyAndReloadIfActive()
+                await handleTemplateLibraryMutationCompleted()
             } catch {
-                showError(error)
+                await showError(error)
             }
         }
     }
 
     private func deleteTemplate(_ templateID: UUID) {
-        Task { @MainActor in
+        let backgroundStore = startWorkoutBackgroundStore
+        Task.detached(priority: .utility) {
             do {
-                let backgroundStore = startWorkoutBackgroundStore
                 try await backgroundStore.performWrite("start-workout.template.delete") { backgroundContext in
                     try TemplateRepository(modelContext: backgroundContext).deleteTemplate(id: templateID)
                 }
-                markHomeDirtyAndReloadIfActive()
+                await handleTemplateLibraryMutationCompleted()
             } catch {
-                showError(error)
+                await showError(error)
             }
         }
     }
@@ -975,12 +955,28 @@ struct StartWorkoutHomeView: View {
         }
     }
 
-    private func handleTemplateEditorSaved(templateID: UUID) {
+    @MainActor
+    private func handleTemplateLibraryMutationCompleted(
+        clearFolderEditor: Bool = false,
+        clearPendingFolderDeletion: Bool = false
+    ) {
+        if clearFolderEditor {
+            showingFolderEditor = false
+        }
+        if clearPendingFolderDeletion {
+            pendingFolderDeletion = nil
+        }
+        markHomeDirtyAndReloadIfActive()
+    }
+
+    private func handleTemplateEditorSaved(_ result: TemplateEditorSaveResult) {
+        pendingTemplateSaveResults[result.templateID] = result
+        controller.applyTemplateSaveResult(result)
         needsExplicitRefresh = true
         guard isTabActive else { return }
         Task { @MainActor in
             await reloadHomeSnapshotIfNeeded(force: true)
-            refreshSelectedTemplatePreviewIfNeeded(templateID: templateID)
+            refreshSelectedTemplatePreviewIfNeeded(templateID: result.templateID)
         }
     }
 
@@ -1010,7 +1006,7 @@ struct StartWorkoutHomeView: View {
             let snapshot = try await backgroundStore.perform("start-workout.snapshot.reload") { backgroundContext in
                 try StartWorkoutHomeSnapshotLoader.load(modelContext: backgroundContext)
             }
-            controller.apply(snapshot)
+            controller.apply(snapshotApplyingPendingTemplateSaves(to: snapshot))
             hasLoadedSnapshot = true
             needsExplicitRefresh = false
             lastLoadedContentUpdatedAt = contentUpdatedAt
@@ -1020,9 +1016,33 @@ struct StartWorkoutHomeView: View {
         }
     }
 
+    private func snapshotApplyingPendingTemplateSaves(
+        to snapshot: StartWorkoutHomeSnapshot
+    ) -> StartWorkoutHomeSnapshot {
+        guard !pendingTemplateSaveResults.isEmpty else { return snapshot }
+
+        var updatedSnapshot = snapshot
+        var resolvedTemplateIDs: [UUID] = []
+        for result in pendingTemplateSaveResults.values {
+            if updatedSnapshot.containsSavedTemplateResult(result) {
+                resolvedTemplateIDs.append(result.templateID)
+            }
+            updatedSnapshot = StartWorkoutHomeSnapshotBuilder.applyingTemplateSaveResult(result, to: updatedSnapshot)
+        }
+
+        for templateID in resolvedTemplateIDs {
+            pendingTemplateSaveResults[templateID] = nil
+        }
+
+        return updatedSnapshot
+    }
+
     @MainActor
     private func currentHomeContentUpdatedAt() async -> Date? {
-        let backgroundStore = startWorkoutBackgroundStore
+        await Self.currentHomeContentUpdatedAt(backgroundStore: startWorkoutBackgroundStore)
+    }
+
+    nonisolated private static func currentHomeContentUpdatedAt(backgroundStore: AppBackgroundStore) async -> Date? {
         return try? await backgroundStore.perform("start-workout.latest-updated-at") { backgroundContext in
             let templateRepository = TemplateRepository(modelContext: backgroundContext)
             let latestFolderUpdate = try? templateRepository.latestFolderUpdatedAt()
@@ -1036,6 +1056,7 @@ struct StartWorkoutHomeView: View {
         }
     }
 
+    @MainActor
     private func showError(_ error: Error) {
         let message = error.localizedDescription
         errorMessage = message.isEmpty ? String(describing: error) : message
@@ -1073,25 +1094,21 @@ struct StartWorkoutHomeView: View {
     }
 
     private func importTransfer(from fileURL: URL, clearingPendingRequestID requestID: UUID? = nil) {
-        Task { @MainActor in
-            defer {
-                if let requestID {
-                    templateFileOpenState.clear(requestID: requestID)
-                }
-            }
-
+        let backgroundStore = startWorkoutBackgroundStore
+        let currentTemplateCount = controller.snapshot.templates.count
+        let isPro = subscriptionState.isPro
+        Task.detached(priority: .utility) {
             do {
-                let backgroundStore = startWorkoutBackgroundStore
                 let importingCount = try await backgroundStore.perform("start-workout.template.import-count") { backgroundContext in
                     try TemplateTransferService(modelContext: backgroundContext)
                         .importedTemplateCount(from: fileURL)
                 }
                 guard ProAccessPolicy.canImportTemplates(
-                    currentTemplateCount: controller.snapshot.templates.count,
+                    currentTemplateCount: currentTemplateCount,
                     importingCount: importingCount,
-                    isPro: subscriptionState.isPro
+                    isPro: isPro
                 ) else {
-                    subscriptionState.presentPaywall()
+                    await handleTemplateImportRequiresPro(clearingPendingRequestID: requestID)
                     return
                 }
 
@@ -1103,15 +1120,51 @@ struct StartWorkoutHomeView: View {
                 let snapshot = try await backgroundStore.perform("start-workout.snapshot.reload") { backgroundContext in
                     try StartWorkoutHomeSnapshotLoader.load(modelContext: backgroundContext)
                 }
-                controller.apply(snapshot)
-                hasLoadedSnapshot = true
-                needsExplicitRefresh = false
-                lastLoadedContentUpdatedAt = await currentHomeContentUpdatedAt()
-                lastRefreshAt = .now
-                applyImportedTransfer(importResult)
+                let contentUpdatedAt = await Self.currentHomeContentUpdatedAt(backgroundStore: backgroundStore)
+                await handleTemplateImportCompleted(
+                    importResult,
+                    snapshot: snapshot,
+                    contentUpdatedAt: contentUpdatedAt,
+                    clearingPendingRequestID: requestID
+                )
             } catch {
-                showError(error)
+                await handleTemplateImportFailed(error, clearingPendingRequestID: requestID)
             }
+        }
+    }
+
+    @MainActor
+    private func handleTemplateImportRequiresPro(clearingPendingRequestID requestID: UUID?) {
+        clearPendingTemplateFileRequest(requestID)
+        subscriptionState.presentPaywall()
+    }
+
+    @MainActor
+    private func handleTemplateImportCompleted(
+        _ result: TemplateTransferImportResult,
+        snapshot: StartWorkoutHomeSnapshot,
+        contentUpdatedAt: Date?,
+        clearingPendingRequestID requestID: UUID?
+    ) {
+        clearPendingTemplateFileRequest(requestID)
+        controller.apply(snapshot)
+        hasLoadedSnapshot = true
+        needsExplicitRefresh = false
+        lastLoadedContentUpdatedAt = contentUpdatedAt
+        lastRefreshAt = .now
+        applyImportedTransfer(result)
+    }
+
+    @MainActor
+    private func handleTemplateImportFailed(_ error: Error, clearingPendingRequestID requestID: UUID?) {
+        clearPendingTemplateFileRequest(requestID)
+        showError(error)
+    }
+
+    @MainActor
+    private func clearPendingTemplateFileRequest(_ requestID: UUID?) {
+        if let requestID {
+            templateFileOpenState.clear(requestID: requestID)
         }
     }
 
@@ -1199,9 +1252,9 @@ struct StartWorkoutHomeView: View {
 
         exportRequest = nil
 
-        Task { @MainActor in
+        let backgroundStore = startWorkoutBackgroundStore
+        Task.detached(priority: .utility) {
             do {
-                let backgroundStore = startWorkoutBackgroundStore
                 let fileURL = try await backgroundStore.performWrite("start-workout.template.export") { backgroundContext in
                     let transferService = TemplateTransferService(modelContext: backgroundContext)
 
@@ -1212,11 +1265,16 @@ struct StartWorkoutHomeView: View {
                         return try transferService.writeExportFile(folderID: folderID, format: format)
                     }
                 }
-                shareSheetItem = TemplateTransferShareSheetItem(fileURL: fileURL)
+                await presentShareSheet(fileURL: fileURL)
             } catch {
-                showError(error)
+                await showError(error)
             }
         }
+    }
+
+    @MainActor
+    private func presentShareSheet(fileURL: URL) {
+        shareSheetItem = TemplateTransferShareSheetItem(fileURL: fileURL)
     }
 
     private func cleanupExportedFile(at fileURL: URL) {
@@ -1271,11 +1329,11 @@ nonisolated struct StartWorkoutFolderSnapshot: Identifiable, Equatable, Sendable
     let sortOrder: Int
     let templateCount: Int
 
-    init(folder: TemplateFolder) {
-        id = folder.id
-        name = folder.name
-        sortOrder = folder.sortOrder
-        templateCount = (folder.templates ?? []).count
+    init(id: UUID, name: String, sortOrder: Int, templateCount: Int) {
+        self.id = id
+        self.name = name
+        self.sortOrder = sortOrder
+        self.templateCount = templateCount
     }
 }
 
@@ -1296,6 +1354,15 @@ nonisolated struct StartWorkoutTemplateRowSnapshot: Identifiable, Equatable, Sen
         sortOrder = template.sortOrder
         exerciseCount = (template.exercises ?? []).count
     }
+
+    init(id: UUID, folderID: UUID, name: String, notes: String?, sortOrder: Int, exerciseCount: Int) {
+        self.id = id
+        self.folderID = folderID
+        self.name = name
+        self.notes = notes
+        self.sortOrder = sortOrder
+        self.exerciseCount = exerciseCount
+    }
 }
 
 nonisolated struct StartWorkoutHomeSnapshot: Sendable {
@@ -1310,6 +1377,16 @@ nonisolated struct StartWorkoutHomeSnapshot: Sendable {
         sections: [],
         lastCompletedByTemplateID: [:]
     )
+
+    func containsSavedTemplateResult(_ result: TemplateEditorSaveResult) -> Bool {
+        let trimmedName = result.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedNotes = result.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        return templates.contains { template in
+            template.id == result.templateID
+                && template.name == trimmedName
+                && (template.notes ?? "") == trimmedNotes
+        }
+    }
 }
 
 @MainActor
@@ -1319,6 +1396,10 @@ final class StartWorkoutHomeController {
 
     func apply(_ snapshot: StartWorkoutHomeSnapshot) {
         self.snapshot = snapshot
+    }
+
+    func applyTemplateSaveResult(_ result: TemplateEditorSaveResult) {
+        snapshot = StartWorkoutHomeSnapshotBuilder.applyingTemplateSaveResult(result, to: snapshot)
     }
 }
 
@@ -1340,7 +1421,18 @@ nonisolated enum StartWorkoutHomeSnapshotBuilder {
         templates: [WorkoutTemplate],
         completedSessions: [WorkoutSession]
     ) -> StartWorkoutHomeSnapshot {
-        let folderSnapshots = folders.map(StartWorkoutFolderSnapshot.init(folder:))
+        let templateCountsByFolderID = Dictionary(
+            grouping: templates,
+            by: \.folderID
+        ).mapValues(\.count)
+        let folderSnapshots = folders.map { folder in
+            StartWorkoutFolderSnapshot(
+                id: folder.id,
+                name: folder.name,
+                sortOrder: folder.sortOrder,
+                templateCount: templateCountsByFolderID[folder.id, default: 0]
+            )
+        }
         let templateSnapshots = templates.map(StartWorkoutTemplateRowSnapshot.init(template:))
         let orderedTemplates = orderTemplates(templateSnapshots, folders: folderSnapshots)
         let sections = buildSections(folders: folderSnapshots, templates: orderedTemplates)
@@ -1351,6 +1443,37 @@ nonisolated enum StartWorkoutHomeSnapshotBuilder {
             templates: orderedTemplates,
             sections: sections,
             lastCompletedByTemplateID: lastCompletedByTemplateID
+        )
+    }
+
+    static func applyingTemplateSaveResult(
+        _ result: TemplateEditorSaveResult,
+        to snapshot: StartWorkoutHomeSnapshot
+    ) -> StartWorkoutHomeSnapshot {
+        let trimmedName = result.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedNotes = result.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        var didUpdateTemplate = false
+        let updatedTemplates = snapshot.templates.map { template in
+            guard template.id == result.templateID else { return template }
+            didUpdateTemplate = true
+            return StartWorkoutTemplateRowSnapshot(
+                id: template.id,
+                folderID: template.folderID,
+                name: trimmedName.isEmpty ? template.name : trimmedName,
+                notes: trimmedNotes.isEmpty ? nil : trimmedNotes,
+                sortOrder: template.sortOrder,
+                exerciseCount: template.exerciseCount
+            )
+        }
+
+        guard didUpdateTemplate else { return snapshot }
+
+        let orderedTemplates = orderTemplates(updatedTemplates, folders: snapshot.folders)
+        return StartWorkoutHomeSnapshot(
+            folders: snapshot.folders,
+            templates: orderedTemplates,
+            sections: buildSections(folders: snapshot.folders, templates: orderedTemplates),
+            lastCompletedByTemplateID: snapshot.lastCompletedByTemplateID
         )
     }
 
@@ -1459,6 +1582,161 @@ private struct StartWorkoutPendingFolderDeletion: Identifiable {
     let id: UUID
     let name: String
     let templateCount: Int
+}
+
+private struct StartWorkoutTemplateRowView: View, Equatable {
+    let template: StartWorkoutTemplateRowSnapshot
+    let destinationFolders: [StartWorkoutFolderSnapshot]
+    let lastPerformedAt: Date?
+    let onStart: () -> Void
+    let onEdit: () -> Void
+    let onExport: () -> Void
+    let onMove: (UUID?) -> Void
+    let onDelete: () -> Void
+
+    static func == (
+        lhs: StartWorkoutTemplateRowView,
+        rhs: StartWorkoutTemplateRowView
+    ) -> Bool {
+        lhs.template == rhs.template
+            && lhs.destinationFolders == rhs.destinationFolders
+            && lhs.lastPerformedAt == rhs.lastPerformedAt
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(template.name)
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(WGJTheme.textPrimary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if let notes = template.notes {
+                        Text(notes)
+                            .font(.caption)
+                            .foregroundStyle(WGJTheme.textSecondary)
+                            .lineLimit(2)
+                    }
+
+                    templateMetadataRow
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                WGJActionMenuButton("Template Actions") {
+                    Button {
+                        onEdit()
+                    } label: {
+                        Label("Edit", systemImage: "pencil")
+                    }
+                    .accessibilityIdentifier("start-workout-template-edit-menu-button")
+
+                    Button {
+                        onExport()
+                    } label: {
+                        Label("Export / Share", systemImage: "square.and.arrow.up")
+                    }
+                    .accessibilityIdentifier("start-workout-template-export-button")
+
+                    if template.folderID != TemplateRepository.unfiledFolderID {
+                        Button("Move to Unfiled") {
+                            onMove(nil)
+                        }
+                    }
+
+                    ForEach(destinationFolders) { folder in
+                        Button("Move to \(folder.name)") {
+                            onMove(folder.id)
+                        }
+                    }
+
+                    Button(role: .destructive) {
+                        onDelete()
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                } label: {
+                    StartWorkoutUtilityIcon(systemImage: "ellipsis", tint: WGJTheme.textSecondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("start-workout-template-actions-button")
+            }
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    editButton
+                    startButton
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    startButton
+                    editButton
+                }
+            }
+        }
+        .padding(14)
+    }
+
+    private var templateMetadataRow: some View {
+        HStack(spacing: 12) {
+            templateMetadataItem(systemImage: "list.bullet", text: exerciseCountText)
+
+            if let lastPerformedAt {
+                templateMetadataItem(
+                    systemImage: "clock",
+                    text: lastPerformedAt.formatted(date: .abbreviated, time: .omitted)
+                )
+            }
+        }
+    }
+
+    private func templateMetadataItem(systemImage: String, text: String) -> some View {
+        Label(text, systemImage: systemImage)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(WGJTheme.textSecondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+    }
+
+    private var startButton: some View {
+        Button {
+            onStart()
+        } label: {
+            Text("Start")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(WGJCompactPrimaryButtonStyle())
+        .accessibilityIdentifier(
+            "start-workout-template-start-button-\(templateAccessibilityKey)"
+        )
+    }
+
+    private var editButton: some View {
+        Button {
+            onEdit()
+        } label: {
+            Text("Edit")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(WGJCompactGhostButtonStyle())
+        .accessibilityIdentifier(
+            "start-workout-template-inline-edit-button-\(templateAccessibilityKey)"
+        )
+    }
+
+    private var exerciseCountText: String {
+        let count = template.exerciseCount
+        return "\(count) exercise" + (count == 1 ? "" : "s")
+    }
+
+    private var templateAccessibilityKey: String {
+        template.name
+            .lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: "-")
+    }
 }
 
 enum StartWorkoutFolderExpansionPersistence {

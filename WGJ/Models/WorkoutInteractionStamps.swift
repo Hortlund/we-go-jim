@@ -46,8 +46,22 @@ nonisolated struct ActiveWorkoutExerciseInteractionStamp: Hashable, Sendable {
         self.entriesByID = Dictionary(entries.map { ($0.id, $0) }, uniquingKeysWith: { existing, _ in existing })
     }
 
+    private init(entries: [Entry], invalidation: Int, entriesByID: [UUID: Entry]) {
+        self.entries = entries
+        self.invalidation = invalidation
+        self.entriesByID = entriesByID
+    }
+
     var exerciseIDs: Set<UUID> {
         Set(entries.map(\.id))
+    }
+
+    func withInvalidation(_ invalidation: Int) -> ActiveWorkoutExerciseInteractionStamp {
+        ActiveWorkoutExerciseInteractionStamp(
+            entries: entries,
+            invalidation: invalidation,
+            entriesByID: entriesByID
+        )
     }
 
     func changedExerciseIDs(comparedTo previous: ActiveWorkoutExerciseInteractionStamp?) -> Set<UUID> {

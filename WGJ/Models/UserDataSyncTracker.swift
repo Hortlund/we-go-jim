@@ -112,6 +112,12 @@ nonisolated final class UserDataSyncTracker {
 
     private init() { }
 
+    #if DEBUG
+    nonisolated static func makeForTesting() -> UserDataSyncTracker {
+        UserDataSyncTracker()
+    }
+    #endif
+
     func configureForLaunch(isCloudEnabled: Bool, errorDescription: String?) -> UserDataSyncStatusSnapshot {
         lock.lock()
         defer { lock.unlock() }

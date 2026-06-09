@@ -88,7 +88,7 @@ struct ProfileView: View {
     @State private var showingError = false
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 16) {
                 WGJRootHeader("Profile", subtitle: "Your training snapshot, progress, and app controls.")
 
                 identityCard
@@ -226,38 +226,38 @@ struct ProfileView: View {
         VStack(alignment: .leading, spacing: 12) {
             WGJSectionHeader("Highlights", subtitle: "A quick look at the work you've been putting in.")
 
-            LazyVGrid(
-                columns: [
-                    GridItem(.flexible(), spacing: 10),
-                    GridItem(.flexible(), spacing: 10),
-                ],
-                spacing: 10
-            ) {
-                ProfileQuickStatTile(
-                    title: "Total Workouts",
-                    value: "\(dashboardContent.overviewStats.totalWorkouts)",
-                    systemImage: "figure.strengthtraining.traditional",
-                    tint: WGJTheme.accentBlue
-                )
-                ProfileQuickStatTile(
-                    title: "Total PRs",
-                    value: "\(dashboardContent.overviewStats.totalPRHits)",
-                    systemImage: "trophy.fill",
-                    tint: WGJTheme.accentGold
-                )
-                ProfileQuickStatTile(
-                    title: "Current Streak",
-                    value: dayCountText(dashboardContent.overviewStats.currentStreakDays),
-                    systemImage: "flame.fill",
-                    tint: WGJTheme.success
-                )
-                ProfileQuickStatTile(
-                    title: "Total Time",
-                    value: formattedDurationSummary(dashboardContent.overviewStats.totalDurationSeconds),
-                    systemImage: "clock.fill",
-                    tint: WGJTheme.accentCyan
-                )
+            Grid(horizontalSpacing: 10, verticalSpacing: 10) {
+                GridRow {
+                    ProfileQuickStatTile(
+                        title: "Total Workouts",
+                        value: "\(dashboardContent.overviewStats.totalWorkouts)",
+                        systemImage: "figure.strengthtraining.traditional",
+                        tint: WGJTheme.accentBlue
+                    )
+                    ProfileQuickStatTile(
+                        title: "Total PRs",
+                        value: "\(dashboardContent.overviewStats.totalPRHits)",
+                        systemImage: "trophy.fill",
+                        tint: WGJTheme.accentGold
+                    )
+                }
+
+                GridRow {
+                    ProfileQuickStatTile(
+                        title: "Current Streak",
+                        value: dayCountText(dashboardContent.overviewStats.currentStreakDays),
+                        systemImage: "flame.fill",
+                        tint: WGJTheme.success
+                    )
+                    ProfileQuickStatTile(
+                        title: "Total Time",
+                        value: formattedDurationSummary(dashboardContent.overviewStats.totalDurationSeconds),
+                        systemImage: "clock.fill",
+                        tint: WGJTheme.accentCyan
+                    )
+                }
             }
+            .frame(maxWidth: .infinity)
 
             ProfileHighlightsMetaRow(title: "Active Since", value: activeSinceText)
             ProfileHighlightsMetaRow(title: "Top Exercise", value: topExerciseSummaryText)
@@ -479,33 +479,29 @@ struct ProfileView: View {
         VStack(alignment: .leading, spacing: 12) {
             WGJSectionHeader("Streaks", subtitle: "How steady your training has been lately")
 
-            LazyVGrid(
-                columns: [
-                    GridItem(.flexible(), spacing: 10),
-                    GridItem(.flexible(), spacing: 10),
-                    GridItem(.flexible(), spacing: 10),
-                ],
-                spacing: 10
-            ) {
-                ProfileQuickStatTile(
-                    title: "Current",
-                    value: dayCountText(dashboardContent.overviewStats.currentStreakDays),
-                    systemImage: "flame.fill",
-                    tint: WGJTheme.success
-                )
-                ProfileQuickStatTile(
-                    title: "Longest",
-                    value: dayCountText(dashboardContent.overviewStats.longestStreakDays),
-                    systemImage: "bolt.fill",
-                    tint: WGJTheme.accentGold
-                )
-                ProfileQuickStatTile(
-                    title: "This Month",
-                    value: dayCountText(dashboardContent.overviewStats.activeDaysThisMonth),
-                    systemImage: "calendar",
-                    tint: WGJTheme.accentBlue
-                )
+            Grid(horizontalSpacing: 10, verticalSpacing: 10) {
+                GridRow {
+                    ProfileQuickStatTile(
+                        title: "Current",
+                        value: dayCountText(dashboardContent.overviewStats.currentStreakDays),
+                        systemImage: "flame.fill",
+                        tint: WGJTheme.success
+                    )
+                    ProfileQuickStatTile(
+                        title: "Longest",
+                        value: dayCountText(dashboardContent.overviewStats.longestStreakDays),
+                        systemImage: "bolt.fill",
+                        tint: WGJTheme.accentGold
+                    )
+                    ProfileQuickStatTile(
+                        title: "This Month",
+                        value: dayCountText(dashboardContent.overviewStats.activeDaysThisMonth),
+                        systemImage: "calendar",
+                        tint: WGJTheme.accentBlue
+                    )
+                }
             }
+            .frame(maxWidth: .infinity)
         }
         .padding(14)
         .wgjCardContainer()
@@ -554,10 +550,7 @@ struct ProfileView: View {
         VStack(alignment: .leading, spacing: 12) {
             WGJSectionHeader("Consistency Calendar", subtitle: "Your last six weeks of training, day by day")
 
-            let maxWorkoutCount = max(1, dashboardContent.activityDays.map(\.workoutCount).max() ?? 0)
-            let hasAnyWorkoutActivity = dashboardContent.activityDays.contains { $0.workoutCount > 0 }
-
-            if !hasAnyWorkoutActivity {
+            if !dashboardContent.hasActivityDayWorkouts {
                 Text("Train a few days and your calendar will start to fill in.")
                     .font(.subheadline)
                     .foregroundStyle(WGJTheme.textSecondary)
@@ -570,9 +563,16 @@ struct ProfileView: View {
                 .font(.caption)
                 .foregroundStyle(WGJTheme.textSecondary)
 
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 7), spacing: 6) {
-                    ForEach(dashboardContent.activityDays) { day in
-                        ProfileConsistencyDayCell(day: day, maxWorkoutCount: maxWorkoutCount)
+                VStack(spacing: 6) {
+                    ForEach(Array(dashboardContent.activityDayRows.enumerated()), id: \.offset) { _, row in
+                        HStack(spacing: 6) {
+                            ForEach(row) { day in
+                                ProfileConsistencyDayCell(
+                                    day: day,
+                                    maxWorkoutCount: dashboardContent.maxActivityDayWorkoutCount
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -818,7 +818,6 @@ struct ProfileView: View {
 
             let backgroundStore = profileBackgroundStore
             let profile = try await controller.loadPublishedProfileIdentity(
-                modelContext: modelContext,
                 cloudSyncEnabled: cloudSyncEnabled,
                 backgroundStore: backgroundStore
             )
@@ -826,7 +825,6 @@ struct ProfileView: View {
             currentProfile = profile
             dashboardContent.weeklyGoal = profile.weeklyWorkoutGoal
             let dashboardContent = try await controller.loadDashboardContent(
-                modelContext: modelContext,
                 profile: profile,
                 backgroundStore: backgroundStore
             )
@@ -893,12 +891,12 @@ struct ProfileView: View {
         coachBriefLoadState = .loading
         let token = UUID()
         coachBriefLoadToken = token
-        coachBriefLoadTask = Task {
+        let backgroundStore = profileBackgroundStore
+        coachBriefLoadTask = Task.detached(priority: .utility) {
             do {
                 let coachBrief = try await controller.loadCoachBriefPresentation(
-                    modelContext: modelContext,
                     enabledWidgets: enabledWidgets,
-                    backgroundStore: profileBackgroundStore
+                    backgroundStore: backgroundStore
                 )
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
@@ -943,9 +941,11 @@ struct ProfileView: View {
         let token = UUID()
         loadingCoachFollowUps.insert(kind)
         coachFollowUpTokens[kind] = token
-        coachFollowUpTasks[kind] = Task {
-            defer {
-                Task { @MainActor in
+        let backgroundStore = profileBackgroundStore
+        let snapshot = coachBrief.snapshot
+        coachFollowUpTasks[kind] = Task.detached(priority: .utility) {
+            func clearLoadingState() async {
+                await MainActor.run {
                     guard coachFollowUpTokens[kind] == token else { return }
                     loadingCoachFollowUps.remove(kind)
                     coachFollowUpTasks[kind] = nil
@@ -955,10 +955,9 @@ struct ProfileView: View {
 
             do {
                 let summary = try await controller.loadCoachFollowUpSummary(
-                    modelContext: modelContext,
                     kind: kind,
-                    snapshot: coachBrief.snapshot,
-                    backgroundStore: profileBackgroundStore
+                    snapshot: snapshot,
+                    backgroundStore: backgroundStore
                 )
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
@@ -967,10 +966,13 @@ struct ProfileView: View {
                     coachFollowUpSummaries[kind] = summary
                 }
             } catch is CancellationError {
+                await clearLoadingState()
                 return
             } catch {
+                await clearLoadingState()
                 return
             }
+            await clearLoadingState()
         }
     }
 
@@ -985,8 +987,9 @@ struct ProfileView: View {
 
     private func markProfileDirtyAndReloadIfActive() {
         appWarmupState.invalidateProfile()
-        Task {
-            await handleProfileInvalidated(version: appWarmupState.profileInvalidationVersion)
+        let invalidationVersion = appWarmupState.profileInvalidationVersion
+        Task.detached(priority: .utility) {
+            await handleProfileInvalidated(version: invalidationVersion)
         }
     }
 
@@ -1027,7 +1030,7 @@ struct ProfileView: View {
             hasFreshWarmSnapshot: appWarmupState.freshProfile() != nil
         )
         let renderToken = profileReloadToken
-        dashboardRenderTask = Task {
+        dashboardRenderTask = Task.detached(priority: .utility) {
             if delay > .zero {
                 try? await Task.sleep(for: delay)
             } else {
@@ -1065,7 +1068,14 @@ struct ProfileView: View {
 
     private func scheduleTrendSeriesLoad() {
         let enabledWidgets = usableDashboardWidgets(dashboardContent.enabledWidgets)
-        guard enabledWidgets.contains(where: { $0.kind.requiresExerciseSelection }) else { return }
+        let widgetsNeedingSeries = enabledWidgets.filter { config in
+            config.kind.requiresExerciseSelection
+                && dashboardContent.trendSeriesByWidgetID[config.id] == nil
+        }
+        guard !widgetsNeedingSeries.isEmpty else {
+            isLoadingTrendSeries = false
+            return
+        }
 
         let reloadToken = profileReloadToken
         cancelTrendSeriesLoad()
@@ -1073,8 +1083,8 @@ struct ProfileView: View {
         let loadToken = UUID()
         trendSeriesLoadToken = loadToken
         controller.setTrendSeriesCacheOwner(loadToken)
-        trendSeriesLoadTask = Task {
-            try? await Task.sleep(for: .milliseconds(180))
+        let backgroundStore = profileBackgroundStore
+        trendSeriesLoadTask = Task.detached(priority: .utility) {
             guard !Task.isCancelled else { return }
             let isTabStillActive = await MainActor.run {
                 isTabActive && profileReloadToken == reloadToken && trendSeriesLoadToken == loadToken
@@ -1083,16 +1093,15 @@ struct ProfileView: View {
 
             do {
                 let trendSeriesByWidgetID = try await controller.loadTrendSeries(
-                    modelContext: modelContext,
-                    enabledWidgets: enabledWidgets,
+                    enabledWidgets: widgetsNeedingSeries,
                     cacheOwner: loadToken,
-                    backgroundStore: profileBackgroundStore
+                    backgroundStore: backgroundStore
                 )
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     guard profileReloadToken == reloadToken else { return }
                     guard trendSeriesLoadToken == loadToken else { return }
-                    dashboardContent.trendSeriesByWidgetID = trendSeriesByWidgetID
+                    dashboardContent.trendSeriesByWidgetID.merge(trendSeriesByWidgetID) { _, new in new }
                     persistWarmProfileSnapshotIfNeeded()
                 }
             } catch {
@@ -1231,17 +1240,12 @@ struct ProfileView: View {
 @MainActor
 @Observable
 final class ProfileViewController {
-    nonisolated private struct TrendSeriesCacheKey: Hashable, Sendable {
-        let metric: ProfileExerciseTrendMetric
-        let catalogExerciseUUID: String
-    }
-
     nonisolated private struct TrendSeriesLoadResult: Sendable {
         let trendSeriesByWidgetID: [UUID: ExerciseMetricSeries]
-        let cache: [TrendSeriesCacheKey: ExerciseMetricSeries]
+        let cache: [ProfileDashboardTrendSeriesCacheKey: ExerciseMetricSeries]
     }
 
-    private var trendSeriesCache: [TrendSeriesCacheKey: ExerciseMetricSeries] = [:]
+    private var trendSeriesCache: [ProfileDashboardTrendSeriesCacheKey: ExerciseMetricSeries] = [:]
     private var trendSeriesCacheOwner: UUID?
 
     func invalidateTrendSeriesCache() {
@@ -1254,7 +1258,6 @@ final class ProfileViewController {
     }
 
     func loadPublishedProfileIdentity(
-        modelContext: ModelContext,
         cloudSyncEnabled: Bool,
         backgroundStore: AppBackgroundStore
     ) async throws -> ProfileIdentitySnapshot {
@@ -1266,7 +1269,6 @@ final class ProfileViewController {
     }
 
     func loadDashboardContent(
-        modelContext: ModelContext,
         profile: ProfileIdentitySnapshot,
         backgroundStore: AppBackgroundStore
     ) async throws -> ProfileDashboardContent {
@@ -1286,7 +1288,6 @@ final class ProfileViewController {
     }
 
     func loadTrendSeries(
-        modelContext: ModelContext,
         enabledWidgets: [ProfileWidgetConfigSnapshot],
         cacheOwner: UUID,
         backgroundStore: AppBackgroundStore
@@ -1296,12 +1297,12 @@ final class ProfileViewController {
             let metricsService = WorkoutMetricsService(modelContext: backgroundContext)
             var trendSeriesByWidgetID: [UUID: ExerciseMetricSeries] = [:]
             var nextCache = cachedSeries
-            var currentCacheKeys: Set<TrendSeriesCacheKey> = []
+            var currentCacheKeys: Set<ProfileDashboardTrendSeriesCacheKey> = []
 
             for config in enabledWidgets {
                 guard config.kind.isExerciseTrend else { continue }
                 guard let selectedExerciseUUID = config.selectedCatalogExerciseUUID else { continue }
-                let cacheKey = TrendSeriesCacheKey(
+                let cacheKey = ProfileDashboardTrendSeriesCacheKey(
                     metric: config.exerciseTrendMetric,
                     catalogExerciseUUID: selectedExerciseUUID
                 )
@@ -1339,7 +1340,6 @@ final class ProfileViewController {
     }
 
     func loadCoachBriefPresentation(
-        modelContext: ModelContext,
         enabledWidgets: [ProfileWidgetConfigSnapshot],
         backgroundStore: AppBackgroundStore
     ) async throws -> ProfileCoachPresentation? {
@@ -1356,7 +1356,6 @@ final class ProfileViewController {
     }
 
     func loadCoachFollowUpSummary(
-        modelContext: ModelContext,
         kind: CoachFollowUpKind,
         snapshot: WeeklyCoachInsightSnapshot,
         backgroundStore: AppBackgroundStore
@@ -1401,6 +1400,48 @@ private extension ExerciseMetricSeries {
     }
 }
 
+nonisolated enum ProfileDashboardTrendSeriesBuilder {
+    static func build(
+        enabledWidgets: [ProfileWidgetConfigSnapshot],
+        metricsService: WorkoutMetricsService
+    ) throws -> [UUID: ExerciseMetricSeries] {
+        var trendSeriesByWidgetID: [UUID: ExerciseMetricSeries] = [:]
+        var seriesByWidgetConfig: [ProfileDashboardTrendSeriesCacheKey: ExerciseMetricSeries] = [:]
+
+        for config in enabledWidgets {
+            guard config.kind.isExerciseTrend else { continue }
+            guard let selectedExerciseUUID = config.selectedCatalogExerciseUUID else { continue }
+
+            let cacheKey = ProfileDashboardTrendSeriesCacheKey(
+                metric: config.exerciseTrendMetric,
+                catalogExerciseUUID: selectedExerciseUUID
+            )
+            if let cached = seriesByWidgetConfig[cacheKey] {
+                trendSeriesByWidgetID[config.id] = cached.withPreferredName(
+                    config.selectedExerciseNameSnapshot
+                )
+                continue
+            }
+
+            let series = try metricsService.exerciseMetricTrend(
+                for: selectedExerciseUUID,
+                metric: config.exerciseTrendMetric,
+                preferredExerciseName: config.selectedExerciseNameSnapshot,
+                limit: 8
+            )
+            seriesByWidgetConfig[cacheKey] = series
+            trendSeriesByWidgetID[config.id] = series
+        }
+
+        return trendSeriesByWidgetID
+    }
+}
+
+nonisolated private struct ProfileDashboardTrendSeriesCacheKey: Hashable, Sendable {
+    let metric: ProfileExerciseTrendMetric
+    let catalogExerciseUUID: String
+}
+
 nonisolated struct ProfileDashboardContent: Sendable {
     var enabledWidgets: [ProfileWidgetConfigSnapshot]
     var personalRecords: [WorkoutPRRecord]
@@ -1412,6 +1453,9 @@ nonisolated struct ProfileDashboardContent: Sendable {
     var overviewStats: ProfileOverviewStats
     var topExercises: [ProfileTopExerciseStat]
     var activityDays: [ProfileActivityDay]
+    var activityDayRows: [[ProfileActivityDay]]
+    var maxActivityDayWorkoutCount: Int
+    var hasActivityDayWorkouts: Bool
 
     static let empty = ProfileDashboardContent(
         enabledWidgets: [],
@@ -1423,7 +1467,10 @@ nonisolated struct ProfileDashboardContent: Sendable {
         weeklyGoal: 4,
         overviewStats: .empty,
         topExercises: [],
-        activityDays: []
+        activityDays: [],
+        activityDayRows: [],
+        maxActivityDayWorkoutCount: 1,
+        hasActivityDayWorkouts: false
     )
 
     nonisolated static func make(
@@ -1432,7 +1479,13 @@ nonisolated struct ProfileDashboardContent: Sendable {
         trendSeriesByWidgetID: [UUID: ExerciseMetricSeries],
         coachBrief: ProfileCoachPresentation? = nil
     ) -> ProfileDashboardContent {
-        ProfileDashboardContent(
+        let activityDayRows = stride(from: 0, to: dashboard.activityDays.count, by: 7).map { startIndex in
+            Array(dashboard.activityDays[startIndex ..< min(startIndex + 7, dashboard.activityDays.count)])
+        }
+        let maxActivityDayWorkoutCount = max(1, dashboard.activityDays.map(\.workoutCount).max() ?? 0)
+        let hasActivityDayWorkouts = dashboard.activityDays.contains { $0.workoutCount > 0 }
+
+        return ProfileDashboardContent(
             enabledWidgets: enabledWidgets,
             personalRecords: Array(dashboard.personalRecords.prefix(5)),
             weeklyProgress: dashboard.weeklyProgress,
@@ -1442,7 +1495,10 @@ nonisolated struct ProfileDashboardContent: Sendable {
             weeklyGoal: max(1, dashboard.weeklyGoal),
             overviewStats: dashboard.overviewStats,
             topExercises: Array(dashboard.topExercises.prefix(3)),
-            activityDays: dashboard.activityDays
+            activityDays: dashboard.activityDays,
+            activityDayRows: activityDayRows,
+            maxActivityDayWorkoutCount: maxActivityDayWorkoutCount,
+            hasActivityDayWorkouts: hasActivityDayWorkouts
         )
     }
 }
@@ -1523,6 +1579,7 @@ private struct ProfileConsistencyDayCell: View {
     var body: some View {
         RoundedRectangle(cornerRadius: 8, style: .continuous)
             .fill(fill)
+            .frame(maxWidth: .infinity)
             .frame(height: 26)
             .overlay {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)

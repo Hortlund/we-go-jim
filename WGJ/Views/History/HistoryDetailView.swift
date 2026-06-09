@@ -3,8 +3,6 @@ import SwiftData
 import SwiftUI
 
 struct HistoryDetailView: View {
-    private static let topAnchorID = "history-detail-top-anchor"
-
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(\.appBackgroundStore) private var appBackgroundStore
@@ -29,7 +27,6 @@ struct HistoryDetailView: View {
     @State private var expandedExerciseIDs: [UUID: Bool] = [:]
     @State private var hasPendingSummaryRebuild = false
     @State private var isSavingChanges = false
-    @State private var scrollToTopRequestID: UUID?
     @State private var sessionHeaderFlushCoordinator = HistorySessionHeaderFlushCoordinator()
     @State private var rowFlushCoordinator = WorkoutExerciseRowFlushCoordinator()
 
@@ -59,67 +56,58 @@ struct HistoryDetailView: View {
     }
 
     var body: some View {
-        ScrollViewReader { scrollProxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: WGJSpacing.section) {
-                    Color.clear
-                        .frame(height: 0)
-                        .id(Self.topAnchorID)
+        ScrollView {
+            // History detail cards expand, collapse, and reload edited rows; keeping this
+            // stack non-lazy avoids scroll-position churn while the row heights change.
+            VStack(alignment: .leading, spacing: WGJSpacing.section) {
+                if let session {
+                    headerCard(session)
+                    workoutMuscleHeatmapCard
+                    cardioSection
+                    exercisesSectionHeader
+                } else if didLoadSnapshot {
+                    WGJEmptyStateCard(
+                        title: "Workout not found",
+                        message: "This workout could not be loaded.",
+                        icon: "exclamationmark.triangle"
+                    )
+                } else {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 32)
+                }
 
-                    if let session {
-                        headerCard(session)
-                        workoutMuscleHeatmapCard
-                        cardioSection
-                        exercisesSectionHeader
-                    } else if didLoadSnapshot {
-                        WGJEmptyStateCard(
-                            title: "Workout not found",
-                            message: "This workout could not be loaded.",
-                            icon: "exclamationmark.triangle"
-                        )
-                    } else {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 32)
-                    }
-
-                    if sessionExercises.isEmpty {
-                        WGJEmptyStateCard(
-                            title: "No exercises logged",
-                            message: "Add any exercises that are missing from this workout.",
-                            icon: "list.bullet.rectangle"
-                        ) {
-                            Button("Add Exercise") {
-                                showingExercisePicker = true
-                            }
-                            .buttonStyle(WGJPrimaryButtonStyle())
+                if sessionExercises.isEmpty {
+                    WGJEmptyStateCard(
+                        title: "No exercises logged",
+                        message: "Add any exercises that are missing from this workout.",
+                        icon: "list.bullet.rectangle"
+                    ) {
+                        Button("Add Exercise") {
+                            showingExercisePicker = true
                         }
+                        .buttonStyle(WGJPrimaryButtonStyle())
                     }
-
-                    ForEach(Array(sessionExercises.enumerated()), id: \.element.id) { index, exercise in
-                        exerciseSection(exercise, index: index)
-                            .id(exercise.id)
-                    }
-
-                    if !sessionExercises.isEmpty {
-                        addExerciseButton(title: "Add another exercise")
-                            .disabled(session == nil)
-                    }
-
-                    Button("Save Changes") {
-                        saveChanges()
-                    }
-                    .buttonStyle(WGJPrimaryButtonStyle())
-                    .disabled(session == nil || isSavingChanges)
-                    .accessibilityIdentifier("history-detail-save-changes-button")
                 }
-                .padding(WGJSpacing.page)
-            }
-            .onChange(of: scrollToTopRequestID) { _, _ in
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    scrollProxy.scrollTo(Self.topAnchorID, anchor: .top)
+
+                ForEach(Array(sessionExercises.enumerated()), id: \.element.id) { index, exercise in
+                    exerciseSection(exercise, index: index)
+                        .id(exercise.id)
                 }
+
+                if !sessionExercises.isEmpty {
+                    addExerciseButton(title: "Add another exercise")
+                        .disabled(session == nil)
+                }
+
+                Button("Save Changes") {
+                    saveChanges()
+                }
+                .buttonStyle(WGJPrimaryButtonStyle())
+                .disabled(session == nil || isSavingChanges)
+                .accessibilityIdentifier("history-detail-save-changes-button")
             }
+            .padding(WGJSpacing.page)
         }
         .scrollDismissesKeyboard(.interactively)
         .wgjScreenBackground()
@@ -590,7 +578,6 @@ struct HistoryDetailView: View {
             hasPendingSummaryRebuild = false
         }
         await reloadSnapshot()
-        scrollToTopRequestID = UUID()
     }
 
     @MainActor

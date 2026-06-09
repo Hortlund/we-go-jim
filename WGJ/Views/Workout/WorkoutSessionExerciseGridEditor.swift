@@ -1,7 +1,17 @@
 import Foundation
 import SwiftUI
 
+nonisolated struct ActiveWorkoutKeyboardDismissToken: Equatable, Sendable {
+    private(set) var value: Int = 0
+
+    mutating func requestDismiss() {
+        value &+= 1
+    }
+}
+
 struct WorkoutSessionExerciseGridEditor: View {
+    @Environment(\.scenePhase) private var scenePhase
+
     let exerciseName: String
     let muscleSummary: String
     let category: String
@@ -43,6 +53,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     var onExerciseDelete: (() -> Void)?
     var flushCoordinator: WorkoutExerciseRowFlushCoordinator?
     var flushIdentifier: UUID?
+    var keyboardDismissToken: ActiveWorkoutKeyboardDismissToken
     var onInputFocusChange: (Bool) -> Void
     var onDirtyStateChange: (Bool) -> Void
 
@@ -119,6 +130,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         onExerciseDelete: (() -> Void)? = nil,
         flushCoordinator: WorkoutExerciseRowFlushCoordinator? = nil,
         flushIdentifier: UUID? = nil,
+        keyboardDismissToken: ActiveWorkoutKeyboardDismissToken = ActiveWorkoutKeyboardDismissToken(),
         onInputFocusChange: @escaping (Bool) -> Void = { _ in },
         onDirtyStateChange: @escaping (Bool) -> Void = { _ in }
     ) {
@@ -162,6 +174,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.onExerciseDelete = onExerciseDelete
         self.flushCoordinator = flushCoordinator
         self.flushIdentifier = flushIdentifier
+        self.keyboardDismissToken = keyboardDismissToken
         self.onInputFocusChange = onInputFocusChange
         self.onDirtyStateChange = onDirtyStateChange
         self._localIsExpanded = State(initialValue: isExpanded?.wrappedValue ?? initiallyExpanded)
@@ -260,6 +273,14 @@ struct WorkoutSessionExerciseGridEditor: View {
         .onChange(of: focusedInput) { previousFocus, newFocus in
             onInputFocusChange(newFocus != nil)
             handleFocusedInputChange(previousFocus, newFocus)
+        }
+        .onChange(of: keyboardDismissToken) { _, _ in
+            dismissInputFocus()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .background else { return }
+            guard focusedInput != nil else { return }
+            dismissInputFocus()
         }
         .onChange(of: isExpanded) { _, newValue in
             if newValue {
@@ -438,6 +459,8 @@ struct WorkoutSessionExerciseGridEditor: View {
                     headerIcon(symbol: isExpanded ? "chevron.up.circle.fill" : "chevron.down.circle.fill")
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(isExpanded ? "Collapse \(exerciseName)" : "Expand \(exerciseName)")
+                .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
                 .accessibilityIdentifier(
                     exerciseAccessibilityIdentifier.map { "\($0)-expand-button" }
                         ?? "workout-exercise-expand-button"
@@ -893,7 +916,9 @@ struct WorkoutSessionExerciseGridEditor: View {
 
             ZStack {
                 if let overlayState {
-                    metricDisplayText(overlayState)
+                    metricDisplayText(overlayState) {
+                        focusMetric(.reps, at: index)
+                    }
                 }
 
                 TextField(metricPlaceholderText(for: overlayState), text: repsTextBinding(for: index))
@@ -906,8 +931,15 @@ struct WorkoutSessionExerciseGridEditor: View {
                     .foregroundStyle(overlayState == nil ? WGJTheme.textPrimary : Color.clear)
                     .focused($focusedInput, equals: inputFocus(for: index, metric: .reps))
                     .multilineTextAlignment(.center)
+                    .onTapGesture {
+                        focusMetric(.reps, at: index)
+                    }
                     .disabled(!isSetEditingEnabled || setDrafts[index].isLocked)
                     .accessibilityIdentifier("workout-set-\(index)-reps-field")
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                focusMetric(.reps, at: index)
             }
             .metricInputShell(isFocused: isInputFocused(.reps, at: index))
         }
@@ -978,7 +1010,9 @@ struct WorkoutSessionExerciseGridEditor: View {
             HStack(spacing: 6) {
                 ZStack {
                     if let overlayState {
-                        metricDisplayText(overlayState)
+                        metricDisplayText(overlayState) {
+                            focusMetric(.weight, at: index)
+                        }
                     }
 
                     TextField(metricPlaceholderText(for: overlayState), text: weightTextBinding(for: index))
@@ -991,8 +1025,15 @@ struct WorkoutSessionExerciseGridEditor: View {
                         .foregroundStyle(overlayState == nil ? WGJTheme.textPrimary : Color.clear)
                         .focused($focusedInput, equals: inputFocus(for: index, metric: .weight))
                         .multilineTextAlignment(.center)
+                        .onTapGesture {
+                            focusMetric(.weight, at: index)
+                        }
                         .disabled(!isSetEditingEnabled || isLocked)
                         .accessibilityIdentifier("workout-set-\(index)-weight-field")
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    focusMetric(.weight, at: index)
                 }
 
                 WGJActionMenuButton("Load Unit", titleVisibility: .hidden) {
@@ -1455,14 +1496,6 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func weightFieldDisplayState(at index: Int) -> MetricFieldDisplayState? {
         guard setDrafts.indices.contains(index), !isInputFocused(.weight, at: index) else { return nil }
-        if let valueText = weightActualDisplayText(at: index) {
-            return MetricFieldDisplayState(
-                text: valueText,
-                tone: .actual,
-                accessibilityIdentifier: "workout-set-\(index)-weight-actual"
-            )
-        }
-
         guard let ghostText = weightGhostText(at: index) else { return nil }
         return MetricFieldDisplayState(
             text: ghostText,
@@ -1473,42 +1506,12 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func repsFieldDisplayState(at index: Int) -> MetricFieldDisplayState? {
         guard setDrafts.indices.contains(index), !isInputFocused(.reps, at: index) else { return nil }
-        if let valueText = repsActualDisplayText(at: index) {
-            return MetricFieldDisplayState(
-                text: valueText,
-                tone: .actual,
-                accessibilityIdentifier: "workout-set-\(index)-reps-actual"
-            )
-        }
-
         guard let ghostText = repsGhostText(at: index) else { return nil }
         return MetricFieldDisplayState(
             text: ghostText,
             tone: .ghost,
             accessibilityIdentifier: "workout-set-\(index)-reps-ghost"
         )
-    }
-
-    private func weightActualDisplayText(at index: Int) -> String? {
-        guard setDrafts.indices.contains(index) else { return nil }
-        let draft = setDrafts[index]
-
-        if let actualWeight = draft.actualWeight {
-            return formatWeight(actualWeight)
-        }
-
-        let showsBodyweightAsLoggedValue =
-            draft.actualLoadUnit == .bodyweight
-            && (draft.actualReps != nil || draft.isCompleted)
-
-        return showsBodyweightAsLoggedValue ? TemplateLoadUnit.bodyweight.shortLabel : nil
-    }
-
-    private func repsActualDisplayText(at index: Int) -> String? {
-        guard setDrafts.indices.contains(index), let actualReps = setDrafts[index].actualReps else {
-            return nil
-        }
-        return "\(actualReps)"
     }
 
     private func isInputFocused(_ metric: SetInputFocus.Metric, at index: Int) -> Bool {
@@ -2348,7 +2351,8 @@ struct WorkoutSessionExerciseGridEditor: View {
                         onRepsChanged: { updateDropStageRepsText($0, stageID: stage.id, setIndex: setIndex) },
                         onWeightChanged: { updateDropStageWeightText($0, stageID: stage.id, setIndex: setIndex) },
                         onLoadUnitChanged: { updateDropStageLoadUnit($0, stageID: stage.id, setIndex: setIndex) },
-                        onDelete: { removeDropStage(stage.id, from: setIndex) }
+                        onDelete: { removeDropStage(stage.id, from: setIndex) },
+                        keyboardDismissToken: keyboardDismissToken
                     )
                 }
             }
@@ -2501,17 +2505,25 @@ struct WorkoutSessionExerciseGridEditor: View {
     private func handleFocusedInputChange(_ previousFocus: SetInputFocus?, _ newFocus: SetInputFocus?) {
         guard previousFocus != newFocus else { return }
         if let previousFocus {
-            let committedBufferedValueChange = commitBufferedInput(for: previousFocus, clearsText: true)
-            if suppressNextFocusLossCommit {
-                suppressNextFocusLossCommit = false
+            if newFocus != nil {
+                if suppressNextFocusLossCommit {
+                    suppressNextFocusLossCommit = false
+                } else {
+                    scheduleCommitRequest(.debounced)
+                }
             } else {
-                scheduleCommitRequest(
-                    ActiveWorkoutEditorFocusCommitPolicy.dispositionForMetricFocusChange(
-                        previousHadFocus: true,
-                        newHasFocus: newFocus != nil,
-                        committedBufferedValueChange: committedBufferedValueChange
+                let committedBufferedValueChange = commitBufferedInput(for: previousFocus, clearsText: true)
+                if suppressNextFocusLossCommit {
+                    suppressNextFocusLossCommit = false
+                } else {
+                    scheduleCommitRequest(
+                        ActiveWorkoutEditorFocusCommitPolicy.dispositionForMetricFocusChange(
+                            previousHadFocus: true,
+                            newHasFocus: false,
+                            committedBufferedValueChange: committedBufferedValueChange
+                        )
                     )
-                )
+                }
             }
         } else {
             suppressNextFocusLossCommit = false
@@ -2827,6 +2839,7 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
     let onWeightChanged: (String) -> Void
     let onLoadUnitChanged: (TemplateLoadUnit) -> Void
     let onDelete: () -> Void
+    let keyboardDismissToken: ActiveWorkoutKeyboardDismissToken
 
     @State private var repsText: String
     @State private var weightText: String
@@ -2847,7 +2860,8 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
         onRepsChanged: @escaping (String) -> Void,
         onWeightChanged: @escaping (String) -> Void,
         onLoadUnitChanged: @escaping (TemplateLoadUnit) -> Void,
-        onDelete: @escaping () -> Void
+        onDelete: @escaping () -> Void,
+        keyboardDismissToken: ActiveWorkoutKeyboardDismissToken = ActiveWorkoutKeyboardDismissToken()
     ) {
         self.setIndex = setIndex
         self.stageIndex = stageIndex
@@ -2859,6 +2873,7 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
         self.onWeightChanged = onWeightChanged
         self.onLoadUnitChanged = onLoadUnitChanged
         self.onDelete = onDelete
+        self.keyboardDismissToken = keyboardDismissToken
         _repsText = State(initialValue: stage.actualReps.map(String.init) ?? "")
         _weightText = State(initialValue: stage.actualWeight.map(WGJFormatters.decimalString) ?? "")
     }
@@ -2869,6 +2884,7 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
             && lhs.stage == rhs.stage
             && lhs.isEditingEnabled == rhs.isEditingEnabled
             && lhs.isCompletionEnabled == rhs.isCompletionEnabled
+            && lhs.keyboardDismissToken == rhs.keyboardDismissToken
     }
 
     var body: some View {
@@ -2955,6 +2971,11 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
         .onChange(of: focusedField) { oldValue, newValue in
             guard oldValue != nil, newValue == nil else { return }
             commitLocalText()
+        }
+        .onChange(of: keyboardDismissToken) { _, _ in
+            guard focusedField != nil else { return }
+            commitLocalText()
+            focusedField = nil
         }
         .onDisappear {
             commitLocalText()
@@ -3104,22 +3125,24 @@ private struct MetricFieldDisplayState {
     var accessibilityIdentifier: String?
 }
 
-private func metricDisplayText(_ state: MetricFieldDisplayState) -> some View {
-    Text(state.text)
-        .font(.system(.title3, design: .rounded).weight(.semibold))
-        .foregroundStyle(
-            state.tone == .actual
-                ? WGJTheme.textPrimary
-                : WGJTheme.textTertiary.opacity(0.72)
-        )
-        .monospacedDigit()
-        .frame(maxWidth: .infinity)
-        .allowsHitTesting(false)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(state.text)
-        .applyIfLet(state.accessibilityIdentifier) { view, identifier in
-            view.accessibilityIdentifier(identifier)
-        }
+private func metricDisplayText(_ state: MetricFieldDisplayState, onTap: @escaping () -> Void) -> some View {
+    Button(action: onTap) {
+        Text(state.text)
+            .font(.system(.title3, design: .rounded).weight(.semibold))
+            .foregroundStyle(
+                state.tone == .actual
+                    ? WGJTheme.textPrimary
+                    : WGJTheme.textTertiary.opacity(0.72)
+            )
+            .monospacedDigit()
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel(state.text)
+    .applyIfLet(state.accessibilityIdentifier) { view, identifier in
+        view.accessibilityIdentifier(identifier)
+    }
 }
 
 private extension View {

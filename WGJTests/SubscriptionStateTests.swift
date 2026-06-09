@@ -121,6 +121,21 @@ struct SubscriptionStateTests {
 
     @MainActor
     @Test
+    func forcedUITestCustomerInfoIgnoresLaterCustomerInfoUpdates() {
+        let service = SubscriptionServiceProbe(refreshResult: .failure(SubscriptionTestError.offline))
+        let state = SubscriptionState(service: service)
+        state.forceCustomerInfoForUITesting(
+            SubscriptionCustomerInfoSnapshot(activeEntitlementIdentifiers: ["We Go Jim Pro"])
+        )
+
+        state.applyCustomerInfoUpdate(SubscriptionCustomerInfoSnapshot(activeEntitlementIdentifiers: []))
+
+        #expect(state.isPro == true)
+        #expect(state.errorMessage == nil)
+    }
+
+    @MainActor
+    @Test
     func presentPaywallConfiguresRevenueCatBeforePresentation() {
         let service = SubscriptionServiceProbe(refreshResult: .failure(SubscriptionTestError.offline))
         let state = SubscriptionState(service: service)

@@ -19,6 +19,7 @@ nonisolated struct ActiveWorkoutRenderProjection {
     var areAllMainExercisesCompleted: Bool
     var hasWorkoutContent: Bool
     var supersetContextByExerciseID: [UUID: ActiveWorkoutSupersetContext]
+    var exerciseHydrationStamp: ActiveWorkoutExerciseInteractionStamp
 
     static let empty = ActiveWorkoutRenderProjection(
         session: nil,
@@ -32,7 +33,8 @@ nonisolated struct ActiveWorkoutRenderProjection {
         missingCardioPhases: WorkoutCardioPhase.allCases,
         areAllMainExercisesCompleted: true,
         hasWorkoutContent: false,
-        supersetContextByExerciseID: [:]
+        supersetContextByExerciseID: [:],
+        exerciseHydrationStamp: ActiveWorkoutExerciseInteractionStamp(entries: [])
     )
 }
 
@@ -85,7 +87,8 @@ nonisolated enum ActiveWorkoutRenderProjectionBuilder {
             missingCardioPhases: WorkoutCardioPhase.allCases.filter { cardioByPhase[$0] == nil },
             areAllMainExercisesCompleted: areAllMainExercisesCompleted,
             hasWorkoutContent: !exercises.isEmpty || !cardioBlocks.isEmpty,
-            supersetContextByExerciseID: supersetContextByExerciseID(from: displayGroups)
+            supersetContextByExerciseID: supersetContextByExerciseID(from: displayGroups),
+            exerciseHydrationStamp: exerciseHydrationStamp(from: exercises)
         )
     }
 
@@ -113,6 +116,34 @@ nonisolated enum ActiveWorkoutRenderProjectionBuilder {
         }
 
         return contexts
+    }
+
+    private static func exerciseHydrationStamp(
+        from exercises: [ActiveWorkoutRuntimeExercise]
+    ) -> ActiveWorkoutExerciseInteractionStamp {
+        ActiveWorkoutExerciseInteractionStamp(
+            entries: exercises.map { exercise in
+                ActiveWorkoutExerciseInteractionStamp.Entry(
+                    id: exercise.id,
+                    catalogExerciseUUID: exercise.catalogExerciseUUID,
+                    restSeconds: exercise.restSeconds,
+                    targetRepMin: exercise.targetRepMin,
+                    targetRepMax: exercise.targetRepMax,
+                    supersetGroupID: exercise.supersetGroupID,
+                    supersetPositionRaw: exercise.supersetPositionRaw
+                )
+            }
+        )
+    }
+}
+
+nonisolated enum ActiveWorkoutRenderProjectionRefreshPolicy {
+    static func shouldRefreshImmediately(
+        changeSummary: ActiveWorkoutSetDraftChangeSummary,
+        isMetricInputFocused: Bool
+    ) -> Bool {
+        guard isMetricInputFocused else { return true }
+        return changeSummary.hasStructuralChange || changeSummary.hasCompletionChange
     }
 }
 

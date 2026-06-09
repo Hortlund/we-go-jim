@@ -1554,6 +1554,84 @@ struct BrosSocialServiceTests {
         ].joined(separator: "\n"))
     }
 
+    @Test
+    func repairMissingCompletedSessionPublishesQueuesWorkoutAndPRFeedEvents() async throws {
+        let context = try makeInMemoryContext()
+        let profile = try ProfileRepository(modelContext: context).loadOrCreateProfile()
+        profile.displayName = "Local Atlas"
+        profile.updateBrosMembership(
+            circleID: "circle-1",
+            membershipID: "membership-circle-1-user-1",
+            userRecordName: "user-1",
+            joinedAt: Date(timeIntervalSince1970: 100),
+            role: .owner
+        )
+
+        let session = WorkoutSession(
+            name: "Strength Day",
+            status: .completed,
+            startedAt: Date(timeIntervalSince1970: 200),
+            endedAt: Date(timeIntervalSince1970: 2_000),
+            durationSeconds: 1_800,
+            totalVolume: 500,
+            prHitsCount: 1,
+            summaryMetricsVersion: WorkoutMetricsService.currentSummaryMetricsVersion
+        )
+        let exercise = WorkoutSessionExercise(
+            sessionID: session.id,
+            catalogExerciseUUID: "bros-bench-pr",
+            exerciseNameSnapshot: "Bench Press",
+            categorySnapshot: "Chest",
+            muscleSummarySnapshot: "Chest",
+            totalSetCount: 1,
+            completedSetCount: 1,
+            sortOrder: 0
+        )
+        let set = WorkoutSessionSet(
+            sessionExerciseID: exercise.id,
+            sortOrder: 0,
+            actualReps: 5,
+            actualWeight: 100,
+            actualLoadUnit: .kg,
+            isCompleted: true
+        )
+        exercise.sets = [set]
+        session.exercises = [exercise]
+        context.insert(session)
+        try context.save()
+
+        let store = TestBrosCloudStore()
+        store.queryRecordsHandler = { recordType, predicate, _, _ in
+            if recordType == "BroFeedEvent",
+               predicate.predicateFormat.contains("actorUserRecordName")
+            {
+                return []
+            }
+            return []
+        }
+
+        var savedFeedEvents: [CKRecord] = []
+        store.saveHandler = { records, _ in
+            savedFeedEvents.append(contentsOf: records.filter { $0.recordType == "BroFeedEvent" })
+        }
+
+        let service = CloudKitBrosSocialService(modelContext: context, cloudStore: store)
+        try await service.repairMissingCompletedSessionPublishes()
+
+        let queuedItems = try context.fetch(FetchDescriptor<SocialOutboxItem>())
+        #expect(queuedItems.map(\.operation).sorted { $0.rawValue < $1.rawValue } == [
+            .publishPREvent,
+            .publishWorkoutEvent,
+        ])
+
+        await service.flushOutbox()
+
+        let savedKinds = savedFeedEvents.compactMap { $0["kind"] as? String }
+        #expect(savedKinds.contains(BroFeedEventKind.workoutCompleted.rawValue))
+        #expect(savedKinds.contains(BroFeedEventKind.prHit.rawValue))
+        #expect(try context.fetch(FetchDescriptor<SocialOutboxItem>()).isEmpty)
+    }
+
     func joinCircleRepairsStaleMemberIndexBeforeBuildingSnapshot() async throws {
         let context = try makeInMemoryContext()
         let ownerMembership = makeMembershipRecord(

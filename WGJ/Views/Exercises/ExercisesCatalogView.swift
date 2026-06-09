@@ -60,7 +60,7 @@ struct ExercisesCatalogView: View {
     @State private var isSearchToolbarExpanded = false
     @State private var activeFilterDropdown: ExerciseFilterDropdown?
     @State private var showingMuscleMapFilterSheet = false
-    @FocusState private var isSearchFieldFocused: Bool
+    @State private var isSearchFieldFocused = false
 
     private let topAnchorID = "exercises-catalog-top"
 

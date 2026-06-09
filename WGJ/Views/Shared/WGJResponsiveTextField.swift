@@ -116,8 +116,15 @@ struct WGJResponsiveTextField: View {
         Binding(
             get: { draft.liveText },
             set: { newValue in
-                draft.stageLiveText(newValue)
-                scheduleCommit()
+                if commitDelay == .zero {
+                    pendingCommitTask?.cancel()
+                    pendingCommitTask = nil
+                    draft = WGJResponsiveTextDraft(committedText: newValue)
+                    text = newValue
+                } else {
+                    draft.stageLiveText(newValue)
+                    scheduleCommit()
+                }
             }
         )
     }

@@ -43,7 +43,11 @@ struct BrosViewModelTests {
         let service = StubBrosSocialService()
         let viewModel = BrosViewModel(
             accountStatusProvider: { .available },
-            serviceFactory: { _ in service }
+            serviceFactory: { _ in service },
+            reactionSnapshotWorker: { eventID, kind, _ in
+                try await service.setReaction(eventID: eventID, kind: kind)
+                return try await service.fetchSnapshot()
+            }
         )
 
         await viewModel.refresh(
@@ -67,6 +71,10 @@ struct BrosViewModelTests {
         let fetchRemainder = source[fetchStart.lowerBound...]
         let fetchEnd = try #require(fetchRemainder.range(of: "\n    nonisolated private static func fetchAccountStatus"))
         let fetchMethodSource = String(fetchRemainder[..<fetchEnd.lowerBound])
+        let refreshStart = try #require(source.range(of: "func refresh(\n        modelContext: ModelContext"))
+        let refreshRemainder = source[refreshStart.lowerBound...]
+        let refreshEnd = try #require(refreshRemainder.range(of: "\n    private func waitForSnapshotRefreshIfInFlight"))
+        let refreshSource = String(refreshRemainder[..<refreshEnd.lowerBound])
 
         #expect(source.contains("@Environment(\\.appBackgroundStore) private var appBackgroundStore"))
         #expect(source.contains("private var brosBackgroundStore: AppBackgroundStore"))
@@ -74,9 +82,13 @@ struct BrosViewModelTests {
         #expect(!source.contains("backgroundStore: appBackgroundStore"))
         #expect(!source.contains("pendingOutboxHydration"))
         #expect(!source.contains("hydrateSnapshotAfterOutboxFlush"))
+        #expect(!source.contains("serviceFactory: @escaping @MainActor"))
+        #expect(!source.contains("private let serviceFactory: @MainActor"))
         #expect(source.components(separatedBy: "backgroundStore: brosBackgroundStore").count - 1 >= 11)
         #expect(fetchMethodSource.contains("backgroundStore.performAsync(\"bros.snapshot-refresh\")"))
         #expect(activeHydrationRemainder.contains("backgroundStore: backgroundStore"))
+        #expect(!refreshSource.contains("serviceFactory(modelContext)"))
+        #expect(!refreshSource.contains("service(modelContext: modelContext)"))
     }
 
     @Test
@@ -130,6 +142,10 @@ struct BrosViewModelTests {
     @Test
     func brosProductionMutationsUseBackgroundStoreOperations() throws {
         let source = try String(contentsOf: brosViewSourceURL(), encoding: .utf8)
+        let hydrationStart = try #require(source.range(of: "private func scheduleBackgroundHydration"))
+        let hydrationRemainder = source[hydrationStart.lowerBound...]
+        let hydrationEnd = try #require(hydrationRemainder.range(of: "\n    private func scheduleReactionNotificationSync"))
+        let hydrationSource = String(hydrationRemainder[..<hydrationEnd.lowerBound])
         for operation in [
             "bros.create-circle",
             "bros.join-circle",
@@ -140,8 +156,18 @@ struct BrosViewModelTests {
             "bros.outbox-flush",
             "bros.reaction-subscription-sync",
         ] {
-            #expect(source.contains("backgroundStore.performAsync(\"\(operation)\")"))
+            #expect(source.contains(".performAsync(\"\(operation)\""))
         }
+        #expect(source.contains("let resolvedBackgroundStore = backgroundStore ?? AppBackgroundStore(container: modelContext.container)"))
+        #expect(source.contains("resolvedBackgroundStore.performAsync(\"bros.outbox-flush\")"))
+        #expect(source.contains("outboxFlushTask = Task.detached(priority: .utility)"))
+        #expect(source.contains("try? await service.repairMissingCompletedSessionPublishes()"))
+        #expect(hydrationSource.contains("let resolvedBackgroundStore = backgroundStore ?? AppBackgroundStore(container: modelContext.container)"))
+        #expect(hydrationSource.contains("Task.detached(priority: .utility)"))
+        #expect(hydrationSource.contains("refreshActiveSnapshotIfNeeded(\n                backgroundStore: resolvedBackgroundStore"))
+        #expect(!hydrationSource.contains("Task { @MainActor"))
+        #expect(source.contains("resolvedBackgroundStore.performAsync(\"bros.reaction-subscription-sync\")"))
+        #expect(source.contains("Task.detached(priority: .utility) {\n            do {\n                try await resolvedBackgroundStore.performAsync(\"bros.reaction-subscription-sync\")"))
         #expect(!source.contains("let service = try await MainActor.run { try self.service(modelContext: modelContext) }"))
     }
 
@@ -152,7 +178,11 @@ struct BrosViewModelTests {
         let warmSnapshot = makeSnapshot(displayName: "Atlas")
         let viewModel = BrosViewModel(
             accountStatusProvider: { .available },
-            serviceFactory: { _ in service }
+            serviceFactory: { _ in service },
+            reactionSnapshotWorker: { eventID, kind, _ in
+                try await service.setReaction(eventID: eventID, kind: kind)
+                return try await service.fetchSnapshot()
+            }
         )
 
         viewModel.seedWarmState(warmSnapshot)
@@ -176,7 +206,11 @@ struct BrosViewModelTests {
         service.snapshot = snapshot
         let viewModel = BrosViewModel(
             accountStatusProvider: { .available },
-            serviceFactory: { _ in service }
+            serviceFactory: { _ in service },
+            reactionSnapshotWorker: { eventID, kind, _ in
+                try await service.setReaction(eventID: eventID, kind: kind)
+                return try await service.fetchSnapshot()
+            }
         )
 
         await viewModel.refresh(
@@ -207,7 +241,11 @@ struct BrosViewModelTests {
 
         let viewModel = BrosViewModel(
             accountStatusProvider: { .available },
-            serviceFactory: { _ in service }
+            serviceFactory: { _ in service },
+            reactionSnapshotWorker: { eventID, kind, _ in
+                try await service.setReaction(eventID: eventID, kind: kind)
+                return try await service.fetchSnapshot()
+            }
         )
         viewModel.state = .active(staleSnapshot)
 
@@ -227,7 +265,11 @@ struct BrosViewModelTests {
 
         let viewModel = BrosViewModel(
             accountStatusProvider: { .available },
-            serviceFactory: { _ in service }
+            serviceFactory: { _ in service },
+            reactionSnapshotWorker: { eventID, kind, _ in
+                try await service.setReaction(eventID: eventID, kind: kind)
+                return try await service.fetchSnapshot()
+            }
         )
 
         viewModel.seedWarmState(warmSnapshot)
@@ -429,6 +471,47 @@ struct BrosViewModelTests {
     }
 
     @Test
+    func invalidatingSnapshotFreshnessForSocialEventsForcesNextStaleRefresh() async throws {
+        let context = try makeInMemoryContext()
+        let service = StubBrosSocialService()
+        let warmSnapshot = makeSnapshot(displayName: "Atlas")
+        let refreshedSnapshot = makeSnapshot(
+            displayName: "Atlas",
+            feedEvents: [
+                makeReactionEvent(actorUserRecordName: "user-2", reactions: []),
+            ]
+        )
+        service.snapshot = refreshedSnapshot
+
+        let viewModel = BrosViewModel(
+            accountStatusProvider: { .available },
+            serviceFactory: { _ in service }
+        )
+        viewModel.applyWarmState(BrosWarmSnapshot(
+            state: .active(warmSnapshot),
+            blockedUserRecordNames: [],
+            warmedAt: .now
+        ))
+
+        await viewModel.refreshIfStale(
+            modelContext: context,
+            cloudSyncEnabled: true,
+            cloudSyncErrorDescription: nil
+        )
+        #expect(service.fetchSnapshotCallCount == 0)
+
+        viewModel.invalidateSnapshotFreshnessForSocialEvents()
+        await viewModel.refreshIfStale(
+            modelContext: context,
+            cloudSyncEnabled: true,
+            cloudSyncErrorDescription: nil
+        )
+
+        #expect(service.fetchSnapshotCallCount == 1)
+        #expect(viewModel.state == .active(refreshedSnapshot))
+    }
+
+    @Test
     func unavailableWarmSnapshotDoesNotBlockRefreshAfterRuntimeCloudRecovers() async throws {
         let context = try makeInMemoryContext()
         let service = StubBrosSocialService()
@@ -512,7 +595,11 @@ struct BrosViewModelTests {
 
         let viewModel = BrosViewModel(
             accountStatusProvider: { .available },
-            serviceFactory: { _ in service }
+            serviceFactory: { _ in service },
+            reactionSnapshotWorker: { eventID, kind, _ in
+                try await service.setReaction(eventID: eventID, kind: kind)
+                return try await service.fetchSnapshot()
+            }
         )
         viewModel.state = .active(initialSnapshot)
 
@@ -523,7 +610,8 @@ struct BrosViewModelTests {
         )
 
         #expect(viewModel.state == .active(authoritativeSnapshot))
-        await Task.yield()
+        await waitForReactionPendingState(viewModel, eventID: "event-1", isPending: true)
+        await waitForReactionSetCall(service, eventID: "event-1")
         #expect(service.setReactionEventIDs == ["event-1"])
         #expect(service.setReactionKinds == [.fire])
         #expect(service.fetchSnapshotCallCount == 0)
@@ -548,7 +636,11 @@ struct BrosViewModelTests {
 
         let viewModel = BrosViewModel(
             accountStatusProvider: { .available },
-            serviceFactory: { _ in service }
+            serviceFactory: { _ in service },
+            reactionSnapshotWorker: { eventID, kind, _ in
+                try await service.setReaction(eventID: eventID, kind: kind)
+                return try await service.fetchSnapshot()
+            }
         )
 
         await viewModel.createCircle(modelContext: context)
@@ -567,7 +659,11 @@ struct BrosViewModelTests {
 
         let viewModel = BrosViewModel(
             accountStatusProvider: { .available },
-            serviceFactory: { _ in service }
+            serviceFactory: { _ in service },
+            reactionSnapshotWorker: { eventID, kind, _ in
+                try await service.setReaction(eventID: eventID, kind: kind)
+                return try await service.fetchSnapshot()
+            }
         )
         viewModel.joinCode = "ABC123"
 
@@ -644,7 +740,11 @@ struct BrosViewModelTests {
 
         let viewModel = BrosViewModel(
             accountStatusProvider: { .available },
-            serviceFactory: { _ in service }
+            serviceFactory: { _ in service },
+            reactionSnapshotWorker: { eventID, kind, _ in
+                try await service.setReaction(eventID: eventID, kind: kind)
+                return try await service.fetchSnapshot()
+            }
         )
         viewModel.state = .active(initialSnapshot)
 
@@ -654,7 +754,8 @@ struct BrosViewModelTests {
             modelContext: context
         )
 
-        await Task.yield()
+        await waitForReactionPendingState(viewModel, eventID: "event-1", isPending: true)
+        await waitForReactionSetCall(service, eventID: "event-1")
         #expect(viewModel.isReactionPending(eventID: "event-1"))
 
         service.reactionError = BrosSocialServiceError.unavailable
@@ -870,6 +971,23 @@ struct BrosViewModelTests {
             try? await Task.sleep(for: .milliseconds(10))
         }
     }
+
+    private func waitForReactionSetCall(
+        _ service: StubBrosSocialService,
+        eventID: String,
+        timeout: Duration = .seconds(1)
+    ) async {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        while !service.setReactionEventIDs.contains(eventID) {
+            guard clock.now < deadline else {
+                Issue.record("Timed out waiting for reaction set call \(eventID).")
+                return
+            }
+
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
 }
 
 private nonisolated func isRunningOnMainThread() -> Bool {
@@ -981,6 +1099,8 @@ nonisolated private final class StubBrosSocialService: BrosSocialService, BrosSo
     }
 
     func syncReactionNotificationSubscription() async throws { }
+
+    func repairMissingCompletedSessionPublishes() async throws { }
 
     func queueCompletedSessionPublish(sessionID: UUID) throws { }
 

@@ -145,6 +145,32 @@ struct ScreenSnapshotTests {
     }
 
     @Test
+    func templatesOverviewSnapshotLoaderPrecomputesScrollLookupsFromContext() throws {
+        let context = try makeSnapshotLoaderContext()
+        let folder = TemplateFolder(name: "Push", sortOrder: 0)
+        let unfiledTemplate = WorkoutTemplate(
+            folderID: TemplateRepository.unfiledFolderID,
+            name: "Unfiled Template"
+        )
+        let filedTemplate = WorkoutTemplate(folderID: folder.id, name: "Push Template")
+        filedTemplate.sortOrder = 0
+        unfiledTemplate.sortOrder = 1
+        context.insert(folder)
+        context.insert(unfiledTemplate)
+        context.insert(filedTemplate)
+        try context.save()
+
+        let snapshot = try TemplatesOverviewSnapshotLoader.load(modelContext: context)
+
+        #expect(snapshot.templates.map(\.name) == ["Unfiled Template", "Push Template"])
+        #expect(snapshot.unfiledTemplates.map(\.name) == ["Unfiled Template"])
+        #expect(snapshot.templatesByFolderID[folder.id]?.map(\.name) == ["Push Template"])
+        #expect(snapshot.folderNameByID[folder.id] == "Push")
+        #expect(snapshot.destinationFoldersByTemplateID[filedTemplate.id]?.isEmpty == true)
+        #expect(snapshot.destinationFoldersByTemplateID[unfiledTemplate.id]?.map(\.name) == ["Push"])
+    }
+
+    @Test
     func historyOverviewSnapshotLoaderBuildsFilteredSnapshotFromContext() throws {
         let context = try makeSnapshotLoaderContext()
         let session = WorkoutSession(
@@ -480,10 +506,52 @@ struct ScreenSnapshotTests {
         #expect(content.overviewStats.totalWorkouts == 6)
         #expect(content.topExercises.first?.sessionCount == 4)
         #expect(content.activityDays.first?.workoutCount == 1)
+        #expect(content.activityDayRows.flatMap { $0 } == content.activityDays)
+        #expect(content.maxActivityDayWorkoutCount == 1)
+        #expect(content.hasActivityDayWorkouts)
         #expect(content.trendSeriesByWidgetID[trendConfigSnapshot.id]?.points.first?.value == 105)
         #expect(content.coachBrief?.recap.headline == "Bench Press Led The Week")
         #expect(content.coachBrief?.snapshot.topRisingSignals.map(\.exerciseName) == ["Bench Press"])
         #expect(content.coachBrief?.snapshot.followUpKinds == [.whatImproved, .whatChanged, .whyFlat])
+    }
+
+    @Test
+    func profileWidgetManagerListSnapshotBuildsVisiblePartitions() {
+        let enabledPRs = ProfileWidgetConfigSnapshot(
+            config: ProfileWidgetConfig(kind: .prs, isEnabled: true, sortOrder: 1)
+        )
+        let lockedCoach = ProfileWidgetConfigSnapshot(
+            config: ProfileWidgetConfig(kind: .coachBrief, isEnabled: true, sortOrder: 0)
+        )
+        let incompleteTrend = ProfileWidgetConfigSnapshot(
+            config: ProfileWidgetConfig(kind: .exerciseOneRMTrend, isEnabled: false, sortOrder: 2)
+        )
+        let selectedTrend = ProfileWidgetConfigSnapshot(
+            config: ProfileWidgetConfig(
+                kind: .exerciseOneRMTrend,
+                isEnabled: false,
+                selectedCatalogExerciseUUID: "bench",
+                selectedExerciseNameSnapshot: "Bench Press",
+                exerciseTrendMetric: .oneRepMax,
+                sortOrder: 3
+            )
+        )
+
+        let snapshot = ProfileWidgetManagerListSnapshot.make(
+            configs: [selectedTrend, enabledPRs, incompleteTrend, lockedCoach],
+            canUseWidget: { kind in
+                kind != .coachBrief
+            }
+        )
+
+        #expect(snapshot.visibleEnabledConfigs.map { $0.kind } == [ProfileWidgetKind.prs])
+        #expect(
+            snapshot.visibleAvailableConfigs.map { $0.kind } == [
+                ProfileWidgetKind.coachBrief,
+                ProfileWidgetKind.exerciseOneRMTrend,
+            ]
+        )
+        #expect(snapshot.visibleAvailableConfigs.map { $0.id } == [lockedCoach.id, selectedTrend.id])
     }
 
     private func makeSnapshotLoaderContext() throws -> ModelContext {

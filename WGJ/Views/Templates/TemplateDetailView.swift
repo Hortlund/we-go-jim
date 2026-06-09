@@ -5,23 +5,15 @@ import SwiftUI
 struct TemplateDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.appBackgroundStore) private var appBackgroundStore
+    @Environment(\.isTabActive) private var isTabActive
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let templateID: UUID
     private let guidanceService = TrainingGuidanceService()
 
-    @Query private var templates: [WorkoutTemplate]
-    @Query(sort: [
-        SortDescriptor(\TemplateFolder.sortOrder, order: .forward),
-        SortDescriptor(\TemplateFolder.name, order: .forward),
-    ])
-    private var folders: [TemplateFolder]
-    @Query private var templateCardioBlocks: [TemplateCardioBlock]
-    @Query private var templateExercises: [TemplateExercise]
-    @Query private var profiles: [UserProfile]
-
     @State private var showingEditor = false
 
+    @State private var controller = TemplateDetailController()
     @State private var draftStore = TemplateDetailDraftStore()
     @State private var loadedTemplateExerciseIDs: [UUID] = []
     @State private var loadedExerciseStateReloadKey: TemplateExerciseStateReloadKey?
@@ -33,44 +25,20 @@ struct TemplateDetailView: View {
     @State private var isSavingDraftChanges = false
     @State private var exerciseSwipeOffsets: [UUID: CGFloat] = [:]
     @State private var exerciseSwipeRemoving: [UUID: Bool] = [:]
-
-    private var repository: TemplateRepository {
-        TemplateRepository(modelContext: modelContext)
-    }
+    @State private var hasLoadedSnapshot = false
+    @State private var isReloadingSnapshot = false
+    @State private var lastLoadedContentUpdatedAt: Date?
 
     private var templateBackgroundStore: AppBackgroundStore {
         appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
     }
 
-    private var currentProfile: UserProfile? {
-        UserProfileSelection.currentProfile(in: profiles)
-    }
-
     private var preferredLoadUnit: TemplateLoadUnit {
-        currentProfile?.preferredLoadUnit ?? .kg
+        controller.snapshot.preferredLoadUnit
     }
 
     init(templateID: UUID) {
         self.templateID = templateID
-
-        _templates = Query(
-            filter: #Predicate<WorkoutTemplate> { item in
-                item.id == templateID
-            }
-        )
-
-        _templateExercises = Query(
-            filter: #Predicate<TemplateExercise> { item in
-                item.templateID == templateID
-            },
-            sort: [SortDescriptor(\TemplateExercise.sortOrder, order: .forward)]
-        )
-
-        _templateCardioBlocks = Query(
-            filter: #Predicate<TemplateCardioBlock> { item in
-                item.templateID == templateID
-            }
-        )
     }
 
     var body: some View {
@@ -121,13 +89,17 @@ struct TemplateDetailView: View {
                 }
             }
         }
-        .sheet(isPresented: $showingEditor) {
+        .sheet(isPresented: $showingEditor, onDismiss: {
+            Task {
+                await reloadTemplateSnapshotIfNeeded(force: true)
+            }
+        }) {
             if let template {
                 let folderID: UUID? = template.folderID == TemplateRepository.unfiledFolderID
                     ? nil
                     : template.folderID
-                TemplateEditorView(folderID: folderID, templateID: template.id) { savedTemplateID in
-                    handleTemplateEditorSaved(templateID: savedTemplateID)
+                TemplateEditorView(folderID: folderID, templateID: template.id) { result in
+                    handleTemplateEditorSaved(result)
                 }
             }
         }
@@ -135,6 +107,13 @@ struct TemplateDetailView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(errorMessage)
+        }
+        .task(id: isTabActive) {
+            guard isTabActive else { return }
+            await reloadTemplateSnapshotIfNeeded(force: false)
+        }
+        .task {
+            await reloadTemplateSnapshotIfNeeded(force: false)
         }
         .task(id: exerciseStateReloadKey) {
             await loadSetDraftsIfNeeded()
@@ -144,17 +123,17 @@ struct TemplateDetailView: View {
         }
     }
 
-    private var template: WorkoutTemplate? {
-        templates.first
+    private var template: TemplateDetailTemplateSnapshot? {
+        controller.snapshot.template
     }
 
     private var exerciseStateReloadKey: TemplateExerciseStateReloadKey {
-        TemplateExerciseStateReloadKey(exercises: templateExercises)
+        TemplateExerciseStateReloadKey(exercises: controller.snapshot.exercises)
     }
 
     private var recommendationReloadKey: TemplateExerciseRecommendationReloadKey {
         let requestedCatalogUUIDs = Set(
-            templateExercises
+            controller.snapshot.exercises
                 .map(\.catalogExerciseUUID)
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
@@ -166,13 +145,13 @@ struct TemplateDetailView: View {
         )
     }
 
-    private func templateHeaderCard(_ template: WorkoutTemplate) -> some View {
+    private func templateHeaderCard(_ template: TemplateDetailTemplateSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             WGJActionHeader("Template", subtitle: "Reusable workout plan") {
                 HStack(spacing: 8) {
                     WGJMetricPill(
                         systemImage: "list.number",
-                        value: "\(templateExercises.count) exercises",
+                        value: "\(controller.snapshot.exercises.count) exercises",
                         tint: WGJTheme.accentCyan
                     )
 
@@ -239,14 +218,14 @@ struct TemplateDetailView: View {
     private var exercisesSection: some View {
         let rows = exerciseRows
 
-        return LazyVStack(alignment: .leading, spacing: 12) {
+        return VStack(alignment: .leading, spacing: 12) {
             WGJActionHeader(
                 "Exercises",
-                subtitle: templateExercises.isEmpty
+                subtitle: controller.snapshot.exercises.isEmpty
                     ? "Add exercises, then tune sets and rest."
                     : "Tune sets here, or edit the template to add and reorder exercises."
             ) {
-                if templateExercises.isEmpty {
+                if controller.snapshot.exercises.isEmpty {
                     Button {
                         showingEditor = true
                     } label: {
@@ -263,7 +242,7 @@ struct TemplateDetailView: View {
                 }
             }
 
-            if templateExercises.isEmpty {
+            if controller.snapshot.exercises.isEmpty {
                 WGJEmptyStateCard(
                     title: "No exercises yet",
                     message: "Add exercises, then tune set targets and rest.",
@@ -318,7 +297,7 @@ struct TemplateDetailView: View {
                 muscleSummary: row.exercise.muscleSummarySnapshot,
                 category: row.exercise.categorySnapshot,
                 infoDestination: AnyView(
-                    TemplateExerciseDetailDestinationView(templateExercise: row.exercise)
+                    TemplateExerciseDetailDestinationView(exercise: row.exercise)
                 ),
                 recommendation: row.recommendation,
                 supplementaryContent: AnyView(
@@ -351,40 +330,49 @@ struct TemplateDetailView: View {
     }
 
     private func removeExercise(templateExerciseID: UUID) {
-        var capturedError: Error?
-
         withAnimation(WGJMotion.quickAnimation(reduceMotion: reduceMotion)) {
-            do {
-                try repository.removeExercise(templateID: templateID, templateExerciseID: templateExerciseID)
-                discardExerciseState(for: templateExerciseID)
-            } catch {
-                capturedError = error
-            }
+            discardExerciseState(for: templateExerciseID)
         }
 
-        if let capturedError {
-            showError(capturedError)
+        let backgroundStore = templateBackgroundStore
+        Task.detached(priority: .utility) {
+            do {
+                try await backgroundStore.performWrite("template-detail.remove-exercise") { backgroundContext in
+                    try TemplateRepository(modelContext: backgroundContext)
+                        .removeExercise(templateID: templateID, templateExerciseID: templateExerciseID)
+                }
+                await reloadTemplateSnapshotIfNeeded(force: true)
+            } catch {
+                await showError(error)
+            }
         }
     }
 
     private func moveTemplate(toFolderID folderID: UUID?) {
-        do {
-            try repository.moveTemplate(id: templateID, toFolderID: folderID)
-        } catch {
-            showError(error)
+        let backgroundStore = templateBackgroundStore
+        Task.detached(priority: .utility) {
+            do {
+                try await backgroundStore.performWrite("template-detail.move-template") { backgroundContext in
+                    try TemplateRepository(modelContext: backgroundContext)
+                        .moveTemplate(id: templateID, toFolderID: folderID)
+                }
+                await reloadTemplateSnapshotIfNeeded(force: true)
+            } catch {
+                await showError(error)
+            }
         }
     }
 
     @MainActor
-    private func handleTemplateEditorSaved(templateID savedTemplateID: UUID) {
-        guard savedTemplateID == templateID else { return }
-        Task { @MainActor in
+    private func handleTemplateEditorSaved(_ result: TemplateEditorSaveResult) {
+        guard result.templateID == templateID else { return }
+        Task {
             await loadSetDraftsIfNeeded(force: true)
         }
     }
 
     @MainActor
-    private func setDraftsBinding(for templateExercise: TemplateExercise) -> Binding<[TemplateExerciseSetDraft]> {
+    private func setDraftsBinding(for templateExercise: TemplateDetailExerciseSnapshot) -> Binding<[TemplateExerciseSetDraft]> {
         Binding {
             draftStore.setDrafts(for: templateExercise)
         } set: { updated in
@@ -393,7 +381,7 @@ struct TemplateDetailView: View {
     }
 
     @MainActor
-    private func targetRepMinBinding(for templateExercise: TemplateExercise) -> Binding<Int?> {
+    private func targetRepMinBinding(for templateExercise: TemplateDetailExerciseSnapshot) -> Binding<Int?> {
         Binding {
             draftStore.repRange(for: templateExercise).min
         } set: { updated in
@@ -407,7 +395,7 @@ struct TemplateDetailView: View {
     }
 
     @MainActor
-    private func targetRepMaxBinding(for templateExercise: TemplateExercise) -> Binding<Int?> {
+    private func targetRepMaxBinding(for templateExercise: TemplateDetailExerciseSnapshot) -> Binding<Int?> {
         Binding {
             draftStore.repRange(for: templateExercise).max
         } set: { updated in
@@ -421,7 +409,7 @@ struct TemplateDetailView: View {
     }
 
     @MainActor
-    private func restSecondsBinding(for templateExercise: TemplateExercise) -> Binding<Int> {
+    private func restSecondsBinding(for templateExercise: TemplateDetailExerciseSnapshot) -> Binding<Int> {
         Binding {
             draftStore.restSeconds(for: templateExercise)
         } set: { updated in
@@ -430,7 +418,7 @@ struct TemplateDetailView: View {
     }
 
     @MainActor
-    private func notesBinding(for templateExercise: TemplateExercise) -> Binding<String> {
+    private func notesBinding(for templateExercise: TemplateDetailExerciseSnapshot) -> Binding<String> {
         Binding {
             draftStore.notes(for: templateExercise)
         } set: { updated in
@@ -439,8 +427,54 @@ struct TemplateDetailView: View {
     }
 
     @MainActor
+    private func reloadTemplateSnapshotIfNeeded(force: Bool) async {
+        guard !isReloadingSnapshot else { return }
+        let currentContentUpdatedAt = await currentTemplateContentUpdatedAt()
+        guard force || !hasLoadedSnapshot || currentContentUpdatedAt != lastLoadedContentUpdatedAt else {
+            return
+        }
+
+        await reloadTemplateSnapshot(contentUpdatedAt: currentContentUpdatedAt)
+    }
+
+    @MainActor
+    private func reloadTemplateSnapshot(contentUpdatedAt: Date?) async {
+        isReloadingSnapshot = true
+        defer { isReloadingSnapshot = false }
+
+        do {
+            let backgroundStore = templateBackgroundStore
+            let snapshot = try await backgroundStore.performWrite("template-detail.snapshot.reload") { backgroundContext in
+                try TemplateDetailSnapshotLoader.load(
+                    templateID: templateID,
+                    modelContext: backgroundContext
+                )
+            }
+            controller.apply(snapshot)
+            hasLoadedSnapshot = true
+            lastLoadedContentUpdatedAt = contentUpdatedAt ?? snapshot.contentUpdatedAt
+        } catch {
+            showError(error)
+        }
+    }
+
+    @MainActor
+    private func currentTemplateContentUpdatedAt() async -> Date? {
+        let backgroundStore = templateBackgroundStore
+        return try? await backgroundStore.perform("template-detail.latest-updated-at") { backgroundContext in
+            let repository = TemplateRepository(modelContext: backgroundContext)
+            let latestFolderUpdate = try? repository.latestFolderUpdatedAt()
+            let latestTemplateUpdate = try? repository.latestTemplateUpdatedAt()
+            return [latestFolderUpdate, latestTemplateUpdate]
+                .compactMap { $0 }
+                .max()
+        }
+    }
+
+    @MainActor
     private func loadSetDraftsIfNeeded(force: Bool = false) async {
-        let currentIDs = templateExercises.map(\.id)
+        let currentExercises = controller.snapshot.exercises
+        let currentIDs = currentExercises.map(\.id)
         let currentIDSet = Set(currentIDs)
         let currentReloadKey = exerciseStateReloadKey
         discardRemovedExerciseState(keeping: currentIDSet)
@@ -455,22 +489,16 @@ struct TemplateDetailView: View {
             return
         }
 
-        do {
-            try repository.ensureDefaultSetPlans(templateID: templateID)
-            let persistedExercises = try repository.exercises(in: templateID)
-            draftStore.load(exercises: persistedExercises)
-            let previousIDs = Set(loadedTemplateExerciseIDs)
-            isExpandedByExerciseID = isExpandedByExerciseID.filter { currentIDSet.contains($0.key) }
-            for exerciseID in currentIDs where isExpandedByExerciseID[exerciseID] == nil {
-                let isNewExercise = previousIDs.contains(exerciseID) == false
-                isExpandedByExerciseID[exerciseID] = hasLoadedExerciseStateOnce && isNewExercise
-            }
-            loadedTemplateExerciseIDs = currentIDs
-            loadedExerciseStateReloadKey = currentReloadKey
-            hasLoadedExerciseStateOnce = true
-        } catch {
-            showError(error)
+        draftStore.load(exercises: currentExercises)
+        let previousIDs = Set(loadedTemplateExerciseIDs)
+        isExpandedByExerciseID = isExpandedByExerciseID.filter { currentIDSet.contains($0.key) }
+        for exerciseID in currentIDs where isExpandedByExerciseID[exerciseID] == nil {
+            let isNewExercise = previousIDs.contains(exerciseID) == false
+            isExpandedByExerciseID[exerciseID] = hasLoadedExerciseStateOnce && isNewExercise
         }
+        loadedTemplateExerciseIDs = currentIDs
+        loadedExerciseStateReloadKey = currentReloadKey
+        hasLoadedExerciseStateOnce = true
     }
 
     @MainActor
@@ -479,11 +507,9 @@ struct TemplateDetailView: View {
         isSavingDraftChanges = true
 
         let draftStoreToSave = draftStore
-        Task { @MainActor in
-            defer { isSavingDraftChanges = false }
-
+        let backgroundStore = templateBackgroundStore
+        Task.detached(priority: .utility) {
             do {
-                let backgroundStore = templateBackgroundStore
                 try await backgroundStore.performWrite("template-detail.save-drafts") { backgroundContext in
                     let backgroundRepository = TemplateRepository(
                         modelContext: backgroundContext,
@@ -495,19 +521,22 @@ struct TemplateDetailView: View {
                     )
                 }
 
+                await reloadTemplateSnapshotIfNeeded(force: true)
                 await loadSetDraftsIfNeeded(force: true)
+                await setSavingDraftChanges(false)
             } catch {
-                showError(error)
+                await setSavingDraftChanges(false)
+                await showError(error)
             }
         }
     }
 
-    private func destinationFolders(for template: WorkoutTemplate) -> [TemplateFolder] {
-        folders.filter { $0.id != template.folderID }
+    private func destinationFolders(for template: TemplateDetailTemplateSnapshot) -> [TemplateOverviewFolderSnapshot] {
+        controller.snapshot.destinationFolders.filter { $0.id != template.folderID }
     }
 
     private var isTrainingGuidanceEnabled: Bool {
-        currentProfile?.isTrainingGuidanceEnabled ?? true
+        controller.snapshot.isTrainingGuidanceEnabled
     }
 
     private func isExpandedBinding(for exerciseID: UUID) -> Binding<Bool> {
@@ -518,7 +547,7 @@ struct TemplateDetailView: View {
     }
 
     private func templateRecommendation(
-        for exercise: TemplateExercise,
+        for exercise: TemplateDetailExerciseSnapshot,
         catalogByUUID: [String: TrainingGuidanceCatalogSnapshot]
     ) -> TemplateExerciseRecommendation? {
         guard isTrainingGuidanceEnabled else { return nil }
@@ -540,7 +569,7 @@ struct TemplateDetailView: View {
     private func loadCatalogMatches() async {
         guard isTrainingGuidanceEnabled else {
             recommendationByExerciseID = Dictionary(
-                templateExercises.map { ($0.id, nil as TemplateExerciseRecommendation?) },
+                controller.snapshot.exercises.map { ($0.id, nil as TemplateExerciseRecommendation?) },
                 uniquingKeysWith: { first, _ in first }
             )
             return
@@ -549,7 +578,7 @@ struct TemplateDetailView: View {
         let requestedCatalogUUIDs = recommendationReloadKey.catalogExerciseUUIDs
         guard !requestedCatalogUUIDs.isEmpty else {
             recommendationByExerciseID = Dictionary(
-                templateExercises.map { ($0.id, nil as TemplateExerciseRecommendation?) },
+                controller.snapshot.exercises.map { ($0.id, nil as TemplateExerciseRecommendation?) },
                 uniquingKeysWith: { first, _ in first }
             )
             return
@@ -562,7 +591,7 @@ struct TemplateDetailView: View {
                     .exerciseSnapshotMap(for: requestedCatalogUUIDs)
             }
             recommendationByExerciseID = Dictionary(
-                templateExercises.map { exercise in
+                controller.snapshot.exercises.map { exercise in
                     (exercise.id, templateRecommendation(for: exercise, catalogByUUID: matches))
                 },
                 uniquingKeysWith: { first, _ in first }
@@ -573,12 +602,9 @@ struct TemplateDetailView: View {
     }
 
     @MainActor
-    private func componentDrafts(for exercise: TemplateExercise) -> [TemplateExerciseComponentDraft] {
-        let orderedComponents = (exercise.components ?? [])
-            .sorted { $0.sortOrder < $1.sortOrder }
-            .map(TemplateExerciseComponentDraft.init(model:))
-        if !orderedComponents.isEmpty {
-            return orderedComponents
+    private func componentDrafts(for exercise: TemplateDetailExerciseSnapshot) -> [TemplateExerciseComponentDraft] {
+        if !exercise.components.isEmpty {
+            return exercise.components
         }
 
         guard !exercise.catalogExerciseUUID.isEmpty else {
@@ -595,6 +621,12 @@ struct TemplateDetailView: View {
         ]
     }
 
+    @MainActor
+    private func setSavingDraftChanges(_ isSaving: Bool) {
+        isSavingDraftChanges = isSaving
+    }
+
+    @MainActor
     private func showError(_ error: Error) {
         errorMessage = String(describing: error)
         showingError = true
@@ -647,11 +679,11 @@ struct TemplateDetailView: View {
         WGJMotion.cardTransition(reduceMotion: reduceMotion)
     }
 
-    private var orderedCardioBlocks: [TemplateCardioBlock] {
-        templateCardioBlocks.sorted { $0.phase.sortOrder < $1.phase.sortOrder }
+    private var orderedCardioBlocks: [TemplateDetailCardioBlockSnapshot] {
+        controller.snapshot.cardioBlocks
     }
 
-    private func cardioBlock(for phase: WorkoutCardioPhase) -> TemplateCardioBlock? {
+    private func cardioBlock(for phase: WorkoutCardioPhase) -> TemplateDetailCardioBlockSnapshot? {
         orderedCardioBlocks.first(where: { $0.phase == phase })
     }
 
@@ -675,7 +707,7 @@ struct TemplateDetailView: View {
     }
 
     private var exerciseRows: [TemplateExerciseRowData] {
-        templateExercises.enumerated().map { index, exercise in
+        controller.snapshot.exercises.enumerated().map { index, exercise in
             TemplateExerciseRowData(
                 id: exercise.id,
                 index: index,
@@ -691,29 +723,22 @@ private struct TemplateExerciseDetailDestinationView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.appBackgroundStore) private var appBackgroundStore
 
-    @Query private var catalogMatches: [ExerciseCatalogItem]
-
-    let templateExercise: TemplateExercise
+    let exercise: TemplateDetailExerciseSnapshot
 
     @State private var availableMuscles: [ExerciseMuscleSnapshot] = []
     @State private var suggestedCategories: [String] = []
+    @State private var catalogExerciseExists = false
     @State private var didLoadCatalogMetadata = false
 
-    init(templateExercise: TemplateExercise) {
-        self.templateExercise = templateExercise
-        let catalogExerciseUUID = templateExercise.catalogExerciseUUID
-        _catalogMatches = Query(
-            filter: #Predicate<ExerciseCatalogItem> { item in
-                item.remoteUUID == catalogExerciseUUID
-            }
-        )
+    init(exercise: TemplateDetailExerciseSnapshot) {
+        self.exercise = exercise
     }
 
     var body: some View {
         Group {
-            if let catalogExercise = catalogMatches.first {
+            if catalogExerciseExists {
                 ExerciseDetailDestinationView(
-                    remoteUUID: catalogExercise.remoteUUID,
+                    remoteUUID: exercise.catalogExerciseUUID,
                     availableMuscles: availableMuscles,
                     suggestedCategories: suggestedCategories
                 )
@@ -733,23 +758,23 @@ private struct TemplateExerciseDetailDestinationView: View {
     private var fallbackSnapshotDetail: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text(templateExercise.exerciseNameSnapshot)
+                Text(exercise.exerciseNameSnapshot)
                     .font(.title2.weight(.semibold))
                     .foregroundStyle(WGJTheme.textPrimary)
 
-                if !templateExercise.categorySnapshot.isEmpty {
-                    snapshotInfoRow(title: "Category", value: templateExercise.categorySnapshot)
+                if !exercise.categorySnapshot.isEmpty {
+                    snapshotInfoRow(title: "Category", value: exercise.categorySnapshot)
                 }
 
-                if !templateExercise.muscleSummarySnapshot.isEmpty {
-                    snapshotInfoRow(title: "Primary muscles", value: templateExercise.muscleSummarySnapshot)
+                if !exercise.muscleSummarySnapshot.isEmpty {
+                    snapshotInfoRow(title: "Primary muscles", value: exercise.muscleSummarySnapshot)
                 }
 
-                if let min = templateExercise.targetRepMin, let max = templateExercise.targetRepMax {
+                if let min = exercise.targetRepMin, let max = exercise.targetRepMax {
                     snapshotInfoRow(title: "Target range", value: "\(min)-\(max) reps")
                 }
 
-                snapshotInfoRow(title: "Rest", value: "\(templateExercise.restSeconds / 60):\(String(format: "%02d", templateExercise.restSeconds % 60))")
+                snapshotInfoRow(title: "Rest", value: "\(exercise.restSeconds / 60):\(String(format: "%02d", exercise.restSeconds % 60))")
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -771,14 +796,18 @@ private struct TemplateExerciseDetailDestinationView: View {
             let backgroundStore = templateDetailBackgroundStore
             let metadata = try await backgroundStore.perform("template-exercise-detail.catalog-metadata") { backgroundContext in
                 let repository = ExerciseCatalogRepository(modelContext: backgroundContext)
+                let catalogMatches = try repository.exerciseSnapshotMap(for: [exercise.catalogExerciseUUID])
                 return (
+                    exists: catalogMatches[exercise.catalogExerciseUUID] != nil,
                     muscles: try repository.availableMuscles().map(ExerciseMuscleSnapshot.init(muscle:)),
                     categories: try repository.availableCategories(includeUncurated: true)
                 )
             }
+            catalogExerciseExists = metadata.exists
             availableMuscles = metadata.muscles
             suggestedCategories = metadata.categories
         } catch {
+            catalogExerciseExists = false
             availableMuscles = []
             suggestedCategories = []
         }
@@ -793,6 +822,196 @@ private struct TemplateExerciseDetailDestinationView: View {
             Text(value)
                 .foregroundStyle(WGJTheme.textPrimary)
         }
+    }
+}
+
+nonisolated struct TemplateDetailSnapshot: Sendable, Equatable {
+    let template: TemplateDetailTemplateSnapshot?
+    let destinationFolders: [TemplateOverviewFolderSnapshot]
+    let cardioBlocks: [TemplateDetailCardioBlockSnapshot]
+    let exercises: [TemplateDetailExerciseSnapshot]
+    let preferredLoadUnit: TemplateLoadUnit
+    let isTrainingGuidanceEnabled: Bool
+    let contentUpdatedAt: Date?
+
+    static let empty = TemplateDetailSnapshot(
+        template: nil,
+        destinationFolders: [],
+        cardioBlocks: [],
+        exercises: [],
+        preferredLoadUnit: .kg,
+        isTrainingGuidanceEnabled: true,
+        contentUpdatedAt: nil
+    )
+}
+
+nonisolated struct TemplateDetailTemplateSnapshot: Identifiable, Sendable, Equatable {
+    let id: UUID
+    let folderID: UUID
+    let name: String
+    let notes: String
+    let updatedAt: Date
+}
+
+nonisolated struct TemplateDetailCardioBlockSnapshot: Identifiable, Sendable, Equatable {
+    let id: UUID
+    let phase: WorkoutCardioPhase
+    let exerciseNameSnapshot: String
+    let categorySnapshot: String
+    let muscleSummarySnapshot: String
+    let targetDurationSeconds: Int
+}
+
+nonisolated struct TemplateDetailExerciseSnapshot: Identifiable, Sendable, Equatable {
+    let id: UUID
+    let catalogExerciseUUID: String
+    let exerciseNameSnapshot: String
+    let categorySnapshot: String
+    let muscleSummarySnapshot: String
+    let targetRepMin: Int?
+    let targetRepMax: Int?
+    let restSeconds: Int
+    let notes: String
+    let updatedAt: Date
+    let components: [TemplateExerciseComponentDraft]
+    let setDrafts: [TemplateExerciseSetDraft]
+
+    init(
+        id: UUID,
+        catalogExerciseUUID: String,
+        exerciseNameSnapshot: String,
+        categorySnapshot: String,
+        muscleSummarySnapshot: String,
+        targetRepMin: Int?,
+        targetRepMax: Int?,
+        restSeconds: Int,
+        notes: String,
+        updatedAt: Date,
+        components: [TemplateExerciseComponentDraft],
+        setDrafts: [TemplateExerciseSetDraft]
+    ) {
+        self.id = id
+        self.catalogExerciseUUID = catalogExerciseUUID
+        self.exerciseNameSnapshot = exerciseNameSnapshot
+        self.categorySnapshot = categorySnapshot
+        self.muscleSummarySnapshot = muscleSummarySnapshot
+        self.targetRepMin = targetRepMin
+        self.targetRepMax = targetRepMax
+        self.restSeconds = restSeconds
+        self.notes = notes
+        self.updatedAt = updatedAt
+        self.components = components
+        self.setDrafts = setDrafts
+    }
+
+    init(model exercise: TemplateExercise) {
+        self = TemplateDetailSnapshotLoader.exerciseSnapshot(exercise)
+    }
+}
+
+@Observable
+private final class TemplateDetailController {
+    var snapshot = TemplateDetailSnapshot.empty
+
+    func apply(_ snapshot: TemplateDetailSnapshot) {
+        self.snapshot = snapshot
+    }
+}
+
+nonisolated enum TemplateDetailSnapshotLoader {
+    static func load(templateID: UUID, modelContext: ModelContext) throws -> TemplateDetailSnapshot {
+        let templateRepository = TemplateRepository(modelContext: modelContext)
+        try templateRepository.ensureDefaultSetPlans(templateID: templateID)
+
+        guard let template = try templateRepository.template(id: templateID) else {
+            return .empty
+        }
+
+        let folders = try templateRepository.folders()
+        let allTemplates = try templateRepository.templates()
+        let templateCountsByFolderID = Dictionary(
+            grouping: allTemplates,
+            by: \.folderID
+        ).mapValues(\.count)
+        let exercises = try templateRepository.exercises(in: templateID)
+        let cardioBlocks = try templateRepository.cardioBlocks(templateID: templateID)
+        let currentProfile = try? ProfileRepository(modelContext: modelContext).currentProfile()
+        let contentUpdatedAt = [
+            template.updatedAt,
+            try? templateRepository.latestFolderUpdatedAt(),
+            try? templateRepository.latestTemplateUpdatedAt(),
+        ]
+            .compactMap { $0 }
+            .max()
+
+        return TemplateDetailSnapshot(
+            template: TemplateDetailTemplateSnapshot(
+                id: template.id,
+                folderID: template.folderID,
+                name: template.name,
+                notes: template.notes,
+                updatedAt: template.updatedAt
+            ),
+            destinationFolders: folders
+                .filter { $0.id != template.folderID }
+                .map { folder in
+                    TemplateOverviewFolderSnapshot(
+                        id: folder.id,
+                        name: folder.name,
+                        templateCount: templateCountsByFolderID[folder.id, default: 0]
+                    )
+                },
+            cardioBlocks: cardioBlocks.map { block in
+                TemplateDetailCardioBlockSnapshot(
+                    id: block.id,
+                    phase: block.phase,
+                    exerciseNameSnapshot: block.exerciseNameSnapshot,
+                    categorySnapshot: block.categorySnapshot,
+                    muscleSummarySnapshot: block.muscleSummarySnapshot,
+                    targetDurationSeconds: block.targetDurationSeconds
+                )
+            },
+            exercises: exercises.map(Self.exerciseSnapshot),
+            preferredLoadUnit: currentProfile?.preferredLoadUnit ?? .kg,
+            isTrainingGuidanceEnabled: currentProfile?.isTrainingGuidanceEnabled ?? true,
+            contentUpdatedAt: contentUpdatedAt
+        )
+    }
+
+    static func exerciseSnapshot(_ exercise: TemplateExercise) -> TemplateDetailExerciseSnapshot {
+        let orderedComponents = (exercise.components ?? [])
+            .sorted { $0.sortOrder < $1.sortOrder }
+            .map(TemplateExerciseComponentDraft.init(model:))
+        let components: [TemplateExerciseComponentDraft]
+        if orderedComponents.isEmpty, !exercise.catalogExerciseUUID.isEmpty {
+            components = [
+                TemplateExerciseComponentDraft(
+                    catalogExerciseUUID: exercise.catalogExerciseUUID,
+                    exerciseNameSnapshot: exercise.exerciseNameSnapshot,
+                    categorySnapshot: exercise.categorySnapshot,
+                    muscleSummarySnapshot: exercise.muscleSummarySnapshot
+                ),
+            ]
+        } else {
+            components = orderedComponents
+        }
+
+        return TemplateDetailExerciseSnapshot(
+            id: exercise.id,
+            catalogExerciseUUID: exercise.catalogExerciseUUID,
+            exerciseNameSnapshot: exercise.exerciseNameSnapshot,
+            categorySnapshot: exercise.categorySnapshot,
+            muscleSummarySnapshot: exercise.muscleSummarySnapshot,
+            targetRepMin: exercise.targetRepMin,
+            targetRepMax: exercise.targetRepMax,
+            restSeconds: max(0, min(3600, exercise.restSeconds)),
+            notes: exercise.notes,
+            updatedAt: exercise.updatedAt,
+            components: components,
+            setDrafts: (exercise.prescribedSets ?? [])
+                .sorted { $0.sortOrder < $1.sortOrder }
+                .map(TemplateExerciseSetDraft.init(model:))
+        )
     }
 }
 
@@ -825,16 +1044,14 @@ nonisolated struct TemplateDetailDraftStore: Equatable, Sendable {
             || notesByExerciseID != persistedNotesByExerciseID
     }
 
-    mutating func load(exercises: [TemplateExercise]) {
+    mutating func load(exercises: [TemplateDetailExerciseSnapshot]) {
         var loadedSets: [UUID: [TemplateExerciseSetDraft]] = [:]
         var loadedRanges: [UUID: RepRangeDraft] = [:]
         var loadedRests: [UUID: Int] = [:]
         var loadedNotes: [UUID: String] = [:]
 
         for exercise in exercises {
-            loadedSets[exercise.id] = (exercise.prescribedSets ?? [])
-                .sorted { $0.sortOrder < $1.sortOrder }
-                .map(TemplateExerciseSetDraft.init(model:))
+            loadedSets[exercise.id] = exercise.setDrafts
             loadedRanges[exercise.id] = RepRangeDraft(
                 min: exercise.targetRepMin,
                 max: exercise.targetRepMax
@@ -853,24 +1070,21 @@ nonisolated struct TemplateDetailDraftStore: Equatable, Sendable {
         persistedNotesByExerciseID = loadedNotes
     }
 
-    func setDrafts(for exercise: TemplateExercise) -> [TemplateExerciseSetDraft] {
-        setDraftsByExerciseID[exercise.id]
-            ?? (exercise.prescribedSets ?? [])
-                .sorted { $0.sortOrder < $1.sortOrder }
-                .map(TemplateExerciseSetDraft.init(model:))
+    func setDrafts(for exercise: TemplateDetailExerciseSnapshot) -> [TemplateExerciseSetDraft] {
+        setDraftsByExerciseID[exercise.id] ?? exercise.setDrafts
     }
 
-    func repRange(for exercise: TemplateExercise) -> RepRangeDraft {
+    func repRange(for exercise: TemplateDetailExerciseSnapshot) -> RepRangeDraft {
         repRangeByExerciseID[exercise.id]
             ?? RepRangeDraft(min: exercise.targetRepMin, max: exercise.targetRepMax)
     }
 
-    func restSeconds(for exercise: TemplateExercise) -> Int {
+    func restSeconds(for exercise: TemplateDetailExerciseSnapshot) -> Int {
         restSecondsByExerciseID[exercise.id]
             ?? max(0, min(3600, exercise.restSeconds))
     }
 
-    func notes(for exercise: TemplateExercise) -> String {
+    func notes(for exercise: TemplateDetailExerciseSnapshot) -> String {
         notesByExerciseID[exercise.id] ?? exercise.notes
     }
 
@@ -982,8 +1196,7 @@ struct TemplateExerciseStateReloadKey: Hashable {
         }
     }
 
-    @MainActor
-    init(exercises: [TemplateExercise]) {
+    init(exercises: [TemplateDetailExerciseSnapshot]) {
         self.init(
             entries: exercises.map { exercise in
                 Entry(id: exercise.id, updatedAt: exercise.updatedAt)
@@ -1000,7 +1213,7 @@ private struct TemplateExerciseRecommendationReloadKey: Hashable {
 private struct TemplateExerciseRowData: Identifiable {
     let id: UUID
     let index: Int
-    let exercise: TemplateExercise
+    let exercise: TemplateDetailExerciseSnapshot
     let recommendation: TemplateExerciseRecommendation?
 }
 

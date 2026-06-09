@@ -34,7 +34,7 @@ nonisolated enum ActiveWorkoutSnapshotPersistencePolicy {
 
 nonisolated enum ActiveWorkoutKeyboardChromePolicy {
     static func shouldResetKeyboardState(scenePhase: ScenePhase) -> Bool {
-        scenePhase != .active
+        scenePhase == .background
     }
 
     static func shouldShowTimerDock(
@@ -47,13 +47,6 @@ nonisolated enum ActiveWorkoutKeyboardChromePolicy {
         scenePhase == .active && hasSession && !isEndingSession && !isKeyboardVisible && !isMetricInputFocused
     }
 
-    static func shouldShowFloatingKeyboardDismissButton(
-        isKeyboardVisible: Bool,
-        isMetricInputFocused: Bool
-    ) -> Bool {
-        isKeyboardVisible || isMetricInputFocused
-    }
-
     static func shouldAnimateTimerDockVisibilityChange(
         previousIsVisible: Bool,
         currentIsVisible: Bool
@@ -63,12 +56,20 @@ nonisolated enum ActiveWorkoutKeyboardChromePolicy {
 }
 
 nonisolated enum ActiveWorkoutBottomDockPlacementPolicy {
-    static func shouldPinToScreenOverlay(hasSession: Bool, isEndingSession: Bool) -> Bool {
-        hasSession && !isEndingSession
+    static func shouldPinToScreenOverlay(
+        hasSession: Bool,
+        isEndingSession: Bool,
+        isCancelArmed: Bool = false
+    ) -> Bool {
+        hasSession && !isEndingSession && !isCancelArmed
     }
 
-    static func shouldReserveScrollClearance(hasSession: Bool, isEndingSession: Bool) -> Bool {
-        hasSession && !isEndingSession
+    static func shouldReserveScrollClearance(
+        hasSession: Bool,
+        isEndingSession: Bool,
+        isCancelArmed: Bool = false
+    ) -> Bool {
+        hasSession && !isEndingSession && !isCancelArmed
     }
 }
 

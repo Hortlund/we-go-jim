@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct WorkoutExerciseRowHostView: View {
+struct WorkoutExerciseRowHostView: View, Equatable {
     let exerciseID: UUID
     let exerciseAccessibilityIdentifier: String
     let exerciseName: String
@@ -44,6 +44,7 @@ struct WorkoutExerciseRowHostView: View {
     let onExerciseReplace: (() -> Void)?
     let onExerciseDelete: (() -> Void)?
     let flushCoordinator: WorkoutExerciseRowFlushCoordinator?
+    let keyboardDismissToken: ActiveWorkoutKeyboardDismissToken
     let onInputFocusChange: (Bool) -> Void
 
     @State private var localRestSeconds: Int
@@ -95,6 +96,7 @@ struct WorkoutExerciseRowHostView: View {
         onExerciseReplace: (() -> Void)? = nil,
         onExerciseDelete: (() -> Void)? = nil,
         flushCoordinator: WorkoutExerciseRowFlushCoordinator? = nil,
+        keyboardDismissToken: ActiveWorkoutKeyboardDismissToken = ActiveWorkoutKeyboardDismissToken(),
         onInputFocusChange: @escaping (Bool) -> Void = { _ in }
     ) {
         self.exerciseID = exerciseID
@@ -140,6 +142,7 @@ struct WorkoutExerciseRowHostView: View {
         self.onExerciseReplace = onExerciseReplace
         self.onExerciseDelete = onExerciseDelete
         self.flushCoordinator = flushCoordinator
+        self.keyboardDismissToken = keyboardDismissToken
         self.onInputFocusChange = onInputFocusChange
         self._localRestSeconds = State(initialValue: restSeconds)
         self._localSetDrafts = State(initialValue: setDrafts)
@@ -233,6 +236,7 @@ struct WorkoutExerciseRowHostView: View {
             onExerciseDelete: onExerciseDelete,
             flushCoordinator: flushCoordinator,
             flushIdentifier: exerciseID,
+            keyboardDismissToken: keyboardDismissToken,
             onInputFocusChange: onInputFocusChange,
             onDirtyStateChange: { isDirty in
                 flushCoordinator?.setDirty(isDirty, for: exerciseID)
@@ -273,5 +277,46 @@ struct WorkoutExerciseRowHostView: View {
     private func flushPendingEditsIfNeeded() {
         guard editingCoordinator.hasPendingChanges else { return }
         editingCoordinator.flushCommits()
+    }
+
+    static func == (lhs: WorkoutExerciseRowHostView, rhs: WorkoutExerciseRowHostView) -> Bool {
+        lhs.exerciseID == rhs.exerciseID
+            && lhs.exerciseAccessibilityIdentifier == rhs.exerciseAccessibilityIdentifier
+            && lhs.exerciseName == rhs.exerciseName
+            && lhs.muscleSummary == rhs.muscleSummary
+            && lhs.category == rhs.category
+            && lhs.exerciseIndexTitle == rhs.exerciseIndexTitle
+            && lhs.targetRepMin == rhs.targetRepMin
+            && lhs.targetRepMax == rhs.targetRepMax
+            && lhs.previousPerformanceResolution == rhs.previousPerformanceResolution
+            && lhs.personalRecordSummaryKinds == rhs.personalRecordSummaryKinds
+            && lhs.personalRecordKindsBySetID == rhs.personalRecordKindsBySetID
+            && lhs.guidance == rhs.guidance
+            && lhs.preferredLoadUnit == rhs.preferredLoadUnit
+            && lhs.componentSummaryResolution == rhs.componentSummaryResolution
+            && lhs.componentSummaryAccessibilityIdentifierPrefix == rhs.componentSummaryAccessibilityIdentifierPrefix
+            && lhs.exerciseNotes == rhs.exerciseNotes
+            && lhs.restSeconds == rhs.restSeconds
+            && lhs.setDrafts == rhs.setDrafts
+            && lhs.isExpanded == rhs.isExpanded
+            && lhs.showsInlineExerciseControls == rhs.showsInlineExerciseControls
+            && lhs.showsSetProgressChip == rhs.showsSetProgressChip
+            && lhs.manualCompletionMode == rhs.manualCompletionMode
+            && lhs.isBozarModeEnabled == rhs.isBozarModeEnabled
+            && lhs.isSetEditingEnabled == rhs.isSetEditingEnabled
+            && lhs.isSetCompletionEnabled == rhs.isSetCompletionEnabled
+            && lhs.setCompletionGatePresentation == rhs.setCompletionGatePresentation
+            && lhs.enablesHeaderSwipeDelete == rhs.enablesHeaderSwipeDelete
+            && lhs.emphasizesExerciseCompletion == rhs.emphasizesExerciseCompletion
+            && lhs.canMoveExerciseUp == rhs.canMoveExerciseUp
+            && lhs.canMoveExerciseDown == rhs.canMoveExerciseDown
+            && (lhs.onExerciseSettings != nil) == (rhs.onExerciseSettings != nil)
+            && (lhs.onExerciseComponentPicker != nil) == (rhs.onExerciseComponentPicker != nil)
+            && (lhs.onExerciseMoveUp != nil) == (rhs.onExerciseMoveUp != nil)
+            && (lhs.onExerciseMoveDown != nil) == (rhs.onExerciseMoveDown != nil)
+            && (lhs.onExerciseMoveToPosition != nil) == (rhs.onExerciseMoveToPosition != nil)
+            && (lhs.onExerciseReplace != nil) == (rhs.onExerciseReplace != nil)
+            && (lhs.onExerciseDelete != nil) == (rhs.onExerciseDelete != nil)
+            && lhs.keyboardDismissToken == rhs.keyboardDismissToken
     }
 }

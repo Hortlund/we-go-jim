@@ -616,20 +616,55 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
-    func contentViewInvalidatesProfileWhenWorkoutHistoryChanges() throws {
+    func contentViewInvalidatesProfileAndBrosWhenWorkoutHistoryChanges() throws {
         let source = try String(contentsOf: contentViewSourceURL(), encoding: .utf8)
 
         #expect(source.contains(".publisher(for: .wgjWorkoutHistoryDidChange)"))
         #expect(source.contains(".receive(on: RunLoop.main)"))
         #expect(source.contains("handleWorkoutHistoryChanged()"))
-        #expect(source.contains("""
-    private func handleWorkoutHistoryChanged() {
-        guard appPhase == .main else { return }
-        appWarmupState.invalidateProfile()
-        scheduleWeeklyGoalWidgetPublish()
-        requestWarmups(trigger: .activeWorkoutEnded)
+        #expect(source.contains("appWarmupState.invalidateProfile()"))
+        #expect(source.contains("appWarmupState.invalidateBros()"))
+        #expect(source.contains("AppNotificationRouter.shared.requestBrosRefresh()"))
+        #expect(source.contains("scheduleWeeklyGoalWidgetPublish()"))
+        #expect(source.contains("requestWarmups(trigger: .activeWorkoutEnded)"))
+        #expect(source.contains("scheduleSocialMaintenanceAfterWorkoutHistoryChangeIfNeeded()"))
+        #expect(source.contains("guard appRuntimeState.isBrosCloudAvailable else { return }"))
+        #expect(source.contains("await scheduleSocialMaintenanceIfNeeded(trigger: .activeWorkoutEnded)"))
     }
-"""))
+
+    @Test
+    func contentViewSchedulesBrosMaintenanceWhenCloudRuntimeRecovers() throws {
+        let source = try String(contentsOf: contentViewSourceURL(), encoding: .utf8)
+        let handlerStart = try #require(source.range(of: "private func handleCloudRuntimeModeChanged()"))
+        let handlerRemainder = source[handlerStart.lowerBound...]
+        let handlerEnd = try #require(handlerRemainder.range(of: "\n    private func scheduleSocialMaintenanceAfterWorkoutHistoryChangeIfNeeded"))
+        let handlerSource = String(handlerRemainder[..<handlerEnd.lowerBound])
+        let schedulerStart = try #require(source.range(of: "private func scheduleSocialMaintenanceAfterCloudAvailabilityChangeIfNeeded()"))
+        let schedulerRemainder = source[schedulerStart.lowerBound...]
+        let schedulerEnd = try #require(schedulerRemainder.range(of: "\n    private func startUserDataCloudMirrorIfReady"))
+        let schedulerSource = String(schedulerRemainder[..<schedulerEnd.lowerBound])
+
+        #expect(source.contains(".onChange(of: appRuntimeState.cloudRuntimeMode) { _, _ in"))
+        #expect(source.contains("handleCloudRuntimeModeChanged()"))
+        #expect(handlerSource.contains("startUserDataCloudMirrorIfReady()"))
+        #expect(handlerSource.contains("scheduleSocialMaintenanceAfterCloudAvailabilityChangeIfNeeded()"))
+        #expect(schedulerSource.contains("guard appRuntimeState.isBrosCloudAvailable else { return }"))
+        #expect(schedulerSource.contains("AppNotificationRouter.shared.requestBrosRefresh()"))
+        #expect(schedulerSource.contains("await scheduleSocialMaintenanceIfNeeded(trigger: .activeWorkoutEnded)"))
+    }
+
+    @Test
+    func workoutHistorySocialMaintenanceRequestsBrosRefreshAfterOutboxFlush() throws {
+        let source = try String(contentsOf: contentViewSourceURL(), encoding: .utf8)
+        let schedulerStart = try #require(source.range(of: "private func scheduleSocialMaintenanceIfNeeded"))
+        let schedulerRemainder = source[schedulerStart.lowerBound...]
+        let schedulerEnd = try #require(schedulerRemainder.range(of: "\n    private func socialMaintenanceDelay"))
+        let schedulerSource = String(schedulerRemainder[..<schedulerEnd.lowerBound])
+
+        #expect(schedulerSource.contains("await Self.runSocialMaintenance(modelContext: backgroundContext)"))
+        #expect(schedulerSource.contains("guard trigger == .activeWorkoutEnded else { return }"))
+        #expect(schedulerSource.contains("appWarmupState.invalidateBros()"))
+        #expect(schedulerSource.contains("AppNotificationRouter.shared.requestBrosRefresh()"))
     }
 
     @Test
@@ -797,13 +832,13 @@ struct AppLaunchWarmupTests {
     }
 
     @Test
-    func profileDashboardRenderPolicyDefersFirstDashboardMountEvenWhenProfileSnapshotIsWarm() {
-        #expect(ProfileDashboardRenderPolicy.renderDelay(hasRenderedDashboardContent: false) == .milliseconds(450))
+    func profileDashboardRenderPolicyMountsFirstDashboardImmediately() {
+        #expect(ProfileDashboardRenderPolicy.renderDelay(hasRenderedDashboardContent: false) == .zero)
         #expect(ProfileDashboardRenderPolicy.renderDelay(hasRenderedDashboardContent: true) == .zero)
         #expect(ProfileDashboardRenderPolicy.renderDelay(
             hasRenderedDashboardContent: false,
             hasFreshWarmSnapshot: true
-        ) == .milliseconds(450))
+        ) == .zero)
     }
 
     @Test
@@ -824,7 +859,7 @@ struct AppLaunchWarmupTests {
 
     @Test
     func userDataSyncTrackerReportsRunningCloudImportAsSyncing() {
-        let tracker = UserDataSyncTracker.shared
+        let tracker = UserDataSyncTracker.makeForTesting()
         var snapshot = tracker.configureForLaunch(isCloudEnabled: true, errorDescription: nil)
         #expect(snapshot.state == .caughtUp)
 

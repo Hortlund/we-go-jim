@@ -111,6 +111,23 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
+    func mainTabRootBodyDoesNotObserveRestTimerPopupChanges() throws {
+        let source = try String(contentsOf: mainTabViewSourceURL(), encoding: .utf8)
+        let bodyStart = try #require(source.range(of: "var body: some View"))
+        let bodyRemainder = source[bodyStart.lowerBound...]
+        let bodyEnd = try #require(bodyRemainder.range(of: "\n    private func activeWorkoutOverlayBottomInset"))
+        let bodySource = String(bodyRemainder[..<bodyEnd.lowerBound])
+        let overlayStart = try #require(source.range(of: "private struct MainTabBottomOverlayChrome"))
+        let overlayRemainder = source[overlayStart.lowerBound...]
+        let overlayEnd = try #require(overlayRemainder.range(of: "\nprivate var activeWorkoutOverlayTransition"))
+        let overlaySource = String(overlayRemainder[..<overlayEnd.lowerBound])
+
+        #expect(!bodySource.contains("restTimerState.restTimerPopup"))
+        #expect(overlaySource.contains("@Environment(RestTimerState.self) private var restTimerState"))
+        #expect(overlaySource.contains("value: restTimerState.restTimerPopup?.id"))
+    }
+
+    @Test
     func exercisesCatalogHeaderCollapseProgressTracksScrollOffsetGradually() {
         #expect(ExercisesCatalogHeaderCollapsePolicy.progress(forScrollOffset: 0) == 0)
         #expect(ExercisesCatalogHeaderCollapsePolicy.progress(forScrollOffset: -18) > 0)
@@ -220,6 +237,43 @@ struct AppPerformanceRuntimeTests {
 
         #expect(snapshot.requestedDelays == [.milliseconds(80)])
         #expect(snapshot.didRun == true)
+    }
+
+    @Test
+    func completedWorkoutBrosPublishesQueueLocallyBeforeCloudFlush() throws {
+        let workoutRepositorySource = try String(
+            contentsOf: productionSourceRootURL()
+                .appendingPathComponent("Services")
+                .appendingPathComponent("WorkoutSessionRepository.swift"),
+            encoding: .utf8
+        )
+        let draftRepositorySource = try String(
+            contentsOf: productionSourceRootURL()
+                .appendingPathComponent("Services")
+                .appendingPathComponent("ActiveWorkoutDraftRepository.swift"),
+            encoding: .utf8
+        )
+        let runtimeSource = try String(
+            contentsOf: productionSourceRootURL()
+                .appendingPathComponent("Services")
+                .appendingPathComponent("ActiveWorkoutRuntime.swift"),
+            encoding: .utf8
+        )
+        let socialServiceSource = try String(
+            contentsOf: productionSourceRootURL()
+                .appendingPathComponent("Services")
+                .appendingPathComponent("BrosSocialService.swift"),
+            encoding: .utf8
+        )
+
+        #expect(socialServiceSource.contains("static func makeForLocalOutboxQueueing"))
+        #expect(socialServiceSource.contains("LocalOutboxOnlyBrosCloudStore"))
+        #expect(workoutRepositorySource.contains("makeForLocalOutboxQueueing(modelContext: modelContext)"))
+        #expect(draftRepositorySource.contains("makeForLocalOutboxQueueing(modelContext: modelContext)"))
+        #expect(runtimeSource.contains("makeForLocalOutboxQueueing(modelContext: modelContext)"))
+        #expect(!workoutRepositorySource.contains("makeIfUserDataSyncEnabled(modelContext: modelContext)?.queueCompletedSessionPublish"))
+        #expect(!draftRepositorySource.contains("makeIfUserDataSyncEnabled(modelContext: modelContext)?\n            .queueCompletedSessionPublish"))
+        #expect(!runtimeSource.contains("makeIfUserDataSyncEnabled(modelContext: modelContext)?\n            .queueCompletedSessionPublish"))
     }
 
     @Test
@@ -481,7 +535,7 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
-    func activeWorkoutUserEditSnapshotWritesDoNotRunOnMainActor() throws {
+    func activeWorkoutUserEditSnapshotWritesStayOffMainActorWithoutPriorityInversion() throws {
         let source = try String(contentsOf: activeWorkoutViewSourceURL(), encoding: .utf8)
         let minimizedStart = try #require(source.range(of: "private func scheduleMinimizedDurableSnapshotSave"))
         let minimizedRemainder = source[minimizedStart.lowerBound...]
@@ -492,11 +546,50 @@ struct AppPerformanceRuntimeTests {
         let end = try #require(remainder.range(of: "\n    @MainActor\n    private func awaitPendingSnapshotWrites"))
         let methodSource = String(remainder[..<end.lowerBound])
 
-        #expect(minimizedSource.contains("pendingMinimizedSnapshotTask = Task.detached(priority: .utility)"))
-        #expect(methodSource.contains("pendingUserEditSnapshotTask = Task.detached(priority: .utility)"))
+        #expect(minimizedSource.contains("pendingMinimizedSnapshotTask = Task.detached(priority: .userInitiated)"))
+        #expect(methodSource.contains("pendingUserEditSnapshotTask = Task.detached(priority: .userInitiated)"))
         #expect(!minimizedSource.contains("pendingMinimizedSnapshotTask = Task { @MainActor"))
         #expect(!methodSource.contains("pendingUserEditSnapshotTask = Task { @MainActor"))
         #expect(methodSource.contains("let restTimerSnapshot = restTimerState.restTimerSnapshot()"))
+    }
+
+    @Test
+    func activeWorkoutSceneTransitionFlushDoesNotInheritMainActorTaskContext() throws {
+        let source = try String(contentsOf: activeWorkoutViewSourceURL(), encoding: .utf8)
+        let sceneStart = try #require(source.range(of: "private func handleScenePhaseChange"))
+        let sceneRemainder = source[sceneStart.lowerBound...]
+        let sceneEnd = try #require(sceneRemainder.range(of: "\n    @MainActor\n    private func flushDirtyWritesForSceneTransitionIfStillCurrent"))
+        let sceneSource = String(sceneRemainder[..<sceneEnd.lowerBound])
+
+        #expect(sceneSource.contains("Task.detached(priority: .userInitiated)"))
+        #expect(sceneSource.contains("flushDirtyWritesForSceneTransitionIfStillCurrent()"))
+        #expect(!sceneSource.contains("Task { @MainActor"))
+        #expect(!sceneSource.contains("flushDirtyWritesNow(checkpoint: .sceneTransition)"))
+    }
+
+    @Test
+    func uiTestActiveWorkoutSnapshotResetRunsBeforeBootstrapBranchSelection() throws {
+        let source = try String(contentsOf: wgjAppSourceURL(), encoding: .utf8)
+        let bootstrapStart = try #require(source.range(of: "private static func makeContainerBootstrap() async throws"))
+        let bootstrapRemainder = source[bootstrapStart.lowerBound...]
+        let bootstrapEnd = try #require(bootstrapRemainder.range(of: "\n    private static func makeCloudBackedContainer() throws"))
+        let bootstrapSource = String(bootstrapRemainder[..<bootstrapEnd.lowerBound])
+
+        #expect(bootstrapSource.contains("resetActiveWorkoutSnapshotForUITestsIfRequested()"))
+        #expect(source.contains("private static func resetActiveWorkoutSnapshotForUITestsIfRequested()"))
+        #expect(source.contains("UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT"))
+    }
+
+    @Test
+    func uiTestProSubscriptionOverrideStaysDebugOnlyAndExplicit() throws {
+        let source = try String(contentsOf: wgjAppSourceURL(), encoding: .utf8)
+        let hookStart = try #require(source.range(of: "private static func applyUITestSubscriptionOverridesIfRequested"))
+        let hookSource = String(source[hookStart.lowerBound...])
+
+        #expect(source.contains("#if DEBUG\n        Self.applyUITestSubscriptionOverridesIfRequested()"))
+        #expect(hookSource.contains("UITEST_FORCE_PRO_SUBSCRIPTION"))
+        #expect(hookSource.contains("SubscriptionState.shared.forceCustomerInfoForUITesting"))
+        #expect(hookSource.contains("RevenueCatConfig.entitlementIdentifier"))
     }
 
     @Test
@@ -552,6 +645,10 @@ struct AppPerformanceRuntimeTests {
         let deferredRemainder = source[deferredStart.lowerBound...]
         let deferredEnd = try #require(deferredRemainder.range(of: "\n    nonisolated private static func runSocialMaintenance"))
         let deferredSource = String(deferredRemainder[..<deferredEnd.lowerBound])
+        let socialStart = try #require(source.range(of: "nonisolated private static func runSocialMaintenance"))
+        let socialRemainder = source[socialStart.lowerBound...]
+        let socialEnd = try #require(socialRemainder.range(of: "\n    nonisolated private static func shouldRunSocialMaintenance"))
+        let socialSource = String(socialRemainder[..<socialEnd.lowerBound])
         let profileBootstrapStart = try #require(source.range(of: "private func prepareLocalProfileIdentityIfNeeded"))
         let profileBootstrapRemainder = source[profileBootstrapStart.lowerBound...]
         let profileBootstrapEnd = try #require(profileBootstrapRemainder.range(of: "\n    @MainActor\n    private func shouldRunFirstRunLocalBootstrapBeforeMainEntry"))
@@ -571,6 +668,8 @@ struct AppPerformanceRuntimeTests {
         #expect(deferredSource.contains("backgroundStore.performAsync(\"app.maintenance.work\")"))
         #expect(!deferredSource.contains("BrosCleanStartPolicy.applyIfNeeded(modelContext: modelContext)"))
         #expect(!deferredSource.contains("HistoryProjectionRepository(modelContext: modelContext)"))
+        #expect(socialSource.contains("try? await service.repairMissingCompletedSessionPublishes()"))
+        #expect(socialSource.contains("await service.flushOutbox()"))
         #expect(profileBootstrapSource.contains("let backgroundStore = rootBackgroundStore"))
         #expect(profileBootstrapSource.contains("backgroundStore.perform(\"profile.bootstrap.local\")"))
         #expect(!profileBootstrapSource.contains("ProfileRepository(modelContext: modelContext)"))
@@ -604,6 +703,121 @@ struct AppPerformanceRuntimeTests {
         #expect(!controllerSource.contains("WGJPerformance.measure(\"profile.trends\")"))
         #expect(!controllerSource.contains("ProfileRepository(modelContext: modelContext)"))
         #expect(!controllerSource.contains("WorkoutMetricsService(modelContext: modelContext)"))
+    }
+
+    @Test
+    func profileDashboardDefersTrendSeriesUntilAfterInitialSnapshotRender() throws {
+        let profileSource = try String(contentsOf: profileViewSourceURL(), encoding: .utf8)
+        let contentSource = try String(contentsOf: contentViewSourceURL(), encoding: .utf8)
+        let loadDashboardStart = try #require(profileSource.range(of: "func loadDashboardContent("))
+        let loadDashboardRemainder = profileSource[loadDashboardStart.lowerBound...]
+        let loadDashboardEnd = try #require(loadDashboardRemainder.range(of: "\n    func loadTrendSeries("))
+        let loadDashboardSource = String(loadDashboardRemainder[..<loadDashboardEnd.lowerBound])
+        let warmSnapshotStart = try #require(contentSource.range(of: "private static func buildProfileWarmSnapshot("))
+        let warmSnapshotRemainder = contentSource[warmSnapshotStart.lowerBound...]
+        let warmSnapshotEnd = try #require(warmSnapshotRemainder.range(of: "\n    private static func buildBrosWarmSnapshot("))
+        let warmSnapshotSource = String(warmSnapshotRemainder[..<warmSnapshotEnd.lowerBound])
+
+        #expect(!loadDashboardSource.contains("ProfileDashboardTrendSeriesBuilder.build("))
+        #expect(!warmSnapshotSource.contains("ProfileDashboardTrendSeriesBuilder.build("))
+        #expect(loadDashboardSource.contains("trendSeriesByWidgetID: [:]"))
+        #expect(warmSnapshotSource.contains("trendSeriesByWidgetID: [:]"))
+        #expect(profileSource.contains("backgroundStore.perform(\"profile.trends\")"))
+        #expect(!profileSource.contains("Task.sleep(for: .milliseconds(180))"))
+        #expect(!profileSource.contains("LazyVStack(alignment: .leading, spacing: 16)"))
+        #expect(!profileSource.contains("LazyVGrid"))
+        #expect(profileSource.contains("Grid(horizontalSpacing: 10, verticalSpacing: 10)"))
+        #expect(profileSource.contains("dashboardContent.activityDayRows.enumerated()"))
+        #expect(profileSource.contains("maxWorkoutCount: dashboardContent.maxActivityDayWorkoutCount"))
+        #expect(!profileSource.contains("private func activityDayRows(_ days: [ProfileActivityDay])"))
+        #expect(!profileSource.contains("dashboardContent.activityDays.map(\\.workoutCount).max()"))
+    }
+
+    @Test
+    func profileAsyncWorkersDoNotInheritMainActorContext() throws {
+        let source = try String(contentsOf: profileViewSourceURL(), encoding: .utf8)
+        let coachStart = try #require(source.range(of: "private func scheduleCoachBriefLoad"))
+        let coachRemainder = source[coachStart.lowerBound...]
+        let coachEnd = try #require(coachRemainder.range(of: "\n    private func cancelCoachBriefLoad"))
+        let coachSource = String(coachRemainder[..<coachEnd.lowerBound])
+        let followUpStart = try #require(source.range(of: "private func loadCoachFollowUp"))
+        let followUpRemainder = source[followUpStart.lowerBound...]
+        let followUpEnd = try #require(followUpRemainder.range(of: "\n    private func cancelCoachFollowUpLoads"))
+        let followUpSource = String(followUpRemainder[..<followUpEnd.lowerBound])
+        let invalidationStart = try #require(source.range(of: "private func markProfileDirtyAndReloadIfActive"))
+        let invalidationRemainder = source[invalidationStart.lowerBound...]
+        let invalidationEnd = try #require(invalidationRemainder.range(of: "\n    @MainActor\n    private func handleProfileInvalidated"))
+        let invalidationSource = String(invalidationRemainder[..<invalidationEnd.lowerBound])
+        let renderStart = try #require(source.range(of: "private func scheduleDashboardRender"))
+        let renderRemainder = source[renderStart.lowerBound...]
+        let renderEnd = try #require(renderRemainder.range(of: "\n    private func cancelDashboardRender"))
+        let renderSource = String(renderRemainder[..<renderEnd.lowerBound])
+        let trendsStart = try #require(source.range(of: "private func scheduleTrendSeriesLoad"))
+        let trendsRemainder = source[trendsStart.lowerBound...]
+        let trendsEnd = try #require(trendsRemainder.range(of: "\n    private func formatWeight"))
+        let trendsSource = String(trendsRemainder[..<trendsEnd.lowerBound])
+
+        for workerSource in [coachSource, followUpSource, invalidationSource, renderSource, trendsSource] {
+            #expect(workerSource.contains("Task.detached(priority: .utility)"))
+            #expect(!workerSource.contains("Task {"))
+            #expect(!workerSource.contains("Task { @MainActor"))
+        }
+    }
+
+    @Test
+    func profileWidgetManagerUsesBackgroundSnapshotsAndWrites() throws {
+        let source = try String(contentsOf: profileWidgetManagerViewSourceURL(), encoding: .utf8)
+        let bodyStart = try #require(source.range(of: "    var body: some View"))
+        let bodyRemainder = source[bodyStart.lowerBound...]
+        let bodyEnd = try #require(bodyRemainder.range(of: "\n    private func sectionHeader"))
+        let bodySource = String(bodyRemainder[..<bodyEnd.lowerBound])
+        let initialLoadStart = try #require(source.range(of: "private func reloadInitialData() async"))
+        let initialLoadRemainder = source[initialLoadStart.lowerBound...]
+        let initialLoadEnd = try #require(initialLoadRemainder.range(of: "\n    private func presentExercisePicker"))
+        let initialLoadSource = String(initialLoadRemainder[..<initialLoadEnd.lowerBound])
+        let moveStart = try #require(source.range(of: "private func moveEnabledWidgets"))
+        let moveRemainder = source[moveStart.lowerBound...]
+        let moveEnd = try #require(moveRemainder.range(of: "\n    private func toggleConfig"))
+        let moveSource = String(moveRemainder[..<moveEnd.lowerBound])
+        let saveSelectionStart = try #require(source.range(of: "private func saveExerciseSelection"))
+        let saveSelectionRemainder = source[saveSelectionStart.lowerBound...]
+        let saveSelectionEnd = try #require(saveSelectionRemainder.range(of: "\n    private func selectionTarget"))
+        let saveSelectionSource = String(saveSelectionRemainder[..<saveSelectionEnd.lowerBound])
+        let pickerStart = try #require(source.range(of: "private func presentExercisePicker"))
+        let pickerRemainder = source[pickerStart.lowerBound...]
+        let pickerEnd = try #require(pickerRemainder.range(of: "\n    private func saveExerciseSelection"))
+        let pickerSource = String(pickerRemainder[..<pickerEnd.lowerBound])
+
+        #expect(source.contains("@Environment(\\.appBackgroundStore) private var appBackgroundStore"))
+        #expect(source.contains("@State private var configs: [ProfileWidgetConfigSnapshot]"))
+        #expect(source.contains("@State private var widgetListSnapshot = ProfileWidgetManagerListSnapshot.empty"))
+        #expect(source.contains("ProfileWidgetManagerListSnapshot.make("))
+        #expect(source.contains("visibleEnabledConfigs"))
+        #expect(source.contains("visibleAvailableConfigs"))
+        #expect(!source.contains("private var enabledConfigs: [ProfileWidgetConfigSnapshot]"))
+        #expect(!source.contains("private var disabledConfigs: [ProfileWidgetConfigSnapshot]"))
+        #expect(!bodySource.contains(".filter {"))
+        #expect(!bodySource.contains(".sorted {"))
+        #expect(source.contains("private var widgetBackgroundStore: AppBackgroundStore"))
+        #expect(source.contains("appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)"))
+        #expect(!source.contains("@State private var configs: [ProfileWidgetConfig]"))
+        #expect(!source.contains("private var repository: ProfileWidgetRepository"))
+        #expect(!source.contains("private var metricsService: WorkoutMetricsService"))
+        #expect(initialLoadSource.contains("backgroundStore.perform(\"profile-widgets.initial-load\")"))
+        #expect(initialLoadSource.contains("configurationSnapshots()"))
+        #expect(initialLoadSource.contains("WorkoutMetricsService(modelContext: backgroundContext).exerciseHistoryOptions()"))
+        #expect(moveSource.contains("applyConfigs(Self.reorderedEnabledConfigs"))
+        #expect(moveSource.contains("Task.detached(priority: .userInitiated)"))
+        #expect(moveSource.contains("backgroundStore.performWrite(\"profile-widgets.move\")"))
+        #expect(saveSelectionSource.contains("applyConfigs(Self.applyingExerciseSelection"))
+        #expect(saveSelectionSource.contains("Task.detached(priority: .userInitiated)"))
+        #expect(saveSelectionSource.contains("backgroundStore.performWrite(\"profile-widgets.exercise-selection\")"))
+        #expect(pickerSource.contains("Task.detached(priority: .userInitiated)"))
+        #expect(pickerSource.contains("backgroundStore.perform(\"profile-widgets.exercise-options\")"))
+        #expect(!pickerSource.contains("Task {"))
+        #expect(!pickerSource.contains("await loadExerciseOptions("))
+        #expect(!moveSource.contains("ProfileWidgetRepository(modelContext: modelContext)"))
+        #expect(!saveSelectionSource.contains("ProfileWidgetRepository(modelContext: modelContext)"))
     }
 
     @Test
@@ -708,10 +922,14 @@ struct AppPerformanceRuntimeTests {
         #expect(overviewReloadSource.contains("backgroundStore.perform(\"history-overview.snapshot.reload\")"))
         #expect(!overviewReloadSource.contains("WGJPerformance.measure(\"history-overview.snapshot.reload\")"))
         #expect(overviewArchiveSource.contains("backgroundStore.performWrite(\"history-overview.archive\")"))
+        #expect(overviewArchiveSource.contains("Task.detached(priority: .utility)"))
+        #expect(!overviewArchiveSource.contains("Task { @MainActor"))
         #expect(hiddenSheetSource.contains("@State private var archivedSessions: [ArchivedWorkoutSnapshot]"))
         #expect(hiddenSheetSource.contains("backgroundStore.perform(\"history-hidden.snapshot\")"))
         #expect(hiddenSheetSource.contains("backgroundStore.performWrite(\"history-hidden.restore\")"))
         #expect(hiddenSheetSource.contains("backgroundStore.performWrite(\"history-hidden.delete\")"))
+        #expect(hiddenSheetSource.contains("Task.detached(priority: .utility)"))
+        #expect(!hiddenSheetSource.contains("Task { @MainActor"))
         #expect(!hiddenSheetSource.contains("@State private var archivedSessions: [WorkoutSession]"))
         #expect(detailSource.contains("private var historyBackgroundStore: AppBackgroundStore"))
         #expect(detailSource.contains("appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)"))
@@ -731,6 +949,27 @@ struct AppPerformanceRuntimeTests {
         #expect(!detailReloadSource.contains("Self.loadSnapshot(modelContext: modelContext"))
         #expect(!detailSaveSource.contains("modelContext: modelContext"))
         #expect(!detailHydrationSource.contains("Self.loadHydrationPayloads(\n                        modelContext: modelContext"))
+    }
+
+    @Test
+    func historyDetailKeepsEditableScrollContentStableWithoutProgrammaticReanchors() throws {
+        let source = try String(contentsOf: historyDetailViewSourceURL(), encoding: .utf8)
+        let bodyStart = try #require(source.range(of: "var body: some View"))
+        let bodyRemainder = source[bodyStart.lowerBound...]
+        let bodyEnd = try #require(bodyRemainder.range(of: "\n        .scrollDismissesKeyboard"))
+        let bodySource = String(bodyRemainder[..<bodyEnd.lowerBound])
+        let saveCompletedStart = try #require(source.range(of: "private func handleSaveChangesCompleted"))
+        let saveCompletedRemainder = source[saveCompletedStart.lowerBound...]
+        let saveCompletedEnd = try #require(saveCompletedRemainder.range(of: "\n    @MainActor\n    private func handleSaveChangesFailed"))
+        let saveCompletedSource = String(saveCompletedRemainder[..<saveCompletedEnd.lowerBound])
+
+        #expect(bodySource.contains("VStack(alignment: .leading, spacing: WGJSpacing.section)"))
+        #expect(!bodySource.contains("LazyVStack"))
+        #expect(!source.contains("ScrollViewReader"))
+        #expect(!source.contains("scrollTo("))
+        #expect(!source.contains("history-detail-top-anchor"))
+        #expect(!source.contains("scrollToTopRequestID"))
+        #expect(!saveCompletedSource.contains("withAnimation"))
     }
 
     @Test
@@ -822,13 +1061,38 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
+    func exercisesCatalogUIKitSearchFieldUsesStateBackedFocus() throws {
+        let source = try String(contentsOf: exercisesCatalogViewSourceURL(), encoding: .utf8)
+        let fieldStart = try #require(source.range(of: "private struct ExercisesCatalogSearchField"))
+        let fieldSource = String(source[fieldStart.lowerBound...])
+
+        #expect(source.contains("@State private var isSearchFieldFocused = false"))
+        #expect(!source.contains("@FocusState private var isSearchFieldFocused"))
+        #expect(fieldSource.contains("WGJAccessoryTextField("))
+        #expect(fieldSource.contains("isFocused: $isFocused"))
+    }
+
+    @Test
     func templateDetailAndFolderActionsUseResolvedBackgroundStore() throws {
         let detailSource = try String(contentsOf: templateDetailViewSourceURL(), encoding: .utf8)
+        let editorSource = try String(contentsOf: templateEditorViewSourceURL(), encoding: .utf8)
         let folderSource = try String(contentsOf: folderDetailViewSourceURL(), encoding: .utf8)
         let saveStart = try #require(detailSource.range(of: "private func saveTemplateDetailChanges()"))
         let saveRemainder = detailSource[saveStart.lowerBound...]
         let saveEnd = try #require(saveRemainder.range(of: "\n    private func templateRecommendation"))
         let saveSource = String(saveRemainder[..<saveEnd.lowerBound])
+        let editorSaveStart = try #require(editorSource.range(of: "private func saveTemplate()"))
+        let editorSaveRemainder = editorSource[editorSaveStart.lowerBound...]
+        let editorSaveEnd = try #require(editorSaveRemainder.range(of: "\n    private func loadInitialDataIfNeeded"))
+        let editorSaveSource = String(editorSaveRemainder[..<editorSaveEnd.lowerBound])
+        let editorLoadStart = try #require(editorSource.range(of: "private func loadInitialDataIfNeeded() async"))
+        let editorLoadRemainder = editorSource[editorLoadStart.lowerBound...]
+        let editorLoadEnd = try #require(editorLoadRemainder.range(of: "\n    private func templateRecommendation"))
+        let editorLoadSource = String(editorLoadRemainder[..<editorLoadEnd.lowerBound])
+        let editorCatalogStart = try #require(editorSource.range(of: "private func loadCatalogMatches() async"))
+        let editorCatalogRemainder = editorSource[editorCatalogStart.lowerBound...]
+        let editorCatalogEnd = try #require(editorCatalogRemainder.range(of: "\n    @MainActor\n    private func applyInitialSnapshot"))
+        let editorCatalogSource = String(editorCatalogRemainder[..<editorCatalogEnd.lowerBound])
         let catalogStart = try #require(detailSource.range(of: "private func loadCatalogMatches() async"))
         let catalogRemainder = detailSource[catalogStart.lowerBound...]
         let catalogEnd = try #require(catalogRemainder.range(of: "\n    @MainActor\n    private func componentDrafts"))
@@ -837,12 +1101,23 @@ struct AppPerformanceRuntimeTests {
         let exerciseDetailMetadataRemainder = detailSource[exerciseDetailMetadataStart.lowerBound...]
         let exerciseDetailMetadataEnd = try #require(exerciseDetailMetadataRemainder.range(of: "\n    private func snapshotInfoRow"))
         let exerciseDetailMetadataSource = String(exerciseDetailMetadataRemainder[..<exerciseDetailMetadataEnd.lowerBound])
+        let folderLoaderStart = try #require(folderSource.range(of: "\nnonisolated enum FolderDetailSnapshotLoader"))
+        let folderViewSource = String(folderSource[..<folderLoaderStart.lowerBound])
 
         #expect(detailSource.contains("private var templateBackgroundStore: AppBackgroundStore"))
         #expect(detailSource.contains("appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)"))
         #expect(!detailSource.contains("if let appBackgroundStore"))
+        #expect(!detailSource.contains("@Query"))
+        #expect(detailSource.contains("TemplateDetailSnapshot"))
+        #expect(detailSource.contains("TemplateDetailSnapshotLoader.load("))
+        #expect(detailSource.contains("backgroundStore.performWrite(\"template-detail.snapshot.reload\")"))
+        #expect(detailSource.contains("TemplateDetailExerciseSnapshot"))
+        #expect(detailSource.contains("let templateCountsByFolderID = Dictionary("))
+        #expect(!detailSource.contains("templateCount: (folder.templates ?? []).count"))
         #expect(saveSource.contains("let backgroundStore = templateBackgroundStore"))
         #expect(saveSource.contains("backgroundStore.performWrite(\"template-detail.save-drafts\")"))
+        #expect(saveSource.contains("Task.detached(priority: .utility)"))
+        #expect(!saveSource.contains("Task { @MainActor"))
         #expect(!saveSource.contains("modelContext: modelContext"))
         #expect(catalogSource.contains("let backgroundStore = templateBackgroundStore"))
         #expect(catalogSource.contains("backgroundStore.perform(\"template-detail.catalog-matches\")"))
@@ -851,16 +1126,146 @@ struct AppPerformanceRuntimeTests {
         #expect(detailSource.contains("private var templateDetailBackgroundStore: AppBackgroundStore"))
         #expect(exerciseDetailMetadataSource.contains("let backgroundStore = templateDetailBackgroundStore"))
         #expect(exerciseDetailMetadataSource.contains("backgroundStore.perform(\"template-exercise-detail.catalog-metadata\")"))
+        #expect(exerciseDetailMetadataSource.contains("exerciseSnapshotMap(for: [exercise.catalogExerciseUUID])"))
         #expect(exerciseDetailMetadataSource.contains("ExerciseMuscleSnapshot.init(muscle:)"))
         #expect(!exerciseDetailMetadataSource.contains("ExerciseCatalogRepository(modelContext: modelContext)"))
+        #expect(editorSource.contains("private var templateEditorBackgroundStore: AppBackgroundStore"))
+        #expect(editorSource.contains("TemplateEditorInitialSnapshot"))
+        #expect(editorSource.contains("TemplateEditorSnapshotLoader.load("))
+        #expect(editorSource.contains("TemplateEditorPersistence.save("))
+        #expect(!editorSource.contains("@Query"))
+        #expect(editorSaveSource.contains("Task.detached(priority: .utility)"))
+        #expect(editorSaveSource.contains("backgroundStore.performWrite(\"template-editor.save\")"))
+        #expect(!editorSaveSource.contains("TemplateRepository(modelContext: modelContext)"))
+        #expect(editorLoadSource.contains("backgroundStore.perform(\"template-editor.initial-load\")"))
+        #expect(!editorLoadSource.contains("TemplateRepository(modelContext: modelContext)"))
+        #expect(editorCatalogSource.contains("backgroundStore.perform(\"template-editor.catalog-matches\")"))
+        #expect(editorCatalogSource.contains("exerciseSnapshotMap(for: requestedCatalogUUIDs)"))
+        #expect(!editorCatalogSource.contains("ExerciseCatalogRepository(modelContext: modelContext)"))
         #expect(folderSource.contains("private var folderBackgroundStore: AppBackgroundStore"))
         #expect(folderSource.contains("appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)"))
         #expect(!folderSource.contains("if let appBackgroundStore"))
         #expect(folderSource.contains("backgroundStore.performWrite(\"folder-detail.template.delete\")"))
         #expect(folderSource.contains("backgroundStore.performWrite(\"folder-detail.template.move\")"))
         #expect(folderSource.contains("backgroundStore.performWrite(\"folder-detail.folder.export\")"))
-        #expect(!folderSource.contains("TemplateRepository(modelContext: modelContext)"))
-        #expect(!folderSource.contains("TemplateTransferService(modelContext: modelContext)"))
+        #expect(folderViewSource.contains("Task.detached(priority: .utility)"))
+        #expect(!folderViewSource.contains("Task { @MainActor"))
+        #expect(!folderViewSource.contains("TemplateRepository(modelContext: modelContext)"))
+        #expect(!folderViewSource.contains("TemplateTransferService(modelContext: modelContext)"))
+        #expect(!folderSource.contains("@Query"))
+        #expect(folderSource.contains("FolderDetailSnapshot"))
+        #expect(folderSource.contains("FolderDetailSnapshotLoader.load(modelContext:"))
+        #expect(folderSource.contains("backgroundStore.perform(\"folder-detail.snapshot.reload\")"))
+        #expect(folderSource.contains("let templateCountsByFolderID = Dictionary("))
+        #expect(folderSource.contains("grouping: templates,\n            by: \\.folderID"))
+        #expect(!folderSource.contains("templates.filter { $0.folderID == folder.id }.count"))
+        #expect(!folderSource.contains("(template.exercises ?? []).count"))
+    }
+
+    @Test
+    func templatesOverviewUsesBackgroundValueSnapshotsForScrollCards() throws {
+        let source = try String(contentsOf: templatesOverviewViewSourceURL(), encoding: .utf8)
+        let mutationStart = try #require(source.range(of: "private func saveFolderDraft()"))
+        let mutationRemainder = source[mutationStart.lowerBound...]
+        let mutationEnd = try #require(mutationRemainder.range(of: "\n    private func reloadSnapshotIfNeeded"))
+        let mutationSource = String(mutationRemainder[..<mutationEnd.lowerBound])
+        let bodyStart = try #require(source.range(of: "    var body: some View"))
+        let bodyRemainder = source[bodyStart.lowerBound...]
+        let bodyEnd = try #require(bodyRemainder.range(of: "\n    private var headerActions"))
+        let bodySource = String(bodyRemainder[..<bodyEnd.lowerBound])
+        let cardStart = try #require(source.range(of: "    private func templateCard"))
+        let cardRemainder = source[cardStart.lowerBound...]
+        let cardEnd = try #require(cardRemainder.range(of: "\n    private func folderCard"))
+        let cardSource = String(cardRemainder[..<cardEnd.lowerBound])
+
+        #expect(!source.contains("@Query"))
+        #expect(source.contains("TemplatesOverviewSnapshot"))
+        #expect(source.contains("TemplatesOverviewSnapshotLoader.load(modelContext:"))
+        #expect(source.contains("backgroundStore.perform(\"templates-overview.snapshot.reload\")"))
+        #expect(source.contains("backgroundStore.performWrite(\"templates-overview.folder.save\")"))
+        #expect(source.contains("backgroundStore.performWrite(\"templates-overview.template.delete\")"))
+        #expect(source.contains("TemplateOverviewTemplateSnapshot"))
+        #expect(!source.contains("(template.exercises ?? []).count"))
+        #expect(!source.contains("(folder.templates ?? []).count"))
+        #expect(mutationSource.contains("Task.detached(priority: .utility)"))
+        #expect(!mutationSource.contains("Task { @MainActor"))
+        #expect(source.contains("templatesByFolderID"))
+        #expect(source.contains("unfiledTemplates"))
+        #expect(source.contains("folderNameByID"))
+        #expect(source.contains("destinationFoldersByTemplateID"))
+        #expect(!bodySource.contains(".filter {"))
+        #expect(!cardSource.contains(".filter {"))
+    }
+
+    @Test
+    func templateScrollCardsUseEquatableRenderBoundaries() throws {
+        let overviewSource = try String(contentsOf: templatesOverviewViewSourceURL(), encoding: .utf8)
+        let folderSource = try String(contentsOf: folderDetailViewSourceURL(), encoding: .utf8)
+        let overviewTemplateStart = try #require(overviewSource.range(of: "private func templateCard"))
+        let overviewTemplateRemainder = overviewSource[overviewTemplateStart.lowerBound...]
+        let overviewTemplateEnd = try #require(overviewTemplateRemainder.range(of: "\n    private func folderCard"))
+        let overviewTemplateSource = String(overviewTemplateRemainder[..<overviewTemplateEnd.lowerBound])
+        let overviewFolderStart = try #require(overviewSource.range(of: "private func folderCard"))
+        let overviewFolderRemainder = overviewSource[overviewFolderStart.lowerBound...]
+        let overviewFolderEnd = try #require(overviewFolderRemainder.range(of: "\n    private var displayedTemplates"))
+        let overviewFolderSource = String(overviewFolderRemainder[..<overviewFolderEnd.lowerBound])
+        let folderTemplateStart = try #require(folderSource.range(of: "private func templateCard"))
+        let folderTemplateRemainder = folderSource[folderTemplateStart.lowerBound...]
+        let folderTemplateEnd = try #require(folderTemplateRemainder.range(of: "\n    private var addExistingSheet"))
+        let folderTemplateSource = String(folderTemplateRemainder[..<folderTemplateEnd.lowerBound])
+
+        #expect(overviewSource.contains("private struct TemplateOverviewTemplateCardView: View, Equatable"))
+        #expect(overviewSource.contains("private struct TemplateOverviewFolderCardView: View, Equatable"))
+        #expect(folderSource.contains("private struct FolderDetailTemplateCardView: View, Equatable"))
+        #expect(overviewTemplateSource.contains("TemplateOverviewTemplateCardView("))
+        #expect(overviewTemplateSource.contains(".equatable()"))
+        #expect(overviewFolderSource.contains("TemplateOverviewFolderCardView("))
+        #expect(overviewFolderSource.contains(".equatable()"))
+        #expect(folderTemplateSource.contains("FolderDetailTemplateCardView("))
+        #expect(folderTemplateSource.contains(".equatable()"))
+    }
+
+    @Test
+    func primaryScrollScreensKeepFixedChromeOutOfLazyStacks() throws {
+        let historySource = try String(contentsOf: historyOverviewViewSourceURL(), encoding: .utf8)
+        let startWorkoutSource = try String(contentsOf: startWorkoutHomeViewSourceURL(), encoding: .utf8)
+        let templatesSource = try String(contentsOf: templatesOverviewViewSourceURL(), encoding: .utf8)
+        let folderSource = try String(contentsOf: folderDetailViewSourceURL(), encoding: .utf8)
+        let templateDetailSource = try String(contentsOf: templateDetailViewSourceURL(), encoding: .utf8)
+        let prescriptionEditorSource = try String(contentsOf: templateExercisePrescriptionEditorSourceURL(), encoding: .utf8)
+        let activeWorkoutSource = try String(contentsOf: activeWorkoutViewSourceURL(), encoding: .utf8)
+
+        #expect(historySource.contains("ScrollView {\n            VStack(alignment: .leading, spacing: 16)"))
+        #expect(!historySource.contains("ScrollView {\n            LazyVStack(alignment: .leading, spacing: 16)"))
+        #expect(startWorkoutSource.contains("ScrollView {\n            VStack(alignment: .leading, spacing: 20)"))
+        #expect(!startWorkoutSource.contains("ScrollView {\n            LazyVStack(alignment: .leading, spacing: 20)"))
+        #expect(!startWorkoutSource.contains("LazyVStack"))
+        #expect(templatesSource.contains("ScrollView {\n            VStack(alignment: .leading, spacing: 16)"))
+        #expect(!templatesSource.contains("ScrollView {\n            LazyVStack(alignment: .leading, spacing: 16)"))
+        #expect(!templatesSource.contains("LazyVStack"))
+        #expect(folderSource.contains("ScrollView {\n            VStack(alignment: .leading, spacing: 16)"))
+        #expect(!folderSource.contains("ScrollView {\n            LazyVStack(alignment: .leading, spacing: 16)"))
+
+        let detailExercisesStart = try #require(templateDetailSource.range(of: "private var exercisesSection: some View"))
+        let detailExercisesRemainder = templateDetailSource[detailExercisesStart.lowerBound...]
+        let detailExercisesEnd = try #require(detailExercisesRemainder.range(of: "\n    private func templateExerciseSection"))
+        let detailExercisesSource = String(detailExercisesRemainder[..<detailExercisesEnd.lowerBound])
+        #expect(detailExercisesSource.contains("return VStack(alignment: .leading, spacing: 12)"))
+        #expect(!detailExercisesSource.contains("LazyVStack"))
+
+        let prescriptionSetsStart = try #require(prescriptionEditorSource.range(of: "private var setsSection: some View"))
+        let prescriptionSetsRemainder = prescriptionEditorSource[prescriptionSetsStart.lowerBound...]
+        let prescriptionSetsEnd = try #require(prescriptionSetsRemainder.range(of: "\n    private func metricField"))
+        let prescriptionSetsSource = String(prescriptionSetsRemainder[..<prescriptionSetsEnd.lowerBound])
+        #expect(prescriptionSetsSource.contains("VStack(alignment: .leading, spacing: 14)"))
+        #expect(!prescriptionSetsSource.contains("LazyVStack"))
+
+        let activeContentStart = try #require(activeWorkoutSource.range(of: "private func activeWorkoutScrollContent"))
+        let activeContentRemainder = activeWorkoutSource[activeContentStart.lowerBound...]
+        let activeContentEnd = try #require(activeContentRemainder.range(of: "\n    @MainActor\n    @ViewBuilder\n    private var activeWorkoutHeaderContent"))
+        let activeContentSource = String(activeContentRemainder[..<activeContentEnd.lowerBound])
+        #expect(activeContentSource.contains("VStack(alignment: .leading, spacing: 16)"))
+        #expect(!activeContentSource.contains("LazyVStack"))
     }
 
     @Test
@@ -959,10 +1364,58 @@ struct AppPerformanceRuntimeTests {
         let workerSource = String(workerRemainder[..<workerEnd.lowerBound])
 
         #expect(toggleSource.contains("Task.detached(priority: .utility)"))
-        #expect(toggleSource.contains("Self.setReactionAndFetchSnapshot("))
+        #expect(toggleSource.contains("self.reactionSnapshotWorker(eventID, emoji, resolvedBackgroundStore)"))
         #expect(!toggleSource.contains("Task { @MainActor"))
+        #expect(!toggleSource.contains("Task { [weak self]"))
+        #expect(!toggleSource.contains("self.setReactionAndFetchSnapshot("))
+        #expect(toggleSource.contains("let resolvedBackgroundStore = backgroundStore ?? AppBackgroundStore(container: modelContext.container)"))
+        #expect(source.contains("reactionSnapshotWorker: @escaping @Sendable"))
+        #expect(source.contains("try await BrosViewModel.setReactionAndFetchSnapshot("))
         #expect(workerSource.contains("backgroundStore.performAsync(\"bros.set-reaction\")"))
         #expect(!workerSource.contains("modelContext: modelContext"))
+    }
+
+    @Test
+    func brosKeepsBoundedShellContainersNonLazyWhileFeedListStaysLazy() throws {
+        let source = try String(contentsOf: brosViewSourceURL(), encoding: .utf8)
+        let bodyStart = try #require(source.range(of: "var body: some View"))
+        let bodyRemainder = source[bodyStart.lowerBound...]
+        let bodyEnd = try #require(bodyRemainder.range(of: "\n        .refreshable"))
+        let bodySource = String(bodyRemainder[..<bodyEnd.lowerBound])
+        let activeStart = try #require(source.range(of: "private func activeContent"))
+        let activeRemainder = source[activeStart.lowerBound...]
+        let activeEnd = try #require(activeRemainder.range(of: "\n    private func lockedBrosCircleContent"))
+        let activeSource = String(activeRemainder[..<activeEnd.lowerBound])
+        let lockedStart = try #require(source.range(of: "private func lockedBrosCircleContent"))
+        let lockedRemainder = source[lockedStart.lowerBound...]
+        let lockedEnd = try #require(lockedRemainder.range(of: "\n    private func membersCard"))
+        let lockedSource = String(lockedRemainder[..<lockedEnd.lowerBound])
+
+        #expect(bodySource.contains("VStack(alignment: .leading, spacing: WGJSpacing.section)"))
+        #expect(!bodySource.contains("LazyVStack"))
+        #expect(activeSource.contains("VStack(alignment: .leading, spacing: WGJSpacing.section)"))
+        #expect(activeSource.contains("LazyVStack(alignment: .leading, spacing: 12)"))
+        #expect(lockedSource.contains("VStack(alignment: .leading, spacing: WGJSpacing.section)"))
+        #expect(!lockedSource.contains("LazyVStack"))
+    }
+
+    @Test
+    func brosFilteringAndRuntimeRecoveryStayOffMainActorInteractionPath() throws {
+        let source = try String(contentsOf: brosViewSourceURL(), encoding: .utf8)
+        let recoveryStart = try #require(source.range(of: "private func handleRuntimeCloudErrorChanged"))
+        let recoveryRemainder = source[recoveryStart.lowerBound...]
+        let recoveryEnd = try #require(recoveryRemainder.range(of: "\n    @MainActor\n    private func cancelActivationRefresh"))
+        let recoverySource = String(recoveryRemainder[..<recoveryEnd.lowerBound])
+        let filterStart = try #require(source.range(of: "private func rebuildFilteredSnapshot"))
+        let filterRemainder = source[filterStart.lowerBound...]
+        let filterEnd = try #require(filterRemainder.range(of: "\n    private func applyWarmSnapshotIfAvailable"))
+        let filterSource = String(filterRemainder[..<filterEnd.lowerBound])
+
+        #expect(recoverySource.contains("Task.detached(priority: .utility)"))
+        #expect(!recoverySource.contains("Task { @MainActor"))
+        #expect(filterSource.contains("filterSnapshotTask = Task.detached(priority: .utility)"))
+        #expect(filterSource.contains("BrosSocialRules.filteredSnapshot("))
+        #expect(!filterSource.contains("WGJPerformance.measure(\"bros.filtered-snapshot\") {\n                BrosSocialRules.filteredSnapshot("))
     }
 
     @Test
@@ -1084,6 +1537,47 @@ struct AppPerformanceRuntimeTests {
         #expect(projection.postWorkoutCardio?.phase == .postWorkout)
         #expect(projection.exerciseDisplayGroups.count == 2)
         #expect(!projection.areAllMainExercisesCompleted)
+        #expect(projection.exerciseHydrationStamp.entries.map(\.id) == [firstExerciseID, secondExerciseID, thirdExerciseID])
+        #expect(projection.exerciseHydrationStamp.entries.first?.restSeconds == 120)
+    }
+
+    @Test
+    func activeWorkoutMainScrollKeepsExerciseCardsNonLazy() throws {
+        let source = try String(contentsOf: activeWorkoutViewSourceURL(), encoding: .utf8)
+        let contentStart = try #require(source.range(of: "private func activeWorkoutScrollContent"))
+        let contentRemainder = source[contentStart.lowerBound...]
+        let contentEnd = try #require(contentRemainder.range(of: "\n    @MainActor\n    @ViewBuilder\n    private var activeWorkoutHeaderContent"))
+        let contentSource = String(contentRemainder[..<contentEnd.lowerBound])
+
+        #expect(contentSource.contains("VStack(alignment: .leading, spacing: 16)"))
+        #expect(!contentSource.contains("LazyVStack"))
+        #expect(source.contains("renderProjection.exerciseHydrationStamp"))
+        #expect(!source.contains("ActiveWorkoutExerciseInteractionStamp(\n            entries: renderProjection.sessionExercises.map"))
+    }
+
+    @Test
+    func activeWorkoutExerciseRowsUseEquatableRenderBoundary() throws {
+        let activeSource = try String(contentsOf: activeWorkoutViewSourceURL(), encoding: .utf8)
+        let rowHostSource = try String(contentsOf: workoutExerciseRowHostViewSourceURL(), encoding: .utf8)
+        let rowStart = try #require(activeSource.range(of: "private func exerciseRow"))
+        let rowRemainder = activeSource[rowStart.lowerBound...]
+        let rowEnd = try #require(rowRemainder.range(of: "\n    @MainActor\n    @ViewBuilder\n    private func exerciseSection"))
+        let rowSource = String(rowRemainder[..<rowEnd.lowerBound])
+
+        #expect(rowHostSource.contains("struct WorkoutExerciseRowHostView: View, Equatable"))
+        #expect(rowHostSource.contains("static func == (lhs: WorkoutExerciseRowHostView, rhs: WorkoutExerciseRowHostView) -> Bool"))
+        #expect(rowSource.contains("WorkoutExerciseRowHostView("))
+        #expect(rowSource.contains(".equatable()"))
+    }
+
+    @Test
+    func activeWorkoutScrollPositionDoesNotWriteVisibleTargetIntoViewStateDuringScroll() throws {
+        let source = try String(contentsOf: activeWorkoutViewSourceURL(), encoding: .utf8)
+
+        #expect(!source.contains("@State private var currentScrollTarget"))
+        #expect(source.contains("ActiveWorkoutScrollPositionCache"))
+        #expect(source.contains("Binding<ActiveWorkoutScrollTarget?>"))
+        #expect(source.contains(".scrollPosition(id: activeWorkoutScrollPositionBinding"))
     }
 
     @Test
@@ -1113,6 +1607,24 @@ struct AppPerformanceRuntimeTests {
         #expect(finishSource.contains("let backgroundStore = persistenceBackgroundStore"))
         #expect(saveSource.contains("let backgroundStore = persistenceBackgroundStore"))
         #expect(!saveSource.contains("TemplateRepository(modelContext: modelContext)"))
+    }
+
+    @Test
+    func activeWorkoutCompletionSummaryBuildsRecapOffMainContext() throws {
+        let source = try String(contentsOf: workoutCompletionSummaryViewSourceURL(), encoding: .utf8)
+        let loadStart = try #require(source.range(of: "private func loadSnapshotIfNeeded() async"))
+        let loadRemainder = source[loadStart.lowerBound...]
+        let loadEnd = try #require(loadRemainder.range(of: "\n    private func triggerCelebrationIfNeeded"))
+        let loadSource = String(loadRemainder[..<loadEnd.lowerBound])
+
+        #expect(source.contains("@Environment(\\.appBackgroundStore) private var appBackgroundStore"))
+        #expect(source.contains("private var completionBackgroundStore: AppBackgroundStore"))
+        #expect(source.contains("appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)"))
+        #expect(loadSource.contains("let backgroundStore = completionBackgroundStore"))
+        #expect(loadSource.contains("backgroundStore.perform(\"workout-completion.summary\")"))
+        #expect(!loadSource.contains("modelContext: modelContext"))
+        #expect(source.contains("nonisolated enum WorkoutCompletionSnapshotBuilder"))
+        #expect(!source.contains("@MainActor\nenum WorkoutCompletionSnapshotBuilder"))
     }
 
     @Test
@@ -1158,7 +1670,7 @@ struct AppPerformanceRuntimeTests {
         let resumeEnd = try #require(resumeRemainder.range(of: "\n    @MainActor\n    private func persistCommittedUserEditSnapshot"))
         let resumeSource = String(resumeRemainder[..<resumeEnd.lowerBound])
 
-        #expect(resumeSource.contains("foregroundNonCriticalInteractionWorkTask = Task.detached(priority: .utility)"))
+        #expect(resumeSource.contains("foregroundNonCriticalInteractionWorkTask = Task.detached(priority: .userInitiated)"))
         #expect(resumeSource.contains("resumeForegroundNonCriticalInteractionWorkIfStillAllowed()"))
         #expect(!resumeSource.contains("foregroundNonCriticalInteractionWorkTask = Task { @MainActor"))
     }
@@ -1171,6 +1683,8 @@ struct AppPerformanceRuntimeTests {
 
         #expect(responsiveFieldSource.contains("pendingCommitTask = Task.detached(priority: .utility)"))
         #expect(responsiveFieldSource.contains("commitPendingTextAfterDelayIfStillCurrent()"))
+        #expect(responsiveFieldSource.contains("if commitDelay == .zero"))
+        #expect(responsiveFieldSource.contains("text = newValue"))
         #expect(!responsiveFieldSource.contains("pendingCommitTask = Task { @MainActor"))
 
         #expect(templateCoordinatorSource.contains("pendingNotesCommitTask = Task.detached(priority: .utility)"))
@@ -1195,7 +1709,7 @@ struct AppPerformanceRuntimeTests {
         let scheduleEnd = try #require(scheduleRemainder.range(of: "\n    @MainActor\n    private func reconcileSessionLifecycleIfNeeded"))
         let scheduleSource = String(scheduleRemainder[..<scheduleEnd.lowerBound])
 
-        #expect(scheduleSource.contains("deferredHydrationTask = Task.detached(priority: .utility)"))
+        #expect(scheduleSource.contains("deferredHydrationTask = Task.detached(priority: .userInitiated)"))
         #expect(source.contains("private actor ActiveWorkoutDeferredHydrationWorker"))
         #expect(scheduleSource.contains("ActiveWorkoutDeferredHydrationWorker()"))
         #expect(scheduleSource.contains("hydrationWorker.loadAfterDelay("))
@@ -1208,9 +1722,9 @@ struct AppPerformanceRuntimeTests {
     @Test
     func startWorkoutEntryAndTemplateTransferUseResolvedBackgroundStore() throws {
         let source = try String(contentsOf: startWorkoutHomeViewSourceURL(), encoding: .utf8)
-        let preparationStart = try #require(source.range(of: "private func prepareActiveWorkoutStart(templateID: UUID?)"))
+        let preparationStart = try #require(source.range(of: "nonisolated private static func prepareActiveWorkoutStart(\n        templateID: UUID?,\n        backgroundStore: AppBackgroundStore"))
         let preparationRemainder = source[preparationStart.lowerBound...]
-        let preparationEnd = try #require(preparationRemainder.range(of: "\n    nonisolated private static func prepareActiveWorkoutStart"))
+        let preparationEnd = try #require(preparationRemainder.range(of: "\n    nonisolated private static func prepareActiveWorkoutStart(\n        templateID: UUID?,\n        modelContext: ModelContext"))
         let preparationSource = String(preparationRemainder[..<preparationEnd.lowerBound])
         let importStart = try #require(source.range(of: "private func importTransfer(from fileURL: URL"))
         let importRemainder = source[importStart.lowerBound...]
@@ -1222,8 +1736,12 @@ struct AppPerformanceRuntimeTests {
         let reloadSource = String(reloadRemainder[..<reloadEnd.lowerBound])
         let contentTimestampStart = try #require(source.range(of: "private func currentHomeContentUpdatedAt() async"))
         let contentTimestampRemainder = source[contentTimestampStart.lowerBound...]
-        let contentTimestampEnd = try #require(contentTimestampRemainder.range(of: "\n    private func showError"))
+        let contentTimestampEnd = try #require(contentTimestampRemainder.range(of: "\n    nonisolated private static func currentHomeContentUpdatedAt"))
         let contentTimestampSource = String(contentTimestampRemainder[..<contentTimestampEnd.lowerBound])
+        let staticContentTimestampStart = try #require(source.range(of: "nonisolated private static func currentHomeContentUpdatedAt(backgroundStore: AppBackgroundStore)"))
+        let staticContentTimestampRemainder = source[staticContentTimestampStart.lowerBound...]
+        let staticContentTimestampEnd = try #require(staticContentTimestampRemainder.range(of: "\n    @MainActor\n    private func showError"))
+        let staticContentTimestampSource = String(staticContentTimestampRemainder[..<staticContentTimestampEnd.lowerBound])
         let previewStart = try #require(source.range(of: "private func makeTemplatePreview(templateID: UUID) async throws"))
         let previewRemainder = source[previewStart.lowerBound...]
         let previewEnd = try #require(previewRemainder.range(of: "\n    @MainActor\n    private func refreshSelectedTemplatePreviewIfNeeded"))
@@ -1232,6 +1750,10 @@ struct AppPerformanceRuntimeTests {
         let exportRemainder = source[exportStart.lowerBound...]
         let exportEnd = try #require(exportRemainder.range(of: "\n    private func cleanupExportedFile"))
         let exportSource = String(exportRemainder[..<exportEnd.lowerBound])
+        let templateMutationStart = try #require(source.range(of: "private func saveFolderDraft()"))
+        let templateMutationRemainder = source[templateMutationStart.lowerBound...]
+        let templateMutationEnd = try #require(templateMutationRemainder.range(of: "\n    private func presentActiveWorkoutConflict"))
+        let templateMutationSource = String(templateMutationRemainder[..<templateMutationEnd.lowerBound])
 
         #expect(source.contains("private var startWorkoutBackgroundStore: AppBackgroundStore"))
         #expect(source.contains("appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)"))
@@ -1241,25 +1763,51 @@ struct AppPerformanceRuntimeTests {
         #expect(!source.contains("private var templateTransferService: TemplateTransferService"))
         #expect(source.contains("nonisolated struct StartWorkoutFolderSnapshot"))
         #expect(source.contains("nonisolated struct StartWorkoutTemplateRowSnapshot"))
+        #expect(source.contains("let templateCountsByFolderID = Dictionary("))
+        #expect(source.contains("grouping: templates,\n            by: \\.folderID"))
+        #expect(!source.contains("folders.map(StartWorkoutFolderSnapshot.init(folder:))"))
+        #expect(!source.contains("templateCount = (folder.templates ?? []).count"))
         #expect(reloadSource.contains("let backgroundStore = startWorkoutBackgroundStore"))
         #expect(reloadSource.contains("backgroundStore.perform(\"start-workout.snapshot.reload\")"))
         #expect(!reloadSource.contains("controller.reload(modelContext: modelContext)"))
-        #expect(contentTimestampSource.contains("backgroundStore.perform(\"start-workout.latest-updated-at\")"))
-        #expect(!contentTimestampSource.contains("TemplateRepository(modelContext: modelContext)"))
+        #expect(contentTimestampSource.contains("Self.currentHomeContentUpdatedAt(backgroundStore: startWorkoutBackgroundStore)"))
+        #expect(staticContentTimestampSource.contains("backgroundStore.perform(\"start-workout.latest-updated-at\")"))
+        #expect(!staticContentTimestampSource.contains("TemplateRepository(modelContext: modelContext)"))
         #expect(previewSource.contains("backgroundStore.perform(\"start-workout.template.preview\")"))
         #expect(!previewSource.contains("TemplateExerciseComponentRotationResolver(modelContext: modelContext)"))
-        #expect(preparationSource.contains("let backgroundStore = startWorkoutBackgroundStore"))
+        #expect(source.contains("Self.prepareActiveWorkoutStart(\n                    templateID: templateID,\n                    backgroundStore: backgroundStore"))
         #expect(preparationSource.contains("backgroundStore.performWrite(\"start-workout.import-legacy-active-session\")"))
         #expect(preparationSource.contains("backgroundStore.perform(\"start-workout.prepare-runtime-session\")"))
         #expect(!preparationSource.contains("ActiveWorkoutSessionFactory(modelContext: modelContext)"))
+        #expect(preparationSource.contains("backgroundStore: AppBackgroundStore"))
+        #expect(source.contains("Task.detached(priority: .userInitiated) {\n            do {\n                let preparation = try await Self.prepareActiveWorkoutStart("))
+        #expect(templateMutationSource.contains("Task.detached(priority: .utility)"))
+        #expect(!templateMutationSource.contains("Task { @MainActor"))
         #expect(importSource.contains("let backgroundStore = startWorkoutBackgroundStore"))
+        #expect(importSource.contains("Task.detached(priority: .utility)"))
+        #expect(!importSource.contains("Task { @MainActor"))
         #expect(importSource.contains("backgroundStore.perform(\"start-workout.template.import-count\")"))
         #expect(importSource.contains("backgroundStore.performWrite(\"start-workout.template.import\")"))
         #expect(!importSource.contains("templateTransferService.importTransfer"))
         #expect(!importSource.contains("controller.reload(modelContext: modelContext)"))
         #expect(exportSource.contains("let backgroundStore = startWorkoutBackgroundStore"))
         #expect(exportSource.contains("backgroundStore.performWrite(\"start-workout.template.export\")"))
+        #expect(exportSource.contains("Task.detached(priority: .utility)"))
+        #expect(!exportSource.contains("Task { @MainActor"))
         #expect(!exportSource.contains("templateTransferService.writeExportFile"))
+    }
+
+    @Test
+    func startWorkoutTemplateRowsUseEquatableRenderBoundary() throws {
+        let source = try String(contentsOf: startWorkoutHomeViewSourceURL(), encoding: .utf8)
+        let rowStart = try #require(source.range(of: "private func templateRow"))
+        let rowRemainder = source[rowStart.lowerBound...]
+        let rowEnd = try #require(rowRemainder.range(of: "\n    private func templateMetadataRow"))
+        let rowSource = String(rowRemainder[..<rowEnd.lowerBound])
+
+        #expect(source.contains("private struct StartWorkoutTemplateRowView: View, Equatable"))
+        #expect(rowSource.contains("StartWorkoutTemplateRowView("))
+        #expect(rowSource.contains(".equatable()"))
     }
 
     @Test
@@ -1267,12 +1815,58 @@ struct AppPerformanceRuntimeTests {
         let activeWorkoutSource = try String(contentsOf: activeWorkoutViewSourceURL(), encoding: .utf8)
         let startWorkoutSource = try String(contentsOf: startWorkoutHomeViewSourceURL(), encoding: .utf8)
         let runtimeSource = try String(contentsOf: appRuntimeConfigSourceURL(), encoding: .utf8)
+        let templateRepositorySource = try String(contentsOf: templateRepositorySourceURL(), encoding: .utf8)
 
         #expect(runtimeSource.contains("wgjTemplateLibraryDidChange"))
         #expect(runtimeSource.contains("TemplateLibraryChangeBroadcaster"))
         #expect(activeWorkoutSource.contains("TemplateLibraryChangeBroadcaster.post()"))
+        #expect(templateRepositorySource.contains("TemplateLibraryChangeBroadcaster.post()"))
         #expect(startWorkoutSource.contains(".wgjTemplateLibraryDidChange"))
         #expect(startWorkoutSource.contains("markHomeDirtyAndReloadIfActive()"))
+        #expect(startWorkoutSource.contains("pendingTemplateSaveResults"))
+        #expect(startWorkoutSource.contains("snapshotApplyingPendingTemplateSaves(to: snapshot)"))
+    }
+
+    @Test
+    func startWorkoutAppliesTemplateEditorSaveResultBeforeBackgroundReload() {
+        let templateID = UUID()
+        let staleTemplate = StartWorkoutTemplateRowSnapshot(
+            id: templateID,
+            folderID: TemplateRepository.unfiledFolderID,
+            name: "Editable Template",
+            notes: "Old note",
+            sortOrder: 0,
+            exerciseCount: 3
+        )
+        let staleSnapshot = StartWorkoutHomeSnapshot(
+            folders: [],
+            templates: [staleTemplate],
+            sections: [
+                StartWorkoutTemplateSection(
+                    id: TemplateRepository.unfiledFolderID,
+                    title: "Unfiled",
+                    systemImage: "tray.full.fill",
+                    folderIDForCreation: nil,
+                    templates: [staleTemplate]
+                )
+            ],
+            lastCompletedByTemplateID: [templateID: .distantPast]
+        )
+
+        let updatedSnapshot = StartWorkoutHomeSnapshotBuilder.applyingTemplateSaveResult(
+            TemplateEditorSaveResult(
+                templateID: templateID,
+                name: "Editable Template Updated",
+                notes: ""
+            ),
+            to: staleSnapshot
+        )
+
+        #expect(updatedSnapshot.templates.map(\.name) == ["Editable Template Updated"])
+        #expect(updatedSnapshot.templates.first?.notes == nil)
+        #expect(updatedSnapshot.templates.first?.exerciseCount == 3)
+        #expect(updatedSnapshot.sections.first?.templates.map(\.name) == ["Editable Template Updated"])
+        #expect(updatedSnapshot.lastCompletedByTemplateID[templateID] == .distantPast)
     }
 
     @Test
@@ -1380,6 +1974,21 @@ struct AppPerformanceRuntimeTests {
     }
 
     @Test
+    func historyOverviewDayFilterUsesPreparedBackgroundSnapshots() throws {
+        let source = try String(contentsOf: historyOverviewViewSourceURL(), encoding: .utf8)
+        let onChangeStart = try #require(source.range(of: ".onChange(of: selectedDayFilter)"))
+        let onChangeRemainder = source[onChangeStart.lowerBound...]
+        let onChangeEnd = try #require(onChangeRemainder.range(of: "\n        .alert("))
+        let onChangeSource = String(onChangeRemainder[..<onChangeEnd.lowerBound])
+
+        #expect(source.contains("sectionsByDayStart"))
+        #expect(source.contains("func applyDayFilter(_ selectedDayFilter: Date?"))
+        #expect(onChangeSource.contains("controller.applyDayFilter"))
+        #expect(!source.contains("private func recomputeSnapshot()"))
+        #expect(!onChangeSource.contains("HistoryOverviewSnapshotBuilder.build"))
+    }
+
+    @Test
     func activeWorkoutDurableSnapshotPolicySkipsValueOnlySetDraftEdits() {
         let previous = [
             WorkoutSessionSetDraft(
@@ -1430,7 +2039,7 @@ struct AppPerformanceRuntimeTests {
     @Test
     func activeWorkoutKeyboardChromeResetsWhenAppLeavesActiveScene() {
         #expect(!ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: .active))
-        #expect(ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: .inactive))
+        #expect(!ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: .inactive))
         #expect(ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: .background))
     }
 
@@ -1467,18 +2076,137 @@ struct AppPerformanceRuntimeTests {
             isMetricInputFocused: false,
             scenePhase: .background
         ))
-        #expect(ActiveWorkoutKeyboardChromePolicy.shouldShowFloatingKeyboardDismissButton(
-            isKeyboardVisible: true,
-            isMetricInputFocused: false
-        ))
-        #expect(ActiveWorkoutKeyboardChromePolicy.shouldShowFloatingKeyboardDismissButton(
-            isKeyboardVisible: false,
-            isMetricInputFocused: true
-        ))
-        #expect(!ActiveWorkoutKeyboardChromePolicy.shouldShowFloatingKeyboardDismissButton(
-            isKeyboardVisible: false,
-            isMetricInputFocused: false
-        ))
+    }
+
+    @Test
+    func activeWorkoutUsesSingleKeyboardToolbarHideControlWithoutFloatingFallback() throws {
+        let activeWorkoutSource = try String(contentsOf: activeWorkoutViewSourceURL(), encoding: .utf8)
+        let mainTabSource = try String(contentsOf: mainTabViewSourceURL(), encoding: .utf8)
+        let gridEditorSource = try String(contentsOf: workoutSessionExerciseGridEditorSourceURL(), encoding: .utf8)
+
+        #expect(activeWorkoutSource.components(separatedBy: ".wgjMinimalKeyboardToolbar(isEnabled: true, onDismiss: dismissKeyboard)").count - 1 == 1)
+        #expect(!activeWorkoutSource.contains(".wgjMinimalKeyboardToolbar(isEnabled: !isMetricInputFocused"))
+        #expect(!mainTabSource.contains(".wgjMinimalKeyboardToolbar()"))
+        #expect(activeWorkoutSource.contains("@State private var keyboardDismissToken = ActiveWorkoutKeyboardDismissToken()"))
+        #expect(activeWorkoutSource.contains("keyboardDismissToken: keyboardDismissToken(for: exerciseID)"))
+        #expect(activeWorkoutSource.contains("keyboardDismissToken.requestDismiss()"))
+        #expect(gridEditorSource.contains("nonisolated struct ActiveWorkoutKeyboardDismissToken"))
+        #expect(gridEditorSource.contains(".onChange(of: keyboardDismissToken)"))
+        #expect(gridEditorSource.contains("dismissInputFocus()"))
+        #expect(gridEditorSource.contains("focusedField = nil"))
+        #expect(!activeWorkoutSource.contains("ActiveWorkoutFloatingKeyboardDismissButton"))
+        #expect(!activeWorkoutSource.contains("active-workout-floating-keyboard-hide-button"))
+        #expect(activeWorkoutSource.components(separatedBy: "keyboard-hide-button").count - 1 == 0)
+    }
+
+    @Test
+    func activeWorkoutUITestsDoNotDependOnSimulatorSoftwareKeyboardVisibility() throws {
+        let source = try String(contentsOf: wgjUITestsSourceURL(), encoding: .utf8)
+        let activeWorkoutStart = try #require(source.range(of: "func testActiveWorkoutHomeReturnKeepsTypedSetValuesInteractive()"))
+        let activeWorkoutSource = String(source[activeWorkoutStart.lowerBound...])
+
+        #expect(activeWorkoutSource.contains("private func focusTextInputForTyping"))
+        #expect(activeWorkoutSource.contains("app.buttons[\"keyboard-hide-button\"]"))
+        #expect(!activeWorkoutSource.contains("app.keyboards"))
+    }
+
+    @Test
+    func activeWorkoutKeyboardDismissOnlyInvalidatesFocusedExerciseRow() throws {
+        let activeWorkoutSource = try String(contentsOf: activeWorkoutViewSourceURL(), encoding: .utf8)
+        let rowStart = try #require(activeWorkoutSource.range(of: "private func exerciseRow"))
+        let rowRemainder = activeWorkoutSource[rowStart.lowerBound...]
+        let rowEnd = try #require(rowRemainder.range(of: "\n    @MainActor\n    @ViewBuilder\n    private func exerciseSection"))
+        let rowSource = String(rowRemainder[..<rowEnd.lowerBound])
+        let helperStart = try #require(activeWorkoutSource.range(of: "private func keyboardDismissToken(for exerciseID: UUID)"))
+        let helperRemainder = activeWorkoutSource[helperStart.lowerBound...]
+        let helperEnd = try #require(helperRemainder.range(of: "\n    private func dismissKeyboard"))
+        let helperSource = String(helperRemainder[..<helperEnd.lowerBound])
+        let hideStart = try #require(activeWorkoutSource.range(of: "UIResponder.keyboardDidHideNotification"))
+        let hideRemainder = activeWorkoutSource[hideStart.lowerBound...]
+        let hideEnd = try #require(hideRemainder.range(of: "\n            }\n            .onAppear"))
+        let hideSource = String(hideRemainder[..<hideEnd.lowerBound])
+
+        #expect(activeWorkoutSource.contains("@State private var focusedMetricInputExerciseID: UUID?"))
+        #expect(activeWorkoutSource.contains("@State private var keyboardDismissTargetExerciseID: UUID?"))
+        #expect(rowSource.contains("keyboardDismissToken: keyboardDismissToken(for: exerciseID)"))
+        #expect(rowSource.contains("handleMetricInputFocusChange(isFocused, exerciseID: exerciseID)"))
+        #expect(!rowSource.contains("keyboardDismissToken: keyboardDismissToken,"))
+        #expect(helperSource.contains("focusedMetricInputExerciseID == exerciseID"))
+        #expect(helperSource.contains("keyboardDismissTargetExerciseID == exerciseID"))
+        #expect(helperSource.contains("return keyboardDismissToken"))
+        #expect(helperSource.contains("return ActiveWorkoutKeyboardDismissToken()"))
+        #expect(activeWorkoutSource.contains("if let focusedMetricInputExerciseID {\n            keyboardDismissTargetExerciseID = focusedMetricInputExerciseID\n        }"))
+        #expect(activeWorkoutSource.contains("keyboardDismissTargetExerciseID = nil\n            return"))
+        #expect(!hideSource.contains("keyboardDismissTargetExerciseID = nil"))
+    }
+
+    @Test
+    func activeWorkoutMetricDisplayOverlaysRemainTapToFocusTargets() throws {
+        let source = try String(contentsOf: workoutSessionExerciseGridEditorSourceURL(), encoding: .utf8)
+        let repsStart = try #require(source.range(of: "private func repsField(at index: Int)"))
+        let repsRemainder = source[repsStart.lowerBound...]
+        let repsEnd = try #require(repsRemainder.range(of: "\n    private func repsFieldWithCompletionControl"))
+        let repsSource = String(repsRemainder[..<repsEnd.lowerBound])
+        let weightStart = try #require(source.range(of: "private func loadField(at index: Int)"))
+        let weightRemainder = source[weightStart.lowerBound...]
+        let weightEnd = try #require(weightRemainder.range(of: "\n    private func metricPlaceholderText"))
+        let weightSource = String(weightRemainder[..<weightEnd.lowerBound])
+        let helperStart = try #require(source.range(of: "private func metricDisplayText"))
+        let helperRemainder = source[helperStart.lowerBound...]
+        let helperEnd = try #require(helperRemainder.range(of: "\nprivate extension View"))
+        let helperSource = String(helperRemainder[..<helperEnd.lowerBound])
+        let focusStart = try #require(source.range(of: "private func focusMetric"))
+        let focusRemainder = source[focusStart.lowerBound...]
+        let focusEnd = try #require(focusRemainder.range(of: "\n    private func dismissInputFocus"))
+        let focusSource = String(focusRemainder[..<focusEnd.lowerBound])
+
+        #expect(repsSource.contains("ZStack"))
+        #expect(repsSource.contains("TextField(metricPlaceholderText(for: overlayState), text: repsTextBinding(for: index))"))
+        #expect(repsSource.contains("metricDisplayText(overlayState)"))
+        #expect(repsSource.contains("focusMetric(.reps, at: index)"))
+        #expect(repsSource.contains(".focused($focusedInput, equals: inputFocus(for: index, metric: .reps))"))
+        #expect(repsSource.contains(".onTapGesture {\n                focusMetric(.reps, at: index)\n            }"))
+        #expect(repsSource.contains(".foregroundStyle(overlayState == nil ? WGJTheme.textPrimary : Color.clear)"))
+        #expect(!repsSource.contains("WGJAccessoryTextField("))
+        #expect(!repsSource.contains("forceRefocus"))
+        #expect(!repsSource.contains(".id("))
+        #expect(!repsSource.contains(".simultaneousGesture(TapGesture().onEnded"))
+        #expect(weightSource.contains("ZStack"))
+        #expect(weightSource.contains("TextField(metricPlaceholderText(for: overlayState), text: weightTextBinding(for: index))"))
+        #expect(weightSource.contains("metricDisplayText(overlayState)"))
+        #expect(weightSource.contains("focusMetric(.weight, at: index)"))
+        #expect(weightSource.contains(".focused($focusedInput, equals: inputFocus(for: index, metric: .weight))"))
+        #expect(weightSource.contains(".onTapGesture {\n                    focusMetric(.weight, at: index)\n                }"))
+        #expect(weightSource.contains(".foregroundStyle(overlayState == nil ? WGJTheme.textPrimary : Color.clear)"))
+        #expect(!weightSource.contains("WGJAccessoryTextField("))
+        #expect(!weightSource.contains("forceRefocus"))
+        #expect(!weightSource.contains(".id("))
+        #expect(!weightSource.contains(".simultaneousGesture(TapGesture().onEnded"))
+        #expect(source.contains("@FocusState private var focusedInput: SetInputFocus?"))
+        #expect(!source.contains("private func metricFocusBinding(for target: SetInputFocus)"))
+        #expect(!source.contains("private func metricTextFieldOpacity"))
+        #expect(!source.contains("private func metricActualAccessibilityMarker"))
+        #expect(helperSource.contains("onTap: @escaping () -> Void"))
+        #expect(helperSource.contains("Button(action: onTap)"))
+        #expect(helperSource.contains(".buttonStyle(.plain)"))
+        #expect(helperSource.contains(".contentShape(Rectangle())"))
+        #expect(!helperSource.contains(".onTapGesture(perform: onTap)"))
+        #expect(source.contains("@Environment(\\.scenePhase) private var scenePhase"))
+        #expect(!source.contains("@State private var pendingMetricRefocusTask"))
+        #expect(!source.contains("@State private var isMetricKeyboardVisible"))
+        #expect(!source.contains("@State private var metricInputGeneration"))
+        #expect(!source.contains("UIResponder.keyboardWillShowNotification"))
+        #expect(!source.contains("UIResponder.keyboardDidHideNotification"))
+        #expect(!source.contains("wasMetricKeyboardVisible"))
+        #expect(source.contains(".onChange(of: scenePhase) { _, newPhase in"))
+        #expect(source.contains("guard newPhase == .background else { return }"))
+        #expect(source.contains("guard focusedInput != nil else { return }\n            dismissInputFocus()"))
+        #expect(!focusSource.contains("forceRefocus"))
+        #expect(!source.contains("scheduleMetricFocusActivation"))
+        #expect(!source.contains("scheduleMetricFocusRecovery"))
+        #expect(source.contains("if newFocus != nil {\n                if suppressNextFocusLossCommit"))
+        #expect(source.contains("scheduleCommitRequest(.debounced)"))
+        #expect(focusSource.contains("focusedInput = inputFocus(for: index, metric: metric)"))
     }
 
     @Test
@@ -1499,6 +2227,24 @@ struct AppPerformanceRuntimeTests {
             hasSession: true,
             isEndingSession: true
         ))
+    }
+
+    @Test
+    func activeWorkoutRootBodyDoesNotObserveRestTimerPopupChanges() throws {
+        let source = try String(contentsOf: activeWorkoutViewSourceURL(), encoding: .utf8)
+        let bodyStart = try #require(source.range(of: "var body: some View"))
+        let bodyRemainder = source[bodyStart.lowerBound...]
+        let bodyEnd = try #require(bodyRemainder.range(of: "\n    private var finishToolbarButton"))
+        let bodySource = String(bodyRemainder[..<bodyEnd.lowerBound])
+        let dockStart = try #require(source.range(of: "private struct ActiveWorkoutKeyboardAwareBottomDock"))
+        let dockRemainder = source[dockStart.lowerBound...]
+        let dockEnd = try #require(dockRemainder.range(of: "\nprivate struct ActiveWorkoutSupersetHeader"))
+        let dockSource = String(dockRemainder[..<dockEnd.lowerBound])
+
+        #expect(!bodySource.contains("restTimerState.restTimerPopup"))
+        #expect(!bodySource.contains("restTimerPopupID:"))
+        #expect(dockSource.contains("@Environment(RestTimerState.self) private var restTimerState"))
+        #expect(dockSource.contains("value: restTimerState.restTimerPopup?.id"))
     }
 
     @Test
@@ -1630,6 +2376,42 @@ struct AppPerformanceRuntimeTests {
             )
         )
         #expect(ActiveWorkoutInteractionWorkPolicy.foregroundResumeGraceDelay == .milliseconds(2_500))
+    }
+
+    @Test
+    func activeWorkoutProjectionRefreshPolicyDefersValueOnlyFocusedEdits() {
+        let valueOnly = ActiveWorkoutSetDraftChangeSummary(
+            hasStructuralChange: false,
+            hasCompletionChange: false,
+            hasValueChange: true
+        )
+        let completion = ActiveWorkoutSetDraftChangeSummary(
+            hasStructuralChange: false,
+            hasCompletionChange: true,
+            hasValueChange: false
+        )
+        let structural = ActiveWorkoutSetDraftChangeSummary(
+            hasStructuralChange: true,
+            hasCompletionChange: false,
+            hasValueChange: false
+        )
+
+        #expect(!ActiveWorkoutRenderProjectionRefreshPolicy.shouldRefreshImmediately(
+            changeSummary: valueOnly,
+            isMetricInputFocused: true
+        ))
+        #expect(ActiveWorkoutRenderProjectionRefreshPolicy.shouldRefreshImmediately(
+            changeSummary: valueOnly,
+            isMetricInputFocused: false
+        ))
+        #expect(ActiveWorkoutRenderProjectionRefreshPolicy.shouldRefreshImmediately(
+            changeSummary: completion,
+            isMetricInputFocused: true
+        ))
+        #expect(ActiveWorkoutRenderProjectionRefreshPolicy.shouldRefreshImmediately(
+            changeSummary: structural,
+            isMetricInputFocused: true
+        ))
     }
 
     @Test
@@ -2267,6 +3049,13 @@ struct AppPerformanceRuntimeTests {
             .appendingPathComponent("ActiveWorkoutView.swift")
     }
 
+    private func workoutCompletionSummaryViewSourceURL() -> URL {
+        productionSourceRootURL()
+            .appendingPathComponent("Views")
+            .appendingPathComponent("Workout")
+            .appendingPathComponent("WorkoutCompletionSummaryView.swift")
+    }
+
     private func mainTabViewSourceURL() -> URL {
         productionSourceRootURL()
             .appendingPathComponent("Views")
@@ -2285,9 +3074,19 @@ struct AppPerformanceRuntimeTests {
             .appendingPathComponent("ContentView.swift")
     }
 
+    private func wgjAppSourceURL() -> URL {
+        productionSourceRootURL()
+            .appendingPathComponent("WGJApp.swift")
+    }
+
     private func profileViewSourceURL() -> URL {
         profileViewsDirectoryURL()
             .appendingPathComponent("ProfileView.swift")
+    }
+
+    private func profileWidgetManagerViewSourceURL() -> URL {
+        profileViewsDirectoryURL()
+            .appendingPathComponent("ProfileWidgetManagerView.swift")
     }
 
     private func settingsViewSourceURL() -> URL {
@@ -2396,6 +3195,13 @@ struct AppPerformanceRuntimeTests {
             .appendingPathComponent("WorkoutSessionExerciseGridEditor.swift")
     }
 
+    private func workoutExerciseRowHostViewSourceURL() -> URL {
+        productionSourceRootURL()
+            .appendingPathComponent("Views")
+            .appendingPathComponent("Workout")
+            .appendingPathComponent("WorkoutExerciseRowHostView.swift")
+    }
+
     private func responsiveTextFieldSourceURL() -> URL {
         productionSourceRootURL()
             .appendingPathComponent("Views")
@@ -2408,6 +3214,27 @@ struct AppPerformanceRuntimeTests {
             .appendingPathComponent("Views")
             .appendingPathComponent("Templates")
             .appendingPathComponent("TemplateExerciseEditingCoordinator.swift")
+    }
+
+    private func templateExercisePrescriptionEditorSourceURL() -> URL {
+        productionSourceRootURL()
+            .appendingPathComponent("Views")
+            .appendingPathComponent("Templates")
+            .appendingPathComponent("TemplateExercisePrescriptionEditor.swift")
+    }
+
+    private func wgjUITestsSourceURL() -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("WGJUITests")
+            .appendingPathComponent("WGJUITests.swift")
+    }
+
+    private func templateRepositorySourceURL() -> URL {
+        productionSourceRootURL()
+            .appendingPathComponent("Services")
+            .appendingPathComponent("TemplateRepository.swift")
     }
 
     private func historyOverviewViewSourceURL() -> URL {
@@ -2438,11 +3265,25 @@ struct AppPerformanceRuntimeTests {
             .appendingPathComponent("TemplateDetailView.swift")
     }
 
+    private func templateEditorViewSourceURL() -> URL {
+        productionSourceRootURL()
+            .appendingPathComponent("Views")
+            .appendingPathComponent("Templates")
+            .appendingPathComponent("TemplateEditorView.swift")
+    }
+
     private func folderDetailViewSourceURL() -> URL {
         productionSourceRootURL()
             .appendingPathComponent("Views")
             .appendingPathComponent("Templates")
             .appendingPathComponent("FolderDetailView.swift")
+    }
+
+    private func templatesOverviewViewSourceURL() -> URL {
+        productionSourceRootURL()
+            .appendingPathComponent("Views")
+            .appendingPathComponent("Templates")
+            .appendingPathComponent("TemplatesOverviewView.swift")
     }
 }
 

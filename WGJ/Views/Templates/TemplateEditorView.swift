@@ -4,14 +4,13 @@ import SwiftUI
 struct TemplateEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(SubscriptionState.self) private var subscriptionState
 
-    @Query private var profiles: [UserProfile]
-
     private let folderID: UUID?
     private let templateID: UUID?
-    private let onSaved: @MainActor (UUID) -> Void
+    private let onSaved: @MainActor (TemplateEditorSaveResult) -> Void
     private let guidanceService = TrainingGuidanceService()
 
     @State private var templateName = ""
@@ -27,22 +26,9 @@ struct TemplateEditorView: View {
     @State private var errorMessage = ""
     @State private var showingError = false
     @State private var keyboardDismissToken = TemplateEditorKeyboardDismissToken()
-
-    private var templateRepository: TemplateRepository {
-        TemplateRepository(modelContext: modelContext)
-    }
-
-    private var catalogRepository: ExerciseCatalogRepository {
-        ExerciseCatalogRepository(modelContext: modelContext)
-    }
-
-    private var currentProfile: UserProfile? {
-        UserProfileSelection.currentProfile(in: profiles)
-    }
-
-    private var preferredLoadUnit: TemplateLoadUnit {
-        currentProfile?.preferredLoadUnit ?? .kg
-    }
+    @State private var preferredLoadUnit: TemplateLoadUnit = .kg
+    @State private var isTrainingGuidanceEnabled = true
+    @State private var isSavingTemplate = false
 
     private var recommendationReloadKey: TemplateEditorRecommendationReloadKey {
         let requestedCatalogUUIDs = Set(
@@ -58,10 +44,14 @@ struct TemplateEditorView: View {
         )
     }
 
+    private var templateEditorBackgroundStore: AppBackgroundStore {
+        appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
+    }
+
     init(
         folderID: UUID? = nil,
         templateID: UUID? = nil,
-        onSaved: @escaping @MainActor (UUID) -> Void = { _ in }
+        onSaved: @escaping @MainActor (TemplateEditorSaveResult) -> Void = { _ in }
     ) {
         self.folderID = folderID
         self.templateID = templateID
@@ -97,7 +87,10 @@ struct TemplateEditorView: View {
                     Button("Save") {
                         saveTemplate()
                     }
-                    .disabled(templateName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(
+                        templateName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        || isSavingTemplate
+                    )
                     .accessibilityIdentifier("template-editor-save-button")
                 }
 
@@ -624,38 +617,30 @@ struct TemplateEditorView: View {
     }
 
     private func saveTemplate() {
-        do {
-            let drafts = exerciseDrafts.map(\.draft)
-            let cardioDrafts = WorkoutCardioPhase.allCases.compactMap { cardioDraftsByPhase[$0] }
-            let savedTemplateID: UUID
-            if let templateID {
-                try templateRepository.updateTemplateContents(
-                    id: templateID,
-                    name: templateName,
-                    notes: templateNotes,
-                    exerciseDrafts: drafts,
-                    cardioDrafts: cardioDrafts
-                )
-                savedTemplateID = templateID
-            } else {
-                guard ProAccessPolicy.canCreateTemplate(
-                    currentTemplateCount: try templateRepository.templates().count,
-                    isPro: subscriptionState.isPro
-                ) else {
-                    subscriptionState.presentPaywall()
-                    return
-                }
+        guard !isSavingTemplate else { return }
 
-                let created = try templateRepository.createTemplate(folderID: folderID, name: templateName, notes: templateNotes)
-                try templateRepository.setExercises(templateID: created.id, drafts: drafts)
-                try templateRepository.setCardioBlocks(templateID: created.id, drafts: cardioDrafts)
-                savedTemplateID = created.id
+        let request = TemplateEditorSaveRequest(
+            folderID: folderID,
+            templateID: templateID,
+            name: templateName,
+            notes: templateNotes,
+            exerciseDrafts: exerciseDrafts.map(\.draft),
+            cardioDrafts: WorkoutCardioPhase.allCases.compactMap { cardioDraftsByPhase[$0] },
+            isPro: subscriptionState.isPro
+        )
+        let backgroundStore = templateEditorBackgroundStore
+
+        isSavingTemplate = true
+        Task.detached(priority: .utility) {
+            do {
+                let result = try await backgroundStore.performWrite("template-editor.save") { backgroundContext in
+                    try TemplateEditorPersistence.save(request, modelContext: backgroundContext)
+                }
+                await handleSaveResult(result)
+            } catch {
+                await showError(error)
+                await setSavingTemplate(false)
             }
-            onSaved(savedTemplateID)
-            dismiss()
-        } catch {
-            errorMessage = String(describing: error)
-            showingError = true
         }
     }
 
@@ -663,37 +648,23 @@ struct TemplateEditorView: View {
         guard !hasLoadedInitialData else { return }
         hasLoadedInitialData = true
 
-        guard let templateID else { return }
-
         do {
-            if let template = try templateRepository.template(id: templateID) {
-                templateName = template.name
-                templateNotes = template.notes
-            }
-            exerciseDrafts = try templateRepository.exercises(in: templateID).map {
-                TemplateExerciseDraftStore(
-                    draft: TemplateExerciseDraft(model: $0, preferredLoadUnit: preferredLoadUnit)
+            let backgroundStore = templateEditorBackgroundStore
+            let snapshot = try await backgroundStore.perform("template-editor.initial-load") { backgroundContext in
+                try TemplateEditorSnapshotLoader.load(
+                    templateID: templateID,
+                    modelContext: backgroundContext
                 )
             }
-            cardioDraftsByPhase = Dictionary(
-                try templateRepository.cardioBlocks(templateID: templateID).map { cardioBlock in
-                    (cardioBlock.phase, TemplateCardioBlockDraft(model: cardioBlock))
-                },
-                uniquingKeysWith: { first, _ in first }
-            )
+            applyInitialSnapshot(snapshot)
         } catch {
-            errorMessage = String(describing: error)
-            showingError = true
+            showError(error)
         }
-    }
-
-    private var isTrainingGuidanceEnabled: Bool {
-        currentProfile?.isTrainingGuidanceEnabled ?? true
     }
 
     private func templateRecommendation(
         for draftStore: TemplateExerciseDraftStore,
-        catalogByUUID: [String: ExerciseCatalogItem]
+        catalogByUUID: [String: TrainingGuidanceCatalogSnapshot]
     ) -> TemplateExerciseRecommendation? {
         guard isTrainingGuidanceEnabled else { return nil }
         if let catalogExercise = catalogByUUID[draftStore.catalogExerciseUUID] {
@@ -730,7 +701,11 @@ struct TemplateEditorView: View {
         }
 
         do {
-            let matches = try catalogRepository.exerciseMap(for: requestedCatalogUUIDs)
+            let backgroundStore = templateEditorBackgroundStore
+            let matches = try await backgroundStore.perform("template-editor.catalog-matches") { backgroundContext in
+                try ExerciseCatalogRepository(modelContext: backgroundContext)
+                    .exerciseSnapshotMap(for: requestedCatalogUUIDs)
+            }
             recommendationByExerciseID = Dictionary(
                 exerciseDrafts.map { draftStore in
                     (draftStore.id, templateRecommendation(for: draftStore, catalogByUUID: matches))
@@ -738,9 +713,47 @@ struct TemplateEditorView: View {
                 uniquingKeysWith: { first, _ in first }
             )
         } catch {
-            errorMessage = String(describing: error)
-            showingError = true
+            showError(error)
         }
+    }
+
+    @MainActor
+    private func applyInitialSnapshot(_ snapshot: TemplateEditorInitialSnapshot) {
+        preferredLoadUnit = snapshot.preferredLoadUnit
+        isTrainingGuidanceEnabled = snapshot.isTrainingGuidanceEnabled
+        guard let template = snapshot.template else { return }
+        templateName = template.name
+        templateNotes = template.notes
+        exerciseDrafts = template.exerciseDrafts.map {
+            TemplateExerciseDraftStore(draft: $0)
+        }
+        cardioDraftsByPhase = Dictionary(
+            template.cardioDrafts.map { ($0.phase, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+    }
+
+    @MainActor
+    private func handleSaveResult(_ result: TemplateEditorSaveOperationResult) {
+        isSavingTemplate = false
+        switch result {
+        case .requiresPaywall:
+            subscriptionState.presentPaywall()
+        case .saved(let saveResult):
+            onSaved(saveResult)
+            dismiss()
+        }
+    }
+
+    @MainActor
+    private func setSavingTemplate(_ isSaving: Bool) {
+        isSavingTemplate = isSaving
+    }
+
+    @MainActor
+    private func showError(_ error: Error) {
+        errorMessage = String(describing: error)
+        showingError = true
     }
 
     private var exerciseCardTransition: AnyTransition {
@@ -1400,6 +1413,119 @@ private struct TemplateEditorExerciseRowData: Identifiable {
     let supersetPresentation: TemplateEditorSupersetPresentation?
 }
 
+nonisolated struct TemplateEditorInitialSnapshot: Sendable, Equatable {
+    let preferredLoadUnit: TemplateLoadUnit
+    let isTrainingGuidanceEnabled: Bool
+    let template: TemplateEditorLoadedTemplate?
+}
+
+nonisolated struct TemplateEditorLoadedTemplate: Sendable, Equatable {
+    let name: String
+    let notes: String
+    let exerciseDrafts: [TemplateExerciseDraft]
+    let cardioDrafts: [TemplateCardioBlockDraft]
+}
+
+nonisolated enum TemplateEditorSnapshotLoader {
+    static func load(
+        templateID: UUID?,
+        modelContext: ModelContext
+    ) throws -> TemplateEditorInitialSnapshot {
+        let profile = try ProfileRepository(modelContext: modelContext).currentProfile()
+        let preferredLoadUnit = profile?.preferredLoadUnit ?? .kg
+        let isTrainingGuidanceEnabled = profile?.isTrainingGuidanceEnabled ?? true
+
+        guard let templateID else {
+            return TemplateEditorInitialSnapshot(
+                preferredLoadUnit: preferredLoadUnit,
+                isTrainingGuidanceEnabled: isTrainingGuidanceEnabled,
+                template: nil
+            )
+        }
+
+        let repository = TemplateRepository(modelContext: modelContext)
+        let loadedTemplate: TemplateEditorLoadedTemplate?
+        if let template = try repository.template(id: templateID) {
+            loadedTemplate = TemplateEditorLoadedTemplate(
+                name: template.name,
+                notes: template.notes,
+                exerciseDrafts: try repository.exercises(in: templateID).map {
+                    TemplateExerciseDraft(model: $0, preferredLoadUnit: preferredLoadUnit)
+                },
+                cardioDrafts: try repository.cardioBlocks(templateID: templateID).map {
+                    TemplateCardioBlockDraft(model: $0)
+                }
+            )
+        } else {
+            loadedTemplate = nil
+        }
+
+        return TemplateEditorInitialSnapshot(
+            preferredLoadUnit: preferredLoadUnit,
+            isTrainingGuidanceEnabled: isTrainingGuidanceEnabled,
+            template: loadedTemplate
+        )
+    }
+}
+
+nonisolated struct TemplateEditorSaveRequest: Sendable {
+    let folderID: UUID?
+    let templateID: UUID?
+    let name: String
+    let notes: String
+    let exerciseDrafts: [TemplateExerciseDraft]
+    let cardioDrafts: [TemplateCardioBlockDraft]
+    let isPro: Bool
+}
+
+nonisolated enum TemplateEditorSaveOperationResult: Sendable, Equatable {
+    case requiresPaywall
+    case saved(TemplateEditorSaveResult)
+}
+
+nonisolated enum TemplateEditorPersistence {
+    static func save(
+        _ request: TemplateEditorSaveRequest,
+        modelContext: ModelContext
+    ) throws -> TemplateEditorSaveOperationResult {
+        let repository = TemplateRepository(modelContext: modelContext, autoSaveChanges: false)
+        let savedTemplateID: UUID
+
+        if let templateID = request.templateID {
+            try repository.updateTemplateContents(
+                id: templateID,
+                name: request.name,
+                notes: request.notes,
+                exerciseDrafts: request.exerciseDrafts,
+                cardioDrafts: request.cardioDrafts
+            )
+            savedTemplateID = templateID
+        } else {
+            guard ProAccessPolicy.canCreateTemplate(
+                currentTemplateCount: try repository.templates().count,
+                isPro: request.isPro
+            ) else {
+                return .requiresPaywall
+            }
+
+            let created = try repository.createTemplate(
+                folderID: request.folderID,
+                name: request.name,
+                notes: request.notes
+            )
+            try repository.setExercises(templateID: created.id, drafts: request.exerciseDrafts)
+            try repository.setCardioBlocks(templateID: created.id, drafts: request.cardioDrafts)
+            savedTemplateID = created.id
+        }
+
+        return .saved(TemplateEditorSaveResult(
+            templateID: savedTemplateID,
+            name: request.name.trimmingCharacters(in: .whitespacesAndNewlines),
+            notes: request.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        ))
+    }
+}
+
 private struct TemplateEditorRecommendationReloadKey: Hashable {
     let catalogExerciseUUIDs: [String]
     let isTrainingGuidanceEnabled: Bool
@@ -1502,6 +1628,12 @@ private struct TemplateEditorSupersetSection: View {
         let secs = max(0, seconds) % 60
         return String(format: "%d:%02d", mins, secs)
     }
+}
+
+nonisolated struct TemplateEditorSaveResult: Sendable, Equatable {
+    let templateID: UUID
+    let name: String
+    let notes: String
 }
 
 #Preview {

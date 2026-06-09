@@ -73,17 +73,44 @@ struct WGJAccessoryTextField: UIViewRepresentable {
     let placeholder: String
     @Binding var text: String
     @Binding var isFocused: Bool
+    var accessibilityIdentifier: String = "exercises-search-field"
+    var keyboardType: UIKeyboardType = .default
+    var returnKeyType: UIReturnKeyType = .search
+    var textAlignment: NSTextAlignment = .natural
+    var font: UIFont = UIFont.preferredFont(forTextStyle: .body)
+    var textColor: UIColor = UIColor(WGJTheme.textPrimary)
+    var tintColor: UIColor = UIColor(WGJTheme.accentBlue)
+    var isEnabled: Bool = true
+    var showsAccessoryDismissButton: Bool = true
     let onDismiss: () -> Void
 
     init(
         _ placeholder: String,
         text: Binding<String>,
         isFocused: Binding<Bool>,
+        accessibilityIdentifier: String = "exercises-search-field",
+        keyboardType: UIKeyboardType = .default,
+        returnKeyType: UIReturnKeyType = .search,
+        textAlignment: NSTextAlignment = .natural,
+        font: UIFont = UIFont.preferredFont(forTextStyle: .body),
+        textColor: UIColor = UIColor(WGJTheme.textPrimary),
+        tintColor: UIColor = UIColor(WGJTheme.accentBlue),
+        isEnabled: Bool = true,
+        showsAccessoryDismissButton: Bool = true,
         onDismiss: @escaping () -> Void
     ) {
         self.placeholder = placeholder
         _text = text
         _isFocused = isFocused
+        self.accessibilityIdentifier = accessibilityIdentifier
+        self.keyboardType = keyboardType
+        self.returnKeyType = returnKeyType
+        self.textAlignment = textAlignment
+        self.font = font
+        self.textColor = textColor
+        self.tintColor = tintColor
+        self.isEnabled = isEnabled
+        self.showsAccessoryDismissButton = showsAccessoryDismissButton
         self.onDismiss = onDismiss
     }
 
@@ -97,20 +124,23 @@ struct WGJAccessoryTextField: UIViewRepresentable {
         textField.placeholder = placeholder
         textField.autocapitalizationType = .none
         textField.autocorrectionType = .no
-        textField.returnKeyType = .search
+        textField.keyboardType = keyboardType
+        textField.returnKeyType = returnKeyType
         textField.borderStyle = .none
         textField.backgroundColor = .clear
-        textField.textColor = UIColor(WGJTheme.textPrimary)
-        textField.tintColor = UIColor(WGJTheme.accentBlue)
-        textField.font = UIFont.preferredFont(forTextStyle: .body)
+        textField.textColor = textColor
+        textField.tintColor = tintColor
+        textField.font = font
+        textField.textAlignment = textAlignment
         textField.adjustsFontForContentSizeCategory = true
-        textField.accessibilityIdentifier = "exercises-search-field"
+        textField.isEnabled = isEnabled
+        textField.accessibilityIdentifier = accessibilityIdentifier
         textField.addTarget(
             context.coordinator,
             action: #selector(Coordinator.textDidChange(_:)),
             for: .editingChanged
         )
-        textField.inputAccessoryView = context.coordinator.makeAccessoryView()
+        textField.inputAccessoryView = showsAccessoryDismissButton ? context.coordinator.makeAccessoryView() : nil
         context.coordinator.textField = textField
         return textField
     }
@@ -119,9 +149,27 @@ struct WGJAccessoryTextField: UIViewRepresentable {
         if textField.text != text {
             textField.text = text
         }
+        textField.placeholder = placeholder
+        textField.keyboardType = keyboardType
+        textField.returnKeyType = returnKeyType
+        textField.textAlignment = textAlignment
+        textField.font = font
+        textField.textColor = textColor
+        textField.tintColor = tintColor
+        textField.isEnabled = isEnabled
+        textField.accessibilityIdentifier = accessibilityIdentifier
+        if showsAccessoryDismissButton, textField.inputAccessoryView == nil {
+            textField.inputAccessoryView = context.coordinator.makeAccessoryView()
+            textField.reloadInputViews()
+        } else if !showsAccessoryDismissButton, textField.inputAccessoryView != nil {
+            textField.inputAccessoryView = nil
+            textField.reloadInputViews()
+        }
 
-        if isFocused, !textField.isFirstResponder {
+        if isFocused, isEnabled, !textField.isFirstResponder {
             textField.becomeFirstResponder()
+        } else if !isFocused, textField.isFirstResponder {
+            textField.resignFirstResponder()
         }
     }
 
@@ -221,20 +269,25 @@ private struct WGJKeyboardVisibilityModifier: ViewModifier {
 }
 
 private struct WGJMinimalKeyboardToolbarModifier: ViewModifier {
+    let isEnabled: Bool
     let onDismiss: () -> Void
 
     init(
         isKeyboardVisible: Binding<Bool>? = nil,
+        isEnabled: Bool = true,
         onDismiss: @escaping () -> Void
     ) {
+        self.isEnabled = isEnabled
         self.onDismiss = onDismiss
     }
 
     func body(content: Content) -> some View {
         content
             .toolbar {
-                ToolbarItemGroup(placement: .keyboard) {
-                    keyboardToolbarButton
+                if isEnabled {
+                    ToolbarItemGroup(placement: .keyboard) {
+                        keyboardToolbarButton
+                    }
                 }
             }
     }
@@ -271,7 +324,10 @@ extension View {
         ))
     }
 
-    func wgjMinimalKeyboardToolbar(onDismiss: @escaping () -> Void) -> some View {
-        modifier(WGJMinimalKeyboardToolbarModifier(onDismiss: onDismiss))
+    func wgjMinimalKeyboardToolbar(
+        isEnabled: Bool = true,
+        onDismiss: @escaping () -> Void
+    ) -> some View {
+        modifier(WGJMinimalKeyboardToolbarModifier(isEnabled: isEnabled, onDismiss: onDismiss))
     }
 }

@@ -13,6 +13,9 @@ struct WGJApp: App {
         CloudSyncEventMonitor.shared.start()
         AppLifecycleDiagnostics.shared.start()
         SubscriptionState.shared.configureIfNeeded()
+#if DEBUG
+        Self.applyUITestSubscriptionOverridesIfRequested()
+#endif
     }
 
     var body: some Scene {
@@ -49,6 +52,7 @@ struct WGJApp: App {
     private static func makeContainerBootstrap() async throws -> ModelContainerBootstrap {
 #if DEBUG
         try AppStoreLayout.clearPersistentStoreFilesForUITestsIfRequested()
+        resetActiveWorkoutSnapshotForUITestsIfRequested()
 #endif
         return try await AppLaunchBootstrapResolver.resolve(
             makeUITestContainer: {
@@ -71,6 +75,16 @@ struct WGJApp: App {
             }
         )
     }
+
+#if DEBUG
+    @MainActor
+    private static func applyUITestSubscriptionOverridesIfRequested(processInfo: ProcessInfo = .processInfo) {
+        guard processInfo.arguments.contains("UITEST_FORCE_PRO_SUBSCRIPTION") else { return }
+        SubscriptionState.shared.forceCustomerInfoForUITesting(
+            SubscriptionCustomerInfoSnapshot(activeEntitlementIdentifiers: [RevenueCatConfig.entitlementIdentifier])
+        )
+    }
+#endif
 
     private static func makeCloudBackedContainer() throws -> ModelContainer {
         let appSchema = fullAppSchema()
@@ -120,9 +134,7 @@ struct WGJApp: App {
 
     private static func makeUITestContainer() throws -> ModelContainer {
 #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT") {
-            ActiveWorkoutSnapshotStore.deleteDefaultSnapshotFileForUITests()
-        }
+        resetActiveWorkoutSnapshotForUITestsIfRequested()
 #endif
         let appSchema = fullAppSchema()
         let inMemory = ModelConfiguration(
@@ -136,6 +148,14 @@ struct WGJApp: App {
         try seedUITestCatalogIfNeeded(container: container)
         return container
     }
+
+#if DEBUG
+    private static func resetActiveWorkoutSnapshotForUITestsIfRequested() {
+        if ProcessInfo.processInfo.arguments.contains("UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT") {
+            ActiveWorkoutSnapshotStore.deleteDefaultSnapshotFileForUITests()
+        }
+    }
+#endif
 
     nonisolated private static func makeEmergencyInMemoryContainer() throws -> ModelContainer {
         let appSchema = fullAppSchema()

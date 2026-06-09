@@ -49,6 +49,69 @@ Use `Status: superseded` when an entry is no longer the active rule, and explain
 
 ## Active Lessons
 
+## 2026-06-09 - Active Workout Metric Inputs Stay SwiftUI Native
+
+- Date: 2026-06-09
+- Trigger/Problem: The active-workout keyboard path drifted toward custom UIKit metric fields while trying to solve simulator keyboard/focus failures, and the user corrected that SwiftUI itself was not the problem.
+- Root Cause: The fix chased keyboard accessory control symptoms by adding more field-level UIKit and refocus machinery instead of removing churn around the existing SwiftUI focus path.
+- Durable Rule: Active Workout weight/reps metric inputs should stay SwiftUI-native with `@FocusState` and one root-owned keyboard toolbar dismiss action. Do not migrate hot-path metric inputs to `UIViewRepresentable`, add field-level keyboard accessories, or add delayed refocus/keyboard-notification recovery loops without fresh evidence and explicit user approval.
+- How to Verify Next Time: Run `WGJTests/AppPerformanceRuntimeTests` and scan `WorkoutSessionExerciseGridEditor.swift` for `WGJAccessoryTextField`, metric input identity regeneration, keyboard notification tracking, and refocus tasks inside weight/reps metric fields; active metric fields should be SwiftUI `TextField`s using `$focusedInput`.
+- Status: active
+
+## 2026-06-09 - Rest Timer Popup Observation Stays In Overlay Leaves
+
+- Date: 2026-06-09
+- Trigger/Problem: Active Workout and the main tab shell could still re-render too broadly when rest timer popup state changed.
+- Root Cause: Root screen bodies read `restTimerState.restTimerPopup` directly for animation/banner state, so a small transient timer popup update could invalidate large SwiftUI trees while the user was scrolling or logging sets.
+- Durable Rule: Rest timer popup and countdown observation belongs in the smallest overlay, dock, strip, or timer leaf view that renders it. Root tab/screen bodies may pass actions and static layout inputs, but must not read `restTimerState.restTimerPopup` for animation or presentation.
+- How to Verify Next Time: Run `WGJTests/AppPerformanceRuntimeTests` and scan root body segments in `MainTabView.swift` and `ActiveWorkoutView.swift` for `restTimerState.restTimerPopup` or `restTimerPopupID` plumbing.
+- Status: active
+
+## 2026-06-09 - Bros Workout Publishes Queue Locally Before Cloud Flush
+
+- Date: 2026-06-09
+- Trigger/Problem: Completed workouts and PRs could fail to appear in Bros when a workout finished while iCloud/CloudKit status was degraded, unresolved, or temporarily unavailable.
+- Root Cause: Workout completion paths used `makeIfUserDataSyncEnabled` before creating `SocialOutboxItem` rows, so the app skipped local announcement queueing unless direct CloudKit operations were currently allowed.
+- Durable Rule: Completed workout and PR social announcements are local-first outbox events. Queue them after the completed session save whenever a local Bros membership exists; gate only the later CloudKit repair/flush work on cloud availability.
+- How to Verify Next Time: Run `WGJTests/WorkoutSessionRepositoryTests/finishSessionQueuesBrosOutboxWhenCloudSyncIsTemporarilyDegraded`, `WGJTests/BrosSocialServiceTests`, and `WGJTests/AppPerformanceRuntimeTests`; scan completion paths for `makeForLocalOutboxQueueing(modelContext:)` before `queueCompletedSessionPublish`.
+- Status: active
+
+## 2026-06-09 - Start Workout UI Smokes Must Reset Active Snapshot
+
+- Date: 2026-06-09
+- Trigger/Problem: `testTemplateAndFolderAddFlow` repeatedly failed to find the new-folder sheet even though the folder button tap succeeded.
+- Root Cause: A previous UI smoke left an active-workout snapshot restored as a full-screen overlay. The Start Workout tab remained mounted underneath it, so the test could tap underlying Start Workout controls while the active-workout overlay still owned presentation.
+- Durable Rule: UI tests that exercise Start Workout, template creation, folder creation, imports, or template preview flows should launch with `UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT` unless they are explicitly testing active-workout restore/minimize behavior.
+- How to Verify Next Time: If a Start Workout UI element tap appears to succeed but the expected sheet does not appear, inspect `app.debugDescription` for `active-workout-overlay` before changing product code. Add the reset launch argument to independent Start Workout smokes.
+- Status: active
+
+## 2026-06-09 - Template Mutations Must Not Inherit SwiftUI Actor Context
+
+- Date: 2026-06-09
+- Trigger/Problem: Template overview, folder/detail, history, and Start Workout template actions kept resurfacing lag risks even after their SwiftData work moved into `AppBackgroundStore`.
+- Root Cause: Several mutation flows still launched writes from `Task { @MainActor ... }` or plain SwiftUI-owned `Task { ... }` wrappers. Even when `performWrite` used a background context internally, the orchestration inherited UI-actor context and could keep import/export/reload coordination tied to interaction paths.
+- Durable Rule: Template, history, and Start Workout mutations must resolve the `AppBackgroundStore` on the UI actor, then run persistence/import/export work from `Task.detached(priority: .utility)`. Only final state publication, paywall presentation, errors, and sheet/share presentation should hop back to `@MainActor`.
+- How to Verify Next Time: Run `WGJTests/AppPerformanceRuntimeTests` and scan hot views with `rg -n -U "Task \\{ @MainActor[\\s\\S]{0,1600}performWrite\\(" WGJ/Views/Profile WGJ/Views/Bros WGJ/Views/Templates WGJ/Views/History WGJ/Views/Workout WGJ/ContentView.swift`; the scan should be empty for interaction-heavy mutation paths.
+- Status: active
+
+## 2026-06-09 - Bros Service Work Must Stay Off The UI Actor
+
+- Date: 2026-06-09
+- Trigger/Problem: Bros and Profile/Bros warmup still felt slow because the Bros view model could construct cloud social services and run outbox/reaction sync setup from UI-actor entry points before background snapshot work had a chance to complete.
+- Root Cause: `BrosViewModel` preflighted `serviceFactory(modelContext)` during refresh and used optional background-store fallbacks inside async social tasks, which made it too easy for CloudKit/service setup to run on the main actor or outside the resolved background-store path.
+- Durable Rule: Bros refresh, outbox flush, reaction sync, and social-event freshness invalidation must resolve an `AppBackgroundStore` before async work and must not instantiate production cloud social services on the main actor as a preflight. Local-only and unavailable-cloud paths should still return bounded placeholder/unavailable states without blocking tab interaction.
+- How to Verify Next Time: Run `WGJTests/BrosViewModelTests`, `WGJTests/AppPerformanceRuntimeTests`, and a Profile/Bros UI smoke. Scan `BrosView.swift` for main-actor `serviceFactory` annotations, refresh-path `serviceFactory(modelContext)` calls, and async mutation tasks that do not use `resolvedBackgroundStore.performAsync`.
+- Status: active
+
+## 2026-06-09 - Editable Detail Screens Must Not Hide Refresh Jank With Scroll Reanchors
+
+- Date: 2026-06-09
+- Trigger/Problem: History detail scrolling and editing could still feel jumpy after persistence work moved off the main actor because saving reloaded the detail snapshot and then animated a programmatic scroll-to-top.
+- Root Cause: The detail view used `ScrollViewReader`, a top anchor, and `scrollToTopRequestID` to move the viewport after save. That forced extra layout while edited exercise cards changed height and made the screen move without a direct user navigation request.
+- Durable Rule: Editable workout/detail screens should preserve the user's scroll context through save/reload and solve content-shape or stale-data issues without programmatic scroll reanchors. For bounded, height-changing editor stacks, prefer stable non-lazy containers; keep lazy containers for genuinely long feed/list sections only.
+- How to Verify Next Time: Run `WGJTests/AppPerformanceRuntimeTests` and the relevant edit/save UI smoke. Scan touched detail views for `ScrollViewReader`, `scrollTo(`, top-anchor IDs, save-completion scroll requests, and lazy wrappers around bounded height-changing editor cards.
+- Status: active
+
 ## 2026-06-08 - Remote-Only User Data Restore Needs Compact App-Owned Backup
 
 - Date: 2026-06-08
@@ -805,4 +868,58 @@ Promote a lesson here only when it clears the bar above.
 - Root Cause: In a default-main-actor app target, service protocols, scheduled tasks, and view-model helpers can accidentally inherit or reintroduce main-actor execution even when the actual work is SwiftData, CloudKit, file IO, or background sync.
 - Durable Rule: Keep SwiftUI state mutation and presentation on `MainActor`, but persistence writes, CloudKit reads/writes, sync bridge work, snapshot/file IO, account checks, image decode/cache work, and hydration must use normal actors, utility tasks, or `AppBackgroundStore`/background `ModelContext` paths. Do not mark service protocols `@MainActor` unless every requirement is truly UI-only.
 - How to Verify Next Time: Search hot paths for `@MainActor`, `Task { @MainActor`, `MainActor.run`, direct main-context saves, and service protocols with global actor annotations; add source or behavior tests proving production routes use `AppBackgroundStore.performAsync`/`performWrite` and concrete non-main services before claiming lag/freeze fixes.
+- Status: active
+
+## 2026-06-09 - Active Workout Keyboard Hide Must Stay Single-Source
+
+- Date: 2026-06-09
+- Trigger/Problem: Active Workout keyboard dismissal regressed into multiple fallback controls after repeated attempts, creating duplicate hide buttons and inconsistent visibility around the keyboard.
+- Root Cause: A floating overlay fallback tried to compensate for toolbar placement issues instead of making the focused Active Workout surface own the real keyboard accessory.
+- Durable Rule: Active Workout must use one `keyboard-hide-button` path from `.wgjMinimalKeyboardToolbar(onDismiss:)` attached to the focused workout surface. Do not add floating or overlay keyboard-dismiss fallbacks in Active Workout; fix accessory attachment/focus ownership instead.
+- How to Verify Next Time: Search production Active Workout code for floating keyboard fallback identifiers, run `WGJTests/AppPerformanceRuntimeTests.activeWorkoutUsesSingleKeyboardToolbarHideControlWithoutFloatingFallback`, and run `WGJUITests/WGJUITests.testActiveWorkoutHomeReturnKeepsTypedSetValuesInteractive` on the preferred signed-in iPhone 17 simulator.
+- Status: active
+
+## 2026-06-09 - Workout History Changes Must Wake Bros Freshness
+
+- Date: 2026-06-09
+- Trigger/Problem: Bros could miss or delay workout and PR announcements after a local workout completion because warm snapshot freshness and stale-refresh throttles still considered the feed current.
+- Root Cause: Completed-workout history changes invalidated Profile and widgets but did not invalidate Bros warm state or request an active Bros refresh; outbox flushes also left the stale-refresh timestamp intact.
+- Durable Rule: Any user-visible social event source, especially workout completion and PR outbox flush, must invalidate Bros snapshot freshness and route through `AppNotificationRouter.shared.requestBrosRefresh()` so the active Bros tab does not wait for the normal stale interval.
+- How to Verify Next Time: Run `WGJTests/AppLaunchWarmupTests.contentViewInvalidatesProfileAndBrosWhenWorkoutHistoryChanges` and `WGJTests/BrosViewModelTests.invalidatingSnapshotFreshnessForSocialEventsForcesNextStaleRefresh`, then verify a completed workout queues/flushed social feed work without blocking local-only workout completion.
+- Status: active
+
+## 2026-06-09 - Template Scroll And Detail Cards Must Use Value Snapshots
+
+- Date: 2026-06-09
+- Trigger/Problem: Template scrolling and detail editing could still hitch because overview/detail cards rendered live SwiftData models and relationship counts directly in scroll bodies.
+- Root Cause: `TemplatesOverviewView` used broad `@Query` arrays and computed `(template.exercises ?? []).count` / `(folder.templates ?? []).count` while building cards; `TemplateDetailView` also observed template/exercise/cardio/profile queries and loaded set drafts from the main context.
+- Durable Rule: Template overview/list/detail cards must render from value data loaded through `AppBackgroundStore`; relationship traversal, default-set normalization, and repository writes belong in background snapshot/action paths, not in SwiftUI card bodies.
+- How to Verify Next Time: Run `WGJTests/AppPerformanceRuntimeTests.templatesOverviewUsesBackgroundValueSnapshotsForScrollCards` and `WGJTests/AppPerformanceRuntimeTests.templateDetailAndFolderActionsUseResolvedBackgroundStore`, then scan template views for `@Query` or relationship-count access in card rendering.
+- Status: active
+
+## 2026-06-09 - Focused Save Buttons Need Synchronous Field Commit Or Snapshot Overlays
+
+- Date: 2026-06-09
+- Trigger/Problem: Template edit UI could visibly type an updated name but save or reload back to the stale row title, making the list look laggy or broken after dismissing the editor.
+- Root Cause: `WGJResponsiveTextField` showed draft text before the parent binding was guaranteed current for zero-delay fields, and the Start Workout `onDismiss` background reload could overwrite an optimistic edit with a stale snapshot before the background context caught up.
+- Durable Rule: Save buttons that read focused text fields must either force the field's parent binding to update synchronously or commit the local draft before mutation. For value-snapshot lists, keep saved edit results as a short-lived overlay until the reloaded snapshot actually contains the saved value.
+- How to Verify Next Time: Run `WGJUITests/WGJUITests.testTemplateEditFlowSmoke`, `WGJTests/AppPerformanceRuntimeTests.debouncedTextInputTimersDoNotSleepOnMainActor`, and `WGJTests/AppPerformanceRuntimeTests.startWorkoutAppliesTemplateEditorSaveResultBeforeBackgroundReload`; manually watch for typed text reverting after sheet dismiss.
+- Status: active
+
+## 2026-06-09 - UI-Test Active Workout Reset Must Precede Bootstrap Selection
+
+- Date: 2026-06-09
+- Trigger/Problem: `testMainTabNavigationSmoke` failed in iCloud launch mode because a stale persisted Active Workout full-screen overlay from prior simulator state stayed presented over the tab shell, so tapping History left Profile selected and the History calendar button never appeared.
+- Root Cause: `UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT` was only honored inside `makeUITestContainer()`, which only runs for the in-memory UI-test bootstrap branch. iCloud-mode UI tests could pass the flag and still inherit the shared active-workout snapshot.
+- Durable Rule: Test reset hooks for cross-branch state such as active-workout snapshots must run before `AppLaunchBootstrapResolver.resolve` chooses in-memory, cloud-backed, local fallback, or emergency containers. Do not hide shared-state cleanup inside only one bootstrap branch.
+- How to Verify Next Time: Run `WGJTests/AppPerformanceRuntimeTests.uiTestActiveWorkoutSnapshotResetRunsBeforeBootstrapBranchSelection` and `WGJUITests/WGJUITests.testMainTabNavigationSmoke` after any bootstrap or UI-test launch-argument changes.
+- Status: active
+
+## 2026-06-09 - Bounded Interactive Scrolls Should Stay Non-Lazy
+
+- Date: 2026-06-09
+- Trigger/Problem: Active Workout, Profile, Templates, and History kept showing scroll hitches or focus/layout instability even after heavy persistence work moved off the main actor, and the user asked whether lazy loading was making these screens worse.
+- Root Cause: Several primary scroll bodies are bounded but highly stateful: text fields, expansion state, keyboard toolbars, set drafts, warm snapshots, and row-local controllers all need stable view identity. Lazy stacks can recreate offscreen rows and churn focus or row state, which costs more than it saves on these hot paths.
+- Durable Rule: Keep bounded, stateful, interaction-heavy primary scroll bodies non-lazy. Use value snapshots and background stores to reduce render work first. Keep `LazyVStack` for genuinely unbounded/passive feeds such as Bros feed events, or for small grids where identity/focus churn is not part of the interaction path.
+- How to Verify Next Time: Run `WGJTests/AppPerformanceRuntimeTests.primaryScrollScreensKeepFixedChromeOutOfLazyStacks`, `activeWorkoutMainScrollKeepsExerciseCardsNonLazy`, and `brosKeepsBoundedShellContainersNonLazyWhileFeedListStaysLazy`; then manually smoke Active Workout typing/minimize restore and scroll Profile/History/Templates without focus or viewport jumps.
 - Status: active

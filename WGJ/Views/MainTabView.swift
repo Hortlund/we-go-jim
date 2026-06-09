@@ -103,13 +103,16 @@ struct MainTabView: View {
                 }
                 .tint(WGJTheme.accentBlue)
                 .wgjTabChrome()
-                .wgjMinimalKeyboardToolbar()
                 .environment(\.activeWorkoutOverlayBottomInset, overlayBottomInset)
 
-                bottomOverlayChrome(size: proxy.size, bottomSafeAreaInset: bottomSafeAreaInset)
-                    .animation(overlayAnimation, value: activeWorkoutPresentationState.isActiveWorkoutStripCollapsed)
-                    .animation(overlayAnimation, value: restTimerState.restTimerPopup?.id)
-                    .animation(overlayAnimation, value: isKeyboardVisible)
+                MainTabBottomOverlayChrome(
+                    size: proxy.size,
+                    bottomSafeAreaInset: bottomSafeAreaInset,
+                    isKeyboardVisible: isKeyboardVisible,
+                    usesModernTabChrome: usesModernTabChrome,
+                    overlayAnimation: overlayAnimation,
+                    onPresentActiveWorkout: presentActiveWorkout
+                )
 
                 syncBannerChrome(topSafeAreaInset: topSafeAreaInset)
                     .animation(syncBannerAnimation, value: shouldShowSyncBanner)
@@ -246,40 +249,6 @@ struct MainTabView: View {
     }
 
     @ViewBuilder
-    private func bottomOverlayChrome(size: CGSize, bottomSafeAreaInset: CGFloat) -> some View {
-        ZStack(alignment: .bottom) {
-            if let activeSessionID = activeWorkoutPresentationState.activeSessionID,
-               activeWorkoutPresentationState.isActiveWorkoutStripCollapsed,
-               !isKeyboardVisible
-            {
-                ActiveWorkoutStripView(sessionID: activeSessionID) {
-                    presentActiveWorkout(sessionID: activeSessionID)
-                }
-                .padding(.bottom, activeWorkoutStripBottomLift(size: size, bottomSafeAreaInset: bottomSafeAreaInset))
-                .transition(activeWorkoutStripTransition)
-                .zIndex(2)
-            }
-
-            if let popup = restTimerState.restTimerPopup,
-               !activeWorkoutPresentationState.isActiveWorkoutPresented,
-               !isKeyboardVisible
-            {
-                WGJTransientBanner(
-                    title: popup.title,
-                    message: popup.message,
-                    icon: "bell.badge.fill",
-                    tint: WGJTheme.success
-                )
-                .padding(.horizontal, WGJSpacing.page)
-                .padding(.bottom, popupBottomLift(size: size, bottomSafeAreaInset: bottomSafeAreaInset))
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-        .wgjGlassContainer(spacing: 16)
-    }
-
-    @ViewBuilder
     private func syncBannerChrome(topSafeAreaInset: CGFloat) -> some View {
         ZStack(alignment: .top) {
             if shouldShowSyncBanner {
@@ -341,17 +310,6 @@ struct MainTabView: View {
         dismissedSyncBannerFingerprint = MainTabSyncBannerPolicy.dismissalFingerprint(for: userDataSyncStatus)
     }
 
-    private func activeWorkoutStripBottomLift(size: CGSize, bottomSafeAreaInset: CGFloat) -> CGFloat {
-        bottomSafeAreaInset + activeWorkoutStripBottomGap(size: size)
-    }
-
-    private func popupBottomLift(size: CGSize, bottomSafeAreaInset: CGFloat) -> CGFloat {
-        if activeWorkoutPresentationState.isActiveWorkoutStripCollapsed {
-            return activeWorkoutStripBottomLift(size: size, bottomSafeAreaInset: bottomSafeAreaInset) + 82
-        }
-        return bottomSafeAreaInset + 72
-    }
-
     private func activeWorkoutStripBottomGap(size: CGSize) -> CGFloat {
         MainTabOverlayLayoutPolicy.activeWorkoutStripBottomGap(
             screenHeight: size.height,
@@ -378,6 +336,72 @@ struct MainTabView: View {
         }
     }
 
+}
+
+private struct MainTabBottomOverlayChrome: View {
+    @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
+    @Environment(RestTimerState.self) private var restTimerState
+
+    let size: CGSize
+    let bottomSafeAreaInset: CGFloat
+    let isKeyboardVisible: Bool
+    let usesModernTabChrome: Bool
+    let overlayAnimation: Animation
+    let onPresentActiveWorkout: (UUID) -> Void
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            if let activeSessionID = activeWorkoutPresentationState.activeSessionID,
+               activeWorkoutPresentationState.isActiveWorkoutStripCollapsed,
+               !isKeyboardVisible
+            {
+                ActiveWorkoutStripView(sessionID: activeSessionID) {
+                    onPresentActiveWorkout(activeSessionID)
+                }
+                .padding(.bottom, activeWorkoutStripBottomLift)
+                .transition(activeWorkoutStripTransition)
+                .zIndex(2)
+            }
+
+            if let popup = restTimerState.restTimerPopup,
+               !activeWorkoutPresentationState.isActiveWorkoutPresented,
+               !isKeyboardVisible
+            {
+                WGJTransientBanner(
+                    title: popup.title,
+                    message: popup.message,
+                    icon: "bell.badge.fill",
+                    tint: WGJTheme.success
+                )
+                .padding(.horizontal, WGJSpacing.page)
+                .padding(.bottom, popupBottomLift)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .wgjGlassContainer(spacing: 16)
+        .animation(overlayAnimation, value: activeWorkoutPresentationState.isActiveWorkoutStripCollapsed)
+        .animation(overlayAnimation, value: restTimerState.restTimerPopup?.id)
+        .animation(overlayAnimation, value: isKeyboardVisible)
+    }
+
+    private var activeWorkoutStripBottomLift: CGFloat {
+        bottomSafeAreaInset + activeWorkoutStripBottomGap
+    }
+
+    private var popupBottomLift: CGFloat {
+        if activeWorkoutPresentationState.isActiveWorkoutStripCollapsed {
+            return activeWorkoutStripBottomLift + 82
+        }
+        return bottomSafeAreaInset + 72
+    }
+
+    private var activeWorkoutStripBottomGap: CGFloat {
+        MainTabOverlayLayoutPolicy.activeWorkoutStripBottomGap(
+            screenHeight: size.height,
+            usesModernTabChrome: usesModernTabChrome
+        )
+    }
 }
 
 private var activeWorkoutOverlayTransition: AnyTransition {

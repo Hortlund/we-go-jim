@@ -645,7 +645,7 @@ struct AppleCoachNarrativeServiceTests {
             availabilityProvider: { true },
             recapGenerator: { _ in
                 await gate.markEntered()
-                try await Task.sleep(nanoseconds: 200_000_000)
+                await gate.waitUntilReleased()
                 return CoachNarrativeSummary(
                     headline: "Generated",
                     body: "This should never be cached after caller cancellation.",
@@ -665,7 +665,8 @@ struct AppleCoachNarrativeServiceTests {
             try await task.value
         }
 
-        try? await Task.sleep(nanoseconds: 250_000_000)
+        await gate.release()
+        try? await Task.sleep(nanoseconds: 50_000_000)
         #expect(try fixture.context.fetch(FetchDescriptor<CachedCoachNarrative>()).isEmpty)
     }
 

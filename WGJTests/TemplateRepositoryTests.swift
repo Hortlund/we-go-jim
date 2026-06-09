@@ -826,7 +826,7 @@ struct TemplateRepositoryTests {
         let originalRest = exercise.restSeconds
 
         var draftStore = TemplateDetailDraftStore()
-        draftStore.load(exercises: try repository.exercises(in: template.id))
+        draftStore.load(exercises: try repository.exercises(in: template.id).map(TemplateDetailExerciseSnapshot.init(model:)))
         draftStore.updateRepRange(exerciseID: exercise.id, min: 8, max: 12)
         draftStore.updateRest(exerciseID: exercise.id, restSeconds: 90)
 

@@ -926,7 +926,7 @@ nonisolated final class ActiveWorkoutCompletionWriter {
             container: modelContext.container
         )
         WorkoutHistoryChangeBroadcaster.post()
-        try? CloudKitBrosSocialService.makeIfUserDataSyncEnabled(modelContext: modelContext)?
+        try? CloudKitBrosSocialService.makeForLocalOutboxQueueing(modelContext: modelContext)
             .queueCompletedSessionPublish(sessionID: completedSession.id)
 
         return completedSession.id

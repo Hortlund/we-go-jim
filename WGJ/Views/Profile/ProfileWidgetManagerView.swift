@@ -4,16 +4,21 @@ import SwiftUI
 struct ProfileWidgetManagerView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(SubscriptionState.self) private var subscriptionState
 
-    @State private var configs: [ProfileWidgetConfig] = []
+    @State private var configs: [ProfileWidgetConfigSnapshot] = []
+    @State private var widgetListSnapshot = ProfileWidgetManagerListSnapshot.empty
     @State private var exerciseOptions: [ExerciseHistoryOption] = []
     @State private var selectingExerciseTarget: ExerciseSelectionTarget?
     @State private var newTrendMetric: ProfileExerciseTrendMetric = .oneRepMax
     @State private var errorMessage = ""
     @State private var showingError = false
+    @State private var isLoading = false
+    @State private var exercisePickerLoadTask: Task<Void, Never>?
+    @State private var exercisePickerLoadToken: UUID?
 
-    private enum ExerciseSelectionTarget: Identifiable {
+    private enum ExerciseSelectionTarget: Identifiable, Sendable {
         case singleton(kind: ProfileWidgetKind, enableAfterSelection: Bool)
         case existingTrend(id: UUID, metric: ProfileExerciseTrendMetric)
         case newTrend(metric: ProfileExerciseTrendMetric)
@@ -48,27 +53,14 @@ struct ProfileWidgetManagerView: View {
         }
     }
 
-    private var repository: ProfileWidgetRepository {
-        ProfileWidgetRepository(modelContext: modelContext)
-    }
-
-    private var metricsService: WorkoutMetricsService {
-        WorkoutMetricsService(modelContext: modelContext)
-    }
-
-    private var enabledConfigs: [ProfileWidgetConfig] {
-        configs
-            .filter { $0.isEnabled && canUseWidget($0.kind) && shouldShowConfig($0) }
-            .sorted { $0.sortOrder < $1.sortOrder }
-    }
-
-    private var disabledConfigs: [ProfileWidgetConfig] {
-        configs
-            .filter { (!$0.isEnabled || !canUseWidget($0.kind)) && shouldShowConfig($0) }
-            .sorted { $0.sortOrder < $1.sortOrder }
+    private var widgetBackgroundStore: AppBackgroundStore {
+        appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
     }
 
     var body: some View {
+        let visibleEnabledConfigs = widgetListSnapshot.visibleEnabledConfigs
+        let visibleAvailableConfigs = widgetListSnapshot.visibleAvailableConfigs
+
         List {
             Section {
                 WGJEmptyStateCard(
@@ -82,7 +74,7 @@ struct ProfileWidgetManagerView: View {
             }
 
             Section {
-                if enabledConfigs.isEmpty {
+                if visibleEnabledConfigs.isEmpty {
                     WGJEmptyStateCard(
                         title: "No widgets enabled",
                         message: "Turn on at least one widget to show progress on your profile.",
@@ -93,7 +85,7 @@ struct ProfileWidgetManagerView: View {
                     .listRowSeparator(.hidden)
                 }
 
-                ForEach(enabledConfigs) { config in
+                ForEach(visibleEnabledConfigs) { config in
                     widgetRow(config)
                 }
                 .onMove(perform: moveEnabledWidgets)
@@ -104,7 +96,7 @@ struct ProfileWidgetManagerView: View {
             Section {
                 addExerciseTrendRow
 
-                ForEach(disabledConfigs) { config in
+                ForEach(visibleAvailableConfigs) { config in
                     widgetRow(config)
                 }
             } header: {
@@ -129,8 +121,13 @@ struct ProfileWidgetManagerView: View {
             }
         }
         .task {
-            loadConfigs()
-            loadExerciseOptions()
+            await reloadInitialData()
+        }
+        .onChange(of: subscriptionState.isPro) { _, _ in
+            rebuildWidgetListSnapshot()
+        }
+        .onDisappear {
+            cancelExercisePickerLoad()
         }
         .sheet(item: $selectingExerciseTarget) { target in
             ProfileWidgetExercisePickerView(
@@ -156,7 +153,7 @@ struct ProfileWidgetManagerView: View {
             .padding(.bottom, 4)
     }
 
-    private func widgetRow(_ config: ProfileWidgetConfig) -> some View {
+    private func widgetRow(_ config: ProfileWidgetConfigSnapshot) -> some View {
         let isLocked = isProLocked(config.kind)
 
         return HStack(alignment: .top, spacing: 12) {
@@ -369,7 +366,7 @@ struct ProfileWidgetManagerView: View {
         }
     }
 
-    private func title(for config: ProfileWidgetConfig) -> String {
+    private func title(for config: ProfileWidgetConfigSnapshot) -> String {
         guard config.kind.isExerciseTrend else {
             return config.kind.title
         }
@@ -380,7 +377,7 @@ struct ProfileWidgetManagerView: View {
         return "\(config.exerciseTrendMetric.title) Trend"
     }
 
-    private func description(for config: ProfileWidgetConfig) -> String {
+    private func description(for config: ProfileWidgetConfigSnapshot) -> String {
         guard config.kind.isExerciseTrend else {
             return description(for: config.kind)
         }
@@ -398,7 +395,7 @@ struct ProfileWidgetManagerView: View {
     }
 
     @ViewBuilder
-    private func exerciseSelectionBadge(_ config: ProfileWidgetConfig) -> some View {
+    private func exerciseSelectionBadge(_ config: ProfileWidgetConfigSnapshot) -> some View {
         if let selectedName = config.selectedExerciseNameSnapshot, !selectedName.isEmpty {
             HStack(spacing: 6) {
                 Image(systemName: "figure.strengthtraining.traditional")
@@ -422,46 +419,80 @@ struct ProfileWidgetManagerView: View {
     }
 
     private func moveEnabledWidgets(from source: IndexSet, to destination: Int) {
-        do {
-            try repository.moveEnabledWidget(fromOffsets: source, toOffset: destination)
-            loadConfigs()
-        } catch {
-            showError(error)
+        let backgroundStore = widgetBackgroundStore
+        applyConfigs(Self.reorderedEnabledConfigs(configs, fromOffsets: source, toOffset: destination))
+        Task.detached(priority: .userInitiated) {
+            do {
+                let snapshots = try await backgroundStore.performWrite("profile-widgets.move") { backgroundContext in
+                    let repository = ProfileWidgetRepository(modelContext: backgroundContext)
+                    try repository.moveEnabledWidget(fromOffsets: source, toOffset: destination)
+                    return try repository.configurationSnapshots()
+                }
+                await applyConfigs(snapshots)
+            } catch {
+                await showError(error)
+            }
         }
     }
 
-    private func toggleConfig(_ config: ProfileWidgetConfig) {
+    private func toggleConfig(_ config: ProfileWidgetConfigSnapshot) {
         guard canUseWidget(config.kind) || config.isEnabled else {
             subscriptionState.presentPaywall()
             return
         }
 
-        do {
-            if config.kind.isExerciseTrend {
-                try repository.setEnabled(id: config.id, isEnabled: !config.isEnabled)
-            } else {
-                try repository.setEnabled(kind: config.kind, isEnabled: !config.isEnabled)
+        let backgroundStore = widgetBackgroundStore
+        applyConfigs(configs.map { snapshot in
+            guard snapshot.id == config.id else { return snapshot }
+            return snapshot.updating(isEnabled: !config.isEnabled)
+        })
+        Task.detached(priority: .userInitiated) {
+            do {
+                let snapshots = try await backgroundStore.performWrite("profile-widgets.toggle") { backgroundContext in
+                    let repository = ProfileWidgetRepository(modelContext: backgroundContext)
+                    if config.kind.isExerciseTrend {
+                        try repository.setEnabled(id: config.id, isEnabled: !config.isEnabled)
+                    } else {
+                        try repository.setEnabled(kind: config.kind, isEnabled: !config.isEnabled)
+                    }
+                    return try repository.configurationSnapshots()
+                }
+                await applyConfigs(snapshots)
+            } catch {
+                await showError(error)
             }
-            loadConfigs()
-        } catch {
-            showError(error)
         }
     }
 
-    private func removeOrToggleConfig(_ config: ProfileWidgetConfig) {
-        do {
-            if config.kind.isExerciseTrend {
-                try repository.removeConfig(id: config.id)
-            } else {
-                try repository.setEnabled(kind: config.kind, isEnabled: false)
+    private func removeOrToggleConfig(_ config: ProfileWidgetConfigSnapshot) {
+        let backgroundStore = widgetBackgroundStore
+        if config.kind.isExerciseTrend {
+            applyConfigs(configs.filter { $0.id != config.id })
+        } else {
+            applyConfigs(configs.map { snapshot in
+                guard snapshot.id == config.id else { return snapshot }
+                return snapshot.updating(isEnabled: false)
+            })
+        }
+        Task.detached(priority: .userInitiated) {
+            do {
+                let snapshots = try await backgroundStore.performWrite("profile-widgets.remove") { backgroundContext in
+                    let repository = ProfileWidgetRepository(modelContext: backgroundContext)
+                    if config.kind.isExerciseTrend {
+                        try repository.removeConfig(id: config.id)
+                    } else {
+                        try repository.setEnabled(kind: config.kind, isEnabled: false)
+                    }
+                    return try repository.configurationSnapshots()
+                }
+                await applyConfigs(snapshots)
+            } catch {
+                await showError(error)
             }
-            loadConfigs()
-        } catch {
-            showError(error)
         }
     }
 
-    private func enableConfig(_ config: ProfileWidgetConfig) {
+    private func enableConfig(_ config: ProfileWidgetConfigSnapshot) {
         guard canUseWidget(config.kind) else {
             subscriptionState.presentPaywall()
             return
@@ -475,82 +506,127 @@ struct ProfileWidgetManagerView: View {
         toggleConfig(config)
     }
 
-    private func loadConfigs() {
-        do {
-            configs = try repository.configurations()
-        } catch {
-            showError(error)
-        }
-    }
+    @MainActor
+    private func reloadInitialData() async {
+        guard !isLoading else { return }
+        isLoading = true
+        defer { isLoading = false }
 
-    private func loadExerciseOptions(metric: ProfileExerciseTrendMetric? = nil) {
+        let backgroundStore = widgetBackgroundStore
         do {
-            exerciseOptions = try metricsService.exerciseHistoryOptions(metric: metric)
+            let snapshot = try await backgroundStore.perform("profile-widgets.initial-load") { backgroundContext in
+                ProfileWidgetManagerSnapshot(
+                    configs: try ProfileWidgetRepository(modelContext: backgroundContext).configurationSnapshots(),
+                    exerciseOptions: try WorkoutMetricsService(modelContext: backgroundContext).exerciseHistoryOptions()
+                )
+            }
+            applyConfigs(snapshot.configs)
+            exerciseOptions = snapshot.exerciseOptions
         } catch {
             showError(error)
         }
     }
 
     private func presentExercisePicker(for target: ExerciseSelectionTarget) {
-        loadExerciseOptions(metric: target.metric)
-        guard !exerciseOptions.isEmpty else {
-            errorMessage = emptyExerciseMessage(for: target.metric)
-            showingError = true
-            return
+        exercisePickerLoadTask?.cancel()
+        let token = UUID()
+        exercisePickerLoadToken = token
+        let backgroundStore = widgetBackgroundStore
+        let metric = target.metric
+        let emptyMessage = emptyExerciseMessage(for: metric)
+        exercisePickerLoadTask = Task.detached(priority: .userInitiated) {
+            do {
+                let options = try await backgroundStore.perform("profile-widgets.exercise-options") { backgroundContext in
+                    try WorkoutMetricsService(modelContext: backgroundContext).exerciseHistoryOptions(metric: metric)
+                }
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    guard exercisePickerLoadToken == token else { return }
+                    exerciseOptions = options
+                    exercisePickerLoadTask = nil
+                    exercisePickerLoadToken = nil
+                    guard !options.isEmpty else {
+                        errorMessage = emptyMessage
+                        showingError = true
+                        return
+                    }
+                    selectingExerciseTarget = target
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    guard exercisePickerLoadToken == token else { return }
+                    exercisePickerLoadTask = nil
+                    exercisePickerLoadToken = nil
+                    showError(error)
+                }
+            }
         }
+    }
 
-        selectingExerciseTarget = target
+    private func cancelExercisePickerLoad() {
+        exercisePickerLoadTask?.cancel()
+        exercisePickerLoadTask = nil
+        exercisePickerLoadToken = nil
     }
 
     private func saveExerciseSelection(
         _ option: ExerciseHistoryOption,
         for target: ExerciseSelectionTarget
     ) {
-        do {
-            switch target {
-            case .singleton(let kind, let enableWidget):
-                try repository.updateExerciseSelection(
-                    kind: kind,
-                    catalogExerciseUUID: option.catalogExerciseUUID,
-                    exerciseName: option.exerciseName
-                )
-                if enableWidget {
-                    try repository.setEnabled(kind: kind, isEnabled: true)
+        let backgroundStore = widgetBackgroundStore
+        applyConfigs(Self.applyingExerciseSelection(option, target: target, to: configs))
+        Task.detached(priority: .userInitiated) {
+            do {
+                let snapshots = try await backgroundStore.performWrite("profile-widgets.exercise-selection") { backgroundContext in
+                    let repository = ProfileWidgetRepository(modelContext: backgroundContext)
+                    switch target {
+                    case .singleton(let kind, let enableWidget):
+                        try repository.updateExerciseSelection(
+                            kind: kind,
+                            catalogExerciseUUID: option.catalogExerciseUUID,
+                            exerciseName: option.exerciseName
+                        )
+                        if enableWidget {
+                            try repository.setEnabled(kind: kind, isEnabled: true)
+                        }
+                    case .existingTrend(let id, let metric):
+                        try repository.updateExerciseTrendConfig(
+                            id: id,
+                            metric: metric,
+                            catalogExerciseUUID: option.catalogExerciseUUID,
+                            exerciseName: option.exerciseName
+                        )
+                    case .newTrend(let metric):
+                        try repository.createExerciseTrendConfig(
+                            metric: metric,
+                            catalogExerciseUUID: option.catalogExerciseUUID,
+                            exerciseName: option.exerciseName,
+                            isEnabled: true
+                        )
+                    }
+                    return try repository.configurationSnapshots()
                 }
-            case .existingTrend(let id, let metric):
-                try repository.updateExerciseTrendConfig(
-                    id: id,
-                    metric: metric,
-                    catalogExerciseUUID: option.catalogExerciseUUID,
-                    exerciseName: option.exerciseName
-                )
-            case .newTrend(let metric):
-                try repository.createExerciseTrendConfig(
-                    metric: metric,
-                    catalogExerciseUUID: option.catalogExerciseUUID,
-                    exerciseName: option.exerciseName,
-                    isEnabled: true
-                )
+                await applyConfigs(snapshots)
+            } catch {
+                await showError(error)
             }
-            loadConfigs()
-        } catch {
-            showError(error)
         }
     }
 
-    private func selectionTarget(for config: ProfileWidgetConfig, enableAfterSelection: Bool) -> ExerciseSelectionTarget {
+    private func selectionTarget(for config: ProfileWidgetConfigSnapshot, enableAfterSelection: Bool) -> ExerciseSelectionTarget {
         if config.kind.isExerciseTrend {
             return .existingTrend(id: config.id, metric: config.exerciseTrendMetric)
         }
         return .singleton(kind: config.kind, enableAfterSelection: enableAfterSelection)
     }
 
-    private func shouldShowConfig(_ config: ProfileWidgetConfig) -> Bool {
+    private func shouldShowConfig(_ config: ProfileWidgetConfigSnapshot) -> Bool {
         guard config.kind.isExerciseTrend else { return true }
         return config.selectedCatalogExerciseUUID != nil
     }
 
-    private func accessibilityIDToken(for config: ProfileWidgetConfig) -> String {
+    private func accessibilityIDToken(for config: ProfileWidgetConfigSnapshot) -> String {
         if config.kind.isExerciseTrend {
             return "exerciseTrend-\(config.id.uuidString)"
         }
@@ -574,6 +650,13 @@ struct ProfileWidgetManagerView: View {
         }
     }
 
+    @MainActor
+    private func applyConfigs(_ snapshots: [ProfileWidgetConfigSnapshot]) {
+        configs = snapshots
+        rebuildWidgetListSnapshot()
+    }
+
+    @MainActor
     private func showError(_ error: Error) {
         errorMessage = String(describing: error)
         showingError = true
@@ -585,6 +668,125 @@ struct ProfileWidgetManagerView: View {
 
     private func isProLocked(_ kind: ProfileWidgetKind) -> Bool {
         ProAccessPolicy.requiresPro(kind) && !subscriptionState.isPro
+    }
+
+    @MainActor
+    private func rebuildWidgetListSnapshot() {
+        widgetListSnapshot = ProfileWidgetManagerListSnapshot.make(
+            configs: configs,
+            canUseWidget: { kind in
+                canUseWidget(kind)
+            }
+        )
+    }
+
+    nonisolated private static func reorderedEnabledConfigs(
+        _ configs: [ProfileWidgetConfigSnapshot],
+        fromOffsets source: IndexSet,
+        toOffset destination: Int
+    ) -> [ProfileWidgetConfigSnapshot] {
+        var enabled = configs.filter(\.isEnabled).sorted { $0.sortOrder < $1.sortOrder }
+        let movingItems = source.sorted().compactMap { index in
+            enabled.indices.contains(index) ? enabled[index] : nil
+        }
+        for index in source.sorted(by: >) where enabled.indices.contains(index) {
+            enabled.remove(at: index)
+        }
+
+        var insertionIndex = destination - source.filter { $0 < destination }.count
+        insertionIndex = max(0, min(insertionIndex, enabled.count))
+        enabled.insert(contentsOf: movingItems, at: insertionIndex)
+
+        let enabledIDs = Set(enabled.map(\.id))
+        let disabled = configs
+            .filter { !enabledIDs.contains($0.id) }
+            .sorted { $0.sortOrder < $1.sortOrder }
+        return (enabled + disabled).enumerated().map { index, config in
+            config.updating(sortOrder: index)
+        }
+    }
+
+    nonisolated private static func applyingExerciseSelection(
+        _ option: ExerciseHistoryOption,
+        target: ExerciseSelectionTarget,
+        to configs: [ProfileWidgetConfigSnapshot]
+    ) -> [ProfileWidgetConfigSnapshot] {
+        switch target {
+        case .singleton(let kind, let enableWidget):
+            return configs.map { config in
+                guard config.kind == kind else { return config }
+                return config.updating(
+                    isEnabled: enableWidget ? true : config.isEnabled,
+                    selectedCatalogExerciseUUID: option.catalogExerciseUUID,
+                    selectedExerciseNameSnapshot: option.exerciseName
+                )
+            }
+        case .existingTrend(let id, let metric):
+            return configs.map { config in
+                guard config.id == id else { return config }
+                return config.updating(
+                    kind: .exerciseOneRMTrend,
+                    selectedCatalogExerciseUUID: option.catalogExerciseUUID,
+                    selectedExerciseNameSnapshot: option.exerciseName,
+                    exerciseTrendMetric: metric
+                )
+            }
+        case .newTrend(let metric):
+            let nextSortOrder = (configs.map(\.sortOrder).max() ?? -1) + 1
+            return configs + [
+                ProfileWidgetConfigSnapshot(
+                    id: UUID(),
+                    kind: .exerciseOneRMTrend,
+                    isEnabled: true,
+                    sortOrder: nextSortOrder,
+                    selectedCatalogExerciseUUID: option.catalogExerciseUUID,
+                    selectedExerciseNameSnapshot: option.exerciseName,
+                    exerciseTrendMetric: metric,
+                    updatedAt: .now
+                ),
+            ]
+        }
+    }
+}
+
+private struct ProfileWidgetManagerSnapshot: Sendable {
+    let configs: [ProfileWidgetConfigSnapshot]
+    let exerciseOptions: [ExerciseHistoryOption]
+}
+
+nonisolated struct ProfileWidgetManagerListSnapshot: Sendable {
+    let visibleEnabledConfigs: [ProfileWidgetConfigSnapshot]
+    let visibleAvailableConfigs: [ProfileWidgetConfigSnapshot]
+
+    static let empty = ProfileWidgetManagerListSnapshot(
+        visibleEnabledConfigs: [],
+        visibleAvailableConfigs: []
+    )
+
+    static func make(
+        configs: [ProfileWidgetConfigSnapshot],
+        canUseWidget: (ProfileWidgetKind) -> Bool
+    ) -> ProfileWidgetManagerListSnapshot {
+        var visibleEnabledConfigs: [ProfileWidgetConfigSnapshot] = []
+        var visibleAvailableConfigs: [ProfileWidgetConfigSnapshot] = []
+
+        for config in configs.sorted(by: { $0.sortOrder < $1.sortOrder }) where shouldShowConfig(config) {
+            if config.isEnabled && canUseWidget(config.kind) {
+                visibleEnabledConfigs.append(config)
+            } else {
+                visibleAvailableConfigs.append(config)
+            }
+        }
+
+        return ProfileWidgetManagerListSnapshot(
+            visibleEnabledConfigs: visibleEnabledConfigs,
+            visibleAvailableConfigs: visibleAvailableConfigs
+        )
+    }
+
+    private static func shouldShowConfig(_ config: ProfileWidgetConfigSnapshot) -> Bool {
+        guard config.kind.isExerciseTrend else { return true }
+        return config.selectedCatalogExerciseUUID != nil
     }
 }
 

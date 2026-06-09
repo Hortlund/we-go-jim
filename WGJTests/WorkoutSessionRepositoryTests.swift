@@ -91,6 +91,36 @@ struct WorkoutSessionRepositoryTests {
     }
 
     @Test
+    func finishSessionQueuesBrosOutboxWhenCloudSyncIsTemporarilyDegraded() throws {
+        let tracker = UserDataSyncTracker.shared
+        _ = tracker.configureForLaunch(isCloudEnabled: true, errorDescription: "iCloud availability check timed out.")
+        defer {
+            _ = tracker.configureForLaunch(isCloudEnabled: false, errorDescription: nil)
+        }
+
+        let context = try makeInMemoryContext()
+        let profile = UserProfile(displayName: "Local Atlas")
+        profile.updateBrosMembership(
+            circleID: "circle-1",
+            membershipID: "membership-circle-1-user-1",
+            userRecordName: "user-1",
+            joinedAt: Date(timeIntervalSince1970: 100),
+            role: .owner
+        )
+        context.insert(profile)
+
+        let repository = WorkoutSessionRepository(modelContext: context)
+        let session = try repository.createEmptySession(name: "Offline PR Day")
+        session.startedAt = Date(timeIntervalSince1970: 1_000)
+        try context.save()
+
+        try repository.finishSession(sessionID: session.id)
+
+        let queuedItems = try context.fetch(FetchDescriptor<SocialOutboxItem>())
+        #expect(queuedItems.map(\.operation) == [.publishWorkoutEvent])
+    }
+
+    @Test
     func addExerciseUsesPreferredWeightUnitForDefaultSets() throws {
         let context = try makeInMemoryContext()
         let profileRepository = ProfileRepository(modelContext: context)
