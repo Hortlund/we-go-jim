@@ -90,6 +90,8 @@ struct ActiveWorkoutCardioPhaseCard<HeaderActions: View>: View {
 
                 Spacer(minLength: 12)
 
+                completionButton
+
                 headerActions
             }
 
@@ -100,7 +102,6 @@ struct ActiveWorkoutCardioPhaseCard<HeaderActions: View>: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            completionRow
         }
         .padding(16)
         .background { cardBackground }
@@ -138,43 +139,35 @@ struct ActiveWorkoutCardioPhaseCard<HeaderActions: View>: View {
         }
     }
 
-    @ViewBuilder
-    private var completionRow: some View {
-        if isCompleted {
-            HStack(spacing: 10) {
-                Label("Completed", systemImage: "checkmark.circle.fill")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(WGJTheme.success)
-                    .wgjSingleLineText(scale: 0.9)
-
-                Spacer(minLength: 8)
-
-                Button("Undo", action: onToggleCompletion)
-                    .buttonStyle(WGJGhostButtonStyle())
-                    .accessibilityLabel(undoAccessibilityLabel)
-                    .modifier(CardioCompletionIdentifier(identifier: completionAccessibilityIdentifier))
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(WGJTheme.success.opacity(0.10))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(WGJTheme.success.opacity(0.22), lineWidth: 1)
-                    )
-            )
-        } else {
-            Button(action: onToggleCompletion) {
-                Label(completionTitle, systemImage: "checkmark.circle.fill")
-                    .frame(maxWidth: .infinity)
-                    .wgjSingleLineText(scale: 0.82)
-            }
-            .buttonStyle(WGJCompactPrimaryButtonStyle())
-            .disabled(!canComplete)
-            .accessibilityLabel(completionAccessibilityLabel)
-            .modifier(CardioCompletionIdentifier(identifier: completionAccessibilityIdentifier))
+    private var completionButton: some View {
+        Button(action: onToggleCompletion) {
+            Image(systemName: isCompleted ? "checkmark.circle.fill" : "checkmark.circle")
+                .font(.system(size: 20, weight: .bold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(completionTint)
+                .frame(width: 44, height: 44)
+                .background(
+                    Circle()
+                        .fill(completionTint.opacity(isCompleted ? 0.18 : 0.12))
+                        .overlay(
+                            Circle()
+                                .stroke(completionTint.opacity(isCompleted ? 0.36 : 0.24), lineWidth: 1)
+                        )
+                )
+                .contentShape(Circle())
         }
+        .buttonStyle(.plain)
+        .frame(width: 48, height: 54)
+        .disabled(!canComplete && !isCompleted)
+        .accessibilityLabel(isCompleted ? undoAccessibilityLabel : completionAccessibilityLabel)
+        .modifier(CardioCompletionIdentifier(identifier: completionAccessibilityIdentifier))
+    }
+
+    private var completionTint: Color {
+        if isCompleted {
+            return WGJTheme.success
+        }
+        return canComplete ? WGJTheme.accentBlue : WGJTheme.accentGold
     }
 
     private func cardioInfoChip(_ title: String, tint: Color) -> some View {

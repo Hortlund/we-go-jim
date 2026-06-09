@@ -2340,7 +2340,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         guard !setDrafts[index].isLocked else { return }
         let targetSetID = setDrafts[index].id
         let focusedSetInput = focusedInput?.setID == targetSetID ? focusedInput : nil
-        _ = commitAllBufferedInput(clearsText: true)
+        _ = commitBufferedInput(forSetID: targetSetID, clearsText: true)
         guard let resolvedIndex = indexForSetID(targetSetID) else { return }
 
         if isCompleted, !canCompleteSet(setDrafts[resolvedIndex]) {
@@ -2372,7 +2372,8 @@ struct WorkoutSessionExerciseGridEditor: View {
         guard updatedDrafts.indices.contains(index) else { return }
         guard !updatedDrafts[index].isLocked else { return }
         if focusedInput?.setID == updatedDrafts[index].id {
-            dismissInputFocus(suppressCommit: true)
+            suppressNextFocusLossCommit = true
+            focusedInput = nil
         }
 
         let setID = updatedDrafts[index].id
@@ -2449,7 +2450,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                 if suppressNextFocusLossCommit {
                     suppressNextFocusLossCommit = false
                 } else {
-                    scheduleCommitRequest(.debounced)
+                    scheduleBufferedInputCommit()
                 }
             } else {
                 let committedBufferedValueChange = commitBufferedInput(for: previousFocus, clearsText: true)
@@ -2552,6 +2553,23 @@ struct WorkoutSessionExerciseGridEditor: View {
         setDrafts = updatedDrafts
         handleDraftValueMutation(previousDrafts: previousDrafts)
         return true
+    }
+
+    @discardableResult
+    private func commitBufferedInput(
+        forSetID setID: UUID,
+        clearsText: Bool
+    ) -> Bool {
+        var changed = false
+        changed = commitBufferedInput(
+            for: SetInputFocus(setID: setID, metric: .weight),
+            clearsText: clearsText
+        ) || changed
+        changed = commitBufferedInput(
+            for: SetInputFocus(setID: setID, metric: .reps),
+            clearsText: clearsText
+        ) || changed
+        return changed
     }
 
     @discardableResult
