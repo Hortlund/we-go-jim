@@ -582,7 +582,6 @@ struct ActiveWorkoutView: View {
     ) -> some View {
         let exerciseID = exercise.id
         let exerciseName = exercise.exerciseNameSnapshot
-        let guidance = guidanceByExerciseID[exerciseID] ?? nil
 
         Group {
             if let drafts = renderableDrafts(for: exerciseID) {
@@ -596,7 +595,7 @@ struct ActiveWorkoutView: View {
                     targetRepMin: exercise.targetRepMin,
                     targetRepMax: exercise.targetRepMax,
                     previousPerformanceResolution: resolvedPreviousPerformanceResolution(for: exerciseID),
-                    guidance: guidance,
+                    guidance: nil,
                     preferredLoadUnit: preferredLoadUnit,
                     componentSummaryResolution: componentResolutionByExerciseID[exerciseID],
                     componentSummaryAccessibilityIdentifierPrefix: "active-workout-exercise-\(exercise.catalogExerciseUUID)-component-summary",
@@ -777,7 +776,6 @@ struct ActiveWorkoutView: View {
     ) {
         guard setDraftsByExerciseID[exerciseID] != updated else { return }
         setDraftsByExerciseID[exerciseID] = updated
-        scheduleGuidanceRefresh(for: exerciseID)
         if refreshProjectionImmediately {
             refreshRenderProjection()
         } else {
@@ -1626,7 +1624,7 @@ struct ActiveWorkoutView: View {
     }
 
     private var isTrainingGuidanceEnabled: Bool {
-        profilePreferences.isTrainingGuidanceEnabled
+        false
     }
 
     private var canRunNonCriticalInteractionWork: Bool {

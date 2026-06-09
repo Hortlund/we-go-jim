@@ -737,21 +737,21 @@ struct WorkoutSessionExerciseGridEditor: View {
 
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .top, spacing: 12) {
-                        metricField(title: "Weight", supporting: row.targetWeightText) {
+                        metricField(title: "Weight", supporting: nil) {
                             loadField(at: row.index)
                         }
 
-                        metricField(title: "Reps", supporting: row.targetRepsText) {
+                        metricField(title: "Reps", supporting: nil) {
                             repsFieldWithCompletionControl(for: row, presentation: completionPresentation)
                         }
                     }
 
                     VStack(alignment: .leading, spacing: 12) {
-                        metricField(title: "Weight", supporting: row.targetWeightText) {
+                        metricField(title: "Weight", supporting: nil) {
                             loadField(at: row.index)
                         }
 
-                        metricField(title: "Reps", supporting: row.targetRepsText) {
+                        metricField(title: "Reps", supporting: nil) {
                             repsFieldWithCompletionControl(for: row, presentation: completionPresentation)
                         }
                     }
@@ -1871,8 +1871,6 @@ struct WorkoutSessionExerciseGridEditor: View {
                         formatWeight: formatWeight
                     ),
                     metadataLine: metadataLine(for: draft),
-                    targetWeightText: targetWeightText(for: draft, formatWeight: formatWeight),
-                    targetRepsText: targetRepsText(for: draft),
                     inlineHintPresentation: WorkoutSetInlineHintPresentation.make(
                         draft: draft,
                         previous: previousPerformanceResolution.previous(at: index),
@@ -1931,22 +1929,6 @@ struct WorkoutSessionExerciseGridEditor: View {
 
         guard !parts.isEmpty else { return nil }
         return parts.joined(separator: " • ")
-    }
-
-    private static func targetWeightText(for set: WorkoutSessionSetDraft, formatWeight: (Double) -> String) -> String? {
-        guard let targetWeight = set.targetWeight else {
-            return nil
-        }
-
-        return "Target \(formatWeight(targetWeight)) \(set.targetLoadUnit.shortLabel)"
-    }
-
-    private static func targetRepsText(for set: WorkoutSessionSetDraft) -> String? {
-        guard let targetReps = set.targetReps else {
-            return nil
-        }
-
-        return "Target \(targetReps)"
     }
 
     private static func completionButtonTitle(for draft: WorkoutSessionSetDraft, restSeconds: Int) -> String {
@@ -2228,11 +2210,12 @@ struct WorkoutSessionExerciseGridEditor: View {
     private func completionControlPresentation(
         for row: WorkoutSessionExerciseSetRowDisplaySnapshot
     ) -> WorkoutSetCompletionControlPresentation? {
-        WorkoutSetCompletionControlPresentation.make(
+        let canCompleteSet = row.set.isCompleted || canCompleteSet(row.set)
+        return WorkoutSetCompletionControlPresentation.make(
             draft: row.set,
             manualCompletionMode: manualCompletionMode,
-            isSetCompletionEnabled: isSetCompletionEnabled,
-            gatePresentation: setCompletionGatePresentation,
+            isSetCompletionEnabled: canCompleteSet,
+            gatePresentation: resolvedSetCompletionGatePresentation,
             isGateRevealed: revealedCompletionGateSetIDs.contains(row.id)
         )
     }
@@ -2355,29 +2338,29 @@ struct WorkoutSessionExerciseGridEditor: View {
     private func requestCompletionChange(at index: Int, isCompleted: Bool) {
         guard setDrafts.indices.contains(index) else { return }
         guard !setDrafts[index].isLocked else { return }
-        if isCompleted, !isSetCompletionEnabled {
+        let targetSetID = setDrafts[index].id
+        let focusedSetInput = focusedInput?.setID == targetSetID ? focusedInput : nil
+        _ = commitAllBufferedInput(clearsText: true)
+        guard let resolvedIndex = indexForSetID(targetSetID) else { return }
+
+        if isCompleted, !canCompleteSet(setDrafts[resolvedIndex]) {
             _ = withAnimation(.easeInOut(duration: 0.2)) {
-                revealedCompletionGateSetIDs.insert(setDrafts[index].id)
+                revealedCompletionGateSetIDs.insert(targetSetID)
             }
             return
         }
 
-        let targetSetID = setDrafts[index].id
         revealedCompletionGateSetIDs.remove(targetSetID)
-        let focusedSetInput = focusedInput?.setID == targetSetID ? focusedInput : nil
 
         guard isCompleted else {
             if focusedSetInput != nil {
                 dismissInputFocus(suppressCommit: true)
             }
-            setCompletion(false, at: index)
+            setCompletion(false, at: resolvedIndex)
             return
         }
 
-        if let focusedSetInput {
-            _ = commitBufferedInput(for: focusedSetInput, clearsText: true)
-        }
-        setCompletion(true, at: index)
+        setCompletion(true, at: resolvedIndex)
     }
 
     private func setCompletion(
@@ -2423,6 +2406,23 @@ struct WorkoutSessionExerciseGridEditor: View {
                 onSetCompletionChange?(stageID, nil, 0, false)
             }
         }
+    }
+
+    private var resolvedSetCompletionGatePresentation: WorkoutSetCompletionGatePresentation {
+        setCompletionGatePresentation ?? WorkoutSetCompletionGatePresentation(
+            title: "Enter this set first",
+            detail: "Add the current weight and reps before completing the set. Previous values are only guidance until you tap Fill Last.",
+            iconSystemName: "exclamationmark.triangle.fill"
+        )
+    }
+
+    private func canCompleteSet(_ draft: WorkoutSessionSetDraft) -> Bool {
+        guard isSetCompletionEnabled else { return false }
+        guard draft.actualReps != nil else { return false }
+        if draft.actualLoadUnit == .bodyweight || draft.targetLoadUnit == .bodyweight {
+            return true
+        }
+        return draft.actualWeight != nil
     }
 
     private func notifyChanged(drafts: [WorkoutSessionSetDraft]? = nil) {
@@ -3050,8 +3050,6 @@ private struct WorkoutSessionExerciseSetRowDisplaySnapshot: Identifiable, Equata
     let title: String
     let previousSummary: String
     let metadataLine: String?
-    let targetWeightText: String?
-    let targetRepsText: String?
     let inlineHintPresentation: WorkoutSetInlineHintPresentation?
     let completionButtonTitle: String
 }
