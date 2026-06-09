@@ -112,9 +112,6 @@ struct TemplateDetailView: View {
             guard isTabActive else { return }
             await reloadTemplateSnapshotIfNeeded(force: false)
         }
-        .task {
-            await reloadTemplateSnapshotIfNeeded(force: false)
-        }
         .task(id: exerciseStateReloadKey) {
             await loadSetDraftsIfNeeded()
         }

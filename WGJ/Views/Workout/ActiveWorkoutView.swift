@@ -2057,7 +2057,7 @@ struct ActiveWorkoutView: View {
         let restTimerSnapshot = restTimerState.restTimerSnapshot()
         let scrollTarget = minimizedScrollRestoreTarget()
         pendingMinimizedSnapshotTask?.cancel()
-        pendingMinimizedSnapshotTask = Task.detached(priority: .userInitiated) {
+        pendingMinimizedSnapshotTask = Task.detached(priority: .utility) {
             guard !Task.isCancelled else { return }
             do {
                 try await ActiveWorkoutSnapshotStore.shared.save(
@@ -2654,7 +2654,7 @@ struct ActiveWorkoutView: View {
 
         pendingUserEditSnapshotTask?.cancel()
         let restTimerSnapshot = restTimerState.restTimerSnapshot()
-        pendingUserEditSnapshotTask = Task.detached(priority: .userInitiated) {
+        pendingUserEditSnapshotTask = Task.detached(priority: .utility) {
             guard !Task.isCancelled else { return }
             do {
                 try await ActiveWorkoutSnapshotStore.shared.save(
