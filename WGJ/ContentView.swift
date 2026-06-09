@@ -24,6 +24,7 @@ struct ContentView: View {
     @State private var enteredMainDeferredMaintenanceTask: Task<Void, Never>?
     @State private var enteredMainNoncriticalWorkTask: Task<Void, Never>?
     @State private var isPreparingMainPhase = false
+    @State private var hasAttemptedStartupCloudRestore = false
     @State private var hasInstalledUITestPendingTemplate = false
     @State private var hasScheduledInitialDeferredMaintenance = false
     @State private var pendingDeepLinkURL: URL?
@@ -150,6 +151,8 @@ struct ContentView: View {
 
         let skipsSplash = ProcessInfo.processInfo.arguments.contains(AppStartupRouting.skipSplashArgument)
         let shouldRunFirstRunLocalBootstrap = shouldRunFirstRunLocalBootstrapBeforeMainEntry(skipsSplash: skipsSplash)
+
+        await restoreCloudBackupOnEmptyLocalStoreIfNeeded()
 
         if PreMainStartupWorkPolicy.shouldPrepareLocalProfileIdentity(
             shouldRunFirstRunLocalBootstrap: shouldRunFirstRunLocalBootstrap
@@ -664,6 +667,43 @@ struct ContentView: View {
         } catch {
             return
         }
+    }
+
+    private func restoreCloudBackupOnEmptyLocalStoreIfNeeded() async {
+        guard !hasAttemptedStartupCloudRestore else { return }
+        hasAttemptedStartupCloudRestore = true
+        guard appRuntimeState.cloudSyncEnabled else { return }
+
+        do {
+            let isEmpty = try await rootBackgroundStore.perform("app.startup-cloud-restore.empty-check") { backgroundContext in
+                try Self.isLocalUserDataEmpty(modelContext: backgroundContext)
+            }
+            guard isEmpty else { return }
+
+            let didRestore = try await UserDataCloudBackupService(
+                localContainer: modelContext.container,
+                backupStore: CloudKitUserDataCloudBackupStore()
+            ).restoreLatestBackup()
+
+            if didRestore {
+                AppRuntimeState.shared.updateUserDataSyncStatus(.backedUp())
+                appWarmupState.invalidateProfile()
+                WorkoutHistoryChangeBroadcaster.post()
+                TemplateLibraryChangeBroadcaster.post()
+                scheduleWeeklyGoalWidgetPublish()
+            }
+        } catch {
+            AppRuntimeState.shared.updateUserDataSyncStatus(
+                .degraded("Cloud backup restore failed: \(error.localizedDescription)")
+            )
+        }
+    }
+
+    nonisolated private static func isLocalUserDataEmpty(modelContext: ModelContext) throws -> Bool {
+        try modelContext.fetch(FetchDescriptor<UserProfile>()).isEmpty
+            && modelContext.fetch(FetchDescriptor<WorkoutTemplate>()).isEmpty
+            && modelContext.fetch(FetchDescriptor<WorkoutSession>()).isEmpty
+            && modelContext.fetch(FetchDescriptor<CustomExerciseCloudRecord>()).isEmpty
     }
 
     @MainActor
