@@ -41,6 +41,12 @@ nonisolated enum ProfileWeeklyGoalChartScalePolicy {
 }
 
 struct ProfileView: View {
+    private enum ScrollTarget {
+        static let cloudBackupSection = "profile-cloud-backup-section"
+        static let cloudBackupDetailsEnd = "profile-cloud-backup-details-end"
+        static let profileBottomPadding = "profile-bottom-padding"
+    }
+
     private enum CoachBriefLoadState {
         case idle
         case loading
@@ -93,22 +99,27 @@ struct ProfileView: View {
     @State private var errorMessage = ""
     @State private var showingError = false
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                WGJRootHeader("Profile", subtitle: "Your training snapshot, progress, and app controls.")
+        ScrollViewReader { scrollProxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    WGJRootHeader("Profile", subtitle: "Your training snapshot, progress, and app controls.")
 
-                identityCard
-                highlightsCard
-                dashboardSection
-                appSection
-                cloudBackupSection
+                    identityCard
+                    highlightsCard
+                    dashboardSection
+                    appSection
+                    cloudBackupSection(scrollProxy: scrollProxy)
+                    Color.clear
+                        .frame(height: 96)
+                        .id(ScrollTarget.profileBottomPadding)
+                }
+                .padding(.top, 8)
+                .padding(16)
             }
-            .padding(.top, 8)
-            .padding(16)
+            .scrollDismissesKeyboard(.interactively)
+            .wgjScreenBackground()
+            .accessibilityIdentifier("profile-content-root")
         }
-        .scrollDismissesKeyboard(.interactively)
-        .wgjScreenBackground()
-        .accessibilityIdentifier("profile-content-root")
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {
             applyWarmProfileSnapshotIfAvailable()
@@ -718,7 +729,7 @@ struct ProfileView: View {
         }
     }
 
-    private var cloudBackupSection: some View {
+    private func cloudBackupSection(scrollProxy: ScrollViewProxy) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .center, spacing: 12) {
                 Text("Cloud Backup")
@@ -782,11 +793,12 @@ struct ProfileView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(WGJTheme.textSecondary)
 
-            cloudBackupComparisonTable
+            cloudBackupComparisonTable(scrollProxy: scrollProxy)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .wgjCardContainer()
+        .id(ScrollTarget.cloudBackupSection)
         .accessibilityIdentifier("profile-cloud-backup-section")
     }
 
@@ -872,7 +884,7 @@ struct ProfileView: View {
         return remoteCloudBackupSummary == localCloudBackupSummary ? WGJTheme.success : WGJTheme.accentGold
     }
 
-    private var cloudBackupComparisonTable: some View {
+    private func cloudBackupComparisonTable(scrollProxy: ScrollViewProxy) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 8) {
                 Label(cloudBackupComparisonText, systemImage: cloudBackupComparisonIcon)
@@ -900,9 +912,14 @@ struct ProfileView: View {
             }
 
             Button {
+                let shouldShowDetails = !showsCloudBackupDetails
                 withAnimation(.snappy(duration: 0.22, extraBounce: 0.02)) {
-                    showsCloudBackupDetails.toggle()
+                    showsCloudBackupDetails = shouldShowDetails
                 }
+                scrollCloudBackupDetailsAfterToggle(
+                    showingDetails: shouldShowDetails,
+                    scrollProxy: scrollProxy
+                )
             } label: {
                 HStack(spacing: 8) {
                     Text(showsCloudBackupDetails ? "Hide backup contents" : "Show backup contents")
@@ -916,6 +933,7 @@ struct ProfileView: View {
                 }
                 .foregroundStyle(WGJTheme.accentCyan)
                 .padding(.vertical, 6)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("profile-cloud-backup-details-toggle")
@@ -933,7 +951,24 @@ struct ProfileView: View {
                     RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
                         .fill(WGJTheme.field.opacity(0.42))
                 }
+                .id(ScrollTarget.cloudBackupDetailsEnd)
                 .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    private func scrollCloudBackupDetailsAfterToggle(
+        showingDetails: Bool,
+        scrollProxy: ScrollViewProxy
+    ) {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 140_000_000)
+            withAnimation(.snappy(duration: 0.24, extraBounce: 0.02)) {
+                if showingDetails {
+                    scrollProxy.scrollTo(ScrollTarget.profileBottomPadding, anchor: .bottom)
+                } else {
+                    scrollProxy.scrollTo(ScrollTarget.cloudBackupSection, anchor: .bottom)
+                }
             }
         }
     }
