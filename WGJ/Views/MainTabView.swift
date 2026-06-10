@@ -174,23 +174,19 @@ struct MainTabView: View {
     @ViewBuilder
     private func cloudBackupTopBanner(topSafeAreaInset: CGFloat) -> some View {
         if let cloudBackupBanner {
-            VStack {
-                WGJTransientBanner(
-                    title: cloudBackupBannerTitle(for: cloudBackupBanner),
-                    message: cloudBackupBannerMessage(for: cloudBackupBanner),
-                    icon: cloudBackupBannerIcon(for: cloudBackupBanner),
-                    tint: cloudBackupBannerTint(for: cloudBackupBanner)
-                )
-                .padding(.horizontal, WGJSpacing.page)
-                .padding(.top, max(12, topSafeAreaInset + 8))
-                .transition(.move(edge: .top).combined(with: .opacity))
-                .accessibilityIdentifier("cloud-backup-status-banner")
-
-                Spacer(minLength: 0)
-            }
+            WGJTransientBanner(
+                title: cloudBackupBannerTitle(for: cloudBackupBanner),
+                message: cloudBackupBannerMessage(for: cloudBackupBanner),
+                icon: cloudBackupBannerIcon(for: cloudBackupBanner),
+                tint: cloudBackupBannerTint(for: cloudBackupBanner)
+            )
+            .padding(.horizontal, WGJSpacing.page)
+            .padding(.top, max(8, topSafeAreaInset + 6))
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .allowsHitTesting(false)
+            .transition(.move(edge: .top).combined(with: .opacity))
             .animation(overlayAnimation, value: cloudBackupBanner)
+            .accessibilityIdentifier("cloud-backup-status-banner")
         }
     }
 
