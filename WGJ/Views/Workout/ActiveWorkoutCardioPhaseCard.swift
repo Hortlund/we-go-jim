@@ -56,7 +56,7 @@ struct ActiveWorkoutCardioPhaseCard<HeaderActions: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(phase.title.uppercased())
                         .font(.caption.weight(.bold))
@@ -90,9 +90,10 @@ struct ActiveWorkoutCardioPhaseCard<HeaderActions: View>: View {
 
                 Spacer(minLength: 12)
 
-                completionButton
-
-                headerActions
+                HStack(alignment: .center, spacing: 8) {
+                    completionButton
+                    headerActions
+                }
             }
 
             if let footnote, !footnote.isEmpty {
