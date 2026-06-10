@@ -78,22 +78,56 @@ nonisolated enum BoundaryCloudBackupScheduler {
     static func exportBestEffort(container: ModelContainer, reason: BoundaryCloudBackupReason) {
         guard AppRuntimeConfig.canUseConfiguredCloudKitContainer else { return }
 
-        Task.detached(priority: .utility) {
-            do {
-                await MainActor.run {
-                    AppRuntimeState.shared.updateUserDataSyncStatus(.pending())
-                }
-                let exportedSnapshot = try await UserDataCloudBackupService(
-                    localContainer: container,
-                    backupStore: CloudKitUserDataCloudBackupStore()
-                ).exportCurrentBackup()
-                await MainActor.run {
-                    AppRuntimeState.shared.updateUserDataSyncStatus(.backedUp(at: exportedSnapshot.updatedAt))
-                }
-            } catch {
-                await MainActor.run {
-                    AppRuntimeState.shared.updateUserDataSyncStatus(.degraded("Cloud backup failed after \(reason.failureDescription): \(error.localizedDescription)"))
-                }
+        Task(priority: .utility) {
+            await BoundaryCloudBackupExportQueue.shared.enqueue(container: container, reason: reason)
+        }
+    }
+}
+
+private struct BoundaryCloudBackupRequest {
+    let container: ModelContainer
+    let reason: BoundaryCloudBackupReason
+}
+
+private actor BoundaryCloudBackupExportQueue {
+    static let shared = BoundaryCloudBackupExportQueue()
+
+    private var isProcessing = false
+    private var pendingRequest: BoundaryCloudBackupRequest?
+
+    func enqueue(container: ModelContainer, reason: BoundaryCloudBackupReason) {
+        pendingRequest = BoundaryCloudBackupRequest(container: container, reason: reason)
+        guard !isProcessing else { return }
+
+        isProcessing = true
+        Task(priority: .utility) {
+            await processPendingRequests()
+        }
+    }
+
+    private func processPendingRequests() async {
+        while let request = pendingRequest {
+            pendingRequest = nil
+            await export(request)
+        }
+        isProcessing = false
+    }
+
+    private func export(_ request: BoundaryCloudBackupRequest) async {
+        do {
+            await MainActor.run {
+                AppRuntimeState.shared.updateUserDataSyncStatus(.pending())
+            }
+            let exportedSnapshot = try await UserDataCloudBackupService(
+                localContainer: request.container,
+                backupStore: CloudKitUserDataCloudBackupStore()
+            ).exportCurrentBackup()
+            await MainActor.run {
+                AppRuntimeState.shared.updateUserDataSyncStatus(.backedUp(at: exportedSnapshot.updatedAt))
+            }
+        } catch {
+            await MainActor.run {
+                AppRuntimeState.shared.updateUserDataSyncStatus(.degraded("Cloud backup failed after \(request.reason.failureDescription): \(error.localizedDescription)"))
             }
         }
     }
