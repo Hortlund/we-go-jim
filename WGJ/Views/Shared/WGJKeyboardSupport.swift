@@ -32,43 +32,6 @@ enum WGJKeyboard {
     }
 }
 
-enum WGJKeyboardHideControl {
-    static let title = ""
-    static let systemImage = "keyboard.chevron.compact.down"
-    static let accessibilityLabel = "Hide keyboard"
-    static let accessibilityIdentifier = "keyboard-hide-button"
-
-    static var foregroundStyle: Color {
-        WGJTheme.textPrimary
-    }
-
-    static var foregroundUIColor: UIColor {
-        UIColor(WGJTheme.textPrimary)
-    }
-
-    static func buttonConfiguration() -> UIButton.Configuration {
-        var configuration = UIButton.Configuration.plain()
-        configuration.image = UIImage(systemName: systemImage)
-        configuration.baseForegroundColor = foregroundUIColor
-        return configuration
-    }
-}
-
-struct WGJKeyboardHideButton: View {
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: WGJKeyboardHideControl.systemImage)
-                .font(.body.weight(.semibold))
-                .foregroundStyle(WGJKeyboardHideControl.foregroundStyle)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(WGJKeyboardHideControl.accessibilityLabel)
-        .accessibilityIdentifier(WGJKeyboardHideControl.accessibilityIdentifier)
-    }
-}
-
 struct WGJAccessoryTextField: UIViewRepresentable {
     let placeholder: String
     @Binding var text: String
@@ -81,7 +44,7 @@ struct WGJAccessoryTextField: UIViewRepresentable {
     var textColor: UIColor = UIColor(WGJTheme.textPrimary)
     var tintColor: UIColor = UIColor(WGJTheme.accentBlue)
     var isEnabled: Bool = true
-    var showsAccessoryDismissButton: Bool = true
+    var showsAccessoryDismissButton: Bool = false
     let onDismiss: () -> Void
 
     init(
@@ -96,7 +59,7 @@ struct WGJAccessoryTextField: UIViewRepresentable {
         textColor: UIColor = UIColor(WGJTheme.textPrimary),
         tintColor: UIColor = UIColor(WGJTheme.accentBlue),
         isEnabled: Bool = true,
-        showsAccessoryDismissButton: Bool = true,
+        showsAccessoryDismissButton: Bool = false,
         onDismiss: @escaping () -> Void
     ) {
         self.placeholder = placeholder
@@ -140,7 +103,7 @@ struct WGJAccessoryTextField: UIViewRepresentable {
             action: #selector(Coordinator.textDidChange(_:)),
             for: .editingChanged
         )
-        textField.inputAccessoryView = showsAccessoryDismissButton ? context.coordinator.makeAccessoryView() : nil
+        textField.inputAccessoryView = nil
         context.coordinator.textField = textField
         return textField
     }
@@ -158,10 +121,7 @@ struct WGJAccessoryTextField: UIViewRepresentable {
         textField.tintColor = tintColor
         textField.isEnabled = isEnabled
         textField.accessibilityIdentifier = accessibilityIdentifier
-        if showsAccessoryDismissButton, textField.inputAccessoryView == nil {
-            textField.inputAccessoryView = context.coordinator.makeAccessoryView()
-            textField.reloadInputViews()
-        } else if !showsAccessoryDismissButton, textField.inputAccessoryView != nil {
+        if textField.inputAccessoryView != nil {
             textField.inputAccessoryView = nil
             textField.reloadInputViews()
         }
@@ -187,29 +147,6 @@ struct WGJAccessoryTextField: UIViewRepresentable {
             _text = text
             _isFocused = isFocused
             self.onDismiss = onDismiss
-        }
-
-        func makeAccessoryView() -> UIView {
-            let toolbar = UIToolbar()
-            toolbar.sizeToFit()
-            toolbar.barStyle = .default
-            toolbar.isTranslucent = true
-
-            let button = UIBarButtonItem(
-                image: UIImage(systemName: WGJKeyboardHideControl.systemImage),
-                style: .plain,
-                target: self,
-                action: #selector(dismissKeyboard)
-            )
-            button.tintColor = WGJKeyboardHideControl.foregroundUIColor
-            button.accessibilityLabel = WGJKeyboardHideControl.accessibilityLabel
-            button.accessibilityIdentifier = WGJKeyboardHideControl.accessibilityIdentifier
-
-            toolbar.items = [
-                UIBarButtonItem.flexibleSpace(),
-                button,
-            ]
-            return toolbar
         }
 
         @objc func textDidChange(_ sender: UITextField) {
@@ -268,37 +205,6 @@ private struct WGJKeyboardVisibilityModifier: ViewModifier {
     }
 }
 
-private struct WGJMinimalKeyboardToolbarModifier: ViewModifier {
-    let isEnabled: Bool
-    let onDismiss: () -> Void
-
-    init(
-        isKeyboardVisible: Binding<Bool>? = nil,
-        isEnabled: Bool = true,
-        onDismiss: @escaping () -> Void
-    ) {
-        self.isEnabled = isEnabled
-        self.onDismiss = onDismiss
-    }
-
-    func body(content: Content) -> some View {
-        content
-            .toolbar {
-                if isEnabled {
-                    ToolbarItemGroup(placement: .keyboard) {
-                        keyboardToolbarButton
-                    }
-                }
-            }
-    }
-
-    @ViewBuilder
-    private var keyboardToolbarButton: some View {
-        Spacer()
-        WGJKeyboardHideButton(action: onDismiss)
-    }
-}
-
 extension View {
     @MainActor
     func wgjTrackKeyboardVisibility(
@@ -310,24 +216,17 @@ extension View {
 
     @MainActor
     func wgjMinimalKeyboardToolbar() -> some View {
-        modifier(WGJMinimalKeyboardToolbarModifier(onDismiss: {
-            WGJKeyboard.dismiss()
-        }))
+        self
     }
 
     func wgjMinimalKeyboardToolbar(isKeyboardVisible: Binding<Bool>) -> some View {
-        modifier(WGJMinimalKeyboardToolbarModifier(
-            isKeyboardVisible: isKeyboardVisible,
-            onDismiss: {
-                WGJKeyboard.dismiss()
-            }
-        ))
+        self
     }
 
     func wgjMinimalKeyboardToolbar(
         isEnabled: Bool = true,
         onDismiss: @escaping () -> Void
     ) -> some View {
-        modifier(WGJMinimalKeyboardToolbarModifier(isEnabled: isEnabled, onDismiss: onDismiss))
+        self
     }
 }

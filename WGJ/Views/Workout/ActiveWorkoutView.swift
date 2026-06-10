@@ -115,12 +115,6 @@ struct ActiveWorkoutView: View {
                     finishToolbarButton
                 }
             }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                if isKeyboardVisible {
-                    ActiveWorkoutKeyboardDismissBar(action: dismissKeyboard)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-            }
             .overlay(alignment: .bottom) {
                 if ActiveWorkoutBottomDockPlacementPolicy.shouldPinToScreenOverlay(
                     hasSession: session != nil,
@@ -2190,6 +2184,9 @@ struct ActiveWorkoutView: View {
 
     private func keyboardDismissToken(for exerciseID: UUID) -> ActiveWorkoutKeyboardDismissToken {
         guard focusedMetricInputExerciseID == exerciseID || keyboardDismissTargetExerciseID == exerciseID else {
+            if isKeyboardVisible, focusedMetricInputExerciseID == nil, keyboardDismissTargetExerciseID == nil {
+                return keyboardDismissToken
+            }
             return ActiveWorkoutKeyboardDismissToken()
         }
 
@@ -2199,12 +2196,13 @@ struct ActiveWorkoutView: View {
     private func dismissKeyboard() {
         if let focusedMetricInputExerciseID {
             keyboardDismissTargetExerciseID = focusedMetricInputExerciseID
-            keyboardDismissToken.requestDismiss()
-            return
         }
 
         keyboardDismissToken.requestDismiss()
-        WGJKeyboard.dismiss()
+        Task { @MainActor in
+            await Task.yield()
+            WGJKeyboard.dismiss()
+        }
     }
 
     private func handleMetricInputFocusChange(_ isFocused: Bool, exerciseID: UUID) {
@@ -3551,60 +3549,6 @@ private enum ActiveWorkoutPickerTarget: Identifiable {
             return "Add Exercise"
         case .cardio:
             return "Choose Exercise"
-        }
-    }
-}
-
-private struct ActiveWorkoutKeyboardDismissBar: View {
-    let action: () -> Void
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "keyboard")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(WGJTheme.textSecondary)
-                .frame(width: 32, height: 32)
-                .background {
-                    Circle()
-                        .fill(WGJTheme.field.opacity(0.86))
-                }
-
-            Spacer(minLength: 0)
-
-            Button(action: action) {
-                Label("Done", systemImage: WGJKeyboardHideControl.systemImage)
-                    .font(.subheadline.weight(.semibold))
-                    .labelStyle(.titleAndIcon)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background {
-                        Capsule()
-                            .fill(WGJTheme.accentBlue.opacity(0.14))
-                            .overlay {
-                                Capsule()
-                                    .stroke(WGJTheme.accentBlue.opacity(0.28), lineWidth: 1)
-                            }
-                    }
-            }
-            .buttonStyle(.borderless)
-            .foregroundStyle(WGJTheme.accentBlue)
-            .accessibilityLabel(WGJKeyboardHideControl.accessibilityLabel)
-            .accessibilityIdentifier(WGJKeyboardHideControl.accessibilityIdentifier)
-        }
-        .frame(maxWidth: .infinity, minHeight: 52)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 6)
-        .background {
-            Rectangle()
-                .fill(.ultraThinMaterial)
-                .overlay {
-                    WGJTheme.bgElevated.opacity(0.62)
-                }
-        }
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(WGJTheme.outline.opacity(0.22))
-                .frame(height: 1 / max(UIScreen.main.scale, 1))
         }
     }
 }
