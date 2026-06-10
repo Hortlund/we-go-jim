@@ -83,9 +83,12 @@ struct ProfileView: View {
     @State private var lastLoadedProfileUpdatedAt: Date?
     @State private var lastRefreshAt: Date?
     @State private var lastHandledProfileInvalidationVersion = 0
-    @State private var cloudBackupSummary = ProfileCloudBackupSummary.empty
+    @State private var localCloudBackupSummary = UserDataCloudBackupContentSummary.empty
+    @State private var remoteCloudBackupSummary: UserDataCloudBackupContentSummary?
     @State private var isLoadingCloudBackupSummary = false
+    @State private var isRefreshingCloudBackupMetadata = false
     @State private var isForcingCloudBackup = false
+    @State private var showsCloudBackupDetails = false
 
     @State private var errorMessage = ""
     @State private var showingError = false
@@ -111,6 +114,7 @@ struct ProfileView: View {
             applyWarmProfileSnapshotIfAvailable()
             Task {
                 await refreshCloudBackupSummary()
+                await refreshCloudBackupMetadata()
             }
         }
         .task(id: isTabActive) {
@@ -774,27 +778,11 @@ struct ProfileView: View {
                     }
             }
 
-            Text("Included in backup")
+            Text("Backup comparison")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(WGJTheme.textSecondary)
 
-            HStack(spacing: 10) {
-                ProfileCloudBackupStatTile(
-                    title: "Workouts",
-                    value: cloudBackupSummary.completedWorkoutCountText,
-                    isLoading: isLoadingCloudBackupSummary
-                )
-                ProfileCloudBackupStatTile(
-                    title: "Templates",
-                    value: cloudBackupSummary.templateCountText,
-                    isLoading: isLoadingCloudBackupSummary
-                )
-                ProfileCloudBackupStatTile(
-                    title: "Custom",
-                    value: cloudBackupSummary.customExerciseCountText,
-                    isLoading: isLoadingCloudBackupSummary
-                )
-            }
+            cloudBackupComparisonTable
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -823,14 +811,131 @@ struct ProfileView: View {
     }
 
     private var cloudBackupStatusDetail: String {
-        "Last backup: \(latestCloudBackupText)"
+        if isRefreshingCloudBackupMetadata {
+            return "Checking latest backup..."
+        }
+        return "Last backup: \(latestCloudBackupText)"
     }
 
     private var latestCloudBackupText: String {
         if let latestExport = userDataSyncStatus.latestSuccessfulExportAt {
-            return latestExport.formatted(.dateTime.month(.abbreviated).day().hour().minute())
+            return latestExport.formatted(.relative(presentation: .named))
         }
         return "Never"
+    }
+
+    private var cloudBackupComparisonRows: [ProfileCloudBackupComparisonRow] {
+        ProfileCloudBackupComparisonRow.primaryRows(
+            cloud: remoteCloudBackupSummary,
+            device: localCloudBackupSummary
+        )
+    }
+
+    private var cloudBackupDetailRows: [ProfileCloudBackupComparisonRow] {
+        ProfileCloudBackupComparisonRow.detailRows(
+            cloud: remoteCloudBackupSummary,
+            device: localCloudBackupSummary
+        )
+    }
+
+    private var cloudBackupComparisonText: String {
+        guard let remoteCloudBackupSummary else {
+            return cloudSyncEnabled ? "No cloud backup found" : "Cloud backup unavailable"
+        }
+
+        let localTotal = localCloudBackupSummary.totalBackedUpItemCount
+        let remoteTotal = remoteCloudBackupSummary.totalBackedUpItemCount
+        guard localTotal != remoteTotal else {
+            return "Cloud matches this device"
+        }
+
+        if localTotal > remoteTotal {
+            return "\(localTotal - remoteTotal) local item\(localTotal - remoteTotal == 1 ? "" : "s") not backed up yet"
+        }
+
+        return "\(remoteTotal - localTotal) cloud item\(remoteTotal - localTotal == 1 ? "" : "s") not on this device"
+    }
+
+    private var cloudBackupComparisonIcon: String {
+        guard let remoteCloudBackupSummary else {
+            return "icloud.slash"
+        }
+        return remoteCloudBackupSummary == localCloudBackupSummary
+            ? "checkmark.seal.fill"
+            : "arrow.left.arrow.right.circle.fill"
+    }
+
+    private var cloudBackupComparisonTint: Color {
+        guard let remoteCloudBackupSummary else {
+            return WGJTheme.textSecondary
+        }
+        return remoteCloudBackupSummary == localCloudBackupSummary ? WGJTheme.success : WGJTheme.accentGold
+    }
+
+    private var cloudBackupComparisonTable: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 8) {
+                Label(cloudBackupComparisonText, systemImage: cloudBackupComparisonIcon)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(cloudBackupComparisonTint)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 0)
+            }
+
+            ProfileCloudBackupComparisonHeader()
+
+            VStack(spacing: 0) {
+                ForEach(cloudBackupComparisonRows) { row in
+                    ProfileCloudBackupComparisonRowView(
+                        row: row,
+                        isLoading: isLoadingCloudBackupSummary || isRefreshingCloudBackupMetadata
+                    )
+                }
+            }
+            .background {
+                RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
+                    .fill(WGJTheme.field.opacity(0.42))
+            }
+
+            Button {
+                withAnimation(.snappy(duration: 0.22, extraBounce: 0.02)) {
+                    showsCloudBackupDetails.toggle()
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Text(showsCloudBackupDetails ? "Hide backup contents" : "Show backup contents")
+                        .font(.caption.weight(.semibold))
+
+                    Spacer(minLength: 0)
+
+                    Image(systemName: "chevron.down")
+                        .font(.caption.weight(.bold))
+                        .rotationEffect(.degrees(showsCloudBackupDetails ? 180 : 0))
+                }
+                .foregroundStyle(WGJTheme.accentCyan)
+                .padding(.vertical, 6)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("profile-cloud-backup-details-toggle")
+
+            if showsCloudBackupDetails {
+                VStack(spacing: 0) {
+                    ForEach(cloudBackupDetailRows) { row in
+                        ProfileCloudBackupComparisonRowView(
+                            row: row,
+                            isLoading: isLoadingCloudBackupSummary || isRefreshingCloudBackupMetadata
+                        )
+                    }
+                }
+                .background {
+                    RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
+                        .fill(WGJTheme.field.opacity(0.42))
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
     }
 
     private var cloudBackupStatusIcon: String {
@@ -985,13 +1090,36 @@ struct ProfileView: View {
         isLoadingCloudBackupSummary = true
         do {
             let backgroundStore = profileBackgroundStore
-            cloudBackupSummary = try await backgroundStore.perform("profile.cloud-backup-summary") { context in
-                try ProfileCloudBackupSummary.load(context: context)
+            localCloudBackupSummary = try await backgroundStore.perform("profile.cloud-backup-summary") { context in
+                try UserDataCloudBackupContentSummary.loadLocal(context: context)
             }
         } catch {
-            cloudBackupSummary = .empty
+            localCloudBackupSummary = .empty
         }
         isLoadingCloudBackupSummary = false
+    }
+
+    @MainActor
+    private func refreshCloudBackupMetadata() async {
+        guard cloudSyncEnabled, !isRefreshingCloudBackupMetadata else { return }
+
+        isRefreshingCloudBackupMetadata = true
+        do {
+            let snapshot = try await UserDataCloudBackupService(
+                localContainer: modelContext.container,
+                backupStore: CloudKitUserDataCloudBackupStore()
+            ).latestBackupSnapshot()
+            if let snapshot {
+                remoteCloudBackupSummary = snapshot.contentSummary
+                AppRuntimeState.shared.updateUserDataSyncStatus(.backedUp(at: snapshot.updatedAt))
+            } else {
+                remoteCloudBackupSummary = nil
+                AppRuntimeState.shared.updateUserDataSyncStatus(.backedUp(at: nil))
+            }
+        } catch {
+            AppRuntimeState.shared.updateUserDataSyncStatus(.degraded("Cloud backup status check failed: \(error.localizedDescription)"))
+        }
+        isRefreshingCloudBackupMetadata = false
     }
 
     @MainActor
@@ -1001,11 +1129,12 @@ struct ProfileView: View {
         isForcingCloudBackup = true
         AppRuntimeState.shared.updateUserDataSyncStatus(.pending())
         do {
-            try await UserDataCloudBackupService(
+            let exportedSnapshot = try await UserDataCloudBackupService(
                 localContainer: modelContext.container,
                 backupStore: CloudKitUserDataCloudBackupStore()
             ).exportCurrentBackup()
-            AppRuntimeState.shared.updateUserDataSyncStatus(.backedUp())
+            remoteCloudBackupSummary = exportedSnapshot.contentSummary
+            AppRuntimeState.shared.updateUserDataSyncStatus(.backedUp(at: exportedSnapshot.updatedAt))
             await refreshCloudBackupSummary()
         } catch {
             AppRuntimeState.shared.updateUserDataSyncStatus(.degraded("Manual cloud backup failed: \(error.localizedDescription)"))
@@ -1691,63 +1820,189 @@ private struct ProfileQuickStatTile: View {
     }
 }
 
-private struct ProfileCloudBackupSummary: Equatable, Sendable {
-    static let empty = ProfileCloudBackupSummary(
+private extension UserDataCloudBackupContentSummary {
+    static let empty = UserDataCloudBackupContentSummary(
+        profileCount: 0,
+        profileWidgetCount: 0,
+        customExerciseCount: 0,
+        templateFolderCount: 0,
+        workoutTemplateCount: 0,
+        templateCardioBlockCount: 0,
+        templateExerciseCount: 0,
+        templateComponentCount: 0,
+        templateSetCount: 0,
+        templateDropStageCount: 0,
         completedWorkoutCount: 0,
-        templateCount: 0,
-        customExerciseCount: 0
+        workoutCardioBlockCount: 0,
+        workoutExerciseCount: 0,
+        workoutSetCount: 0,
+        workoutDropStageCount: 0
     )
 
-    let completedWorkoutCount: Int
-    let templateCount: Int
-    let customExerciseCount: Int
+    var totalBackedUpItemCount: Int {
+        profileCount
+            + profileWidgetCount
+            + customExerciseCount
+            + templateFolderCount
+            + workoutTemplateCount
+            + templateCardioBlockCount
+            + templateExerciseCount
+            + templateComponentCount
+            + templateSetCount
+            + templateDropStageCount
+            + completedWorkoutCount
+            + workoutCardioBlockCount
+            + workoutExerciseCount
+            + workoutSetCount
+            + workoutDropStageCount
+    }
 
-    var completedWorkoutCountText: String { "\(completedWorkoutCount)" }
-    var templateCountText: String { "\(templateCount)" }
-    var customExerciseCountText: String { "\(customExerciseCount)" }
-
-    nonisolated static func load(context: ModelContext) throws -> ProfileCloudBackupSummary {
-        let workoutSessions = try context.fetch(FetchDescriptor<WorkoutSession>())
-        let templates = try context.fetch(FetchDescriptor<WorkoutTemplate>())
+    nonisolated static func loadLocal(context: ModelContext) throws -> UserDataCloudBackupContentSummary {
         let exercises = try context.fetch(FetchDescriptor<ExerciseCatalogItem>())
+        let workoutSessions = try context.fetch(FetchDescriptor<WorkoutSession>())
 
-        return ProfileCloudBackupSummary(
+        return UserDataCloudBackupContentSummary(
+            profileCount: try context.fetch(FetchDescriptor<UserProfile>()).count,
+            profileWidgetCount: try context.fetch(FetchDescriptor<ProfileWidgetConfig>()).count,
+            customExerciseCount: exercises.filter(\.isCustomExercise).count,
+            templateFolderCount: try context.fetch(FetchDescriptor<TemplateFolder>()).count,
+            workoutTemplateCount: try context.fetch(FetchDescriptor<WorkoutTemplate>()).count,
+            templateCardioBlockCount: try context.fetch(FetchDescriptor<TemplateCardioBlock>()).count,
+            templateExerciseCount: try context.fetch(FetchDescriptor<TemplateExercise>()).count,
+            templateComponentCount: try context.fetch(FetchDescriptor<TemplateExerciseComponent>()).count,
+            templateSetCount: try context.fetch(FetchDescriptor<TemplateExerciseSet>()).count,
+            templateDropStageCount: try context.fetch(FetchDescriptor<TemplateExerciseDropStage>()).count,
             completedWorkoutCount: workoutSessions.filter { $0.status == .completed }.count,
-            templateCount: templates.count,
-            customExerciseCount: exercises.filter(\.isCustomExercise).count
+            workoutCardioBlockCount: try context.fetch(FetchDescriptor<WorkoutSessionCardioBlock>()).count,
+            workoutExerciseCount: try context.fetch(FetchDescriptor<WorkoutSessionExercise>()).count,
+            workoutSetCount: try context.fetch(FetchDescriptor<WorkoutSessionSet>()).count,
+            workoutDropStageCount: try context.fetch(FetchDescriptor<WorkoutSessionDropStage>()).count
         )
     }
 }
 
-private struct ProfileCloudBackupStatTile: View {
+private struct ProfileCloudBackupComparisonRow: Identifiable, Equatable {
+    let id: String
     let title: String
-    let value: String
+    let cloudCount: Int?
+    let deviceCount: Int
+
+    var hasDifference: Bool {
+        guard let cloudCount else { return false }
+        return cloudCount != deviceCount
+    }
+
+    static func primaryRows(
+        cloud: UserDataCloudBackupContentSummary?,
+        device: UserDataCloudBackupContentSummary
+    ) -> [ProfileCloudBackupComparisonRow] {
+        [
+            ProfileCloudBackupComparisonRow(
+                id: "completed-workouts",
+                title: "Workouts",
+                cloudCount: cloud?.completedWorkoutCount,
+                deviceCount: device.completedWorkoutCount
+            ),
+            ProfileCloudBackupComparisonRow(
+                id: "workout-templates",
+                title: "Templates",
+                cloudCount: cloud?.workoutTemplateCount,
+                deviceCount: device.workoutTemplateCount
+            ),
+            ProfileCloudBackupComparisonRow(
+                id: "custom-exercises",
+                title: "Custom exercises",
+                cloudCount: cloud?.customExerciseCount,
+                deviceCount: device.customExerciseCount
+            ),
+        ]
+    }
+
+    static func detailRows(
+        cloud: UserDataCloudBackupContentSummary?,
+        device: UserDataCloudBackupContentSummary
+    ) -> [ProfileCloudBackupComparisonRow] {
+        [
+            ProfileCloudBackupComparisonRow(id: "profiles", title: "Profiles", cloudCount: cloud?.profileCount, deviceCount: device.profileCount),
+            ProfileCloudBackupComparisonRow(id: "profile-widgets", title: "Profile widgets", cloudCount: cloud?.profileWidgetCount, deviceCount: device.profileWidgetCount),
+            ProfileCloudBackupComparisonRow(id: "template-folders", title: "Template folders", cloudCount: cloud?.templateFolderCount, deviceCount: device.templateFolderCount),
+            ProfileCloudBackupComparisonRow(id: "template-cardio", title: "Template cardio blocks", cloudCount: cloud?.templateCardioBlockCount, deviceCount: device.templateCardioBlockCount),
+            ProfileCloudBackupComparisonRow(id: "template-exercises", title: "Template exercises", cloudCount: cloud?.templateExerciseCount, deviceCount: device.templateExerciseCount),
+            ProfileCloudBackupComparisonRow(id: "template-components", title: "Template components", cloudCount: cloud?.templateComponentCount, deviceCount: device.templateComponentCount),
+            ProfileCloudBackupComparisonRow(id: "template-sets", title: "Template sets", cloudCount: cloud?.templateSetCount, deviceCount: device.templateSetCount),
+            ProfileCloudBackupComparisonRow(id: "template-drop-stages", title: "Template drop stages", cloudCount: cloud?.templateDropStageCount, deviceCount: device.templateDropStageCount),
+            ProfileCloudBackupComparisonRow(id: "workout-cardio", title: "Workout cardio blocks", cloudCount: cloud?.workoutCardioBlockCount, deviceCount: device.workoutCardioBlockCount),
+            ProfileCloudBackupComparisonRow(id: "workout-exercises", title: "Workout exercises", cloudCount: cloud?.workoutExerciseCount, deviceCount: device.workoutExerciseCount),
+            ProfileCloudBackupComparisonRow(id: "workout-sets", title: "Workout sets", cloudCount: cloud?.workoutSetCount, deviceCount: device.workoutSetCount),
+            ProfileCloudBackupComparisonRow(id: "workout-drop-stages", title: "Workout drop stages", cloudCount: cloud?.workoutDropStageCount, deviceCount: device.workoutDropStageCount),
+        ]
+    }
+}
+
+private struct ProfileCloudBackupComparisonHeader: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            Text("Item")
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text("Cloud")
+                .frame(width: 58, alignment: .trailing)
+            Text("Device")
+                .frame(width: 58, alignment: .trailing)
+        }
+        .font(.caption2.weight(.bold))
+        .foregroundStyle(WGJTheme.textSecondary)
+        .textCase(.uppercase)
+        .padding(.horizontal, 10)
+    }
+}
+
+private struct ProfileCloudBackupComparisonRowView: View {
+    let row: ProfileCloudBackupComparisonRow
     let isLoading: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        HStack(spacing: 10) {
             if isLoading {
                 ProgressView()
                     .controlSize(.small)
-                    .frame(height: 22, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                Text(value)
-                    .font(.title3.weight(.bold))
+                Text(row.title)
+                    .font(.subheadline.weight(.medium))
                     .foregroundStyle(WGJTheme.textPrimary)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
+                    .minimumScaleFactor(0.82)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(WGJTheme.textSecondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+                Text(countText(row.cloudCount))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(valueTint)
+                    .monospacedDigit()
+                    .frame(width: 58, alignment: .trailing)
+
+                Text("\(row.deviceCount)")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(valueTint)
+                    .monospacedDigit()
+                    .frame(width: 58, alignment: .trailing)
+            }
         }
-        .padding(12)
-        .frame(minHeight: 70, alignment: .leading)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .wgjCardContainer(cornerRadius: WGJRadius.control)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .background {
+            if row.hasDifference {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(WGJTheme.accentGold.opacity(0.10))
+            }
+        }
+    }
+
+    private var valueTint: Color {
+        row.hasDifference ? WGJTheme.accentGold : WGJTheme.textSecondary
+    }
+
+    private func countText(_ count: Int?) -> String {
+        count.map(String.init) ?? "-"
     }
 }
 

@@ -7,9 +7,41 @@ struct UserDataCloudBackupRemoteRecord: Equatable, Sendable {
     var payloadData: Data
 }
 
+struct UserDataCloudBackupRemoteMetadata: Equatable, Sendable {
+    var updatedAt: Date
+}
+
+struct UserDataCloudBackupRemoteSnapshot: Equatable, Sendable {
+    var updatedAt: Date
+    var contentSummary: UserDataCloudBackupContentSummary
+}
+
+struct UserDataCloudBackupRestoreResult: Equatable, Sendable {
+    var restoredAt: Date
+}
+
+struct UserDataCloudBackupContentSummary: Equatable, Sendable {
+    var profileCount: Int
+    var profileWidgetCount: Int
+    var customExerciseCount: Int
+    var templateFolderCount: Int
+    var workoutTemplateCount: Int
+    var templateCardioBlockCount: Int
+    var templateExerciseCount: Int
+    var templateComponentCount: Int
+    var templateSetCount: Int
+    var templateDropStageCount: Int
+    var completedWorkoutCount: Int
+    var workoutCardioBlockCount: Int
+    var workoutExerciseCount: Int
+    var workoutSetCount: Int
+    var workoutDropStageCount: Int
+}
+
 protocol UserDataCloudBackupStoring: Sendable {
     func saveBackup(_ record: UserDataCloudBackupRemoteRecord) async throws
     func fetchBackup() async throws -> UserDataCloudBackupRemoteRecord?
+    func fetchBackupMetadata() async throws -> UserDataCloudBackupRemoteMetadata?
 }
 
 nonisolated enum UserDataCloudBackupDescriptor {
@@ -39,12 +71,12 @@ nonisolated enum BoundaryCloudBackupScheduler {
                 await MainActor.run {
                     AppRuntimeState.shared.updateUserDataSyncStatus(.pending())
                 }
-                try await UserDataCloudBackupService(
+                let exportedSnapshot = try await UserDataCloudBackupService(
                     localContainer: container,
                     backupStore: CloudKitUserDataCloudBackupStore()
                 ).exportCurrentBackup()
                 await MainActor.run {
-                    AppRuntimeState.shared.updateUserDataSyncStatus(.backedUp())
+                    AppRuntimeState.shared.updateUserDataSyncStatus(.backedUp(at: exportedSnapshot.updatedAt))
                 }
             } catch {
                 await MainActor.run {
@@ -68,7 +100,8 @@ nonisolated final class UserDataCloudBackupService {
     }
 
     @MainActor
-    func exportCurrentBackup() async throws {
+    @discardableResult
+    func exportCurrentBackup() async throws -> UserDataCloudBackupRemoteSnapshot {
         let context = ModelContext(localContainer)
         context.autosaveEnabled = false
         let payload = try UserDataCloudBackupPayload(context: context)
@@ -77,26 +110,46 @@ nonisolated final class UserDataCloudBackupService {
             updatedAt: payload.generatedAt,
             payloadData: payloadData
         ))
+        return UserDataCloudBackupRemoteSnapshot(
+            updatedAt: payload.generatedAt,
+            contentSummary: payload.contentSummary
+        )
     }
 
-    @discardableResult
+    func latestBackupMetadata() async throws -> UserDataCloudBackupRemoteMetadata? {
+        try await backupStore.fetchBackupMetadata()
+    }
+
     @MainActor
-    func restoreLatestBackup() async throws -> Bool {
+    func latestBackupSnapshot() async throws -> UserDataCloudBackupRemoteSnapshot? {
         guard let record = try await backupStore.fetchBackup() else {
-            return false
+            return nil
+        }
+
+        let payload = try Self.makeDecoder().decode(UserDataCloudBackupPayload.self, from: record.payloadData)
+        return UserDataCloudBackupRemoteSnapshot(
+            updatedAt: record.updatedAt,
+            contentSummary: payload.contentSummary
+        )
+    }
+
+    @MainActor
+    func restoreLatestBackup() async throws -> UserDataCloudBackupRestoreResult? {
+        guard let record = try await backupStore.fetchBackup() else {
+            return nil
         }
 
         let payload = try Self.makeDecoder().decode(UserDataCloudBackupPayload.self, from: record.payloadData)
         let context = ModelContext(localContainer)
         context.autosaveEnabled = false
         guard try Self.isLocalUserDataEmpty(context: context) else {
-            return false
+            return nil
         }
         try payload.mergeIntoLocalStore(in: context)
         if context.hasChanges {
             try context.save()
         }
-        return true
+        return UserDataCloudBackupRestoreResult(restoredAt: record.updatedAt)
     }
 
     private static func makeEncoder() -> JSONEncoder {
@@ -178,6 +231,16 @@ nonisolated struct CloudKitUserDataCloudBackupStore: UserDataCloudBackupStoring 
             return UserDataCloudBackupRemoteRecord(updatedAt: updatedAt, payloadData: decodedPayloadData)
         }
         return nil
+    }
+
+    func fetchBackupMetadata() async throws -> UserDataCloudBackupRemoteMetadata? {
+        let recordID = CKRecord.ID(recordName: UserDataCloudBackupDescriptor.recordName)
+        guard let record = try await existingRecord(recordID: recordID) else {
+            return nil
+        }
+
+        let updatedAt = record[UserDataCloudBackupDescriptor.Field.updatedAt] as? Date ?? .distantPast
+        return UserDataCloudBackupRemoteMetadata(updatedAt: updatedAt)
     }
 
     private static func inlinePayloadFallback(for payloadData: Data) -> (data: Data, compression: String?)? {
@@ -280,6 +343,26 @@ private struct UserDataCloudBackupPayload: Codable {
         workoutExercises = try context.fetch(FetchDescriptor<WorkoutSessionExercise>()).map(WorkoutExerciseBackup.init)
         workoutSets = try context.fetch(FetchDescriptor<WorkoutSessionSet>()).map(WorkoutSetBackup.init)
         workoutDropStages = try context.fetch(FetchDescriptor<WorkoutSessionDropStage>()).map(WorkoutDropStageBackup.init)
+    }
+
+    var contentSummary: UserDataCloudBackupContentSummary {
+        UserDataCloudBackupContentSummary(
+            profileCount: profiles.count,
+            profileWidgetCount: profileWidgets.count,
+            customExerciseCount: customExercises.count,
+            templateFolderCount: templateFolders.count,
+            workoutTemplateCount: workoutTemplates.count,
+            templateCardioBlockCount: templateCardioBlocks.count,
+            templateExerciseCount: templateExercises.count,
+            templateComponentCount: templateComponents.count,
+            templateSetCount: templateSets.count,
+            templateDropStageCount: templateDropStages.count,
+            completedWorkoutCount: workoutSessions.count,
+            workoutCardioBlockCount: workoutCardioBlocks.count,
+            workoutExerciseCount: workoutExercises.count,
+            workoutSetCount: workoutSets.count,
+            workoutDropStageCount: workoutDropStages.count
+        )
     }
 
     func mergeIntoLocalStore(in context: ModelContext) throws {

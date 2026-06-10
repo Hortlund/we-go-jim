@@ -680,13 +680,13 @@ struct ContentView: View {
             }
             guard isEmpty else { return }
 
-            let didRestore = try await UserDataCloudBackupService(
+            let restoreResult = try await UserDataCloudBackupService(
                 localContainer: modelContext.container,
                 backupStore: CloudKitUserDataCloudBackupStore()
             ).restoreLatestBackup()
 
-            if didRestore {
-                AppRuntimeState.shared.updateUserDataSyncStatus(.backedUp())
+            if let restoreResult {
+                AppRuntimeState.shared.updateUserDataSyncStatus(.backedUp(at: restoreResult.restoredAt))
                 appWarmupState.invalidateProfile()
                 WorkoutHistoryChangeBroadcaster.post()
                 TemplateLibraryChangeBroadcaster.post()

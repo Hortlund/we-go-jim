@@ -236,7 +236,7 @@ nonisolated struct UserDataSyncStatusSnapshot: Equatable, Sendable {
         )
     }
 
-    static func backedUp(at date: Date = .now) -> UserDataSyncStatusSnapshot {
+    static func backedUp(at date: Date? = .now) -> UserDataSyncStatusSnapshot {
         UserDataSyncStatusSnapshot(
             state: .backedUp,
             detail: "The latest explicit save was exported to cloud backup.",
