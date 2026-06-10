@@ -1055,6 +1055,10 @@ nonisolated final class WorkoutSessionRepository {
         invalidateAnalyticsCache()
         publishWeeklyGoalWidgetProgress()
         WorkoutHistoryChangeBroadcaster.post()
+        BoundaryCloudBackupScheduler.exportBestEffort(
+            container: modelContext.container,
+            reason: .workoutDeleted
+        )
     }
 
     private func template(id: UUID) throws -> WorkoutTemplate? {

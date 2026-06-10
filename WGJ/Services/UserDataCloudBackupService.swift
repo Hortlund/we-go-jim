@@ -59,7 +59,19 @@ nonisolated enum UserDataCloudBackupDescriptor {
 
 nonisolated enum BoundaryCloudBackupReason: String, Sendable {
     case workoutCompleted
+    case workoutDeleted
     case templateSaved
+
+    var failureDescription: String {
+        switch self {
+        case .workoutCompleted:
+            return "workout completion"
+        case .workoutDeleted:
+            return "workout delete"
+        case .templateSaved:
+            return "template save"
+        }
+    }
 }
 
 nonisolated enum BoundaryCloudBackupScheduler {
@@ -80,7 +92,7 @@ nonisolated enum BoundaryCloudBackupScheduler {
                 }
             } catch {
                 await MainActor.run {
-                    AppRuntimeState.shared.updateUserDataSyncStatus(.degraded("Cloud backup failed after \(reason.rawValue): \(error.localizedDescription)"))
+                    AppRuntimeState.shared.updateUserDataSyncStatus(.degraded("Cloud backup failed after \(reason.failureDescription): \(error.localizedDescription)"))
                 }
             }
         }
