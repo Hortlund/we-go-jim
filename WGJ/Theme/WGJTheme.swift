@@ -688,10 +688,17 @@ private struct WGJOptionalAccessibilityIdentifier: ViewModifier {
 }
 
 struct WGJTransientBanner: View {
+    enum Style {
+        case floating
+        case topDocked
+    }
+
     let title: String
     let message: String?
     var icon: String = "checkmark.circle.fill"
     var tint: Color = WGJTheme.success
+    var style: Style = .floating
+    var topInset: CGFloat = 0
 
     var body: some View {
         HStack(spacing: 12) {
@@ -720,28 +727,70 @@ struct WGJTransientBanner: View {
 
             Spacer(minLength: 12)
         }
-        .padding(14)
+        .padding(.horizontal, style == .topDocked ? 20 : 14)
+        .padding(.top, style == .topDocked ? topInset + 12 : 14)
+        .padding(.bottom, style == .topDocked ? 16 : 14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(WGJTheme.cardStrong.opacity(0.96))
+            bannerShape
+                .fill(WGJTheme.cardStrong.opacity(style == .topDocked ? 0.94 : 0.96))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    tint.opacity(0.10),
-                                    Color.clear,
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
+                    bannerShape.fill(bannerTintOverlay)
                 }
                 .overlay {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(tint.opacity(0.26), lineWidth: 1)
+                    bannerStroke
                 }
+                .shadow(
+                    color: style == .topDocked ? tint.opacity(0.10) : .clear,
+                    radius: style == .topDocked ? 24 : 0,
+                    x: 0,
+                    y: style == .topDocked ? 14 : 0
+                )
+        }
+    }
+
+    @ViewBuilder
+    private var bannerStroke: some View {
+        switch style {
+        case .floating:
+            bannerShape
+                .stroke(tint.opacity(0.26), lineWidth: 1)
+        case .topDocked:
+            EmptyView()
+        }
+    }
+
+    private var bannerTintOverlay: Color {
+        switch style {
+        case .floating:
+            return tint.opacity(0.10)
+        case .topDocked:
+            return tint.opacity(0.06)
+        }
+    }
+
+    private var bannerShape: UnevenRoundedRectangle {
+        switch style {
+        case .floating:
+            return UnevenRoundedRectangle(
+                cornerRadii: RectangleCornerRadii(
+                    topLeading: 18,
+                    bottomLeading: 18,
+                    bottomTrailing: 18,
+                    topTrailing: 18
+                ),
+                style: .continuous
+            )
+        case .topDocked:
+            return UnevenRoundedRectangle(
+                cornerRadii: RectangleCornerRadii(
+                    topLeading: 0,
+                    bottomLeading: 28,
+                    bottomTrailing: 28,
+                    topTrailing: 0
+                ),
+                style: .continuous
+            )
         }
     }
 }

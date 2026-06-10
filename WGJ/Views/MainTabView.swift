@@ -92,11 +92,12 @@ struct MainTabView: View {
 
                 activeWorkoutOverlayChrome(size: proxy.size)
                     .animation(activeWorkoutOverlayAnimation, value: activeWorkoutPresentationState.isActiveWorkoutPresented)
-
-                cloudBackupTopBanner(topSafeAreaInset: proxy.safeAreaInsets.top)
-                    .zIndex(30)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .overlay(alignment: .top) {
+                cloudBackupTopBanner(topSafeAreaInset: proxy.safeAreaInsets.top)
+                    .ignoresSafeArea(edges: .top)
+            }
             .fullScreenCover(item: $workoutCompletionPresentationState.presentedWorkout) { presentation in
                 WorkoutCompletionSummaryView(sessionID: presentation.sessionID)
                     .interactiveDismissDisabled()
@@ -178,11 +179,11 @@ struct MainTabView: View {
                 title: cloudBackupBannerTitle(for: cloudBackupBanner),
                 message: cloudBackupBannerMessage(for: cloudBackupBanner),
                 icon: cloudBackupBannerIcon(for: cloudBackupBanner),
-                tint: cloudBackupBannerTint(for: cloudBackupBanner)
+                tint: cloudBackupBannerTint(for: cloudBackupBanner),
+                style: .topDocked,
+                topInset: topSafeAreaInset
             )
-            .padding(.horizontal, WGJSpacing.page)
-            .padding(.top, max(8, topSafeAreaInset + 6))
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .frame(maxWidth: .infinity, alignment: .top)
             .allowsHitTesting(false)
             .transition(.move(edge: .top).combined(with: .opacity))
             .animation(overlayAnimation, value: cloudBackupBanner)
