@@ -810,17 +810,6 @@ nonisolated struct ActiveWorkoutPreparedStartState: Equatable, Sendable {
     let firstRenderSnapshot: ActiveWorkoutPreparedFirstRenderSnapshot
 }
 
-nonisolated enum ActiveWorkoutOverlayTransitionProfile: Equatable, Sendable {
-    case gentleSlide
-    case fadeOnly
-}
-
-nonisolated enum ActiveWorkoutOverlayPresentationPolicy {
-    static func transitionProfile(reduceMotion: Bool) -> ActiveWorkoutOverlayTransitionProfile {
-        reduceMotion ? .fadeOnly : .gentleSlide
-    }
-}
-
 nonisolated enum MainTabOverlayLayoutPolicy {
     private static let modernTabChromeStripBottomGap: CGFloat = 45
     private static let compactLegacyTabChromeStripBottomGap: CGFloat = 78

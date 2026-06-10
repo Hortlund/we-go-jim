@@ -95,6 +95,10 @@ enum WGJMotion {
         reduceMotion ? .easeOut(duration: 0.01) : .smooth(duration: 0.26, extraBounce: 0.04)
     }
 
+    static func activeWorkoutPresentationAnimation(reduceMotion: Bool) -> Animation {
+        reduceMotion ? .easeOut(duration: 0.01) : .smooth(duration: 0.42, extraBounce: 0.04)
+    }
+
     static func cardTransition(reduceMotion: Bool) -> AnyTransition {
         .asymmetric(
             insertion: reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity),

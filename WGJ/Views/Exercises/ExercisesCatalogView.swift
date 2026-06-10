@@ -945,7 +945,7 @@ struct ExercisesCatalogView: View {
     }
 
     private func presentActiveWorkout(sessionID: UUID) {
-        withAnimation(WGJMotion.overlayAnimation(reduceMotion: reduceMotion)) {
+        withAnimation(WGJMotion.activeWorkoutPresentationAnimation(reduceMotion: reduceMotion)) {
             activeWorkoutPresentationState.present(sessionID: sessionID)
         }
     }

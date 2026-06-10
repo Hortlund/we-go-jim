@@ -18,12 +18,7 @@ struct MainTabView: View {
     }
 
     private var activeWorkoutOverlayAnimation: Animation {
-        switch ActiveWorkoutOverlayPresentationPolicy.transitionProfile(reduceMotion: reduceMotion) {
-        case .gentleSlide:
-            return .smooth(duration: 0.34, extraBounce: 0.06)
-        case .fadeOnly:
-            return .easeOut(duration: 0.01)
-        }
+        WGJMotion.activeWorkoutPresentationAnimation(reduceMotion: reduceMotion)
     }
 
     var body: some View {
@@ -91,6 +86,7 @@ struct MainTabView: View {
                     isKeyboardVisible: isKeyboardVisible,
                     usesModernTabChrome: usesModernTabChrome,
                     overlayAnimation: overlayAnimation,
+                    activeWorkoutAnimation: activeWorkoutOverlayAnimation,
                     onPresentActiveWorkout: presentActiveWorkout
                 )
 
@@ -169,7 +165,7 @@ struct MainTabView: View {
             }
             .frame(width: sanitizedOverlayLength(size.width), height: sanitizedOverlayLength(size.height))
             .background(WGJTheme.bgBase.ignoresSafeArea())
-            .transition(activeWorkoutOverlayTransition)
+            .transition(activeWorkoutOverlayTransition(reduceMotion: reduceMotion))
             .zIndex(20)
             .accessibilityIdentifier("active-workout-overlay")
         }
@@ -312,6 +308,7 @@ private struct MainTabBottomOverlayChrome: View {
     let isKeyboardVisible: Bool
     let usesModernTabChrome: Bool
     let overlayAnimation: Animation
+    let activeWorkoutAnimation: Animation
     let onPresentActiveWorkout: (UUID) -> Void
 
     var body: some View {
@@ -345,7 +342,7 @@ private struct MainTabBottomOverlayChrome: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .wgjGlassContainer(spacing: 16)
-        .animation(overlayAnimation, value: activeWorkoutPresentationState.isActiveWorkoutStripCollapsed)
+        .animation(activeWorkoutAnimation, value: activeWorkoutPresentationState.isActiveWorkoutStripCollapsed)
         .animation(overlayAnimation, value: restTimerState.restTimerPopup?.id)
         .animation(overlayAnimation, value: isKeyboardVisible)
     }
@@ -369,12 +366,15 @@ private struct MainTabBottomOverlayChrome: View {
     }
 }
 
-private var activeWorkoutOverlayTransition: AnyTransition {
-    .asymmetric(
-        insertion: .move(edge: .bottom)
-            .combined(with: .opacity),
-        removal: .move(edge: .bottom)
-            .combined(with: .opacity)
+private func activeWorkoutOverlayTransition(reduceMotion: Bool) -> AnyTransition {
+    guard !reduceMotion else { return .opacity }
+    return AnyTransition.asymmetric(
+        insertion: AnyTransition.move(edge: .bottom)
+            .combined(with: AnyTransition.opacity)
+            .combined(with: AnyTransition.scale(scale: 0.985, anchor: .bottom)),
+        removal: AnyTransition.move(edge: .bottom)
+            .combined(with: AnyTransition.opacity)
+            .combined(with: AnyTransition.scale(scale: 0.992, anchor: .bottom))
     )
 }
 

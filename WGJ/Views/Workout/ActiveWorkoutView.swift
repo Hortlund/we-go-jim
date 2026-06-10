@@ -2084,11 +2084,15 @@ struct ActiveWorkoutView: View {
     }
 
     private func presentActiveWorkout() {
-        activeWorkoutPresentationState.present(sessionID: sessionID)
+        withAnimation(WGJMotion.activeWorkoutPresentationAnimation(reduceMotion: reduceMotion)) {
+            activeWorkoutPresentationState.present(sessionID: sessionID)
+        }
     }
 
     private func collapseActiveWorkout() {
-        activeWorkoutPresentationState.collapseActiveWorkout()
+        withAnimation(WGJMotion.activeWorkoutPresentationAnimation(reduceMotion: reduceMotion)) {
+            activeWorkoutPresentationState.collapseActiveWorkout()
+        }
     }
 
     private func cancelWorkout() {
