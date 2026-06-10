@@ -37,9 +37,9 @@ nonisolated enum WorkoutCompletionConfettiPolicy {
     static func pieceCount(for intensity: WorkoutCompletionConfettiIntensity) -> Int {
         switch intensity {
         case .completedWorkout:
-            return 64
+            return 48
         case .manualTap:
-            return 28
+            return 22
         }
     }
 }
@@ -90,8 +90,7 @@ struct WorkoutCompletionSummaryView: View {
                     ForEach(confettiBursts) { burst in
                         WorkoutCompletionConfettiOverlay(
                             originInGlobalSpace: burst.origin,
-                            pieceCount: burst.pieceCount,
-                            seed: burst.seed
+                            pieces: burst.pieces
                         )
                             .id(burst.id)
                     }
@@ -388,8 +387,13 @@ struct WorkoutCompletionSummaryView: View {
                 return
             }
 
-            snapshot = builtSnapshot
-            triggerCelebrationIfNeeded()
+            withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
+                snapshot = builtSnapshot
+            }
+            Task { @MainActor in
+                await Task.yield()
+                triggerCelebrationIfNeeded()
+            }
         } catch {
             continueToHistory()
         }
@@ -412,12 +416,12 @@ struct WorkoutCompletionSummaryView: View {
         guard !reduceMotion else { return }
         let burst = WorkoutCompletionConfettiBurst(
             origin: origin,
-            pieceCount: WorkoutCompletionConfettiPolicy.pieceCount(for: intensity)
+            intensity: intensity
         )
         confettiBursts.append(burst)
         confettiDismissTasks[burst.id]?.cancel()
         confettiDismissTasks[burst.id] = Task.detached(priority: .utility) {
-            try? await Task.sleep(for: .seconds(2.8))
+            try? await Task.sleep(for: .seconds(2.4))
             guard !Task.isCancelled else { return }
             await self.removeConfettiBurstAfterDelayIfStillNeeded(id: burst.id)
         }
@@ -426,9 +430,7 @@ struct WorkoutCompletionSummaryView: View {
     @MainActor
     private func removeConfettiBurstAfterDelayIfStillNeeded(id: UUID) {
         guard !Task.isCancelled else { return }
-        withAnimation(.easeOut(duration: 0.25)) {
-            confettiBursts.removeAll { $0.id == id }
-        }
+        confettiBursts.removeAll { $0.id == id }
         confettiDismissTasks[id] = nil
     }
 
@@ -832,20 +834,22 @@ private struct WorkoutCompletionHeroFramePreferenceKey: PreferenceKey {
 private struct WorkoutCompletionConfettiBurst: Identifiable {
     let id = UUID()
     let origin: CGPoint
-    let pieceCount: Int
-    let seed = UInt64.random(in: 1...UInt64.max)
+    let pieces: [WorkoutCompletionConfettiPiece]
+
+    init(origin: CGPoint, intensity: WorkoutCompletionConfettiIntensity) {
+        self.origin = origin
+        self.pieces = WorkoutCompletionConfettiPiece.random(
+            seed: UInt64.random(in: 1...UInt64.max),
+            count: WorkoutCompletionConfettiPolicy.pieceCount(for: intensity)
+        )
+    }
 }
 
 private struct WorkoutCompletionConfettiOverlay: View {
     let originInGlobalSpace: CGPoint
-    let pieceCount: Int
-    let seed: UInt64
+    let pieces: [WorkoutCompletionConfettiPiece]
 
     @State private var animate = false
-
-    private var pieces: [WorkoutCompletionConfettiPiece] {
-        WorkoutCompletionConfettiPiece.random(seed: seed, count: pieceCount)
-    }
 
     var body: some View {
         GeometryReader { proxy in
