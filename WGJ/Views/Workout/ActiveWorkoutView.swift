@@ -115,7 +115,12 @@ struct ActiveWorkoutView: View {
                     finishToolbarButton
                 }
             }
-            .wgjMinimalKeyboardToolbar(isEnabled: true, onDismiss: dismissKeyboard)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if isKeyboardVisible {
+                    ActiveWorkoutKeyboardDismissBar(action: dismissKeyboard)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
             .overlay(alignment: .bottom) {
                 if ActiveWorkoutBottomDockPlacementPolicy.shouldPinToScreenOverlay(
                     hasSession: session != nil,
@@ -3525,6 +3530,36 @@ private enum ActiveWorkoutPickerTarget: Identifiable {
             return "Add Exercise"
         case .cardio:
             return "Choose Exercise"
+        }
+    }
+}
+
+private struct ActiveWorkoutKeyboardDismissBar: View {
+    let action: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Spacer(minLength: 0)
+
+            Button(action: action) {
+                Label("Done", systemImage: WGJKeyboardHideControl.systemImage)
+                    .font(.subheadline.weight(.semibold))
+                    .labelStyle(.titleAndIcon)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(WGJTheme.accentBlue)
+            .accessibilityLabel(WGJKeyboardHideControl.accessibilityLabel)
+            .accessibilityIdentifier(WGJKeyboardHideControl.accessibilityIdentifier)
+        }
+        .frame(maxWidth: .infinity, minHeight: 44)
+        .padding(.horizontal, 12)
+        .background(.bar)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(WGJTheme.outline.opacity(0.28))
+                .frame(height: 1 / max(UIScreen.main.scale, 1))
         }
     }
 }
