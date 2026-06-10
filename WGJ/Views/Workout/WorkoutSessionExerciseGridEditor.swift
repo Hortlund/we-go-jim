@@ -1533,7 +1533,9 @@ struct WorkoutSessionExerciseGridEditor: View {
         if suppressCommit, focusedInput != nil {
             suppressNextFocusLossCommit = true
         }
+        guard focusedInput != nil else { return }
         focusedInput = nil
+        WGJKeyboard.dismiss()
     }
 
     private func repsTextBinding(for index: Int) -> Binding<String> {
@@ -2372,8 +2374,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         guard updatedDrafts.indices.contains(index) else { return }
         guard !updatedDrafts[index].isLocked else { return }
         if focusedInput?.setID == updatedDrafts[index].id {
-            suppressNextFocusLossCommit = true
-            focusedInput = nil
+            dismissInputFocus(suppressCommit: true)
         }
 
         let setID = updatedDrafts[index].id
