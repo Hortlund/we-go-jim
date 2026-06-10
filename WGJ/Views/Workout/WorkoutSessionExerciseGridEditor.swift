@@ -2157,18 +2157,15 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func setCardFill(for set: WorkoutSessionSetDraft, hasPersonalRecord: Bool) -> Color {
+        if set.isCompleted {
+            return WGJTheme.success.opacity(0.16)
+        }
+
         if hasPersonalRecord {
-            if set.isCompleted {
-                return WGJTheme.accentGold.opacity(0.12)
-            }
             if set.isWarmup {
                 return WGJTheme.accentGold.opacity(0.14)
             }
             return WGJTheme.accentGold.opacity(0.08)
-        }
-
-        if set.isCompleted {
-            return WGJTheme.accentBlue.opacity(0.12)
         }
 
         if set.isWarmup {
@@ -2179,12 +2176,12 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func setCardStroke(for set: WorkoutSessionSetDraft, hasPersonalRecord: Bool) -> Color {
-        if hasPersonalRecord {
-            return WGJTheme.accentGold.opacity(0.50)
+        if set.isCompleted {
+            return WGJTheme.success.opacity(0.44)
         }
 
-        if set.isCompleted {
-            return WGJTheme.accentBlue.opacity(0.34)
+        if hasPersonalRecord {
+            return WGJTheme.accentGold.opacity(0.50)
         }
 
         if set.isWarmup {
