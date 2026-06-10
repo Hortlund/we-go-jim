@@ -619,7 +619,7 @@ struct ActiveWorkoutView: View {
                         persistCommittedUserEditSnapshot()
                     },
                     onSetDraftsCommitted: { drafts in
-                        handleDraftsChanged(drafts, for: exercise)
+                        handleDraftsChanged(drafts, for: exercise, scrollProxy: scrollProxy)
                     },
                     onRestCommitted: { rest in
                         updateRestValue(rest, for: exerciseID)
@@ -1482,7 +1482,8 @@ struct ActiveWorkoutView: View {
     @MainActor
     private func handleDraftsChanged(
         _ drafts: [WorkoutSessionSetDraft],
-        for exercise: ActiveWorkoutRuntimeExercise
+        for exercise: ActiveWorkoutRuntimeExercise,
+        scrollProxy: ScrollViewProxy
     ) {
         let previousDrafts = resolvedDrafts(for: exercise)
         let changeSummary = ActiveWorkoutSetDraftChangeSummary.compare(
@@ -1491,18 +1492,6 @@ struct ActiveWorkoutView: View {
         )
         let isCompleted = isExerciseCompleted(drafts)
         let previouslyCompleted = cardStateController.didCompleteCurrentCycle(for: exercise.id)
-        if previouslyCompleted != isCompleted {
-            cardStateController.updateCompletion(
-                for: exercise.id,
-                isCompleted: isCompleted
-            )
-            if isCompleted {
-                WorkoutFeedbackCenter.shared.exerciseCompleted()
-                withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
-                    cardStateController.setExpanded(false, for: exercise.id)
-                }
-            }
-        }
         let refreshesProjectionImmediately = ActiveWorkoutRenderProjectionRefreshPolicy.shouldRefreshImmediately(
             changeSummary: changeSummary,
             isMetricInputFocused: isMetricInputFocused
@@ -1517,6 +1506,35 @@ struct ActiveWorkoutView: View {
                 for: changeSummary
             )
         )
+
+        guard previouslyCompleted != isCompleted else { return }
+        cardStateController.updateCompletion(
+            for: exercise.id,
+            isCompleted: isCompleted
+        )
+        if isCompleted {
+            WorkoutFeedbackCenter.shared.exerciseCompleted()
+            collapseCompletedExerciseCard(exercise.id, using: scrollProxy)
+        }
+    }
+
+    @MainActor
+    private func collapseCompletedExerciseCard(
+        _ exerciseID: UUID,
+        using scrollProxy: ScrollViewProxy
+    ) {
+        let wasExpanded = cardStateController.isExpanded(for: exerciseID)
+        guard wasExpanded else { return }
+
+        let target = ActiveWorkoutScrollTarget.exercise(exerciseID)
+        let animation = WGJMotion.cardAnimation(reduceMotion: reduceMotion)
+        withAnimation(animation) {
+            cardStateController.setExpanded(false, for: exerciseID)
+        }
+        Task { @MainActor in
+            await Task.yield()
+            scrollToTarget(target, using: scrollProxy, anchor: .top, animation: animation)
+        }
     }
 
     @MainActor
