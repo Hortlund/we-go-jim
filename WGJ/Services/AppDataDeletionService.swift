@@ -4,12 +4,17 @@ import SwiftData
 nonisolated final class AppDataDeletionService {
     private let modelContext: ModelContext
     private let fileManager: FileManager
+    private let deleteCloudBackup: @Sendable () async throws -> Void
     private let clearWeeklyGoalWidgetSnapshot: @Sendable () -> Void
     private let clearActiveWorkoutSnapshot: @Sendable () async throws -> Void
 
     init(
         modelContext: ModelContext,
         fileManager: FileManager = .default,
+        deleteCloudBackup: @escaping @Sendable () async throws -> Void = {
+            guard AppRuntimeConfig.canUseConfiguredCloudKitContainer else { return }
+            try await CloudKitUserDataCloudBackupStore().deleteBackup()
+        },
         clearWeeklyGoalWidgetSnapshot: @escaping @Sendable () -> Void = {
             WeeklyGoalWidgetPublisher()?.clear()
         },
@@ -19,31 +24,54 @@ nonisolated final class AppDataDeletionService {
     ) {
         self.modelContext = modelContext
         self.fileManager = fileManager
+        self.deleteCloudBackup = deleteCloudBackup
         self.clearWeeklyGoalWidgetSnapshot = clearWeeklyGoalWidgetSnapshot
         self.clearActiveWorkoutSnapshot = clearActiveWorkoutSnapshot
     }
 
     func deleteAllUserData() async throws {
+        try await deleteCloudBackup()
         try deleteLocalData()
         try await clearLocalArtifacts()
     }
 
     private func deleteLocalData() throws {
         try clearExerciseImageCache()
-        try recordCloudMirrorDeletionTombstones()
         try deleteCustomExercises()
-        try deleteAll(ProfileWidgetConfig.self)
-        try deleteAll(CachedCoachFollowUpNarrative.self)
-        try deleteAll(CachedCoachNarrative.self)
-        try deleteAll(ActiveWorkoutDraftSession.self)
-        try deleteAll(WorkoutSession.self)
-        try deleteAll(CompletedSetFact.self)
+
+        try deleteAll(TemplateExerciseDropStage.self)
+        try deleteAll(TemplateExerciseSet.self)
+        try deleteAll(TemplateExerciseComponent.self)
         try deleteAll(TemplateCardioBlock.self)
+        try deleteAll(TemplateSupersetGroup.self)
         try deleteAll(TemplateExercise.self)
         try deleteAll(WorkoutTemplate.self)
         try deleteAll(TemplateFolder.self)
+
+        try deleteAll(ActiveWorkoutDraftDropStage.self)
+        try deleteAll(ActiveWorkoutDraftSet.self)
+        try deleteAll(ActiveWorkoutDraftExerciseComponent.self)
+        try deleteAll(ActiveWorkoutDraftCardioBlock.self)
+        try deleteAll(ActiveWorkoutDraftSupersetGroup.self)
+        try deleteAll(ActiveWorkoutDraftExercise.self)
+        try deleteAll(ActiveWorkoutDraftSession.self)
+
+        try deleteAll(WorkoutSessionDropStage.self)
+        try deleteAll(WorkoutSessionSet.self)
+        try deleteAll(WorkoutSessionCardioBlock.self)
+        try deleteAll(WorkoutSessionSupersetGroup.self)
+        try deleteAll(WorkoutSessionExercise.self)
+        try deleteAll(WorkoutSession.self)
+
+        try deleteAll(CompletedSetFact.self)
+        try deleteAll(CachedCoachFollowUpNarrative.self)
+        try deleteAll(CachedCoachNarrative.self)
+        try deleteAll(ProfileWidgetConfig.self)
+        try deleteAll(UserDataDeletionTombstone.self)
         try deleteAll(UserProfile.self)
         try modelContext.save()
+        ExerciseSearchService.invalidateCatalogIndex(for: modelContext)
+        HistoryAnalyticsCache.shared.clear()
     }
 
     private func clearLocalArtifacts() async throws {
@@ -73,87 +101,6 @@ nonisolated final class AppDataDeletionService {
         for exercise in exercises where exercise.sourceName == "custom" {
             modelContext.delete(exercise)
         }
-    }
-
-    private func recordCloudMirrorDeletionTombstones() throws {
-        var existingKeys = Set(
-            try modelContext.fetch(FetchDescriptor<UserDataDeletionTombstone>())
-                .map(cloudMirrorTombstoneKey)
-        )
-
-        for profile in try modelContext.fetch(FetchDescriptor<UserProfile>()) {
-            insertTombstoneIfNeeded(
-                entityName: "UserProfile",
-                entityID: profile.id,
-                existingKeys: &existingKeys
-            )
-        }
-
-        for config in try modelContext.fetch(FetchDescriptor<ProfileWidgetConfig>()) {
-            insertTombstoneIfNeeded(
-                entityName: "ProfileWidgetConfig",
-                entityID: config.id,
-                existingKeys: &existingKeys
-            )
-        }
-
-        for folder in try modelContext.fetch(FetchDescriptor<TemplateFolder>()) {
-            insertTombstoneIfNeeded(
-                entityName: "TemplateFolder",
-                entityID: folder.id,
-                existingKeys: &existingKeys
-            )
-        }
-
-        for template in try modelContext.fetch(FetchDescriptor<WorkoutTemplate>()) {
-            insertTombstoneIfNeeded(
-                entityName: "WorkoutTemplate",
-                entityID: template.id,
-                existingKeys: &existingKeys
-            )
-        }
-
-        for session in try modelContext.fetch(FetchDescriptor<WorkoutSession>()) {
-            insertTombstoneIfNeeded(
-                entityName: "WorkoutSession",
-                entityID: session.id,
-                existingKeys: &existingKeys
-            )
-        }
-
-        for exercise in try modelContext.fetch(FetchDescriptor<ExerciseCatalogItem>())
-        where exercise.sourceName == "custom" {
-            insertTombstoneIfNeeded(
-                entityName: "ExerciseCatalogItem",
-                entityID: UUID(),
-                entityKey: exercise.remoteUUID,
-                existingKeys: &existingKeys
-            )
-        }
-    }
-
-    private func insertTombstoneIfNeeded(
-        entityName: String,
-        entityID: UUID,
-        entityKey: String? = nil,
-        existingKeys: inout Set<String>
-    ) {
-        let tombstone = UserDataDeletionTombstone(
-            entityName: entityName,
-            entityID: entityID,
-            entityKey: entityKey
-        )
-        let key = cloudMirrorTombstoneKey(tombstone)
-        guard existingKeys.insert(key).inserted else { return }
-        modelContext.insert(tombstone)
-    }
-
-    private func cloudMirrorTombstoneKey(_ tombstone: UserDataDeletionTombstone) -> String {
-        if let entityKey = tombstone.entityKey?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !entityKey.isEmpty {
-            return "\(tombstone.entityName):\(entityKey)"
-        }
-        return "\(tombstone.entityName):\(tombstone.entityID.uuidString.lowercased())"
     }
 
     private func deleteAll<T: PersistentModel>(_ type: T.Type) throws {

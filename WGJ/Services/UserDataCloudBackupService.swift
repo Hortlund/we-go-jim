@@ -40,6 +40,7 @@ struct UserDataCloudBackupContentSummary: Equatable, Sendable {
 
 protocol UserDataCloudBackupStoring: Sendable {
     func saveBackup(_ record: UserDataCloudBackupRemoteRecord) async throws
+    func deleteBackup() async throws
     func fetchBackup() async throws -> UserDataCloudBackupRemoteRecord?
     func fetchBackupMetadata() async throws -> UserDataCloudBackupRemoteMetadata?
 }
@@ -166,6 +167,10 @@ nonisolated final class UserDataCloudBackupService {
         try await backupStore.fetchBackupMetadata()
     }
 
+    func deleteRemoteBackup() async throws {
+        try await backupStore.deleteBackup()
+    }
+
     @MainActor
     func latestBackupSnapshot() async throws -> UserDataCloudBackupRemoteSnapshot? {
         guard let record = try await backupStore.fetchBackup() else {
@@ -252,6 +257,21 @@ nonisolated struct CloudKitUserDataCloudBackupStore: UserDataCloudBackupStoring 
         _ = try await database.modifyRecords(
             saving: [record],
             deleting: [],
+            savePolicy: .allKeys,
+            atomically: true
+        )
+    }
+
+    func deleteBackup() async throws {
+        let database = try requireDatabase()
+        let recordID = CKRecord.ID(recordName: UserDataCloudBackupDescriptor.recordName)
+        guard try await existingRecord(recordID: recordID) != nil else {
+            return
+        }
+
+        _ = try await database.modifyRecords(
+            saving: [],
+            deleting: [recordID],
             savePolicy: .allKeys,
             atomically: true
         )

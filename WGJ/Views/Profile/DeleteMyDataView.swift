@@ -10,17 +10,18 @@ struct DeleteMyDataView: View {
     @State private var alertTitle = ""
     @State private var alertMessage = ""
     @State private var showingAlert = false
-    @State private var shouldResetAfterAlert = false
+    @State private var shouldReturnToSetupAfterAlert = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                WGJRootHeader("Delete My Data", subtitle: "Remove local app data.")
+                WGJRootHeader("Delete My Data", subtitle: "Remove your local data and CloudKit backup.")
 
                 infoCard(
                     title: "This deletes",
                     lines: [
                         "Your local profile, avatar, workouts, active-workout draft, templates, widgets, and custom exercises.",
+                        "Your WGJ CloudKit backup for this iCloud account.",
                         "Cached exercise images stored on-device.",
                         "Local workout history, projections, and profile progress data.",
                     ]
@@ -32,6 +33,7 @@ struct DeleteMyDataView: View {
                         "Exercise catalog seed data bundled with the app.",
                         "Data Apple may keep for account, backup, security, or legal reasons.",
                         "Copies already exported, screenshotted, backed up outside WGJ, or retained where deletion is not technically or legally possible.",
+                        "Cloud data if iCloud or CloudKit cannot confirm the deletion.",
                     ]
                 )
 
@@ -42,7 +44,7 @@ struct DeleteMyDataView: View {
                         ProgressView()
                             .frame(maxWidth: .infinity)
                     } else {
-                        Label("Delete All App Data", systemImage: "trash.fill")
+                        Label("Delete Local and Cloud Data", systemImage: "trash.fill")
                             .frame(maxWidth: .infinity)
                     }
                 }
@@ -57,25 +59,25 @@ struct DeleteMyDataView: View {
         .navigationTitle("Delete My Data")
         .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog(
-            "Delete all app data?",
+            "Delete local and CloudKit data?",
             isPresented: $showingConfirmation,
             titleVisibility: .visible
         ) {
-            Button("Delete All Data", role: .destructive) {
+            Button("Delete Everything", role: .destructive) {
                 Task {
                     await deleteAllData()
                 }
             }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("This cannot be undone. Cloud deletion depends on iCloud and network availability.")
+            Text("This cannot be undone. WGJ will delete the CloudKit backup first, then clear this device, and return to setup after you dismiss the success message.")
         }
         .alert(alertTitle, isPresented: $showingAlert) {
             Button("OK") {
-                if shouldResetAfterAlert {
+                if shouldReturnToSetupAfterAlert {
                     NotificationCenter.default.post(name: .wgjDidDeleteAllUserData, object: nil)
                 }
-                shouldResetAfterAlert = false
+                shouldReturnToSetupAfterAlert = false
             }
         } message: {
             Text(alertMessage)
@@ -95,13 +97,13 @@ struct DeleteMyDataView: View {
                 try await service.deleteAllUserData()
             }
             alertTitle = "Data Deleted"
-            alertMessage = "All local app data was deleted. The app will restart after you dismiss this alert."
-            shouldResetAfterAlert = true
+            alertMessage = "Your CloudKit backup and local WGJ data were deleted. WGJ will return to setup after you tap OK."
+            shouldReturnToSetupAfterAlert = true
             showingAlert = true
         } catch {
             alertTitle = "Delete Failed"
             alertMessage = error.localizedDescription
-            shouldResetAfterAlert = false
+            shouldReturnToSetupAfterAlert = false
             showingAlert = true
         }
     }
