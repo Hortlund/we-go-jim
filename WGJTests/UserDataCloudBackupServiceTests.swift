@@ -586,6 +586,125 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         XCTAssertEqual(templateDropStages.first?.targetWeight, 90)
     }
 
+    func testProgressComparisonUsesSessionChildIDs() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+
+        let templateID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let olderSessionID = UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
+        let newerSessionID = UUID(uuidString: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")!
+        let olderExerciseID = UUID(uuidString: "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD")!
+        let newerExerciseID = UUID(uuidString: "EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE")!
+
+        for model in [
+            WorkoutSession(
+                id: olderSessionID,
+                templateID: templateID,
+                name: "Day 4 - Lower B",
+                status: .completed,
+                startedAt: Date(timeIntervalSince1970: 100),
+                endedAt: Date(timeIntervalSince1970: 200)
+            ),
+            WorkoutSession(
+                id: newerSessionID,
+                templateID: templateID,
+                name: "Day 4 - Lower B",
+                status: .completed,
+                startedAt: Date(timeIntervalSince1970: 300),
+                endedAt: Date(timeIntervalSince1970: 400)
+            ),
+            WorkoutSessionExercise(
+                id: olderExerciseID,
+                sessionID: olderSessionID,
+                catalogExerciseUUID: "leg-press",
+                exerciseNameSnapshot: "Leg Press",
+                categorySnapshot: "Strength",
+                muscleSummarySnapshot: "Quadriceps"
+            ),
+            WorkoutSessionExercise(
+                id: newerExerciseID,
+                sessionID: newerSessionID,
+                catalogExerciseUUID: "leg-press",
+                exerciseNameSnapshot: "Leg Press",
+                categorySnapshot: "Strength",
+                muscleSummarySnapshot: "Quadriceps"
+            ),
+            WorkoutSessionSet(
+                sessionExerciseID: olderExerciseID,
+                actualReps: 8,
+                actualWeight: 100,
+                isCompleted: true
+            ),
+            WorkoutSessionSet(
+                sessionExerciseID: newerExerciseID,
+                actualReps: 8,
+                actualWeight: 120,
+                isCompleted: true
+            ),
+        ] as [any PersistentModel] {
+            context.insert(model)
+        }
+        try context.save()
+
+        let snapshot = try WorkoutProgressSnapshotLoader.load(
+            modelContext: context,
+            selectedPreviousSessionID: olderSessionID,
+            selectedCurrentSessionID: newerSessionID
+        )
+
+        guard case let .ready(comparison) = snapshot.state else {
+            return XCTFail("Expected progress comparison")
+        }
+        XCTAssertEqual(comparison.exerciseComparisons.count, 1)
+        XCTAssertEqual(comparison.exerciseComparisons.first?.exerciseName, "Leg Press")
+        XCTAssertEqual(comparison.exerciseComparisons.first?.direction, .up)
+        XCTAssertEqual(comparison.currentWorkout.completedSetCount, 1)
+    }
+
+    func testHistoryDetailMuscleHeatmapUsesSessionSetIDs() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+
+        let sessionID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let exerciseID = UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
+        for model in [
+            WorkoutSession(
+                id: sessionID,
+                name: "Day 4 - Lower B",
+                status: .completed,
+                startedAt: Date(timeIntervalSince1970: 100),
+                endedAt: Date(timeIntervalSince1970: 200)
+            ),
+            WorkoutSessionExercise(
+                id: exerciseID,
+                sessionID: sessionID,
+                catalogExerciseUUID: "custom-leg-press",
+                exerciseNameSnapshot: "Leg Press",
+                categorySnapshot: "Strength",
+                muscleSummarySnapshot: "Quadriceps"
+            ),
+            WorkoutSessionSet(
+                sessionExerciseID: exerciseID,
+                actualReps: 8,
+                actualWeight: 120,
+                isCompleted: true
+            ),
+        ] as [any PersistentModel] {
+            context.insert(model)
+        }
+        try context.save()
+
+        let snapshot = try HistoryDetailSnapshotBuilder.load(
+            modelContext: context,
+            sessionID: sessionID
+        )
+
+        XCTAssertFalse(snapshot.muscleHeatmap.entries.isEmpty)
+        XCTAssertTrue(snapshot.muscleHeatmap.topRegionNames.contains("Quadriceps"))
+    }
+
     func testExportCurrentBackupIncludesOnlyCompletedWorkoutChildren() async throws {
         let container = try makeInMemoryContainer()
         let context = ModelContext(container)

@@ -69,9 +69,32 @@ nonisolated enum WorkoutMuscleHeatmapBuilder {
 
     static func scores(
         for exercise: WorkoutSessionExercise,
+        sets: [WorkoutSessionSet],
         catalogMappings: [String: WorkoutMuscleHeatmapCatalogMapping]
     ) -> [ExerciseBodyMapRegion: Double] {
-        let completedSetCount = completedWorkingSetCount(for: exercise)
+        scores(
+            for: exercise,
+            completedSetCount: completedWorkingSetCount(in: sets),
+            catalogMappings: catalogMappings
+        )
+    }
+
+    static func scores(
+        for exercise: WorkoutSessionExercise,
+        catalogMappings: [String: WorkoutMuscleHeatmapCatalogMapping]
+    ) -> [ExerciseBodyMapRegion: Double] {
+        scores(
+            for: exercise,
+            completedSetCount: completedWorkingSetCount(for: exercise),
+            catalogMappings: catalogMappings
+        )
+    }
+
+    private static func scores(
+        for exercise: WorkoutSessionExercise,
+        completedSetCount: Int,
+        catalogMappings: [String: WorkoutMuscleHeatmapCatalogMapping]
+    ) -> [ExerciseBodyMapRegion: Double] {
         guard completedSetCount > 0 else { return [:] }
 
         let perSetScores = scores(
@@ -105,7 +128,11 @@ nonisolated enum WorkoutMuscleHeatmapBuilder {
     }
 
     private static func completedWorkingSetCount(for exercise: WorkoutSessionExercise) -> Int {
-        (exercise.sets ?? []).filter { set in
+        completedWorkingSetCount(in: exercise.sets ?? [])
+    }
+
+    private static func completedWorkingSetCount(in sets: [WorkoutSessionSet]) -> Int {
+        sets.filter { set in
             guard set.isCompleted, !set.isWarmup else {
                 return false
             }

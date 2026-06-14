@@ -666,9 +666,12 @@ nonisolated enum WorkoutProgressSnapshotLoader {
         selectedPreviousSessionID: UUID?,
         selectedCurrentSessionID: UUID?
     ) throws -> WorkoutProgressDashboardSnapshot {
-        let sessions = try WorkoutSessionRepository(modelContext: modelContext)
+        let repository = WorkoutSessionRepository(modelContext: modelContext)
+        let sessions = try repository
             .completedSessions(includeArchived: true)
-            .map(WorkoutProgressSessionInput.init(session:))
+            .map { session in
+                try WorkoutProgressSessionInput(session: session, repository: repository)
+            }
         return WorkoutProgressSnapshotBuilder.build(
             sessions: sessions,
             selectedPreviousSessionID: selectedPreviousSessionID,
@@ -678,6 +681,23 @@ nonisolated enum WorkoutProgressSnapshotLoader {
 }
 
 extension WorkoutProgressSessionInput {
+    nonisolated init(session: WorkoutSession, repository: WorkoutSessionRepository) throws {
+        self.init(
+            id: session.id,
+            templateID: session.templateID,
+            name: session.name,
+            startedAt: session.startedAt,
+            endedAt: session.endedAt,
+            durationSeconds: session.durationSeconds,
+            prHitsCount: session.prHitsCount,
+            archivedAt: session.archivedAt,
+            exercises: try repository.sessionExercises(sessionID: session.id)
+                .map { exercise in
+                    try WorkoutProgressExerciseInput(exercise: exercise, repository: repository)
+                }
+        )
+    }
+
     nonisolated init(session: WorkoutSession) {
         self.init(
             id: session.id,
@@ -696,6 +716,17 @@ extension WorkoutProgressSessionInput {
 }
 
 extension WorkoutProgressExerciseInput {
+    nonisolated init(exercise: WorkoutSessionExercise, repository: WorkoutSessionRepository) throws {
+        self.init(
+            id: exercise.id,
+            catalogExerciseUUID: exercise.catalogExerciseUUID,
+            exerciseName: exercise.exerciseNameSnapshot,
+            sortOrder: exercise.sortOrder,
+            sets: try repository.sessionSets(sessionExerciseID: exercise.id)
+                .map(WorkoutProgressSetInput.init(set:))
+        )
+    }
+
     nonisolated init(exercise: WorkoutSessionExercise) {
         self.init(
             id: exercise.id,
