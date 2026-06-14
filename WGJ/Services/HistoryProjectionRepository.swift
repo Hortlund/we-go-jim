@@ -16,7 +16,10 @@ nonisolated final class HistoryProjectionRepository {
             return try deleteFacts(forSessionID: sessionID, persistChanges: persistChanges)
         }
 
-        let drafts = HistoryProjectionSnapshotBuilder.projectedFacts(from: session)
+        let drafts = try HistoryProjectionSnapshotBuilder.projectedFacts(
+            from: session,
+            repository: sessionRepository
+        )
         let existingFacts = try facts(forSessionID: sessionID)
         let didChange = apply(drafts: drafts, to: existingFacts, sessionID: sessionID)
 
@@ -62,7 +65,10 @@ nonisolated final class HistoryProjectionRepository {
         }
 
         for session in completedSessions {
-            let drafts = HistoryProjectionSnapshotBuilder.projectedFacts(from: session)
+            let drafts = try HistoryProjectionSnapshotBuilder.projectedFacts(
+                from: session,
+                repository: sessionRepository
+            )
             let existing = factsBySessionID[session.id] ?? []
             let hasStaleProjectionVersion = session.summaryMetricsVersion < WorkoutMetricsService.currentSummaryMetricsVersion
             guard hasStaleProjectionVersion || !factsMatch(existing, drafts: drafts) else { continue }
@@ -94,7 +100,10 @@ nonisolated final class HistoryProjectionRepository {
         }
 
         for session in completedSessions {
-            let drafts = HistoryProjectionSnapshotBuilder.projectedFacts(from: session)
+            let drafts = try HistoryProjectionSnapshotBuilder.projectedFacts(
+                from: session,
+                repository: sessionRepository
+            )
             let existing = factsBySessionID[session.id] ?? []
             let hasStaleProjectionVersion = session.summaryMetricsVersion < WorkoutMetricsService.currentSummaryMetricsVersion
             if hasStaleProjectionVersion || factsMatch(existing, drafts: drafts) == false {

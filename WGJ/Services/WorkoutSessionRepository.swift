@@ -501,6 +501,16 @@ nonisolated final class WorkoutSessionRepository {
         return try modelContext.fetch(descriptor)
     }
 
+    func sessionSets(sessionExerciseID: UUID) throws -> [WorkoutSessionSet] {
+        let descriptor = FetchDescriptor<WorkoutSessionSet>(
+            predicate: #Predicate { set in
+                set.sessionExerciseID == sessionExerciseID
+            },
+            sortBy: [SortDescriptor(\.sortOrder, order: .forward)]
+        )
+        return try modelContext.fetch(descriptor)
+    }
+
     func sessionExercises(
         sessionID: UUID,
         exerciseIDs: Set<UUID>

@@ -472,15 +472,17 @@ nonisolated enum HistoryOverviewSnapshotLoader {
         let completedSessions: [HistoryOverviewSessionSnapshot]
         let hasMorePages: Bool
         if let selectedDayFilter {
-            completedSessions = try repository
-                .completedSessions(onDay: selectedDayFilter)
-                .map(HistoryOverviewSessionSnapshot.init(session:))
+            completedSessions = try snapshots(
+                from: repository.completedSessions(onDay: selectedDayFilter),
+                repository: repository
+            )
             hasMorePages = false
         } else {
-            let page = try repository
-                .completedSessions(before: nil, limit: pageSize + 1)
-                .map(HistoryOverviewSessionSnapshot.init(session:))
-            completedSessions = Array(page.prefix(pageSize))
+            let page = try repository.completedSessions(before: nil, limit: pageSize + 1)
+            completedSessions = try snapshots(
+                from: Array(page.prefix(pageSize)),
+                repository: repository
+            )
             hasMorePages = page.count > pageSize
         }
         let preparedSnapshots = HistoryOverviewSnapshotBuilder.buildPreparedSnapshots(
@@ -505,10 +507,11 @@ nonisolated enum HistoryOverviewSnapshotLoader {
         pageSize: Int
     ) throws -> HistoryOverviewLoadedSnapshot {
         let repository = WorkoutSessionRepository(modelContext: modelContext)
-        let page = try repository
-            .completedSessions(before: date, limit: pageSize + 1)
-            .map(HistoryOverviewSessionSnapshot.init(session:))
-        let completedSessions = Array(page.prefix(pageSize))
+        let page = try repository.completedSessions(before: date, limit: pageSize + 1)
+        let completedSessions = try snapshots(
+            from: Array(page.prefix(pageSize)),
+            repository: repository
+        )
         let preparedSnapshots = HistoryOverviewSnapshotBuilder.buildPreparedSnapshots(
             sessions: completedSessions
         )
@@ -533,6 +536,20 @@ nonisolated enum HistoryOverviewSnapshotLoader {
     nonisolated private static func startOfMonth(for date: Date, calendar: Calendar = .current) -> Date {
         let components = calendar.dateComponents([.year, .month], from: date)
         return calendar.date(from: components) ?? date
+    }
+
+    nonisolated private static func snapshots(
+        from sessions: [WorkoutSession],
+        repository: WorkoutSessionRepository
+    ) throws -> [HistoryOverviewSessionSnapshot] {
+        try sessions.map { session in
+            let exercises = try repository.sessionExercises(sessionID: session.id)
+            let rows = try HistorySessionSummaryBuilder.rows(
+                for: exercises,
+                repository: repository
+            )
+            return HistoryOverviewSessionSnapshot(session: session, summaryRows: rows)
+        }
     }
 }
 
@@ -667,6 +684,13 @@ nonisolated enum HistoryOverviewSnapshotBuilder {
 extension HistoryOverviewSessionSnapshot {
     nonisolated init(session: WorkoutSession) {
         self.init(
+            session: session,
+            summaryRows: HistorySessionSummaryBuilder.rows(for: session)
+        )
+    }
+
+    nonisolated init(session: WorkoutSession, summaryRows: [HistorySessionSummaryRow]) {
+        self.init(
             id: session.id,
             updatedAt: session.updatedAt,
             name: session.name,
@@ -675,7 +699,7 @@ extension HistoryOverviewSessionSnapshot {
             durationSeconds: session.durationSeconds,
             totalVolume: session.totalVolume,
             prHitsCount: session.prHitsCount,
-            summaryRows: HistorySessionSummaryBuilder.rows(for: session)
+            summaryRows: summaryRows
         )
     }
 }
@@ -801,6 +825,20 @@ nonisolated enum HistorySessionSummaryBuilder {
         let exercises = (session.exercises ?? []).sorted { $0.sortOrder < $1.sortOrder }
         return exercises.enumerated().map { index, exercise in
             let sets = (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
+            return HistorySessionSummaryRow(
+                id: index,
+                exercise: "\(sets.count) x \(exercise.exerciseNameSnapshot)",
+                bestSet: WorkoutMetricsService.bestSetText(for: sets)
+            )
+        }
+    }
+
+    nonisolated static func rows(
+        for exercises: [WorkoutSessionExercise],
+        repository: WorkoutSessionRepository
+    ) throws -> [HistorySessionSummaryRow] {
+        try exercises.enumerated().map { index, exercise in
+            let sets = try repository.sessionSets(sessionExerciseID: exercise.id)
             return HistorySessionSummaryRow(
                 id: index,
                 exercise: "\(sets.count) x \(exercise.exerciseNameSnapshot)",

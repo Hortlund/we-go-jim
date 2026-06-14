@@ -21,12 +21,49 @@ nonisolated enum HistoryProjectionSnapshotBuilder {
         }
     }
 
+    static func projectedFacts(
+        from session: WorkoutSession,
+        repository: WorkoutSessionRepository
+    ) throws -> [CompletedSetFactDraft] {
+        let completedAt = session.endedAt ?? session.startedAt
+        let sourceSessionUpdatedAt = try sourceSessionUpdatedAt(for: session, repository: repository)
+        let orderedExercises = try repository.sessionExercises(sessionID: session.id)
+
+        return try orderedExercises.flatMap { exercise in
+            try repository.sessionSets(sessionExerciseID: exercise.id).compactMap { set in
+                projectedFact(
+                    from: set,
+                    session: session,
+                    exercise: exercise,
+                    completedAt: completedAt,
+                    sourceSessionUpdatedAt: sourceSessionUpdatedAt
+                )
+            }
+        }
+    }
+
     static func sourceSessionUpdatedAt(for session: WorkoutSession) -> Date {
         var latest = session.updatedAt
 
         for exercise in session.exercises ?? [] {
             latest = max(latest, exercise.updatedAt)
             for set in exercise.sets ?? [] {
+                latest = max(latest, set.updatedAt)
+            }
+        }
+
+        return latest
+    }
+
+    static func sourceSessionUpdatedAt(
+        for session: WorkoutSession,
+        repository: WorkoutSessionRepository
+    ) throws -> Date {
+        var latest = session.updatedAt
+
+        for exercise in try repository.sessionExercises(sessionID: session.id) {
+            latest = max(latest, exercise.updatedAt)
+            for set in try repository.sessionSets(sessionExerciseID: exercise.id) {
                 latest = max(latest, set.updatedAt)
             }
         }

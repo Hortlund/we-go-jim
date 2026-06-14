@@ -1309,11 +1309,14 @@ nonisolated final class WorkoutMetricsService {
     ) -> [CompletedSetFact] {
         let persistedFacts = existingFacts ?? (try? historyProjectionRepository.facts(forSessionID: session.id)) ?? []
         guard !persistedFacts.isEmpty else {
-            return HistoryProjectionSnapshotBuilder.projectedFacts(from: session).map { $0.makeModel() }
+            return projectedFacts(from: session)
         }
 
         let hasStaleProjectionVersion = session.summaryMetricsVersion < Self.currentSummaryMetricsVersion
-        let sourceUpdatedAt = HistoryProjectionSnapshotBuilder.sourceSessionUpdatedAt(for: session)
+        let sourceUpdatedAt = (try? HistoryProjectionSnapshotBuilder.sourceSessionUpdatedAt(
+            for: session,
+            repository: repository
+        )) ?? HistoryProjectionSnapshotBuilder.sourceSessionUpdatedAt(for: session)
         let completedAt = session.endedAt ?? session.startedAt
         let hasStaleProjectionSource = persistedFacts.contains { fact in
             fact.sourceSessionUpdatedAt != sourceUpdatedAt || fact.completedAt != completedAt
@@ -1322,7 +1325,15 @@ nonisolated final class WorkoutMetricsService {
             return persistedFacts
         }
 
-        return HistoryProjectionSnapshotBuilder.projectedFacts(from: session).map { $0.makeModel() }
+        return projectedFacts(from: session)
+    }
+
+    private func projectedFacts(from session: WorkoutSession) -> [CompletedSetFact] {
+        ((try? HistoryProjectionSnapshotBuilder.projectedFacts(
+            from: session,
+            repository: repository
+        )) ?? HistoryProjectionSnapshotBuilder.projectedFacts(from: session))
+            .map { $0.makeModel() }
     }
 
     private func session(id: UUID) throws -> WorkoutSession? {
