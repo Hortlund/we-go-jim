@@ -79,7 +79,7 @@ final class WorkoutProgressSnapshotBuilderTests: XCTestCase {
         XCTAssertEqual(comparison.mode, .sameTemplate)
     }
 
-    func testCompatibleWorkoutOptionsPreferSameTemplateAsOtherSelection() {
+    func testCompatibleWorkoutOptionsIncludeAllVisibleWorkoutsForManualSelection() {
         let pushTemplateID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
         let pullTemplateID = UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
         let pushOlder = session(
@@ -108,7 +108,7 @@ final class WorkoutProgressSnapshotBuilderTests: XCTestCase {
         )
 
         let previousOptions = snapshot.compatibleWorkoutOptions(for: .previous)
-        XCTAssertEqual(previousOptions.map(\.sessionID), [pushLatest.id, pushOlder.id])
+        XCTAssertEqual(previousOptions.map(\.sessionID), [pull.id, pushLatest.id, pushOlder.id])
     }
 
     func testDefaultSelectionFallsBackToLatestTwoVisibleSessions() {

@@ -99,7 +99,7 @@ struct ProgressDashboardView: View {
                 HStack(alignment: .top, spacing: 12) {
                     VStack(alignment: .leading, spacing: 5) {
                         WGJSectionHeader(
-                            "Template Matchup",
+                            "Workout Matchup",
                             subtitle: pickerSubtitle(previous: previous, current: current)
                         )
                     }
@@ -166,7 +166,7 @@ struct ProgressDashboardView: View {
         current: WorkoutProgressWorkoutSummary?
     ) -> String {
         guard let previous, let current else {
-            return "Compare repeat workouts from the same template."
+            return "Defaults to your latest repeat. Tap to choose any completed workouts."
         }
 
         return "\(previous.name) -> \(current.name)"

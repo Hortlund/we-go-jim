@@ -169,25 +169,7 @@ nonisolated struct WorkoutProgressDashboardSnapshot: Equatable, Sendable {
     )
 
     func compatibleWorkoutOptions(for slot: WorkoutProgressSelectionSlot) -> [WorkoutProgressWorkoutOption] {
-        let anchorSessionID: UUID?
-        switch slot {
-        case .previous:
-            anchorSessionID = selectedCurrentSessionID
-        case .current:
-            anchorSessionID = selectedPreviousSessionID
-        }
-
-        guard let anchorSessionID,
-              let anchor = workoutOptions.first(where: { $0.sessionID == anchorSessionID }),
-              let templateID = anchor.templateID
-        else {
-            return workoutOptions
-        }
-
-        let sameTemplateOptions = workoutOptions.filter { option in
-            option.sessionID == anchorSessionID || option.templateID == templateID
-        }
-        return sameTemplateOptions.count >= 2 ? sameTemplateOptions : workoutOptions
+        workoutOptions
     }
 }
 
