@@ -42,6 +42,8 @@ struct WGJApp: App {
     }
 
     private static func makeContainerBootstrap() async throws -> ModelContainerBootstrap {
+        AppStoreLayout.clearPersistentStoreFilesForPendingReset()
+        AppStoreLayout.clearObsoleteAppGroupStoreFiles()
 #if DEBUG
         try AppStoreLayout.clearPersistentStoreFilesForUITestsIfRequested()
         resetActiveWorkoutSnapshotForUITestsIfRequested()
@@ -297,18 +299,18 @@ nonisolated enum AppStoreLayout {
         historyProjectionConfigurationName,
     ]
     static let storeFilePrefixes = configurationNames.map { "\($0).store" }
+    static let obsoleteAppGroupStoreFilePrefixes = [
+        "LocalCatalog.store",
+        "UserData.store",
+        "ActiveWorkoutDraft.store",
+        "UserDataCloudMirror.store",
+        "SocialOutbox.store",
+    ]
     static let historyProjectionGroupContainer = ModelConfiguration.GroupContainer.identifier(appGroupIdentifier)
+    private static let resetPersistentStoresKey = "appStorage.resetPersistentStoresOnNextLaunch"
 
     static func prepareAppGroupStoreDirectory(fileManager: FileManager = .default) throws {
-        guard let groupContainerURL = fileManager.containerURL(
-            forSecurityApplicationGroupIdentifier: appGroupIdentifier
-        ) else {
-            return
-        }
-
-        let supportDirectory = groupContainerURL
-            .appendingPathComponent("Library", isDirectory: true)
-            .appendingPathComponent("Application Support", isDirectory: true)
+        guard let supportDirectory = appGroupApplicationSupportDirectory(fileManager: fileManager) else { return }
         try fileManager.createDirectory(
             at: supportDirectory,
             withIntermediateDirectories: true
@@ -324,6 +326,25 @@ nonisolated enum AppStoreLayout {
             return
         }
 
+        try clearPersistentStoreFiles(fileManager: fileManager)
+    }
+#endif
+
+    static func requestPersistentStoreResetOnNextLaunch(defaults: UserDefaults = .standard) {
+        defaults.set(true, forKey: resetPersistentStoresKey)
+    }
+
+    static func clearPersistentStoreFilesForPendingReset(
+        defaults: UserDefaults = .standard,
+        fileManager: FileManager = .default
+    ) {
+        guard defaults.bool(forKey: resetPersistentStoresKey) else { return }
+        try? clearPersistentStoreFiles(fileManager: fileManager)
+        clearObsoleteAppGroupStoreFiles(fileManager: fileManager)
+        defaults.removeObject(forKey: resetPersistentStoresKey)
+    }
+
+    static func persistentStoreDirectories(fileManager: FileManager = .default) -> [URL] {
         var directories = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)
         if let groupContainerURL = fileManager.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier) {
             directories.append(
@@ -332,19 +353,47 @@ nonisolated enum AppStoreLayout {
                     .appendingPathComponent("Application Support", isDirectory: true)
             )
         }
+        return directories
+    }
 
-        for directory in directories {
+    static func appGroupApplicationSupportDirectory(fileManager: FileManager = .default) -> URL? {
+        fileManager.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier)?
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Application Support", isDirectory: true)
+    }
+
+    static func isPersistentStoreFile(_ fileURL: URL) -> Bool {
+        storeFilePrefixes.contains { prefix in
+            fileURL.lastPathComponent.hasPrefix(prefix)
+        }
+    }
+
+    static func clearObsoleteAppGroupStoreFiles(fileManager: FileManager = .default) {
+        guard let directory = appGroupApplicationSupportDirectory(fileManager: fileManager),
+              fileManager.fileExists(atPath: directory.path),
+              let fileURLs = try? fileManager.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: nil
+              )
+        else { return }
+
+        for fileURL in fileURLs where obsoleteAppGroupStoreFilePrefixes.contains(where: { prefix in
+            fileURL.lastPathComponent.hasPrefix(prefix)
+        }) {
+            try? fileManager.removeItem(at: fileURL)
+        }
+    }
+
+    private static func clearPersistentStoreFiles(fileManager: FileManager) throws {
+        for directory in persistentStoreDirectories(fileManager: fileManager) {
             guard fileManager.fileExists(atPath: directory.path) else { continue }
             let fileURLs = try fileManager.contentsOfDirectory(
                 at: directory,
                 includingPropertiesForKeys: nil
             )
-            for fileURL in fileURLs where storeFilePrefixes.contains(where: { prefix in
-                fileURL.lastPathComponent.hasPrefix(prefix)
-            }) {
+            for fileURL in fileURLs where isPersistentStoreFile(fileURL) {
                 try? fileManager.removeItem(at: fileURL)
             }
         }
     }
-#endif
 }

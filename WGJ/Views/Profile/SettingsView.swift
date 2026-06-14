@@ -168,6 +168,15 @@ struct SettingsView: View {
                     WGJSectionHeader("Legal & Support", subtitle: "Review terms, privacy, safety, moderation, and data controls.")
 
                     WGJNavigationTile(
+                        title: "Storage",
+                        systemImage: "internaldrive.fill",
+                        subtitle: "Review local storage and clear cache files.",
+                        accessibilityID: "settings-storage-tile"
+                    ) {
+                        AppStorageDiagnosticsView()
+                    }
+
+                    WGJNavigationTile(
                         title: "Terms & Safety",
                         systemImage: "exclamationmark.shield.fill",
                         subtitle: "Read workout safety, responsibility, warranty, and liability limits.",
