@@ -150,6 +150,7 @@ nonisolated final class UserDataCloudBackupService {
     func exportCurrentBackup() async throws -> UserDataCloudBackupRemoteSnapshot {
         let context = ModelContext(localContainer)
         context.autosaveEnabled = false
+        try TemplateRepository(modelContext: context, autoSaveChanges: false).pruneOrphanedTemplateGraphs()
         let payload = try UserDataCloudBackupPayload(context: context)
         let payloadData = try Self.makeEncoder().encode(payload)
         try await backupStore.saveBackup(UserDataCloudBackupRemoteRecord(
