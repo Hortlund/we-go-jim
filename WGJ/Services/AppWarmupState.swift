@@ -182,7 +182,7 @@ nonisolated enum FirstFrameTabContentPolicy {
         case .profile:
             _ = hasFreshWarmSnapshot
             return false
-        case .history, .startWorkout, .exercises:
+        case .history, .startWorkout, .progress, .exercises:
             return false
         }
     }
@@ -213,7 +213,7 @@ nonisolated enum FirstFrameTabContentPolicy {
         switch tab {
         case .profile:
             return hasFreshWarmSnapshot || isWarmupActive
-        case .history, .startWorkout, .exercises:
+        case .history, .startWorkout, .progress, .exercises:
             return false
         }
     }

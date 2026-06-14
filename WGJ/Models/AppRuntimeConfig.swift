@@ -570,6 +570,7 @@ nonisolated enum AppMainTab: String, Hashable, CaseIterable {
     case profile
     case history
     case startWorkout
+    case progress
     case exercises
 }
 

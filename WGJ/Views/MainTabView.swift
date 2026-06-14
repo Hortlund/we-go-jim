@@ -66,6 +66,17 @@ struct MainTabView: View {
                     }
 
                     rootTab(
+                        .progress,
+                        title: "Progress",
+                        systemImage: "chart.line.uptrend.xyaxis",
+                        activeWorkoutOverlayBottomInset: overlayBottomInset
+                    ) {
+                        NavigationStack {
+                            ProgressDashboardView()
+                        }
+                    }
+
+                    rootTab(
                         .exercises,
                         title: "Exercises",
                         systemImage: "dumbbell.fill",
