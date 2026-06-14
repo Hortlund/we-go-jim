@@ -415,8 +415,10 @@ nonisolated private struct UserDataCloudBackupPayload: Codable {
     var templateExercises: [TemplateExerciseBackup]
     var templateComponents: [TemplateComponentBackup]
     var templateSets: [TemplateSetBackup]
+    var templateSupersetGroups: [TemplateSupersetGroupBackup]?
     var templateDropStages: [TemplateDropStageBackup]
     var workoutSessions: [WorkoutSessionBackup]
+    var workoutSupersetGroups: [WorkoutSupersetGroupBackup]?
     var workoutCardioBlocks: [WorkoutCardioBlockBackup]
     var workoutExercises: [WorkoutExerciseBackup]
     var workoutSets: [WorkoutSetBackup]
@@ -432,12 +434,29 @@ nonisolated private struct UserDataCloudBackupPayload: Codable {
         templateExercises = try context.fetch(FetchDescriptor<TemplateExercise>()).map(TemplateExerciseBackup.init)
         templateComponents = try context.fetch(FetchDescriptor<TemplateExerciseComponent>()).map(TemplateComponentBackup.init)
         templateSets = try context.fetch(FetchDescriptor<TemplateExerciseSet>()).map(TemplateSetBackup.init)
+        templateSupersetGroups = try context.fetch(FetchDescriptor<TemplateSupersetGroup>()).map(TemplateSupersetGroupBackup.init)
         templateDropStages = try context.fetch(FetchDescriptor<TemplateExerciseDropStage>()).map(TemplateDropStageBackup.init)
-        workoutSessions = try context.fetch(FetchDescriptor<WorkoutSession>()).filter { $0.status == .completed }.map(WorkoutSessionBackup.init)
-        workoutCardioBlocks = try context.fetch(FetchDescriptor<WorkoutSessionCardioBlock>()).map(WorkoutCardioBlockBackup.init)
-        workoutExercises = try context.fetch(FetchDescriptor<WorkoutSessionExercise>()).map(WorkoutExerciseBackup.init)
-        workoutSets = try context.fetch(FetchDescriptor<WorkoutSessionSet>()).map(WorkoutSetBackup.init)
-        workoutDropStages = try context.fetch(FetchDescriptor<WorkoutSessionDropStage>()).map(WorkoutDropStageBackup.init)
+        let completedSessions = try context.fetch(FetchDescriptor<WorkoutSession>()).filter { $0.status == .completed }
+        let completedSessionIDs = Set(completedSessions.map(\.id))
+        let completedExercises = try context.fetch(FetchDescriptor<WorkoutSessionExercise>())
+            .filter { completedSessionIDs.contains($0.sessionID) }
+        let completedExerciseIDs = Set(completedExercises.map(\.id))
+        let completedSets = try context.fetch(FetchDescriptor<WorkoutSessionSet>())
+            .filter { completedExerciseIDs.contains($0.sessionExerciseID) }
+        let completedSetIDs = Set(completedSets.map(\.id))
+
+        workoutSessions = completedSessions.map(WorkoutSessionBackup.init)
+        workoutSupersetGroups = try context.fetch(FetchDescriptor<WorkoutSessionSupersetGroup>())
+            .filter { completedSessionIDs.contains($0.sessionID) }
+            .map(WorkoutSupersetGroupBackup.init)
+        workoutCardioBlocks = try context.fetch(FetchDescriptor<WorkoutSessionCardioBlock>())
+            .filter { completedSessionIDs.contains($0.sessionID) }
+            .map(WorkoutCardioBlockBackup.init)
+        workoutExercises = completedExercises.map(WorkoutExerciseBackup.init)
+        workoutSets = completedSets.map(WorkoutSetBackup.init)
+        workoutDropStages = try context.fetch(FetchDescriptor<WorkoutSessionDropStage>())
+            .filter { completedSetIDs.contains($0.sessionSetID) }
+            .map(WorkoutDropStageBackup.init)
     }
 
     var contentSummary: UserDataCloudBackupContentSummary {
@@ -470,12 +489,15 @@ nonisolated private struct UserDataCloudBackupPayload: Codable {
         try upsertTemplateExercises(in: context)
         try upsertTemplateComponents(in: context)
         try upsertTemplateSets(in: context)
+        try upsertTemplateSupersetGroups(in: context)
         try upsertTemplateDropStages(in: context)
         try upsertWorkoutSessions(in: context)
+        try upsertWorkoutSupersetGroups(in: context)
         try upsertWorkoutCardioBlocks(in: context)
         try upsertWorkoutExercises(in: context)
         try upsertWorkoutSets(in: context)
         try upsertWorkoutDropStages(in: context)
+        try relinkSupersetRelationships(in: context)
     }
 
     private func upsertProfiles(in context: ModelContext) throws {
@@ -553,6 +575,13 @@ nonisolated private struct UserDataCloudBackupPayload: Codable {
         }
     }
 
+    private func upsertTemplateSupersetGroups(in context: ModelContext) throws {
+        let existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<TemplateSupersetGroup>()).map { ($0.id, $0) })
+        for item in templateSupersetGroups ?? [] {
+            if let model = existing[item.id] { item.apply(to: model) } else { context.insert(item.model) }
+        }
+    }
+
     private func upsertTemplateDropStages(in context: ModelContext) throws {
         let existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<TemplateExerciseDropStage>()).map { ($0.id, $0) })
         for item in templateDropStages {
@@ -563,6 +592,13 @@ nonisolated private struct UserDataCloudBackupPayload: Codable {
     private func upsertWorkoutSessions(in context: ModelContext) throws {
         let existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<WorkoutSession>()).map { ($0.id, $0) })
         for item in workoutSessions {
+            if let model = existing[item.id] { item.apply(to: model) } else { context.insert(item.model) }
+        }
+    }
+
+    private func upsertWorkoutSupersetGroups(in context: ModelContext) throws {
+        let existing = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<WorkoutSessionSupersetGroup>()).map { ($0.id, $0) })
+        for item in workoutSupersetGroups ?? [] {
             if let model = existing[item.id] { item.apply(to: model) } else { context.insert(item.model) }
         }
     }
@@ -594,6 +630,26 @@ nonisolated private struct UserDataCloudBackupPayload: Codable {
             if let model = existing[item.id] { item.apply(to: model) } else { context.insert(item.model) }
         }
     }
+
+    private func relinkSupersetRelationships(in context: ModelContext) throws {
+        let templatesByID = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<WorkoutTemplate>()).map { ($0.id, $0) })
+        let templateGroupsByID = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<TemplateSupersetGroup>()).map { ($0.id, $0) })
+        for group in templateGroupsByID.values {
+            group.template = templatesByID[group.templateID]
+        }
+        for exercise in try context.fetch(FetchDescriptor<TemplateExercise>()) {
+            exercise.supersetGroup = exercise.supersetGroupID.flatMap { templateGroupsByID[$0] }
+        }
+
+        let sessionsByID = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<WorkoutSession>()).map { ($0.id, $0) })
+        let workoutGroupsByID = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<WorkoutSessionSupersetGroup>()).map { ($0.id, $0) })
+        for group in workoutGroupsByID.values {
+            group.session = sessionsByID[group.sessionID]
+        }
+        for exercise in try context.fetch(FetchDescriptor<WorkoutSessionExercise>()) {
+            exercise.supersetGroup = exercise.supersetGroupID.flatMap { workoutGroupsByID[$0] }
+        }
+    }
 }
 
 private protocol BackupModel {
@@ -612,6 +668,7 @@ private struct Profile: Codable, BackupModel {
     var weeklyWorkoutGoal: Int
     var isTrainingGuidanceEnabled: Bool
     var keepsScreenAwake: Bool
+    var isBozarModeEnabled: Bool?
     var createdAt: Date
     var updatedAt: Date
 
@@ -625,6 +682,7 @@ private struct Profile: Codable, BackupModel {
         weeklyWorkoutGoal = model.weeklyWorkoutGoal
         isTrainingGuidanceEnabled = model.isTrainingGuidanceEnabled
         keepsScreenAwake = model.keepsScreenAwake
+        isBozarModeEnabled = model.isBozarModeEnabled
         createdAt = model.createdAt
         updatedAt = model.updatedAt
     }
@@ -640,6 +698,7 @@ private struct Profile: Codable, BackupModel {
             weeklyWorkoutGoal: weeklyWorkoutGoal,
             isTrainingGuidanceEnabled: isTrainingGuidanceEnabled,
             keepsScreenAwake: keepsScreenAwake,
+            isBozarModeEnabled: isBozarModeEnabled ?? false,
             createdAt: createdAt,
             updatedAt: updatedAt
         )
@@ -654,6 +713,7 @@ private struct Profile: Codable, BackupModel {
         model.weeklyWorkoutGoal = weeklyWorkoutGoal
         model.isTrainingGuidanceEnabled = isTrainingGuidanceEnabled
         model.keepsScreenAwake = keepsScreenAwake
+        model.isBozarModeEnabled = isBozarModeEnabled ?? false
         model.createdAt = createdAt
         model.updatedAt = updatedAt
     }
@@ -1063,6 +1123,39 @@ private struct TemplateSetBackup: Codable, BackupModel {
     }
 }
 
+private struct TemplateSupersetGroupBackup: Codable, BackupModel {
+    var id: UUID
+    var templateID: UUID
+    var roundRestSeconds: Int
+    var createdAt: Date
+    var updatedAt: Date
+
+    nonisolated init(_ model: TemplateSupersetGroup) {
+        id = model.id
+        templateID = model.templateID
+        roundRestSeconds = model.roundRestSeconds
+        createdAt = model.createdAt
+        updatedAt = model.updatedAt
+    }
+
+    nonisolated var model: TemplateSupersetGroup {
+        TemplateSupersetGroup(
+            id: id,
+            templateID: templateID,
+            roundRestSeconds: roundRestSeconds,
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
+    }
+
+    nonisolated func apply(to model: TemplateSupersetGroup) {
+        model.templateID = templateID
+        model.roundRestSeconds = roundRestSeconds
+        model.createdAt = createdAt
+        model.updatedAt = updatedAt
+    }
+}
+
 private struct TemplateDropStageBackup: Codable, BackupModel {
     var id: UUID
     var templateExerciseSetID: UUID
@@ -1172,6 +1265,39 @@ private struct WorkoutSessionBackup: Codable, BackupModel {
         model.summaryMetricsVersion = summaryMetricsVersion
         model.notes = notes
         model.archivedAt = archivedAt
+        model.createdAt = createdAt
+        model.updatedAt = updatedAt
+    }
+}
+
+private struct WorkoutSupersetGroupBackup: Codable, BackupModel {
+    var id: UUID
+    var sessionID: UUID
+    var roundRestSeconds: Int
+    var createdAt: Date
+    var updatedAt: Date
+
+    nonisolated init(_ model: WorkoutSessionSupersetGroup) {
+        id = model.id
+        sessionID = model.sessionID
+        roundRestSeconds = model.roundRestSeconds
+        createdAt = model.createdAt
+        updatedAt = model.updatedAt
+    }
+
+    nonisolated var model: WorkoutSessionSupersetGroup {
+        WorkoutSessionSupersetGroup(
+            id: id,
+            sessionID: sessionID,
+            roundRestSeconds: roundRestSeconds,
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
+    }
+
+    nonisolated func apply(to model: WorkoutSessionSupersetGroup) {
+        model.sessionID = sessionID
+        model.roundRestSeconds = roundRestSeconds
         model.createdAt = createdAt
         model.updatedAt = updatedAt
     }
