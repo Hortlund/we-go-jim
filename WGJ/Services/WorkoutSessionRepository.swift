@@ -826,7 +826,7 @@ nonisolated final class WorkoutSessionRepository {
             return nil
         }
 
-        let orderedSets = (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
+        let orderedSets = try sessionSets(sessionExerciseID: exercise.id)
         guard !orderedSets.isEmpty else { return nil }
         if let exact = orderedSets.first(where: { $0.sortOrder == setIndex }) {
             return exact
@@ -886,15 +886,18 @@ nonisolated final class WorkoutSessionRepository {
             excludingSessionID: excludingSessionID
         )
 
-        return exercisesByCatalogUUID.mapValues { exercise in
-            let orderedSets = (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
-            return Dictionary(orderedSets.map { set in
+        var maps: [String: [Int: WorkoutPreviousSetSnapshot]] = [:]
+        maps.reserveCapacity(exercisesByCatalogUUID.count)
+        for (catalogExerciseUUID, exercise) in exercisesByCatalogUUID {
+            let orderedSets = try sessionSets(sessionExerciseID: exercise.id)
+            maps[catalogExerciseUUID] = Dictionary(orderedSets.map { set in
                 (
                     set.sortOrder,
                     previousSnapshot(from: set)
                 )
             }, uniquingKeysWith: { existing, _ in existing })
         }
+        return maps
     }
 
     func finishSession(sessionID: UUID, notes: String? = nil) throws {
@@ -913,7 +916,7 @@ nonisolated final class WorkoutSessionRepository {
         session.updatedAt = now
 
         let metrics = WorkoutMetricsService(modelContext: modelContext)
-        let projectedFacts = HistoryProjectionSnapshotBuilder.projectedFacts(from: session)
+        let projectedFacts = try HistoryProjectionSnapshotBuilder.projectedFacts(from: session, repository: self)
         let summary = try metrics.sessionSummary(session: session, projectedFacts: projectedFacts)
         session.totalVolume = summary.totalVolume
         session.prHitsCount = summary.prHitsCount
@@ -991,7 +994,7 @@ nonisolated final class WorkoutSessionRepository {
         session.updatedAt = now
 
         let metrics = WorkoutMetricsService(modelContext: modelContext)
-        let projectedFacts = HistoryProjectionSnapshotBuilder.projectedFacts(from: session)
+        let projectedFacts = try HistoryProjectionSnapshotBuilder.projectedFacts(from: session, repository: self)
         let summary = try metrics.sessionSummary(session: session, projectedFacts: projectedFacts)
         session.totalVolume = summary.totalVolume
         session.prHitsCount = summary.prHitsCount
@@ -1365,7 +1368,7 @@ nonisolated final class WorkoutSessionRepository {
         var chosenSessionByExercise: [String: UUID] = [:]
 
         for session in sessions {
-            for exercise in orderedSessionExercises(session) {
+            for exercise in try sessionExercises(sessionID: session.id) {
                 guard requested.contains(exercise.catalogExerciseUUID) else { continue }
                 guard chosenSessionByExercise[exercise.catalogExerciseUUID] == nil else { continue }
                 chosenSessionByExercise[exercise.catalogExerciseUUID] = session.id

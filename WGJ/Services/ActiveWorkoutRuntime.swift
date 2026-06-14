@@ -688,8 +688,7 @@ nonisolated final class ActiveWorkoutSessionFactory {
             updatedAt: now
         )
 
-        session.cardioBlocks = (template.cardioBlocks ?? [])
-            .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
+        session.cardioBlocks = try templateCardioBlocks(templateID: template.id)
             .map { templateCardioBlock in
                 ActiveWorkoutRuntimeCardioBlock(
                     phase: templateCardioBlock.phase,
@@ -705,8 +704,7 @@ nonisolated final class ActiveWorkoutSessionFactory {
             }
 
         let componentResolver = TemplateExerciseComponentRotationResolver(modelContext: modelContext)
-        session.exercises = try (template.exercises ?? [])
-            .sorted { $0.sortOrder < $1.sortOrder }
+        session.exercises = try templateExercises(templateID: template.id)
             .enumerated()
             .map { index, templateExercise in
                 let componentResolution = try componentResolver.resolution(
@@ -729,8 +727,7 @@ nonisolated final class ActiveWorkoutSessionFactory {
                     )
                 } ?? []
 
-                var setDrafts = (templateExercise.prescribedSets ?? [])
-                    .sorted { $0.sortOrder < $1.sortOrder }
+                var setDrafts = try templateExerciseSets(templateExerciseID: templateExercise.id)
                     .map { templateSet in
                         WorkoutSessionSetDraft(
                             isWarmup: templateSet.isWarmup,
@@ -740,8 +737,7 @@ nonisolated final class ActiveWorkoutSessionFactory {
                             targetLoadUnit: templateSet.loadUnit,
                             actualLoadUnit: templateSet.loadUnit,
                             isLocked: templateSet.isLocked,
-                            dropStages: (templateSet.dropStages ?? [])
-                                .sorted { $0.sortOrder < $1.sortOrder }
+                            dropStages: try templateExerciseDropStages(templateExerciseSetID: templateSet.id)
                                 .map { templateStage in
                                     WorkoutSessionDropStageDraft(
                                         targetReps: templateStage.targetReps,
@@ -840,6 +836,47 @@ nonisolated final class ActiveWorkoutSessionFactory {
             template.id == id
         })
         return try modelContext.fetch(descriptor).first
+    }
+
+    private func templateCardioBlocks(templateID: UUID) throws -> [TemplateCardioBlock] {
+        let descriptor = FetchDescriptor<TemplateCardioBlock>(
+            predicate: #Predicate { block in
+                block.templateID == templateID
+            },
+            sortBy: [SortDescriptor(\.phaseRaw, order: .forward)]
+        )
+        return try modelContext.fetch(descriptor)
+            .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
+    }
+
+    private func templateExercises(templateID: UUID) throws -> [TemplateExercise] {
+        let descriptor = FetchDescriptor<TemplateExercise>(
+            predicate: #Predicate { exercise in
+                exercise.templateID == templateID
+            },
+            sortBy: [SortDescriptor(\.sortOrder, order: .forward)]
+        )
+        return try modelContext.fetch(descriptor)
+    }
+
+    private func templateExerciseSets(templateExerciseID: UUID) throws -> [TemplateExerciseSet] {
+        let descriptor = FetchDescriptor<TemplateExerciseSet>(
+            predicate: #Predicate { set in
+                set.templateExerciseID == templateExerciseID
+            },
+            sortBy: [SortDescriptor(\.sortOrder, order: .forward)]
+        )
+        return try modelContext.fetch(descriptor)
+    }
+
+    private func templateExerciseDropStages(templateExerciseSetID: UUID) throws -> [TemplateExerciseDropStage] {
+        let descriptor = FetchDescriptor<TemplateExerciseDropStage>(
+            predicate: #Predicate { stage in
+                stage.templateExerciseSetID == templateExerciseSetID
+            },
+            sortBy: [SortDescriptor(\.sortOrder, order: .forward)]
+        )
+        return try modelContext.fetch(descriptor)
     }
 
     private func preferredLoadUnit() -> TemplateLoadUnit {

@@ -375,6 +375,217 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         XCTAssertEqual(facts.first?.exerciseNameSnapshot, "Lat Pulldown")
     }
 
+    func testHistoryDetailUsesSessionSetIDs() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+
+        let sessionID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let exerciseID = UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
+        context.insert(WorkoutSession(
+            id: sessionID,
+            name: "Day 4 - Lower B",
+            status: .completed,
+            startedAt: Date(timeIntervalSince1970: 100),
+            endedAt: Date(timeIntervalSince1970: 200)
+        ))
+        context.insert(WorkoutSessionExercise(
+            id: exerciseID,
+            sessionID: sessionID,
+            catalogExerciseUUID: "leg-press",
+            exerciseNameSnapshot: "Leg Press",
+            categorySnapshot: "Strength",
+            muscleSummarySnapshot: "Quadriceps",
+            totalSetCount: 1,
+            completedSetCount: 1
+        ))
+        context.insert(WorkoutSessionSet(
+            id: UUID(uuidString: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")!,
+            sessionExerciseID: exerciseID,
+            actualReps: 7,
+            actualWeight: 120,
+            isCompleted: true
+        ))
+        try context.save()
+
+        let snapshot = try HistoryDetailSnapshotBuilder.load(
+            modelContext: context,
+            sessionID: sessionID
+        )
+
+        let drafts = snapshot.localState.setDraftsByExerciseID[exerciseID]
+        XCTAssertEqual(drafts?.count, 1)
+        XCTAssertEqual(drafts?.first?.actualReps, 7)
+        XCTAssertEqual(drafts?.first?.actualWeight, 120)
+    }
+
+    func testPreviousValuesUseSessionSetIDs() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+
+        let sessionID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let exerciseID = UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
+        context.insert(WorkoutSession(
+            id: sessionID,
+            name: "Day 4 - Lower B",
+            status: .completed,
+            startedAt: Date(timeIntervalSince1970: 100),
+            endedAt: Date(timeIntervalSince1970: 200)
+        ))
+        context.insert(WorkoutSessionExercise(
+            id: exerciseID,
+            sessionID: sessionID,
+            catalogExerciseUUID: "leg-press",
+            exerciseNameSnapshot: "Leg Press",
+            categorySnapshot: "Strength",
+            muscleSummarySnapshot: "Quadriceps"
+        ))
+        context.insert(WorkoutSessionSet(
+            id: UUID(uuidString: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")!,
+            sessionExerciseID: exerciseID,
+            actualReps: 7,
+            actualWeight: 120,
+            isCompleted: true
+        ))
+        try context.save()
+
+        let previousMaps = try WorkoutSessionRepository(modelContext: context).previousSetMaps(
+            forExercises: ["leg-press"],
+            before: Date(timeIntervalSince1970: 300),
+            excludingSessionID: nil
+        )
+
+        XCTAssertEqual(previousMaps["leg-press"]?[0]?.reps, 7)
+        XCTAssertEqual(previousMaps["leg-press"]?[0]?.weight, 120)
+    }
+
+    func testActiveWorkoutTemplateStartUsesTemplateChildIDs() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+
+        let templateID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let exerciseID = UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
+        let setID = UUID(uuidString: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")!
+        context.insert(WorkoutTemplate(
+            id: templateID,
+            folderID: UUID(uuidString: "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD")!,
+            name: "Day 1 - Upper A"
+        ))
+        context.insert(TemplateCardioBlock(
+            id: UUID(uuidString: "EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE")!,
+            templateID: templateID,
+            phase: .preWorkout,
+            catalogExerciseUUID: "crosstrainer",
+            exerciseNameSnapshot: "Crosstrainer",
+            categorySnapshot: "Cardio",
+            muscleSummarySnapshot: "Quadriceps",
+            targetDurationSeconds: 300
+        ))
+        context.insert(TemplateExercise(
+            id: exerciseID,
+            templateID: templateID,
+            catalogExerciseUUID: "lat-pulldown",
+            exerciseNameSnapshot: "Lat Pulldown",
+            categorySnapshot: "Strength",
+            muscleSummarySnapshot: "Back",
+            targetRepMin: 8,
+            targetRepMax: 12,
+            restSeconds: 120
+        ))
+        context.insert(TemplateExerciseComponent(
+            id: UUID(uuidString: "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF")!,
+            templateExerciseID: exerciseID,
+            catalogExerciseUUID: "lat-pulldown-wide",
+            exerciseNameSnapshot: "Wide Lat Pulldown",
+            categorySnapshot: "Strength",
+            muscleSummarySnapshot: "Back",
+            sortOrder: 0
+        ))
+        context.insert(TemplateExerciseSet(
+            id: setID,
+            templateExerciseID: exerciseID,
+            targetReps: 10,
+            targetWeight: 60,
+            loadUnit: .kg
+        ))
+        context.insert(TemplateExerciseDropStage(
+            id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
+            templateExerciseSetID: setID,
+            targetReps: 8,
+            targetWeight: 45,
+            loadUnit: .kg
+        ))
+        try context.save()
+
+        let session = try ActiveWorkoutSessionFactory(modelContext: context)
+            .createSessionFromTemplate(templateID: templateID)
+
+        XCTAssertEqual(session.cardioBlocks.count, 1)
+        XCTAssertEqual(session.exercises.count, 1)
+        XCTAssertEqual(session.exercises.first?.components.count, 1)
+        XCTAssertEqual(session.exercises.first?.exerciseNameSnapshot, "Wide Lat Pulldown")
+        XCTAssertEqual(session.exercises.first?.setDrafts.count, 1)
+        XCTAssertEqual(session.exercises.first?.setDrafts.first?.targetReps, 10)
+        XCTAssertEqual(session.exercises.first?.setDrafts.first?.targetWeight, 60)
+        XCTAssertEqual(session.exercises.first?.setDrafts.first?.dropStages.first?.targetWeight, 45)
+    }
+
+    func testCreateTemplateFromWorkoutUsesSessionSetIDs() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+
+        let sessionID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let exerciseID = UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
+        let setID = UUID(uuidString: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")!
+        context.insert(WorkoutSession(
+            id: sessionID,
+            name: "Day 4 - Lower B",
+            status: .completed,
+            startedAt: Date(timeIntervalSince1970: 100),
+            endedAt: Date(timeIntervalSince1970: 200)
+        ))
+        context.insert(WorkoutSessionExercise(
+            id: exerciseID,
+            sessionID: sessionID,
+            catalogExerciseUUID: "leg-press",
+            exerciseNameSnapshot: "Leg Press",
+            categorySnapshot: "Strength",
+            muscleSummarySnapshot: "Quadriceps",
+            restSeconds: 150
+        ))
+        context.insert(WorkoutSessionSet(
+            id: setID,
+            sessionExerciseID: exerciseID,
+            actualReps: 7,
+            actualWeight: 120,
+            actualLoadUnit: .kg,
+            isCompleted: true
+        ))
+        context.insert(WorkoutSessionDropStage(
+            id: UUID(uuidString: "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD")!,
+            sessionSetID: setID,
+            actualReps: 5,
+            actualWeight: 90,
+            actualLoadUnit: .kg,
+            isCompleted: true
+        ))
+        try context.save()
+
+        _ = try TemplateRepository(modelContext: context)
+            .createTemplate(fromSessionID: sessionID, name: "Copied Lower")
+
+        let templateSets = try context.fetch(FetchDescriptor<TemplateExerciseSet>())
+        let templateDropStages = try context.fetch(FetchDescriptor<TemplateExerciseDropStage>())
+        XCTAssertEqual(templateSets.count, 1)
+        XCTAssertEqual(templateSets.first?.targetReps, 7)
+        XCTAssertEqual(templateSets.first?.targetWeight, 120)
+        XCTAssertEqual(templateDropStages.first?.targetReps, 5)
+        XCTAssertEqual(templateDropStages.first?.targetWeight, 90)
+    }
+
     func testExportCurrentBackupIncludesOnlyCompletedWorkoutChildren() async throws {
         let container = try makeInMemoryContainer()
         let context = ModelContext(container)
