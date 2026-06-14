@@ -659,22 +659,23 @@ struct WorkoutSessionExerciseGridEditor: View {
             return row
         }
 
-        let rows = Self.makeDisplayRows(
-            setDrafts: setDrafts,
+        let workingSetNumber = setDrafts
+            .prefix(currentIndex + 1)
+            .filter { !$0.isWarmup }
+            .count
+        let row = Self.makeDisplayRow(
+            draft: currentSet,
+            index: currentIndex,
+            workingSetNumber: workingSetNumber,
             previousPerformanceResolution: previousPerformanceResolution,
             targetRepMin: targetRepMin,
             targetRepMax: targetRepMax,
             restSeconds: restSeconds,
             formatWeight: formatWeight
         )
+        guard row.id == currentSet.id else { return nil }
 
-        guard rows.indices.contains(currentIndex),
-              rows[currentIndex].id == row.id
-        else {
-            return nil
-        }
-
-        return rows[currentIndex]
+        return row
     }
 
     @ViewBuilder
@@ -1842,47 +1843,69 @@ struct WorkoutSessionExerciseGridEditor: View {
         var workingSetNumber = 0
 
         for (index, draft) in setDrafts.enumerated() {
-            let label: WorkoutSessionExerciseSetRowLabel
-            if draft.isWarmup {
-                label = WorkoutSessionExerciseSetRowLabel(
-                    badgeTitle: "W",
-                    title: "Warmup Set"
-                )
-            } else {
+            if !draft.isWarmup {
                 workingSetNumber += 1
-                label = WorkoutSessionExerciseSetRowLabel(
-                    badgeTitle: "\(workingSetNumber)",
-                    title: "Working Set \(workingSetNumber)"
-                )
             }
 
             rows.append(
-                WorkoutSessionExerciseSetRowDisplaySnapshot(
-                    id: draft.id,
+                makeDisplayRow(
+                    draft: draft,
                     index: index,
-                    set: draft,
-                    badgeTitle: label.badgeTitle,
-                    title: label.title,
-                    previousSummary: previousSummaryText(
-                        for: draft,
-                        for: previousPerformanceResolution,
-                        at: index,
-                        formatWeight: formatWeight
-                    ),
-                    metadataLine: metadataLine(for: draft),
-                    inlineHintPresentation: WorkoutSetInlineHintPresentation.make(
-                        draft: draft,
-                        previous: previousPerformanceResolution.previous(at: index),
-                        targetRepMin: targetRepMin,
-                        targetRepMax: targetRepMax,
-                        formatWeight: formatWeight
-                    ),
-                    completionButtonTitle: completionButtonTitle(for: draft, restSeconds: restSeconds)
+                    workingSetNumber: workingSetNumber,
+                    previousPerformanceResolution: previousPerformanceResolution,
+                    targetRepMin: targetRepMin,
+                    targetRepMax: targetRepMax,
+                    restSeconds: restSeconds,
+                    formatWeight: formatWeight
                 )
             )
         }
 
         return rows
+    }
+
+    private static func makeDisplayRow(
+        draft: WorkoutSessionSetDraft,
+        index: Int,
+        workingSetNumber: Int,
+        previousPerformanceResolution: WorkoutPreviousPerformanceResolution,
+        targetRepMin: Int?,
+        targetRepMax: Int?,
+        restSeconds: Int,
+        formatWeight: (Double) -> String
+    ) -> WorkoutSessionExerciseSetRowDisplaySnapshot {
+        let label = draft.isWarmup
+            ? WorkoutSessionExerciseSetRowLabel(
+                badgeTitle: "W",
+                title: "Warmup Set"
+            )
+            : WorkoutSessionExerciseSetRowLabel(
+                badgeTitle: "\(workingSetNumber)",
+                title: "Working Set \(workingSetNumber)"
+            )
+
+        return WorkoutSessionExerciseSetRowDisplaySnapshot(
+            id: draft.id,
+            index: index,
+            set: draft,
+            badgeTitle: label.badgeTitle,
+            title: label.title,
+            previousSummary: previousSummaryText(
+                for: draft,
+                for: previousPerformanceResolution,
+                at: index,
+                formatWeight: formatWeight
+            ),
+            metadataLine: metadataLine(for: draft),
+            inlineHintPresentation: WorkoutSetInlineHintPresentation.make(
+                draft: draft,
+                previous: previousPerformanceResolution.previous(at: index),
+                targetRepMin: targetRepMin,
+                targetRepMax: targetRepMax,
+                formatWeight: formatWeight
+            ),
+            completionButtonTitle: completionButtonTitle(for: draft, restSeconds: restSeconds)
+        )
     }
 
     private static func previousSummaryText(
@@ -2546,6 +2569,9 @@ struct WorkoutSessionExerciseGridEditor: View {
         let previousDrafts = setDrafts
         suppressNextSetDraftsDisplayRefresh = true
         setDrafts = updatedDrafts
+        if isExpanded {
+            rebuildDisplayRows(using: updatedDrafts)
+        }
         handleDraftValueMutation(previousDrafts: previousDrafts)
         return true
     }
@@ -2582,6 +2608,9 @@ struct WorkoutSessionExerciseGridEditor: View {
         let previousDrafts = setDrafts
         suppressNextSetDraftsDisplayRefresh = true
         setDrafts = updatedDrafts
+        if isExpanded {
+            rebuildDisplayRows(using: updatedDrafts)
+        }
         handleDraftValueMutation(previousDrafts: previousDrafts)
         return true
     }
