@@ -223,11 +223,40 @@ nonisolated final class UserDataCloudBackupService {
 nonisolated struct CloudKitUserDataCloudBackupStore: UserDataCloudBackupStoring {
     private static let inlinePayloadFallbackLimitBytes = 900_000
     private static let lzfsePayloadCompression = "lzfse"
+    private static let temporaryPayloadDirectoryName = "WGJUserDataCloudBackups"
 
     private let database: CKDatabase?
 
     init(container: CKContainer? = nil) {
         self.database = (container ?? AppRuntimeConfig.makeCloudKitContainer())?.privateCloudDatabase
+    }
+
+    static func removeExpiredTemporaryPayloads(olderThan age: TimeInterval = 24 * 60 * 60) {
+        let fileManager = FileManager.default
+        let directory = temporaryPayloadDirectoryURL(fileManager: fileManager)
+        guard fileManager.fileExists(atPath: directory.path),
+              let fileURLs = try? fileManager.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey]
+              )
+        else {
+            return
+        }
+
+        let expirationDate = Date().addingTimeInterval(-age)
+        for fileURL in fileURLs {
+            guard let values = try? fileURL.resourceValues(forKeys: [
+                .contentModificationDateKey,
+                .isRegularFileKey,
+            ]),
+                values.isRegularFile == true,
+                (values.contentModificationDate ?? .distantPast) < expirationDate
+            else {
+                continue
+            }
+
+            try? fileManager.removeItem(at: fileURL)
+        }
     }
 
     func saveBackup(_ backup: UserDataCloudBackupRemoteRecord) async throws {
@@ -352,12 +381,16 @@ nonisolated struct CloudKitUserDataCloudBackupStore: UserDataCloudBackupStoring 
     }
 
     private func writeTemporaryPayload(_ data: Data) throws -> URL {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("WGJUserDataCloudBackups", isDirectory: true)
+        let directory = Self.temporaryPayloadDirectoryURL(fileManager: .default)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appendingPathComponent("\(UUID().uuidString).json")
         try data.write(to: url, options: [.atomic])
         return url
+    }
+
+    private static func temporaryPayloadDirectoryURL(fileManager: FileManager) -> URL {
+        fileManager.temporaryDirectory
+            .appendingPathComponent(temporaryPayloadDirectoryName, isDirectory: true)
     }
 
     private func requireDatabase() throws -> CKDatabase {

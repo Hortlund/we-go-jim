@@ -4,12 +4,15 @@ import UIKit
 
 nonisolated final class ExerciseImageCacheService {
     private let fileManager: FileManager
-    private let decodedThumbnailMaxPixelSize = 640
+    private let decodedThumbnailMaxPixelSize = 192
+
+    private static let diskCacheLimitBytes = 64 * 1024 * 1024
+    private static let diskCacheTrimTargetBytes = 48 * 1024 * 1024
 
     private static let sharedMemoryImageCache: NSCache<NSString, UIImage> = {
         let cache = NSCache<NSString, UIImage>()
-        cache.countLimit = 96
-        cache.totalCostLimit = 32 * 1024 * 1024
+        cache.countLimit = 48
+        cache.totalCostLimit = 12 * 1024 * 1024
         return cache
     }()
 
@@ -33,7 +36,11 @@ nonisolated final class ExerciseImageCacheService {
         }
 
         if let cached = await loadCachedImage(from: imageAsset) {
-            Self.sharedMemoryImageCache.setObject(cached, forKey: cacheKey)
+            Self.sharedMemoryImageCache.setObject(
+                cached,
+                forKey: cacheKey,
+                cost: Self.memoryCost(for: cached)
+            )
             return cached
         }
 
@@ -63,8 +70,20 @@ nonisolated final class ExerciseImageCacheService {
             return nil
         }
 
-        Self.sharedMemoryImageCache.setObject(image, forKey: cacheKey)
+        Self.sharedMemoryImageCache.setObject(
+            image,
+            forKey: cacheKey,
+            cost: Self.memoryCost(for: image)
+        )
         return image
+    }
+
+    func trimDiskCacheIfNeeded() async {
+        let cacheDirectoryURL = self.cacheDirectoryURL
+        await Task.detached(priority: .utility) {
+            Self.trimDiskCache(at: cacheDirectoryURL)
+        }
+        .value
     }
 
     private func loadCachedImage(from asset: ExerciseImageAsset) async -> UIImage? {
@@ -127,4 +146,71 @@ nonisolated final class ExerciseImageCacheService {
         }
         .value
     }
+
+    private static func memoryCost(for image: UIImage) -> Int {
+        if let cgImage = image.cgImage {
+            return cgImage.bytesPerRow * cgImage.height
+        }
+
+        let width = max(Int(image.size.width * image.scale), 1)
+        let height = max(Int(image.size.height * image.scale), 1)
+        return width * height * 4
+    }
+
+    private static func trimDiskCache(at cacheDirectoryURL: URL) {
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: cacheDirectoryURL.path),
+              let enumerator = fileManager.enumerator(
+                at: cacheDirectoryURL,
+                includingPropertiesForKeys: [
+                    .isRegularFileKey,
+                    .fileSizeKey,
+                    .contentAccessDateKey,
+                    .contentModificationDateKey,
+                ],
+                options: [.skipsHiddenFiles]
+              )
+        else {
+            return
+        }
+
+        var files: [CachedDiskFile] = []
+        var totalSize = 0
+        for case let fileURL as URL in enumerator {
+            guard let values = try? fileURL.resourceValues(forKeys: [
+                .isRegularFileKey,
+                .fileSizeKey,
+                .contentAccessDateKey,
+                .contentModificationDateKey,
+            ]),
+                values.isRegularFile == true
+            else {
+                continue
+            }
+
+            let size = max(values.fileSize ?? 0, 0)
+            totalSize += size
+            files.append(CachedDiskFile(
+                url: fileURL,
+                size: size,
+                lastUsedAt: values.contentAccessDate ?? values.contentModificationDate ?? .distantPast
+            ))
+        }
+
+        guard totalSize > diskCacheLimitBytes else { return }
+
+        for file in files.sorted(by: { $0.lastUsedAt < $1.lastUsedAt }) {
+            try? fileManager.removeItem(at: file.url)
+            totalSize -= file.size
+            if totalSize <= diskCacheTrimTargetBytes {
+                break
+            }
+        }
+    }
+}
+
+private struct CachedDiskFile: Sendable {
+    let url: URL
+    let size: Int
+    let lastUsedAt: Date
 }

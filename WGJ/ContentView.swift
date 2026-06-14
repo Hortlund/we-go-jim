@@ -286,7 +286,15 @@ struct ContentView: View {
     private func performEnteredMainNoncriticalWork() {
         appRuntimeState.refreshCloudAvailabilityIfNeeded()
         scheduleWeeklyGoalWidgetPublish()
+        scheduleExerciseImageCacheTrim()
         requestWarmups(trigger: .enteredMain)
+    }
+
+    private func scheduleExerciseImageCacheTrim() {
+        Task.detached(priority: .utility) {
+            await ExerciseImageCacheService().trimDiskCacheIfNeeded()
+            CloudKitUserDataCloudBackupStore.removeExpiredTemporaryPayloads()
+        }
     }
 
     private func handleWorkoutHistoryChanged() {

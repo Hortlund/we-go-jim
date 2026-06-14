@@ -2162,6 +2162,9 @@ private struct ExerciseCatalogThumbnail: View {
             guard !Task.isCancelled, currentRemoteUUID == remoteUUID else { return }
             image = loadedImage
         }
+        .onDisappear {
+            image = nil
+        }
     }
 }
 

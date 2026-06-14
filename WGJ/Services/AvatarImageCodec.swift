@@ -35,7 +35,8 @@ nonisolated final class AvatarThumbnailCacheService {
     func store(_ thumbnail: UIImage?, for fingerprint: String, maxPixelSize: CGFloat) {
         cache.setObject(
             AvatarThumbnailCacheEntry(thumbnail: thumbnail, maxPixelSize: maxPixelSize),
-            forKey: fingerprint as NSString
+            forKey: fingerprint as NSString,
+            cost: Self.memoryCost(for: thumbnail)
         )
     }
 
@@ -56,6 +57,17 @@ nonisolated final class AvatarThumbnailCacheService {
 
     static func fingerprint(for data: Data) -> String {
         "\(data.count)-\(data.hashValue)"
+    }
+
+    private static func memoryCost(for image: UIImage?) -> Int {
+        guard let image else { return 1 }
+        if let cgImage = image.cgImage {
+            return cgImage.bytesPerRow * cgImage.height
+        }
+
+        let width = max(Int(image.size.width * image.scale), 1)
+        let height = max(Int(image.size.height * image.scale), 1)
+        return width * height * 4
     }
 }
 
