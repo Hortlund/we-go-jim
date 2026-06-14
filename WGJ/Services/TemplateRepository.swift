@@ -419,16 +419,10 @@ nonisolated final class TemplateRepository {
             throw TemplateRepositoryError.folderNotFound
         }
 
+        let templates = try templates(in: folder.id)
         recordDeletionTombstone(entityName: "TemplateFolder", entityID: folder.id)
-        for template in folder.templates ?? [] {
-            recordDeletionTombstone(entityName: "WorkoutTemplate", entityID: template.id)
-            for cardioBlock in template.cardioBlocks ?? [] {
-                modelContext.delete(cardioBlock)
-            }
-            for exercise in template.exercises ?? [] {
-                modelContext.delete(exercise)
-            }
-            modelContext.delete(template)
+        for template in templates {
+            try deleteTemplateGraph(template)
         }
 
         modelContext.delete(folder)
@@ -810,17 +804,101 @@ nonisolated final class TemplateRepository {
             throw TemplateRepositoryError.templateNotFound
         }
 
-        recordDeletionTombstone(entityName: "WorkoutTemplate", entityID: template.id)
-        for cardioBlock in template.cardioBlocks ?? [] {
+        try deleteTemplateGraph(template)
+        try saveUserDataChanges()
+    }
+
+    func pruneOrphanedTemplateGraphs() throws {
+        let folderIDs = Set(try folders().map(\.id) + [Self.unfiledFolderID])
+        let orphanedTemplates = try templates().filter { !folderIDs.contains($0.folderID) }
+        guard !orphanedTemplates.isEmpty else { return }
+
+        for template in orphanedTemplates {
+            try deleteTemplateGraph(template, recordsTombstone: false)
+        }
+
+        if modelContext.hasChanges {
+            try modelContext.save()
+        }
+    }
+
+    private func deleteTemplateGraph(_ template: WorkoutTemplate, recordsTombstone: Bool = true) throws {
+        if recordsTombstone {
+            recordDeletionTombstone(entityName: "WorkoutTemplate", entityID: template.id)
+        }
+
+        for cardioBlock in try cardioBlocks(templateID: template.id) {
             modelContext.delete(cardioBlock)
         }
 
-        for exercise in template.exercises ?? [] {
+        for exercise in try rawTemplateExercises(in: template.id) {
+            try deleteTemplateExerciseGraph(exercise)
             modelContext.delete(exercise)
         }
 
+        for group in try templateSupersetGroups(in: template.id) {
+            modelContext.delete(group)
+        }
+
         modelContext.delete(template)
-        try saveUserDataChanges()
+    }
+
+    private func rawTemplateExercises(in templateID: UUID) throws -> [TemplateExercise] {
+        let descriptor = FetchDescriptor<TemplateExercise>(
+            predicate: #Predicate { item in
+                item.templateID == templateID
+            }
+        )
+        return try modelContext.fetch(descriptor)
+    }
+
+    private func templateSupersetGroups(in templateID: UUID) throws -> [TemplateSupersetGroup] {
+        let descriptor = FetchDescriptor<TemplateSupersetGroup>(
+            predicate: #Predicate { item in
+                item.templateID == templateID
+            }
+        )
+        return try modelContext.fetch(descriptor)
+    }
+
+    private func deleteTemplateExerciseGraph(_ exercise: TemplateExercise) throws {
+        for set in try templateExerciseSets(in: exercise.id) {
+            for dropStage in try templateExerciseDropStages(in: set.id) {
+                modelContext.delete(dropStage)
+            }
+            modelContext.delete(set)
+        }
+
+        for component in try templateExerciseComponents(in: exercise.id) {
+            modelContext.delete(component)
+        }
+    }
+
+    private func templateExerciseComponents(in templateExerciseID: UUID) throws -> [TemplateExerciseComponent] {
+        let descriptor = FetchDescriptor<TemplateExerciseComponent>(
+            predicate: #Predicate { item in
+                item.templateExerciseID == templateExerciseID
+            }
+        )
+        return try modelContext.fetch(descriptor)
+    }
+
+    private func templateExerciseSets(in templateExerciseID: UUID) throws -> [TemplateExerciseSet] {
+        let descriptor = FetchDescriptor<TemplateExerciseSet>(
+            predicate: #Predicate { item in
+                item.templateExerciseID == templateExerciseID
+            }
+        )
+        return try modelContext.fetch(descriptor)
+    }
+
+    private func templateExerciseDropStages(in templateExerciseSetID: UUID) throws -> [TemplateExerciseDropStage] {
+        let descriptor = FetchDescriptor<TemplateExerciseDropStage>(
+            predicate: #Predicate { item in
+                item.templateExerciseSetID == templateExerciseSetID
+            }
+        )
+        return try modelContext.fetch(descriptor)
     }
 
     private func recordDeletionTombstone(entityName: String, entityID: UUID) {

@@ -183,6 +183,110 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         XCTAssertEqual(restoredExercises.first?.exerciseNameSnapshot, "Lat Pulldown")
     }
 
+    func testDeletingFolderRemovesTemplateRowsFromNextBackup() async throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+
+        let folderID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let templateID = UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
+        let exerciseID = UUID(uuidString: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")!
+        let setID = UUID(uuidString: "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD")!
+
+        for model in [
+            TemplateFolder(id: folderID, name: "Bro Split"),
+            WorkoutTemplate(id: templateID, folderID: folderID, name: "Day 1"),
+            TemplateCardioBlock(
+                id: UUID(uuidString: "EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE")!,
+                templateID: templateID,
+                phase: .preWorkout,
+                catalogExerciseUUID: "crosstrainer",
+                exerciseNameSnapshot: "Crosstrainer",
+                categorySnapshot: "Cardio",
+                muscleSummarySnapshot: "Quads",
+                targetDurationSeconds: 300
+            ),
+            TemplateSupersetGroup(
+                id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
+                templateID: templateID,
+                roundRestSeconds: 120
+            ),
+            TemplateExercise(
+                id: exerciseID,
+                templateID: templateID,
+                catalogExerciseUUID: "lat-pulldown",
+                exerciseNameSnapshot: "Lat Pulldown",
+                categorySnapshot: "Strength",
+                muscleSummarySnapshot: "Back"
+            ),
+            TemplateExerciseComponent(
+                id: UUID(uuidString: "22222222-2222-2222-2222-222222222222")!,
+                templateExerciseID: exerciseID,
+                catalogExerciseUUID: "lat-pulldown",
+                exerciseNameSnapshot: "Lat Pulldown",
+                categorySnapshot: "Strength",
+                muscleSummarySnapshot: "Back"
+            ),
+            TemplateExerciseSet(
+                id: setID,
+                templateExerciseID: exerciseID,
+                targetReps: 10,
+                targetWeight: 60
+            ),
+            TemplateExerciseDropStage(
+                id: UUID(uuidString: "33333333-3333-3333-3333-333333333333")!,
+                templateExerciseSetID: setID,
+                targetReps: 8,
+                targetWeight: 40
+            ),
+        ] as [any PersistentModel] {
+            context.insert(model)
+        }
+        try context.save()
+
+        try TemplateRepository(modelContext: context).deleteFolder(id: folderID)
+        let snapshot = try await UserDataCloudBackupService(
+            localContainer: container,
+            backupStore: CapturingBackupStore()
+        ).exportCurrentBackup()
+
+        XCTAssertEqual(try context.fetch(FetchDescriptor<WorkoutTemplate>()).count, 0)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<TemplateExercise>()).count, 0)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<TemplateExerciseSet>()).count, 0)
+        XCTAssertEqual(snapshot.contentSummary.templateFolderCount, 0)
+        XCTAssertEqual(snapshot.contentSummary.workoutTemplateCount, 0)
+        XCTAssertEqual(snapshot.contentSummary.templateExerciseCount, 0)
+    }
+
+    func testExportCurrentBackupPrunesOrphanedTemplateRows() async throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+
+        let missingFolderID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let templateID = UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
+        context.insert(WorkoutTemplate(id: templateID, folderID: missingFolderID, name: "Deleted Folder Template"))
+        context.insert(TemplateExercise(
+            id: UUID(uuidString: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")!,
+            templateID: templateID,
+            catalogExerciseUUID: "lat-pulldown",
+            exerciseNameSnapshot: "Lat Pulldown",
+            categorySnapshot: "Strength",
+            muscleSummarySnapshot: "Back"
+        ))
+        try context.save()
+
+        let snapshot = try await UserDataCloudBackupService(
+            localContainer: container,
+            backupStore: CapturingBackupStore()
+        ).exportCurrentBackup()
+
+        XCTAssertEqual(try context.fetch(FetchDescriptor<WorkoutTemplate>()).count, 0)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<TemplateExercise>()).count, 0)
+        XCTAssertEqual(snapshot.contentSummary.workoutTemplateCount, 0)
+        XCTAssertEqual(snapshot.contentSummary.templateExerciseCount, 0)
+    }
+
     func testExportCurrentBackupIncludesOnlyCompletedWorkoutChildren() async throws {
         let container = try makeInMemoryContainer()
         let context = ModelContext(container)
