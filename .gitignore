@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+
+# Xcode user state
+*.xcuserstate
+xcuserdata/
+*.xcuserdatad/
+
+# Build products and derived data
+build/
+DerivedData/
+
+# Signing material must stay local
+*.mobileprovision
+*.p12
+*.cer
+*.pem
+*.key

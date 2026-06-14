@@ -14,41 +14,33 @@ struct SupportView: View {
                 WGJRootHeader("Support", subtitle: "Best-effort support for app issues and privacy questions.")
 
                 VStack(alignment: .leading, spacing: 12) {
-                    WGJSectionHeader("Support on X", subtitle: AppRuntimeConfig.supportXHandle)
-
-                    if let supportXURL = AppRuntimeConfig.supportXURL {
-                        Button {
-                            openURL(supportXURL)
-                        } label: {
-                            Label("Open \(AppRuntimeConfig.supportXHandle) on X", systemImage: "at")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(WGJPrimaryButtonStyle())
-                        .accessibilityIdentifier("support-open-x-button")
-                    }
-
-                    Button {
-                        UIPasteboard.general.string = AppRuntimeConfig.supportXURL?.absoluteString
-                        showAlert(
-                            title: "Copied",
-                            message: "The X support profile link is on your clipboard."
-                        )
-                    } label: {
-                        Label("Copy X Profile Link", systemImage: "doc.on.doc")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(WGJGhostButtonStyle())
-                    .accessibilityIdentifier("support-copy-x-link-button")
+                    WGJSectionHeader(
+                        "Project Support",
+                        subtitle: AppRuntimeConfig.supportURL?.absoluteString ?? "No support URL configured"
+                    )
 
                     if let supportURL = AppRuntimeConfig.supportURL {
                         Button {
                             openURL(supportURL)
                         } label: {
-                            Label("Open Privacy & Contact", systemImage: "globe")
+                            Label("Open GitHub Issues", systemImage: "exclamationmark.bubble")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(WGJPrimaryButtonStyle())
+                        .accessibilityIdentifier("support-open-project-issues-button")
+
+                        Button {
+                            UIPasteboard.general.string = supportURL.absoluteString
+                            showAlert(
+                                title: "Copied",
+                                message: "The project support link is on your clipboard."
+                            )
+                        } label: {
+                            Label("Copy Support Link", systemImage: "doc.on.doc")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(WGJGhostButtonStyle())
-                        .accessibilityIdentifier("support-open-privacy-contact-button")
+                        .accessibilityIdentifier("support-copy-project-link-button")
                     }
                 }
                 .padding(14)

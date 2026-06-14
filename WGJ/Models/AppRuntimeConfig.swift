@@ -78,11 +78,9 @@ nonisolated enum AppRuntimeConfig {
         static let skipSplash = "UITEST_SKIP_SPLASH"
     }
 
-    static let supportEmail = "hortlund.andreas@gmail.com"
-    static let supportXHandle = "@AndreasHortlund"
-    static let supportXURL = URL(string: "https://x.com/AndreasHortlund")
-    static let privacyPolicyURL = URL(string: "https://highball.se/wgj/privacy/")
-    static let supportURL = URL(string: "https://highball.se/wgj/index.html")
+    static let supportEmail = ""
+    static let supportURL = URL(string: "https://github.com/Hortlund/we-go-jim/issues")
+    static let privacyPolicyURL: URL? = nil
     static var appEnvironment: AppEnvironment {
         guard let rawValue = infoString(for: InfoKey.appEnvironment)?.lowercased(),
               let environment = AppEnvironment(rawValue: rawValue)

@@ -77,11 +77,24 @@ The main rule: keep views thin. If logic decides how data is saved, restored, sy
 3. Configure signing for the app target and widget extension.
 4. Build and run on an iPhone simulator or device.
 
-The current CloudKit container is:
+The project intentionally does not include a committed Apple development team. Set your own team in Xcode before building for a physical device.
+
+## Fork Configuration
+
+The checked-in Xcode project still uses WGJ's default app identifiers so the owner build remains reproducible. If you fork the app, replace these values with identifiers you control:
+
+- `PRODUCT_BUNDLE_IDENTIFIER`
+- `WGJ_APP_GROUP_IDENTIFIER`
+- `WGJ_CLOUDKIT_CONTAINER_IDENTIFIER`
+- URL/document type identifiers such as `com.hortlund.wgj.template` if you want your fork to own a different import type
+
+The default CloudKit container is:
 
 ```text
 iCloud.se.highball.WeGoJim
 ```
+
+That container identifier is not a credential. It is app-specific Apple entitlement metadata that is visible in signed apps and project settings. Forks need their own container because CloudKit access is controlled by Apple Developer account entitlements, not by secrecy of the identifier.
 
 For CloudKit backup behavior, use a simulator or device signed into an iCloud account and make sure the entitlements match your signing setup.
 
