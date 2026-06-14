@@ -167,11 +167,11 @@ nonisolated enum CloudStartupPreflight {
                 continuation.resume(returning: status)
             }
 
-            statusTask = Task {
+            statusTask = Task.detached(priority: .utility) {
                 let status = await statusProvider.currentStatus()
                 resumeOnce(status)
             }
-            timeoutTask = Task {
+            timeoutTask = Task.detached(priority: .utility) {
                 try? await Task.sleep(for: timeout)
                 resumeOnce(.timedOut)
             }

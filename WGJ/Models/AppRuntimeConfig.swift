@@ -426,7 +426,7 @@ final class AppRuntimeState {
         return .degraded(errorDescription)
     }
 
-    private static func accountStatus(
+    nonisolated private static func accountStatus(
         from statusProvider: any AccountStatusProviding,
         timeout: Duration
     ) async -> AccountStatus {
@@ -449,11 +449,11 @@ final class AppRuntimeState {
                 continuation.resume(returning: status)
             }
 
-            statusTask = Task {
+            statusTask = Task.detached(priority: .utility) {
                 let status = await statusProvider.fetchAccountStatus()
                 resumeOnce(status)
             }
-            timeoutTask = Task {
+            timeoutTask = Task.detached(priority: .utility) {
                 try? await Task.sleep(for: timeout)
                 resumeOnce(.unavailable(.unknown))
             }

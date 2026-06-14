@@ -40,7 +40,7 @@ nonisolated enum StartupWarmupGate {
         guard !warmupTasks.isEmpty else { return }
 
         let completion = StartupWarmupCompletion()
-        let monitorTask = Task {
+        let monitorTask = Task.detached(priority: .utility) {
             for task in warmupTasks {
                 await task.value
             }

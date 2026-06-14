@@ -79,7 +79,7 @@ nonisolated enum BoundaryCloudBackupScheduler {
     static func exportBestEffort(container: ModelContainer, reason: BoundaryCloudBackupReason) {
         guard AppRuntimeConfig.canUseConfiguredCloudKitContainer else { return }
 
-        Task(priority: .utility) {
+        Task.detached(priority: .utility) {
             await BoundaryCloudBackupExportQueue.shared.enqueue(container: container, reason: reason)
         }
     }
@@ -146,7 +146,6 @@ nonisolated final class UserDataCloudBackupService {
         self.backupStore = backupStore
     }
 
-    @MainActor
     @discardableResult
     func exportCurrentBackup() async throws -> UserDataCloudBackupRemoteSnapshot {
         let context = ModelContext(localContainer)
@@ -171,7 +170,6 @@ nonisolated final class UserDataCloudBackupService {
         try await backupStore.deleteBackup()
     }
 
-    @MainActor
     func latestBackupSnapshot() async throws -> UserDataCloudBackupRemoteSnapshot? {
         guard let record = try await backupStore.fetchBackup() else {
             return nil
@@ -184,7 +182,6 @@ nonisolated final class UserDataCloudBackupService {
         )
     }
 
-    @MainActor
     func restoreLatestBackup() async throws -> UserDataCloudBackupRestoreResult? {
         guard let record = try await backupStore.fetchBackup() else {
             return nil
@@ -371,8 +368,7 @@ nonisolated struct CloudKitUserDataCloudBackupStore: UserDataCloudBackupStoring 
     }
 }
 
-@MainActor
-private struct UserDataCloudBackupPayload: Codable {
+nonisolated private struct UserDataCloudBackupPayload: Codable {
     static let schemaVersion = 2
 
     var schemaVersion: Int = Self.schemaVersion
@@ -569,8 +565,8 @@ private struct UserDataCloudBackupPayload: Codable {
 
 private protocol BackupModel {
     associatedtype Model
-    var model: Model { get }
-    func apply(to model: Model)
+    nonisolated var model: Model { get }
+    nonisolated func apply(to model: Model)
 }
 
 private struct Profile: Codable, BackupModel {
@@ -586,7 +582,7 @@ private struct Profile: Codable, BackupModel {
     var createdAt: Date
     var updatedAt: Date
 
-    init(_ model: UserProfile) {
+    nonisolated init(_ model: UserProfile) {
         id = model.id
         displayName = model.displayName
         athleteTypeRaw = model.athleteTypeRaw
@@ -600,7 +596,7 @@ private struct Profile: Codable, BackupModel {
         updatedAt = model.updatedAt
     }
 
-    var model: UserProfile {
+    nonisolated var model: UserProfile {
         UserProfile(
             id: id,
             displayName: displayName,
@@ -616,7 +612,7 @@ private struct Profile: Codable, BackupModel {
         )
     }
 
-    func apply(to model: UserProfile) {
+    nonisolated func apply(to model: UserProfile) {
         model.displayName = displayName
         model.athleteTypeRaw = athleteTypeRaw
         model.avatarImageData = avatarImageData
@@ -641,7 +637,7 @@ private struct ProfileWidget: Codable, BackupModel {
     var createdAt: Date
     var updatedAt: Date
 
-    init(_ model: ProfileWidgetConfig) {
+    nonisolated init(_ model: ProfileWidgetConfig) {
         id = model.id
         kindRaw = model.kindRaw
         isEnabled = model.isEnabled
@@ -653,7 +649,7 @@ private struct ProfileWidget: Codable, BackupModel {
         updatedAt = model.updatedAt
     }
 
-    var model: ProfileWidgetConfig {
+    nonisolated var model: ProfileWidgetConfig {
         ProfileWidgetConfig(
             id: id,
             kind: ProfileWidgetKind(rawValue: kindRaw) ?? .prs,
@@ -667,7 +663,7 @@ private struct ProfileWidget: Codable, BackupModel {
         )
     }
 
-    func apply(to model: ProfileWidgetConfig) {
+    nonisolated func apply(to model: ProfileWidgetConfig) {
         model.kindRaw = kindRaw
         model.isEnabled = isEnabled
         model.selectedCatalogExerciseUUID = selectedCatalogExerciseUUID
@@ -690,7 +686,7 @@ private struct CustomExercise: Codable, BackupModel {
     var lastUpdateGlobal: Date?
     var updatedAt: Date
 
-    init(_ model: ExerciseCatalogItem) {
+    nonisolated init(_ model: ExerciseCatalogItem) {
         remoteUUID = model.remoteUUID
         remoteID = model.remoteID
         displayName = model.displayName
@@ -702,7 +698,7 @@ private struct CustomExercise: Codable, BackupModel {
         updatedAt = model.updatedAt
     }
 
-    var model: ExerciseCatalogItem {
+    nonisolated var model: ExerciseCatalogItem {
         ExerciseCatalogItem(
             remoteUUID: remoteUUID,
             remoteID: remoteID,
@@ -718,7 +714,7 @@ private struct CustomExercise: Codable, BackupModel {
         )
     }
 
-    func apply(to model: ExerciseCatalogItem) {
+    nonisolated func apply(to model: ExerciseCatalogItem) {
         model.remoteID = remoteID
         model.displayName = displayName
         model.categoryName = categoryName
@@ -737,7 +733,7 @@ private struct TemplateFolderBackup: Codable, BackupModel {
     var createdAt: Date
     var updatedAt: Date
 
-    init(_ model: TemplateFolder) {
+    nonisolated init(_ model: TemplateFolder) {
         id = model.id
         name = model.name
         sortOrder = model.sortOrder
@@ -745,11 +741,11 @@ private struct TemplateFolderBackup: Codable, BackupModel {
         updatedAt = model.updatedAt
     }
 
-    var model: TemplateFolder {
+    nonisolated var model: TemplateFolder {
         TemplateFolder(id: id, name: name, sortOrder: sortOrder, createdAt: createdAt, updatedAt: updatedAt)
     }
 
-    func apply(to model: TemplateFolder) {
+    nonisolated func apply(to model: TemplateFolder) {
         model.name = name
         model.sortOrder = sortOrder
         model.createdAt = createdAt
@@ -766,7 +762,7 @@ private struct WorkoutTemplateBackup: Codable, BackupModel {
     var createdAt: Date
     var updatedAt: Date
 
-    init(_ model: WorkoutTemplate) {
+    nonisolated init(_ model: WorkoutTemplate) {
         id = model.id
         folderID = model.folderID
         name = model.name
@@ -776,11 +772,11 @@ private struct WorkoutTemplateBackup: Codable, BackupModel {
         updatedAt = model.updatedAt
     }
 
-    var model: WorkoutTemplate {
+    nonisolated var model: WorkoutTemplate {
         WorkoutTemplate(id: id, folderID: folderID, name: name, notes: notes, sortOrder: sortOrder, createdAt: createdAt, updatedAt: updatedAt)
     }
 
-    func apply(to model: WorkoutTemplate) {
+    nonisolated func apply(to model: WorkoutTemplate) {
         model.folderID = folderID
         model.name = name
         model.notes = notes
@@ -802,7 +798,7 @@ private struct TemplateCardioBlockBackup: Codable, BackupModel {
     var createdAt: Date
     var updatedAt: Date
 
-    init(_ model: TemplateCardioBlock) {
+    nonisolated init(_ model: TemplateCardioBlock) {
         id = model.id
         templateID = model.templateID
         phaseRaw = model.phaseRaw
@@ -815,7 +811,7 @@ private struct TemplateCardioBlockBackup: Codable, BackupModel {
         updatedAt = model.updatedAt
     }
 
-    var model: TemplateCardioBlock {
+    nonisolated var model: TemplateCardioBlock {
         TemplateCardioBlock(
             id: id,
             templateID: templateID,
@@ -830,7 +826,7 @@ private struct TemplateCardioBlockBackup: Codable, BackupModel {
         )
     }
 
-    func apply(to model: TemplateCardioBlock) {
+    nonisolated func apply(to model: TemplateCardioBlock) {
         model.templateID = templateID
         model.phaseRaw = phaseRaw
         model.catalogExerciseUUID = catalogExerciseUUID
@@ -860,7 +856,7 @@ private struct TemplateExerciseBackup: Codable, BackupModel {
     var createdAt: Date
     var updatedAt: Date
 
-    init(_ model: TemplateExercise) {
+    nonisolated init(_ model: TemplateExercise) {
         id = model.id
         templateID = model.templateID
         catalogExerciseUUID = model.catalogExerciseUUID
@@ -878,7 +874,7 @@ private struct TemplateExerciseBackup: Codable, BackupModel {
         updatedAt = model.updatedAt
     }
 
-    var model: TemplateExercise {
+    nonisolated var model: TemplateExercise {
         TemplateExercise(
             id: id,
             templateID: templateID,
@@ -898,7 +894,7 @@ private struct TemplateExerciseBackup: Codable, BackupModel {
         )
     }
 
-    func apply(to model: TemplateExercise) {
+    nonisolated func apply(to model: TemplateExercise) {
         model.templateID = templateID
         model.catalogExerciseUUID = catalogExerciseUUID
         model.exerciseNameSnapshot = exerciseNameSnapshot
@@ -927,7 +923,7 @@ private struct TemplateComponentBackup: Codable, BackupModel {
     var createdAt: Date
     var updatedAt: Date
 
-    init(_ model: TemplateExerciseComponent) {
+    nonisolated init(_ model: TemplateExerciseComponent) {
         id = model.id
         templateExerciseID = model.templateExerciseID
         catalogExerciseUUID = model.catalogExerciseUUID
@@ -939,7 +935,7 @@ private struct TemplateComponentBackup: Codable, BackupModel {
         updatedAt = model.updatedAt
     }
 
-    var model: TemplateExerciseComponent {
+    nonisolated var model: TemplateExerciseComponent {
         TemplateExerciseComponent(
             id: id,
             templateExerciseID: templateExerciseID,
@@ -953,7 +949,7 @@ private struct TemplateComponentBackup: Codable, BackupModel {
         )
     }
 
-    func apply(to model: TemplateExerciseComponent) {
+    nonisolated func apply(to model: TemplateExerciseComponent) {
         model.templateExerciseID = templateExerciseID
         model.catalogExerciseUUID = catalogExerciseUUID
         model.exerciseNameSnapshot = exerciseNameSnapshot
@@ -981,7 +977,7 @@ private struct TemplateSetBackup: Codable, BackupModel {
     var createdAt: Date
     var updatedAt: Date
 
-    init(_ model: TemplateExerciseSet) {
+    nonisolated init(_ model: TemplateExerciseSet) {
         id = model.id
         templateExerciseID = model.templateExerciseID
         sortOrder = model.sortOrder
@@ -998,7 +994,7 @@ private struct TemplateSetBackup: Codable, BackupModel {
         updatedAt = model.updatedAt
     }
 
-    var model: TemplateExerciseSet {
+    nonisolated var model: TemplateExerciseSet {
         TemplateExerciseSet(
             id: id,
             templateExerciseID: templateExerciseID,
@@ -1017,7 +1013,7 @@ private struct TemplateSetBackup: Codable, BackupModel {
         )
     }
 
-    func apply(to model: TemplateExerciseSet) {
+    nonisolated func apply(to model: TemplateExerciseSet) {
         model.templateExerciseID = templateExerciseID
         model.sortOrder = sortOrder
         model.targetReps = targetReps
@@ -1044,7 +1040,7 @@ private struct TemplateDropStageBackup: Codable, BackupModel {
     var createdAt: Date
     var updatedAt: Date
 
-    init(_ model: TemplateExerciseDropStage) {
+    nonisolated init(_ model: TemplateExerciseDropStage) {
         id = model.id
         templateExerciseSetID = model.templateExerciseSetID
         sortOrder = model.sortOrder
@@ -1055,7 +1051,7 @@ private struct TemplateDropStageBackup: Codable, BackupModel {
         updatedAt = model.updatedAt
     }
 
-    var model: TemplateExerciseDropStage {
+    nonisolated var model: TemplateExerciseDropStage {
         TemplateExerciseDropStage(
             id: id,
             templateExerciseSetID: templateExerciseSetID,
@@ -1068,7 +1064,7 @@ private struct TemplateDropStageBackup: Codable, BackupModel {
         )
     }
 
-    func apply(to model: TemplateExerciseDropStage) {
+    nonisolated func apply(to model: TemplateExerciseDropStage) {
         model.templateExerciseSetID = templateExerciseSetID
         model.sortOrder = sortOrder
         model.targetReps = targetReps
@@ -1095,7 +1091,7 @@ private struct WorkoutSessionBackup: Codable, BackupModel {
     var createdAt: Date
     var updatedAt: Date
 
-    init(_ model: WorkoutSession) {
+    nonisolated init(_ model: WorkoutSession) {
         id = model.id
         templateID = model.templateID
         name = model.name
@@ -1112,7 +1108,7 @@ private struct WorkoutSessionBackup: Codable, BackupModel {
         updatedAt = model.updatedAt
     }
 
-    var model: WorkoutSession {
+    nonisolated var model: WorkoutSession {
         WorkoutSession(
             id: id,
             templateID: templateID,
@@ -1131,7 +1127,7 @@ private struct WorkoutSessionBackup: Codable, BackupModel {
         )
     }
 
-    func apply(to model: WorkoutSession) {
+    nonisolated func apply(to model: WorkoutSession) {
         model.templateID = templateID
         model.name = name
         model.statusRaw = statusRaw
@@ -1161,7 +1157,7 @@ private struct WorkoutCardioBlockBackup: Codable, BackupModel {
     var createdAt: Date
     var updatedAt: Date
 
-    init(_ model: WorkoutSessionCardioBlock) {
+    nonisolated init(_ model: WorkoutSessionCardioBlock) {
         id = model.id
         sessionID = model.sessionID
         phaseRaw = model.phaseRaw
@@ -1175,7 +1171,7 @@ private struct WorkoutCardioBlockBackup: Codable, BackupModel {
         updatedAt = model.updatedAt
     }
 
-    var model: WorkoutSessionCardioBlock {
+    nonisolated var model: WorkoutSessionCardioBlock {
         WorkoutSessionCardioBlock(
             id: id,
             sessionID: sessionID,
@@ -1191,7 +1187,7 @@ private struct WorkoutCardioBlockBackup: Codable, BackupModel {
         )
     }
 
-    func apply(to model: WorkoutSessionCardioBlock) {
+    nonisolated func apply(to model: WorkoutSessionCardioBlock) {
         model.sessionID = sessionID
         model.phaseRaw = phaseRaw
         model.catalogExerciseUUID = catalogExerciseUUID
@@ -1226,7 +1222,7 @@ private struct WorkoutExerciseBackup: Codable, BackupModel {
     var createdAt: Date
     var updatedAt: Date
 
-    init(_ model: WorkoutSessionExercise) {
+    nonisolated init(_ model: WorkoutSessionExercise) {
         id = model.id
         sessionID = model.sessionID
         templateExerciseID = model.templateExerciseID
@@ -1248,7 +1244,7 @@ private struct WorkoutExerciseBackup: Codable, BackupModel {
         updatedAt = model.updatedAt
     }
 
-    var model: WorkoutSessionExercise {
+    nonisolated var model: WorkoutSessionExercise {
         WorkoutSessionExercise(
             id: id,
             sessionID: sessionID,
@@ -1272,7 +1268,7 @@ private struct WorkoutExerciseBackup: Codable, BackupModel {
         )
     }
 
-    func apply(to model: WorkoutSessionExercise) {
+    nonisolated func apply(to model: WorkoutSessionExercise) {
         model.sessionID = sessionID
         model.templateExerciseID = templateExerciseID
         model.catalogExerciseUUID = catalogExerciseUUID
@@ -1309,7 +1305,7 @@ private struct WorkoutSetBackup: Codable, BackupModel {
     var createdAt: Date
     var updatedAt: Date
 
-    init(_ model: WorkoutSessionSet) {
+    nonisolated init(_ model: WorkoutSessionSet) {
         id = model.id
         sessionExerciseID = model.sessionExerciseID
         sortOrder = model.sortOrder
@@ -1327,7 +1323,7 @@ private struct WorkoutSetBackup: Codable, BackupModel {
         updatedAt = model.updatedAt
     }
 
-    var model: WorkoutSessionSet {
+    nonisolated var model: WorkoutSessionSet {
         WorkoutSessionSet(
             id: id,
             sessionExerciseID: sessionExerciseID,
@@ -1347,7 +1343,7 @@ private struct WorkoutSetBackup: Codable, BackupModel {
         )
     }
 
-    func apply(to model: WorkoutSessionSet) {
+    nonisolated func apply(to model: WorkoutSessionSet) {
         model.sessionExerciseID = sessionExerciseID
         model.sortOrder = sortOrder
         model.isWarmup = isWarmup
@@ -1379,7 +1375,7 @@ private struct WorkoutDropStageBackup: Codable, BackupModel {
     var createdAt: Date
     var updatedAt: Date
 
-    init(_ model: WorkoutSessionDropStage) {
+    nonisolated init(_ model: WorkoutSessionDropStage) {
         id = model.id
         sessionSetID = model.sessionSetID
         sortOrder = model.sortOrder
@@ -1394,7 +1390,7 @@ private struct WorkoutDropStageBackup: Codable, BackupModel {
         updatedAt = model.updatedAt
     }
 
-    var model: WorkoutSessionDropStage {
+    nonisolated var model: WorkoutSessionDropStage {
         WorkoutSessionDropStage(
             id: id,
             sessionSetID: sessionSetID,
@@ -1411,7 +1407,7 @@ private struct WorkoutDropStageBackup: Codable, BackupModel {
         )
     }
 
-    func apply(to model: WorkoutSessionDropStage) {
+    nonisolated func apply(to model: WorkoutSessionDropStage) {
         model.sessionSetID = sessionSetID
         model.sortOrder = sortOrder
         model.targetReps = targetReps
