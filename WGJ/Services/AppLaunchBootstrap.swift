@@ -4,16 +4,8 @@ import OSLog
 import SwiftData
 import UIKit
 
-protocol ProcessInfoProviding {
-    var arguments: [String] { get }
-    var environment: [String: String] { get }
-}
-
-extension ProcessInfo: ProcessInfoProviding { }
-
 struct ModelContainerBootstrap {
     let container: ModelContainer
-    let storageMode: AppStorageMode
     let cloudRuntimeMode: CloudRuntimeMode
     let cloudFeaturesEnabled: Bool
     let userDataSyncEnabled: Bool
@@ -114,7 +106,6 @@ final class AppLaunchBootstrapState {
         guard resolutionTask != nil else { return }
 
         AppRuntimeState.shared.updateCloudState(
-            storageMode: bootstrap.storageMode,
             runtimeMode: bootstrap.cloudRuntimeMode,
             isEnabled: bootstrap.cloudFeaturesEnabled,
             errorDescription: bootstrap.cloudSyncErrorDescription
@@ -138,22 +129,16 @@ enum AppLaunchBootstrapResolver {
     private static let uiTestInMemoryStoreArgument = "UITEST_IN_MEMORY_STORE"
 
     static func resolve(
-        processInfo: any ProcessInfoProviding = ProcessInfo.processInfo,
+        processArguments: [String] = ProcessInfo.processInfo.arguments,
         canUseConfiguredCloudKitContainer: Bool = AppRuntimeConfig.canUseConfiguredCloudKitContainer,
-        startupDecisionProvider: @escaping @Sendable () async -> CloudStartupDecision = {
-            await CloudStartupPreflight.makeDecisionAsync()
-        },
         makeUITestContainer: @escaping @Sendable () throws -> ModelContainer,
-        makeCloudBackedContainer: @escaping @Sendable () throws -> ModelContainer,
         makeLocalFallbackContainer: @escaping @Sendable () throws -> ModelContainer,
-        makeCloudFailureLocalFallbackContainer: (@Sendable () throws -> ModelContainer)? = nil,
         makeEmergencyInMemoryContainer: (@Sendable () throws -> ModelContainer)? = nil,
         describeError: @escaping @Sendable (Error) -> String
     ) async throws -> ModelContainerBootstrap {
-        if processInfo.arguments.contains(uiTestInMemoryStoreArgument) {
+        if processArguments.contains(uiTestInMemoryStoreArgument) {
             return ModelContainerBootstrap(
                 container: try makeUITestContainer(),
-                storageMode: .localAuthoritative,
                 cloudRuntimeMode: .unavailable("UI test run using an in-memory local container."),
                 cloudFeaturesEnabled: false,
                 userDataSyncEnabled: false,
@@ -170,11 +155,6 @@ enum AppLaunchBootstrapResolver {
                 describeError: describeError
             )
         }
-
-        _ = startupDecisionProvider
-        _ = makeCloudBackedContainer
-        _ = makeCloudFailureLocalFallbackContainer
-        _ = describeError
 
         return try makeLocalBootstrap(
             makeLocalFallbackContainer: makeLocalFallbackContainer,
@@ -193,7 +173,6 @@ enum AppLaunchBootstrapResolver {
         do {
             return ModelContainerBootstrap(
                 container: try makeLocalFallbackContainer(),
-                storageMode: .localAuthoritative,
                 cloudRuntimeMode: localOnlyDescription.map(CloudRuntimeMode.unavailable) ?? .checking,
                 cloudFeaturesEnabled: localOnlyDescription == nil,
                 userDataSyncEnabled: false,
@@ -208,7 +187,6 @@ enum AppLaunchBootstrapResolver {
             let description = "Local storage could not be opened. Keeping the app running in temporary local-only mode. \(describeError(error))"
             return ModelContainerBootstrap(
                 container: try makeEmergencyInMemoryContainer(),
-                storageMode: .localAuthoritative,
                 cloudRuntimeMode: .unavailable(description),
                 cloudFeaturesEnabled: false,
                 userDataSyncEnabled: false,

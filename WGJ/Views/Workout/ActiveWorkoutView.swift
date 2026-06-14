@@ -518,7 +518,7 @@ struct ActiveWorkoutView: View {
                 statusTint: cardioStatusTint(for: cardioBlock),
                 footnote: cardioFootnote(for: cardioBlock),
                 isCompleted: resolvedCardioCompletion(for: cardioBlock),
-                canComplete: canToggleCompletion(for: cardioBlock),
+                canComplete: true,
                 completionTitle: "Complete \(cardioBlock.phase.shortTitle)",
                 completionAccessibilityLabel: cardioCompletionAccessibilityLabel(for: cardioBlock),
                 undoAccessibilityLabel: cardioCompletionAccessibilityLabel(for: cardioBlock),
@@ -1488,10 +1488,6 @@ struct ActiveWorkoutView: View {
     @MainActor
     private func toggleCardioCompletion(for cardioBlock: ActiveWorkoutRuntimeCardioBlock) {
         let currentCompletion = resolvedCardioCompletion(for: cardioBlock)
-        guard canToggleCompletion(for: cardioBlock) || currentCompletion else {
-            return
-        }
-
         let updatedCompletion = !currentCompletion
         pendingCardioCompletionsByPhase[cardioBlock.phase] = updatedCompletion
         refreshRenderProjection()
@@ -2906,15 +2902,6 @@ struct ActiveWorkoutView: View {
         } else {
             scrollProxy.scrollTo(target, anchor: anchor)
         }
-    }
-
-    @MainActor
-    private func canToggleCompletion(for cardioBlock: ActiveWorkoutRuntimeCardioBlock) -> Bool {
-        WorkoutCardioCompletionPolicy.canToggleCompletion(
-            phase: cardioBlock.phase,
-            isCurrentlyCompleted: resolvedCardioCompletion(for: cardioBlock),
-            areMainExercisesCompleted: areAllMainExercisesCompleted
-        )
     }
 
     @MainActor

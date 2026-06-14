@@ -10,14 +10,6 @@ nonisolated enum CloudKitContainerAvailabilityError: Error, Sendable {
     case unavailable
 }
 
-nonisolated enum AppStorageMode: Equatable, Sendable {
-    case localAuthoritative
-
-    var usesCloudBackedUserDataStore: Bool {
-        false
-    }
-}
-
 nonisolated enum CloudRuntimeMode: Equatable, Sendable {
     case unavailable(String)
     case checking
@@ -286,7 +278,6 @@ nonisolated enum RuntimeCloudAvailabilityRefreshPolicy {
 final class AppRuntimeState {
     static let shared = AppRuntimeState()
 
-    var storageMode: AppStorageMode = .localAuthoritative
     var cloudRuntimeMode: CloudRuntimeMode = .unavailable("CloudKit has not been checked yet.")
     var cloudSyncEnabled = false
     var cloudSyncErrorDescription: String?
@@ -309,13 +300,11 @@ final class AppRuntimeState {
 #endif
 
     func updateCloudState(
-        storageMode: AppStorageMode = .localAuthoritative,
         runtimeMode: CloudRuntimeMode? = nil,
         isEnabled: Bool,
         errorDescription: String?
     ) {
         cancelRuntimeCloudAvailabilityRefresh()
-        self.storageMode = storageMode
         cloudSyncEnabled = isEnabled
         cloudSyncErrorDescription = errorDescription
         cloudRuntimeMode = runtimeMode ?? Self.runtimeMode(
@@ -707,17 +696,6 @@ nonisolated enum ActiveWorkoutScrollTarget: Hashable, Codable, Sendable {
     case exercise(UUID)
     case postWorkoutCardio
     case cancelSection
-}
-
-nonisolated enum ActiveWorkoutCompletionScrollPolicy {
-    static func targetAfterCompletionChange(
-        exerciseID: UUID,
-        didTransitionToCompleted: Bool
-    ) -> ActiveWorkoutScrollTarget? {
-        _ = exerciseID
-        _ = didTransitionToCompleted
-        return nil
-    }
 }
 
 nonisolated enum ActiveWorkoutMinimizeScrollRestorePolicy {

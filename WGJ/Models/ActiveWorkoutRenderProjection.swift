@@ -146,13 +146,3 @@ nonisolated enum ActiveWorkoutRenderProjectionRefreshPolicy {
         return changeSummary.hasStructuralChange || changeSummary.hasCompletionChange
     }
 }
-
-nonisolated enum WorkoutCardioCompletionPolicy {
-    static func canToggleCompletion(
-        phase _: WorkoutCardioPhase,
-        isCurrentlyCompleted _: Bool,
-        areMainExercisesCompleted _: Bool
-    ) -> Bool {
-        true
-    }
-}

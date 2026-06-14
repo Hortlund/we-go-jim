@@ -10,24 +10,6 @@ enum WGJFormatters {
         return formatter
     }()
 
-    private static let oneDecimalFormatter: NumberFormatter = {
-        let formatter = NumberFormatter()
-        formatter.locale = Locale.current
-        formatter.numberStyle = .decimal
-        formatter.minimumFractionDigits = 0
-        formatter.maximumFractionDigits = 1
-        return formatter
-    }()
-
-    private static let integerFormatter: NumberFormatter = {
-        let formatter = NumberFormatter()
-        formatter.locale = Locale.current
-        formatter.numberStyle = .decimal
-        formatter.minimumFractionDigits = 0
-        formatter.maximumFractionDigits = 0
-        return formatter
-    }()
-
     nonisolated static func decimalString(_ value: Double) -> String {
         value.formatted(.number.precision(.fractionLength(0...2)))
     }

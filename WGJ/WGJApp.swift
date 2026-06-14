@@ -50,14 +50,8 @@ struct WGJApp: App {
             makeUITestContainer: {
                 try makeUITestContainer()
             },
-            makeCloudBackedContainer: {
-                try makeCloudBackedContainer()
-            },
             makeLocalFallbackContainer: {
                 try makeLocalFallbackContainer()
-            },
-            makeCloudFailureLocalFallbackContainer: {
-                try makeCloudFailureLocalFallbackContainer()
             },
             makeEmergencyInMemoryContainer: {
                 try makeEmergencyInMemoryContainer()
@@ -68,25 +62,7 @@ struct WGJApp: App {
         )
     }
 
-    private static func makeCloudBackedContainer() throws -> ModelContainer {
-        let appSchema = fullAppSchema()
-        try AppStoreLayout.prepareAppGroupStoreDirectory()
-        return try ModelContainer(
-            for: appSchema,
-            configurations: storeConfigurations()
-        )
-    }
-
     private static func makeLocalFallbackContainer() throws -> ModelContainer {
-        let appSchema = fullAppSchema()
-        try AppStoreLayout.prepareAppGroupStoreDirectory()
-        return try ModelContainer(
-            for: appSchema,
-            configurations: storeConfigurations()
-        )
-    }
-
-    private static func makeCloudFailureLocalFallbackContainer() throws -> ModelContainer {
         let appSchema = fullAppSchema()
         try AppStoreLayout.prepareAppGroupStoreDirectory()
         return try ModelContainer(
@@ -139,7 +115,6 @@ struct WGJApp: App {
         let description = "App storage could not be opened. Keeping WGJ running in temporary local-only mode. \(describe(error))"
         return ModelContainerBootstrap(
             container: try makeEmergencyInMemoryContainer(),
-            storageMode: .localAuthoritative,
             cloudRuntimeMode: .unavailable(description),
             cloudFeaturesEnabled: false,
             userDataSyncEnabled: false,
@@ -372,8 +347,4 @@ nonisolated enum AppStoreLayout {
         }
     }
 #endif
-}
-
-enum AppBootstrapRecoveryPolicy {
-    static let preservesExistingStoresOnCloudFailure = true
 }

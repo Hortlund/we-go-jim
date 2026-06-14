@@ -2,17 +2,6 @@ import Foundation
 import SwiftData
 import UIKit
 
-nonisolated protocol ExerciseCatalogRepositoryProtocol {
-    func ensureSeedImportedIfNeeded() throws
-    func searchExercises(query: String, filters: ExerciseFilters) throws -> [ExerciseCatalogItem]
-    func groupedByMuscle(primaryOnly: Bool) throws -> [ExerciseMuscleGroupSection]
-    func exerciseMap(for remoteUUIDs: [String]) throws -> [String: ExerciseCatalogItem]
-    func exerciseSnapshotMap(for remoteUUIDs: [String]) throws -> [String: TrainingGuidanceCatalogSnapshot]
-    func createCustomExercise(draft: CustomExerciseDraft) throws -> ExerciseCatalogItem
-    func updateCustomExercise(_ exercise: ExerciseCatalogItem, draft: CustomExerciseDraft) throws
-    func deleteCustomExercise(_ exercise: ExerciseCatalogItem) throws
-}
-
 enum ExerciseCatalogRepositoryError: LocalizedError {
     case emptyName
     case emptyCategory
@@ -39,7 +28,7 @@ enum ExerciseCatalogRepositoryError: LocalizedError {
     }
 }
 
-nonisolated final class ExerciseCatalogRepository: ExerciseCatalogRepositoryProtocol {
+nonisolated final class ExerciseCatalogRepository {
     private let syncService: ExerciseCatalogSyncService
     private let searchService: ExerciseSearchService
     private let imageCacheService: ExerciseImageCacheService
