@@ -34,12 +34,14 @@ nonisolated enum WorkoutCompletionConfettiIntensity {
 }
 
 nonisolated enum WorkoutCompletionConfettiPolicy {
+    static let automaticCelebrationDelay: Duration = .milliseconds(320)
+
     static func pieceCount(for intensity: WorkoutCompletionConfettiIntensity) -> Int {
         switch intensity {
         case .completedWorkout:
-            return 48
+            return 30
         case .manualTap:
-            return 22
+            return 16
         }
     }
 }
@@ -387,11 +389,10 @@ struct WorkoutCompletionSummaryView: View {
                 return
             }
 
-            withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
-                snapshot = builtSnapshot
-            }
+            snapshot = builtSnapshot
             Task { @MainActor in
-                await Task.yield()
+                try? await Task.sleep(for: WorkoutCompletionConfettiPolicy.automaticCelebrationDelay)
+                guard !Task.isCancelled else { return }
                 triggerCelebrationIfNeeded()
             }
         } catch {
