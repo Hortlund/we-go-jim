@@ -61,6 +61,38 @@ nonisolated struct ActiveWorkoutStoredSnapshot: Equatable, Codable, Sendable {
     let restTimer: RestTimerSnapshot?
     let presentationMode: ActiveWorkoutStoredPresentationMode?
     let scrollTarget: ActiveWorkoutScrollTarget?
+    let expandedExerciseIDs: Set<UUID>
+
+    init(
+        session: ActiveWorkoutRuntimeSession,
+        restTimer: RestTimerSnapshot? = nil,
+        presentationMode: ActiveWorkoutStoredPresentationMode? = nil,
+        scrollTarget: ActiveWorkoutScrollTarget? = nil,
+        expandedExerciseIDs: Set<UUID> = []
+    ) {
+        self.session = session
+        self.restTimer = restTimer
+        self.presentationMode = presentationMode
+        self.scrollTarget = scrollTarget
+        self.expandedExerciseIDs = expandedExerciseIDs
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case session
+        case restTimer
+        case presentationMode
+        case scrollTarget
+        case expandedExerciseIDs
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        session = try container.decode(ActiveWorkoutRuntimeSession.self, forKey: .session)
+        restTimer = try container.decodeIfPresent(RestTimerSnapshot.self, forKey: .restTimer)
+        presentationMode = try container.decodeIfPresent(ActiveWorkoutStoredPresentationMode.self, forKey: .presentationMode)
+        scrollTarget = try container.decodeIfPresent(ActiveWorkoutScrollTarget.self, forKey: .scrollTarget)
+        expandedExerciseIDs = try container.decodeIfPresent(Set<UUID>.self, forKey: .expandedExerciseIDs) ?? []
+    }
 }
 
 nonisolated extension ActiveWorkoutRuntimeSession {
@@ -505,7 +537,8 @@ actor ActiveWorkoutSnapshotStore {
                 session: session,
                 restTimer: storedSnapshot.restTimer,
                 presentationMode: storedSnapshot.presentationMode,
-                scrollTarget: storedSnapshot.scrollTarget
+                scrollTarget: storedSnapshot.scrollTarget,
+                expandedExerciseIDs: storedSnapshot.expandedExerciseIDs
             )
         }
 
@@ -519,9 +552,11 @@ actor ActiveWorkoutSnapshotStore {
         restTimer: RestTimerSnapshot? = nil,
         presentationMode: ActiveWorkoutStoredPresentationMode? = nil,
         scrollTarget: ActiveWorkoutScrollTarget? = nil,
+        expandedExerciseIDs: Set<UUID>? = nil,
         preservesExistingRestTimer: Bool = true,
         preservesExistingPresentationMode: Bool = true,
-        preservesExistingScrollTarget: Bool = true
+        preservesExistingScrollTarget: Bool = true,
+        preservesExistingExpandedExerciseIDs: Bool = true
     ) throws {
         try Task.checkCancellation()
         try FileManager.default.createDirectory(
@@ -534,6 +569,7 @@ actor ActiveWorkoutSnapshotStore {
         let existingSnapshot = preservesExistingRestTimer
             || preservesExistingPresentationMode
             || preservesExistingScrollTarget
+            || preservesExistingExpandedExerciseIDs
             ? (try? loadStoredSnapshot())
             : nil
         let existingRestTimer = preservesExistingRestTimer ? existingSnapshot?.restTimer : nil
@@ -541,14 +577,17 @@ actor ActiveWorkoutSnapshotStore {
             ? existingSnapshot?.presentationMode
             : nil
         let existingScrollTarget = preservesExistingScrollTarget ? existingSnapshot?.scrollTarget : nil
+        let existingExpandedExerciseIDs = preservesExistingExpandedExerciseIDs ? existingSnapshot?.expandedExerciseIDs : nil
         let resolvedRestTimer = restTimer ?? existingRestTimer
         let resolvedPresentationMode = presentationMode ?? existingPresentationMode
         let resolvedScrollTarget = scrollTarget ?? existingScrollTarget
+        let resolvedExpandedExerciseIDs = expandedExerciseIDs ?? existingExpandedExerciseIDs ?? []
         let storedSnapshot = ActiveWorkoutStoredSnapshot(
             session: normalizedSession,
             restTimer: resolvedRestTimer?.isExpired == true ? nil : resolvedRestTimer,
             presentationMode: resolvedPresentationMode,
-            scrollTarget: resolvedScrollTarget
+            scrollTarget: resolvedScrollTarget,
+            expandedExerciseIDs: resolvedExpandedExerciseIDs
         )
         try Task.checkCancellation()
         let data = try encoder.encode(storedSnapshot)

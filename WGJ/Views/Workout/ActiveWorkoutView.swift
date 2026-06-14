@@ -40,6 +40,8 @@ struct ActiveWorkoutView: View {
     @State private var shouldRefreshAllGuidance = false
     @State private var cardStateController = ActiveWorkoutExerciseCardStateController()
     @State private var renderProjection = ActiveWorkoutRenderProjection.empty
+    @State private var currentScrollTarget: ActiveWorkoutScrollTarget?
+    @State private var didRestoreInitialScrollTarget = false
     @State private var isBatchingRenderProjectionRefresh = false
     @State private var needsBatchedRenderProjectionRefresh = false
     @State private var profilePreferences = ActiveWorkoutProfilePreferences.default
@@ -96,6 +98,7 @@ struct ActiveWorkoutView: View {
                 .scrollTargetLayout()
                 .padding(16)
             }
+            .scrollPosition(id: $currentScrollTarget, anchor: .top)
             .scrollDismissesKeyboard(.interactively)
             .wgjScreenBackground()
             .wgjNavigationChrome()
@@ -193,7 +196,7 @@ struct ActiveWorkoutView: View {
                 templateReviewSheet(for: preview)
             }
             .task {
-                await bootstrapIfNeeded()
+                await bootstrapIfNeeded(scrollProxy: scrollProxy)
             }
             .task(id: session?.id) {
                 await reconcileSessionLifecycleIfNeeded()
@@ -913,7 +916,7 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
-    private func bootstrapIfNeeded() async {
+    private func bootstrapIfNeeded(scrollProxy: ScrollViewProxy) async {
         guard !hasBootstrapped else { return }
         guard !isBootstrapping else { return }
         isBootstrapping = true
@@ -945,6 +948,27 @@ struct ActiveWorkoutView: View {
             templateNameDraft = session.name == "Empty Workout" ? "New Template" : session.name
         }
         hasBootstrapped = true
+        restoreInitialScrollTargetIfNeeded(using: scrollProxy)
+    }
+
+    @MainActor
+    private func restoreInitialScrollTargetIfNeeded(using scrollProxy: ScrollViewProxy) {
+        guard !didRestoreInitialScrollTarget else { return }
+        guard let target = activeWorkoutPresentationState.preparedScrollTarget(for: sessionID) else { return }
+        guard isRestorableScrollTarget(target) else {
+            activeWorkoutPresentationState.stageScrollTarget(nil, for: sessionID)
+            didRestoreInitialScrollTarget = true
+            return
+        }
+
+        didRestoreInitialScrollTarget = true
+        currentScrollTarget = target
+        activeWorkoutPresentationState.stageScrollTarget(nil, for: sessionID)
+        Task { @MainActor in
+            await Task.yield()
+            guard hasBootstrapped, !Task.isCancelled else { return }
+            scrollToTarget(target, using: scrollProxy, animation: nil)
+        }
     }
 
     @MainActor
@@ -2073,6 +2097,7 @@ struct ActiveWorkoutView: View {
 
         let restTimerSnapshot = restTimerState.restTimerSnapshot()
         let scrollTarget = minimizedScrollRestoreTarget()
+        let expandedExerciseIDs = cardStateController.expandedExerciseIDs()
         pendingMinimizedSnapshotTask?.cancel()
         pendingMinimizedSnapshotTask = Task.detached(priority: .utility) {
             guard !Task.isCancelled else { return }
@@ -2082,9 +2107,11 @@ struct ActiveWorkoutView: View {
                     restTimer: restTimerSnapshot,
                     presentationMode: .collapsed,
                     scrollTarget: scrollTarget,
+                    expandedExerciseIDs: expandedExerciseIDs,
                     preservesExistingRestTimer: false,
                     preservesExistingPresentationMode: false,
-                    preservesExistingScrollTarget: false
+                    preservesExistingScrollTarget: false,
+                    preservesExistingExpandedExerciseIDs: false
                 )
             } catch {
                 guard !Task.isCancelled else { return }
@@ -2097,7 +2124,48 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func minimizedScrollRestoreTarget() -> ActiveWorkoutScrollTarget? {
-        nil
+        if let focusedMetricInputExerciseID,
+           sessionExercises.contains(where: { $0.id == focusedMetricInputExerciseID }) {
+            return .exercise(focusedMetricInputExerciseID)
+        }
+
+        if let keyboardDismissTargetExerciseID,
+           sessionExercises.contains(where: { $0.id == keyboardDismissTargetExerciseID }) {
+            return .exercise(keyboardDismissTargetExerciseID)
+        }
+
+        if let currentScrollTarget,
+           currentScrollTarget != .header,
+           isRestorableScrollTarget(currentScrollTarget) {
+            return currentScrollTarget
+        }
+
+        let expandedExerciseIDs = cardStateController.expandedExerciseIDs()
+        if let expandedExercise = sessionExercises.first(where: { expandedExerciseIDs.contains($0.id) }) {
+            return .exercise(expandedExercise.id)
+        }
+
+        if let currentScrollTarget, isRestorableScrollTarget(currentScrollTarget) {
+            return currentScrollTarget
+        }
+
+        return session == nil ? nil : .header
+    }
+
+    @MainActor
+    private func isRestorableScrollTarget(_ target: ActiveWorkoutScrollTarget) -> Bool {
+        switch target {
+        case .header:
+            return session != nil
+        case .preWorkoutCardio:
+            return preWorkoutCardio != nil
+        case .exercise(let exerciseID):
+            return sessionExercises.contains { $0.id == exerciseID }
+        case .postWorkoutCardio:
+            return postWorkoutCardio != nil
+        case .cancelSection:
+            return session != nil && !isEndingSession
+        }
     }
 
     private func presentActiveWorkout() {
@@ -2473,13 +2541,6 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func flushDirtyWritesNow(checkpoint: ActiveWorkoutLifecycleCheckpoint) async -> Bool {
-        if checkpoint == .sceneTransition,
-           !rowFlushCoordinator.hasDirtyRows,
-           pendingUserEditSnapshotTask == nil,
-           pendingMinimizedSnapshotTask == nil {
-            return true
-        }
-
         let shouldBatchProjectionRefresh = checkpoint == .sceneTransition
         if shouldBatchProjectionRefresh {
             isBatchingRenderProjectionRefresh = true
@@ -2518,7 +2579,9 @@ struct ActiveWorkoutView: View {
             pendingCardioCompletionsByPhase = [:]
             refreshRenderProjection()
             let scrollTarget = minimizedScrollRestoreTarget()
+            let expandedExerciseIDs = cardStateController.expandedExerciseIDs()
             activeWorkoutPresentationState.stageScrollTarget(scrollTarget, for: sessionID)
+            activeWorkoutPresentationState.stageExpandedExerciseIDs(expandedExerciseIDs, for: sessionID)
 
             do {
                 try await ActiveWorkoutSnapshotStore.shared.save(
@@ -2526,9 +2589,11 @@ struct ActiveWorkoutView: View {
                     restTimer: restTimerState.restTimerSnapshot(),
                     presentationMode: .presented,
                     scrollTarget: scrollTarget,
+                    expandedExerciseIDs: expandedExerciseIDs,
                     preservesExistingRestTimer: false,
                     preservesExistingPresentationMode: false,
-                    preservesExistingScrollTarget: false
+                    preservesExistingScrollTarget: false,
+                    preservesExistingExpandedExerciseIDs: false
                 )
                 return true
             } catch {
@@ -2558,7 +2623,9 @@ struct ActiveWorkoutView: View {
         pendingCardioCompletionsByPhase = [:]
         refreshRenderProjection()
         let scrollTarget = minimizedScrollRestoreTarget()
+        let expandedExerciseIDs = cardStateController.expandedExerciseIDs()
         activeWorkoutPresentationState.stageScrollTarget(scrollTarget, for: sessionID)
+        activeWorkoutPresentationState.stageExpandedExerciseIDs(expandedExerciseIDs, for: sessionID)
         guard ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: checkpoint) else {
             return true
         }
@@ -2569,9 +2636,11 @@ struct ActiveWorkoutView: View {
                 restTimer: restTimerState.restTimerSnapshot(),
                 presentationMode: .presented,
                 scrollTarget: scrollTarget,
+                expandedExerciseIDs: expandedExerciseIDs,
                 preservesExistingRestTimer: false,
                 preservesExistingPresentationMode: false,
-                preservesExistingScrollTarget: false
+                preservesExistingScrollTarget: false,
+                preservesExistingExpandedExerciseIDs: false
             )
             return true
         } catch {
@@ -2672,7 +2741,9 @@ struct ActiveWorkoutView: View {
         refreshRenderProjection()
         activeWorkoutPresentationState.stageRuntimeSession(snapshot, for: sessionID)
         let scrollTarget = minimizedScrollRestoreTarget()
+        let expandedExerciseIDs = cardStateController.expandedExerciseIDs()
         activeWorkoutPresentationState.stageScrollTarget(scrollTarget, for: sessionID)
+        activeWorkoutPresentationState.stageExpandedExerciseIDs(expandedExerciseIDs, for: sessionID)
 
         guard writeDurableSnapshot,
               ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: .userEdit)
@@ -2690,9 +2761,11 @@ struct ActiveWorkoutView: View {
                     restTimer: restTimerSnapshot,
                     presentationMode: .presented,
                     scrollTarget: scrollTarget,
+                    expandedExerciseIDs: expandedExerciseIDs,
                     preservesExistingRestTimer: false,
                     preservesExistingPresentationMode: false,
-                    preservesExistingScrollTarget: false
+                    preservesExistingScrollTarget: false,
+                    preservesExistingExpandedExerciseIDs: false
                 )
             } catch {
                 guard !Task.isCancelled else { return }
@@ -2821,8 +2894,11 @@ struct ActiveWorkoutView: View {
         anchor: UnitPoint = .top,
         animation: Animation? = nil
     ) {
-        let resolvedAnimation = animation ?? WGJMotion.cardAnimation(reduceMotion: reduceMotion)
-        withAnimation(resolvedAnimation) {
+        if let animation {
+            withAnimation(animation) {
+                scrollProxy.scrollTo(target, anchor: anchor)
+            }
+        } else {
             scrollProxy.scrollTo(target, anchor: anchor)
         }
     }

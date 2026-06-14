@@ -568,7 +568,7 @@ nonisolated enum AppPhase {
     case main
 }
 
-nonisolated enum AppMainTab: Hashable {
+nonisolated enum AppMainTab: String, Hashable, CaseIterable {
     case profile
     case history
     case startWorkout
@@ -590,7 +590,25 @@ nonisolated struct PendingTemplateFileOpen: Equatable, Identifiable {
 @MainActor
 @Observable
 final class AppTabState {
-    var selectedTab: AppMainTab = .startWorkout
+    static let selectedTabDefaultsKey = "selectedMainTab"
+
+    var selectedTab: AppMainTab {
+        didSet {
+            defaults.set(selectedTab.rawValue, forKey: Self.selectedTabDefaultsKey)
+        }
+    }
+
+    @ObservationIgnored private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        if let rawValue = defaults.string(forKey: Self.selectedTabDefaultsKey),
+           let persistedTab = AppMainTab(rawValue: rawValue) {
+            selectedTab = persistedTab
+        } else {
+            selectedTab = .startWorkout
+        }
+    }
 }
 
 @MainActor
@@ -840,15 +858,18 @@ nonisolated struct ActiveWorkoutRestoredPresentation: Equatable, Sendable {
     let sessionID: UUID
     let presentationMode: ActiveWorkoutStoredPresentationMode?
     let scrollTarget: ActiveWorkoutScrollTarget?
+    let expandedExerciseIDs: Set<UUID>
 
     init(
         sessionID: UUID,
         presentationMode: ActiveWorkoutStoredPresentationMode?,
-        scrollTarget: ActiveWorkoutScrollTarget? = nil
+        scrollTarget: ActiveWorkoutScrollTarget? = nil,
+        expandedExerciseIDs: Set<UUID> = []
     ) {
         self.sessionID = sessionID
         self.presentationMode = presentationMode
         self.scrollTarget = scrollTarget
+        self.expandedExerciseIDs = expandedExerciseIDs
     }
 }
 
@@ -1050,6 +1071,10 @@ final class ActiveWorkoutPresentationState {
         if let restoredPresentation {
             activeSessionID = restoredPresentation.sessionID
             stageScrollTarget(restoredPresentation.scrollTarget, for: restoredPresentation.sessionID)
+            stageExpandedExerciseIDs(
+                restoredPresentation.expandedExerciseIDs,
+                for: restoredPresentation.sessionID
+            )
             switch restoredPresentation.presentationMode {
             case .some(.presented):
                 isActiveWorkoutPresented = true
@@ -1076,7 +1101,8 @@ final class ActiveWorkoutPresentationState {
                 return ActiveWorkoutRestoredPresentation(
                     sessionID: snapshot.session.id,
                     presentationMode: snapshot.presentationMode,
-                    scrollTarget: snapshot.scrollTarget
+                    scrollTarget: snapshot.scrollTarget,
+                    expandedExerciseIDs: snapshot.expandedExerciseIDs
                 )
             }
         } catch {
