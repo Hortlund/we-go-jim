@@ -438,7 +438,6 @@ struct ProfileView: View {
                 }
                 .chartYScale(domain: 0 ... scale.domainUpperBound)
                 .frame(height: 160)
-                .drawingGroup()
                 .allowsHitTesting(false)
             }
         }
@@ -678,7 +677,6 @@ struct ProfileView: View {
                             }
                         }
                         .frame(height: 170)
-                        .drawingGroup()
                         .allowsHitTesting(false)
                     }
                 } else if let latest = series.points.last {
