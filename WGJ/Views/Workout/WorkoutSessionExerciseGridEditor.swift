@@ -311,6 +311,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                     : Color.clear,
                 lineWidth: shouldEmphasizeCompletedExercise ? 2 : 1.2
             )
+            .allowsHitTesting(false)
     }
 
     @ViewBuilder
@@ -912,9 +913,7 @@ struct WorkoutSessionExerciseGridEditor: View {
 
             ZStack {
                 if let overlayState {
-                    metricDisplayText(overlayState) {
-                        focusMetric(.reps, at: index)
-                    }
+                    metricDisplayText(overlayState)
                 }
 
                 TextField(metricPlaceholderText(for: overlayState), text: repsTextBinding(for: index))
@@ -1006,9 +1005,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             HStack(spacing: 6) {
                 ZStack {
                     if let overlayState {
-                        metricDisplayText(overlayState) {
-                            focusMetric(.weight, at: index)
-                        }
+                        metricDisplayText(overlayState)
                     }
 
                     TextField(metricPlaceholderText(for: overlayState), text: weightTextBinding(for: index))
@@ -3019,24 +3016,21 @@ private struct MetricFieldDisplayState {
     var accessibilityIdentifier: String?
 }
 
-private func metricDisplayText(_ state: MetricFieldDisplayState, onTap: @escaping () -> Void) -> some View {
-    Button(action: onTap) {
-        Text(state.text)
-            .font(.system(.title3, design: .rounded).weight(.semibold))
-            .foregroundStyle(
-                state.tone == .actual
-                    ? WGJTheme.textPrimary
-                    : WGJTheme.textTertiary.opacity(0.72)
-            )
-            .monospacedDigit()
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
-    }
-    .buttonStyle(.plain)
-    .accessibilityLabel(state.text)
-    .applyIfLet(state.accessibilityIdentifier) { view, identifier in
-        view.accessibilityIdentifier(identifier)
-    }
+private func metricDisplayText(_ state: MetricFieldDisplayState) -> some View {
+    Text(state.text)
+        .font(.system(.title3, design: .rounded).weight(.semibold))
+        .foregroundStyle(
+            state.tone == .actual
+                ? WGJTheme.textPrimary
+                : WGJTheme.textTertiary.opacity(0.72)
+        )
+        .monospacedDigit()
+        .frame(maxWidth: .infinity)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .applyIfLet(state.accessibilityIdentifier) { view, identifier in
+            view.accessibilityIdentifier(identifier)
+        }
 }
 
 private extension View {
