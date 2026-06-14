@@ -287,6 +287,94 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         XCTAssertEqual(snapshot.contentSummary.templateExerciseCount, 0)
     }
 
+    func testHistoryOverviewSummaryUsesSessionExerciseIDs() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+
+        let sessionID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let exerciseID = UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
+        context.insert(WorkoutSession(
+            id: sessionID,
+            name: "Day 4 - Lower B",
+            status: .completed,
+            startedAt: Date(timeIntervalSince1970: 100),
+            endedAt: Date(timeIntervalSince1970: 200),
+            durationSeconds: 100,
+            totalVolume: 600
+        ))
+        context.insert(WorkoutSessionExercise(
+            id: exerciseID,
+            sessionID: sessionID,
+            catalogExerciseUUID: "lat-pulldown",
+            exerciseNameSnapshot: "Lat Pulldown",
+            categorySnapshot: "Strength",
+            muscleSummarySnapshot: "Back",
+            totalSetCount: 1,
+            completedSetCount: 1,
+            sortOrder: 0
+        ))
+        context.insert(WorkoutSessionSet(
+            id: UUID(uuidString: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")!,
+            sessionExerciseID: exerciseID,
+            sortOrder: 0,
+            actualReps: 10,
+            actualWeight: 60,
+            isCompleted: true
+        ))
+        try context.save()
+
+        let loaded = try HistoryOverviewSnapshotLoader.load(
+            modelContext: context,
+            selectedDayFilter: nil,
+            pageSize: 10
+        )
+
+        let row = try XCTUnwrap(loaded.completedSessions.first?.summaryRows.first)
+        XCTAssertEqual(row.exercise, "1 x Lat Pulldown")
+        XCTAssertNotEqual(row.bestSet, "-")
+    }
+
+    func testHistoryProjectionUsesSessionExerciseIDs() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+
+        let sessionID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let exerciseID = UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
+        context.insert(WorkoutSession(
+            id: sessionID,
+            name: "Day 4 - Lower B",
+            status: .completed,
+            startedAt: Date(timeIntervalSince1970: 100),
+            endedAt: Date(timeIntervalSince1970: 200)
+        ))
+        context.insert(WorkoutSessionExercise(
+            id: exerciseID,
+            sessionID: sessionID,
+            catalogExerciseUUID: "lat-pulldown",
+            exerciseNameSnapshot: "Lat Pulldown",
+            categorySnapshot: "Strength",
+            muscleSummarySnapshot: "Back",
+            sortOrder: 0
+        ))
+        context.insert(WorkoutSessionSet(
+            id: UUID(uuidString: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")!,
+            sessionExerciseID: exerciseID,
+            sortOrder: 0,
+            actualReps: 10,
+            actualWeight: 60,
+            isCompleted: true
+        ))
+        try context.save()
+
+        XCTAssertEqual(try HistoryProjectionRepository(modelContext: context).backfillIfNeeded(), 1)
+        let facts = try context.fetch(FetchDescriptor<CompletedSetFact>())
+        XCTAssertEqual(facts.count, 1)
+        XCTAssertEqual(facts.first?.catalogExerciseUUID, "lat-pulldown")
+        XCTAssertEqual(facts.first?.exerciseNameSnapshot, "Lat Pulldown")
+    }
+
     func testExportCurrentBackupIncludesOnlyCompletedWorkoutChildren() async throws {
         let container = try makeInMemoryContainer()
         let context = ModelContext(container)
