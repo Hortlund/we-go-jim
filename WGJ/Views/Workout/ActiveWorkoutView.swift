@@ -41,6 +41,7 @@ struct ActiveWorkoutView: View {
     @State private var pendingGuidanceRefreshTask: Task<Void, Never>?
     @State private var pendingUserEditSnapshotTask: Task<Void, Never>?
     @State private var pendingMinimizedSnapshotTask: Task<Void, Never>?
+    @State private var pendingTemplateUpdatePreviewTask: Task<Void, Never>?
     @State private var pendingGuidanceRefreshExerciseIDs: Set<UUID> = []
     @State private var shouldRefreshAllGuidance = false
     @State private var cardStateController = ActiveWorkoutExerciseCardStateController()
@@ -244,6 +245,8 @@ struct ActiveWorkoutView: View {
                 foregroundNonCriticalInteractionWorkTask = nil
                 pendingGuidanceRefreshTask?.cancel()
                 pendingGuidanceRefreshTask = nil
+                pendingTemplateUpdatePreviewTask?.cancel()
+                pendingTemplateUpdatePreviewTask = nil
                 pendingGuidanceRefreshExerciseIDs = []
                 shouldRefreshAllGuidance = false
             }
@@ -1255,6 +1258,8 @@ struct ActiveWorkoutView: View {
 
         if let preview = result.templateUpdatePreview {
             pendingTemplateUpdatePreview = preview
+        } else if result.completedTemplateID != nil {
+            loadTemplateUpdatePreviewAfterFinish(sessionID: result.completedSessionID)
         } else {
             presentWorkoutCompletionSummary()
         }
@@ -2047,6 +2052,33 @@ struct ActiveWorkoutView: View {
         pendingTemplateUpdatePreview = nil
     }
 
+    private func loadTemplateUpdatePreviewAfterFinish(sessionID: UUID) {
+        pendingTemplateUpdatePreviewTask?.cancel()
+        let backgroundStore = persistenceBackgroundStore
+
+        pendingTemplateUpdatePreviewTask = Task(priority: .utility) {
+            do {
+                let preview = try await backgroundStore.perform("active-workout.template.preview-sync") { backgroundContext in
+                    try WorkoutTemplateSyncService(modelContext: backgroundContext)
+                        .previewTemplateUpdate(forSessionID: sessionID)
+                }
+                guard !Task.isCancelled else { return }
+                pendingTemplateUpdatePreviewTask = nil
+
+                if let preview {
+                    pendingTemplateUpdatePreview = preview
+                } else {
+                    presentWorkoutCompletionSummary()
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                pendingTemplateUpdatePreviewTask = nil
+                isEndingSession = false
+                showError(error)
+            }
+        }
+    }
+
     private func presentWorkoutCompletionSummary() {
         dismissKeyboard()
         isCancelArmed = false
@@ -2054,6 +2086,8 @@ struct ActiveWorkoutView: View {
         pendingCompletionAfterSaveTemplateSheet = false
         pendingCompletionAfterTemplateReviewSheet = false
         pendingTemplateUpdateAfterReviewSheetDismissal = nil
+        pendingTemplateUpdatePreviewTask?.cancel()
+        pendingTemplateUpdatePreviewTask = nil
         exerciseSettingsDraft = nil
         exerciseComponentPickerDraft = nil
         pendingTemplateUpdatePreview = nil
@@ -2841,8 +2875,7 @@ struct ActiveWorkoutView: View {
         } else {
             canCreateTemplateFromCompletedWorkout = true
             folderSnapshots = []
-            templateUpdatePreview = try WorkoutTemplateSyncService(modelContext: modelContext)
-                .previewTemplateUpdate(forSessionID: completedSession.id)
+            templateUpdatePreview = nil
         }
 
         return ActiveWorkoutFinishResult(

@@ -141,7 +141,8 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         let sourceContainer = try makeInMemoryContainer()
         let sourceContext = ModelContext(sourceContainer)
         sourceContext.autosaveEnabled = false
-        let sourceTemplate = WorkoutTemplate(id: templateID, folderID: folderID, name: "Day 1 - Upper A")
+        let sourceFolder = TemplateFolder(id: folderID, name: "Bro Split")
+        let sourceTemplate = WorkoutTemplate(id: templateID, folderID: folderID, name: "Day 1 - Upper A", folder: sourceFolder)
         let sourceExercise = TemplateExercise(
             id: exerciseID,
             templateID: templateID,
@@ -152,7 +153,9 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
             sortOrder: 0,
             template: sourceTemplate
         )
+        sourceFolder.templates = [sourceTemplate]
         sourceTemplate.exercises = [sourceExercise]
+        sourceContext.insert(sourceFolder)
         sourceContext.insert(sourceTemplate)
         sourceContext.insert(sourceExercise)
         try sourceContext.save()
@@ -373,6 +376,80 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         XCTAssertEqual(facts.count, 1)
         XCTAssertEqual(facts.first?.catalogExerciseUUID, "lat-pulldown")
         XCTAssertEqual(facts.first?.exerciseNameSnapshot, "Lat Pulldown")
+    }
+
+    func testWorkoutMetricsUseSessionExerciseIDsForPRsAndVolume() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+
+        let olderSessionID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let olderExerciseID = UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
+        context.insert(WorkoutSession(
+            id: olderSessionID,
+            name: "Older Lower",
+            status: .completed,
+            startedAt: Date(timeIntervalSince1970: 100),
+            endedAt: Date(timeIntervalSince1970: 200)
+        ))
+        context.insert(WorkoutSessionExercise(
+            id: olderExerciseID,
+            sessionID: olderSessionID,
+            catalogExerciseUUID: "leg-press",
+            exerciseNameSnapshot: "Leg Press",
+            categorySnapshot: "Strength",
+            muscleSummarySnapshot: "Quadriceps",
+            sortOrder: 0
+        ))
+        context.insert(WorkoutSessionSet(
+            id: UUID(uuidString: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")!,
+            sessionExerciseID: olderExerciseID,
+            sortOrder: 0,
+            actualReps: 8,
+            actualWeight: 100,
+            isCompleted: true
+        ))
+
+        let newerSessionID = UUID(uuidString: "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD")!
+        let newerExerciseID = UUID(uuidString: "EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE")!
+        context.insert(WorkoutSession(
+            id: newerSessionID,
+            name: "Newer Lower",
+            status: .completed,
+            startedAt: Date(timeIntervalSince1970: 300),
+            endedAt: Date(timeIntervalSince1970: 400)
+        ))
+        context.insert(WorkoutSessionExercise(
+            id: newerExerciseID,
+            sessionID: newerSessionID,
+            catalogExerciseUUID: "leg-press",
+            exerciseNameSnapshot: "Leg Press",
+            categorySnapshot: "Strength",
+            muscleSummarySnapshot: "Quadriceps",
+            sortOrder: 0
+        ))
+        context.insert(WorkoutSessionSet(
+            id: UUID(uuidString: "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF")!,
+            sessionExerciseID: newerExerciseID,
+            sortOrder: 0,
+            actualReps: 8,
+            actualWeight: 120,
+            isCompleted: true
+        ))
+        try context.save()
+
+        _ = try HistoryProjectionRepository(modelContext: context).backfillIfNeeded()
+
+        let metrics = WorkoutMetricsService(modelContext: context)
+        let sessionPRs = try metrics.sessionPRAchievements(sessionID: newerSessionID)
+        let setPRs = try metrics.sessionSetPRAchievements(sessionID: newerSessionID)
+        let summary = try metrics.sessionSummary(sessionID: newerSessionID)
+
+        XCTAssertEqual(sessionPRs.map(\.exerciseName), ["Leg Press"])
+        XCTAssertEqual(setPRs.count, 1)
+        XCTAssertEqual(Set(setPRs[0].kinds), Set([.strength, .weight, .volume]))
+        XCTAssertEqual(summary.totalVolume, 960)
+        XCTAssertEqual(summary.prHitsCount, 1)
     }
 
     func testHistoryDetailUsesSessionSetIDs() throws {

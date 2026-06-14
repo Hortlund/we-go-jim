@@ -39,9 +39,9 @@ nonisolated enum WorkoutCompletionConfettiPolicy {
     static func pieceCount(for intensity: WorkoutCompletionConfettiIntensity) -> Int {
         switch intensity {
         case .completedWorkout:
-            return 30
+            return 54
         case .manualTap:
-            return 16
+            return 24
         }
     }
 }
@@ -422,7 +422,7 @@ struct WorkoutCompletionSummaryView: View {
         confettiBursts.append(burst)
         confettiDismissTasks[burst.id]?.cancel()
         confettiDismissTasks[burst.id] = Task.detached(priority: .utility) {
-            try? await Task.sleep(for: .seconds(2.4))
+            try? await Task.sleep(for: .seconds(2.8))
             guard !Task.isCancelled else { return }
             await self.removeConfettiBurstAfterDelayIfStillNeeded(id: burst.id)
         }
@@ -876,7 +876,7 @@ private struct WorkoutCompletionConfettiOverlay: View {
                         )
                         .opacity(animate ? 0 : 1)
                         .animation(
-                            .easeOut(duration: piece.duration)
+                            .timingCurve(0.16, 0.84, 0.24, 1.0, duration: piece.duration)
                                 .delay(piece.delay),
                             value: animate
                         )
@@ -911,10 +911,10 @@ private struct WorkoutCompletionConfettiPiece: Identifiable {
         let colors = [WGJTheme.accentBlue, WGJTheme.accentGold, WGJTheme.success, WGJTheme.accentCyan]
 
         return (0..<count).map { index in
-            let width = generator.value(in: CGFloat(7)...CGFloat(14))
-            let height = generator.value(in: CGFloat(9)...CGFloat(22))
+            let width = generator.value(in: CGFloat(6)...CGFloat(12))
+            let height = generator.value(in: CGFloat(8)...CGFloat(18))
             let direction = generator.value(in: 0.0...(2.0 * Double.pi))
-            let distance = generator.value(in: 0.32...1.0)
+            let distance = generator.value(in: 0.36...1.08)
             let upwardKick = generator.value(in: -0.28...0.14)
             return WorkoutCompletionConfettiPiece(
                 id: index,
@@ -927,8 +927,8 @@ private struct WorkoutCompletionConfettiPiece: Identifiable {
                 travelY: abs(sin(direction)) * generator.value(in: 0.42...1.02) + upwardKick,
                 startRotation: generator.value(in: -45...45),
                 endRotation: generator.value(in: 180...760) * (generator.nextBool() ? 1 : -1),
-                delay: generator.value(in: 0...0.18),
-                duration: generator.value(in: 1.15...2.1),
+                delay: generator.value(in: 0...0.16),
+                duration: generator.value(in: 1.35...2.35),
                 color: colors[index % colors.count]
             )
         }
