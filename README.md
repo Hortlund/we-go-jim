@@ -8,6 +8,12 @@
 
 The app is local-first. The important workout loop should work on-device first: templates, active workout progress, completed workouts, profile stats, and history are saved locally. CloudKit is used as a best-effort backup/export boundary after explicit saves, not as a broad background sync engine that can interrupt lifting.
 
+<p align="center">
+  <img src="AppStoreScreenshots/03-start-workout.png" alt="Start Workout screen" width="30%">
+  <img src="AppStoreScreenshots/09-active-workout-sets.png" alt="Active Workout logging screen" width="30%">
+  <img src="AppStoreScreenshots/05-progress.png" alt="Progress comparison screen" width="30%">
+</p>
+
 ## Philosophy
 
 - **Training flow first.** Start a session fast, keep inputs editable, finish cleanly, and review what changed.
