@@ -1985,20 +1985,24 @@ struct WorkoutSessionExerciseGridEditor: View {
 
         pendingCommitTask?.cancel()
         pendingCommitTask = nil
+        let retainedFocus = focusedInput?.setID == targetSetID ? focusedInput : nil
         clearInputDrafts(for: targetSetID)
-        if focusedInput?.setID == targetSetID {
-            dismissInputFocus(suppressCommit: true)
-        }
 
         if !manualCompletionMode {
             var autoCompletedDrafts = updatedDrafts
             autoCompletedDrafts[index].isCompleted = true
             setDrafts = autoCompletedDrafts
+            if let retainedFocus {
+                syncInputDraft(for: retainedFocus, using: autoCompletedDrafts[index])
+            }
             notifyChanged(drafts: autoCompletedDrafts)
             return
         }
 
         setDrafts = updatedDrafts
+        if let retainedFocus {
+            syncInputDraft(for: retainedFocus, using: updatedDrafts[index])
+        }
         notifyChanged(drafts: updatedDrafts)
     }
 
