@@ -182,7 +182,7 @@ nonisolated final class UserDataCloudBackupService {
         )
     }
 
-    func restoreLatestBackup() async throws -> UserDataCloudBackupRestoreResult? {
+    func restoreLatestBackup(replacingLocalData: Bool = false) async throws -> UserDataCloudBackupRestoreResult? {
         guard let record = try await backupStore.fetchBackup() else {
             return nil
         }
@@ -190,9 +190,20 @@ nonisolated final class UserDataCloudBackupService {
         let payload = try Self.makeDecoder().decode(UserDataCloudBackupPayload.self, from: record.payloadData)
         let context = ModelContext(localContainer)
         context.autosaveEnabled = false
-        guard try Self.isLocalUserDataEmpty(context: context) else {
-            return nil
+
+        if replacingLocalData {
+            try await AppDataDeletionService(
+                modelContext: context,
+                deleteCloudBackup: {},
+                clearWeeklyGoalWidgetSnapshot: {},
+                clearActiveWorkoutSnapshot: {}
+            ).deleteLocalDeviceData()
+        } else {
+            guard try Self.isLocalUserDataEmpty(context: context) else {
+                return nil
+            }
         }
+
         try payload.mergeIntoLocalStore(in: context)
         if context.hasChanges {
             try context.save()

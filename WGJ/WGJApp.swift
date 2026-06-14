@@ -43,7 +43,6 @@ struct WGJApp: App {
 
     private static func makeContainerBootstrap() async throws -> ModelContainerBootstrap {
         AppStoreLayout.clearPersistentStoreFilesForPendingReset()
-        AppStoreLayout.clearObsoleteAppGroupStoreFiles()
 #if DEBUG
         try AppStoreLayout.clearPersistentStoreFilesForUITestsIfRequested()
         resetActiveWorkoutSnapshotForUITestsIfRequested()
@@ -299,13 +298,6 @@ nonisolated enum AppStoreLayout {
         historyProjectionConfigurationName,
     ]
     static let storeFilePrefixes = configurationNames.map { "\($0).store" }
-    static let obsoleteAppGroupStoreFilePrefixes = [
-        "LocalCatalog.store",
-        "UserData.store",
-        "ActiveWorkoutDraft.store",
-        "UserDataCloudMirror.store",
-        "SocialOutbox.store",
-    ]
     static let historyProjectionGroupContainer = ModelConfiguration.GroupContainer.identifier(appGroupIdentifier)
     private static let resetPersistentStoresKey = "appStorage.resetPersistentStoresOnNextLaunch"
 
@@ -340,7 +332,6 @@ nonisolated enum AppStoreLayout {
     ) {
         guard defaults.bool(forKey: resetPersistentStoresKey) else { return }
         try? clearPersistentStoreFiles(fileManager: fileManager)
-        clearObsoleteAppGroupStoreFiles(fileManager: fileManager)
         defaults.removeObject(forKey: resetPersistentStoresKey)
     }
 
@@ -365,22 +356,6 @@ nonisolated enum AppStoreLayout {
     static func isPersistentStoreFile(_ fileURL: URL) -> Bool {
         storeFilePrefixes.contains { prefix in
             fileURL.lastPathComponent.hasPrefix(prefix)
-        }
-    }
-
-    static func clearObsoleteAppGroupStoreFiles(fileManager: FileManager = .default) {
-        guard let directory = appGroupApplicationSupportDirectory(fileManager: fileManager),
-              fileManager.fileExists(atPath: directory.path),
-              let fileURLs = try? fileManager.contentsOfDirectory(
-                at: directory,
-                includingPropertiesForKeys: nil
-              )
-        else { return }
-
-        for fileURL in fileURLs where obsoleteAppGroupStoreFilePrefixes.contains(where: { prefix in
-            fileURL.lastPathComponent.hasPrefix(prefix)
-        }) {
-            try? fileManager.removeItem(at: fileURL)
         }
     }
 

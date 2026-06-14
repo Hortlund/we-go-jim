@@ -133,6 +133,56 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         XCTAssertEqual(profiles.first?.isBozarModeEnabled, true)
     }
 
+    func testRestoreLatestBackupCanReplaceBrokenLocalTemplates() async throws {
+        let templateID = UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
+        let exerciseID = UUID(uuidString: "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD")!
+        let folderID = UUID(uuidString: "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF")!
+
+        let sourceContainer = try makeInMemoryContainer()
+        let sourceContext = ModelContext(sourceContainer)
+        sourceContext.autosaveEnabled = false
+        let sourceTemplate = WorkoutTemplate(id: templateID, folderID: folderID, name: "Day 1 - Upper A")
+        let sourceExercise = TemplateExercise(
+            id: exerciseID,
+            templateID: templateID,
+            catalogExerciseUUID: "lat-pulldown",
+            exerciseNameSnapshot: "Lat Pulldown",
+            categorySnapshot: "Strength",
+            muscleSummarySnapshot: "Back",
+            sortOrder: 0,
+            template: sourceTemplate
+        )
+        sourceTemplate.exercises = [sourceExercise]
+        sourceContext.insert(sourceTemplate)
+        sourceContext.insert(sourceExercise)
+        try sourceContext.save()
+
+        let backupStore = CapturingBackupStore()
+        _ = try await UserDataCloudBackupService(
+            localContainer: sourceContainer,
+            backupStore: backupStore
+        ).exportCurrentBackup()
+
+        let brokenContainer = try makeInMemoryContainer()
+        let brokenContext = ModelContext(brokenContainer)
+        brokenContext.autosaveEnabled = false
+        brokenContext.insert(WorkoutTemplate(id: templateID, folderID: folderID, name: "Day 1 - Upper A"))
+        try brokenContext.save()
+
+        let restoreResult = try await UserDataCloudBackupService(
+            localContainer: brokenContainer,
+            backupStore: backupStore
+        ).restoreLatestBackup(replacingLocalData: true)
+
+        let restoredContext = ModelContext(brokenContainer)
+        let restoredTemplates = try restoredContext.fetch(FetchDescriptor<WorkoutTemplate>())
+        let restoredExercises = try restoredContext.fetch(FetchDescriptor<TemplateExercise>())
+        XCTAssertNotNil(restoreResult)
+        XCTAssertEqual(restoredTemplates.count, 1)
+        XCTAssertEqual(restoredExercises.count, 1)
+        XCTAssertEqual(restoredExercises.first?.exerciseNameSnapshot, "Lat Pulldown")
+    }
+
     func testExportCurrentBackupIncludesOnlyCompletedWorkoutChildren() async throws {
         let container = try makeInMemoryContainer()
         let context = ModelContext(container)
