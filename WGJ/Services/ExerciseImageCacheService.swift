@@ -8,6 +8,7 @@ nonisolated final class ExerciseImageCacheService {
 
     private static let diskCacheLimitBytes = 64 * 1024 * 1024
     private static let diskCacheTrimTargetBytes = 48 * 1024 * 1024
+    private static let fullImageFallbackLimitBytes = 1 * 1024 * 1024
 
     private static let sharedMemoryImageCache: NSCache<NSString, UIImage> = {
         let cache = NSCache<NSString, UIImage>()
@@ -128,7 +129,7 @@ nonisolated final class ExerciseImageCacheService {
         await Task.detached(priority: .utility) { [decodedThumbnailMaxPixelSize] in
             let options = [kCGImageSourceShouldCache: false] as CFDictionary
             guard let source = CGImageSourceCreateWithData(data as CFData, options) else {
-                return UIImage(data: data)
+                return Self.fallbackImage(from: data)
             }
 
             let thumbnailOptions = [
@@ -142,7 +143,7 @@ nonisolated final class ExerciseImageCacheService {
                 return UIImage(cgImage: cgImage)
             }
 
-            return UIImage(data: data)
+            return Self.fallbackImage(from: data)
         }
         .value
     }
@@ -155,6 +156,14 @@ nonisolated final class ExerciseImageCacheService {
         let width = max(Int(image.size.width * image.scale), 1)
         let height = max(Int(image.size.height * image.scale), 1)
         return width * height * 4
+    }
+
+    private static func fallbackImage(from data: Data) -> UIImage? {
+        guard data.count <= fullImageFallbackLimitBytes else {
+            return nil
+        }
+
+        return UIImage(data: data)
     }
 
     private static func trimDiskCache(at cacheDirectoryURL: URL) {

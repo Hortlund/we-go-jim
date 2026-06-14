@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import SwiftData
 
 nonisolated struct WorkoutPreviousSetSnapshot: Equatable, Sendable {
@@ -149,6 +150,11 @@ nonisolated enum WorkoutSessionRepositoryError: Error {
 }
 
 nonisolated final class WorkoutSessionRepository {
+    private static let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "WGJ",
+        category: "WorkoutSessionRepository"
+    )
+
     private let modelContext: ModelContext
     private let weeklyGoalWidgetPublisher: WeeklyGoalWidgetPublisher?
     private var historyProjectionRepository: HistoryProjectionRepository {
@@ -193,9 +199,7 @@ nonisolated final class WorkoutSessionRepository {
         do {
             try weeklyGoalWidgetPublisher.publish(modelContext: modelContext, generatedAt: .now)
         } catch {
-            #if DEBUG
-            print("Weekly goal widget publish failed: \(error)")
-            #endif
+            Self.logger.error("Weekly goal widget publish failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 

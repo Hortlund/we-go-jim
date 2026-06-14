@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import OSLog
 import SwiftData
 import UIKit
 
@@ -28,6 +29,11 @@ struct ResolvedAppLaunchBootstrap {
 @MainActor
 @Observable
 final class AppLaunchBootstrapState {
+    nonisolated private static let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "WGJ",
+        category: "AppLaunchBootstrap"
+    )
+
     private(set) var resolvedBootstrap: ResolvedAppLaunchBootstrap?
 
     @ObservationIgnored private var resolutionTask: Task<Void, Never>?
@@ -80,11 +86,11 @@ final class AppLaunchBootstrapState {
                         )
                     } catch {
                         await self.clearResolutionTask(generation: currentGeneration)
-                        print("Could not create ModelContainer bootstrap: \(error)")
+                        Self.logger.error("Could not create ModelContainer bootstrap: \(error.localizedDescription, privacy: .public)")
                     }
                 } else {
                     await self.clearResolutionTask(generation: currentGeneration)
-                    print("Could not create ModelContainer bootstrap: \(error)")
+                    Self.logger.error("Could not create ModelContainer bootstrap: \(error.localizedDescription, privacy: .public)")
                 }
             }
         }
@@ -215,6 +221,10 @@ enum AppLaunchBootstrapResolver {
 
 final class AppLifecycleDiagnostics {
     static let shared = AppLifecycleDiagnostics()
+    nonisolated private static let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "WGJ",
+        category: "AppLifecycleDiagnostics"
+    )
 
     private enum Key {
         static let launchID = "appLifecycleDiagnostics.launchID"
@@ -255,7 +265,7 @@ final class AppLifecycleDiagnostics {
             let reason = unexpectedRestartReason(now: date)
             defaults.set(date, forKey: Key.lastUnexpectedRestartAt)
             defaults.set(reason, forKey: Key.lastUnexpectedRestartReason)
-            print("Previous app process ended without clean termination: \(reason)")
+            Self.logger.info("Previous app process ended without clean termination: \(reason, privacy: .public)")
         }
 
         defaults.set(UUID().uuidString, forKey: Key.launchID)

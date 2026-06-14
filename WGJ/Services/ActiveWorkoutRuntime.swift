@@ -493,6 +493,7 @@ actor ActiveWorkoutSnapshotStore {
     private static let defaultFileName = "active-workout-snapshot.json"
 
     private let baseDirectory: URL
+    private var cachedSnapshotData: Data?
 
     init(baseDirectory: URL? = nil) {
         if let baseDirectory {
@@ -527,9 +528,11 @@ actor ActiveWorkoutSnapshotStore {
         try Task.checkCancellation()
         let url = snapshotURL
         guard FileManager.default.fileExists(atPath: url.path) else {
+            cachedSnapshotData = nil
             return nil
         }
         let data = try Data(contentsOf: url)
+        cachedSnapshotData = data
         if let storedSnapshot = try? decoder.decode(ActiveWorkoutStoredSnapshot.self, from: data) {
             var session = storedSnapshot.session
             session.normalizeSetRestToExerciseDefaults()
@@ -591,21 +594,32 @@ actor ActiveWorkoutSnapshotStore {
         )
         try Task.checkCancellation()
         let data = try encoder.encode(storedSnapshot)
-        if FileManager.default.fileExists(atPath: snapshotURL.path),
-           let existingData = try? Data(contentsOf: snapshotURL),
-           existingData == data {
+        let url = snapshotURL
+        if cachedSnapshotData == data,
+           FileManager.default.fileExists(atPath: url.path) {
             return
         }
+        if cachedSnapshotData == nil,
+           FileManager.default.fileExists(atPath: url.path),
+           let existingData = try? Data(contentsOf: url) {
+            cachedSnapshotData = existingData
+            if existingData == data {
+                return
+            }
+        }
         try Task.checkCancellation()
-        try data.write(to: snapshotURL, options: [.atomic])
+        try data.write(to: url, options: [.atomic])
+        cachedSnapshotData = data
     }
 
     func delete() throws {
         let url = snapshotURL
         guard FileManager.default.fileExists(atPath: url.path) else {
+            cachedSnapshotData = nil
             return
         }
         try FileManager.default.removeItem(at: url)
+        cachedSnapshotData = nil
     }
 
     func hasSnapshot() throws -> Bool {

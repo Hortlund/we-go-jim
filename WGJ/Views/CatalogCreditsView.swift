@@ -3,6 +3,8 @@ import SwiftUI
 
 struct CatalogCreditsView: View {
     @Query(sort: [SortDescriptor(\ExerciseAttribution.sourceName, order: .forward)]) private var attributions: [ExerciseAttribution]
+    private static let muscleMapSourceURL = URL(string: "https://github.com/melihcolpan/MuscleMap")
+    private static let muscleMapAuthorURL = URL(string: "https://github.com/melihcolpan")
 
     var body: some View {
         ScrollView {
@@ -26,8 +28,13 @@ struct CatalogCreditsView: View {
                         .font(.subheadline)
                         .foregroundStyle(WGJTheme.textSecondary)
 
-                    Link("Source URL", destination: URL(string: "https://github.com/melihcolpan/MuscleMap")!)
-                    Link("Author GitHub", destination: URL(string: "https://github.com/melihcolpan")!)
+                    if let sourceURL = Self.muscleMapSourceURL {
+                        Link("Source URL", destination: sourceURL)
+                    }
+
+                    if let authorURL = Self.muscleMapAuthorURL {
+                        Link("Author GitHub", destination: authorURL)
+                    }
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)

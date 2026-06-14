@@ -72,11 +72,13 @@ nonisolated final class AvatarThumbnailCacheService {
 }
 
 enum AvatarImageCodec {
+    nonisolated private static let fullImageFallbackLimitBytes = 1 * 1024 * 1024
+
     static func thumbnail(from data: Data, maxPixelSize: CGFloat) async -> UIImage? {
         await Task.detached(priority: .utility) {
             let options = [kCGImageSourceShouldCache: false] as CFDictionary
             guard let source = CGImageSourceCreateWithData(data as CFData, options) else {
-                return UIImage(data: data)
+                return fallbackImage(from: data)
             }
 
             let thumbnailOptions = [
@@ -90,7 +92,7 @@ enum AvatarImageCodec {
                 return UIImage(cgImage: cgImage)
             }
 
-            return UIImage(data: data)
+            return fallbackImage(from: data)
         }
         .value
     }
@@ -105,5 +107,13 @@ enum AvatarImageCodec {
         }
 
         return thumbnail.jpegData(compressionQuality: compressionQuality) ?? data
+    }
+
+    nonisolated private static func fallbackImage(from data: Data) -> UIImage? {
+        guard data.count <= fullImageFallbackLimitBytes else {
+            return nil
+        }
+
+        return UIImage(data: data)
     }
 }

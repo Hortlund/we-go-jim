@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import OSLog
 import SwiftData
 import SwiftUI
 import UIKit
@@ -15,6 +16,10 @@ struct ActiveWorkoutView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     private let sessionID: UUID
+    nonisolated private static let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "WGJ",
+        category: "ActiveWorkout"
+    )
 
     @State private var runtimeSession: ActiveWorkoutRuntimeSession?
     @State private var hasBootstrapped = false
@@ -1967,7 +1972,7 @@ struct ActiveWorkoutView: View {
                 do {
                     try await ActiveWorkoutSnapshotStore.shared.delete()
                 } catch {
-                    NSLog("WGJ active workout snapshot cleanup failed after completion: \(error.localizedDescription)")
+                    Self.logger.error("Active workout snapshot cleanup failed after completion: \(error.localizedDescription, privacy: .public)")
                 }
                 handleCompletedSessionTransition(result)
             } catch {
@@ -2198,7 +2203,7 @@ struct ActiveWorkoutView: View {
                 do {
                     try await ActiveWorkoutSnapshotStore.shared.delete()
                 } catch {
-                    NSLog("WGJ active workout snapshot cleanup failed after discard: \(error.localizedDescription)")
+                    Self.logger.error("Active workout snapshot cleanup failed after discard: \(error.localizedDescription, privacy: .public)")
                 }
             }
         }

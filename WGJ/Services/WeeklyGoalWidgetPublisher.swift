@@ -1,10 +1,15 @@
 import Foundation
+import OSLog
 import SwiftData
 import WidgetKit
 
 nonisolated final class WeeklyGoalWidgetPublisher {
     static let widgetKind = WeeklyGoalWidgetDescriptor.kind
     static let widgetKinds = [WeeklyGoalWidgetDescriptor.kind]
+    private static let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "WGJ",
+        category: "WeeklyGoalWidget"
+    )
 
     private let store: WeeklyGoalWidgetStore
     private let reloadTimelines: (String) -> Void
@@ -29,18 +34,14 @@ nonisolated final class WeeklyGoalWidgetPublisher {
 
     static func publishBestEffort(modelContext: ModelContext, generatedAt: Date = .now) {
         guard let publisher = WeeklyGoalWidgetPublisher() else {
-            #if DEBUG
-            print("Weekly goal widget publish skipped: app group store unavailable")
-            #endif
+            logger.debug("Weekly goal widget publish skipped: app group store unavailable")
             return
         }
 
         do {
             try publisher.publish(modelContext: modelContext, generatedAt: generatedAt)
         } catch {
-            #if DEBUG
-            print("Weekly goal widget publish failed: \(error)")
-            #endif
+            logger.error("Weekly goal widget publish failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
