@@ -129,4 +129,6 @@ Good contributions tend to:
 
 ## License
 
-No license file is currently included. Treat the repository as source-available until a license is added.
+WGJ is released under the [MIT License](LICENSE).
+
+You can use, copy, modify, merge, publish, distribute, sublicense, and sell copies of the software, as long as the copyright notice and license notice are kept with copies or substantial portions of the software.
