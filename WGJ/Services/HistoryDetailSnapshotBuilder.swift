@@ -133,7 +133,7 @@ enum HistoryDetailSnapshotBuilder {
         let cardioBlocks = try repository.sessionCardioBlocks(sessionID: sessionID)
         let preferredLoadUnit = (try? ProfileRepository(modelContext: modelContext)
             .currentProfile()?.preferredLoadUnit) ?? .kg
-        let localState = localState(for: exercises)
+        let localState = try localState(for: exercises, repository: repository)
         let requestedHydrationIDs = hydrationExerciseIDs ?? Set(exercises.map(\.id))
         let hydrationExercises = exercises.filter { requestedHydrationIDs.contains($0.id) }
         let hydrationPayloadByExerciseID = try hydrationPayloads(
@@ -174,7 +174,7 @@ enum HistoryDetailSnapshotBuilder {
             .filter { exerciseIDs.contains($0.id) }
         guard !exercises.isEmpty else { return [:] }
 
-        let localState = localState(for: exercises)
+        let localState = try localState(for: exercises, repository: repository)
         return try hydrationPayloads(
             modelContext: modelContext,
             session: session,
@@ -191,10 +191,20 @@ enum HistoryDetailSnapshotBuilder {
         orderedSessionSets(for: exercise).map(WorkoutSessionSetDraft.init(model:))
     }
 
-    nonisolated private static func localState(for exercises: [WorkoutSessionExercise]) -> LocalState {
+    nonisolated private static func makeDrafts(
+        from exercise: WorkoutSessionExercise,
+        repository: WorkoutSessionRepository
+    ) throws -> [WorkoutSessionSetDraft] {
+        try repository.sessionSets(sessionExerciseID: exercise.id).map(WorkoutSessionSetDraft.init(model:))
+    }
+
+    nonisolated private static func localState(
+        for exercises: [WorkoutSessionExercise],
+        repository: WorkoutSessionRepository
+    ) throws -> LocalState {
         LocalState(
             setDraftsByExerciseID: Dictionary(
-                exercises.map { ($0.id, makeDrafts(from: $0)) },
+                try exercises.map { ($0.id, try makeDrafts(from: $0, repository: repository)) },
                 uniquingKeysWith: { first, _ in first }
             ),
             restByExerciseID: Dictionary(

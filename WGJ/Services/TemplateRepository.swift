@@ -543,9 +543,9 @@ nonisolated final class TemplateRepository {
         )
 
         let sessionExercises = try workoutSessionExercises(sessionID: sessionID)
-        let drafts: [TemplateExerciseDraft] = sessionExercises.map { exercise in
-            let orderedSets = (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
-            let setDrafts = orderedSets.map { set in
+        let drafts: [TemplateExerciseDraft] = try sessionExercises.map { exercise in
+            let orderedSets = try workoutSessionSets(sessionExerciseID: exercise.id)
+            let setDrafts = try orderedSets.map { set in
                 let usedActual = set.actualReps != nil || set.actualWeight != nil
                 return TemplateExerciseSetDraft(
                     targetReps: usedActual ? set.actualReps : set.targetReps,
@@ -554,8 +554,7 @@ nonisolated final class TemplateRepository {
                     restSeconds: exercise.restSeconds,
                     isWarmup: set.isWarmup,
                     isLocked: set.isLocked,
-                    dropStages: (set.dropStages ?? [])
-                        .sorted { $0.sortOrder < $1.sortOrder }
+                    dropStages: try workoutSessionDropStages(sessionSetID: set.id)
                         .map { stage in
                             let usedActualStage = stage.actualReps != nil || stage.actualWeight != nil
                             return TemplateExerciseDropStageDraft(
@@ -1782,6 +1781,26 @@ nonisolated final class TemplateRepository {
         let descriptor = FetchDescriptor<WorkoutSessionExercise>(
             predicate: #Predicate { exercise in
                 exercise.sessionID == sessionID
+            },
+            sortBy: [SortDescriptor(\.sortOrder, order: .forward)]
+        )
+        return try modelContext.fetch(descriptor)
+    }
+
+    private func workoutSessionSets(sessionExerciseID: UUID) throws -> [WorkoutSessionSet] {
+        let descriptor = FetchDescriptor<WorkoutSessionSet>(
+            predicate: #Predicate { set in
+                set.sessionExerciseID == sessionExerciseID
+            },
+            sortBy: [SortDescriptor(\.sortOrder, order: .forward)]
+        )
+        return try modelContext.fetch(descriptor)
+    }
+
+    private func workoutSessionDropStages(sessionSetID: UUID) throws -> [WorkoutSessionDropStage] {
+        let descriptor = FetchDescriptor<WorkoutSessionDropStage>(
+            predicate: #Predicate { stage in
+                stage.sessionSetID == sessionSetID
             },
             sortBy: [SortDescriptor(\.sortOrder, order: .forward)]
         )

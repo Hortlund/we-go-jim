@@ -79,7 +79,7 @@ nonisolated final class TemplateExerciseComponentRotationResolver {
         selectedCatalogExerciseUUID: String? = nil,
         excludingSessionID: UUID? = nil
     ) throws -> ExerciseComponentRotationResolution? {
-        let orderedComponents = normalizedTemplateComponents(for: exercise)
+        let orderedComponents = try normalizedTemplateComponents(for: exercise)
         return try resolution(
             templateID: template.id,
             templateExerciseID: exercise.id,
@@ -154,9 +154,15 @@ nonisolated final class TemplateExerciseComponentRotationResolver {
         )
     }
 
-    private func normalizedTemplateComponents(for exercise: TemplateExercise) -> [ExerciseComponentSnapshot] {
-        let ordered = (exercise.components ?? [])
-            .sorted { $0.sortOrder < $1.sortOrder }
+    private func normalizedTemplateComponents(for exercise: TemplateExercise) throws -> [ExerciseComponentSnapshot] {
+        let exerciseID = exercise.id
+        let descriptor = FetchDescriptor<TemplateExerciseComponent>(
+            predicate: #Predicate { component in
+                component.templateExerciseID == exerciseID
+            },
+            sortBy: [SortDescriptor(\.sortOrder, order: .forward)]
+        )
+        let ordered = try modelContext.fetch(descriptor)
             .map(ExerciseComponentSnapshot.init(model:))
         if !ordered.isEmpty {
             return ordered
@@ -191,7 +197,7 @@ nonisolated final class TemplateExerciseComponentRotationResolver {
             if let exercise = try completedTemplateExercise(
                 sessionID: session.id,
                 templateExerciseID: templateExerciseID
-            ), hasCompletedSets(exercise) {
+            ), try hasCompletedSets(sessionExerciseID: exercise.id) {
                 return exercise.catalogExerciseUUID
             }
         }
@@ -248,7 +254,14 @@ nonisolated final class TemplateExerciseComponentRotationResolver {
         })
     }
 
-    private func hasCompletedSets(_ exercise: WorkoutSessionExercise) -> Bool {
-        (exercise.sets ?? []).contains(where: \.isCompleted)
+    private func hasCompletedSets(sessionExerciseID: UUID) throws -> Bool {
+        var descriptor = FetchDescriptor<WorkoutSessionSet>(
+            predicate: #Predicate { set in
+                set.sessionExerciseID == sessionExerciseID
+                    && set.isCompleted == true
+            }
+        )
+        descriptor.fetchLimit = 1
+        return try modelContext.fetch(descriptor).isEmpty == false
     }
 }
