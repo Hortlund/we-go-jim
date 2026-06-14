@@ -47,7 +47,6 @@ The main rule: keep views thin. If logic decides how data is saved, restored, sy
 .
 |- WGJ.xcodeproj
 |- WGJ-App-Info.plist
-|- Scripts/
 |- WGJ/
 |  |- Assets.xcassets/        App icon, splash icon, colors
 |  |- Models/                 SwiftData models, runtime config, domain enums
@@ -66,8 +65,7 @@ The main rule: keep views thin. If logic decides how data is saved, restored, sy
 |  |- ContentView.swift       Root app flow and lifecycle routing
 |  `- WGJApp.swift            Model container setup and bootstrap
 |- WGJWidgetExtension/        Weekly goal widget
-|- WGJTests/                  Unit tests for backup and active workout runtime behavior
-`- WGJUITests/                UI test target placeholder
+`- WGJTests/                  Unit tests for backup and active workout runtime behavior
 ```
 
 ## Running Locally
@@ -77,7 +75,7 @@ The main rule: keep views thin. If logic decides how data is saved, restored, sy
 3. Configure signing for the app target and widget extension.
 4. Build and run on an iPhone simulator or device.
 
-The project intentionally does not include a committed Apple development team. Set your own team in Xcode before building for a physical device.
+The checked-in Xcode project currently keeps the owner signing setup. Forks should set their own team before building for a physical device or distributing the app.
 
 ## Fork Configuration
 
@@ -97,6 +95,15 @@ iCloud.se.highball.WeGoJim
 That container identifier is not a credential. It is app-specific Apple entitlement metadata that is visible in signed apps and project settings. Forks need their own container because CloudKit access is controlled by Apple Developer account entitlements, not by secrecy of the identifier.
 
 For CloudKit backup behavior, use a simulator or device signed into an iCloud account and make sure the entitlements match your signing setup.
+
+## Legal Links
+
+The app links to these public pages from Settings:
+
+- Privacy: https://highball.se/wgj/privacy/
+- Terms and product site: https://highball.se/wgj/index.html
+
+Forks should replace those links in `AppRuntimeConfig` before distribution.
 
 ## Testing
 

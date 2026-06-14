@@ -72,7 +72,8 @@ nonisolated enum AppRuntimeConfig {
 
     static let supportEmail = ""
     static let supportURL = URL(string: "https://github.com/Hortlund/we-go-jim/issues")
-    static let privacyPolicyURL: URL? = nil
+    static let privacyPolicyURL = URL(string: "https://highball.se/wgj/privacy/")
+    static let termsURL = URL(string: "https://highball.se/wgj/index.html")
     static var appEnvironment: AppEnvironment {
         guard let rawValue = infoString(for: InfoKey.appEnvironment)?.lowercased(),
               let environment = AppEnvironment(rawValue: rawValue)

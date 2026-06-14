@@ -1,10 +1,28 @@
 import SwiftUI
 
 struct TermsSafetyView: View {
+    @Environment(\.openURL) private var openURL
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 WGJRootHeader("Terms & Safety", subtitle: "Use WGJ as a workout log, not as medical, legal, or professional advice.")
+
+                if let termsURL = AppRuntimeConfig.termsURL {
+                    VStack(alignment: .leading, spacing: 12) {
+                        WGJSectionHeader("Terms Website", subtitle: termsURL.absoluteString)
+
+                        Button {
+                            openURL(termsURL)
+                        } label: {
+                            Label("Open Terms Website", systemImage: "link")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(WGJPrimaryButtonStyle())
+                    }
+                    .padding(14)
+                    .wgjCardContainer(strong: true)
+                }
 
                 termsCard(
                     title: "Your responsibility",
