@@ -1,11 +1,17 @@
 import Foundation
+import SwiftData
 import SwiftUI
 
 struct AppStorageDiagnosticsView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
+
     @State private var snapshot = AppStorageSnapshot.empty
     @State private var isLoading = false
     @State private var isClearing = false
+    @State private var isRestoringCloudBackup = false
     @State private var showingStoreResetConfirmation = false
+    @State private var showingCloudRestoreConfirmation = false
     @State private var alertTitle = ""
     @State private var alertMessage = ""
     @State private var showingAlert = false
@@ -74,7 +80,7 @@ struct AppStorageDiagnosticsView: View {
                 .wgjCardContainer(strong: true)
 
                 VStack(alignment: .leading, spacing: 10) {
-                    WGJSectionHeader("Cleanup", subtitle: "Clear cache and obsolete shared stores, or schedule a full local reset.")
+                    WGJSectionHeader("Cleanup", subtitle: "Clear cache, restore CloudKit backup, or schedule a full local reset.")
 
                     Button {
                         clearCaches()
@@ -89,6 +95,20 @@ struct AppStorageDiagnosticsView: View {
                     }
                     .buttonStyle(WGJGhostButtonStyle())
                     .disabled(isClearing)
+
+                    Button {
+                        showingCloudRestoreConfirmation = true
+                    } label: {
+                        if isRestoringCloudBackup {
+                            ProgressView()
+                                .frame(maxWidth: .infinity)
+                        } else {
+                            Label("Restore Latest Cloud Backup", systemImage: "icloud.and.arrow.down")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .buttonStyle(WGJGhostButtonStyle())
+                    .disabled(!cloudSyncEnabled || isRestoringCloudBackup)
 
                     Button(role: .destructive) {
                         showingStoreResetConfirmation = true
@@ -110,6 +130,18 @@ struct AppStorageDiagnosticsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task {
             refresh()
+        }
+        .confirmationDialog(
+            "Restore latest CloudKit backup?",
+            isPresented: $showingCloudRestoreConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Restore Backup", role: .destructive) {
+                restoreCloudBackup()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This replaces local WGJ data on this device with the latest CloudKit backup. It does not delete the CloudKit backup.")
         }
         .confirmationDialog(
             "Reset local stores on next launch?",
@@ -168,12 +200,45 @@ struct AppStorageDiagnosticsView: View {
                 await MainActor.run {
                     snapshot = loadedSnapshot
                     isClearing = false
-                    showAlert(title: "Storage Cleared", message: "Disposable cache, temporary files, and obsolete shared stores were removed.")
+                    showAlert(title: "Storage Cleared", message: "Disposable cache and temporary files were removed.")
                 }
             } catch {
                 await MainActor.run {
                     isClearing = false
                     showAlert(title: "Cleanup Failed", message: error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    private func restoreCloudBackup() {
+        guard cloudSyncEnabled, !isRestoringCloudBackup else { return }
+        isRestoringCloudBackup = true
+        let container = modelContext.container
+        Task.detached(priority: .utility) {
+            do {
+                let restoreResult = try await UserDataCloudBackupService(
+                    localContainer: container,
+                    backupStore: CloudKitUserDataCloudBackupStore()
+                ).restoreLatestBackup(replacingLocalData: true)
+                let loadedSnapshot = AppStorageDiagnosticsService.snapshot()
+
+                await MainActor.run {
+                    snapshot = loadedSnapshot
+                    isRestoringCloudBackup = false
+                    if let restoreResult {
+                        AppRuntimeState.shared.updateUserDataSyncStatus(.backedUp(at: restoreResult.restoredAt))
+                        WorkoutHistoryChangeBroadcaster.post()
+                        TemplateLibraryChangeBroadcaster.post()
+                        showAlert(title: "Backup Restored", message: "Latest CloudKit backup was restored on this device.")
+                    } else {
+                        showAlert(title: "No Backup Found", message: "WGJ could not find a CloudKit backup to restore.")
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    isRestoringCloudBackup = false
+                    showAlert(title: "Restore Failed", message: error.localizedDescription)
                 }
             }
         }
@@ -209,7 +274,6 @@ nonisolated private enum AppStorageDiagnosticsService {
     }
 
     static func clearCachesAndTemporaryFiles(fileManager: FileManager = .default) throws {
-        AppStoreLayout.clearObsoleteAppGroupStoreFiles(fileManager: fileManager)
         if let caches = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first {
             try removeContents(of: caches, fileManager: fileManager)
         }

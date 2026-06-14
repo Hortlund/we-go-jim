@@ -31,6 +31,10 @@ nonisolated final class AppDataDeletionService {
 
     func deleteAllUserData() async throws {
         try await deleteCloudBackup()
+        try await deleteLocalDeviceData()
+    }
+
+    func deleteLocalDeviceData() async throws {
         try deleteLocalData()
         try await clearLocalArtifacts()
     }
