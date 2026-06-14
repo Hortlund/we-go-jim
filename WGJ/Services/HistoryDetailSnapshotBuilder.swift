@@ -144,7 +144,8 @@ enum HistoryDetailSnapshotBuilder {
         )
         let muscleHeatmap = try muscleHeatmap(
             modelContext: modelContext,
-            exercises: exercises
+            exercises: exercises,
+            repository: repository
         )
 
         return Snapshot(
@@ -260,14 +261,17 @@ enum HistoryDetailSnapshotBuilder {
 
     nonisolated private static func muscleHeatmap(
         modelContext: ModelContext,
-        exercises: [WorkoutSessionExercise]
+        exercises: [WorkoutSessionExercise],
+        repository: WorkoutSessionRepository
     ) throws -> WorkoutMuscleHeatmapSnapshot {
         guard !exercises.isEmpty else { return .empty }
 
         let catalogMappings = try WorkoutMuscleHeatmapBuilder.catalogMappings(modelContext: modelContext)
-        let scores = exercises.reduce(into: [ExerciseBodyMapRegion: Double]()) { scores, exercise in
+        var scores: [ExerciseBodyMapRegion: Double] = [:]
+        for exercise in exercises {
             let exerciseScores = WorkoutMuscleHeatmapBuilder.scores(
                 for: exercise,
+                sets: try repository.sessionSets(sessionExerciseID: exercise.id),
                 catalogMappings: catalogMappings
             )
             for (region, score) in exerciseScores {
