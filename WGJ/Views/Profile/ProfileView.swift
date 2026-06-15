@@ -1716,43 +1716,6 @@ private extension ExerciseMetricSeries {
     }
 }
 
-nonisolated enum ProfileDashboardTrendSeriesBuilder {
-    static func build(
-        enabledWidgets: [ProfileWidgetConfigSnapshot],
-        metricsService: WorkoutMetricsService
-    ) throws -> [UUID: ExerciseMetricSeries] {
-        var trendSeriesByWidgetID: [UUID: ExerciseMetricSeries] = [:]
-        var seriesByWidgetConfig: [ProfileDashboardTrendSeriesCacheKey: ExerciseMetricSeries] = [:]
-
-        for config in enabledWidgets {
-            guard config.kind.isExerciseTrend else { continue }
-            guard let selectedExerciseUUID = config.selectedCatalogExerciseUUID else { continue }
-
-            let cacheKey = ProfileDashboardTrendSeriesCacheKey(
-                metric: config.exerciseTrendMetric,
-                catalogExerciseUUID: selectedExerciseUUID
-            )
-            if let cached = seriesByWidgetConfig[cacheKey] {
-                trendSeriesByWidgetID[config.id] = cached.withPreferredName(
-                    config.selectedExerciseNameSnapshot
-                )
-                continue
-            }
-
-            let series = try metricsService.exerciseMetricTrend(
-                for: selectedExerciseUUID,
-                metric: config.exerciseTrendMetric,
-                preferredExerciseName: config.selectedExerciseNameSnapshot,
-                limit: 8
-            )
-            seriesByWidgetConfig[cacheKey] = series
-            trendSeriesByWidgetID[config.id] = series
-        }
-
-        return trendSeriesByWidgetID
-    }
-}
-
 nonisolated private struct ProfileDashboardTrendSeriesCacheKey: Hashable, Sendable {
     let metric: ProfileExerciseTrendMetric
     let catalogExerciseUUID: String

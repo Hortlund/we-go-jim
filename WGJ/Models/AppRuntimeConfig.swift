@@ -699,64 +699,6 @@ nonisolated enum ActiveWorkoutScrollTarget: Hashable, Codable, Sendable {
     case cancelSection
 }
 
-nonisolated enum ActiveWorkoutMinimizeScrollRestorePolicy {
-    static func target(
-        currentScrollTarget: ActiveWorkoutScrollTarget?,
-        expandedExerciseIDs: Set<UUID>,
-        orderedExerciseIDs: [UUID],
-        hasPreWorkoutCardio: Bool,
-        hasPostWorkoutCardio: Bool
-    ) -> ActiveWorkoutScrollTarget? {
-        if let currentScrollTarget,
-           isRestorable(
-                currentScrollTarget,
-                orderedExerciseIDs: orderedExerciseIDs,
-                hasPreWorkoutCardio: hasPreWorkoutCardio,
-                hasPostWorkoutCardio: hasPostWorkoutCardio
-           ) {
-            return currentScrollTarget
-        }
-
-        if let expandedExerciseID = orderedExerciseIDs.first(where: { expandedExerciseIDs.contains($0) }) {
-            return .exercise(expandedExerciseID)
-        }
-
-        if let firstExerciseID = orderedExerciseIDs.first {
-            return .exercise(firstExerciseID)
-        }
-
-        if hasPreWorkoutCardio {
-            return .preWorkoutCardio
-        }
-
-        if hasPostWorkoutCardio {
-            return .postWorkoutCardio
-        }
-
-        return .header
-    }
-
-    private static func isRestorable(
-        _ target: ActiveWorkoutScrollTarget,
-        orderedExerciseIDs: [UUID],
-        hasPreWorkoutCardio: Bool,
-        hasPostWorkoutCardio: Bool
-    ) -> Bool {
-        switch target {
-        case .header:
-            return true
-        case .preWorkoutCardio:
-            return hasPreWorkoutCardio
-        case .exercise(let exerciseID):
-            return orderedExerciseIDs.contains(exerciseID)
-        case .postWorkoutCardio:
-            return hasPostWorkoutCardio
-        case .cancelSection:
-            return false
-        }
-    }
-}
-
 @MainActor
 @Observable
 final class WorkoutCompletionPresentationState {

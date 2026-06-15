@@ -844,12 +844,6 @@ final class UserDataDeletionTombstone {
     }
 }
 
-nonisolated struct CustomExerciseCloudMuscleSnapshot: Codable, Equatable {
-    var remoteID: Int
-    var name: String
-    var nameEn: String
-}
-
 @Model
 final class CustomExerciseCloudRecord {
     var id: UUID = UUID()

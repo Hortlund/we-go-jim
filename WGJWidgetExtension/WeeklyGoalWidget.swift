@@ -317,19 +317,6 @@ struct WeeklyGoalWidgetView: View {
         }
     }
 
-    private func mediumStatus(_ snapshot: WeeklyGoalWidgetSnapshot) -> String {
-        if snapshot.completedWorkouts >= snapshot.weeklyGoal {
-            return snapshot.statusText
-        }
-        let remaining = snapshot.remainingWorkouts
-        return "\(snapshot.completedWorkouts) done, \(remaining) left"
-    }
-
-    private func weekRange(_ snapshot: WeeklyGoalWidgetSnapshot) -> String {
-        let start = snapshot.weekStart.formatted(.dateTime.month(.abbreviated).day())
-        let end = snapshot.weekEnd.addingTimeInterval(-1).formatted(.dateTime.month(.abbreviated).day())
-        return "\(start)-\(end)"
-    }
 }
 
 private struct WeeklyGoalWidgetBarChart: View {

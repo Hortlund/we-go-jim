@@ -601,10 +601,6 @@ struct StartWorkoutHomeView: View {
         )
     }
 
-    private func optionalNotes(for template: StartWorkoutTemplateRowSnapshot) -> String? {
-        template.notes
-    }
-
     private func templateAccessibilityKey(_ templateName: String) -> String {
         templateName
             .lowercased()

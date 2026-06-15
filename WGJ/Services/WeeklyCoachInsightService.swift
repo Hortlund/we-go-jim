@@ -289,10 +289,6 @@ nonisolated final class WeeklyCoachInsightService {
         (value * 10).rounded() / 10
     }
 
-    private func stablePercentageString(_ value: Double) -> String {
-        String(format: "%.1f", locale: Locale(identifier: "en_US_POSIX"), roundedPercentage(value))
-    }
-
     private func weekStart(for date: Date) -> Date {
         let components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
         return calendar.date(from: components) ?? date
