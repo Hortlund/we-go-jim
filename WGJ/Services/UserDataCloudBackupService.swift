@@ -197,7 +197,9 @@ nonisolated final class UserDataCloudBackupService {
                 modelContext: context,
                 deleteCloudBackup: {},
                 clearWeeklyGoalWidgetSnapshot: {},
-                clearActiveWorkoutSnapshot: {}
+                clearActiveWorkoutSnapshot: {
+                    try await ActiveWorkoutSnapshotStore.shared.delete()
+                }
             ).deleteLocalDeviceData()
         } else {
             guard try Self.isLocalUserDataEmpty(context: context) else {

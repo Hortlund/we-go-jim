@@ -28,7 +28,7 @@ nonisolated enum ActiveWorkoutSnapshotPersistencePolicy {
     }
 
     static func shouldWriteDurableSnapshot(for summary: ActiveWorkoutSetDraftChangeSummary) -> Bool {
-        summary.hasStructuralChange || summary.hasCompletionChange
+        summary.hasStructuralChange || summary.hasCompletionChange || summary.hasValueChange
     }
 }
 

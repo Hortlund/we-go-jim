@@ -279,6 +279,24 @@ final class ActiveWorkoutRuntimeTests: XCTestCase {
         XCTAssertEqual(updated?[1].actualWeight, 80)
     }
 
+    func testValueOnlyDraftChangeWritesDurableSnapshot() {
+        let setID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let previous = [
+            WorkoutSessionSetDraft(id: setID, actualReps: 8, actualWeight: 100),
+        ]
+        let current = [
+            WorkoutSessionSetDraft(id: setID, actualReps: 9, actualWeight: 102.5),
+        ]
+
+        let summary = ActiveWorkoutSetDraftChangeSummary.compare(
+            previous: previous,
+            current: current
+        )
+
+        XCTAssertTrue(summary.hasValueChange)
+        XCTAssertTrue(ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: summary))
+    }
+
     func testSnapshotStorePreservesRestoreMetadataAcrossCachedSaves() async throws {
         let store = ActiveWorkoutSnapshotStore(baseDirectory: try makeTemporaryDirectory())
         let sessionID = UUID(uuidString: "11111111-2222-3333-4444-555555555555")!

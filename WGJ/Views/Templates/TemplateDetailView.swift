@@ -25,6 +25,7 @@ struct TemplateDetailView: View {
     @State private var isSavingDraftChanges = false
     @State private var exerciseSwipeOffsets: [UUID: CGFloat] = [:]
     @State private var exerciseSwipeRemoving: [UUID: Bool] = [:]
+    @State private var keyboardDismissToken = TemplateEditorKeyboardDismissToken()
     @State private var hasLoadedSnapshot = false
     @State private var isReloadingSnapshot = false
     @State private var lastLoadedContentUpdatedAt: Date?
@@ -260,7 +261,7 @@ struct TemplateDetailView: View {
 
             if draftStore.hasChanges {
                 Button {
-                    saveTemplateDetailChanges()
+                    saveTemplateDetailChangesAfterFlushingFocusedInput()
                 } label: {
                     if isSavingDraftChanges {
                         HStack(spacing: 10) {
@@ -314,6 +315,7 @@ struct TemplateDetailView: View {
                 isExpanded: isExpandedBinding(for: row.id),
                 exerciseIndexTitle: "Exercise \(row.index + 1)",
                 preferredLoadUnit: preferredLoadUnit,
+                keyboardDismissToken: keyboardDismissToken,
                 targetRepMin: targetRepMinBinding(for: row.exercise),
                 targetRepMax: targetRepMaxBinding(for: row.exercise),
                 restSeconds: restSecondsBinding(for: row.exercise),
@@ -496,6 +498,16 @@ struct TemplateDetailView: View {
         loadedTemplateExerciseIDs = currentIDs
         loadedExerciseStateReloadKey = currentReloadKey
         hasLoadedExerciseStateOnce = true
+    }
+
+    @MainActor
+    private func saveTemplateDetailChangesAfterFlushingFocusedInput() {
+        guard !isSavingDraftChanges, draftStore.hasChanges else { return }
+        keyboardDismissToken.requestDismiss()
+        Task { @MainActor in
+            await Task.yield()
+            saveTemplateDetailChanges()
+        }
     }
 
     @MainActor

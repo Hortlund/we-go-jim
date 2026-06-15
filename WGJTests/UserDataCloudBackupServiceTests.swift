@@ -120,6 +120,65 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         XCTAssertEqual(Set(remainingExercises.map(\.id)), [firstExerciseID, secondExerciseID])
     }
 
+    func testActiveDraftRemoveExerciseRejectsExerciseFromDifferentSession() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+
+        let firstSessionID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let secondSessionID = UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
+        let firstExerciseID = UUID(uuidString: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")!
+        let secondExerciseID = UUID(uuidString: "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD")!
+        let firstSession = ActiveWorkoutDraftSession(
+            id: firstSessionID,
+            name: "Push"
+        )
+        let secondSession = ActiveWorkoutDraftSession(
+            id: secondSessionID,
+            name: "Pull"
+        )
+        let firstExercise = ActiveWorkoutDraftExercise(
+            id: firstExerciseID,
+            sessionID: firstSessionID,
+            catalogExerciseUUID: "bench-press",
+            exerciseNameSnapshot: "Bench Press",
+            categorySnapshot: "Strength",
+            muscleSummarySnapshot: "Chest",
+            session: firstSession
+        )
+        let secondExercise = ActiveWorkoutDraftExercise(
+            id: secondExerciseID,
+            sessionID: secondSessionID,
+            catalogExerciseUUID: "row",
+            exerciseNameSnapshot: "Row",
+            categorySnapshot: "Strength",
+            muscleSummarySnapshot: "Back",
+            session: secondSession
+        )
+        firstSession.exercises = [firstExercise]
+        secondSession.exercises = [secondExercise]
+
+        for model in [
+            firstSession,
+            secondSession,
+            firstExercise,
+            secondExercise,
+        ] as [any PersistentModel] {
+            context.insert(model)
+        }
+        try context.save()
+
+        XCTAssertThrowsError(
+            try ActiveWorkoutDraftRepository(modelContext: context)
+                .removeExercise(sessionID: firstSessionID, sessionExerciseID: secondExerciseID)
+        ) { error in
+            XCTAssertEqual(error as? WorkoutSessionRepositoryError, .sessionExerciseNotFound)
+        }
+
+        let remainingExercises = try context.fetch(FetchDescriptor<ActiveWorkoutDraftExercise>())
+        XCTAssertEqual(Set(remainingExercises.map(\.id)), [firstExerciseID, secondExerciseID])
+    }
+
     func testRestoreLatestBackupPreservesTemplateSupersetGroups() async throws {
         let sourceContainer = try makeInMemoryContainer()
         let sourceContext = ModelContext(sourceContainer)
@@ -300,6 +359,47 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         XCTAssertEqual(restoredTemplates.count, 1)
         XCTAssertEqual(restoredExercises.count, 1)
         XCTAssertEqual(restoredExercises.first?.exerciseNameSnapshot, "Lat Pulldown")
+    }
+
+    func testRestoreLatestBackupReplacingLocalDataClearsActiveWorkoutSnapshot() async throws {
+        try? await ActiveWorkoutSnapshotStore.shared.delete()
+        addTeardownBlock {
+            try? await ActiveWorkoutSnapshotStore.shared.delete()
+        }
+
+        let sourceContainer = try makeInMemoryContainer()
+        let sourceContext = ModelContext(sourceContainer)
+        sourceContext.autosaveEnabled = false
+        sourceContext.insert(WorkoutTemplate(
+            id: UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!,
+            folderID: TemplateRepository.unfiledFolderID,
+            name: "Cloud Template"
+        ))
+        try sourceContext.save()
+
+        let backupStore = CapturingBackupStore()
+        _ = try await UserDataCloudBackupService(
+            localContainer: sourceContainer,
+            backupStore: backupStore
+        ).exportCurrentBackup()
+
+        let staleSnapshot = ActiveWorkoutRuntimeSession(
+            id: UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!,
+            name: "Stale Local Workout",
+            startedAt: Date(timeIntervalSince1970: 100),
+            createdAt: Date(timeIntervalSince1970: 100),
+            updatedAt: Date(timeIntervalSince1970: 100)
+        )
+        try await ActiveWorkoutSnapshotStore.shared.save(staleSnapshot)
+
+        let restoreContainer = try makeInMemoryContainer()
+        _ = try await UserDataCloudBackupService(
+            localContainer: restoreContainer,
+            backupStore: backupStore
+        ).restoreLatestBackup(replacingLocalData: true)
+
+        let storedSnapshot = try await ActiveWorkoutSnapshotStore.shared.loadStoredSnapshot()
+        XCTAssertNil(storedSnapshot)
     }
 
     func testDeletingFolderRemovesTemplateRowsFromNextBackup() async throws {
