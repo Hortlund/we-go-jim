@@ -84,7 +84,7 @@ struct TemplateEditorView: View {
 
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        saveTemplate()
+                        saveTemplateAfterFlushingFocusedInput()
                     }
                     .disabled(
                         templateName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -613,6 +613,15 @@ struct TemplateEditorView: View {
                 destination: .template
             )
         )
+    }
+
+    private func saveTemplateAfterFlushingFocusedInput() {
+        guard !isSavingTemplate else { return }
+        keyboardDismissToken.requestDismiss()
+        Task { @MainActor in
+            await Task.yield()
+            saveTemplate()
+        }
     }
 
     private func saveTemplate() {

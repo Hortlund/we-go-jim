@@ -622,6 +622,7 @@ struct TemplateExercisePrescriptionEditor: View {
         WGJActionMenuButton("Exercise Actions") {
             if let onMoveUp {
                 Button {
+                    commitFocusedInputBeforeAction()
                     onMoveUp()
                 } label: {
                     Label("Move exercise up", systemImage: "arrow.up")
@@ -631,6 +632,7 @@ struct TemplateExercisePrescriptionEditor: View {
 
             if let onMoveDown {
                 Button {
+                    commitFocusedInputBeforeAction()
                     onMoveDown()
                 } label: {
                     Label("Move exercise down", systemImage: "arrow.down")
@@ -640,6 +642,7 @@ struct TemplateExercisePrescriptionEditor: View {
 
             if let onMoveToPosition {
                 Button {
+                    commitFocusedInputBeforeAction()
                     onMoveToPosition()
                 } label: {
                     Label("Move to position", systemImage: "list.number")
@@ -648,6 +651,7 @@ struct TemplateExercisePrescriptionEditor: View {
 
             if let onExerciseReplace {
                 Button {
+                    commitFocusedInputBeforeAction()
                     onExerciseReplace()
                 } label: {
                     Label("Replace exercise", systemImage: "arrow.triangle.2.circlepath")
@@ -657,6 +661,7 @@ struct TemplateExercisePrescriptionEditor: View {
 
             if let onExerciseDelete {
                 Button(role: .destructive) {
+                    commitFocusedInputBeforeAction()
                     onExerciseDelete()
                 } label: {
                     Label("Delete exercise", systemImage: "trash")
@@ -669,6 +674,16 @@ struct TemplateExercisePrescriptionEditor: View {
             exerciseAccessibilityIdentifier.map { "\($0)-actions-button" }
                 ?? "template-editor-exercise-actions-button"
         )
+    }
+
+    private func commitFocusedInputBeforeAction() {
+        if let focusedInput {
+            commitInputDraft(for: focusedInput)
+            clearInputDraft(for: focusedInput)
+            self.focusedInput = nil
+        }
+        normalizeSetRestToDefault()
+        onCommitRequest?()
     }
 
     private var hasHeaderMenu: Bool {
@@ -943,6 +958,10 @@ struct TemplateExercisePrescriptionEditor: View {
         guard setDrafts.indices.contains(index) else { return }
         let setID = setDrafts[index].id
         inputDraftStore.stage(newValue, for: .set(setID: setID, metric: .reps))
+        let updatedValue = parsedOptionalInt(from: newValue)
+        if setDrafts[index].targetReps != updatedValue {
+            setDrafts[index].targetReps = updatedValue
+        }
     }
 
     private func updateRepsText(_ newValue: String, forSetID setID: UUID) {
@@ -954,6 +973,10 @@ struct TemplateExercisePrescriptionEditor: View {
         guard setDrafts.indices.contains(index) else { return }
         let setID = setDrafts[index].id
         inputDraftStore.stage(newValue, for: .set(setID: setID, metric: .weight))
+        let updatedValue = parsedOptionalWeight(from: newValue, fallback: setDrafts[index].targetWeight)
+        if setDrafts[index].targetWeight != updatedValue {
+            setDrafts[index].targetWeight = updatedValue
+        }
     }
 
     private func updateWeightText(_ newValue: String, forSetID setID: UUID) {
@@ -1258,19 +1281,22 @@ struct TemplateExercisePrescriptionEditor: View {
                 guard setDrafts[index].targetReps != updatedValue else { return }
                 setDrafts[index].targetReps = updatedValue
             case .weight:
-                let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                let updatedValue: Double?
-                if normalized.isEmpty {
-                    updatedValue = nil
-                } else if let parsed = WGJFormatters.parseLocalizedDecimal(normalized) {
-                    updatedValue = max(0, parsed)
-                } else {
-                    updatedValue = setDrafts[index].targetWeight
-                }
+                let updatedValue = parsedOptionalWeight(from: text, fallback: setDrafts[index].targetWeight)
                 guard setDrafts[index].targetWeight != updatedValue else { return }
                 setDrafts[index].targetWeight = updatedValue
             }
         }
+    }
+
+    private func parsedOptionalWeight(from text: String, fallback: Double?) -> Double? {
+        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalized.isEmpty {
+            return nil
+        }
+        if let parsed = WGJFormatters.parseLocalizedDecimal(normalized) {
+            return max(0, parsed)
+        }
+        return fallback
     }
 
     private func clearInputDraft(for focus: TemplateEditorInputFocus) {

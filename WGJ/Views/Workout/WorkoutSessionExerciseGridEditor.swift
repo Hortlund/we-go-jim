@@ -2068,14 +2068,24 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func removeDropStage(_ stageID: UUID, from setIndex: Int) {
         guard setDrafts.indices.contains(setIndex) else { return }
+        let removedStageWasCompleted = setDrafts[setIndex].dropStages.contains {
+            $0.id == stageID && $0.isCompleted
+        }
         setDrafts[setIndex].dropStages.removeAll { $0.id == stageID }
         notifyChanged()
+        if removedStageWasCompleted {
+            onSetCompletionChange?(stageID, nil, 0, false)
+        }
     }
 
     private func clearDropStages(from index: Int) {
         guard setDrafts.indices.contains(index), !setDrafts[index].dropStages.isEmpty else { return }
+        let completedDropStageIDs = setDrafts[index].dropStages.filter(\.isCompleted).map(\.id)
         setDrafts[index].dropStages = []
         notifyChanged()
+        for stageID in completedDropStageIDs {
+            onSetCompletionChange?(stageID, nil, 0, false)
+        }
     }
 
     private func clearDropStages(fromSetID setID: UUID) {

@@ -5,6 +5,8 @@ import SwiftUI
 struct AppStorageDiagnosticsView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
+    @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
+    @Environment(RestTimerState.self) private var restTimerState
 
     @State private var snapshot = AppStorageSnapshot.empty
     @State private var isLoading = false
@@ -228,6 +230,7 @@ struct AppStorageDiagnosticsView: View {
                     isRestoringCloudBackup = false
                     if let restoreResult {
                         AppRuntimeState.shared.updateUserDataSyncStatus(.backedUp(at: restoreResult.restoredAt))
+                        activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
                         WorkoutHistoryChangeBroadcaster.post()
                         TemplateLibraryChangeBroadcaster.post()
                         showAlert(title: "Backup Restored", message: "Latest CloudKit backup was restored on this device.")
