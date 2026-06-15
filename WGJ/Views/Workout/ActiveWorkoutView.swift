@@ -124,8 +124,8 @@ struct ActiveWorkoutView: View {
                     finishToolbarButton
                 }
             }
-            .overlay(alignment: .bottom) {
-                if ActiveWorkoutBottomDockPlacementPolicy.shouldPinToScreenOverlay(
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if ActiveWorkoutBottomDockPlacementPolicy.shouldReserveBottomSafeAreaInset(
                     hasSession: session != nil,
                     isEndingSession: isEndingSession,
                     isCancelArmed: isCancelArmed
@@ -676,7 +676,7 @@ struct ActiveWorkoutView: View {
                         removeExercise(exerciseID: exerciseID)
                     },
                     flushCoordinator: rowFlushCoordinator,
-                    keyboardDismissToken: keyboardDismissToken(for: exerciseID),
+                    keyboardDismissToken: keyboardDismissToken,
                     onInputFocusChange: { isFocused in
                         handleMetricInputFocusChange(isFocused, exerciseID: exerciseID)
                     }
@@ -2285,17 +2285,6 @@ struct ActiveWorkoutView: View {
         }
     }
 
-    private func keyboardDismissToken(for exerciseID: UUID) -> ActiveWorkoutKeyboardDismissToken {
-        guard focusedMetricInputExerciseID == exerciseID || keyboardDismissTargetExerciseID == exerciseID else {
-            if isKeyboardVisible, focusedMetricInputExerciseID == nil, keyboardDismissTargetExerciseID == nil {
-                return keyboardDismissToken
-            }
-            return ActiveWorkoutKeyboardDismissToken()
-        }
-
-        return keyboardDismissToken
-    }
-
     private func dismissKeyboard() {
         if let focusedMetricInputExerciseID {
             keyboardDismissTargetExerciseID = focusedMetricInputExerciseID
@@ -2709,7 +2698,7 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func flushDirtyWritesForSceneTransitionIfStillCurrent() async {
-        guard scenePhase == .background else { return }
+        guard ActiveWorkoutSceneTransitionPolicy.shouldFlushLocalDraft(scenePhase: scenePhase) else { return }
         _ = await flushDirtyWritesNow(checkpoint: .sceneTransition)
     }
 

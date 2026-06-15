@@ -274,7 +274,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             dismissInputFocus()
         }
         .onChange(of: scenePhase) { _, newPhase in
-            guard newPhase == .background else { return }
+            guard ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: newPhase) else { return }
             guard focusedInput != nil else { return }
             dismissInputFocus()
         }
@@ -1796,17 +1796,25 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func flushPendingEditorState() {
-        let hadPendingCommit = pendingCommitTask != nil
-        if commitAllBufferedInput(clearsText: true) || hadPendingCommit {
-            requestImmediateCommitForCurrentState()
-        }
+        flushPendingMetricInputForImmediateUse()
         if focusedInput != nil {
             dismissInputFocus(suppressCommit: true)
         }
-        pendingCommitTask?.cancel()
-        pendingCommitTask = nil
         flushPendingDisplayRefresh()
         markEditorClean()
+    }
+
+    @discardableResult
+    private func flushPendingMetricInputForImmediateUse() -> Bool {
+        let hadPendingCommit = pendingCommitTask != nil
+        pendingCommitTask?.cancel()
+        pendingCommitTask = nil
+        let changed = commitAllBufferedInput(clearsText: true)
+        if changed || hadPendingCommit {
+            requestImmediateCommitForCurrentState()
+        }
+        markEditorClean()
+        return changed
     }
 
     private func handleDraftValueMutation(previousDrafts: [WorkoutSessionSetDraft]) {
@@ -2095,57 +2103,22 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func updateDropStageWeightText(_ newValue: String, stageID: UUID, setIndex: Int) {
         guard setDrafts.indices.contains(setIndex),
-              let stageIndex = setDrafts[setIndex].dropStages.firstIndex(where: { $0.id == stageID }) else {
+              setDrafts[setIndex].dropStages.contains(where: { $0.id == stageID }) else {
             return
         }
 
-        let normalized = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let updatedValue: Double?
-        if normalized.isEmpty {
-            updatedValue = nil
-        } else if let parsed = WGJFormatters.parseLocalizedDecimal(normalized) {
-            updatedValue = max(0, parsed)
-        } else {
-            updatedValue = setDrafts[setIndex].dropStages[stageIndex].actualWeight
-        }
-
-        guard setDrafts[setIndex].dropStages[stageIndex].actualWeight != updatedValue else { return }
-        let previousDrafts = setDrafts
-        setDrafts[setIndex].dropStages[stageIndex].actualWeight = updatedValue
-        if let updatedValue, updatedValue > 0,
-           setDrafts[setIndex].dropStages[stageIndex].actualLoadUnit == .bodyweight
-        {
-            let fallbackUnit = setDrafts[setIndex].dropStages[stageIndex].targetLoadUnit == .bodyweight
-                ? preferredLoadUnit
-                : setDrafts[setIndex].dropStages[stageIndex].targetLoadUnit
-            setDrafts[setIndex].dropStages[stageIndex].actualLoadUnit = fallbackUnit
-        } else if updatedValue == nil,
-                  setDrafts[setIndex].dropStages[stageIndex].targetLoadUnit == .bodyweight
-        {
-            setDrafts[setIndex].dropStages[stageIndex].actualLoadUnit = .bodyweight
-        }
-        if !manualCompletionMode {
-            let stage = setDrafts[setIndex].dropStages[stageIndex]
-            setDrafts[setIndex].dropStages[stageIndex].isCompleted = stage.actualReps != nil || stage.actualWeight != nil
-        }
-        handleDraftValueMutation(previousDrafts: previousDrafts)
+        metricInputDraftBuffer.stage(newValue, forDropStage: stageID, metric: .weight)
+        scheduleBufferedInputCommit()
     }
 
     private func updateDropStageRepsText(_ newValue: String, stageID: UUID, setIndex: Int) {
         guard setDrafts.indices.contains(setIndex),
-              let stageIndex = setDrafts[setIndex].dropStages.firstIndex(where: { $0.id == stageID }) else {
+              setDrafts[setIndex].dropStages.contains(where: { $0.id == stageID }) else {
             return
         }
-        let cleaned = newValue.filter(\.isNumber)
-        let updatedValue = cleaned.isEmpty ? nil : Int(cleaned)
-        guard setDrafts[setIndex].dropStages[stageIndex].actualReps != updatedValue else { return }
-        let previousDrafts = setDrafts
-        setDrafts[setIndex].dropStages[stageIndex].actualReps = updatedValue
-        if !manualCompletionMode {
-            let stage = setDrafts[setIndex].dropStages[stageIndex]
-            setDrafts[setIndex].dropStages[stageIndex].isCompleted = stage.actualReps != nil || stage.actualWeight != nil
-        }
-        handleDraftValueMutation(previousDrafts: previousDrafts)
+
+        metricInputDraftBuffer.stage(newValue, forDropStage: stageID, metric: .reps)
+        scheduleBufferedInputCommit()
     }
 
     private func updateDropStageLoadUnit(_ loadUnit: TemplateLoadUnit, stageID: UUID, setIndex: Int) {
@@ -2169,6 +2142,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         guard !setDrafts[setIndex].isLocked, setDrafts[setIndex].isCompleted else { return }
 
         let isCompleted = !setDrafts[setIndex].dropStages[stageIndex].isCompleted
+        guard !isCompleted || canCompleteDropStage(setDrafts[setIndex].dropStages[stageIndex]) else { return }
         setDrafts[setIndex].dropStages[stageIndex].isCompleted = isCompleted
         let restLabel: String?
         let restSeconds: Int
@@ -2336,19 +2310,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                 }
 
                 ForEach(Array(setDrafts[setIndex].dropStages.enumerated()), id: \.element.id) { stageIndex, stage in
-                    WorkoutExerciseDropStageCardView(
-                        setIndex: setIndex,
-                        stageIndex: stageIndex,
-                        stage: stage,
-                        isEditingEnabled: isSetEditingEnabled,
-                        isCompletionEnabled: setDrafts[setIndex].isCompleted,
-                        onToggleCompletion: { toggleDropStageCompletion(stage.id, in: setIndex) },
-                        onRepsChanged: { updateDropStageRepsText($0, stageID: stage.id, setIndex: setIndex) },
-                        onWeightChanged: { updateDropStageWeightText($0, stageID: stage.id, setIndex: setIndex) },
-                        onLoadUnitChanged: { updateDropStageLoadUnit($0, stageID: stage.id, setIndex: setIndex) },
-                        onDelete: { removeDropStage(stage.id, from: setIndex) },
-                        keyboardDismissToken: keyboardDismissToken
-                    )
+                    dropStageCard(setIndex: setIndex, stageIndex: stageIndex, stage: stage)
                 }
             }
             .padding(12)
@@ -2364,9 +2326,35 @@ struct WorkoutSessionExerciseGridEditor: View {
         }
     }
 
+    private func dropStageCard(
+        setIndex: Int,
+        stageIndex: Int,
+        stage: WorkoutSessionDropStageDraft
+    ) -> some View {
+        return WorkoutExerciseDropStageCardView(
+            setIndex: setIndex,
+            stageIndex: stageIndex,
+            stage: stage,
+            isEditingEnabled: isSetEditingEnabled,
+            isCompletionEnabled: stage.isCompleted || setDrafts[setIndex].isCompleted,
+            onToggleCompletion: { toggleDropStageCompletion(stage.id, in: setIndex) },
+            onRepsChanged: { updateDropStageRepsText($0, stageID: stage.id, setIndex: setIndex) },
+            onWeightChanged: { updateDropStageWeightText($0, stageID: stage.id, setIndex: setIndex) },
+            onLoadUnitChanged: { updateDropStageLoadUnit($0, stageID: stage.id, setIndex: setIndex) },
+            onDelete: { removeDropStage(stage.id, from: setIndex) },
+            keyboardDismissToken: keyboardDismissToken,
+            onCommitPendingInput: { _ = flushPendingMetricInputForImmediateUse() },
+            onInputFocusChange: handleDropStageInputFocusChange
+        )
+    }
+
     private func toggleCompletion(at index: Int) {
         guard setDrafts.indices.contains(index) else { return }
         requestCompletionChange(at: index, isCompleted: !setDrafts[index].isCompleted)
+    }
+
+    private func handleDropStageInputFocusChange(_ isFocused: Bool) {
+        onInputFocusChange(isFocused || focusedInput != nil)
     }
 
     private func toggleCompletion(setID: UUID) {
@@ -2462,6 +2450,15 @@ struct WorkoutSessionExerciseGridEditor: View {
             return true
         }
         return draft.actualWeight != nil
+    }
+
+    private func canCompleteDropStage(_ stage: WorkoutSessionDropStageDraft) -> Bool {
+        guard isSetCompletionEnabled else { return false }
+        guard stage.actualReps != nil else { return false }
+        if stage.actualLoadUnit == .bodyweight || stage.targetLoadUnit == .bodyweight {
+            return true
+        }
+        return stage.actualWeight != nil
     }
 
     private func notifyChanged(drafts: [WorkoutSessionSetDraft]? = nil) {
@@ -2623,12 +2620,18 @@ struct WorkoutSessionExerciseGridEditor: View {
     private func commitAllBufferedInput(clearsText: Bool) -> Bool {
         guard !metricInputDraftBuffer.isEmpty else { return false }
         var updatedDrafts = setDrafts
-        let changed = metricInputDraftBuffer.commitAll(
+        var changed = metricInputDraftBuffer.commitAll(
             drafts: &updatedDrafts,
             preferredLoadUnit: preferredLoadUnit,
             manualCompletionMode: manualCompletionMode,
             clearsText: clearsText
         )
+        changed = metricInputDraftBuffer.commitAllDropStages(
+            drafts: &updatedDrafts,
+            preferredLoadUnit: preferredLoadUnit,
+            manualCompletionMode: manualCompletionMode,
+            clearsText: clearsText
+        ) || changed
         guard changed else { return false }
 
         let previousDrafts = setDrafts
@@ -2723,6 +2726,10 @@ struct WorkoutSessionExerciseGridEditor: View {
     private func pruneInputDrafts() {
         let validSetIDs = Set(setDrafts.map(\.id))
         metricInputDraftBuffer.prune(keeping: validSetIDs)
+        let validDropStageIDs = Set(setDrafts.flatMap { set in
+            set.dropStages.map(\.id)
+        })
+        metricInputDraftBuffer.pruneDropStages(keeping: validDropStageIDs)
 
         if let focusedInput, !validSetIDs.contains(focusedInput.setID) {
             self.focusedInput = nil
@@ -2769,6 +2776,7 @@ struct WorkoutSessionExerciseGridEditor: View {
 
 private struct WorkoutExerciseDropStageCardView: View, Equatable {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.scenePhase) private var scenePhase
 
     let setIndex: Int
     let stageIndex: Int
@@ -2781,6 +2789,8 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
     let onLoadUnitChanged: (TemplateLoadUnit) -> Void
     let onDelete: () -> Void
     let keyboardDismissToken: ActiveWorkoutKeyboardDismissToken
+    let onCommitPendingInput: () -> Void
+    let onInputFocusChange: (Bool) -> Void
 
     @State private var repsText: String
     @State private var weightText: String
@@ -2802,7 +2812,9 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
         onWeightChanged: @escaping (String) -> Void,
         onLoadUnitChanged: @escaping (TemplateLoadUnit) -> Void,
         onDelete: @escaping () -> Void,
-        keyboardDismissToken: ActiveWorkoutKeyboardDismissToken = ActiveWorkoutKeyboardDismissToken()
+        keyboardDismissToken: ActiveWorkoutKeyboardDismissToken = ActiveWorkoutKeyboardDismissToken(),
+        onCommitPendingInput: @escaping () -> Void = {},
+        onInputFocusChange: @escaping (Bool) -> Void = { _ in }
     ) {
         self.setIndex = setIndex
         self.stageIndex = stageIndex
@@ -2815,6 +2827,8 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
         self.onLoadUnitChanged = onLoadUnitChanged
         self.onDelete = onDelete
         self.keyboardDismissToken = keyboardDismissToken
+        self.onCommitPendingInput = onCommitPendingInput
+        self.onInputFocusChange = onInputFocusChange
         _repsText = State(initialValue: stage.actualReps.map(String.init) ?? "")
         _weightText = State(initialValue: stage.actualWeight.map(WGJFormatters.decimalString) ?? "")
     }
@@ -2900,32 +2914,54 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
         )
         .accessibilityIdentifier("workout-set-\(setIndex)-drop-stage-\(stageIndex)")
         .onChange(of: stage.actualReps) { _, newValue in
+            guard focusedField != .reps else { return }
             let resolved = newValue.map(String.init) ?? ""
             guard repsText != resolved else { return }
             repsText = resolved
         }
         .onChange(of: stage.actualWeight) { _, newValue in
+            guard focusedField != .weight else { return }
             let resolved = newValue.map(WGJFormatters.decimalString) ?? ""
             guard weightText != resolved else { return }
             weightText = resolved
         }
         .onChange(of: focusedField) { oldValue, newValue in
+            onInputFocusChange(newValue != nil)
             guard oldValue != nil, newValue == nil else { return }
             commitLocalText()
+            onCommitPendingInput()
         }
         .onChange(of: keyboardDismissToken) { _, _ in
             guard focusedField != nil else { return }
             commitLocalText()
+            onCommitPendingInput()
             focusedField = nil
+            onInputFocusChange(false)
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: newPhase) else { return }
+            guard focusedField != nil else { return }
+            commitLocalText()
+            onCommitPendingInput()
+            focusedField = nil
+            onInputFocusChange(false)
         }
         .onDisappear {
             commitLocalText()
+            onCommitPendingInput()
+            onInputFocusChange(false)
         }
     }
 
     private var weightField: some View {
         HStack(spacing: 8) {
-            TextField("Weight", text: $weightText)
+            TextField("Weight", text: Binding(
+                get: { weightText },
+                set: { newValue in
+                    weightText = newValue
+                    onWeightChanged(newValue)
+                }
+            ))
                 .keyboardType(.decimalPad)
                 .multilineTextAlignment(.center)
                 .wgjPillField()
@@ -2937,6 +2973,7 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
                 ForEach(TemplateLoadUnit.allCases) { unit in
                     Button(unit.shortLabel) {
                         commitLocalText()
+                        onCommitPendingInput()
                         onLoadUnitChanged(unit)
                     }
                 }
@@ -2952,7 +2989,13 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
     }
 
     private var repsField: some View {
-        TextField("Reps", text: $repsText)
+        TextField("Reps", text: Binding(
+            get: { repsText },
+            set: { newValue in
+                repsText = newValue
+                onRepsChanged(newValue)
+            }
+        ))
             .keyboardType(.numberPad)
             .multilineTextAlignment(.center)
             .wgjPillField()
@@ -2969,6 +3012,7 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
 
             Button {
                 commitLocalText()
+                onCommitPendingInput()
                 onToggleCompletion()
             } label: {
                 Image(systemName: presentation.systemImage)

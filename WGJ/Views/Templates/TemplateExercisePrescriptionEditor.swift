@@ -526,6 +526,7 @@ struct TemplateExercisePrescriptionEditor: View {
                             focusedInput: $focusedInput,
                             repsText: repsText(for: row.index),
                             weightText: weightText(for: row.index),
+                            keyboardDismissToken: keyboardDismissToken,
                             onRepsTextChanged: { updateRepsText($0, forSetID: row.id) },
                             onWeightTextChanged: { updateWeightText($0, forSetID: row.id) },
                             onLoadUnitChanged: { updateLoadUnit($0, forSetID: row.id) },
@@ -1453,6 +1454,7 @@ private struct TemplateExerciseSetCardView: View, Equatable {
     let focusedInput: FocusState<TemplateEditorInputFocus?>.Binding
     let repsText: String
     let weightText: String
+    let keyboardDismissToken: TemplateEditorKeyboardDismissToken
 
     let onRepsTextChanged: (String) -> Void
     let onWeightTextChanged: (String) -> Void
@@ -1475,6 +1477,7 @@ private struct TemplateExerciseSetCardView: View, Equatable {
             && lhs.canMoveDown == rhs.canMoveDown
             && lhs.repsText == rhs.repsText
             && lhs.weightText == rhs.weightText
+            && lhs.keyboardDismissToken == rhs.keyboardDismissToken
     }
 
     var body: some View {
@@ -1749,7 +1752,8 @@ private struct TemplateExerciseSetCardView: View, Equatable {
                     onRepsChanged: { onDropStageRepsChanged(stage.id, $0) },
                     onWeightChanged: { onDropStageWeightChanged(stage.id, $0) },
                     onLoadUnitChanged: { onDropStageLoadUnitChanged(stage.id, $0) },
-                    onDelete: { onRemoveDropStage(stage.id) }
+                    onDelete: { onRemoveDropStage(stage.id) },
+                    keyboardDismissToken: keyboardDismissToken
                 )
             }
         }
@@ -1774,6 +1778,7 @@ private struct TemplateExerciseDropStageCardView: View, Equatable {
     let onWeightChanged: (String) -> Void
     let onLoadUnitChanged: (TemplateLoadUnit) -> Void
     let onDelete: () -> Void
+    let keyboardDismissToken: TemplateEditorKeyboardDismissToken
 
     @State private var repsText: String
     @State private var weightText: String
@@ -1790,7 +1795,8 @@ private struct TemplateExerciseDropStageCardView: View, Equatable {
         onRepsChanged: @escaping (String) -> Void,
         onWeightChanged: @escaping (String) -> Void,
         onLoadUnitChanged: @escaping (TemplateLoadUnit) -> Void,
-        onDelete: @escaping () -> Void
+        onDelete: @escaping () -> Void,
+        keyboardDismissToken: TemplateEditorKeyboardDismissToken = TemplateEditorKeyboardDismissToken()
     ) {
         self.index = index
         self.stage = stage
@@ -1798,12 +1804,15 @@ private struct TemplateExerciseDropStageCardView: View, Equatable {
         self.onWeightChanged = onWeightChanged
         self.onLoadUnitChanged = onLoadUnitChanged
         self.onDelete = onDelete
+        self.keyboardDismissToken = keyboardDismissToken
         _repsText = State(initialValue: stage.targetReps.map(String.init) ?? "")
         _weightText = State(initialValue: stage.targetWeight.map(WGJFormatters.decimalString) ?? "")
     }
 
     static func == (lhs: TemplateExerciseDropStageCardView, rhs: TemplateExerciseDropStageCardView) -> Bool {
-        lhs.index == rhs.index && lhs.stage == rhs.stage
+        lhs.index == rhs.index
+            && lhs.stage == rhs.stage
+            && lhs.keyboardDismissToken == rhs.keyboardDismissToken
     }
 
     var body: some View {
@@ -1864,6 +1873,11 @@ private struct TemplateExerciseDropStageCardView: View, Equatable {
         .onChange(of: focusedField) { oldValue, newValue in
             guard oldValue != nil, newValue == nil else { return }
             commitLocalText()
+        }
+        .onChange(of: keyboardDismissToken) { _, _ in
+            guard focusedField != nil else { return }
+            commitLocalText()
+            focusedField = nil
         }
         .onDisappear {
             commitLocalText()
