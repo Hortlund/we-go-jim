@@ -1392,6 +1392,7 @@ private struct HistoryExerciseDetailEditorCard: View {
     @State private var localSetDrafts: [WorkoutSessionSetDraft]
     @State private var localExerciseNotes: String
     @State private var editingCoordinator: WorkoutExerciseEditingCoordinator
+    @State private var metricInputDraftBuffer = WorkoutMetricInputDraftStore()
 
     init(
         exerciseID: UUID,
@@ -1494,6 +1495,7 @@ private struct HistoryExerciseDetailEditorCard: View {
             )
             guard localSetDrafts != newValue else { return }
             localSetDrafts = newValue
+            pruneMetricInputDrafts()
             updateDirtyState()
         }
         .onChange(of: restSeconds) { _, newValue in
@@ -1877,6 +1879,7 @@ private struct HistoryExerciseDetailEditorCard: View {
 
     private func removeSet(_ setID: UUID) {
         localSetDrafts.removeAll { $0.id == setID }
+        pruneMetricInputDrafts()
         editingCoordinator.stageDrafts(localSetDrafts)
         updateDirtyState()
     }
@@ -1889,6 +1892,7 @@ private struct HistoryExerciseDetailEditorCard: View {
     }
 
     private func flushPendingEdits() {
+        flushPendingMetricInputs()
         guard editingCoordinator.hasPendingChanges else { return }
         editingCoordinator.flushCommits()
         flushCoordinator?.setDirty(false, for: exerciseID)
@@ -1901,25 +1905,17 @@ private struct HistoryExerciseDetailEditorCard: View {
     private func weightBinding(for setID: UUID) -> Binding<String> {
         Binding(
             get: {
+                if let draftText = metricInputDraftBuffer.text(for: setID, metric: .weight) {
+                    return draftText
+                }
                 guard let draft = localSetDrafts.first(where: { $0.id == setID }),
                       let value = draft.actualWeight
                 else { return "" }
                 return WGJFormatters.decimalString(value)
             },
             set: { rawValue in
-                updateSet(setID) { draft in
-                    let normalized = rawValue.replacingOccurrences(of: ",", with: ".")
-                    if normalized.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        draft.actualWeight = nil
-                    } else {
-                        draft.actualWeight = Double(normalized.filter { $0.isNumber || $0 == "." })
-                    }
-                    if draft.targetLoadUnit == .bodyweight {
-                        draft.actualLoadUnit = .bodyweight
-                    } else {
-                        draft.actualLoadUnit = preferredLoadUnit
-                    }
-                }
+                metricInputDraftBuffer.stage(rawValue, for: setID, metric: .weight)
+                commitBufferedMetricInput(for: setID, metric: .weight, clearsText: false)
             }
         )
     }
@@ -1927,18 +1923,60 @@ private struct HistoryExerciseDetailEditorCard: View {
     private func repsBinding(for setID: UUID) -> Binding<String> {
         Binding(
             get: {
+                if let draftText = metricInputDraftBuffer.text(for: setID, metric: .reps) {
+                    return draftText
+                }
                 guard let draft = localSetDrafts.first(where: { $0.id == setID }),
                       let value = draft.actualReps
                 else { return "" }
                 return String(value)
             },
             set: { rawValue in
-                updateSet(setID) { draft in
-                    let cleaned = rawValue.filter(\.isNumber)
-                    draft.actualReps = cleaned.isEmpty ? nil : Int(cleaned)
-                }
+                metricInputDraftBuffer.stage(rawValue, for: setID, metric: .reps)
+                commitBufferedMetricInput(for: setID, metric: .reps, clearsText: false)
             }
         )
+    }
+
+    @discardableResult
+    private func commitBufferedMetricInput(
+        for setID: UUID,
+        metric: WorkoutMetricInputDraftBuffer.Metric,
+        clearsText: Bool
+    ) -> Bool {
+        var updatedDrafts = localSetDrafts
+        let changed = metricInputDraftBuffer.commit(
+            setID: setID,
+            metric: metric,
+            drafts: &updatedDrafts,
+            preferredLoadUnit: preferredLoadUnit,
+            manualCompletionMode: true,
+            clearsText: clearsText
+        )
+        guard changed else { return false }
+        localSetDrafts = updatedDrafts
+        editingCoordinator.stageDrafts(localSetDrafts)
+        updateDirtyState()
+        return true
+    }
+
+    private func flushPendingMetricInputs() {
+        guard !metricInputDraftBuffer.isEmpty else { return }
+        var updatedDrafts = localSetDrafts
+        let changed = metricInputDraftBuffer.commitAll(
+            drafts: &updatedDrafts,
+            preferredLoadUnit: preferredLoadUnit,
+            manualCompletionMode: true,
+            clearsText: true
+        )
+        guard changed else { return }
+        localSetDrafts = updatedDrafts
+        editingCoordinator.stageDrafts(localSetDrafts)
+        updateDirtyState()
+    }
+
+    private func pruneMetricInputDrafts() {
+        metricInputDraftBuffer.prune(keeping: Set(localSetDrafts.map(\.id)))
     }
 
     private var summaryLine: String {

@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 @testable import WGJ
 
 final class ActiveWorkoutRuntimeTests: XCTestCase {
@@ -222,6 +223,81 @@ final class ActiveWorkoutRuntimeTests: XCTestCase {
         XCTAssertEqual(updated?[0].actualReps, 8)
         XCTAssertEqual(updated?[0].actualWeight, 100)
         XCTAssertEqual(updated?[0].actualLoadUnit, .kg)
+    }
+
+    func testActiveWorkoutBottomDockReservesSafeAreaOnlyWhenEditableWorkoutIsVisible() {
+        XCTAssertTrue(
+            ActiveWorkoutBottomDockPlacementPolicy.shouldReserveBottomSafeAreaInset(
+                hasSession: true,
+                isEndingSession: false,
+                isCancelArmed: false
+            )
+        )
+
+        XCTAssertFalse(
+            ActiveWorkoutBottomDockPlacementPolicy.shouldReserveBottomSafeAreaInset(
+                hasSession: false,
+                isEndingSession: false,
+                isCancelArmed: false
+            )
+        )
+        XCTAssertFalse(
+            ActiveWorkoutBottomDockPlacementPolicy.shouldReserveBottomSafeAreaInset(
+                hasSession: true,
+                isEndingSession: true,
+                isCancelArmed: false
+            )
+        )
+        XCTAssertFalse(
+            ActiveWorkoutBottomDockPlacementPolicy.shouldReserveBottomSafeAreaInset(
+                hasSession: true,
+                isEndingSession: false,
+                isCancelArmed: true
+            )
+        )
+    }
+
+    func testActiveWorkoutSceneTransitionsFlushAndResetBeforeBackground() {
+        XCTAssertFalse(ActiveWorkoutSceneTransitionPolicy.shouldFlushLocalDraft(scenePhase: .active))
+        XCTAssertTrue(ActiveWorkoutSceneTransitionPolicy.shouldFlushLocalDraft(scenePhase: .inactive))
+        XCTAssertTrue(ActiveWorkoutSceneTransitionPolicy.shouldFlushLocalDraft(scenePhase: .background))
+
+        XCTAssertFalse(ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: .active))
+        XCTAssertTrue(ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: .inactive))
+        XCTAssertTrue(ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: .background))
+    }
+
+    func testMetricInputDraftBufferCommitsDropStagePendingValues() {
+        let setID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let stageID = UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
+        var drafts = [
+            WorkoutSessionSetDraft(
+                id: setID,
+                actualLoadUnit: .kg,
+                dropStages: [
+                    WorkoutSessionDropStageDraft(
+                        id: stageID,
+                        targetLoadUnit: .kg,
+                        actualLoadUnit: .kg
+                    ),
+                ]
+            ),
+        ]
+        var buffer = WorkoutMetricInputDraftBuffer()
+
+        buffer.stage("82.5", forDropStage: stageID, metric: .weight)
+        buffer.stage("7", forDropStage: stageID, metric: .reps)
+
+        let changed = buffer.commitAllDropStages(
+            drafts: &drafts,
+            preferredLoadUnit: .kg,
+            manualCompletionMode: true
+        )
+
+        XCTAssertTrue(changed)
+        XCTAssertEqual(drafts[0].dropStages[0].actualWeight, 82.5)
+        XCTAssertEqual(drafts[0].dropStages[0].actualReps, 7)
+        XCTAssertEqual(drafts[0].dropStages[0].actualLoadUnit, .kg)
     }
 
     func testFillLastOnlyUpdatesRequestedSet() {

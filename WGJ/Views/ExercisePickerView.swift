@@ -51,6 +51,7 @@ struct ExercisePickerView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 16)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
+                .allowsHitTesting(false)
                 .accessibilityIdentifier("exercise-picker-duplicate-warning")
             }
         }
