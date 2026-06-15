@@ -1624,15 +1624,6 @@ struct ActiveWorkoutView: View {
         return nil
     }
 
-    @MainActor
-    private func setCycleCompletionStates(for exerciseID: UUID) -> [Bool] {
-        guard let exercise = sessionExercises.first(where: { $0.id == exerciseID }) else {
-            return []
-        }
-
-        return resolvedDrafts(for: exercise).map(\.isCycleCompleted)
-    }
-
     private func startRestTimer(
         seconds: Int,
         exerciseName: String,
@@ -1679,11 +1670,6 @@ struct ActiveWorkoutView: View {
             scenePhase: scenePhase,
             isMetricInputFocused: isMetricInputFocused
         )
-    }
-
-    @MainActor
-    private func refreshGuidanceCache() {
-        scheduleGuidanceRefreshForAll()
     }
 
     @MainActor
@@ -1856,17 +1842,6 @@ struct ActiveWorkoutView: View {
             }
         }
         return nil
-    }
-
-    @MainActor
-    private func allExercisesCompleted(
-        from exercises: [ActiveWorkoutRuntimeExercise],
-        draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
-    ) -> Bool {
-        exercises.allSatisfy { exercise in
-            let drafts = draftsByExerciseID[exercise.id] ?? []
-            return isExerciseCompleted(drafts)
-        }
     }
 
     private var exerciseCardTransition: AnyTransition {
@@ -2376,27 +2351,6 @@ struct ActiveWorkoutView: View {
             await Task.yield()
             guard !showingFinishConfirmation else { return }
             finishWorkout()
-        }
-    }
-
-    @MainActor
-    private func focusCancelSection(using scrollProxy: ScrollViewProxy) {
-        scrollToTarget(
-            cancelSectionScrollTarget,
-            using: scrollProxy,
-            anchor: .center,
-            animation: WGJMotion.overlayAnimation(reduceMotion: reduceMotion)
-        )
-
-        Task { @MainActor in
-            await Task.yield()
-            guard isCancelArmed else { return }
-            scrollToTarget(
-                cancelSectionScrollTarget,
-                using: scrollProxy,
-                anchor: .center,
-                animation: WGJMotion.overlayAnimation(reduceMotion: reduceMotion)
-            )
         }
     }
 
@@ -3693,11 +3647,6 @@ private struct ActiveWorkoutGuidanceRefreshSnapshot: Sendable {
     let sessionExercises: [ActiveWorkoutRuntimeExercise]
     let draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
     let catalogMatchesByUUID: [String: TrainingGuidanceCatalogSnapshot]
-}
-
-private struct ActiveWorkoutSessionMetaSnapshot: Equatable, Sendable {
-    let name: String
-    let notes: String
 }
 
 nonisolated private struct ActiveWorkoutTemplateFolderSnapshot: Identifiable, Equatable, Sendable {

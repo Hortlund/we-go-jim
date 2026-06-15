@@ -1383,10 +1383,6 @@ nonisolated final class WorkoutMetricsService {
         (exercise.sets ?? []).sorted { $0.sortOrder < $1.sortOrder }
     }
 
-    private func completedWorkingSetMetrics(for exercise: WorkoutSessionExercise) -> [CompletedWorkingSetMetric] {
-        WorkoutMetricsPolicy.completedWorkingMetrics(from: orderedSessionSets(exercise))
-    }
-
     private func completedWeightedWorkingSetMetrics(for exercise: WorkoutSessionExercise) -> [WeightedWorkingSetMetric] {
         WorkoutMetricsPolicy.completedWeightedWorkingMetrics(from: orderedSessionSets(exercise))
     }
@@ -1416,18 +1412,6 @@ nonisolated final class WorkoutMetricsService {
         let resolvedGoal = max(1, min(14, profile?.weeklyWorkoutGoal ?? 4))
         cachedGoal = resolvedGoal
         return resolvedGoal
-    }
-
-    private func priorSetMetricPeaks(
-        for catalogExerciseUUID: String,
-        before date: Date? = nil,
-        excludingSessionID: UUID? = nil
-    ) throws -> PriorSetMetricPeaks {
-        try priorSetMetricPeaksByExerciseUUID(
-            for: Set([catalogExerciseUUID]),
-            before: date,
-            excludingSessionID: excludingSessionID
-        )[catalogExerciseUUID] ?? PriorSetMetricPeaks()
     }
 
     private func priorSetMetricPeaksByExerciseUUID(

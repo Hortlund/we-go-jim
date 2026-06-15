@@ -213,17 +213,6 @@ private struct WGJGlassButtonBackground: View {
         }
     }
 
-    private var glassTint: Color {
-        switch tone {
-        case .primary:
-            return WGJTheme.accentBlue.opacity(0.18)
-        case .secondary:
-            return WGJTheme.card.opacity(0.14)
-        case .destructive:
-            return WGJTheme.danger.opacity(0.16)
-        }
-    }
-
     var body: some View {
         RoundedRectangle(cornerRadius: WGJRadius.control, style: .continuous)
             .fill(fill)
