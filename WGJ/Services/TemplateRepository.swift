@@ -299,8 +299,8 @@ nonisolated struct TemplateExerciseDraft: Identifiable, Equatable, Sendable {
             notes: "",
             targetRepMin: nil,
             targetRepMax: nil,
-            restSeconds: replacement.restSeconds,
-            setDrafts: replacement.setDrafts,
+            restSeconds: restSeconds,
+            setDrafts: setDrafts.isEmpty ? replacement.setDrafts : setDrafts,
             components: replacement.components,
             superset: superset
         )
@@ -2100,7 +2100,8 @@ nonisolated final class TemplateRepository {
         updatedSets.reserveCapacity(desiredDrafts.count)
 
         for (index, draft) in desiredDrafts.enumerated() {
-            let modelSet = existingByID[draft.id]
+            let existingModelSet = existingByID[draft.id]
+            let modelSet = existingModelSet
                 ?? TemplateExerciseSet(
                     id: draft.id,
                     templateExerciseID: exercise.id,
@@ -2113,7 +2114,11 @@ nonisolated final class TemplateRepository {
                 modelContext.insert(modelSet)
             }
 
-            if hasTargetDelta(modelSet: modelSet, draft: draft) {
+            if existingModelSet == nil {
+                modelSet.previousTargetReps = draft.previousTargetReps
+                modelSet.previousTargetWeight = draft.previousTargetWeight
+                modelSet.previousLoadUnit = draft.previousLoadUnit
+            } else if hasTargetDelta(modelSet: modelSet, draft: draft) {
                 modelSet.previousTargetReps = modelSet.targetReps
                 modelSet.previousTargetWeight = modelSet.targetWeight
                 modelSet.previousLoadUnit = modelSet.loadUnit

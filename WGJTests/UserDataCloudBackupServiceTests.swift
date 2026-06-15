@@ -4,6 +4,122 @@ import XCTest
 
 @MainActor
 final class UserDataCloudBackupServiceTests: XCTestCase {
+    func testDuplicateTemplatePreservesPreviousSetTargets() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+
+        let templateID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let exerciseID = UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
+        let setID = UUID(uuidString: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")!
+        let template = WorkoutTemplate(
+            id: templateID,
+            folderID: TemplateRepository.unfiledFolderID,
+            name: "Upper",
+            notes: "Original"
+        )
+        let exercise = TemplateExercise(
+            id: exerciseID,
+            templateID: templateID,
+            catalogExerciseUUID: "bench-press",
+            exerciseNameSnapshot: "Bench Press",
+            categorySnapshot: "Strength",
+            muscleSummarySnapshot: "Chest",
+            template: template
+        )
+        let set = TemplateExerciseSet(
+            id: setID,
+            templateExerciseID: exerciseID,
+            targetReps: 8,
+            targetWeight: 100,
+            loadUnit: .kg,
+            previousTargetReps: 7,
+            previousTargetWeight: 95,
+            previousLoadUnit: .kg,
+            templateExercise: exercise
+        )
+        template.exercises = [exercise]
+        exercise.prescribedSets = [set]
+
+        context.insert(template)
+        context.insert(exercise)
+        context.insert(set)
+        try context.save()
+
+        let copied = try TemplateRepository(modelContext: context)
+            .duplicateTemplate(id: templateID, name: "Upper Copy")
+
+        let copiedExercise = try XCTUnwrap(copied.exercises?.first)
+        let copiedSet = try XCTUnwrap(copiedExercise.prescribedSets?.first)
+        XCTAssertNotEqual(copiedSet.id, setID)
+        XCTAssertEqual(copiedSet.targetReps, 8)
+        XCTAssertEqual(copiedSet.targetWeight, 100)
+        XCTAssertEqual(copiedSet.previousTargetReps, 7)
+        XCTAssertEqual(copiedSet.previousTargetWeight, 95)
+        XCTAssertEqual(copiedSet.previousLoadUnit, .kg)
+    }
+
+    func testRemoveExerciseRejectsExerciseFromDifferentSession() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+
+        let firstSessionID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let secondSessionID = UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
+        let firstExerciseID = UUID(uuidString: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")!
+        let secondExerciseID = UUID(uuidString: "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD")!
+        let firstSession = WorkoutSession(
+            id: firstSessionID,
+            name: "Push",
+            status: .completed
+        )
+        let secondSession = WorkoutSession(
+            id: secondSessionID,
+            name: "Pull",
+            status: .completed
+        )
+        let firstExercise = WorkoutSessionExercise(
+            id: firstExerciseID,
+            sessionID: firstSessionID,
+            catalogExerciseUUID: "bench-press",
+            exerciseNameSnapshot: "Bench Press",
+            categorySnapshot: "Strength",
+            muscleSummarySnapshot: "Chest",
+            session: firstSession
+        )
+        let secondExercise = WorkoutSessionExercise(
+            id: secondExerciseID,
+            sessionID: secondSessionID,
+            catalogExerciseUUID: "row",
+            exerciseNameSnapshot: "Row",
+            categorySnapshot: "Strength",
+            muscleSummarySnapshot: "Back",
+            session: secondSession
+        )
+        firstSession.exercises = [firstExercise]
+        secondSession.exercises = [secondExercise]
+
+        for model in [
+            firstSession,
+            secondSession,
+            firstExercise,
+            secondExercise,
+        ] as [any PersistentModel] {
+            context.insert(model)
+        }
+        try context.save()
+
+        XCTAssertThrowsError(
+            try WorkoutSessionRepository(modelContext: context)
+                .removeExercise(sessionID: firstSessionID, sessionExerciseID: secondExerciseID)
+        ) { error in
+            XCTAssertEqual(error as? WorkoutSessionRepositoryError, .sessionExerciseNotFound)
+        }
+
+        let remainingExercises = try context.fetch(FetchDescriptor<WorkoutSessionExercise>())
+        XCTAssertEqual(Set(remainingExercises.map(\.id)), [firstExerciseID, secondExerciseID])
+    }
+
     func testRestoreLatestBackupPreservesTemplateSupersetGroups() async throws {
         let sourceContainer = try makeInMemoryContainer()
         let sourceContext = ModelContext(sourceContainer)

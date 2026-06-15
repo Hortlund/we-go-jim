@@ -35,7 +35,7 @@ nonisolated enum WorkoutSetPreviousPerformanceApplicationController {
         to drafts: [WorkoutSessionSetDraft],
         at index: Int,
         previousResolution: WorkoutPreviousPerformanceResolution,
-        mode: WorkoutPreviousPerformanceApplicationMode = .overwriteExisting
+        mode: WorkoutPreviousPerformanceApplicationMode = .fillMissing
     ) -> [WorkoutSessionSetDraft]? {
         guard drafts.indices.contains(index),
               let previous = previousResolution.previous(at: index)

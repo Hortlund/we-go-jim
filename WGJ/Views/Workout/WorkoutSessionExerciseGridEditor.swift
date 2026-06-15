@@ -1974,6 +1974,13 @@ struct WorkoutSessionExerciseGridEditor: View {
     private func applyPreviousPerformance(at index: Int) {
         guard setDrafts.indices.contains(index) else { return }
         guard isSetEditingEnabled, !setDrafts[index].isLocked else { return }
+
+        pendingCommitTask?.cancel()
+        pendingCommitTask = nil
+        _ = commitAllBufferedInput(clearsText: true)
+
+        guard setDrafts.indices.contains(index) else { return }
+        guard isSetEditingEnabled, !setDrafts[index].isLocked else { return }
         let targetSetID = setDrafts[index].id
         guard let updatedDrafts = WorkoutSetPreviousPerformanceApplicationController.applyPreviousPerformance(
             to: setDrafts,
@@ -1986,7 +1993,6 @@ struct WorkoutSessionExerciseGridEditor: View {
         pendingCommitTask?.cancel()
         pendingCommitTask = nil
         let retainedFocus = focusedInput?.setID == targetSetID ? focusedInput : nil
-        clearInputDrafts(for: targetSetID)
 
         if !manualCompletionMode {
             var autoCompletedDrafts = updatedDrafts
@@ -2468,14 +2474,20 @@ struct WorkoutSessionExerciseGridEditor: View {
     private func handleFocusedInputChange(_ previousFocus: SetInputFocus?, _ newFocus: SetInputFocus?) {
         guard previousFocus != newFocus else { return }
         if let previousFocus {
+            let committedBufferedValueChange = commitBufferedInput(for: previousFocus, clearsText: true)
             if newFocus != nil {
                 if suppressNextFocusLossCommit {
                     suppressNextFocusLossCommit = false
                 } else {
-                    scheduleBufferedInputCommit()
+                    scheduleCommitRequest(
+                        ActiveWorkoutEditorFocusCommitPolicy.dispositionForMetricFocusChange(
+                            previousHadFocus: true,
+                            newHasFocus: true,
+                            committedBufferedValueChange: committedBufferedValueChange
+                        )
+                    )
                 }
             } else {
-                let committedBufferedValueChange = commitBufferedInput(for: previousFocus, clearsText: true)
                 if suppressNextFocusLossCommit {
                     suppressNextFocusLossCommit = false
                 } else {
@@ -2723,11 +2735,6 @@ struct WorkoutSessionExerciseGridEditor: View {
         case .reps:
             metricInputDraftBuffer.sync(setID: draft.id, metric: .reps, draft: draft)
         }
-    }
-
-    private func clearInputDrafts(for setID: UUID) {
-        metricInputDraftBuffer.clear(for: setID, metric: .weight)
-        metricInputDraftBuffer.clear(for: setID, metric: .reps)
     }
 
     private func setSwipeOffsetBinding(for setID: UUID) -> Binding<CGFloat> {
@@ -3287,12 +3294,12 @@ private extension WorkoutSessionSetDraft {
         let shouldReplaceWeight = mode == .overwriteExisting || updatedDraft.actualWeight == nil
         let shouldReplaceReps = mode == .overwriteExisting || updatedDraft.actualReps == nil
 
-        if shouldReplaceWeight {
+        if shouldReplaceWeight, (previous.weight != nil || previous.unit == .bodyweight) {
             updatedDraft.actualWeight = previous.weight
             updatedDraft.actualLoadUnit = previous.unit
         }
 
-        if shouldReplaceReps {
+        if shouldReplaceReps, previous.reps != nil {
             updatedDraft.actualReps = previous.reps
         }
         return updatedDraft
