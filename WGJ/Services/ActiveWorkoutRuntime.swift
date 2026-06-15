@@ -361,7 +361,6 @@ nonisolated extension ActiveWorkoutRuntimeExercise {
         preferredLoadUnit: TemplateLoadUnit,
         date: Date = .now
     ) -> ActiveWorkoutRuntimeExercise {
-        let restSeconds = 120
         let loadUnit = TemplateLoadUnit.inferredDefault(fromEquipmentSummary: selection.equipmentSummary)
             ?? preferredLoadUnit
 
@@ -387,7 +386,9 @@ nonisolated extension ActiveWorkoutRuntimeExercise {
                     updatedAt: date
                 ),
             ],
-            setDrafts: Self.defaultSetDrafts(restSeconds: restSeconds, loadUnit: loadUnit),
+            setDrafts: setDrafts.isEmpty
+                ? Self.defaultSetDrafts(restSeconds: restSeconds, loadUnit: loadUnit)
+                : setDrafts,
             superset: superset,
             createdAt: createdAt,
             updatedAt: date

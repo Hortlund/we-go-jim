@@ -614,6 +614,9 @@ nonisolated final class WorkoutSessionRepository {
         guard let exercise = try sessionExercise(id: sessionExerciseID) else {
             throw WorkoutSessionRepositoryError.sessionExerciseNotFound
         }
+        guard exercise.sessionID == sessionID else {
+            throw WorkoutSessionRepositoryError.sessionExerciseNotFound
+        }
 
         modelContext.delete(exercise)
 
