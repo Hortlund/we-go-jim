@@ -21,10 +21,10 @@ nonisolated enum WorkoutCompletionConfettiOrigin {
 
     static func defaultOrigin(heroFrame: CGRect, fallbackScreenWidth: CGFloat) -> CGPoint {
         guard !heroFrame.isEmpty else {
-            return CGPoint(x: fallbackScreenWidth / 2, y: 140)
+            return CGPoint(x: fallbackScreenWidth / 2, y: 220)
         }
 
-        return CGPoint(x: heroFrame.midX, y: heroFrame.minY + min(96, heroFrame.height * 0.36))
+        return CGPoint(x: heroFrame.midX, y: heroFrame.minY + min(heroFrame.height - 28, heroFrame.height * 0.68))
     }
 }
 
@@ -33,16 +33,58 @@ nonisolated enum WorkoutCompletionConfettiIntensity {
     case manualTap
 }
 
+nonisolated enum WorkoutCompletionConfettiBurstRole: Equatable, Sendable {
+    case centralThrow
+}
+
+nonisolated struct WorkoutCompletionConfettiBurstDescriptor: Equatable, Sendable {
+    let origin: CGPoint
+    let role: WorkoutCompletionConfettiBurstRole
+    let pieceCount: Int
+    let delay: Double
+}
+
 nonisolated enum WorkoutCompletionConfettiPolicy {
-    static let automaticCelebrationDelay: Duration = .milliseconds(320)
+    static let automaticCelebrationDelay: Duration = .zero
+    static let burstLifetime: Duration = .seconds(7.0)
 
     static func pieceCount(for intensity: WorkoutCompletionConfettiIntensity) -> Int {
         switch intensity {
         case .completedWorkout:
             return 54
         case .manualTap:
-            return 24
+            return 18
         }
+    }
+
+    static func burstDescriptors(
+        origin: CGPoint,
+        intensity: WorkoutCompletionConfettiIntensity
+    ) -> [WorkoutCompletionConfettiBurstDescriptor] {
+        [
+            WorkoutCompletionConfettiBurstDescriptor(
+                origin: origin,
+                role: .centralThrow,
+                pieceCount: pieceCount(for: intensity),
+                delay: 0.0
+            ),
+        ]
+    }
+
+    static func initialSpreadX(for screenWidth: CGFloat) -> CGFloat {
+        min(max(screenWidth * 0.34, 112), 170)
+    }
+
+    static func initialSpreadY(for screenHeight: CGFloat) -> CGFloat {
+        min(max(screenHeight * 0.07, 42), 68)
+    }
+
+    static func horizontalMotionScale(for screenWidth: CGFloat) -> CGFloat {
+        min(max(screenWidth, 320), 440)
+    }
+
+    static func verticalMotionScale(for screenHeight: CGFloat) -> CGFloat {
+        min(max(screenHeight, 560), 680)
     }
 }
 
@@ -92,7 +134,8 @@ struct WorkoutCompletionSummaryView: View {
                     ForEach(confettiBursts) { burst in
                         WorkoutCompletionConfettiOverlay(
                             originInGlobalSpace: burst.origin,
-                            pieces: burst.pieces
+                            pieces: burst.pieces,
+                            startDate: burst.startDate
                         )
                             .id(burst.id)
                     }
@@ -390,17 +433,16 @@ struct WorkoutCompletionSummaryView: View {
             }
 
             snapshot = builtSnapshot
-            Task { @MainActor in
-                try? await Task.sleep(for: WorkoutCompletionConfettiPolicy.automaticCelebrationDelay)
-                guard !Task.isCancelled else { return }
-                triggerCelebrationIfNeeded()
-            }
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            triggerCelebrationIfReady()
         } catch {
             continueToHistory()
         }
     }
 
-    private func triggerCelebrationIfNeeded() {
+    private func triggerCelebrationIfReady() {
+        guard snapshot != nil else { return }
         guard !hasTriggeredCelebration else { return }
         hasTriggeredCelebration = true
         triggerCelebration(origin: defaultConfettiOrigin(), intensity: .completedWorkout)
@@ -414,17 +456,19 @@ struct WorkoutCompletionSummaryView: View {
 
         WorkoutFeedbackCenter.shared.workoutCompleted()
 
-        guard !reduceMotion else { return }
-        let burst = WorkoutCompletionConfettiBurst(
-            origin: origin,
-            intensity: intensity
-        )
-        confettiBursts.append(burst)
-        confettiDismissTasks[burst.id]?.cancel()
-        confettiDismissTasks[burst.id] = Task.detached(priority: .utility) {
-            try? await Task.sleep(for: .seconds(2.8))
-            guard !Task.isCancelled else { return }
-            await self.removeConfettiBurstAfterDelayIfStillNeeded(id: burst.id)
+        guard !reduceMotion else {
+            return
+        }
+
+        for descriptor in WorkoutCompletionConfettiPolicy.burstDescriptors(origin: origin, intensity: intensity) {
+            let burst = WorkoutCompletionConfettiBurst(descriptor: descriptor)
+            confettiBursts.append(burst)
+            confettiDismissTasks[burst.id]?.cancel()
+            confettiDismissTasks[burst.id] = Task.detached(priority: .utility) {
+                try? await Task.sleep(for: WorkoutCompletionConfettiPolicy.burstLifetime)
+                guard !Task.isCancelled else { return }
+                await self.removeConfettiBurstAfterDelayIfStillNeeded(id: burst.id)
+            }
         }
     }
 
@@ -836,12 +880,15 @@ private struct WorkoutCompletionConfettiBurst: Identifiable {
     let id = UUID()
     let origin: CGPoint
     let pieces: [WorkoutCompletionConfettiPiece]
+    let startDate: Date
 
-    init(origin: CGPoint, intensity: WorkoutCompletionConfettiIntensity) {
-        self.origin = origin
+    init(descriptor: WorkoutCompletionConfettiBurstDescriptor) {
+        origin = descriptor.origin
+        startDate = Date().addingTimeInterval(descriptor.delay)
         self.pieces = WorkoutCompletionConfettiPiece.random(
             seed: UInt64.random(in: 1...UInt64.max),
-            count: WorkoutCompletionConfettiPolicy.pieceCount(for: intensity)
+            role: descriptor.role,
+            count: descriptor.pieceCount
         )
     }
 }
@@ -849,8 +896,7 @@ private struct WorkoutCompletionConfettiBurst: Identifiable {
 private struct WorkoutCompletionConfettiOverlay: View {
     let originInGlobalSpace: CGPoint
     let pieces: [WorkoutCompletionConfettiPiece]
-
-    @State private var animate = false
+    let startDate: Date
 
     var body: some View {
         GeometryReader { proxy in
@@ -860,77 +906,165 @@ private struct WorkoutCompletionConfettiOverlay: View {
                 overlayFrameInGlobalSpace: overlayFrameInGlobal
             )
 
-            ZStack {
-                ForEach(pieces) { piece in
-                    RoundedRectangle(cornerRadius: piece.cornerRadius, style: .continuous)
-                        .fill(piece.color)
-                        .frame(width: piece.width, height: piece.height)
-                        .rotationEffect(.degrees(animate ? piece.endRotation : piece.startRotation))
-                        .position(
-                            x: origin.x + (piece.originX * 18),
-                            y: origin.y + (piece.originY * 18)
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+                let elapsed = max(0, timeline.date.timeIntervalSince(startDate))
+                let initialSpreadX = WorkoutCompletionConfettiPolicy.initialSpreadX(for: proxy.size.width)
+                let initialSpreadY = WorkoutCompletionConfettiPolicy.initialSpreadY(for: proxy.size.height)
+                let widthScale = WorkoutCompletionConfettiPolicy.horizontalMotionScale(for: proxy.size.width)
+                let heightScale = WorkoutCompletionConfettiPolicy.verticalMotionScale(for: proxy.size.height)
+
+                Canvas { context, _ in
+                    for piece in pieces {
+                        let progress = piece.progress(at: elapsed)
+                        guard progress > 0 else { continue }
+
+                        let x = origin.x
+                            + (piece.originX * initialSpreadX)
+                            + (piece.xOffset(progress: progress) * widthScale)
+                        let y = origin.y
+                            + (piece.originY * initialSpreadY)
+                            + (piece.yOffset(progress: progress) * heightScale)
+
+                        var pieceContext = context
+                        pieceContext.opacity = piece.opacity(progress: progress)
+                        pieceContext.translateBy(x: x, y: y)
+                        pieceContext.rotate(by: .degrees(piece.rotation(progress: progress)))
+                        pieceContext.fill(
+                            Path(
+                                roundedRect: CGRect(
+                                    x: -piece.width / 2,
+                                    y: -piece.height / 2,
+                                    width: piece.width,
+                                    height: piece.height
+                                ),
+                                cornerRadius: piece.cornerRadius
+                            ),
+                            with: .color(piece.color)
                         )
-                        .offset(
-                            x: animate ? piece.travelX * min(proxy.size.width, 420) : 0,
-                            y: animate ? piece.travelY * min(proxy.size.height, 520) : 0
-                        )
-                        .opacity(animate ? 0 : 1)
-                        .animation(
-                            .timingCurve(0.16, 0.84, 0.24, 1.0, duration: piece.duration)
-                                .delay(piece.delay),
-                            value: animate
-                        )
+                    }
                 }
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .allowsHitTesting(false)
-        .onAppear {
-            animate = true
-        }
     }
 }
 
-private struct WorkoutCompletionConfettiPiece: Identifiable {
+struct WorkoutCompletionConfettiPiece: Identifiable {
     let id: Int
     let width: CGFloat
     let height: CGFloat
     let cornerRadius: CGFloat
     let originX: CGFloat
     let originY: CGFloat
-    let travelX: CGFloat
-    let travelY: CGFloat
+    let driftX: CGFloat
+    let launchHeight: CGFloat
+    let fallDistance: CGFloat
     let startRotation: Double
-    let endRotation: Double
+    let rotationDelta: Double
     let delay: Double
     let duration: Double
     let color: Color
 
-    static func random(seed: UInt64, count: Int) -> [WorkoutCompletionConfettiPiece] {
+    static func random(
+        seed: UInt64,
+        role: WorkoutCompletionConfettiBurstRole,
+        count: Int
+    ) -> [WorkoutCompletionConfettiPiece] {
         var generator = WorkoutCompletionConfettiRandom(seed: seed)
-        let colors = [WGJTheme.accentBlue, WGJTheme.accentGold, WGJTheme.success, WGJTheme.accentCyan]
+        let colors = [
+            WGJTheme.accentBlue,
+            WGJTheme.accentGold,
+            WGJTheme.success,
+            WGJTheme.accentCyan,
+            WGJTheme.accentPurple,
+            WGJTheme.warning,
+        ]
 
         return (0..<count).map { index in
             let width = generator.value(in: CGFloat(6)...CGFloat(12))
             let height = generator.value(in: CGFloat(8)...CGFloat(18))
-            let direction = generator.value(in: 0.0...(2.0 * Double.pi))
-            let distance = generator.value(in: 0.36...1.08)
-            let upwardKick = generator.value(in: -0.28...0.14)
+            let spreadProgress = count > 1 ? CGFloat(index) / CGFloat(count - 1) : 0.5
+            let originX = min(
+                1.45,
+                max(
+                    -1.45,
+                    -1.45 + (spreadProgress * 2.9) + generator.value(in: CGFloat(-0.22)...CGFloat(0.22))
+                )
+            )
+            let driftX = horizontalDrift(for: originX, role: role, generator: &generator)
+            let delay = index.isMultiple(of: 4)
+                ? generator.value(in: 0...0.02)
+                : generator.value(in: 0.02...0.14)
             return WorkoutCompletionConfettiPiece(
                 id: index,
                 width: width,
                 height: height,
                 cornerRadius: min(width, height) * generator.value(in: 0.18...0.5),
-                originX: generator.value(in: -1...1),
-                originY: generator.value(in: -0.8...0.8),
-                travelX: cos(direction) * distance,
-                travelY: abs(sin(direction)) * generator.value(in: 0.42...1.02) + upwardKick,
+                originX: originX,
+                originY: generator.value(in: CGFloat(-0.75)...CGFloat(0.65)),
+                driftX: driftX,
+                launchHeight: generator.value(in: CGFloat(0.20)...CGFloat(0.36)),
+                fallDistance: generator.value(in: CGFloat(0.52)...CGFloat(0.88)),
                 startRotation: generator.value(in: -45...45),
-                endRotation: generator.value(in: 180...760) * (generator.nextBool() ? 1 : -1),
-                delay: generator.value(in: 0...0.16),
-                duration: generator.value(in: 1.35...2.35),
+                rotationDelta: generator.value(in: 210...520) * (generator.nextBool() ? 1 : -1),
+                delay: delay,
+                duration: generator.value(in: 4.2...5.4),
                 color: colors[index % colors.count]
             )
+        }
+    }
+
+    func progress(at elapsed: TimeInterval) -> Double {
+        guard elapsed >= delay else { return 0 }
+
+        return min(1, (elapsed - delay) / duration)
+    }
+
+    func xOffset(progress: Double) -> CGFloat {
+        let clampedProgress = min(max(progress, 0), 1)
+        let easedProgress = 1 - pow(1 - clampedProgress, 2)
+
+        return driftX * CGFloat(easedProgress)
+    }
+
+    func yOffset(progress: Double) -> CGFloat {
+        let clampedProgress = min(max(progress, 0), 1)
+        let riseProgress = min(clampedProgress / 0.28, 1)
+        let fallProgress = max(0, (clampedProgress - 0.16) / 0.84)
+        let rise = -launchHeight * CGFloat(sin(riseProgress * Double.pi / 2))
+        let fall = fallDistance * CGFloat(fallProgress * fallProgress)
+
+        return rise + fall
+    }
+
+    func rotation(progress: Double) -> Double {
+        startRotation + (rotationDelta * min(max(progress, 0), 1))
+    }
+
+    func opacity(progress: Double) -> Double {
+        let clampedProgress = min(max(progress, 0), 1)
+        guard clampedProgress > 0.78 else { return 1 }
+
+        return max(0, 1 - ((clampedProgress - 0.78) / 0.22))
+    }
+
+    private static func horizontalDrift(
+        for originX: CGFloat,
+        role: WorkoutCompletionConfettiBurstRole,
+        generator: inout WorkoutCompletionConfettiRandom
+    ) -> CGFloat {
+        switch role {
+        case .centralThrow:
+            let direction: CGFloat
+            if abs(originX) > 0.25 {
+                direction = originX > 0 ? 1 : -1
+            } else {
+                direction = generator.nextBool() ? 1 : -1
+            }
+
+            return direction * generator.value(in: CGFloat(0.06)...CGFloat(0.22))
+                + generator.value(in: CGFloat(-0.05)...CGFloat(0.05))
         }
     }
 }
