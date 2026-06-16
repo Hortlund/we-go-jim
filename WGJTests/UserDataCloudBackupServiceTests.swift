@@ -4,6 +4,37 @@ import XCTest
 
 @MainActor
 final class UserDataCloudBackupServiceTests: XCTestCase {
+    func testWorkoutCompletionBackupIsDeferredPastCompletionPresentation() {
+        XCTAssertEqual(
+            BoundaryCloudBackupScheduler.enqueueDelay(for: .workoutCompleted),
+            .seconds(2)
+        )
+        XCTAssertEqual(
+            BoundaryCloudBackupScheduler.enqueueDelay(for: .workoutCompletionTemplateSaved),
+            .seconds(2)
+        )
+        XCTAssertEqual(
+            BoundaryCloudBackupScheduler.enqueueDelay(for: .templateSaved),
+            .zero
+        )
+        XCTAssertEqual(
+            BoundaryCloudBackupScheduler.enqueueDelay(for: .workoutDeleted),
+            .zero
+        )
+    }
+
+    func testTemplateRepositoryCanUseWorkoutCompletionTemplateBackupReason() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let repository = TemplateRepository(
+            modelContext: context,
+            autoSaveChanges: false,
+            userDataChangeBackupReason: .workoutCompletionTemplateSaved
+        )
+
+        XCTAssertEqual(repository.backupReasonForUserDataChanges, .workoutCompletionTemplateSaved)
+    }
+
     func testDuplicateTemplatePreservesPreviousSetTargets() throws {
         let container = try makeInMemoryContainer()
         let context = ModelContext(container)

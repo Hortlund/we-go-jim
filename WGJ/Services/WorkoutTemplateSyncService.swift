@@ -212,8 +212,14 @@ nonisolated final class WorkoutTemplateSyncService {
         return WorkoutTemplateSyncPreviewBuilder.buildPreview(template: template, session: session)
     }
 
-    func applyTemplateUpdate(_ preview: WorkoutTemplateSyncPreview) throws {
-        let repository = TemplateRepository(modelContext: modelContext)
+    func applyTemplateUpdate(
+        _ preview: WorkoutTemplateSyncPreview,
+        backupReason: BoundaryCloudBackupReason = .templateSaved
+    ) throws {
+        let repository = TemplateRepository(
+            modelContext: modelContext,
+            userDataChangeBackupReason: backupReason
+        )
         try repository.applyWorkoutTemplateSync(
             templateID: preview.templateID,
             templateNotes: preview.mutation.templateNotes,

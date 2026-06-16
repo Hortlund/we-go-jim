@@ -322,10 +322,20 @@ nonisolated final class TemplateRepository {
 
     private let modelContext: ModelContext
     private let autoSaveChanges: Bool
+    private let userDataChangeBackupReason: BoundaryCloudBackupReason
 
-    init(modelContext: ModelContext, autoSaveChanges: Bool = true) {
+    init(
+        modelContext: ModelContext,
+        autoSaveChanges: Bool = true,
+        userDataChangeBackupReason: BoundaryCloudBackupReason = .templateSaved
+    ) {
         self.modelContext = modelContext
         self.autoSaveChanges = autoSaveChanges
+        self.userDataChangeBackupReason = userDataChangeBackupReason
+    }
+
+    var backupReasonForUserDataChanges: BoundaryCloudBackupReason {
+        userDataChangeBackupReason
     }
 
     private func preferredLoadUnit() -> TemplateLoadUnit {
@@ -343,7 +353,7 @@ nonisolated final class TemplateRepository {
         TemplateLibraryChangeBroadcaster.post()
         BoundaryCloudBackupScheduler.exportBestEffort(
             container: modelContext.container,
-            reason: .templateSaved
+            reason: userDataChangeBackupReason
         )
     }
 
@@ -354,7 +364,7 @@ nonisolated final class TemplateRepository {
         TemplateLibraryChangeBroadcaster.post()
         BoundaryCloudBackupScheduler.exportBestEffort(
             container: modelContext.container,
-            reason: .templateSaved
+            reason: userDataChangeBackupReason
         )
     }
 

@@ -1968,7 +1968,11 @@ struct ActiveWorkoutView: View {
         Task.detached(priority: .utility) {
             do {
                 _ = try await backgroundStore.performWrite("active-workout.template.create-from-session") { backgroundContext in
-                    let repository = TemplateRepository(modelContext: backgroundContext, autoSaveChanges: false)
+                    let repository = TemplateRepository(
+                        modelContext: backgroundContext,
+                        autoSaveChanges: false,
+                        userDataChangeBackupReason: .workoutCompletionTemplateSaved
+                    )
                     let template = try repository.createTemplate(
                         fromSessionID: sessionID,
                         name: templateName,
@@ -2246,7 +2250,10 @@ struct ActiveWorkoutView: View {
         Task.detached(priority: .utility) {
             do {
                 try await backgroundStore.performWrite("active-workout.template.apply-sync") { backgroundContext in
-                    try WorkoutTemplateSyncService(modelContext: backgroundContext).applyTemplateUpdate(preview)
+                    try WorkoutTemplateSyncService(modelContext: backgroundContext).applyTemplateUpdate(
+                        preview,
+                        backupReason: .workoutCompletionTemplateSaved
+                    )
                 }
                 await MainActor.run {
                     TemplateLibraryChangeBroadcaster.post()
