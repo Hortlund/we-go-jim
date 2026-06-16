@@ -60,6 +60,7 @@ nonisolated enum UserDataCloudBackupDescriptor {
 
 nonisolated enum BoundaryCloudBackupReason: String, Sendable {
     case workoutCompleted
+    case workoutCompletionTemplateSaved
     case workoutDeleted
     case templateSaved
 
@@ -67,6 +68,8 @@ nonisolated enum BoundaryCloudBackupReason: String, Sendable {
         switch self {
         case .workoutCompleted:
             return "workout completion"
+        case .workoutCompletionTemplateSaved:
+            return "workout completion template update"
         case .workoutDeleted:
             return "workout delete"
         case .templateSaved:
@@ -76,10 +79,25 @@ nonisolated enum BoundaryCloudBackupReason: String, Sendable {
 }
 
 nonisolated enum BoundaryCloudBackupScheduler {
+    static let workoutCompletionSettleDelay: Duration = .seconds(2)
+
+    static func enqueueDelay(for reason: BoundaryCloudBackupReason) -> Duration {
+        switch reason {
+        case .workoutCompleted, .workoutCompletionTemplateSaved:
+            return workoutCompletionSettleDelay
+        case .workoutDeleted, .templateSaved:
+            return .zero
+        }
+    }
+
     static func exportBestEffort(container: ModelContainer, reason: BoundaryCloudBackupReason) {
         guard AppRuntimeConfig.canUseConfiguredCloudKitContainer else { return }
 
         Task.detached(priority: .utility) {
+            let delay = enqueueDelay(for: reason)
+            if delay > .zero {
+                try? await Task.sleep(for: delay)
+            }
             await BoundaryCloudBackupExportQueue.shared.enqueue(container: container, reason: reason)
         }
     }
