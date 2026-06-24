@@ -708,10 +708,12 @@ struct ContentView: View {
     }
 
     nonisolated private static func isLocalUserDataEmpty(modelContext: ModelContext) throws -> Bool {
-        try modelContext.fetch(FetchDescriptor<UserProfile>()).isEmpty
+        let customExercises = try modelContext.fetch(FetchDescriptor<ExerciseCatalogItem>())
+            .filter(\.isCustomExercise)
+        return try modelContext.fetch(FetchDescriptor<UserProfile>()).isEmpty
             && modelContext.fetch(FetchDescriptor<WorkoutTemplate>()).isEmpty
             && modelContext.fetch(FetchDescriptor<WorkoutSession>()).isEmpty
-            && modelContext.fetch(FetchDescriptor<CustomExerciseCloudRecord>()).isEmpty
+            && customExercises.isEmpty
     }
 
     @MainActor

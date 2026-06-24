@@ -3,6 +3,50 @@ import SwiftUI
 @testable import WGJ
 
 final class ActiveWorkoutRuntimeTests: XCTestCase {
+    func testAsyncLoadGenerationTrackerInvalidatesOlderLoads() {
+        var tracker = AsyncLoadGenerationTracker()
+
+        let first = tracker.next()
+        let second = tracker.next()
+
+        XCTAssertFalse(tracker.isCurrent(first))
+        XCTAssertTrue(tracker.isCurrent(second))
+
+        tracker.invalidate()
+
+        XCTAssertFalse(tracker.isCurrent(second))
+    }
+
+    func testCancelledCorruptSnapshotLoadDoesNotDeleteValidSnapshot() async throws {
+        let baseDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("active-workout-snapshot-cancel-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: baseDirectory)
+        }
+
+        let store = ActiveWorkoutSnapshotStore(baseDirectory: baseDirectory)
+        let session = ActiveWorkoutRuntimeSession(
+            id: UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!,
+            name: "Push",
+            startedAt: Date(timeIntervalSince1970: 100)
+        )
+        try await store.save(session)
+
+        let cancelledLoad = Task {
+            try await store.loadDiscardingCorruptSnapshot()
+        }
+        cancelledLoad.cancel()
+
+        do {
+            _ = try await cancelledLoad.value
+        } catch is CancellationError {
+            // Expected: cancellation should propagate without treating the stored snapshot as corrupt.
+        }
+
+        let loadedSession = try await store.load()
+        XCTAssertEqual(loadedSession?.id, session.id)
+    }
+
     func testTemplateExerciseReplacementPreservesSetIdentityAndPreviousTargets() {
         let exerciseID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
         let firstSetID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!

@@ -10,7 +10,10 @@ struct ProgressDashboardView: View {
     @State private var selectedPreviousSessionID: UUID?
     @State private var selectedCurrentSessionID: UUID?
     @State private var hasLoadedSnapshot = false
+    @State private var lastLoadedContentUpdatedAt: Date?
+    @State private var lastRefreshAt: Date?
     @State private var isLoadingSnapshot = false
+    @State private var snapshotLoadGeneration = AsyncLoadGenerationTracker()
     @State private var isWorkoutPickerExpanded = false
     @State private var pickerTarget: ProgressWorkoutPickerTarget?
     @State private var errorMessage = ""
@@ -270,14 +273,29 @@ struct ProgressDashboardView: View {
 
     @MainActor
     private func reloadSnapshotIfNeeded() async {
-        guard !hasLoadedSnapshot else { return }
-        await reloadSnapshot()
+        let currentContentUpdatedAt = await currentProgressContentUpdatedAt()
+        guard TimestampedReloadPolicy.shouldReload(
+            hasLoaded: hasLoadedSnapshot,
+            needsExplicitRefresh: false,
+            currentContentUpdatedAt: currentContentUpdatedAt,
+            lastLoadedContentUpdatedAt: lastLoadedContentUpdatedAt,
+            lastRefreshAt: lastRefreshAt
+        ) else {
+            return
+        }
+
+        await reloadSnapshot(contentUpdatedAt: currentContentUpdatedAt)
     }
 
     @MainActor
-    private func reloadSnapshot() async {
+    private func reloadSnapshot(contentUpdatedAt: Date? = nil) async {
+        let loadGeneration = snapshotLoadGeneration.next()
         isLoadingSnapshot = true
-        defer { isLoadingSnapshot = false }
+        defer {
+            if snapshotLoadGeneration.isCurrent(loadGeneration) {
+                isLoadingSnapshot = false
+            }
+        }
 
         do {
             let previousSelection = selectedPreviousSessionID
@@ -291,11 +309,15 @@ struct ProgressDashboardView: View {
                 )
             }
 
+            guard snapshotLoadGeneration.isCurrent(loadGeneration) else { return }
             snapshot = loadedSnapshot
             selectedPreviousSessionID = loadedSnapshot.selectedPreviousSessionID
             selectedCurrentSessionID = loadedSnapshot.selectedCurrentSessionID
             hasLoadedSnapshot = true
+            lastLoadedContentUpdatedAt = contentUpdatedAt
+            lastRefreshAt = .now
         } catch {
+            guard snapshotLoadGeneration.isCurrent(loadGeneration) else { return }
             errorMessage = String(describing: error)
             showingError = true
         }
@@ -322,6 +344,14 @@ struct ProgressDashboardView: View {
         isWorkoutPickerExpanded = false
         Task {
             await reloadSnapshot()
+        }
+    }
+
+    @MainActor
+    private func currentProgressContentUpdatedAt() async -> Date? {
+        let backgroundStore = progressBackgroundStore
+        return try? await backgroundStore.perform("progress-dashboard.latest-updated-at") { backgroundContext in
+            try WorkoutSessionRepository(modelContext: backgroundContext).latestCompletedSessionUpdatedAt()
         }
     }
 }

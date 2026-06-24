@@ -671,13 +671,6 @@ struct StartWorkoutHomeView: View {
         }
     }
 
-    private func prepareActiveWorkoutStart(templateID: UUID?) async throws -> ActiveWorkoutStartPreparation {
-        try await Self.prepareActiveWorkoutStart(
-            templateID: templateID,
-            backgroundStore: startWorkoutBackgroundStore
-        )
-    }
-
     nonisolated private static func prepareActiveWorkoutStart(
         templateID: UUID?,
         backgroundStore: AppBackgroundStore

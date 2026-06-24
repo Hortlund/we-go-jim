@@ -560,7 +560,10 @@ nonisolated enum WorkoutCompletionSnapshotBuilder {
         let completedSetCount = exerciseData.reduce(0) { partialResult, data in
             partialResult + data.completedSetCount
         }
-        let catalogMuscleMappings = try WorkoutMuscleHeatmapBuilder.catalogMappings(modelContext: modelContext)
+        let catalogMuscleMappings = try WorkoutMuscleHeatmapBuilder.catalogMappings(
+            modelContext: modelContext,
+            catalogExerciseUUIDs: Set(exercises.map(\.catalogExerciseUUID))
+        )
         let muscleHeatmapScores = exercises.reduce(into: [ExerciseBodyMapRegion: Double]()) { scores, exercise in
             let exerciseScores = WorkoutMuscleHeatmapBuilder.scores(
                 for: exercise,

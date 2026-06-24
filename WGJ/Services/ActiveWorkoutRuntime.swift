@@ -519,6 +519,8 @@ actor ActiveWorkoutSnapshotStore {
     func loadDiscardingCorruptSnapshot() throws -> ActiveWorkoutRuntimeSession? {
         do {
             return try load()
+        } catch let error as CancellationError {
+            throw error
         } catch {
             try delete()
             return nil

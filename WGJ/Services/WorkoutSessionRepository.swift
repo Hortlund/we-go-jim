@@ -391,20 +391,20 @@ nonisolated final class WorkoutSessionRepository {
             descriptor = FetchDescriptor<WorkoutSession>(
                 predicate: #Predicate { session in
                     session.statusRaw == completedStatus
-                        && session.startedAt >= dayStart
-                        && session.startedAt < dayEnd
+                        && (session.endedAt ?? session.startedAt) >= dayStart
+                        && (session.endedAt ?? session.startedAt) < dayEnd
                 },
-                sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+                sortBy: [SortDescriptor(\.endedAt, order: .reverse), SortDescriptor(\.startedAt, order: .reverse)]
             )
         } else {
             descriptor = FetchDescriptor<WorkoutSession>(
                 predicate: #Predicate { session in
                     session.statusRaw == completedStatus
                         && session.archivedAt == nil
-                        && session.startedAt >= dayStart
-                        && session.startedAt < dayEnd
+                        && (session.endedAt ?? session.startedAt) >= dayStart
+                        && (session.endedAt ?? session.startedAt) < dayEnd
                 },
-                sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+                sortBy: [SortDescriptor(\.endedAt, order: .reverse), SortDescriptor(\.startedAt, order: .reverse)]
             )
         }
 
@@ -428,8 +428,8 @@ nonisolated final class WorkoutSessionRepository {
             descriptor = FetchDescriptor<WorkoutSession>(
                 predicate: #Predicate { session in
                     session.statusRaw == completedStatus
-                        && session.startedAt >= monthStart
-                        && session.startedAt < monthEnd
+                        && (session.endedAt ?? session.startedAt) >= monthStart
+                        && (session.endedAt ?? session.startedAt) < monthEnd
                 }
             )
         } else {
@@ -437,15 +437,15 @@ nonisolated final class WorkoutSessionRepository {
                 predicate: #Predicate { session in
                     session.statusRaw == completedStatus
                         && session.archivedAt == nil
-                        && session.startedAt >= monthStart
-                        && session.startedAt < monthEnd
+                        && (session.endedAt ?? session.startedAt) >= monthStart
+                        && (session.endedAt ?? session.startedAt) < monthEnd
                 }
             )
         }
 
         var counts: [Date: Int] = [:]
         for session in try modelContext.fetch(descriptor) {
-            counts[calendar.startOfDay(for: session.startedAt), default: 0] += 1
+            counts[calendar.startOfDay(for: session.endedAt ?? session.startedAt), default: 0] += 1
         }
         return counts
     }

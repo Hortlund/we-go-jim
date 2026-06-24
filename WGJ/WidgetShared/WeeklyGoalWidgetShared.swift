@@ -310,13 +310,11 @@ nonisolated struct WeeklyGoalWidgetStore {
         let data = try encoder.encode(snapshot)
         defaults.set(data, forKey: Self.snapshotDefaultsKey)
         clearLegacySnapshots()
-        defaults.synchronize()
     }
 
     func clear() {
         defaults.removeObject(forKey: Self.snapshotDefaultsKey)
         clearLegacySnapshots()
-        defaults.synchronize()
     }
 
     private func clearLegacySnapshots() {

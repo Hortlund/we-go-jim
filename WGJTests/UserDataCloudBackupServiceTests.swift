@@ -585,6 +585,68 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         XCTAssertNotEqual(row.bestSet, "-")
     }
 
+    func testHistoryQueriesUseDisplayedCompletionDayForOvernightWorkouts() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let startedAt = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2025,
+            month: 12,
+            day: 31,
+            hour: 23,
+            minute: 30
+        )))
+        let endedAt = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 1,
+            day: 1,
+            hour: 0,
+            minute: 30
+        )))
+        let selectedDay = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 1,
+            day: 1
+        )))
+        let sessionID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        context.insert(WorkoutSession(
+            id: sessionID,
+            name: "New Year Session",
+            status: .completed,
+            startedAt: startedAt,
+            endedAt: endedAt,
+            durationSeconds: 3_600
+        ))
+        try context.save()
+
+        let repository = WorkoutSessionRepository(modelContext: context)
+        let sessions = try repository.completedSessions(onDay: selectedDay, calendar: calendar)
+        let counts = try repository.completedWorkoutCountsByDay(inMonthContaining: selectedDay, calendar: calendar)
+
+        XCTAssertEqual(sessions.map(\.id), [sessionID])
+        XCTAssertEqual(counts[calendar.startOfDay(for: selectedDay)], 1)
+    }
+
+    func testWorkoutHeatmapCatalogMappingsCanBeScopedToWorkoutExercises() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+
+        context.insert(ExerciseCatalogItem(remoteUUID: "bench", displayName: "Bench Press"))
+        context.insert(ExerciseCatalogItem(remoteUUID: "squat", displayName: "Squat"))
+        try context.save()
+
+        let mappings = try WorkoutMuscleHeatmapBuilder.catalogMappings(
+            modelContext: context,
+            catalogExerciseUUIDs: ["bench"]
+        )
+
+        XCTAssertEqual(Set(mappings.keys), ["bench"])
+    }
+
     func testHistoryProjectionUsesSessionExerciseIDs() throws {
         let container = try makeInMemoryContainer()
         let context = ModelContext(container)
