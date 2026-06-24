@@ -50,6 +50,10 @@ struct HistoryDetailView: View {
         snapshot?.cardioBlocks ?? []
     }
 
+    private var personalRecordHighlights: [HistoryDetailSnapshotBuilder.PersonalRecordHighlight] {
+        snapshot?.personalRecordHighlights ?? []
+    }
+
     init(sessionID: UUID) {
         self.sessionID = sessionID
     }
@@ -61,6 +65,7 @@ struct HistoryDetailView: View {
             VStack(alignment: .leading, spacing: WGJSpacing.section) {
                 if let session {
                     headerCard(session)
+                    personalRecordHighlightsSection
                     workoutMuscleHeatmapCard
                     cardioSection
                     exercisesSectionHeader
@@ -184,6 +189,22 @@ struct HistoryDetailView: View {
                     }
                     .buttonStyle(WGJPrimaryButtonStyle())
                     .disabled(session == nil)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var personalRecordHighlightsSection: some View {
+        if !personalRecordHighlights.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                WGJActionHeader(
+                    "PR Highlights",
+                    subtitle: "\(personalRecordHighlights.count) PR set\(personalRecordHighlights.count == 1 ? "" : "s") from this workout."
+                )
+
+                ForEach(personalRecordHighlights) { highlight in
+                    HistoryPersonalRecordHighlightCard(highlight: highlight)
                 }
             }
         }
@@ -978,6 +999,71 @@ private struct HistoryWorkoutPersonalRecordSummary {
     }
 }
 
+private struct HistoryPersonalRecordHighlightCard: View, Equatable {
+    let highlight: HistoryDetailSnapshotBuilder.PersonalRecordHighlight
+
+    static func == (lhs: HistoryPersonalRecordHighlightCard, rhs: HistoryPersonalRecordHighlightCard) -> Bool {
+        lhs.highlight == rhs.highlight
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: "trophy.fill")
+                .font(.headline.weight(.bold))
+                .foregroundStyle(WGJTheme.accentGold)
+                .frame(width: 40, height: 40)
+                .background {
+                    Circle()
+                        .fill(WGJTheme.accentGold.opacity(0.14))
+                }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(highlight.exerciseName)
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(WGJTheme.textPrimary)
+                    .wgjSingleLineText(scale: 0.82)
+
+                Text("\(highlight.setTitle) · \(highlight.performanceText)")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(WGJTheme.accentGold)
+                    .monospacedDigit()
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(highlight.detailText)
+                    .font(.caption)
+                    .foregroundStyle(WGJTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 12)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(WGJTheme.cardStrong.opacity(0.98))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    WGJTheme.accentGold.opacity(0.14),
+                                    Color.clear,
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(WGJTheme.accentGold.opacity(0.30), lineWidth: 1)
+                }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
 @MainActor
 private final class HistorySessionHeaderFlushCoordinator {
     private var flushHandler: (@MainActor () -> Void)?
@@ -1652,6 +1738,7 @@ private struct HistoryExerciseDetailEditorCard: View {
 
     private func setCard(_ draft: WorkoutSessionSetDraft, index: Int) -> some View {
         let personalRecordKinds = personalRecordKindsBySetID[draft.id] ?? []
+        let isPersonalRecordSet = !personalRecordKinds.isEmpty
         let previous = previousPerformanceResolution.previous(at: index)
 
         return VStack(alignment: .leading, spacing: 12) {
@@ -1676,6 +1763,10 @@ private struct HistoryExerciseDetailEditorCard: View {
                                 .font(.caption.weight(.bold))
                                 .foregroundStyle(WGJTheme.accentGold)
                         }
+                    }
+
+                    if isPersonalRecordSet {
+                        personalRecordChipGroup(personalRecordKinds, compact: true)
                     }
 
                     if let previousText = previousSummary(previous) {
@@ -1750,15 +1841,31 @@ private struct HistoryExerciseDetailEditorCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(draft.isCompleted ? WGJTheme.success.opacity(0.14) : WGJTheme.field)
+                .fill(setCardFill(isPersonalRecordSet: isPersonalRecordSet, isCompleted: draft.isCompleted))
                 .overlay(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .stroke(
-                            draft.isCompleted ? WGJTheme.success.opacity(0.34) : WGJTheme.outline.opacity(0.20),
+                            setCardStroke(isPersonalRecordSet: isPersonalRecordSet, isCompleted: draft.isCompleted),
                             lineWidth: 1
                         )
                 )
         )
+    }
+
+    private func setCardFill(isPersonalRecordSet: Bool, isCompleted: Bool) -> Color {
+        if isPersonalRecordSet {
+            return WGJTheme.accentGold.opacity(0.13)
+        }
+
+        return isCompleted ? WGJTheme.success.opacity(0.14) : WGJTheme.field
+    }
+
+    private func setCardStroke(isPersonalRecordSet: Bool, isCompleted: Bool) -> Color {
+        if isPersonalRecordSet {
+            return WGJTheme.accentGold.opacity(0.48)
+        }
+
+        return isCompleted ? WGJTheme.success.opacity(0.34) : WGJTheme.outline.opacity(0.20)
     }
 
     private func metricField<Content: View>(
@@ -1795,20 +1902,51 @@ private struct HistoryExerciseDetailEditorCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func personalRecordChipGroup(_ kinds: [WorkoutPersonalRecordKind]) -> some View {
+    private func personalRecordChipGroup(_ kinds: [WorkoutPersonalRecordKind], compact: Bool = false) -> some View {
         let indexedKinds = Array(kinds.sorted().enumerated())
-        return HStack(spacing: 8) {
-            ForEach(indexedKinds, id: \.offset) { _, kind in
-                Text(kind.chipTitle)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(WGJTheme.accentGold)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(
-                        Capsule()
-                            .fill(WGJTheme.accentGold.opacity(0.14))
-                    )
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                ForEach(indexedKinds, id: \.offset) { _, kind in
+                    personalRecordChip(kind, compact: compact)
+                }
             }
+
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(indexedKinds, id: \.offset) { _, kind in
+                    personalRecordChip(kind, compact: compact)
+                }
+            }
+        }
+    }
+
+    private func personalRecordChip(_ kind: WorkoutPersonalRecordKind, compact: Bool) -> some View {
+        let tint = personalRecordTint(for: kind)
+
+        return Label(kind.chipTitle, systemImage: kind.systemImage)
+            .font((compact ? Font.caption2 : Font.caption).weight(.bold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, compact ? 8 : 10)
+            .padding(.vertical, compact ? 5 : 6)
+            .background(
+                Capsule()
+                    .fill(tint.opacity(0.14))
+                    .overlay(
+                        Capsule()
+                            .stroke(tint.opacity(0.28), lineWidth: 1)
+                    )
+            )
+    }
+
+    private func personalRecordTint(for kind: WorkoutPersonalRecordKind) -> Color {
+        switch kind {
+        case .strength:
+            return WGJTheme.accentGold
+        case .weight:
+            return WGJTheme.accentBlue
+        case .reps:
+            return WGJTheme.success
+        case .volume:
+            return WGJTheme.accentCyan
         }
     }
 
