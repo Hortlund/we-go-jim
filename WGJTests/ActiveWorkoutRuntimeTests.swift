@@ -47,6 +47,42 @@ final class ActiveWorkoutRuntimeTests: XCTestCase {
         XCTAssertEqual(loadedSession?.id, session.id)
     }
 
+    func testHydrationStampChangesWhenSetDraftsChange() {
+        let exerciseID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let firstSetID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let addedSetID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        let firstSet = WorkoutSessionSetDraft(id: firstSetID, actualReps: 8, actualWeight: 100)
+        let addedSet = WorkoutSessionSetDraft(id: addedSetID, actualReps: nil, actualWeight: nil)
+        let exercise = ActiveWorkoutRuntimeExercise(
+            id: exerciseID,
+            catalogExerciseUUID: "bench-press",
+            exerciseNameSnapshot: "Bench Press",
+            categorySnapshot: "Strength",
+            muscleSummarySnapshot: "Chest",
+            setDrafts: [firstSet]
+        )
+        let session = ActiveWorkoutRuntimeSession(name: "Push", exercises: [exercise])
+
+        let originalProjection = ActiveWorkoutRenderProjectionBuilder.build(
+            session: session,
+            setDraftsByExerciseID: [exerciseID: [firstSet]],
+            pendingCardioCompletionsByPhase: [:]
+        )
+        let updatedProjection = ActiveWorkoutRenderProjectionBuilder.build(
+            session: session,
+            setDraftsByExerciseID: [exerciseID: [firstSet, addedSet]],
+            pendingCardioCompletionsByPhase: [:]
+        )
+
+        XCTAssertNotEqual(originalProjection.exerciseHydrationStamp, updatedProjection.exerciseHydrationStamp)
+        XCTAssertEqual(
+            updatedProjection.exerciseHydrationStamp.changedExerciseIDs(
+                comparedTo: originalProjection.exerciseHydrationStamp
+            ),
+            [exerciseID]
+        )
+    }
+
     func testTemplateExerciseReplacementPreservesSetIdentityAndPreviousTargets() {
         let exerciseID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
         let firstSetID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!

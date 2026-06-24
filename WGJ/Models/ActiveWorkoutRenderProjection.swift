@@ -88,7 +88,10 @@ nonisolated enum ActiveWorkoutRenderProjectionBuilder {
             areAllMainExercisesCompleted: areAllMainExercisesCompleted,
             hasWorkoutContent: !exercises.isEmpty || !cardioBlocks.isEmpty,
             supersetContextByExerciseID: supersetContextByExerciseID(from: displayGroups),
-            exerciseHydrationStamp: exerciseHydrationStamp(from: exercises)
+            exerciseHydrationStamp: exerciseHydrationStamp(
+                from: exercises,
+                setDraftsByExerciseID: setDraftsByExerciseID
+            )
         )
     }
 
@@ -119,16 +122,19 @@ nonisolated enum ActiveWorkoutRenderProjectionBuilder {
     }
 
     private static func exerciseHydrationStamp(
-        from exercises: [ActiveWorkoutRuntimeExercise]
+        from exercises: [ActiveWorkoutRuntimeExercise],
+        setDraftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
     ) -> ActiveWorkoutExerciseInteractionStamp {
         ActiveWorkoutExerciseInteractionStamp(
             entries: exercises.map { exercise in
-                ActiveWorkoutExerciseInteractionStamp.Entry(
+                let setDrafts = setDraftsByExerciseID[exercise.id] ?? exercise.setDrafts
+                return ActiveWorkoutExerciseInteractionStamp.Entry(
                     id: exercise.id,
                     catalogExerciseUUID: exercise.catalogExerciseUUID,
                     restSeconds: exercise.restSeconds,
                     targetRepMin: exercise.targetRepMin,
                     targetRepMax: exercise.targetRepMax,
+                    setDraftIDs: setDrafts.map(\.id),
                     supersetGroupID: exercise.supersetGroupID,
                     supersetPositionRaw: exercise.supersetPositionRaw
                 )
