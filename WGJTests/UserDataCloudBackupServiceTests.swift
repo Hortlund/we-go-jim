@@ -4,6 +4,21 @@ import XCTest
 
 @MainActor
 final class UserDataCloudBackupServiceTests: XCTestCase {
+    func testStartupRootViewDoesNotReadOrRestoreCloudBackup() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let repositoryRoot = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let contentViewURL = repositoryRoot
+            .appendingPathComponent("WGJ")
+            .appendingPathComponent("ContentView.swift")
+        let contentViewSource = try String(contentsOf: contentViewURL, encoding: .utf8)
+
+        XCTAssertFalse(contentViewSource.contains("UserDataCloudBackupService("))
+        XCTAssertFalse(contentViewSource.contains("restoreLatestBackup("))
+        XCTAssertFalse(contentViewSource.contains("app.startup-cloud-restore"))
+    }
+
     func testWorkoutCompletionBackupIsDeferredPastCompletionPresentation() {
         XCTAssertEqual(
             BoundaryCloudBackupScheduler.enqueueDelay(for: .workoutCompleted),
