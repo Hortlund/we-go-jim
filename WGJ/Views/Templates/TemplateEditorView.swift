@@ -1002,8 +1002,6 @@ private struct TemplateEditorExerciseRow: View {
     let onMoveComponentDown: (Int) -> Void
     let onDeleteComponent: (UUID) -> Void
 
-    @State private var swipeOffset: CGFloat = 0
-    @State private var swipeRemoving = false
     @State private var localNotes: String
     @State private var localTargetRepMin: Int?
     @State private var localTargetRepMax: Int?
@@ -1093,105 +1091,96 @@ private struct TemplateEditorExerciseRow: View {
     }
 
     var body: some View {
-        SwipeDeleteRow(
-            offset: $swipeOffset,
-            isRemoving: $swipeRemoving,
-            activeRegionMaxY: 116,
-            gestureStrategy: .simultaneous
-        ) {
-            onExerciseDelete()
-        } content: {
-            TemplateEditorExerciseCardView(
-                exerciseName: draftStore.exerciseNameSnapshot,
-                muscleSummary: draftStore.muscleSummarySnapshot,
-                category: draftStore.categorySnapshot,
-                exerciseAccessibilityIdentifier: "template-editor-exercise-\(draftStore.catalogExerciseUUID)",
-                recommendation: recommendation,
-                exerciseIndexTitle: exerciseIndexTitle,
-                canMoveUp: canMoveUp,
-                canMoveDown: canMoveDown,
-                preferredLoadUnit: preferredLoadUnit,
+        TemplateEditorExerciseCardView(
+            exerciseName: draftStore.exerciseNameSnapshot,
+            muscleSummary: draftStore.muscleSummarySnapshot,
+            category: draftStore.categorySnapshot,
+            exerciseAccessibilityIdentifier: "template-editor-exercise-\(draftStore.catalogExerciseUUID)",
+            recommendation: recommendation,
+            exerciseIndexTitle: exerciseIndexTitle,
+            canMoveUp: canMoveUp,
+            canMoveDown: canMoveDown,
+            preferredLoadUnit: preferredLoadUnit,
+            supersetPresentation: supersetPresentation,
+            canMakeSupersetWithNext: canMakeSupersetWithNext,
+            structureSummaries: structureSummaries(
                 supersetPresentation: supersetPresentation,
-                canMakeSupersetWithNext: canMakeSupersetWithNext,
-                structureSummaries: structureSummaries(
-                    supersetPresentation: supersetPresentation,
+                setDrafts: localSetDrafts
+            ),
+            notes: localNotes,
+            targetRepMin: localTargetRepMin,
+            targetRepMax: localTargetRepMax,
+            restSeconds: localRestSeconds,
+            setDrafts: localSetDrafts,
+            isExpanded: draftStore.isExpanded,
+            keyboardDismissToken: keyboardDismissToken,
+            onCommitRequest: {
+                editingCoordinator.requestImmediateCommit(
+                    notes: localNotes,
+                    targetRepMin: localTargetRepMin,
+                    targetRepMax: localTargetRepMax,
+                    restSeconds: localRestSeconds,
                     setDrafts: localSetDrafts
-                ),
-                notes: localNotes,
-                targetRepMin: localTargetRepMin,
-                targetRepMax: localTargetRepMax,
-                restSeconds: localRestSeconds,
-                setDrafts: localSetDrafts,
-                isExpanded: draftStore.isExpanded,
-                keyboardDismissToken: keyboardDismissToken,
-                onCommitRequest: {
-                    editingCoordinator.requestImmediateCommit(
-                        notes: localNotes,
-                        targetRepMin: localTargetRepMin,
-                        targetRepMax: localTargetRepMax,
-                        restSeconds: localRestSeconds,
-                        setDrafts: localSetDrafts
-                    )
-                },
-                onExpandedChanged: updateExpanded,
-                onNotesChanged: { value in
-                    localNotes = value
-                    editingCoordinator.scheduleNotesCommit(value)
-                },
-                onTargetRepMinChanged: { value in
-                    localTargetRepMin = value
-                    editingCoordinator.requestImmediateCommit(
-                        notes: localNotes,
-                        targetRepMin: value,
-                        targetRepMax: localTargetRepMax,
-                        restSeconds: localRestSeconds,
-                        setDrafts: localSetDrafts
-                    )
-                },
-                onTargetRepMaxChanged: { value in
-                    localTargetRepMax = value
-                    editingCoordinator.requestImmediateCommit(
-                        notes: localNotes,
-                        targetRepMin: localTargetRepMin,
-                        targetRepMax: value,
-                        restSeconds: localRestSeconds,
-                        setDrafts: localSetDrafts
-                    )
-                },
-                onRestChanged: { value in
-                    localRestSeconds = value
-                    editingCoordinator.scheduleRestCommit(value)
-                },
-                onSetDraftsChanged: { value in
-                    localSetDrafts = value
-                    editingCoordinator.scheduleSetDraftCommit(value)
-                },
-                onMoveUp: onMoveUp,
-                onMoveDown: onMoveDown,
-                onMakeSuperset: onMakeSuperset,
-                onUnpairSuperset: onUnpairSuperset,
-                onSupersetRoundRestChanged: onSupersetRoundRestChanged,
-                onMoveToPosition: onMoveToPosition,
-                onExerciseReplace: onExerciseReplace,
-                onExerciseDelete: onExerciseDelete,
-                components: draftStore.components,
-                componentAccessibilityIDPrefix: "template-editor-component-\(draftStore.id.uuidString.lowercased())",
-                onAddComponent: onAddComponent,
-                onMoveComponentUp: onMoveComponentUp,
-                onMoveComponentDown: onMoveComponentDown,
-                onDeleteComponent: onDeleteComponent,
-                shouldCommitOnDisappear: {
-                    editingCoordinator.hasPendingChanges(
-                        notes: localNotes,
-                        targetRepMin: localTargetRepMin,
-                        targetRepMax: localTargetRepMax,
-                        restSeconds: localRestSeconds,
-                        setDrafts: localSetDrafts
-                    )
-                }
-            )
-            .equatable()
-        }
+                )
+            },
+            onExpandedChanged: updateExpanded,
+            onNotesChanged: { value in
+                localNotes = value
+                editingCoordinator.scheduleNotesCommit(value)
+            },
+            onTargetRepMinChanged: { value in
+                localTargetRepMin = value
+                editingCoordinator.requestImmediateCommit(
+                    notes: localNotes,
+                    targetRepMin: value,
+                    targetRepMax: localTargetRepMax,
+                    restSeconds: localRestSeconds,
+                    setDrafts: localSetDrafts
+                )
+            },
+            onTargetRepMaxChanged: { value in
+                localTargetRepMax = value
+                editingCoordinator.requestImmediateCommit(
+                    notes: localNotes,
+                    targetRepMin: localTargetRepMin,
+                    targetRepMax: value,
+                    restSeconds: localRestSeconds,
+                    setDrafts: localSetDrafts
+                )
+            },
+            onRestChanged: { value in
+                localRestSeconds = value
+                editingCoordinator.scheduleRestCommit(value)
+            },
+            onSetDraftsChanged: { value in
+                localSetDrafts = value
+                editingCoordinator.scheduleSetDraftCommit(value)
+            },
+            onMoveUp: onMoveUp,
+            onMoveDown: onMoveDown,
+            onMakeSuperset: onMakeSuperset,
+            onUnpairSuperset: onUnpairSuperset,
+            onSupersetRoundRestChanged: onSupersetRoundRestChanged,
+            onMoveToPosition: onMoveToPosition,
+            onExerciseReplace: onExerciseReplace,
+            onExerciseDelete: onExerciseDelete,
+            components: draftStore.components,
+            componentAccessibilityIDPrefix: "template-editor-component-\(draftStore.id.uuidString.lowercased())",
+            onAddComponent: onAddComponent,
+            onMoveComponentUp: onMoveComponentUp,
+            onMoveComponentDown: onMoveComponentDown,
+            onDeleteComponent: onDeleteComponent,
+            shouldCommitOnDisappear: {
+                editingCoordinator.hasPendingChanges(
+                    notes: localNotes,
+                    targetRepMin: localTargetRepMin,
+                    targetRepMax: localTargetRepMax,
+                    restSeconds: localRestSeconds,
+                    setDrafts: localSetDrafts
+                )
+            }
+        )
+        .equatable()
         .onChange(of: draftStore.targetRepMin) { _, newValue in
             editingCoordinator.syncCommittedState(
                 notes: draftStore.notes,

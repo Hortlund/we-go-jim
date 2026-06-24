@@ -4,6 +4,21 @@ import XCTest
 
 @MainActor
 final class UserDataCloudBackupServiceTests: XCTestCase {
+    func testStartupRootViewDoesNotReadOrRestoreCloudBackup() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let repositoryRoot = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let contentViewURL = repositoryRoot
+            .appendingPathComponent("WGJ")
+            .appendingPathComponent("ContentView.swift")
+        let contentViewSource = try String(contentsOf: contentViewURL, encoding: .utf8)
+
+        XCTAssertFalse(contentViewSource.contains("UserDataCloudBackupService("))
+        XCTAssertFalse(contentViewSource.contains("restoreLatestBackup("))
+        XCTAssertFalse(contentViewSource.contains("app.startup-cloud-restore"))
+    }
+
     func testWorkoutCompletionBackupIsDeferredPastCompletionPresentation() {
         XCTAssertEqual(
             BoundaryCloudBackupScheduler.enqueueDelay(for: .workoutCompleted),
@@ -583,6 +598,136 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         let row = try XCTUnwrap(loaded.completedSessions.first?.summaryRows.first)
         XCTAssertEqual(row.exercise, "1 x Lat Pulldown")
         XCTAssertNotEqual(row.bestSet, "-")
+    }
+
+    func testHistoryQueriesUseDisplayedCompletionDayForOvernightWorkouts() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let startedAt = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2025,
+            month: 12,
+            day: 31,
+            hour: 23,
+            minute: 30
+        )))
+        let endedAt = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 1,
+            day: 1,
+            hour: 0,
+            minute: 30
+        )))
+        let selectedDay = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 1,
+            day: 1
+        )))
+        let sessionID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        context.insert(WorkoutSession(
+            id: sessionID,
+            name: "New Year Session",
+            status: .completed,
+            startedAt: startedAt,
+            endedAt: endedAt,
+            durationSeconds: 3_600
+        ))
+        try context.save()
+
+        let repository = WorkoutSessionRepository(modelContext: context)
+        let sessions = try repository.completedSessions(onDay: selectedDay, calendar: calendar)
+        let counts = try repository.completedWorkoutCountsByDay(inMonthContaining: selectedDay, calendar: calendar)
+
+        XCTAssertEqual(sessions.map(\.id), [sessionID])
+        XCTAssertEqual(counts[calendar.startOfDay(for: selectedDay)], 1)
+    }
+
+    func testCompletedSessionsAreOrderedAndPagedByDisplayedCompletionDate() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+
+        let latestCompletionID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let earlierCompletionID = UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
+        let latestCompletion = WorkoutSession(
+            id: latestCompletionID,
+            name: "Started Earlier, Finished Later",
+            status: .completed,
+            startedAt: Date(timeIntervalSince1970: 100),
+            endedAt: Date(timeIntervalSince1970: 400),
+            durationSeconds: 300
+        )
+        let earlierCompletion = WorkoutSession(
+            id: earlierCompletionID,
+            name: "Started Later, Finished Earlier",
+            status: .completed,
+            startedAt: Date(timeIntervalSince1970: 300),
+            endedAt: Date(timeIntervalSince1970: 350),
+            durationSeconds: 50
+        )
+        context.insert(latestCompletion)
+        context.insert(earlierCompletion)
+        try context.save()
+
+        let repository = WorkoutSessionRepository(modelContext: context)
+        let firstPage = try repository.completedSessions(before: nil, limit: 1)
+        let nextPage = try repository.completedSessions(before: Date(timeIntervalSince1970: 375), limit: 10)
+
+        XCTAssertEqual(firstPage.map(\.id), [latestCompletionID])
+        XCTAssertEqual(nextPage.map(\.id), [earlierCompletionID])
+    }
+
+    func testCompletedSessionsTreatMissingEndDateAsStartedDateWhenOrderingAndPaging() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+
+        let inProgressCompletionID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let earlierCompletedID = UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
+        context.insert(WorkoutSession(
+            id: inProgressCompletionID,
+            name: "Legacy Completed Session",
+            status: .completed,
+            startedAt: Date(timeIntervalSince1970: 500),
+            endedAt: nil,
+            durationSeconds: 0
+        ))
+        context.insert(WorkoutSession(
+            id: earlierCompletedID,
+            name: "Earlier Completed Session",
+            status: .completed,
+            startedAt: Date(timeIntervalSince1970: 100),
+            endedAt: Date(timeIntervalSince1970: 400),
+            durationSeconds: 300
+        ))
+        try context.save()
+
+        let repository = WorkoutSessionRepository(modelContext: context)
+        let firstPage = try repository.completedSessions(before: nil, limit: 1)
+        let nextPage = try repository.completedSessions(before: Date(timeIntervalSince1970: 450), limit: 10)
+
+        XCTAssertEqual(firstPage.map(\.id), [inProgressCompletionID])
+        XCTAssertEqual(nextPage.map(\.id), [earlierCompletedID])
+    }
+
+    func testWorkoutHeatmapCatalogMappingsCanBeScopedToWorkoutExercises() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+
+        context.insert(ExerciseCatalogItem(remoteUUID: "bench", displayName: "Bench Press"))
+        context.insert(ExerciseCatalogItem(remoteUUID: "squat", displayName: "Squat"))
+        try context.save()
+
+        let mappings = try WorkoutMuscleHeatmapBuilder.catalogMappings(
+            modelContext: context,
+            catalogExerciseUUIDs: ["bench"]
+        )
+
+        XCTAssertEqual(Set(mappings.keys), ["bench"])
     }
 
     func testHistoryProjectionUsesSessionExerciseIDs() throws {

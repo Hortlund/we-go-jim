@@ -112,8 +112,6 @@ struct TemplateExercisePrescriptionEditor: View {
 
     private let externalIsExpanded: Binding<Bool>?
     @State private var localIsExpanded: Bool
-    @State private var setSwipeOffsets: [UUID: CGFloat] = [:]
-    @State private var setSwipeRemoving: [UUID: Bool] = [:]
     @State private var inputDraftStore = TemplateExerciseInputDraftStore()
     @FocusState private var focusedInput: TemplateEditorInputFocus?
 
@@ -514,46 +512,39 @@ struct TemplateExercisePrescriptionEditor: View {
 
             VStack(alignment: .leading, spacing: 14) {
                 ForEach(presentation.rows) { row in
-                    SwipeDeleteRow(
-                        offset: setSwipeOffsetBinding(for: row.id),
-                        isRemoving: setRemovingBinding(for: row.id)
-                    ) {
-                        removeSet(withID: row.id)
-                    } content: {
-                        TemplateExerciseSetCardView(
-                            row: row,
-                            canMoveDown: row.index < presentation.rows.count - 1,
-                            focusedInput: $focusedInput,
-                            repsText: repsText(for: row.index),
-                            weightText: weightText(for: row.index),
-                            keyboardDismissToken: keyboardDismissToken,
-                            onRepsTextChanged: { updateRepsText($0, forSetID: row.id) },
-                            onWeightTextChanged: { updateWeightText($0, forSetID: row.id) },
-                            onLoadUnitChanged: { updateLoadUnit($0, forSetID: row.id) },
-                            onToggleWarmup: { toggleWarmup(setID: row.id) },
-                            onInsertBelow: { insertSet(afterSetID: row.id) },
-                            onMoveUp: { moveSetUp(setID: row.id) },
-                            onMoveDown: { moveSetDown(setID: row.id) },
-                            onAddDropStage: { addDropStage(toSetID: row.id) },
-                            onRemoveDropStage: { stageID in
-                                removeDropStage(stageID, fromSetID: row.id)
-                            },
-                            onClearDropStages: { clearDropStages(fromSetID: row.id) },
-                            onDropStageRepsChanged: { stageID, value in
-                                updateDropStageRepsText(value, stageID: stageID, setID: row.id)
-                            },
-                            onDropStageWeightChanged: { stageID, value in
-                                updateDropStageWeightText(value, stageID: stageID, setID: row.id)
-                            },
-                            onDropStageLoadUnitChanged: { stageID, unit in
-                                updateDropStageLoadUnit(unit, stageID: stageID, setID: row.id)
-                            },
-                            onToggleLock: { toggleLock(setID: row.id) },
-                            onDelete: { removeSet(withID: row.id) }
-                        )
-                        .equatable()
-                        .fixedSize(horizontal: false, vertical: true)
-                    }
+                    TemplateExerciseSetCardView(
+                        row: row,
+                        canMoveDown: row.index < presentation.rows.count - 1,
+                        focusedInput: $focusedInput,
+                        repsText: repsText(for: row.index),
+                        weightText: weightText(for: row.index),
+                        keyboardDismissToken: keyboardDismissToken,
+                        onRepsTextChanged: { updateRepsText($0, forSetID: row.id) },
+                        onWeightTextChanged: { updateWeightText($0, forSetID: row.id) },
+                        onLoadUnitChanged: { updateLoadUnit($0, forSetID: row.id) },
+                        onToggleWarmup: { toggleWarmup(setID: row.id) },
+                        onInsertBelow: { insertSet(afterSetID: row.id) },
+                        onMoveUp: { moveSetUp(setID: row.id) },
+                        onMoveDown: { moveSetDown(setID: row.id) },
+                        onAddDropStage: { addDropStage(toSetID: row.id) },
+                        onRemoveDropStage: { stageID in
+                            removeDropStage(stageID, fromSetID: row.id)
+                        },
+                        onClearDropStages: { clearDropStages(fromSetID: row.id) },
+                        onDropStageRepsChanged: { stageID, value in
+                            updateDropStageRepsText(value, stageID: stageID, setID: row.id)
+                        },
+                        onDropStageWeightChanged: { stageID, value in
+                            updateDropStageWeightText(value, stageID: stageID, setID: row.id)
+                        },
+                        onDropStageLoadUnitChanged: { stageID, unit in
+                            updateDropStageLoadUnit(unit, stageID: stageID, setID: row.id)
+                        },
+                        onToggleLock: { toggleLock(setID: row.id) },
+                        onDelete: { removeSet(withID: row.id) }
+                    )
+                    .equatable()
+                    .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
@@ -1020,14 +1011,11 @@ struct TemplateExercisePrescriptionEditor: View {
 
     private func removeSet(at index: Int) {
         guard setDrafts.indices.contains(index) else { return }
-        let removedID = setDrafts[index].id
 
         withAnimation(WGJMotion.quickAnimation(reduceMotion: reduceMotion)) {
             _ = setDrafts.remove(at: index)
         }
 
-        setSwipeOffsets[removedID] = nil
-        setSwipeRemoving[removedID] = nil
         requestImmediateCommit()
     }
 
@@ -1308,19 +1296,6 @@ struct TemplateExercisePrescriptionEditor: View {
         setDrafts.firstIndex(where: { $0.id == setID })
     }
 
-    private func setSwipeOffsetBinding(for setID: UUID) -> Binding<CGFloat> {
-        Binding(
-            get: { setSwipeOffsets[setID] ?? 0 },
-            set: { setSwipeOffsets[setID] = $0 }
-        )
-    }
-
-    private func setRemovingBinding(for setID: UUID) -> Binding<Bool> {
-        Binding(
-            get: { setSwipeRemoving[setID] ?? false },
-            set: { setSwipeRemoving[setID] = $0 }
-        )
-    }
 }
 
 private extension TemplateExercisePrescriptionEditor {

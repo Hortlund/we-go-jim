@@ -668,7 +668,7 @@ nonisolated enum WorkoutProgressSnapshotLoader {
     ) throws -> WorkoutProgressDashboardSnapshot {
         let repository = WorkoutSessionRepository(modelContext: modelContext)
         let sessions = try repository
-            .completedSessions(includeArchived: true)
+            .completedSessions(includeArchived: false)
             .map { session in
                 try WorkoutProgressSessionInput(session: session, repository: repository)
             }

@@ -391,20 +391,20 @@ nonisolated final class WorkoutSessionRepository {
             descriptor = FetchDescriptor<WorkoutSession>(
                 predicate: #Predicate { session in
                     session.statusRaw == completedStatus
-                        && session.startedAt >= dayStart
-                        && session.startedAt < dayEnd
+                        && (session.endedAt ?? session.startedAt) >= dayStart
+                        && (session.endedAt ?? session.startedAt) < dayEnd
                 },
-                sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+                sortBy: [SortDescriptor(\.endedAt, order: .reverse), SortDescriptor(\.startedAt, order: .reverse)]
             )
         } else {
             descriptor = FetchDescriptor<WorkoutSession>(
                 predicate: #Predicate { session in
                     session.statusRaw == completedStatus
                         && session.archivedAt == nil
-                        && session.startedAt >= dayStart
-                        && session.startedAt < dayEnd
+                        && (session.endedAt ?? session.startedAt) >= dayStart
+                        && (session.endedAt ?? session.startedAt) < dayEnd
                 },
-                sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+                sortBy: [SortDescriptor(\.endedAt, order: .reverse), SortDescriptor(\.startedAt, order: .reverse)]
             )
         }
 
@@ -428,8 +428,8 @@ nonisolated final class WorkoutSessionRepository {
             descriptor = FetchDescriptor<WorkoutSession>(
                 predicate: #Predicate { session in
                     session.statusRaw == completedStatus
-                        && session.startedAt >= monthStart
-                        && session.startedAt < monthEnd
+                        && (session.endedAt ?? session.startedAt) >= monthStart
+                        && (session.endedAt ?? session.startedAt) < monthEnd
                 }
             )
         } else {
@@ -437,15 +437,15 @@ nonisolated final class WorkoutSessionRepository {
                 predicate: #Predicate { session in
                     session.statusRaw == completedStatus
                         && session.archivedAt == nil
-                        && session.startedAt >= monthStart
-                        && session.startedAt < monthEnd
+                        && (session.endedAt ?? session.startedAt) >= monthStart
+                        && (session.endedAt ?? session.startedAt) < monthEnd
                 }
             )
         }
 
         var counts: [Date: Int] = [:]
         for session in try modelContext.fetch(descriptor) {
-            counts[calendar.startOfDay(for: session.startedAt), default: 0] += 1
+            counts[calendar.startOfDay(for: session.endedAt ?? session.startedAt), default: 0] += 1
         }
         return counts
     }
@@ -1110,33 +1110,29 @@ nonisolated final class WorkoutSessionRepository {
                 descriptor = FetchDescriptor<WorkoutSession>(
                     predicate: #Predicate { session in
                         session.statusRaw == completedStatus
-                            && session.startedAt < date
+                            && (session.endedAt ?? session.startedAt) < date
                             && session.id != excludingSessionID
-                    },
-                    sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+                    }
                 )
             case let (date?, nil):
                 descriptor = FetchDescriptor<WorkoutSession>(
                     predicate: #Predicate { session in
                         session.statusRaw == completedStatus
-                            && session.startedAt < date
-                    },
-                    sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+                            && (session.endedAt ?? session.startedAt) < date
+                    }
                 )
             case let (nil, excludingSessionID?):
                 descriptor = FetchDescriptor<WorkoutSession>(
                     predicate: #Predicate { session in
                         session.statusRaw == completedStatus
                             && session.id != excludingSessionID
-                    },
-                    sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+                    }
                 )
             case (nil, nil):
                 descriptor = FetchDescriptor<WorkoutSession>(
                     predicate: #Predicate { session in
                         session.statusRaw == completedStatus
-                    },
-                    sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+                    }
                 )
             }
         } else {
@@ -1146,19 +1142,17 @@ nonisolated final class WorkoutSessionRepository {
                     predicate: #Predicate { session in
                         session.statusRaw == completedStatus
                             && session.archivedAt == nil
-                            && session.startedAt < date
+                            && (session.endedAt ?? session.startedAt) < date
                             && session.id != excludingSessionID
-                    },
-                    sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+                    }
                 )
             case let (date?, nil):
                 descriptor = FetchDescriptor<WorkoutSession>(
                     predicate: #Predicate { session in
                         session.statusRaw == completedStatus
                             && session.archivedAt == nil
-                            && session.startedAt < date
-                    },
-                    sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+                            && (session.endedAt ?? session.startedAt) < date
+                    }
                 )
             case let (nil, excludingSessionID?):
                 descriptor = FetchDescriptor<WorkoutSession>(
@@ -1166,25 +1160,34 @@ nonisolated final class WorkoutSessionRepository {
                         session.statusRaw == completedStatus
                             && session.archivedAt == nil
                             && session.id != excludingSessionID
-                    },
-                    sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+                    }
                 )
             case (nil, nil):
                 descriptor = FetchDescriptor<WorkoutSession>(
                     predicate: #Predicate { session in
                         session.statusRaw == completedStatus
                             && session.archivedAt == nil
-                    },
-                    sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+                    }
                 )
             }
         }
 
-        var limitedDescriptor = descriptor
+        let orderedSessions = Self.orderedByDisplayedCompletionDate(try modelContext.fetch(descriptor))
         if let limit {
-            limitedDescriptor.fetchLimit = limit
+            return Array(orderedSessions.prefix(limit))
         }
-        return try modelContext.fetch(limitedDescriptor)
+        return orderedSessions
+    }
+
+    private static func orderedByDisplayedCompletionDate(_ sessions: [WorkoutSession]) -> [WorkoutSession] {
+        sessions.sorted { lhs, rhs in
+            let lhsCompletedAt = lhs.endedAt ?? lhs.startedAt
+            let rhsCompletedAt = rhs.endedAt ?? rhs.startedAt
+            if lhsCompletedAt != rhsCompletedAt {
+                return lhsCompletedAt > rhsCompletedAt
+            }
+            return lhs.id.uuidString < rhs.id.uuidString
+        }
     }
 
     private func defaultSessionSets(

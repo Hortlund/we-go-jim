@@ -23,8 +23,6 @@ struct TemplateDetailView: View {
     @State private var errorMessage = ""
     @State private var showingError = false
     @State private var isSavingDraftChanges = false
-    @State private var exerciseSwipeOffsets: [UUID: CGFloat] = [:]
-    @State private var exerciseSwipeRemoving: [UUID: Bool] = [:]
     @State private var keyboardDismissToken = TemplateEditorKeyboardDismissToken()
     @State private var hasLoadedSnapshot = false
     @State private var isReloadingSnapshot = false
@@ -282,50 +280,41 @@ struct TemplateDetailView: View {
     }
 
     private func templateExerciseSection(_ row: TemplateExerciseRowData) -> some View {
-        SwipeDeleteRow(
-            offset: exerciseSwipeOffsetBinding(for: row.id),
-            isRemoving: exerciseRemovingBinding(for: row.id),
-            activeRegionMaxY: 116,
-            gestureStrategy: .simultaneous
-        ) {
-            removeExercise(templateExerciseID: row.id)
-        } content: {
-            TemplateExercisePrescriptionEditor(
-                exerciseName: row.exercise.exerciseNameSnapshot,
-                muscleSummary: row.exercise.muscleSummarySnapshot,
-                category: row.exercise.categorySnapshot,
-                infoDestination: AnyView(
-                    TemplateExerciseDetailDestinationView(exercise: row.exercise)
-                ),
-                recommendation: row.recommendation,
-                supplementaryContent: AnyView(
-                    VStack(alignment: .leading, spacing: 12) {
-                        WGJExerciseNotesEditor(
-                            placeholder: "Add notes for this exercise",
-                            accessibilityIdentifier: "template-detail-exercise-\(row.exercise.catalogExerciseUUID)-notes-field",
-                            notes: notesBinding(for: row.exercise)
-                        )
+        TemplateExercisePrescriptionEditor(
+            exerciseName: row.exercise.exerciseNameSnapshot,
+            muscleSummary: row.exercise.muscleSummarySnapshot,
+            category: row.exercise.categorySnapshot,
+            infoDestination: AnyView(
+                TemplateExerciseDetailDestinationView(exercise: row.exercise)
+            ),
+            recommendation: row.recommendation,
+            supplementaryContent: AnyView(
+                VStack(alignment: .leading, spacing: 12) {
+                    WGJExerciseNotesEditor(
+                        placeholder: "Add notes for this exercise",
+                        accessibilityIdentifier: "template-detail-exercise-\(row.exercise.catalogExerciseUUID)-notes-field",
+                        notes: notesBinding(for: row.exercise)
+                    )
 
-                        TemplateExerciseComponentsSection(
-                            components: componentDrafts(for: row.exercise)
-                        )
-                    }
-                ),
-                initiallyExpanded: false,
-                isExpanded: isExpandedBinding(for: row.id),
-                exerciseIndexTitle: "Exercise \(row.index + 1)",
-                preferredLoadUnit: preferredLoadUnit,
-                keyboardDismissToken: keyboardDismissToken,
-                targetRepMin: targetRepMinBinding(for: row.exercise),
-                targetRepMax: targetRepMaxBinding(for: row.exercise),
-                restSeconds: restSecondsBinding(for: row.exercise),
-                setDrafts: setDraftsBinding(for: row.exercise),
-                onCommitRequest: {},
-                onExerciseDelete: {
-                    removeExercise(templateExerciseID: row.id)
+                    TemplateExerciseComponentsSection(
+                        components: componentDrafts(for: row.exercise)
+                    )
                 }
-            )
-        }
+            ),
+            initiallyExpanded: false,
+            isExpanded: isExpandedBinding(for: row.id),
+            exerciseIndexTitle: "Exercise \(row.index + 1)",
+            preferredLoadUnit: preferredLoadUnit,
+            keyboardDismissToken: keyboardDismissToken,
+            targetRepMin: targetRepMinBinding(for: row.exercise),
+            targetRepMax: targetRepMaxBinding(for: row.exercise),
+            restSeconds: restSecondsBinding(for: row.exercise),
+            setDrafts: setDraftsBinding(for: row.exercise),
+            onCommitRequest: {},
+            onExerciseDelete: {
+                removeExercise(templateExerciseID: row.id)
+            }
+        )
     }
 
     private func removeExercise(templateExerciseID: UUID) {
@@ -641,11 +630,6 @@ struct TemplateDetailView: View {
         showingError = true
     }
 
-    private func clearExerciseSwipeState(for exerciseID: UUID) {
-        exerciseSwipeOffsets[exerciseID] = nil
-        exerciseSwipeRemoving[exerciseID] = nil
-    }
-
     @MainActor
     private func discardRemovedExerciseState(keeping currentIDs: Set<UUID>) {
         let knownIDs =
@@ -653,8 +637,6 @@ struct TemplateDetailView: View {
             .union(draftStore.exerciseIDs)
             .union(recommendationByExerciseID.keys)
             .union(isExpandedByExerciseID.keys)
-            .union(exerciseSwipeOffsets.keys)
-            .union(exerciseSwipeRemoving.keys)
 
         for exerciseID in knownIDs where !currentIDs.contains(exerciseID) {
             discardExerciseState(for: exerciseID)
@@ -667,21 +649,6 @@ struct TemplateDetailView: View {
         recommendationByExerciseID[exerciseID] = nil
         isExpandedByExerciseID[exerciseID] = nil
         loadedTemplateExerciseIDs.removeAll { $0 == exerciseID }
-        clearExerciseSwipeState(for: exerciseID)
-    }
-
-    private func exerciseSwipeOffsetBinding(for exerciseID: UUID) -> Binding<CGFloat> {
-        Binding(
-            get: { exerciseSwipeOffsets[exerciseID] ?? 0 },
-            set: { exerciseSwipeOffsets[exerciseID] = $0 }
-        )
-    }
-
-    private func exerciseRemovingBinding(for exerciseID: UUID) -> Binding<Bool> {
-        Binding(
-            get: { exerciseSwipeRemoving[exerciseID] ?? false },
-            set: { exerciseSwipeRemoving[exerciseID] = $0 }
-        )
     }
 
     private var exerciseCardTransition: AnyTransition {

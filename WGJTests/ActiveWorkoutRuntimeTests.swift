@@ -3,6 +3,116 @@ import SwiftUI
 @testable import WGJ
 
 final class ActiveWorkoutRuntimeTests: XCTestCase {
+    func testWorkoutEditorsDoNotUseSwipeDeleteRows() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let projectRootURL = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourcePaths = [
+            "WGJ/Views/Workout/WorkoutSessionExerciseGridEditor.swift",
+            "WGJ/Views/Workout/WorkoutExerciseRowHostView.swift",
+            "WGJ/Views/Templates/TemplateEditorView.swift",
+            "WGJ/Views/Templates/TemplateExercisePrescriptionEditor.swift",
+            "WGJ/Views/Templates/TemplateDetailView.swift",
+        ]
+
+        for sourcePath in sourcePaths {
+            let sourceURL = projectRootURL.appendingPathComponent(sourcePath)
+            let source = try String(contentsOf: sourceURL, encoding: .utf8)
+            XCTAssertFalse(source.contains("SwipeDeleteRow"), "\(sourcePath) should use explicit delete controls")
+            XCTAssertFalse(source.contains("SwipeOffset"), "\(sourcePath) should not keep swipe delete offset state")
+            XCTAssertFalse(source.contains("swipeOffset"), "\(sourcePath) should not keep swipe delete offset state")
+            XCTAssertFalse(source.contains("swipeRemoving"), "\(sourcePath) should not keep swipe delete removal state")
+        }
+
+        let sharedSwipeDeleteURL = projectRootURL
+            .appendingPathComponent("WGJ/Views/Shared/SwipeDeleteRow.swift")
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: sharedSwipeDeleteURL.path),
+            "SwipeDeleteRow should stay deleted when no app surfaces use swipe delete"
+        )
+    }
+
+    func testAsyncLoadGenerationTrackerInvalidatesOlderLoads() {
+        var tracker = AsyncLoadGenerationTracker()
+
+        let first = tracker.next()
+        let second = tracker.next()
+
+        XCTAssertFalse(tracker.isCurrent(first))
+        XCTAssertTrue(tracker.isCurrent(second))
+
+        tracker.invalidate()
+
+        XCTAssertFalse(tracker.isCurrent(second))
+    }
+
+    func testCancelledCorruptSnapshotLoadDoesNotDeleteValidSnapshot() async throws {
+        let baseDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("active-workout-snapshot-cancel-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: baseDirectory)
+        }
+
+        let store = ActiveWorkoutSnapshotStore(baseDirectory: baseDirectory)
+        let session = ActiveWorkoutRuntimeSession(
+            id: UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!,
+            name: "Push",
+            startedAt: Date(timeIntervalSince1970: 100)
+        )
+        try await store.save(session)
+
+        let cancelledLoad = Task {
+            try await store.loadDiscardingCorruptSnapshot()
+        }
+        cancelledLoad.cancel()
+
+        do {
+            _ = try await cancelledLoad.value
+        } catch is CancellationError {
+            // Expected: cancellation should propagate without treating the stored snapshot as corrupt.
+        }
+
+        let loadedSession = try await store.load()
+        XCTAssertEqual(loadedSession?.id, session.id)
+    }
+
+    func testHydrationStampChangesWhenSetDraftsChange() {
+        let exerciseID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let firstSetID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let addedSetID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        let firstSet = WorkoutSessionSetDraft(id: firstSetID, actualReps: 8, actualWeight: 100)
+        let addedSet = WorkoutSessionSetDraft(id: addedSetID, actualReps: nil, actualWeight: nil)
+        let exercise = ActiveWorkoutRuntimeExercise(
+            id: exerciseID,
+            catalogExerciseUUID: "bench-press",
+            exerciseNameSnapshot: "Bench Press",
+            categorySnapshot: "Strength",
+            muscleSummarySnapshot: "Chest",
+            setDrafts: [firstSet]
+        )
+        let session = ActiveWorkoutRuntimeSession(name: "Push", exercises: [exercise])
+
+        let originalProjection = ActiveWorkoutRenderProjectionBuilder.build(
+            session: session,
+            setDraftsByExerciseID: [exerciseID: [firstSet]],
+            pendingCardioCompletionsByPhase: [:]
+        )
+        let updatedProjection = ActiveWorkoutRenderProjectionBuilder.build(
+            session: session,
+            setDraftsByExerciseID: [exerciseID: [firstSet, addedSet]],
+            pendingCardioCompletionsByPhase: [:]
+        )
+
+        XCTAssertNotEqual(originalProjection.exerciseHydrationStamp, updatedProjection.exerciseHydrationStamp)
+        XCTAssertEqual(
+            updatedProjection.exerciseHydrationStamp.changedExerciseIDs(
+                comparedTo: originalProjection.exerciseHydrationStamp
+            ),
+            [exerciseID]
+        )
+    }
+
     func testTemplateExerciseReplacementPreservesSetIdentityAndPreviousTargets() {
         let exerciseID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
         let firstSetID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!

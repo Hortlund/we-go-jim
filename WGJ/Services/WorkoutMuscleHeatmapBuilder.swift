@@ -25,6 +25,27 @@ nonisolated enum WorkoutMuscleHeatmapBuilder {
     static func catalogMappings(modelContext: ModelContext) throws -> [String: WorkoutMuscleHeatmapCatalogMapping] {
         let descriptor = FetchDescriptor<ExerciseCatalogItem>()
         let exercises = try modelContext.fetch(descriptor)
+        return catalogMappings(from: exercises)
+    }
+
+    static func catalogMappings(
+        modelContext: ModelContext,
+        catalogExerciseUUIDs: Set<String>
+    ) throws -> [String: WorkoutMuscleHeatmapCatalogMapping] {
+        guard !catalogExerciseUUIDs.isEmpty else { return [:] }
+
+        let descriptor = FetchDescriptor<ExerciseCatalogItem>(
+            predicate: #Predicate { exercise in
+                catalogExerciseUUIDs.contains(exercise.remoteUUID)
+            }
+        )
+        let exercises = try modelContext.fetch(descriptor)
+        return catalogMappings(from: exercises)
+    }
+
+    private static func catalogMappings(
+        from exercises: [ExerciseCatalogItem]
+    ) -> [String: WorkoutMuscleHeatmapCatalogMapping] {
         return Dictionary(
             exercises.map { exercise in
                 (

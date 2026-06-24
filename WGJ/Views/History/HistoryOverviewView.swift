@@ -18,6 +18,8 @@ struct HistoryOverviewView: View {
     @State private var controller = HistoryOverviewController()
     @State private var hasLoadedSnapshot = false
     @State private var needsExplicitRefresh = true
+    @State private var snapshotLoadGeneration = AsyncLoadGenerationTracker()
+    @State private var pageLoadGeneration = AsyncLoadGenerationTracker()
     @State private var lastLoadedContentUpdatedAt: Date?
     @State private var lastRefreshAt: Date?
     @State private var isLoadingMoreHistory = false
@@ -254,6 +256,9 @@ struct HistoryOverviewView: View {
 
     @MainActor
     private func reloadSnapshot(contentUpdatedAt: Date?) async {
+        let loadGeneration = snapshotLoadGeneration.next()
+        pageLoadGeneration.invalidate()
+        isLoadingMoreHistory = false
         do {
             let loaded: HistoryOverviewLoadedSnapshot
             let dayFilter = selectedDayFilter
@@ -265,12 +270,14 @@ struct HistoryOverviewView: View {
                     pageSize: Self.historyPageSize
                 )
             }
+            guard snapshotLoadGeneration.isCurrent(loadGeneration) else { return }
             controller.apply(loaded)
             hasLoadedSnapshot = true
             needsExplicitRefresh = false
             lastLoadedContentUpdatedAt = contentUpdatedAt
             lastRefreshAt = .now
         } catch {
+            guard snapshotLoadGeneration.isCurrent(loadGeneration) else { return }
             errorMessage = String(describing: error)
             showingError = true
         }
@@ -286,8 +293,13 @@ struct HistoryOverviewView: View {
         }
 
         guard let oldestLoadedDate = controller.oldestLoadedDate else { return }
+        let loadGeneration = pageLoadGeneration.next()
         isLoadingMoreHistory = true
-        defer { isLoadingMoreHistory = false }
+        defer {
+            if pageLoadGeneration.isCurrent(loadGeneration) {
+                isLoadingMoreHistory = false
+            }
+        }
 
         do {
             let backgroundStore = historyBackgroundStore
@@ -298,8 +310,11 @@ struct HistoryOverviewView: View {
                     pageSize: Self.historyPageSize
                 )
             }
+            guard pageLoadGeneration.isCurrent(loadGeneration) else { return }
+            guard selectedDayFilter == nil else { return }
             controller.appendPage(loaded)
         } catch {
+            guard pageLoadGeneration.isCurrent(loadGeneration) else { return }
             errorMessage = String(describing: error)
             showingError = true
         }

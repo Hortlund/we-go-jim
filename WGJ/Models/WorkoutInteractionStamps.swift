@@ -86,6 +86,7 @@ nonisolated struct ActiveWorkoutExerciseInteractionStamp: Hashable, Sendable {
         let restSeconds: Int
         let targetRepMin: Int?
         let targetRepMax: Int?
+        let setDraftIDs: [UUID]
         let supersetGroupID: UUID?
         let supersetPositionRaw: String?
     }

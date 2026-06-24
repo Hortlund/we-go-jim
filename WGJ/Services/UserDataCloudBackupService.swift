@@ -214,7 +214,6 @@ nonisolated final class UserDataCloudBackupService {
             try await AppDataDeletionService(
                 modelContext: context,
                 deleteCloudBackup: {},
-                clearWeeklyGoalWidgetSnapshot: {},
                 clearActiveWorkoutSnapshot: {
                     try await ActiveWorkoutSnapshotStore.shared.delete()
                 }

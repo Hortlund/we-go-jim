@@ -110,3 +110,20 @@ nonisolated struct ResumeCriticalMaintenanceTracker: Equatable, Sendable {
         currentRunID = nil
     }
 }
+
+nonisolated struct AsyncLoadGenerationTracker: Equatable, Sendable {
+    private var generation = 0
+
+    mutating func next() -> Int {
+        generation += 1
+        return generation
+    }
+
+    mutating func invalidate() {
+        generation += 1
+    }
+
+    func isCurrent(_ candidate: Int) -> Bool {
+        generation == candidate
+    }
+}
