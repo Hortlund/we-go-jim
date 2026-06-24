@@ -750,7 +750,10 @@ struct ContentView: View {
         )
         await AvatarThumbnailCacheService.shared.prime(data: profile.avatarImageData, maxPixelSize: 176)
         let widgetRepository = ProfileWidgetRepository(modelContext: modelContext)
-        let metricsService = WorkoutMetricsService(modelContext: modelContext)
+        let metricsService = WorkoutMetricsService(
+            modelContext: modelContext,
+            calendar: WeeklyGoalWeekPolicy.calendar()
+        )
         let enabledWidgets = try widgetRepository.enabledConfigurationSnapshots()
         let dashboard = try metricsService.profileDashboardSnapshot(prLimit: 5, weeks: 8)
         var content = ProfileDashboardContent.make(

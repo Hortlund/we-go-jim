@@ -1590,7 +1590,10 @@ final class ProfileViewController {
     ) async throws -> ProfileDashboardContent {
         try await backgroundStore.perform("profile.dashboard") { backgroundContext in
             let widgetRepository = ProfileWidgetRepository(modelContext: backgroundContext)
-            let metricsService = WorkoutMetricsService(modelContext: backgroundContext)
+            let metricsService = WorkoutMetricsService(
+                modelContext: backgroundContext,
+                calendar: WeeklyGoalWeekPolicy.calendar()
+            )
             let enabled = try widgetRepository.enabledConfigurationSnapshots()
             let dashboard = try metricsService.profileDashboardSnapshot(prLimit: 5, weeks: 8)
             var nextContent = ProfileDashboardContent.make(

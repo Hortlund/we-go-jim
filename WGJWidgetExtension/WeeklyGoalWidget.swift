@@ -61,14 +61,23 @@ struct WeeklyGoalWidgetProvider: TimelineProvider {
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<WeeklyGoalWidgetEntry>) -> Void) {
         let currentEntry = entry()
-        let nextRefresh = Calendar.current.date(byAdding: .hour, value: 1, to: currentEntry.date)
+        let calendar = WeeklyGoalWeekPolicy.calendar()
+        let hourlyRefresh = calendar.date(byAdding: .hour, value: 1, to: currentEntry.date)
             ?? currentEntry.date.addingTimeInterval(3_600)
+        let weekRefresh = WeeklyGoalWeekPolicy.nextWeekStart(
+            after: currentEntry.date,
+            calendar: calendar
+        )
+        let nextRefresh = min(hourlyRefresh, weekRefresh)
         completion(Timeline(entries: [currentEntry], policy: .after(nextRefresh)))
     }
 
     private func entry(date: Date = .now) -> WeeklyGoalWidgetEntry {
         if let store = WeeklyGoalWidgetStore(), let snapshot = try? store.load() {
-            return WeeklyGoalWidgetEntry(date: date, snapshot: snapshot)
+            return WeeklyGoalWidgetEntry(
+                date: date,
+                snapshot: WeeklyGoalWidgetContentPolicy.resolvedSnapshot(snapshot, asOf: date)
+            )
         }
 
         return WeeklyGoalWidgetEntry(

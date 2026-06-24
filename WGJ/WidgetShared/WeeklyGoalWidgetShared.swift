@@ -75,17 +75,43 @@ nonisolated struct WeeklyGoalWidgetSnapshot: Codable, Equatable, Sendable {
     }
 }
 
+nonisolated enum WeeklyGoalWeekPolicy {
+    static func calendar(timeZone: TimeZone = .autoupdatingCurrent) -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        calendar.firstWeekday = 2
+        calendar.minimumDaysInFirstWeek = 4
+        return calendar
+    }
+
+    static func nextWeekStart(after date: Date = .now, calendar: Calendar = calendar()) -> Date {
+        let currentWeekStart = weekStart(for: date, calendar: calendar)
+        return calendar.date(byAdding: .weekOfYear, value: 1, to: currentWeekStart)
+            ?? date.addingTimeInterval(7 * 24 * 3_600)
+    }
+
+    static func weekStart(for date: Date, calendar: Calendar = calendar()) -> Date {
+        var components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
+        components.weekday = calendar.firstWeekday
+        guard let weekStart = calendar.date(from: components) else {
+            return calendar.startOfDay(for: date)
+        }
+        return calendar.startOfDay(for: weekStart)
+    }
+}
+
 nonisolated enum WeeklyGoalWidgetContentPolicy {
     static let defaultGoal = 4
     static let minimumGoal = 1
     static let maximumGoal = 14
+    static let recentWeekLimit = 6
 
     static func snapshot(
         completedWorkouts: Int,
         weeklyGoal: Int,
         weekStart: Date,
         recentWeeks: [WeeklyGoalWidgetWeek] = [],
-        calendar: Calendar = .current,
+        calendar: Calendar = WeeklyGoalWeekPolicy.calendar(),
         hasActiveWorkout: Bool = false,
         generatedAt: Date = .now
     ) -> WeeklyGoalWidgetSnapshot {
@@ -121,16 +147,18 @@ nonisolated enum WeeklyGoalWidgetContentPolicy {
     }
 
     static func placeholder(generatedAt: Date = .now) -> WeeklyGoalWidgetSnapshot {
-        snapshot(
+        let calendar = WeeklyGoalWeekPolicy.calendar()
+        return snapshot(
             completedWorkouts: 0,
             weeklyGoal: defaultGoal,
-            weekStart: generatedAt,
+            weekStart: WeeklyGoalWeekPolicy.weekStart(for: generatedAt, calendar: calendar),
+            calendar: calendar,
             generatedAt: generatedAt
         )
     }
 
-    static func preview(generatedAt: Date = .now, calendar: Calendar = .current) -> WeeklyGoalWidgetSnapshot {
-        let weekStart = weekStart(for: generatedAt, calendar: calendar)
+    static func preview(generatedAt: Date = .now, calendar: Calendar = WeeklyGoalWeekPolicy.calendar()) -> WeeklyGoalWidgetSnapshot {
+        let weekStart = WeeklyGoalWeekPolicy.weekStart(for: generatedAt, calendar: calendar)
         let completedByOffset = [1, 3, 2, 4, 1, 3]
         let recentWeeks = completedByOffset.enumerated().compactMap { index, completed -> WeeklyGoalWidgetWeek? in
             guard let week = calendar.date(byAdding: .weekOfYear, value: index - 5, to: weekStart) else {
@@ -153,6 +181,60 @@ nonisolated enum WeeklyGoalWidgetContentPolicy {
         )
     }
 
+    static func resolvedSnapshot(
+        _ snapshot: WeeklyGoalWidgetSnapshot,
+        asOf date: Date = .now,
+        calendar: Calendar = WeeklyGoalWeekPolicy.calendar()
+    ) -> WeeklyGoalWidgetSnapshot {
+        let currentWeekStart = WeeklyGoalWeekPolicy.weekStart(for: date, calendar: calendar)
+        let snapshotWeekStart = WeeklyGoalWeekPolicy.weekStart(for: snapshot.weekStart, calendar: calendar)
+        guard currentWeekStart > snapshotWeekStart else {
+            return snapshot
+        }
+
+        var weeksByStart: [Date: WeeklyGoalWidgetWeek] = [:]
+        for week in snapshot.recentWeeks {
+            let normalizedWeekStart = WeeklyGoalWeekPolicy.weekStart(for: week.weekStart, calendar: calendar)
+            weeksByStart[normalizedWeekStart] = WeeklyGoalWidgetWeek(
+                weekStart: normalizedWeekStart,
+                completedWorkouts: max(0, week.completedWorkouts),
+                goal: normalizedGoal(week.goal)
+            )
+        }
+        weeksByStart[snapshotWeekStart] = WeeklyGoalWidgetWeek(
+            weekStart: snapshotWeekStart,
+            completedWorkouts: max(0, snapshot.completedWorkouts),
+            goal: normalizedGoal(snapshot.weeklyGoal)
+        )
+
+        var weeksAdvanced = 0
+        var rolloverWeekStart = snapshotWeekStart
+        while let nextWeekStart = calendar.date(byAdding: .weekOfYear, value: 1, to: rolloverWeekStart),
+              nextWeekStart <= currentWeekStart {
+            weeksAdvanced += 1
+            weeksByStart[nextWeekStart] = weeksByStart[nextWeekStart] ?? WeeklyGoalWidgetWeek(
+                weekStart: nextWeekStart,
+                completedWorkouts: 0,
+                goal: normalizedGoal(snapshot.weeklyGoal)
+            )
+            rolloverWeekStart = nextWeekStart
+        }
+
+        let recentWeeks = weeksByStart.values
+            .sorted { $0.weekStart < $1.weekStart }
+            .suffix(min(recentWeekLimit, max(snapshot.recentWeeks.count, weeksAdvanced + 1)))
+
+        return WeeklyGoalWidgetSnapshot(
+            completedWorkouts: 0,
+            weeklyGoal: normalizedGoal(snapshot.weeklyGoal),
+            weekStart: currentWeekStart,
+            weekEnd: calendar.date(byAdding: .day, value: 7, to: currentWeekStart) ?? currentWeekStart,
+            generatedAt: date,
+            hasActiveWorkout: snapshot.hasActiveWorkout,
+            recentWeeks: Array(recentWeeks)
+        )
+    }
+
     static func normalizedGoal(_ goal: Int) -> Int {
         max(minimumGoal, min(maximumGoal, goal))
     }
@@ -169,11 +251,6 @@ nonisolated enum WeeklyGoalWidgetContentPolicy {
 
         let remaining = normalizedGoal - normalizedCompleted
         return "\(remaining) to go"
-    }
-
-    private static func weekStart(for date: Date, calendar: Calendar) -> Date {
-        let components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
-        return calendar.date(from: components) ?? date
     }
 }
 

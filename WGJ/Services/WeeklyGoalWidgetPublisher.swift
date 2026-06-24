@@ -46,7 +46,8 @@ nonisolated final class WeeklyGoalWidgetPublisher {
     }
 
     func publish(modelContext: ModelContext, generatedAt: Date = .now) throws {
-        let dashboard = try WorkoutMetricsService(modelContext: modelContext)
+        let calendar = WeeklyGoalWeekPolicy.calendar()
+        let dashboard = try WorkoutMetricsService(modelContext: modelContext, calendar: calendar)
             .profileDashboardSnapshot(prLimit: 1, weeks: 6)
         let currentWeek = dashboard.weeklyProgress.last
         let hasActiveWorkout = (try? WorkoutSessionRepository(modelContext: modelContext).activeSession()) != nil
@@ -61,6 +62,7 @@ nonisolated final class WeeklyGoalWidgetPublisher {
                     goal: point.goal
                 )
             },
+            calendar: calendar,
             hasActiveWorkout: hasActiveWorkout,
             generatedAt: generatedAt
         )
