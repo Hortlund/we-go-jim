@@ -12,9 +12,9 @@ final class WorkoutCompletionConfettiTests: XCTestCase {
         XCTAssertEqual(bursts.count, 1)
         XCTAssertEqual(bursts.first?.role, .centralThrow)
         XCTAssertEqual(bursts.first?.origin, CGPoint(x: 200, y: 180))
-        XCTAssertEqual(bursts.first?.pieceCount, 54)
+        XCTAssertEqual(bursts.first?.pieceCount, 34)
         XCTAssertEqual(bursts.first?.delay, 0)
-        XCTAssertEqual(WorkoutCompletionConfettiPolicy.automaticCelebrationDelay, .zero)
+        XCTAssertEqual(WorkoutCompletionConfettiPolicy.automaticCelebrationDelay, .milliseconds(180))
     }
 
     func testManualTapCelebrationUsesSingleUpwardBurst() {

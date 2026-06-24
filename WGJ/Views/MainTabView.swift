@@ -7,11 +7,8 @@ struct MainTabView: View {
     @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
     @Environment(RestTimerState.self) private var restTimerState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.userDataSyncStatus) private var userDataSyncStatus
 
     @State private var isKeyboardVisible = false
-    @State private var cloudBackupBanner: UserDataSyncStatusSnapshot?
-    @State private var cloudBackupBannerDismissTask: Task<Void, Never>?
 
     private var overlayAnimation: Animation {
         WGJMotion.overlayAnimation(reduceMotion: reduceMotion)
@@ -106,7 +103,7 @@ struct MainTabView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             .overlay(alignment: .top) {
-                cloudBackupTopBanner(topSafeAreaInset: proxy.safeAreaInsets.top)
+                CloudBackupStatusBannerHost(topSafeAreaInset: proxy.safeAreaInsets.top)
                     .ignoresSafeArea(edges: .top)
             }
             .fullScreenCover(item: $workoutCompletionPresentationState.presentedWorkout) { presentation in
@@ -127,13 +124,6 @@ struct MainTabView: View {
                 } else if !activeWorkoutPresentationState.isActiveWorkoutPresented {
                     activeWorkoutPresentationState.isActiveWorkoutStripCollapsed = true
                 }
-            }
-            .onChange(of: userDataSyncStatus) { _, newValue in
-                handleCloudBackupStatusChanged(newValue)
-            }
-            .onDisappear {
-                cloudBackupBannerDismissTask?.cancel()
-                cloudBackupBannerDismissTask = nil
             }
         }
     }
@@ -183,21 +173,71 @@ struct MainTabView: View {
         }
     }
 
+    private func sanitizedOverlayLength(_ value: CGFloat) -> CGFloat {
+        guard value.isFinite else { return 0 }
+        return max(value, 0)
+    }
+
+    private func activeWorkoutStripBottomGap(size: CGSize) -> CGFloat {
+        MainTabOverlayLayoutPolicy.activeWorkoutStripBottomGap(
+            screenHeight: size.height,
+            usesModernTabChrome: usesModernTabChrome
+        )
+    }
+
+    private var usesModernTabChrome: Bool {
+        if #available(iOS 26.0, *) {
+            return true
+        }
+        return false
+    }
+
+    private func presentActiveWorkout(sessionID: UUID) {
+        withAnimation(activeWorkoutOverlayAnimation) {
+            activeWorkoutPresentationState.present(sessionID: sessionID)
+        }
+    }
+}
+
+private struct CloudBackupStatusBannerHost: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.userDataSyncStatus) private var userDataSyncStatus
+
+    let topSafeAreaInset: CGFloat
+
+    @State private var banner: UserDataSyncStatusSnapshot?
+    @State private var dismissTask: Task<Void, Never>?
+
+    private var overlayAnimation: Animation {
+        WGJMotion.overlayAnimation(reduceMotion: reduceMotion)
+    }
+
+    var body: some View {
+        cloudBackupTopBanner
+            .onChange(of: userDataSyncStatus) { _, newValue in
+                handleCloudBackupStatusChanged(newValue)
+            }
+            .onDisappear {
+                dismissTask?.cancel()
+                dismissTask = nil
+            }
+    }
+
     @ViewBuilder
-    private func cloudBackupTopBanner(topSafeAreaInset: CGFloat) -> some View {
-        if let cloudBackupBanner {
+    private var cloudBackupTopBanner: some View {
+        if let banner {
             WGJTransientBanner(
-                title: cloudBackupBannerTitle(for: cloudBackupBanner),
-                message: cloudBackupBannerMessage(for: cloudBackupBanner),
-                icon: cloudBackupBannerIcon(for: cloudBackupBanner),
-                tint: cloudBackupBannerTint(for: cloudBackupBanner),
+                title: cloudBackupBannerTitle(for: banner),
+                message: cloudBackupBannerMessage(for: banner),
+                icon: cloudBackupBannerIcon(for: banner),
+                tint: cloudBackupBannerTint(for: banner),
                 style: .topDocked,
                 topInset: topSafeAreaInset
             )
             .frame(maxWidth: .infinity, alignment: .top)
             .allowsHitTesting(false)
             .transition(.move(edge: .top).combined(with: .opacity))
-            .animation(overlayAnimation, value: cloudBackupBanner)
+            .animation(overlayAnimation, value: banner)
             .accessibilityIdentifier("cloud-backup-status-banner")
         }
     }
@@ -205,32 +245,32 @@ struct MainTabView: View {
     private func handleCloudBackupStatusChanged(_ status: UserDataSyncStatusSnapshot) {
         switch status.state {
         case .localOnly:
-            cloudBackupBannerDismissTask?.cancel()
-            cloudBackupBannerDismissTask = nil
+            dismissTask?.cancel()
+            dismissTask = nil
             withAnimation(overlayAnimation) {
-                cloudBackupBanner = nil
+                banner = nil
             }
         case .pending:
-            cloudBackupBannerDismissTask?.cancel()
-            cloudBackupBannerDismissTask = nil
+            dismissTask?.cancel()
+            dismissTask = nil
             withAnimation(overlayAnimation) {
-                cloudBackupBanner = status
+                banner = status
             }
         case .backedUp, .degraded:
             withAnimation(overlayAnimation) {
-                cloudBackupBanner = status
+                banner = status
             }
-            scheduleCloudBackupBannerDismiss(after: status.state == .backedUp ? 3 : 5)
+            scheduleDismiss(after: status.state == .backedUp ? 3 : 5)
         }
     }
 
-    private func scheduleCloudBackupBannerDismiss(after seconds: UInt64) {
-        cloudBackupBannerDismissTask?.cancel()
-        cloudBackupBannerDismissTask = Task { @MainActor in
+    private func scheduleDismiss(after seconds: UInt64) {
+        dismissTask?.cancel()
+        dismissTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(seconds))
             guard !Task.isCancelled else { return }
             withAnimation(overlayAnimation) {
-                cloudBackupBanner = nil
+                banner = nil
             }
         }
     }
@@ -278,31 +318,6 @@ struct MainTabView: View {
             return WGJTheme.accentGold
         case .localOnly:
             return WGJTheme.textSecondary
-        }
-    }
-
-    private func sanitizedOverlayLength(_ value: CGFloat) -> CGFloat {
-        guard value.isFinite else { return 0 }
-        return max(value, 0)
-    }
-
-    private func activeWorkoutStripBottomGap(size: CGSize) -> CGFloat {
-        MainTabOverlayLayoutPolicy.activeWorkoutStripBottomGap(
-            screenHeight: size.height,
-            usesModernTabChrome: usesModernTabChrome
-        )
-    }
-
-    private var usesModernTabChrome: Bool {
-        if #available(iOS 26.0, *) {
-            return true
-        }
-        return false
-    }
-
-    private func presentActiveWorkout(sessionID: UUID) {
-        withAnimation(activeWorkoutOverlayAnimation) {
-            activeWorkoutPresentationState.present(sessionID: sessionID)
         }
     }
 }
