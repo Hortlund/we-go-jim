@@ -743,6 +743,83 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         XCTAssertEqual(drafts?.first?.actualWeight, 120)
     }
 
+    func testHistoryDetailExposesPersonalRecordHighlights() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+
+        let olderSessionID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let olderExerciseID = UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
+        context.insert(WorkoutSession(
+            id: olderSessionID,
+            name: "Older Lower",
+            status: .completed,
+            startedAt: Date(timeIntervalSince1970: 100),
+            endedAt: Date(timeIntervalSince1970: 200)
+        ))
+        context.insert(WorkoutSessionExercise(
+            id: olderExerciseID,
+            sessionID: olderSessionID,
+            catalogExerciseUUID: "leg-press",
+            exerciseNameSnapshot: "Leg Press",
+            categorySnapshot: "Strength",
+            muscleSummarySnapshot: "Quadriceps",
+            sortOrder: 0
+        ))
+        context.insert(WorkoutSessionSet(
+            id: UUID(uuidString: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")!,
+            sessionExerciseID: olderExerciseID,
+            sortOrder: 0,
+            actualReps: 8,
+            actualWeight: 100,
+            isCompleted: true
+        ))
+
+        let newerSessionID = UUID(uuidString: "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD")!
+        let newerExerciseID = UUID(uuidString: "EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE")!
+        let newerSetID = UUID(uuidString: "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF")!
+        context.insert(WorkoutSession(
+            id: newerSessionID,
+            name: "Newer Lower",
+            status: .completed,
+            startedAt: Date(timeIntervalSince1970: 300),
+            endedAt: Date(timeIntervalSince1970: 400)
+        ))
+        context.insert(WorkoutSessionExercise(
+            id: newerExerciseID,
+            sessionID: newerSessionID,
+            catalogExerciseUUID: "leg-press",
+            exerciseNameSnapshot: "Leg Press",
+            categorySnapshot: "Strength",
+            muscleSummarySnapshot: "Quadriceps",
+            sortOrder: 0
+        ))
+        context.insert(WorkoutSessionSet(
+            id: newerSetID,
+            sessionExerciseID: newerExerciseID,
+            sortOrder: 0,
+            actualReps: 8,
+            actualWeight: 120,
+            isCompleted: true
+        ))
+        try context.save()
+
+        _ = try HistoryProjectionRepository(modelContext: context).backfillIfNeeded()
+
+        let snapshot = try HistoryDetailSnapshotBuilder.load(
+            modelContext: context,
+            sessionID: newerSessionID
+        )
+
+        XCTAssertEqual(snapshot.personalRecordHighlights.count, 1)
+        XCTAssertEqual(snapshot.personalRecordHighlights[0].sessionExerciseID, newerExerciseID)
+        XCTAssertEqual(snapshot.personalRecordHighlights[0].setID, newerSetID)
+        XCTAssertEqual(snapshot.personalRecordHighlights[0].exerciseName, "Leg Press")
+        XCTAssertEqual(snapshot.personalRecordHighlights[0].setTitle, "Working Set 1")
+        XCTAssertEqual(snapshot.personalRecordHighlights[0].performanceText, "120 kg x 8")
+        XCTAssertEqual(snapshot.personalRecordHighlights[0].detailText, "Strength + Weight + Volume PR · 152 kg e1RM")
+    }
+
     func testPreviousValuesUseSessionSetIDs() throws {
         let container = try makeInMemoryContainer()
         let context = ModelContext(container)

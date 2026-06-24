@@ -10,6 +10,7 @@ enum HistoryDetailSnapshotBuilder {
         let localState: LocalState
         let hydrationPayloadByExerciseID: [UUID: ExerciseHydrationPayload]
         let muscleHeatmap: WorkoutMuscleHeatmapSnapshot
+        let personalRecordHighlights: [PersonalRecordHighlight]
     }
 
     nonisolated struct SessionSnapshot: Identifiable, Equatable, Sendable {
@@ -119,6 +120,17 @@ enum HistoryDetailSnapshotBuilder {
         let personalRecords: HistoryExercisePersonalRecordPresentation
     }
 
+    nonisolated struct PersonalRecordHighlight: Identifiable, Equatable, Sendable {
+        let id: String
+        let sessionExerciseID: UUID
+        let setID: UUID
+        let exerciseName: String
+        let setTitle: String
+        let performanceText: String
+        let detailText: String
+        let kinds: [WorkoutPersonalRecordKind]
+    }
+
     nonisolated static func load(
         modelContext: ModelContext,
         sessionID: UUID,
@@ -136,16 +148,23 @@ enum HistoryDetailSnapshotBuilder {
         let localState = try localState(for: exercises, repository: repository)
         let requestedHydrationIDs = hydrationExerciseIDs ?? Set(exercises.map(\.id))
         let hydrationExercises = exercises.filter { requestedHydrationIDs.contains($0.id) }
+        let personalRecordAchievements = try WorkoutMetricsService(modelContext: modelContext)
+            .sessionSetPRAchievements(sessionID: session.id)
         let hydrationPayloadByExerciseID = try hydrationPayloads(
             modelContext: modelContext,
             session: session,
             exercises: hydrationExercises,
-            draftsByExerciseID: localState.setDraftsByExerciseID
+            draftsByExerciseID: localState.setDraftsByExerciseID,
+            personalRecordAchievements: personalRecordAchievements
         )
         let muscleHeatmap = try muscleHeatmap(
             modelContext: modelContext,
             exercises: exercises,
             repository: repository
+        )
+        let personalRecordHighlights = personalRecordHighlights(
+            from: personalRecordAchievements,
+            draftsByExerciseID: localState.setDraftsByExerciseID
         )
 
         return Snapshot(
@@ -155,7 +174,8 @@ enum HistoryDetailSnapshotBuilder {
             preferredLoadUnit: preferredLoadUnit,
             localState: localState,
             hydrationPayloadByExerciseID: hydrationPayloadByExerciseID,
-            muscleHeatmap: muscleHeatmap
+            muscleHeatmap: muscleHeatmap,
+            personalRecordHighlights: personalRecordHighlights
         )
     }
 
@@ -180,7 +200,9 @@ enum HistoryDetailSnapshotBuilder {
             modelContext: modelContext,
             session: session,
             exercises: exercises,
-            draftsByExerciseID: localState.setDraftsByExerciseID
+            draftsByExerciseID: localState.setDraftsByExerciseID,
+            personalRecordAchievements: try WorkoutMetricsService(modelContext: modelContext)
+                .sessionSetPRAchievements(sessionID: session.id)
         )
     }
 
@@ -223,14 +245,14 @@ enum HistoryDetailSnapshotBuilder {
         modelContext: ModelContext,
         session: WorkoutSession,
         exercises: [WorkoutSessionExercise],
-        draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
+        draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]],
+        personalRecordAchievements: [SessionSetPRAchievement]
     ) throws -> [UUID: ExerciseHydrationPayload] {
         guard !exercises.isEmpty else { return [:] }
 
         let exerciseIDs = Set(exercises.map(\.id))
-        let personalRecords = try HistoryExercisePersonalRecordPresentation.presentationsByExerciseID(
-            from: WorkoutMetricsService(modelContext: modelContext)
-                .sessionSetPRAchievements(sessionID: session.id),
+        let personalRecords = HistoryExercisePersonalRecordPresentation.presentationsByExerciseID(
+            from: personalRecordAchievements,
             exerciseIDs: exerciseIDs
         )
         let previousMaps = try WorkoutSessionRepository(modelContext: modelContext).previousSetMaps(
@@ -257,6 +279,64 @@ enum HistoryDetailSnapshotBuilder {
         }
 
         return payloadByExerciseID
+    }
+
+    nonisolated private static func personalRecordHighlights(
+        from achievements: [SessionSetPRAchievement],
+        draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
+    ) -> [PersonalRecordHighlight] {
+        achievements.map { achievement in
+            PersonalRecordHighlight(
+                id: achievement.id,
+                sessionExerciseID: achievement.sessionExerciseID,
+                setID: achievement.setID,
+                exerciseName: achievement.exerciseName,
+                setTitle: setTitle(for: achievement, draftsByExerciseID: draftsByExerciseID),
+                performanceText: performanceText(for: achievement),
+                detailText: detailText(for: achievement),
+                kinds: achievement.kinds
+            )
+        }
+    }
+
+    nonisolated private static func setTitle(
+        for achievement: SessionSetPRAchievement,
+        draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
+    ) -> String {
+        guard let drafts = draftsByExerciseID[achievement.sessionExerciseID],
+              let index = drafts.firstIndex(where: { $0.id == achievement.setID })
+        else {
+            return "PR Set"
+        }
+
+        if drafts[index].isWarmup {
+            return "Warmup Set"
+        }
+
+        let workingSetNumber = drafts.prefix(index + 1).filter { !$0.isWarmup }.count
+        return "Working Set \(max(workingSetNumber, 1))"
+    }
+
+    nonisolated private static func performanceText(for achievement: SessionSetPRAchievement) -> String {
+        if let weight = achievement.weight, achievement.loadUnit != .bodyweight {
+            return "\(WGJFormatters.decimalString(weight)) \(achievement.loadUnit.shortLabel) x \(achievement.reps)"
+        }
+
+        return "\(achievement.reps) reps"
+    }
+
+    nonisolated private static func detailText(for achievement: SessionSetPRAchievement) -> String {
+        let kindsText = achievement.kinds.map(\.title).joined(separator: " + ") + " PR"
+
+        if achievement.kinds.contains(.strength), let estimatedOneRepMax = achievement.estimatedOneRepMax {
+            return "\(kindsText) · \(WGJFormatters.oneDecimalString(estimatedOneRepMax)) \(achievement.loadUnit.shortLabel) e1RM"
+        }
+
+        if achievement.kinds.contains(.volume), let volume = achievement.volume {
+            return "\(kindsText) · \(WGJFormatters.integerString(volume)) kg volume"
+        }
+
+        return kindsText
     }
 
     nonisolated private static func muscleHeatmap(
