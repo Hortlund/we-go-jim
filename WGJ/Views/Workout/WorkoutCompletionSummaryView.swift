@@ -45,13 +45,13 @@ nonisolated struct WorkoutCompletionConfettiBurstDescriptor: Equatable, Sendable
 }
 
 nonisolated enum WorkoutCompletionConfettiPolicy {
-    static let automaticCelebrationDelay: Duration = .zero
+    static let automaticCelebrationDelay: Duration = .milliseconds(180)
     static let burstLifetime: Duration = .seconds(7.0)
 
     static func pieceCount(for intensity: WorkoutCompletionConfettiIntensity) -> Int {
         switch intensity {
         case .completedWorkout:
-            return 54
+            return 34
         case .manualTap:
             return 18
         }
@@ -102,6 +102,7 @@ struct WorkoutCompletionSummaryView: View {
     @State private var celebrationBurstCount = 0
     @State private var confettiBursts: [WorkoutCompletionConfettiBurst] = []
     @State private var confettiDismissTasks: [UUID: Task<Void, Never>] = [:]
+    @State private var automaticCelebrationTask: Task<Void, Never>?
     @State private var heroCardFrame: CGRect = .zero
 
     private var completionBackgroundStore: AppBackgroundStore {
@@ -111,7 +112,7 @@ struct WorkoutCompletionSummaryView: View {
     var body: some View {
         ZStack(alignment: .top) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     if let snapshot {
                         heroCard(snapshot)
                         statGrid(snapshot)
@@ -153,6 +154,8 @@ struct WorkoutCompletionSummaryView: View {
             await loadSnapshotIfNeeded()
         }
         .onDisappear {
+            automaticCelebrationTask?.cancel()
+            automaticCelebrationTask = nil
             confettiDismissTasks.values.forEach { $0.cancel() }
             confettiDismissTasks = [:]
         }
@@ -303,6 +306,7 @@ struct WorkoutCompletionSummaryView: View {
         .buttonStyle(.plain)
         .contentShape(RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous))
         .onPreferenceChange(WorkoutCompletionHeroFramePreferenceKey.self) { frame in
+            guard !heroFrameMatches(frame, heroCardFrame) else { return }
             heroCardFrame = frame
         }
         .simultaneousGesture(
@@ -433,19 +437,24 @@ struct WorkoutCompletionSummaryView: View {
             }
 
             snapshot = builtSnapshot
-            await Task.yield()
-            guard !Task.isCancelled else { return }
-            triggerCelebrationIfReady()
+            scheduleAutomaticCelebrationIfReady()
         } catch {
             continueToHistory()
         }
     }
 
-    private func triggerCelebrationIfReady() {
+    private func scheduleAutomaticCelebrationIfReady() {
         guard snapshot != nil else { return }
         guard !hasTriggeredCelebration else { return }
         hasTriggeredCelebration = true
-        triggerCelebration(origin: defaultConfettiOrigin(), intensity: .completedWorkout)
+        automaticCelebrationTask?.cancel()
+        automaticCelebrationTask = Task { @MainActor in
+            try? await Task.sleep(for: WorkoutCompletionConfettiPolicy.automaticCelebrationDelay)
+            guard !Task.isCancelled else { return }
+            guard snapshot != nil else { return }
+            triggerCelebration(origin: defaultConfettiOrigin(), intensity: .completedWorkout)
+            automaticCelebrationTask = nil
+        }
     }
 
     private func triggerCelebration(
@@ -496,6 +505,13 @@ struct WorkoutCompletionSummaryView: View {
     private func continueToHistory() {
         appTabState.selectedTab = .history
         workoutCompletionPresentationState.dismiss()
+    }
+
+    private func heroFrameMatches(_ lhs: CGRect, _ rhs: CGRect) -> Bool {
+        abs(lhs.minX - rhs.minX) < 0.5
+            && abs(lhs.minY - rhs.minY) < 0.5
+            && abs(lhs.width - rhs.width) < 0.5
+            && abs(lhs.height - rhs.height) < 0.5
     }
 }
 

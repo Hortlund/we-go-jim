@@ -19,6 +19,25 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         XCTAssertFalse(contentViewSource.contains("app.startup-cloud-restore"))
     }
 
+    func testCloudBackupBannerStatusObservationStaysOutOfMainTabShell() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let repositoryRoot = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let mainTabURL = repositoryRoot
+            .appendingPathComponent("WGJ")
+            .appendingPathComponent("Views")
+            .appendingPathComponent("MainTabView.swift")
+        let mainTabSource = try String(contentsOf: mainTabURL, encoding: .utf8)
+
+        let mainTabStart = try XCTUnwrap(mainTabSource.range(of: "struct MainTabView: View"))
+        let bannerHostStart = try XCTUnwrap(mainTabSource.range(of: "private struct CloudBackupStatusBannerHost"))
+        let mainTabShell = mainTabSource[mainTabStart.lowerBound..<bannerHostStart.lowerBound]
+
+        XCTAssertFalse(mainTabShell.contains("\\.userDataSyncStatus"))
+        XCTAssertTrue(mainTabSource.contains("@Environment(\\.userDataSyncStatus) private var userDataSyncStatus"))
+    }
+
     func testWorkoutCompletionBackupIsDeferredPastCompletionPresentation() {
         XCTAssertEqual(
             BoundaryCloudBackupScheduler.enqueueDelay(for: .workoutCompleted),
