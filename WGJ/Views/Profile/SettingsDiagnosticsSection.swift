@@ -19,7 +19,7 @@ struct SettingsDiagnosticsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            WGJActionHeader("Debug", subtitle: "Local state and boundary-backup status.") {
+            WGJActionHeader("Debug", subtitle: "Local state and iCloud backup status.") {
                 Button {
                     onClose()
                 } label: {
@@ -31,7 +31,7 @@ struct SettingsDiagnosticsSection: View {
             infoRow("App environment", value: AppRuntimeConfig.appEnvironment.displayName)
             infoRow("Bundle ID", value: Bundle.main.bundleIdentifier ?? "Unknown")
             infoRow("Storage mode", value: cloudSyncEnabled ? "CloudKit backup available" : "Local only")
-            infoRow("Boundary backup", value: userDataSyncStatus.title)
+            infoRow("Cloud backup", value: userDataSyncStatus.title)
             infoRow("CloudKit environment", value: AppRuntimeConfig.cloudKitConsoleEnvironmentName)
             infoRow("iCloud account", value: cloudAccountStatusText)
             infoRow("Profiles", value: "\(profileCount)")

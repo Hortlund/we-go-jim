@@ -199,7 +199,7 @@ nonisolated struct UserDataSyncStatusSnapshot: Equatable, Sendable {
         case .localOnly:
             return "Saved locally"
         case .pending:
-            return "Cloud backup pending"
+            return "Backing up to iCloud"
         case .backedUp:
             return "Cloud backup updated"
         case .degraded:
@@ -210,7 +210,7 @@ nonisolated struct UserDataSyncStatusSnapshot: Equatable, Sendable {
     static func localOnly(reason: String?) -> UserDataSyncStatusSnapshot {
         UserDataSyncStatusSnapshot(
             state: .localOnly,
-            detail: reason ?? "Core workout data is saved locally. Cloud backup runs only after explicit saves.",
+            detail: reason ?? "Saved on this device. iCloud backup is available.",
             latestLocalMutationAt: nil,
             latestSuccessfulExportAt: nil,
             latestErrorDescription: reason
@@ -220,7 +220,7 @@ nonisolated struct UserDataSyncStatusSnapshot: Equatable, Sendable {
     static func pending(at date: Date = .now) -> UserDataSyncStatusSnapshot {
         UserDataSyncStatusSnapshot(
             state: .pending,
-            detail: "Local changes are waiting for the next save-boundary cloud backup.",
+            detail: "Saved on this device.",
             latestLocalMutationAt: date,
             latestSuccessfulExportAt: nil,
             latestErrorDescription: nil
@@ -230,7 +230,7 @@ nonisolated struct UserDataSyncStatusSnapshot: Equatable, Sendable {
     static func backedUp(at date: Date? = .now) -> UserDataSyncStatusSnapshot {
         UserDataSyncStatusSnapshot(
             state: .backedUp,
-            detail: "The latest explicit save was exported to cloud backup.",
+            detail: "Backed up to iCloud.",
             latestLocalMutationAt: nil,
             latestSuccessfulExportAt: date,
             latestErrorDescription: nil
