@@ -26,7 +26,6 @@ struct WorkoutExerciseRowHostView: View, Equatable {
     let isSetEditingEnabled: Bool
     let isSetCompletionEnabled: Bool
     let setCompletionGatePresentation: WorkoutSetCompletionGatePresentation?
-    let enablesHeaderSwipeDelete: Bool
     let emphasizesExerciseCompletion: Bool
     let canMoveExerciseUp: Bool
     let canMoveExerciseDown: Bool
@@ -77,7 +76,6 @@ struct WorkoutExerciseRowHostView: View, Equatable {
         isSetEditingEnabled: Bool = true,
         isSetCompletionEnabled: Bool = true,
         setCompletionGatePresentation: WorkoutSetCompletionGatePresentation? = nil,
-        enablesHeaderSwipeDelete: Bool = true,
         emphasizesExerciseCompletion: Bool = true,
         canMoveExerciseUp: Bool = false,
         canMoveExerciseDown: Bool = false,
@@ -122,7 +120,6 @@ struct WorkoutExerciseRowHostView: View, Equatable {
         self.isSetEditingEnabled = isSetEditingEnabled
         self.isSetCompletionEnabled = isSetCompletionEnabled
         self.setCompletionGatePresentation = setCompletionGatePresentation
-        self.enablesHeaderSwipeDelete = enablesHeaderSwipeDelete
         self.emphasizesExerciseCompletion = emphasizesExerciseCompletion
         self.canMoveExerciseUp = canMoveExerciseUp
         self.canMoveExerciseDown = canMoveExerciseDown
@@ -204,7 +201,6 @@ struct WorkoutExerciseRowHostView: View, Equatable {
             isSetEditingEnabled: isSetEditingEnabled,
             isSetCompletionEnabled: isSetCompletionEnabled,
             setCompletionGatePresentation: setCompletionGatePresentation,
-            enablesHeaderSwipeDelete: enablesHeaderSwipeDelete,
             emphasizesExerciseCompletion: emphasizesExerciseCompletion,
             onCommitRequest: { drafts, restSeconds in
                 editingCoordinator.requestImmediateCommit(
@@ -301,7 +297,6 @@ struct WorkoutExerciseRowHostView: View, Equatable {
             && lhs.isSetEditingEnabled == rhs.isSetEditingEnabled
             && lhs.isSetCompletionEnabled == rhs.isSetCompletionEnabled
             && lhs.setCompletionGatePresentation == rhs.setCompletionGatePresentation
-            && lhs.enablesHeaderSwipeDelete == rhs.enablesHeaderSwipeDelete
             && lhs.emphasizesExerciseCompletion == rhs.emphasizesExerciseCompletion
             && lhs.canMoveExerciseUp == rhs.canMoveExerciseUp
             && lhs.canMoveExerciseDown == rhs.canMoveExerciseDown

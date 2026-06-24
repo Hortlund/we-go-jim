@@ -37,7 +37,6 @@ struct WorkoutSessionExerciseGridEditor: View {
     var isSetEditingEnabled: Bool
     var isSetCompletionEnabled: Bool
     var setCompletionGatePresentation: WorkoutSetCompletionGatePresentation?
-    var enablesHeaderSwipeDelete: Bool
     var emphasizesExerciseCompletion: Bool
     var onCommitRequest: (([WorkoutSessionSetDraft], Int) -> Void)?
     var onSetCompletionChange: ((UUID, String?, Int, Bool) -> Void)?
@@ -60,10 +59,6 @@ struct WorkoutSessionExerciseGridEditor: View {
     @State private var localIsExpanded: Bool
     @State private var rowSnapshots: [WorkoutSessionExerciseSetRowDisplaySnapshot]
     @State private var cachedCompletedSetCount: Int
-    @State private var exerciseSwipeOffset: CGFloat = 0
-    @State private var exerciseSwipeRemoving = false
-    @State private var setSwipeOffsets: [UUID: CGFloat] = [:]
-    @State private var setSwipeRemoving: [UUID: Bool] = [:]
     @State private var metricInputDraftBuffer = WorkoutMetricInputDraftStore()
     @State private var revealedCompletionGateSetIDs: Set<UUID> = []
     @State private var pendingDisplayRefreshTask: Task<Void, Never>?
@@ -112,7 +107,6 @@ struct WorkoutSessionExerciseGridEditor: View {
         isSetEditingEnabled: Bool = true,
         isSetCompletionEnabled: Bool = true,
         setCompletionGatePresentation: WorkoutSetCompletionGatePresentation? = nil,
-        enablesHeaderSwipeDelete: Bool = false,
         emphasizesExerciseCompletion: Bool = false,
         onCommitRequest: (([WorkoutSessionSetDraft], Int) -> Void)? = nil,
         onSetCompletionChange: ((UUID, String?, Int, Bool) -> Void)? = nil,
@@ -155,7 +149,6 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.isSetEditingEnabled = isSetEditingEnabled
         self.isSetCompletionEnabled = isSetCompletionEnabled
         self.setCompletionGatePresentation = setCompletionGatePresentation
-        self.enablesHeaderSwipeDelete = enablesHeaderSwipeDelete
         self.emphasizesExerciseCompletion = emphasizesExerciseCompletion
         self.onCommitRequest = onCommitRequest
         self.onSetCompletionChange = onSetCompletionChange
@@ -195,7 +188,7 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            headerSection
+            headerContent
 
             if isExpanded {
                 if showsInlineExerciseControls {
@@ -312,23 +305,6 @@ struct WorkoutSessionExerciseGridEditor: View {
                 lineWidth: shouldEmphasizeCompletedExercise ? 2 : 1.2
             )
             .allowsHitTesting(false)
-    }
-
-    @ViewBuilder
-    private var headerSection: some View {
-        if enablesHeaderSwipeDelete, let onExerciseDelete {
-            SwipeDeleteRow(
-                offset: $exerciseSwipeOffset,
-                isRemoving: $exerciseSwipeRemoving,
-                gestureStrategy: .simultaneous
-            ) {
-                onExerciseDelete()
-            } content: {
-                headerContent
-            }
-        } else {
-            headerContent
-        }
     }
 
     private var headerContent: some View {
@@ -601,16 +577,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             }
 
             ForEach(rows) { row in
-                SwipeDeleteRow(
-                    offset: setSwipeOffsetBinding(for: row.id),
-                    isRemoving: setRemovingBinding(for: row.id),
-                    isEnabled: isSetEditingEnabled && !row.set.isLocked,
-                    gestureStrategy: .simultaneous
-                ) {
-                    removeSet(withID: row.id)
-                } content: {
-                    setCard(row)
-                }
+                setCard(row)
             }
 
             Button {
@@ -1629,8 +1596,6 @@ struct WorkoutSessionExerciseGridEditor: View {
             dismissInputFocus()
         }
         rebuildDisplayRows(using: setDrafts)
-        setSwipeOffsets[removedID] = nil
-        setSwipeRemoving[removedID] = nil
         notifyChanged()
         onSetCompletionChange?(removedID, removedTitle, 0, false)
     }
@@ -2752,20 +2717,6 @@ struct WorkoutSessionExerciseGridEditor: View {
         case .reps:
             metricInputDraftBuffer.sync(setID: draft.id, metric: .reps, draft: draft)
         }
-    }
-
-    private func setSwipeOffsetBinding(for setID: UUID) -> Binding<CGFloat> {
-        Binding(
-            get: { setSwipeOffsets[setID] ?? 0 },
-            set: { setSwipeOffsets[setID] = $0 }
-        )
-    }
-
-    private func setRemovingBinding(for setID: UUID) -> Binding<Bool> {
-        Binding(
-            get: { setSwipeRemoving[setID] ?? false },
-            set: { setSwipeRemoving[setID] = $0 }
-        )
     }
 
     private func focusMetric(_ metric: SetInputFocus.Metric, forSetID setID: UUID) {

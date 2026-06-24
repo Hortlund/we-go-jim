@@ -3,6 +3,36 @@ import SwiftUI
 @testable import WGJ
 
 final class ActiveWorkoutRuntimeTests: XCTestCase {
+    func testWorkoutEditorsDoNotUseSwipeDeleteRows() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let projectRootURL = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourcePaths = [
+            "WGJ/Views/Workout/WorkoutSessionExerciseGridEditor.swift",
+            "WGJ/Views/Workout/WorkoutExerciseRowHostView.swift",
+            "WGJ/Views/Templates/TemplateEditorView.swift",
+            "WGJ/Views/Templates/TemplateExercisePrescriptionEditor.swift",
+            "WGJ/Views/Templates/TemplateDetailView.swift",
+        ]
+
+        for sourcePath in sourcePaths {
+            let sourceURL = projectRootURL.appendingPathComponent(sourcePath)
+            let source = try String(contentsOf: sourceURL, encoding: .utf8)
+            XCTAssertFalse(source.contains("SwipeDeleteRow"), "\(sourcePath) should use explicit delete controls")
+            XCTAssertFalse(source.contains("SwipeOffset"), "\(sourcePath) should not keep swipe delete offset state")
+            XCTAssertFalse(source.contains("swipeOffset"), "\(sourcePath) should not keep swipe delete offset state")
+            XCTAssertFalse(source.contains("swipeRemoving"), "\(sourcePath) should not keep swipe delete removal state")
+        }
+
+        let sharedSwipeDeleteURL = projectRootURL
+            .appendingPathComponent("WGJ/Views/Shared/SwipeDeleteRow.swift")
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: sharedSwipeDeleteURL.path),
+            "SwipeDeleteRow should stay deleted when no app surfaces use swipe delete"
+        )
+    }
+
     func testAsyncLoadGenerationTrackerInvalidatesOlderLoads() {
         var tracker = AsyncLoadGenerationTracker()
 
