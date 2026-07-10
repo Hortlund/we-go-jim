@@ -321,16 +321,19 @@ nonisolated enum WorkoutProgressSnapshotBuilder {
         previous: SessionMetrics,
         current: SessionMetrics
     ) -> [WorkoutProgressMetricDelta] {
-        [
+        let volumeDelta = roundedToWholeKilogram(
+            current.totalVolumeKg - previous.totalVolumeKg
+        )
+        return [
             metricDelta(
                 kind: .volume,
                 title: "Volume",
                 systemImage: "scalemass.fill",
-                previousValue: previous.totalVolumeKg,
-                currentValue: current.totalVolumeKg,
+                previousValue: 0,
+                currentValue: volumeDelta,
                 previousText: formattedVolume(previous.totalVolumeKg),
                 currentText: formattedVolume(current.totalVolumeKg),
-                deltaText: signedVolume(current.totalVolumeKg - previous.totalVolumeKg)
+                deltaText: signedVolume(volumeDelta)
             ),
             metricDelta(
                 kind: .duration,
@@ -463,8 +466,30 @@ nonisolated enum WorkoutProgressSnapshotBuilder {
         let improvedCount = exerciseComparisons.filter { $0.direction == .up }.count
         let repeatedCount = exerciseComparisons.count
         let biggestMover = exerciseComparisons.first
-        let volumeDelta = current.totalVolumeKg - previous.totalVolumeKg
+        let volumeDelta = roundedToWholeKilogram(
+            current.totalVolumeKg - previous.totalVolumeKg
+        )
         let prDelta = current.prHitsCount - previous.prHitsCount
+        let workloadDirection = WorkoutProgressDirection.compare(volumeDelta, 0)
+        let prDirection = WorkoutProgressDirection.compare(Double(prDelta), 0)
+        let workloadValue: String
+        switch workloadDirection {
+        case .up:
+            workloadValue = "More work"
+        case .down:
+            workloadValue = "Less work"
+        case .flat:
+            workloadValue = "Same work"
+        }
+        let prValue: String
+        switch prDirection {
+        case .up:
+            prValue = "New hits"
+        case .down:
+            prValue = "Fewer hits"
+        case .flat:
+            prValue = "Steady"
+        }
 
         return [
             WorkoutProgressHighlightCard(
@@ -486,18 +511,18 @@ nonisolated enum WorkoutProgressSnapshotBuilder {
             WorkoutProgressHighlightCard(
                 id: "workload",
                 title: "Workload signal",
-                value: volumeDelta >= 0 ? "More work" : "Less work",
+                value: workloadValue,
                 detail: signedVolume(volumeDelta),
                 systemImage: "chart.line.uptrend.xyaxis",
-                direction: .compare(current.totalVolumeKg, previous.totalVolumeKg)
+                direction: workloadDirection
             ),
             WorkoutProgressHighlightCard(
                 id: "prs",
                 title: "PR signal",
-                value: prDelta > 0 ? "New hits" : "Steady",
+                value: prValue,
                 detail: signedInteger(prDelta),
                 systemImage: "trophy.fill",
-                direction: .compare(Double(current.prHitsCount), Double(previous.prHitsCount))
+                direction: prDirection
             ),
         ]
     }
@@ -567,21 +592,42 @@ nonisolated enum WorkoutProgressSnapshotBuilder {
     }
 
     private static func signedVolume(_ value: Double) -> String {
-        let prefix = value > 0 ? "+" : ""
-        return "\(prefix)\(WGJFormatters.integerString(value)) kg"
+        let roundedValue = roundedToWholeKilogram(value)
+        let prefix = roundedValue > 0 ? "+" : ""
+        return "\(prefix)\(WGJFormatters.integerString(roundedValue)) kg"
     }
 
     private static func signedDuration(_ seconds: Int) -> String {
-        guard abs(seconds) >= 60 else {
-            return formattedDuration(0)
-        }
+        guard seconds != 0 else { return formattedDuration(0) }
+
         let prefix = seconds > 0 ? "+" : seconds < 0 ? "-" : ""
-        return "\(prefix)\(formattedDuration(abs(seconds)))"
+        let absoluteSeconds = abs(seconds)
+        let hours = absoluteSeconds / 3600
+        let minutes = (absoluteSeconds % 3600) / 60
+        let remainingSeconds = absoluteSeconds % 60
+        var components: [String] = []
+
+        if hours > 0 {
+            components.append("\(hours)h")
+        }
+        if minutes > 0 {
+            components.append("\(minutes)m")
+        }
+        if remainingSeconds > 0 {
+            components.append("\(remainingSeconds)s")
+        }
+
+        return prefix + components.joined(separator: " ")
     }
 
     private static func signedInteger(_ value: Int) -> String {
         let prefix = value > 0 ? "+" : ""
         return "\(prefix)\(value)"
+    }
+
+    private static func roundedToWholeKilogram(_ value: Double) -> Double {
+        let rounded = value.rounded()
+        return rounded == 0 ? 0 : rounded
     }
 
 }

@@ -401,6 +401,37 @@ final class WorkoutProgressSnapshotBuilderTests: XCTestCase {
         XCTAssertEqual(comparison.exerciseComparisons.first?.previousBestSetText, "8 reps")
         XCTAssertEqual(comparison.exerciseComparisons.first?.currentBestSetText, "11 reps")
         XCTAssertEqual(comparison.exerciseComparisons.first?.direction, .up)
+        XCTAssertEqual(comparison.exerciseComparisons.first?.deltaText, "+3 reps")
+    }
+
+    func testComparisonExcludesWarmupsAndIncompleteSets() {
+        let comparison = comparison(
+            previousExercises: [
+                exercise(
+                    catalogExerciseUUID: "bench",
+                    name: "Bench Press",
+                    sets: [set(reps: 5, weight: 50)]
+                ),
+            ],
+            currentExercises: [
+                exercise(
+                    catalogExerciseUUID: "bench",
+                    name: "Bench Press",
+                    sets: [
+                        set(reps: 5, weight: 50),
+                        set(reps: 20, weight: 200, isCompleted: false),
+                        set(reps: 20, weight: 200, isWarmup: true),
+                    ]
+                ),
+            ]
+        )
+
+        XCTAssertEqual(
+            comparison.metricDeltas.first { $0.kind == .volume }?.direction,
+            .flat
+        )
+        XCTAssertEqual(comparison.exerciseComparisons.first?.direction, .flat)
+        XCTAssertEqual(comparison.exerciseComparisons.first?.deltaText, "0 kg e1RM")
     }
 
     func testComparisonReportsNoOverlap() {
@@ -463,6 +494,32 @@ final class WorkoutProgressSnapshotBuilderTests: XCTestCase {
         )
     }
 
+    func testComparisonFormatsSubMinuteDurationDelta() {
+        let comparison = comparison(
+            previousExercises: [],
+            currentExercises: [],
+            previousDurationSeconds: 300,
+            currentDurationSeconds: 345
+        )
+
+        let duration = comparison.metricDeltas.first { $0.kind == .duration }
+        XCTAssertEqual(duration?.deltaText, "+45s")
+        XCTAssertEqual(duration?.direction, .up)
+    }
+
+    func testComparisonFormatsMinuteAndSecondDurationDelta() {
+        let comparison = comparison(
+            previousExercises: [],
+            currentExercises: [],
+            previousDurationSeconds: 375,
+            currentDurationSeconds: 300
+        )
+
+        let duration = comparison.metricDeltas.first { $0.kind == .duration }
+        XCTAssertEqual(duration?.deltaText, "-1m 15s")
+        XCTAssertEqual(duration?.direction, .down)
+    }
+
     func testComparisonDoesNotShowSignedZeroDurationDelta() {
         let previous = session(
             id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
@@ -476,7 +533,7 @@ final class WorkoutProgressSnapshotBuilderTests: XCTestCase {
             templateID: nil,
             name: "Shorter",
             completedAt: 200,
-            durationSeconds: 0
+            durationSeconds: 30
         )
 
         let snapshot = WorkoutProgressSnapshotBuilder.build(
@@ -491,6 +548,82 @@ final class WorkoutProgressSnapshotBuilderTests: XCTestCase {
         XCTAssertEqual(
             comparison.metricDeltas.first { $0.kind == WorkoutProgressMetricKind.duration }?.deltaText,
             "0m"
+        )
+        XCTAssertEqual(
+            comparison.metricDeltas.first { $0.kind == WorkoutProgressMetricKind.duration }?.direction,
+            .flat
+        )
+    }
+
+    func testHighlightCardsDistinguishNeutralAndNegativeSignals() {
+        let repeatedExercise = exercise(
+            catalogExerciseUUID: "bench",
+            name: "Bench Press",
+            sets: [set(reps: 5, weight: 100)]
+        )
+        let neutral = comparison(
+            previousExercises: [repeatedExercise],
+            currentExercises: [repeatedExercise],
+            previousPRHitsCount: 2,
+            currentPRHitsCount: 2
+        )
+
+        XCTAssertEqual(
+            neutral.highlightCards.first { $0.id == "workload" }?.value,
+            "Same work"
+        )
+        XCTAssertEqual(
+            neutral.highlightCards.first { $0.id == "prs" }?.value,
+            "Steady"
+        )
+
+        let lower = comparison(
+            previousExercises: [repeatedExercise],
+            currentExercises: [
+                exercise(
+                    catalogExerciseUUID: "bench",
+                    name: "Bench Press",
+                    sets: [set(reps: 5, weight: 90)]
+                ),
+            ],
+            previousPRHitsCount: 2,
+            currentPRHitsCount: 1
+        )
+
+        XCTAssertEqual(
+            lower.highlightCards.first { $0.id == "workload" }?.value,
+            "Less work"
+        )
+        XCTAssertEqual(
+            lower.highlightCards.first { $0.id == "prs" }?.value,
+            "Fewer hits"
+        )
+    }
+
+    func testEquivalentMixedUnitVolumeDoesNotDisplayNegativeZero() {
+        let comparison = comparison(
+            previousExercises: [
+                exercise(
+                    catalogExerciseUUID: "bench",
+                    name: "Bench Press",
+                    sets: [set(reps: 5, weight: 100)]
+                ),
+            ],
+            currentExercises: [
+                exercise(
+                    catalogExerciseUUID: "bench",
+                    name: "Bench Press",
+                    sets: [set(reps: 5, weight: 220.462_262, unit: .lb)]
+                ),
+            ]
+        )
+
+        let volume = comparison.metricDeltas.first { $0.kind == .volume }
+        XCTAssertEqual(volume?.deltaText, "0 kg")
+        XCTAssertEqual(volume?.direction, .flat)
+        XCTAssertEqual(
+            comparison.highlightCards.first { $0.id == "workload" }?.value,
+            "Same work"
         )
     }
 
@@ -519,13 +652,19 @@ final class WorkoutProgressSnapshotBuilderTests: XCTestCase {
 
     private func comparison(
         previousExercises: [WorkoutProgressExerciseInput],
-        currentExercises: [WorkoutProgressExerciseInput]
+        currentExercises: [WorkoutProgressExerciseInput],
+        previousDurationSeconds: Int = 1800,
+        currentDurationSeconds: Int = 1800,
+        previousPRHitsCount: Int = 0,
+        currentPRHitsCount: Int = 0
     ) -> WorkoutProgressComparison {
         let previous = session(
             id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
             templateID: nil,
             name: "Earlier",
             completedAt: 100,
+            durationSeconds: previousDurationSeconds,
+            prHitsCount: previousPRHitsCount,
             exercises: previousExercises
         )
         let current = session(
@@ -533,6 +672,8 @@ final class WorkoutProgressSnapshotBuilderTests: XCTestCase {
             templateID: nil,
             name: "Later",
             completedAt: 200,
+            durationSeconds: currentDurationSeconds,
+            prHitsCount: currentPRHitsCount,
             exercises: currentExercises
         )
         let snapshot = WorkoutProgressSnapshotBuilder.build(
