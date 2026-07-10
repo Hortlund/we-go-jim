@@ -1331,9 +1331,9 @@ nonisolated final class RestTimerNotificationManager: @unchecked Sendable {
         permissions: NotificationPermissionSnapshot
     ) -> RestTimerNotificationDescriptor {
         RestTimerNotificationDescriptor(
-            title: "Rest complete",
+            title: L10n.restTimerTitle,
             subtitle: "",
-            body: "Time for your next set.",
+            body: L10n.restTimerBody,
             usesDefaultSound: true,
             interruptionLevel: RestTimerInterruptionPolicy.effectiveLevel(
                 style: style,

@@ -243,14 +243,14 @@ nonisolated enum WeeklyGoalWidgetContentPolicy {
         let normalizedGoal = normalizedGoal(weeklyGoal)
         let normalizedCompleted = max(0, completedWorkouts)
         if normalizedCompleted > normalizedGoal {
-            return "Goal beaten"
+            return L10n.weeklyGoalBeaten
         }
         if normalizedCompleted == normalizedGoal {
-            return "Goal hit"
+            return L10n.weeklyGoalHit
         }
 
         let remaining = normalizedGoal - normalizedCompleted
-        return "\(remaining) to go"
+        return L10n.weeklyGoalRemaining(remaining)
     }
 }
 
