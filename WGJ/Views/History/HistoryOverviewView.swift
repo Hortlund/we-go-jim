@@ -2,6 +2,12 @@ import Foundation
 import SwiftData
 import SwiftUI
 
+nonisolated enum HistoryPaginationRequestPolicy {
+    static func shouldLoadMore(isLoading: Bool, hasMore: Bool) -> Bool {
+        hasMore && !isLoading
+    }
+}
+
 struct HistoryOverviewView: View {
     nonisolated private static let historyPageSize = 40
 
@@ -33,7 +39,7 @@ struct HistoryOverviewView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            LazyVStack(alignment: .leading, spacing: 16) {
                 WGJRootHeader("History", subtitle: "Completed sessions, volume, and best sets.") {
                     Button("Calendar") {
                         openWorkoutCalendar()
@@ -63,7 +69,7 @@ struct HistoryOverviewView: View {
                 }
 
                 ForEach(controller.snapshot.sections) { section in
-                    VStack(alignment: .leading, spacing: 10) {
+                    LazyVStack(alignment: .leading, spacing: 10) {
                         WGJCompactSectionHeader(section.title)
 
                         ForEach(section.cards) { card in
@@ -286,8 +292,10 @@ struct HistoryOverviewView: View {
     @MainActor
     private func loadMoreHistoryIfNeeded() async {
         guard selectedDayFilter == nil,
-              controller.hasMorePages,
-              !isLoadingMoreHistory
+              HistoryPaginationRequestPolicy.shouldLoadMore(
+                isLoading: isLoadingMoreHistory,
+                hasMore: controller.hasMorePages
+              )
         else {
             return
         }
