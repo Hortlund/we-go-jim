@@ -94,9 +94,12 @@ nonisolated enum HistoryProjectionSnapshotBuilder {
                 return nil
             }
 
-            let normalizedWeightKg = normalizedLoad(weight, unit: normalizedActualLoad.unit)
-            let estimatedOneRepMaxKg = normalizedLoad(
-                estimatedOneRepMax(weight: weight, reps: reps),
+            let normalizedWeightKg = WorkoutPerformanceMath.normalizedLoadInKilograms(
+                weight,
+                unit: normalizedActualLoad.unit
+            )
+            let estimatedOneRepMaxKg = WorkoutPerformanceMath.normalizedLoadInKilograms(
+                WorkoutPerformanceMath.estimatedOneRepMax(weight: weight, reps: reps),
                 unit: normalizedActualLoad.unit
             )
 
@@ -115,7 +118,11 @@ nonisolated enum HistoryProjectionSnapshotBuilder {
                 loadUnit: normalizedActualLoad.unit,
                 normalizedWeightKg: normalizedWeightKg,
                 estimatedOneRepMaxKg: estimatedOneRepMaxKg,
-                volumeKg: normalizedWeightKg * Double(reps),
+                volumeKg: WorkoutPerformanceMath.weightedVolumeInKilograms(
+                    weight: weight,
+                    reps: reps,
+                    unit: normalizedActualLoad.unit
+                ),
                 sourceSessionUpdatedAt: sourceSessionUpdatedAt
             )
 
@@ -138,23 +145,6 @@ nonisolated enum HistoryProjectionSnapshotBuilder {
                 volumeKg: nil,
                 sourceSessionUpdatedAt: sourceSessionUpdatedAt
             )
-        }
-    }
-
-    private static func estimatedOneRepMax(weight: Double, reps: Int) -> Double {
-        guard reps > 0 else { return weight }
-        if reps == 1 { return weight }
-        return weight * (1 + (Double(reps) / 30.0))
-    }
-
-    private static func normalizedLoad(_ value: Double, unit: TemplateLoadUnit) -> Double {
-        switch unit {
-        case .kg:
-            return value
-        case .lb:
-            return value * 0.45359237
-        case .bodyweight:
-            return value
         }
     }
 

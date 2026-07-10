@@ -611,7 +611,11 @@ nonisolated private struct ExerciseMetrics: Equatable, Sendable {
             else {
                 return total
             }
-            return total + normalizedLoad(weight, unit: set.loadUnit) * Double(reps)
+            return total + WorkoutPerformanceMath.weightedVolumeInKilograms(
+                weight: weight,
+                reps: reps,
+                unit: set.loadUnit
+            )
         }
         maxReps = workingSets.compactMap(\.reps).max() ?? 0
 
@@ -624,7 +628,10 @@ nonisolated private struct ExerciseMetrics: Equatable, Sendable {
            let reps = bestWeightedSet.reps,
            let weight = bestWeightedSet.weight
         {
-            bestWeightedOneRepMaxKg = normalizedLoad(estimatedOneRepMax(weight: weight, reps: reps), unit: bestWeightedSet.loadUnit)
+            bestWeightedOneRepMaxKg = WorkoutPerformanceMath.normalizedLoadInKilograms(
+                WorkoutPerformanceMath.estimatedOneRepMax(weight: weight, reps: reps),
+                unit: bestWeightedSet.loadUnit
+            )
             bestSetText = "\(WGJFormatters.decimalString(weight)) \(bestWeightedSet.loadUnit.shortLabel) x \(reps)"
         } else if let bestBodyweightSet = workingSets.max(by: { ($0.reps ?? 0) < ($1.reps ?? 0) }),
                   let reps = bestBodyweightSet.reps
@@ -640,24 +647,10 @@ nonisolated private struct ExerciseMetrics: Equatable, Sendable {
 
 nonisolated private func weightedScore(_ set: WorkoutProgressSetInput) -> Double {
     guard let weight = set.weight, let reps = set.reps else { return 0 }
-    return normalizedLoad(estimatedOneRepMax(weight: weight, reps: reps), unit: set.loadUnit)
-}
-
-nonisolated private func estimatedOneRepMax(weight: Double, reps: Int) -> Double {
-    guard reps > 0 else { return weight }
-    if reps == 1 { return weight }
-    return weight * (1 + (Double(reps) / 30.0))
-}
-
-nonisolated private func normalizedLoad(_ value: Double, unit: TemplateLoadUnit) -> Double {
-    switch unit {
-    case .kg:
-        return value
-    case .lb:
-        return value * 0.45359237
-    case .bodyweight:
-        return value
-    }
+    return WorkoutPerformanceMath.normalizedLoadInKilograms(
+        WorkoutPerformanceMath.estimatedOneRepMax(weight: weight, reps: reps),
+        unit: set.loadUnit
+    )
 }
 
 nonisolated enum WorkoutProgressSnapshotLoader {
