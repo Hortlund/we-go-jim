@@ -1478,9 +1478,14 @@ nonisolated enum TemplateEditorSaveOperationResult: Sendable, Equatable {
 nonisolated enum TemplateEditorPersistence {
     static func save(
         _ request: TemplateEditorSaveRequest,
-        modelContext: ModelContext
+        modelContext: ModelContext,
+        boundaryEffects: TemplateSaveBoundaryEffects = .live
     ) throws -> TemplateEditorSaveOperationResult {
-        let repository = TemplateRepository(modelContext: modelContext, autoSaveChanges: false)
+        let repository = TemplateRepository(
+            modelContext: modelContext,
+            autoSaveChanges: false,
+            boundaryEffects: boundaryEffects
+        )
         let savedTemplateID: UUID
 
         if let templateID = request.templateID {
@@ -1502,6 +1507,8 @@ nonisolated enum TemplateEditorPersistence {
             try repository.setCardioBlocks(templateID: created.id, drafts: request.cardioDrafts)
             savedTemplateID = created.id
         }
+
+        try repository.finalizeDeferredUserDataChangesIfNeeded()
 
         return .saved(TemplateEditorSaveResult(
             templateID: savedTemplateID,

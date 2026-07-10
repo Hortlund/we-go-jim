@@ -317,21 +317,41 @@ nonisolated enum TemplateRepositoryError: Error {
     case duplicateExerciseComponent
 }
 
+nonisolated struct TemplateSaveBoundaryEffects: Sendable {
+    let postLibraryChange: @Sendable () -> Void
+    let scheduleBackup: @Sendable (ModelContainer, BoundaryCloudBackupReason) -> Void
+
+    static let live = TemplateSaveBoundaryEffects(
+        postLibraryChange: {
+            TemplateLibraryChangeBroadcaster.post()
+        },
+        scheduleBackup: { container, reason in
+            BoundaryCloudBackupScheduler.exportBestEffort(
+                container: container,
+                reason: reason
+            )
+        }
+    )
+}
+
 nonisolated final class TemplateRepository {
     nonisolated static let unfiledFolderID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1))
 
     private let modelContext: ModelContext
     private let autoSaveChanges: Bool
     private let userDataChangeBackupReason: BoundaryCloudBackupReason
+    private let boundaryEffects: TemplateSaveBoundaryEffects
 
     init(
         modelContext: ModelContext,
         autoSaveChanges: Bool = true,
-        userDataChangeBackupReason: BoundaryCloudBackupReason = .templateSaved
+        userDataChangeBackupReason: BoundaryCloudBackupReason = .templateSaved,
+        boundaryEffects: TemplateSaveBoundaryEffects = .live
     ) {
         self.modelContext = modelContext
         self.autoSaveChanges = autoSaveChanges
         self.userDataChangeBackupReason = userDataChangeBackupReason
+        self.boundaryEffects = boundaryEffects
     }
 
     var backupReasonForUserDataChanges: BoundaryCloudBackupReason {
@@ -350,22 +370,16 @@ nonisolated final class TemplateRepository {
     private func saveUserDataChanges() throws {
         guard autoSaveChanges else { return }
         try modelContext.save()
-        TemplateLibraryChangeBroadcaster.post()
-        BoundaryCloudBackupScheduler.exportBestEffort(
-            container: modelContext.container,
-            reason: userDataChangeBackupReason
-        )
+        boundaryEffects.postLibraryChange()
+        boundaryEffects.scheduleBackup(modelContext.container, userDataChangeBackupReason)
     }
 
     func finalizeDeferredUserDataChangesIfNeeded() throws {
         guard !autoSaveChanges else { return }
         guard modelContext.hasChanges else { return }
         try modelContext.save()
-        TemplateLibraryChangeBroadcaster.post()
-        BoundaryCloudBackupScheduler.exportBestEffort(
-            container: modelContext.container,
-            reason: userDataChangeBackupReason
-        )
+        boundaryEffects.postLibraryChange()
+        boundaryEffects.scheduleBackup(modelContext.container, userDataChangeBackupReason)
     }
 
     func folders() throws -> [TemplateFolder] {
