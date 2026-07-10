@@ -611,7 +611,6 @@ final class TemplateFileOpenState {
 }
 
 @MainActor
-@MainActor
 @Observable
 final class AppNotificationRouter {
     static let shared = AppNotificationRouter()
