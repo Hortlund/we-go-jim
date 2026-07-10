@@ -26,6 +26,7 @@ struct WGJApp: App {
                             .environment(\.userDataSyncStatus, AppRuntimeState.shared.userDataSyncStatus)
                             .environment(\.appBackgroundStore, resolvedBootstrap.backgroundStore)
                             .environment(AppNotificationRouter.shared)
+                            .environment(resolvedBootstrap.activeWorkoutCoordinator)
                             .modelContainer(resolvedBootstrap.bootstrap.container)
                     case .volatileDiagnostic(let reason):
                         AppStorageDiagnosticModeView(

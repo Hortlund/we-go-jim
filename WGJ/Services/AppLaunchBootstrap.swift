@@ -35,6 +35,7 @@ nonisolated struct ModelContainerBootstrap {
 struct ResolvedAppLaunchBootstrap {
     let bootstrap: ModelContainerBootstrap
     let backgroundStore: AppBackgroundStore
+    let activeWorkoutCoordinator: ActiveWorkoutCoordinator
 }
 
 @MainActor
@@ -71,14 +72,8 @@ final class AppLaunchBootstrapState {
                 let bootstrap = try await resolver()
                 guard !Task.isCancelled else { return }
 
-                let resolved = ResolvedAppLaunchBootstrap(
-                    bootstrap: bootstrap,
-                    backgroundStore: AppBackgroundStore(container: bootstrap.container)
-                )
-
                 guard let self else { return }
                 await self.finishResolution(
-                    resolved,
                     bootstrap: bootstrap,
                     generation: currentGeneration
                 )
@@ -127,7 +122,6 @@ final class AppLaunchBootstrapState {
     }
 
     private func finishResolution(
-        _ resolved: ResolvedAppLaunchBootstrap,
         bootstrap: ModelContainerBootstrap,
         generation: Int
     ) {
@@ -135,7 +129,16 @@ final class AppLaunchBootstrapState {
         guard resolutionTask != nil else { return }
 
         runtimeStateUpdater(bootstrap)
-        resolvedBootstrap = resolved
+        let backgroundStore = AppBackgroundStore(container: bootstrap.container)
+        resolvedBootstrap = ResolvedAppLaunchBootstrap(
+            bootstrap: bootstrap,
+            backgroundStore: backgroundStore,
+            activeWorkoutCoordinator: ActiveWorkoutCoordinator(
+                persistence: ModelContainerActiveWorkoutPersistence(
+                    backgroundStore: backgroundStore
+                )
+            )
+        )
         recoveryState = nil
         resolutionTask = nil
     }

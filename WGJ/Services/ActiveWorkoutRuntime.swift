@@ -1,5 +1,4 @@
 import Foundation
-import Observation
 import SwiftData
 
 nonisolated struct ActiveWorkoutRuntimeSession: Identifiable, Equatable, Codable, Sendable {
@@ -69,12 +68,12 @@ nonisolated protocol ActiveWorkoutSnapshotStoring: Sendable {
 }
 
 nonisolated struct ActiveWorkoutStoredSnapshot: Equatable, Codable, Sendable {
-    let revision: UInt64
-    let session: ActiveWorkoutRuntimeSession
-    let restTimer: RestTimerSnapshot?
-    let presentationMode: ActiveWorkoutStoredPresentationMode?
-    let scrollTarget: ActiveWorkoutScrollTarget?
-    let expandedExerciseIDs: Set<UUID>
+    var revision: UInt64
+    var session: ActiveWorkoutRuntimeSession
+    var restTimer: RestTimerSnapshot?
+    var presentationMode: ActiveWorkoutStoredPresentationMode?
+    var scrollTarget: ActiveWorkoutScrollTarget?
+    var expandedExerciseIDs: Set<UUID>
 
     init(
         revision: UInt64 = 0,
@@ -1113,40 +1112,5 @@ nonisolated enum ActiveWorkoutRuntimeFirstRenderSnapshotBuilder {
         }
 
         return resolved
-    }
-}
-
-@MainActor
-@Observable
-final class ActiveWorkoutRuntimeController {
-    private let snapshotStore: ActiveWorkoutSnapshotStore
-    private(set) var session: ActiveWorkoutRuntimeSession?
-
-    init(
-        session: ActiveWorkoutRuntimeSession? = nil,
-        snapshotStore: ActiveWorkoutSnapshotStore = .shared
-    ) {
-        self.session = session
-        self.snapshotStore = snapshotStore
-    }
-
-    func loadSnapshot() async throws -> ActiveWorkoutRuntimeSession? {
-        let loaded = try await snapshotStore.load()
-        session = loaded
-        return loaded
-    }
-
-    func replaceSession(_ session: ActiveWorkoutRuntimeSession) {
-        self.session = session
-    }
-
-    func saveLifecycleSnapshot() async throws {
-        guard let session else { return }
-        try await snapshotStore.save(session)
-    }
-
-    func discard() async throws {
-        session = nil
-        try await snapshotStore.delete()
     }
 }
