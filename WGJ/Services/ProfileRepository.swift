@@ -162,6 +162,41 @@ nonisolated final class ProfileRepository {
         try saveUserDataChanges()
     }
 
+    func applySettingsPatch(_ patch: UserSettingsPatch) throws -> UserSettingsDraft {
+        let profile = try loadOrCreateProfile()
+        var changed = false
+
+        if let value = patch.weeklyWorkoutGoal {
+            profile.weeklyWorkoutGoal = max(1, min(14, value))
+            changed = true
+        }
+        if let value = patch.isTrainingGuidanceEnabled {
+            profile.isTrainingGuidanceEnabled = value
+            changed = true
+        }
+        if let value = patch.keepsScreenAwake {
+            profile.keepsScreenAwake = value
+            changed = true
+        }
+        if let value = patch.preferredWeightUnit {
+            profile.preferredWeightUnit = value
+            changed = true
+        }
+        if let value = patch.workoutNotificationStyle {
+            profile.workoutNotificationStyle = value
+            changed = true
+        }
+
+        if changed {
+            profile.updatedAt = .now
+            try saveUserDataChanges()
+            if patch.weeklyWorkoutGoal != nil {
+                WeeklyGoalWidgetPublisher.publishBestEffort(modelContext: modelContext)
+            }
+        }
+        return UserSettingsDraft(profile: profile)
+    }
+
     private func resolvedDefaultDisplayName(
         cloudSyncEnabled: Bool,
         defaultDisplayNameProvider: any ProfileDefaultDisplayNameProviding
