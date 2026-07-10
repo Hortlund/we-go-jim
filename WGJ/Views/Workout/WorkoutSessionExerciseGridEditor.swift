@@ -57,8 +57,7 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private let externalIsExpanded: Binding<Bool>?
     @State private var localIsExpanded: Bool
-    @State private var rowSnapshots: [WorkoutSessionExerciseSetRowDisplaySnapshot]
-    @State private var cachedCompletedSetCount: Int
+    @State private var projection: WorkoutSessionExerciseGridProjection
     @State private var metricInputDraftBuffer = WorkoutMetricInputDraftStore()
     @State private var revealedCompletionGateSetIDs: Set<UUID> = []
     @State private var debounceCoordinator = WorkoutGridDebounceCoordinator()
@@ -167,8 +166,8 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.onDirtyStateChange = onDirtyStateChange
         self._localIsExpanded = State(initialValue: isExpanded?.wrappedValue ?? initiallyExpanded)
         let startsExpanded = isExpanded?.wrappedValue ?? initiallyExpanded
-        let initialRows = startsExpanded
-            ? Self.makeDisplayRows(
+        let initialProjection = startsExpanded
+            ? Self.makeProjection(
                 setDrafts: setDrafts.wrappedValue,
                 previousPerformanceResolution: previousPerformanceResolution,
                 targetRepMin: targetRepMin,
@@ -176,13 +175,10 @@ struct WorkoutSessionExerciseGridEditor: View {
                 restSeconds: restSeconds.wrappedValue,
                 formatWeight: { WGJFormatters.decimalString($0) }
             )
-            : []
-        self._rowSnapshots = State(initialValue: initialRows)
-        self._cachedCompletedSetCount = State(
-            initialValue: setDrafts.wrappedValue.reduce(0) { partialResult, draft in
-                partialResult + (draft.isCycleCompleted ? 1 : 0)
-            }
-        )
+            : WorkoutSessionExerciseGridProjectionBuilder.build(
+                setDrafts: setDrafts.wrappedValue
+            )
+        self._projection = State(initialValue: initialProjection)
     }
 
     var body: some View {
@@ -275,7 +271,9 @@ struct WorkoutSessionExerciseGridEditor: View {
                 refreshDisplayRows()
             } else {
                 debounceCoordinator.cancelDisplayRefresh()
-                rowSnapshots = []
+                projection = WorkoutSessionExerciseGridProjectionBuilder.build(
+                    setDrafts: setDrafts
+                )
             }
         }
         .onChange(of: isSetCompletionEnabled) { _, isEnabled in
@@ -624,10 +622,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             return row
         }
 
-        let workingSetNumber = setDrafts
-            .prefix(currentIndex + 1)
-            .filter { !$0.isWarmup }
-            .count
+        let workingSetNumber = projection.workingSetNumberBySetID[currentSet.id] ?? 0
         let row = Self.makeDisplayRow(
             draft: currentSet,
             index: currentIndex,
@@ -1398,21 +1393,21 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private var displayRows: [WorkoutSessionExerciseSetRowDisplaySnapshot] {
         let currentIDs = setDrafts.map(\.id)
-        guard rowSnapshots.map(\.id) == currentIDs else {
-            return Self.makeDisplayRows(
+        guard projection.rows.map(\.id) == currentIDs else {
+            return Self.makeProjection(
                 setDrafts: setDrafts,
                 previousPerformanceResolution: previousPerformanceResolution,
                 targetRepMin: targetRepMin,
                 targetRepMax: targetRepMax,
                 restSeconds: restSeconds,
                 formatWeight: formatWeight
-            )
+            ).rows
         }
-        return rowSnapshots
+        return projection.rows
     }
 
     private var completedSetCount: Int {
-        cachedCompletedSetCount
+        projection.completedSetCount
     }
 
     private var isExerciseCompleted: Bool {
@@ -1604,7 +1599,12 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func indexForSetID(_ setID: UUID) -> Int? {
-        WorkoutSetRowIdentityResolver.currentIndex(for: setID, in: setDrafts)
+        if let index = projection.indexBySetID[setID],
+           setDrafts.indices.contains(index),
+           setDrafts[index].id == setID {
+            return index
+        }
+        return WorkoutSetRowIdentityResolver.currentIndex(for: setID, in: setDrafts)
     }
 
     private func toggleWarmup(at index: Int) {
@@ -1709,7 +1709,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         let currentDrafts = drafts ?? _setDrafts.wrappedValue
         let currentRestSeconds = overrideRestSeconds ?? restSeconds
         let snapshot = WGJPerformance.measure("workout-grid.row-refresh") {
-            Self.makeDisplayRows(
+            Self.makeProjection(
                 setDrafts: currentDrafts,
                 previousPerformanceResolution: previousPerformanceResolution,
                 targetRepMin: targetRepMin,
@@ -1718,10 +1718,7 @@ struct WorkoutSessionExerciseGridEditor: View {
                 formatWeight: formatWeight
             )
         }
-        rowSnapshots = snapshot
-        cachedCompletedSetCount = snapshot.reduce(0) { partialResult, row in
-            partialResult + (row.set.isCycleCompleted ? 1 : 0)
-        }
+        projection = snapshot
     }
 
     private func scheduleDisplayRefresh() {
@@ -1791,38 +1788,28 @@ struct WorkoutSessionExerciseGridEditor: View {
         refreshDisplayRows()
     }
 
-    private static func makeDisplayRows(
+    private static func makeProjection(
         setDrafts: [WorkoutSessionSetDraft],
         previousPerformanceResolution: WorkoutPreviousPerformanceResolution,
         targetRepMin: Int?,
         targetRepMax: Int?,
         restSeconds: Int,
         formatWeight: (Double) -> String
-    ) -> [WorkoutSessionExerciseSetRowDisplaySnapshot] {
-        var rows: [WorkoutSessionExerciseSetRowDisplaySnapshot] = []
-        rows.reserveCapacity(setDrafts.count)
-        var workingSetNumber = 0
-
-        for (index, draft) in setDrafts.enumerated() {
-            if !draft.isWarmup {
-                workingSetNumber += 1
-            }
-
-            rows.append(
-                makeDisplayRow(
-                    draft: draft,
-                    index: index,
-                    workingSetNumber: workingSetNumber,
-                    previousPerformanceResolution: previousPerformanceResolution,
-                    targetRepMin: targetRepMin,
-                    targetRepMax: targetRepMax,
-                    restSeconds: restSeconds,
-                    formatWeight: formatWeight
-                )
+    ) -> WorkoutSessionExerciseGridProjection {
+        return WorkoutSessionExerciseGridProjectionBuilder.build(
+            setDrafts: setDrafts
+        ) { draft, index, workingSetNumber in
+            makeDisplayRow(
+                draft: draft,
+                index: index,
+                workingSetNumber: workingSetNumber,
+                previousPerformanceResolution: previousPerformanceResolution,
+                targetRepMin: targetRepMin,
+                targetRepMax: targetRepMax,
+                restSeconds: restSeconds,
+                formatWeight: formatWeight
             )
         }
-
-        return rows
     }
 
     private static func makeDisplayRow(
@@ -2073,10 +2060,13 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func updateDropStageLoadUnit(_ loadUnit: TemplateLoadUnit, stageID: UUID, setIndex: Int) {
-        guard setDrafts.indices.contains(setIndex),
-              let stageIndex = setDrafts[setIndex].dropStages.firstIndex(where: { $0.id == stageID }) else {
+        guard let location = projection.dropStageLocationByID[stageID],
+              location.setIndex == setIndex,
+              setDrafts.indices.contains(location.setIndex),
+              setDrafts[location.setIndex].dropStages.indices.contains(location.stageIndex) else {
             return
         }
+        let stageIndex = location.stageIndex
         guard setDrafts[setIndex].dropStages[stageIndex].actualLoadUnit != loadUnit else { return }
         setDrafts[setIndex].dropStages[stageIndex].actualLoadUnit = loadUnit
         if loadUnit == .bodyweight {
@@ -2086,10 +2076,13 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func toggleDropStageCompletion(_ stageID: UUID, in setIndex: Int) {
-        guard setDrafts.indices.contains(setIndex),
-              let stageIndex = setDrafts[setIndex].dropStages.firstIndex(where: { $0.id == stageID }) else {
+        guard let location = projection.dropStageLocationByID[stageID],
+              location.setIndex == setIndex,
+              setDrafts.indices.contains(location.setIndex),
+              setDrafts[location.setIndex].dropStages.indices.contains(location.stageIndex) else {
             return
         }
+        let stageIndex = location.stageIndex
         guard !setDrafts[setIndex].isLocked, setDrafts[setIndex].isCompleted else { return }
 
         let isCompleted = !setDrafts[setIndex].dropStages[stageIndex].isCompleted
@@ -2674,9 +2667,10 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func syncCompletedSetCount(using drafts: [WorkoutSessionSetDraft]? = nil) {
         let currentDrafts = drafts ?? setDrafts
-        cachedCompletedSetCount = currentDrafts.reduce(0) { partialResult, draft in
+        let completedSetCount = currentDrafts.reduce(0) { partialResult, draft in
             partialResult + (draft.isCycleCompleted ? 1 : 0)
         }
+        projection = projection.updatingCompletedSetCount(completedSetCount)
     }
 
     private func syncInputDraft(for focus: SetInputFocus, using draft: WorkoutSessionSetDraft) {
@@ -3068,18 +3062,6 @@ private struct WorkoutSessionExerciseSetRowLabel {
     let title: String
 }
 
-private struct WorkoutSessionExerciseSetRowDisplaySnapshot: Identifiable, Equatable {
-    let id: UUID
-    let index: Int
-    let set: WorkoutSessionSetDraft
-    let badgeTitle: String
-    let title: String
-    let previousSummary: String
-    let metadataLine: String?
-    let inlineHintPresentation: WorkoutSetInlineHintPresentation?
-    let completionButtonTitle: String
-}
-
 nonisolated struct WorkoutSetCompletionGatePresentation: Equatable {
     let title: String
     let detail: String
@@ -3162,7 +3144,7 @@ nonisolated struct WorkoutSetCompletionControlPresentation: Equatable {
     }
 }
 
-struct WorkoutSetInlineHintPresentation: Equatable {
+nonisolated struct WorkoutSetInlineHintPresentation: Equatable, Sendable {
     let weightGhostText: String?
     let repsGhostText: String?
     let aimText: String
