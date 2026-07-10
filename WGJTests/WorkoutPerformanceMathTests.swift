@@ -47,4 +47,15 @@ final class WorkoutPerformanceMathTests: XCTestCase {
             0
         )
     }
+
+    func testWeightedVolumeDoesNotFabricateBodyweightLoad() {
+        XCTAssertEqual(
+            WorkoutPerformanceMath.weightedVolumeInKilograms(
+                weight: 100,
+                reps: 5,
+                unit: .bodyweight
+            ),
+            0
+        )
+    }
 }

@@ -25,6 +25,7 @@ nonisolated enum WorkoutPerformanceMath {
         reps: Int,
         unit: TemplateLoadUnit
     ) -> Double {
-        normalizedLoadInKilograms(weight, unit: unit) * Double(max(0, reps))
+        guard unit != .bodyweight else { return 0 }
+        return normalizedLoadInKilograms(weight, unit: unit) * Double(max(0, reps))
     }
 }
