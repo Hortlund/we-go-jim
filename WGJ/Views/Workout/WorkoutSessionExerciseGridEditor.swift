@@ -61,8 +61,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     @State private var cachedCompletedSetCount: Int
     @State private var metricInputDraftBuffer = WorkoutMetricInputDraftStore()
     @State private var revealedCompletionGateSetIDs: Set<UUID> = []
-    @State private var pendingDisplayRefreshTask: Task<Void, Never>?
-    @State private var pendingCommitTask: Task<Void, Never>?
+    @State private var debounceCoordinator = WorkoutGridDebounceCoordinator()
     @State private var suppressNextSetDraftsDisplayRefresh = false
     @State private var suppressNextFocusLossCommit = false
     @FocusState private var focusedInput: SetInputFocus?
@@ -275,8 +274,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             if newValue {
                 refreshDisplayRows()
             } else {
-                pendingDisplayRefreshTask?.cancel()
-                pendingDisplayRefreshTask = nil
+                debounceCoordinator.cancelDisplayRefresh()
                 rowSnapshots = []
             }
         }
@@ -1729,32 +1727,24 @@ struct WorkoutSessionExerciseGridEditor: View {
     private func scheduleDisplayRefresh() {
         guard isExpanded else { return }
         guard focusedInput != nil else {
-            pendingDisplayRefreshTask?.cancel()
-            pendingDisplayRefreshTask = nil
+            debounceCoordinator.cancelDisplayRefresh()
             refreshDisplayRows()
             return
         }
 
-        pendingDisplayRefreshTask?.cancel()
         let delay = displayRefreshDebounce
-        pendingDisplayRefreshTask = Task.detached(priority: .utility) {
-            try? await Task.sleep(for: delay)
-            guard !Task.isCancelled else { return }
-            await refreshDisplayRowsAfterDebounceIfStillNeeded()
+        debounceCoordinator.scheduleDisplayRefresh(after: delay) {
+            refreshDisplayRowsAfterDebounceIfStillNeeded()
         }
     }
 
     @MainActor
     private func refreshDisplayRowsAfterDebounceIfStillNeeded() {
-        guard !Task.isCancelled else { return }
-        pendingDisplayRefreshTask = nil
         refreshDisplayRows()
     }
 
     private func flushPendingDisplayRefresh() {
-        guard pendingDisplayRefreshTask != nil else { return }
-        pendingDisplayRefreshTask?.cancel()
-        pendingDisplayRefreshTask = nil
+        guard debounceCoordinator.cancelDisplayRefresh() else { return }
         if isExpanded {
             refreshDisplayRows()
         }
@@ -1771,9 +1761,7 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     @discardableResult
     private func flushPendingMetricInputForImmediateUse() -> Bool {
-        let hadPendingCommit = pendingCommitTask != nil
-        pendingCommitTask?.cancel()
-        pendingCommitTask = nil
+        let hadPendingCommit = debounceCoordinator.cancelCommit()
         let changed = commitAllBufferedInput(clearsText: true)
         if changed || hadPendingCommit {
             requestImmediateCommitForCurrentState()
@@ -1948,8 +1936,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         guard setDrafts.indices.contains(index) else { return }
         guard isSetEditingEnabled, !setDrafts[index].isLocked else { return }
 
-        pendingCommitTask?.cancel()
-        pendingCommitTask = nil
+        debounceCoordinator.cancelCommit()
         _ = commitAllBufferedInput(clearsText: true)
 
         guard setDrafts.indices.contains(index) else { return }
@@ -1963,8 +1950,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             return
         }
 
-        pendingCommitTask?.cancel()
-        pendingCommitTask = nil
+        debounceCoordinator.cancelCommit()
         let retainedFocus = focusedInput?.setID == targetSetID ? focusedInput : nil
 
         if !manualCompletionMode {
@@ -2427,10 +2413,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func notifyChanged(drafts: [WorkoutSessionSetDraft]? = nil) {
-        pendingCommitTask?.cancel()
-        pendingCommitTask = nil
-        pendingDisplayRefreshTask?.cancel()
-        pendingDisplayRefreshTask = nil
+        debounceCoordinator.cancelAll()
         let currentDrafts = canonicalizedSetDrafts(drafts ?? setDrafts)
         suppressNextSetDraftsDisplayRefresh = true
         if setDrafts != currentDrafts {
@@ -2479,8 +2462,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             stageCurrentInputDraftIfNeeded(for: newFocus)
         }
         if newFocus == nil {
-            pendingDisplayRefreshTask?.cancel()
-            pendingDisplayRefreshTask = nil
+            debounceCoordinator.cancelDisplayRefresh()
             if isExpanded {
                 refreshDisplayRows()
             }
@@ -2622,8 +2604,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         drafts: [WorkoutSessionSetDraft]? = nil,
         restSeconds overrideRestSeconds: Int? = nil
     ) {
-        pendingCommitTask?.cancel()
-        pendingCommitTask = nil
+        debounceCoordinator.cancelCommit()
         requestCommitForCurrentState(drafts: drafts, restSeconds: overrideRestSeconds)
         markEditorClean()
     }
@@ -2635,40 +2616,30 @@ struct WorkoutSessionExerciseGridEditor: View {
         case .immediate:
             requestImmediateCommitForCurrentState()
         case .debounced:
-            pendingCommitTask?.cancel()
             markEditorDirty()
             let delay = commitDebounce
-            pendingCommitTask = Task.detached(priority: .utility) {
-                try? await Task.sleep(for: delay)
-                guard !Task.isCancelled else { return }
-                await commitCurrentStateAfterDebounceIfStillNeeded()
+            debounceCoordinator.scheduleCommit(.currentState, after: delay) {
+                commitCurrentStateAfterDebounceIfStillNeeded()
             }
         }
     }
 
     private func scheduleBufferedInputCommit() {
-        pendingCommitTask?.cancel()
         markEditorDirty()
         let delay = commitDebounce
-        pendingCommitTask = Task.detached(priority: .utility) {
-            try? await Task.sleep(for: delay)
-            guard !Task.isCancelled else { return }
-            await commitBufferedInputAfterDebounceIfStillNeeded()
+        debounceCoordinator.scheduleCommit(.bufferedInput, after: delay) {
+            commitBufferedInputAfterDebounceIfStillNeeded()
         }
     }
 
     @MainActor
     private func commitCurrentStateAfterDebounceIfStillNeeded() {
-        guard !Task.isCancelled else { return }
-        pendingCommitTask = nil
         requestCommitForCurrentState()
         markEditorClean()
     }
 
     @MainActor
     private func commitBufferedInputAfterDebounceIfStillNeeded() {
-        guard !Task.isCancelled else { return }
-        pendingCommitTask = nil
         if commitAllBufferedInput(clearsText: false) {
             requestCommitForCurrentState()
         }
@@ -2680,7 +2651,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func markEditorClean() {
-        guard pendingCommitTask == nil, metricInputDraftBuffer.isEmpty else { return }
+        guard !debounceCoordinator.hasPendingCommit, metricInputDraftBuffer.isEmpty else { return }
         onDirtyStateChange(false)
     }
 
