@@ -16,9 +16,8 @@ struct HistoryDetailView: View {
     @State private var notesDraft = ""
     @State private var preferredLoadUnit: TemplateLoadUnit = .kg
     @State private var loadedLocalState = HistoryDetailSnapshotBuilder.LocalState.empty
-    @State private var setDraftsByExerciseID: [UUID: [WorkoutSessionSetDraft]] = [:]
-    @State private var restByExerciseID: [UUID: Int] = [:]
-    @State private var notesByExerciseID: [UUID: String] = [:]
+    @State private var draftStateStore = WorkoutExerciseDraftStateStore()
+    @State private var renderProjection = HistoryDetailRenderProjection.empty
     @State private var hydrationPayloadByExerciseID: [UUID: HistoryDetailSnapshotBuilder.ExerciseHydrationPayload] = [:]
     @State private var loadingHydrationExerciseIDs: Set<UUID> = []
     @State private var hydrationLoadGeneration = UUID()
@@ -59,9 +58,7 @@ struct HistoryDetailView: View {
 
     var body: some View {
         ScrollView {
-            // History detail cards expand, collapse, and reload edited rows; keeping this
-            // stack non-lazy avoids scroll-position churn while the row heights change.
-            VStack(alignment: .leading, spacing: WGJSpacing.section) {
+            LazyVStack(alignment: .leading, spacing: WGJSpacing.section) {
                 if let session {
                     headerCard(session)
                     personalRecordHighlightsSection
@@ -93,9 +90,9 @@ struct HistoryDetailView: View {
                     }
                 }
 
-                ForEach(Array(sessionExercises.enumerated()), id: \.element.id) { index, exercise in
-                    exerciseSection(exercise, index: index)
-                        .id(exercise.id)
+                ForEach(renderProjection.exerciseRows) { row in
+                    exerciseSection(row.exercise, index: row.index)
+                        .id(row.id)
                 }
 
                 if !sessionExercises.isEmpty {
@@ -348,6 +345,7 @@ struct HistoryDetailView: View {
             applySnapshot(loadedSnapshot)
         } catch WorkoutSessionRepositoryError.sessionNotFound {
             snapshot = nil
+            renderProjection = .empty
             didLoadSnapshot = true
             clearLocalStateForAllExercises()
         } catch {
@@ -364,17 +362,23 @@ struct HistoryDetailView: View {
         notesDraft = loadedSnapshot.session.notes
         preferredLoadUnit = loadedSnapshot.preferredLoadUnit
         loadedLocalState = loadedSnapshot.localState
-        setDraftsByExerciseID = loadedSnapshot.localState.setDraftsByExerciseID
-        restByExerciseID = loadedSnapshot.localState.restByExerciseID
-        notesByExerciseID = loadedSnapshot.localState.notesByExerciseID
+        draftStateStore.replace(
+            with: WorkoutExerciseDraftStateSnapshot(
+                draftsByExerciseID: loadedSnapshot.localState.setDraftsByExerciseID,
+                restsByExerciseID: loadedSnapshot.localState.restByExerciseID,
+                notesByExerciseID: loadedSnapshot.localState.notesByExerciseID
+            )
+        )
+        renderProjection = HistoryDetailRenderProjection(exercises: loadedSnapshot.exercises)
         hydrationPayloadByExerciseID = loadedSnapshot.hydrationPayloadByExerciseID
         loadingHydrationExerciseIDs.removeAll()
         hydrationLoadGeneration = UUID()
 
         let validIDs = Set(loadedSnapshot.exercises.map(\.id))
-        for exerciseID in Set(setDraftsByExerciseID.keys)
-            .union(restByExerciseID.keys)
-            .union(notesByExerciseID.keys)
+        let draftState = draftStateStore.snapshot()
+        for exerciseID in Set(draftState.draftsByExerciseID.keys)
+            .union(draftState.restsByExerciseID.keys)
+            .union(draftState.notesByExerciseID.keys)
             .union(hydrationPayloadByExerciseID.keys)
         where !validIDs.contains(exerciseID) {
             clearLocalState(for: exerciseID)
@@ -388,9 +392,8 @@ struct HistoryDetailView: View {
 
     private func clearLocalStateForAllExercises() {
         loadedLocalState = .empty
-        setDraftsByExerciseID.removeAll()
-        restByExerciseID.removeAll()
-        notesByExerciseID.removeAll()
+        draftStateStore.removeAll()
+        renderProjection = .empty
         hydrationPayloadByExerciseID.removeAll()
         loadingHydrationExerciseIDs.removeAll()
         hydrationLoadGeneration = UUID()
@@ -424,9 +427,9 @@ struct HistoryDetailView: View {
     @ViewBuilder
     private func exerciseSection(_ exercise: HistoryDetailSnapshotBuilder.ExerciseSnapshot, index: Int) -> some View {
         let isExpanded = expandedExerciseIDs[exercise.id] ?? false
-        let hasLoadedLocalState = setDraftsByExerciseID.keys.contains(exercise.id)
-        let drafts = setDraftsByExerciseID[exercise.id] ?? []
-        let restSeconds = restByExerciseID[exercise.id] ?? exercise.restSeconds
+        let drafts = draftStateStore.drafts(for: exercise.id)
+        let hasLoadedLocalState = drafts != nil
+        let restSeconds = draftStateStore.restSeconds(for: exercise.id) ?? exercise.restSeconds
         let hydrationPayload = hydrationPayloadByExerciseID[exercise.id]
 
         VStack(alignment: .leading, spacing: 8) {
@@ -446,9 +449,9 @@ struct HistoryDetailView: View {
                     personalRecordSummaryKinds: hydrationPayload?.personalRecords.summaryKinds ?? [],
                     personalRecordKindsBySetID: hydrationPayload?.personalRecords.setKindsBySetID ?? [:],
                     preferredLoadUnit: preferredLoadUnit,
-                    exerciseNotes: notesByExerciseID[exercise.id] ?? exercise.notes,
+                    exerciseNotes: draftStateStore.notes(for: exercise.id) ?? exercise.notes,
                     restSeconds: restSeconds,
-                    setDrafts: drafts,
+                    setDrafts: drafts ?? [],
                     onExerciseNotesCommitted: { notes in
                         updateNotesValue(notes, for: exercise.id)
                     },
@@ -486,7 +489,7 @@ struct HistoryDetailView: View {
                     completedSetCount: exercise.totalSetCount > 0 ? exercise.completedSetCount : nil,
                     totalSetCount: exercise.totalSetCount > 0 ? exercise.totalSetCount : nil,
                     restSeconds: restSeconds,
-                    notes: notesByExerciseID[exercise.id] ?? exercise.notes
+                    notes: draftStateStore.notes(for: exercise.id) ?? exercise.notes
                 )
 
                 HistoryCollapsedExerciseCard(
@@ -669,9 +672,7 @@ struct HistoryDetailView: View {
 
     @MainActor
     private func clearLocalState(for exerciseID: UUID) {
-        setDraftsByExerciseID.removeValue(forKey: exerciseID)
-        restByExerciseID.removeValue(forKey: exerciseID)
-        notesByExerciseID.removeValue(forKey: exerciseID)
+        draftStateStore.remove(exerciseID: exerciseID)
     }
 
     nonisolated private static func orderedSessionSets(for exercise: WorkoutSessionExercise) -> [WorkoutSessionSet] {
@@ -699,21 +700,17 @@ struct HistoryDetailView: View {
 
     @MainActor
     private func updateDraftsValue(_ updated: [WorkoutSessionSetDraft], for exerciseID: UUID) {
-        guard setDraftsByExerciseID[exerciseID] != updated else { return }
-        setDraftsByExerciseID[exerciseID] = updated
+        _ = draftStateStore.setDrafts(updated, for: exerciseID)
     }
 
     @MainActor
     private func updateRestValue(_ updated: Int, for exerciseID: UUID) {
-        let normalized = max(0, min(3600, updated))
-        guard restByExerciseID[exerciseID] != normalized else { return }
-        restByExerciseID[exerciseID] = normalized
+        _ = draftStateStore.setRestSeconds(updated, for: exerciseID)
     }
 
     @MainActor
     private func updateNotesValue(_ updated: String, for exerciseID: UUID) {
-        guard notesByExerciseID[exerciseID] != updated else { return }
-        notesByExerciseID[exerciseID] = updated
+        _ = draftStateStore.setNotes(updated, for: exerciseID)
     }
 
     @MainActor
@@ -765,16 +762,17 @@ struct HistoryDetailView: View {
 
     @MainActor
     private func makeSaveCommand() -> HistorySaveCommand {
+        let draftState = draftStateStore.snapshot()
         let snapshots = Dictionary<UUID, HistoryExerciseSaveSnapshot>(
             sessionExercises.compactMap { exercise -> (UUID, HistoryExerciseSaveSnapshot)? in
-                guard let drafts = setDraftsByExerciseID[exercise.id] else {
+                guard let drafts = draftState.draftsByExerciseID[exercise.id] else {
                     return nil
                 }
 
                 let snapshot = HistoryExerciseSaveSnapshot(
                     setDrafts: drafts,
-                    restSeconds: restByExerciseID[exercise.id] ?? exercise.restSeconds,
-                    notes: notesByExerciseID[exercise.id] ?? exercise.notes
+                    restSeconds: draftState.restsByExerciseID[exercise.id] ?? exercise.restSeconds,
+                    notes: draftState.notesByExerciseID[exercise.id] ?? exercise.notes
                 )
                 let baseline = HistoryExerciseSaveSnapshot(
                     setDrafts: loadedLocalState.setDraftsByExerciseID[exercise.id] ?? [],

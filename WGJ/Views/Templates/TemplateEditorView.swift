@@ -766,7 +766,15 @@ struct TemplateEditorView: View {
     }
 
     private var exerciseRows: [TemplateEditorExerciseRowData] {
-        let supersetsByExerciseID = supersetPresentationByExerciseID()
+        let structureProjection = TemplateEditorStructureProjection.make(
+            inputs: exerciseDrafts.map { draftStore in
+                TemplateEditorStructureProjection.Input(
+                    id: draftStore.id,
+                    exerciseName: draftStore.exerciseNameSnapshot,
+                    superset: draftStore.superset
+                )
+            }
+        )
         return exerciseDrafts.enumerated().map { index, draftStore in
             TemplateEditorExerciseRowData(
                 id: draftStore.id,
@@ -774,41 +782,9 @@ struct TemplateEditorView: View {
                 draftStore: draftStore,
                 recommendation: recommendationByExerciseID[draftStore.id]
                     ?? templateRecommendation(for: draftStore, catalogByUUID: [:]),
-                supersetPresentation: supersetsByExerciseID[draftStore.id]
+                supersetPresentation: structureProjection.presentationByExerciseID[draftStore.id]
             )
         }
-    }
-
-    private func supersetPresentationByExerciseID() -> [UUID: TemplateEditorSupersetPresentation] {
-        var result: [UUID: TemplateEditorSupersetPresentation] = [:]
-        var pairedGroupIDs: [UUID] = []
-        for draftStore in exerciseDrafts {
-            guard let groupID = draftStore.superset?.groupID else { continue }
-            if pairedGroupIDs.contains(groupID) == false {
-                pairedGroupIDs.append(groupID)
-            }
-        }
-        var groupLetterByID: [UUID: String] = [:]
-        for (position, groupID) in pairedGroupIDs.enumerated() {
-            let unicode = UnicodeScalar(65 + position)
-            groupLetterByID[groupID] = unicode.map(String.init) ?? "A"
-        }
-
-        for draftStore in exerciseDrafts {
-            guard let membership = draftStore.superset else { continue }
-            let letter = groupLetterByID[membership.groupID] ?? "A"
-            let pairedExerciseName = exerciseDrafts.first {
-                $0.superset?.groupID == membership.groupID && $0.id != draftStore.id
-            }?.exerciseNameSnapshot
-            result[draftStore.id] = TemplateEditorSupersetPresentation(
-                groupID: membership.groupID,
-                label: "\(letter)\(membership.position == .first ? "1" : "2")",
-                roundRestSeconds: membership.roundRestSeconds,
-                pairedExerciseName: pairedExerciseName
-            )
-        }
-
-        return result
     }
 
     private var exerciseReorderItems: [ExerciseReorderListItem] {
@@ -1523,12 +1499,7 @@ private struct TemplateEditorRecommendationReloadKey: Hashable {
     let isTrainingGuidanceEnabled: Bool
 }
 
-private struct TemplateEditorSupersetPresentation: Equatable {
-    let groupID: UUID
-    let label: String
-    let roundRestSeconds: Int
-    let pairedExerciseName: String?
-}
+private typealias TemplateEditorSupersetPresentation = TemplateEditorStructureProjection.SupersetPresentation
 
 private struct TemplateEditorSupersetSection: View {
     let presentation: TemplateEditorSupersetPresentation?

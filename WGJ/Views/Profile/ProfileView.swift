@@ -44,6 +44,7 @@ struct ProfileView: View {
     private struct RouteConsumptionTaskID: Equatable {
         let requestID: UUID?
         let isTabActive: Bool
+        let isWeeklyGoalLayoutReady: Bool
     }
 
     private enum ScrollTarget {
@@ -84,6 +85,7 @@ struct ProfileView: View {
     @State private var shouldRenderDashboardContent = false
     @State private var hasRenderedDashboardContent = false
     @State private var showsRoutedWeeklyGoal = false
+    @State private var isWeeklyGoalLayoutReady = false
     @State private var showingWidgetManager = false
     @State private var showingProfileManagement = false
     @State private var showingCoachAnalysis = false
@@ -130,7 +132,8 @@ struct ProfileView: View {
             .task(
                 id: RouteConsumptionTaskID(
                     requestID: appRouteState.pendingRequest?.id,
-                    isTabActive: isTabActive
+                    isTabActive: isTabActive,
+                    isWeeklyGoalLayoutReady: isWeeklyGoalLayoutReady
                 )
             ) {
                 await consumePendingRouteIfNeeded(scrollProxy: scrollProxy)
@@ -468,6 +471,9 @@ struct ProfileView: View {
         .wgjCardContainer()
         .id(ScrollTarget.weeklyGoal)
         .accessibilityIdentifier("profile-weekly-goal-section")
+        .onAppear {
+            isWeeklyGoalLayoutReady = true
+        }
     }
 
     @MainActor
@@ -481,6 +487,7 @@ struct ProfileView: View {
         showsRoutedWeeklyGoal = true
         shouldRenderDashboardContent = true
         hasRenderedDashboardContent = true
+        guard isWeeklyGoalLayoutReady else { return }
         await Task.yield()
         scrollProxy.scrollTo(ScrollTarget.weeklyGoal, anchor: .center)
         appRouteState.consume(id: request.id)

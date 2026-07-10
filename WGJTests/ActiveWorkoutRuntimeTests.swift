@@ -3,6 +3,54 @@ import SwiftUI
 @testable import WGJ
 
 final class ActiveWorkoutRuntimeTests: XCTestCase {
+    func testFinishPresentationDoesNotPublishWeeklyGoalWidgetSynchronously() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let projectRootURL = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: projectRootURL.appendingPathComponent("WGJ/Views/Workout/ActiveWorkoutView.swift"),
+            encoding: .utf8
+        )
+        let finishFunction = try XCTUnwrap(
+            source.range(of: "nonisolated private static func finishSessionPresentation")
+        )
+        let followingFunction = try XCTUnwrap(
+            source.range(
+                of: "private func applyPersistedRestChange",
+                range: finishFunction.upperBound..<source.endIndex
+            )
+        )
+        let criticalPath = source[finishFunction.lowerBound..<followingFunction.lowerBound]
+
+        XCTAssertFalse(
+            criticalPath.contains("WeeklyGoalWidgetPublisher.publishBestEffort"),
+            "Optional widget metrics must run after the first completion frame"
+        )
+    }
+
+    func testLegacyRepositoriesDoNotExposeDuplicateCompletionEntryPoints() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let projectRootURL = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourcePaths = [
+            "WGJ/Services/ActiveWorkoutDraftRepository.swift",
+            "WGJ/Services/WorkoutSessionRepository.swift",
+        ]
+
+        for sourcePath in sourcePaths {
+            let source = try String(
+                contentsOf: projectRootURL.appendingPathComponent(sourcePath),
+                encoding: .utf8
+            )
+            XCTAssertFalse(
+                source.contains("func finishSession(sessionID:"),
+                "\(sourcePath) must not duplicate the canonical WorkoutCompletionRepository path"
+            )
+        }
+    }
+
     func testRowContentIdentityChangesOnlyWhenCatalogExerciseChanges() {
         let runtimeID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
         let first = WorkoutExerciseRowContentIdentity(

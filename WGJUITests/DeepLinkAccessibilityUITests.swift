@@ -18,8 +18,14 @@ final class DeepLinkAccessibilityUITests: XCTestCase {
 
         let weeklyGoal = app.otherElements["profile-weekly-goal-section"]
         XCTAssertTrue(weeklyGoal.waitForExistence(timeout: 10))
-        let isHittable = weeklyGoal.isHittable
-        XCTAssertTrue(isHittable)
+        let hittableExpectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "hittable == true"),
+            object: weeklyGoal
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [hittableExpectation], timeout: 4),
+            .completed
+        )
 
         let startTab = app.buttons["Start Workout"].firstMatch
         let profileTab = app.buttons["Profile"].firstMatch
