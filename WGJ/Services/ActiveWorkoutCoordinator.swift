@@ -406,7 +406,6 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
     }
 }
 
-#if DEBUG
 @MainActor
 extension ActiveWorkoutCoordinator {
     static func preview(session: ActiveWorkoutRuntimeSession? = nil) -> ActiveWorkoutCoordinator {
@@ -453,4 +452,3 @@ private actor ActiveWorkoutPreviewPersistence: ActiveWorkoutPersistence {
         WorkoutCompletionCommitResult(sessionID: session.id, disposition: .inserted)
     }
 }
-#endif
