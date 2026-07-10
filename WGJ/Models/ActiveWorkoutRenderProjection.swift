@@ -6,7 +6,7 @@ nonisolated struct ActiveWorkoutSupersetContext: Equatable, Sendable {
     let pairedExerciseID: UUID
 }
 
-nonisolated struct ActiveWorkoutRenderProjection {
+nonisolated struct ActiveWorkoutRenderProjection: Sendable {
     var session: ActiveWorkoutRuntimeSession?
     var sessionExercises: [ActiveWorkoutRuntimeExercise]
     var orderedCardioBlocks: [ActiveWorkoutRuntimeCardioBlock]

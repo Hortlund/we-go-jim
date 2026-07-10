@@ -416,8 +416,8 @@ nonisolated struct WorkoutExerciseStructurePresentation: Equatable, Sendable {
     }
 }
 
-nonisolated struct WorkoutSupersetDisplayGroup<Item: Identifiable>: Identifiable
-where Item.ID: Hashable {
+nonisolated struct WorkoutSupersetDisplayGroup<Item: Identifiable & Sendable>: Identifiable, Sendable
+where Item.ID: Hashable & Sendable {
     let groupID: UUID
     let roundRestSeconds: Int
     let first: Item
@@ -430,8 +430,8 @@ where Item.ID: Hashable {
     }
 }
 
-nonisolated enum WorkoutExerciseDisplayGroup<Item: Identifiable>: Identifiable
-where Item.ID: Hashable {
+nonisolated enum WorkoutExerciseDisplayGroup<Item: Identifiable & Sendable>: Identifiable, Sendable
+where Item.ID: Hashable & Sendable {
     case single(item: Item, index: Int)
     case superset(WorkoutSupersetDisplayGroup<Item>)
 
@@ -446,10 +446,10 @@ where Item.ID: Hashable {
 }
 
 nonisolated enum WorkoutExerciseDisplayGrouping {
-    static func build<Item: Identifiable>(
+    static func build<Item: Identifiable & Sendable>(
         items: [Item],
         membership: (Item) -> ExerciseSupersetMembershipDraft?
-    ) -> [WorkoutExerciseDisplayGroup<Item>] where Item.ID: Hashable {
+    ) -> [WorkoutExerciseDisplayGroup<Item>] where Item.ID: Hashable & Sendable {
         var groups: [WorkoutExerciseDisplayGroup<Item>] = []
         groups.reserveCapacity(items.count)
 
