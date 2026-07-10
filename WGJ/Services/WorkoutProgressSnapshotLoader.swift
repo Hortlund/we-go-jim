@@ -404,37 +404,42 @@ nonisolated enum WorkoutProgressSnapshotBuilder {
         let sharedIDs = Set(previous.exercisesByCatalogUUID.keys)
             .intersection(current.exercisesByCatalogUUID.keys)
 
-        return sharedIDs.compactMap { catalogExerciseUUID in
+        let rankedComparisons: [RankedExerciseComparison] = sharedIDs.compactMap { catalogExerciseUUID in
             guard let previousExercise = previous.exercisesByCatalogUUID[catalogExerciseUUID],
                   let currentExercise = current.exercisesByCatalogUUID[catalogExerciseUUID]
             else {
                 return nil
             }
 
-            let direction = WorkoutProgressDirection.compare(
-                currentExercise.comparisonScore,
-                previousExercise.comparisonScore
+            let delta = exerciseProgressDelta(
+                previous: previousExercise.progressMetric,
+                current: currentExercise.progressMetric
             )
-            return WorkoutProgressExerciseComparison(
-                id: catalogExerciseUUID,
-                catalogExerciseUUID: catalogExerciseUUID,
-                exerciseName: currentExercise.exerciseName,
-                previousBestSetText: previousExercise.bestSetText,
-                currentBestSetText: currentExercise.bestSetText,
-                previousVolumeText: formattedVolume(previousExercise.totalVolumeKg),
-                currentVolumeText: formattedVolume(currentExercise.totalVolumeKg),
-                deltaText: exerciseDeltaText(previous: previousExercise, current: currentExercise),
-                direction: direction
+            return RankedExerciseComparison(
+                comparison: WorkoutProgressExerciseComparison(
+                    id: catalogExerciseUUID,
+                    catalogExerciseUUID: catalogExerciseUUID,
+                    exerciseName: currentExercise.exerciseName,
+                    previousBestSetText: previousExercise.bestSetText,
+                    currentBestSetText: currentExercise.bestSetText,
+                    previousVolumeText: formattedVolume(previousExercise.totalVolumeKg),
+                    currentVolumeText: formattedVolume(currentExercise.totalVolumeKg),
+                    deltaText: delta.text,
+                    direction: delta.direction
+                ),
+                relativeMagnitude: delta.relativeMagnitude
             )
         }
-        .sorted { lhs, rhs in
-            let lhsMagnitude = abs(deltaMagnitude(for: lhs.deltaText))
-            let rhsMagnitude = abs(deltaMagnitude(for: rhs.deltaText))
-            if lhsMagnitude != rhsMagnitude {
-                return lhsMagnitude > rhsMagnitude
+
+        return rankedComparisons.sorted { lhs, rhs in
+            if lhs.relativeMagnitude != rhs.relativeMagnitude {
+                return lhs.relativeMagnitude > rhs.relativeMagnitude
             }
-            return lhs.exerciseName.localizedStandardCompare(rhs.exerciseName) == .orderedAscending
+            return lhs.comparison.exerciseName.localizedStandardCompare(
+                rhs.comparison.exerciseName
+            ) == .orderedAscending
         }
+        .map(\.comparison)
     }
 
     private static func highlightCards(
@@ -497,15 +502,54 @@ nonisolated enum WorkoutProgressSnapshotBuilder {
         ]
     }
 
-    private static func exerciseDeltaText(
-        previous: ExerciseMetrics,
-        current: ExerciseMetrics
-    ) -> String {
-        if previous.bestWeightedOneRepMaxKg != nil || current.bestWeightedOneRepMaxKg != nil {
-            return signedVolume(current.totalVolumeKg - previous.totalVolumeKg)
-        }
+    private static func exerciseProgressDelta(
+        previous: ExerciseProgressMetric,
+        current: ExerciseProgressMetric
+    ) -> ExerciseProgressDelta {
+        switch (previous, current) {
+        case let (.estimatedOneRepMaxKg(previousValue), .estimatedOneRepMaxKg(currentValue)):
+            let roundedDelta = roundedToOneDecimal(currentValue - previousValue)
+            return ExerciseProgressDelta(
+                direction: .compare(roundedDelta, 0),
+                text: "\(signedOneDecimal(roundedDelta)) kg e1RM",
+                relativeMagnitude: relativeMagnitude(current: currentValue, previous: previousValue)
+            )
 
-        return signedInteger(current.maxReps - previous.maxReps) + " reps"
+        case let (.repetitions(previousValue), .repetitions(currentValue)):
+            let delta = currentValue - previousValue
+            return ExerciseProgressDelta(
+                direction: .compare(Double(delta), 0),
+                text: "\(signedInteger(delta)) \(abs(delta) == 1 ? "rep" : "reps")",
+                relativeMagnitude: relativeMagnitude(
+                    current: Double(currentValue),
+                    previous: Double(previousValue)
+                )
+            )
+
+        default:
+            return ExerciseProgressDelta(
+                direction: .flat,
+                text: "Not comparable",
+                relativeMagnitude: 0
+            )
+        }
+    }
+
+    private static func roundedToOneDecimal(_ value: Double) -> Double {
+        let rounded = (value * 10).rounded() / 10
+        return rounded == 0 ? 0 : rounded
+    }
+
+    private static func signedOneDecimal(_ value: Double) -> String {
+        let prefix = value > 0 ? "+" : ""
+        return "\(prefix)\(WGJFormatters.oneDecimalString(value))"
+    }
+
+    private static func relativeMagnitude(current: Double, previous: Double) -> Double {
+        guard previous != 0 else {
+            return current == 0 ? 0 : 1
+        }
+        return abs((current - previous) / previous)
     }
 
     private static func formattedDuration(_ seconds: Int) -> String {
@@ -540,9 +584,22 @@ nonisolated enum WorkoutProgressSnapshotBuilder {
         return "\(prefix)\(value)"
     }
 
-    private static func deltaMagnitude(for text: String) -> Double {
-        Double(text.filter { $0 == "-" || $0 == "." || $0.isNumber }) ?? 0
-    }
+}
+
+nonisolated private struct RankedExerciseComparison: Equatable, Sendable {
+    let comparison: WorkoutProgressExerciseComparison
+    let relativeMagnitude: Double
+}
+
+nonisolated private enum ExerciseProgressMetric: Equatable, Sendable {
+    case estimatedOneRepMaxKg(Double)
+    case repetitions(Int)
+}
+
+nonisolated private struct ExerciseProgressDelta: Equatable, Sendable {
+    let direction: WorkoutProgressDirection
+    let text: String
+    let relativeMagnitude: Double
 }
 
 nonisolated private struct SessionMetrics: Equatable, Sendable {
@@ -581,6 +638,13 @@ nonisolated private struct ExerciseMetrics: Equatable, Sendable {
     let bestSetText: String
     let bestWeightedOneRepMaxKg: Double?
     let maxReps: Int
+
+    var progressMetric: ExerciseProgressMetric {
+        if let bestWeightedOneRepMaxKg {
+            return .estimatedOneRepMaxKg(bestWeightedOneRepMaxKg)
+        }
+        return .repetitions(maxReps)
+    }
 
     var comparisonScore: Double {
         bestWeightedOneRepMaxKg ?? Double(maxReps)
