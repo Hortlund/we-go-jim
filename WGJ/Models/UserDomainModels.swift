@@ -617,7 +617,7 @@ nonisolated struct TemplateCardioBlockDraft: Identifiable, Equatable, Sendable {
     }
 }
 
-nonisolated struct WorkoutCardioBlockDraft: Identifiable, Equatable {
+nonisolated struct WorkoutCardioBlockDraft: Identifiable, Equatable, Sendable {
     let id: UUID
     var phase: WorkoutCardioPhase
     var catalogExerciseUUID: String

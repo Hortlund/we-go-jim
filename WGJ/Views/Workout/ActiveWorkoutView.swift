@@ -55,6 +55,7 @@ struct ActiveWorkoutView: View {
     @State private var notesDraft = ""
     @State private var pickerTarget: ActiveWorkoutPickerTarget?
     @State private var showingFinishConfirmation = false
+    @State private var finishSummaryModel = ActiveWorkoutFinishSummaryModel()
     @State private var pendingFinishAfterConfirmation = false
     @State private var isCancelArmed = false
     @State private var isEndingSession = false
@@ -474,20 +475,20 @@ struct ActiveWorkoutView: View {
     }
 
     private var finishToolbarButton: some View {
-        let finishConfirmationContent = makeFinishConfirmationContent()
-
-        return Button("Finish") {
+        Button("Finish") {
             presentFinishConfirmation()
         }
         .disabled(isEndingSession || session == nil || !hasWorkoutContent)
         .accessibilityIdentifier("active-workout-finish-button")
         .popover(isPresented: $showingFinishConfirmation, attachmentAnchor: .point(.bottom), arrowEdge: .top) {
-            ActiveWorkoutFinishPopover(
-                content: finishConfirmationContent,
-                onFinish: confirmFinishWorkout,
-                onCancel: { showingFinishConfirmation = false }
-            )
-            .presentationCompactAdaptation(.popover)
+            if let content = finishSummaryModel.content {
+                ActiveWorkoutFinishPopover(
+                    content: content,
+                    onFinish: confirmFinishWorkout,
+                    onCancel: { showingFinishConfirmation = false }
+                )
+                .presentationCompactAdaptation(.popover)
+            }
         }
     }
 
@@ -2307,6 +2308,7 @@ struct ActiveWorkoutView: View {
         guard !isEndingSession else { return }
         pendingFinishAfterConfirmation = false
         isCancelArmed = false
+        finishSummaryModel.present(makeFinishSummaryInput())
         showingFinishConfirmation = true
     }
 
@@ -2318,6 +2320,9 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func handleFinishConfirmationChange(from oldValue: Bool, to newValue: Bool) {
+        if oldValue, !newValue {
+            finishSummaryModel.dismiss()
+        }
         guard oldValue, !newValue, pendingFinishAfterConfirmation else { return }
         pendingFinishAfterConfirmation = false
 
@@ -2329,8 +2334,11 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
-    private func makeFinishConfirmationContent() -> ActiveWorkoutFinishConfirmationContent {
-        ActiveWorkoutFinishConfirmationContent(
+    private func makeFinishSummaryInput(
+        revision: UInt64? = nil
+    ) -> ActiveWorkoutFinishSummaryInput {
+        ActiveWorkoutFinishSummaryInput(
+            revision: revision ?? activeWorkoutCoordinator.storedSnapshot?.revision ?? 0,
             exerciseDrafts: sessionExercises.map { exercise in
                 setDraftsByExerciseID[exercise.id] ?? []
             },
@@ -2680,13 +2688,16 @@ struct ActiveWorkoutView: View {
         activeWorkoutPresentationState.stageScrollTarget(scrollTarget, for: sessionID)
         activeWorkoutPresentationState.stageExpandedExerciseIDs(expandedExerciseIDs, for: sessionID)
 
-        _ = activeWorkoutCoordinator.send(.synchronize(
+        let receipt = activeWorkoutCoordinator.send(.synchronize(
             session: snapshot,
             restTimer: restTimerState.restTimerSnapshot(),
             presentationMode: .presented,
             scrollTarget: scrollTarget,
             expandedExerciseIDs: expandedExerciseIDs
         ), persist: writeDurableSnapshot)
+        finishSummaryModel.refreshIfPresented(
+            makeFinishSummaryInput(revision: receipt.revision)
+        )
     }
 
     @MainActor
@@ -3237,7 +3248,7 @@ private struct ActiveWorkoutFinishPopover: View {
     }
 }
 
-struct ActiveWorkoutFinishConfirmationContent: Equatable {
+nonisolated struct ActiveWorkoutFinishConfirmationContent: Equatable, Sendable {
     let incompleteExerciseCount: Int
     let incompleteSetCount: Int
     let incompleteCardioCount: Int
