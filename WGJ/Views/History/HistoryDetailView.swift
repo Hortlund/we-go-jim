@@ -24,7 +24,6 @@ struct HistoryDetailView: View {
     @State private var hydrationLoadGeneration = UUID()
     @State private var loadedExerciseStateStamp: HistoryExerciseInteractionStamp?
     @State private var expandedExerciseIDs: [UUID: Bool] = [:]
-    @State private var hasPendingSummaryRebuild = false
     @State private var isSavingChanges = false
     @State private var sessionHeaderFlushCoordinator = HistorySessionHeaderFlushCoordinator()
     @State private var rowFlushCoordinator = WorkoutExerciseRowFlushCoordinator()
@@ -568,7 +567,7 @@ struct HistoryDetailView: View {
 
         Task.detached(priority: .utility) {
             do {
-                let didPersistChanges = try await backgroundStore.performWrite("history-detail.save") { backgroundContext in
+                let didPersistChanges = try await backgroundStore.perform("history-detail.save") { backgroundContext in
                     try Self.saveChanges(
                         command: command,
                         modelContext: backgroundContext
@@ -585,9 +584,6 @@ struct HistoryDetailView: View {
     @MainActor
     private func handleSaveChangesCompleted(didPersistChanges: Bool) async {
         isSavingChanges = false
-        if didPersistChanges {
-            hasPendingSummaryRebuild = false
-        }
         await reloadSnapshot()
     }
 
@@ -598,17 +594,10 @@ struct HistoryDetailView: View {
     }
 
     private func addExercise(_ item: ExerciseCatalogSelection) {
-        let backgroundStore = historyBackgroundStore
-        let catalogExerciseUUID = item.remoteUUID
+        let service = WorkoutHistoryMutationService(backgroundStore: historyBackgroundStore)
         Task.detached(priority: .utility) {
             do {
-                try await backgroundStore.performWrite("history-detail.add-exercise") { backgroundContext in
-                    try Self.addExercise(
-                        sessionID: sessionID,
-                        catalogExerciseUUID: catalogExerciseUUID,
-                        modelContext: backgroundContext
-                    )
-                }
+                try await service.addExercise(sessionID: sessionID, selection: item)
                 await handleExerciseAdded()
             } catch {
                 await showError(error)
@@ -618,20 +607,14 @@ struct HistoryDetailView: View {
 
     @MainActor
     private func handleExerciseAdded() async {
-        hasPendingSummaryRebuild = true
         await reloadSnapshot()
     }
 
     private func removeExercise(exerciseID: UUID) {
-        let backgroundStore = historyBackgroundStore
+        let service = WorkoutHistoryMutationService(backgroundStore: historyBackgroundStore)
         Task.detached(priority: .utility) {
             do {
-                try await backgroundStore.performWrite("history-detail.remove-exercise") { backgroundContext in
-                    try WorkoutSessionRepository(modelContext: backgroundContext).removeExercise(
-                        sessionID: sessionID,
-                        sessionExerciseID: exerciseID
-                    )
-                }
+                try await service.removeExercise(sessionID: sessionID, exerciseID: exerciseID)
                 await handleExerciseRemoved(exerciseID: exerciseID)
             } catch {
                 await showError(error)
@@ -644,7 +627,6 @@ struct HistoryDetailView: View {
         clearLocalState(for: exerciseID)
         hydrationPayloadByExerciseID.removeValue(forKey: exerciseID)
         loadingHydrationExerciseIDs.remove(exerciseID)
-        hasPendingSummaryRebuild = true
         await reloadSnapshot()
     }
 
@@ -810,7 +792,6 @@ struct HistoryDetailView: View {
             sessionID: sessionID,
             sessionName: sessionNameDraft,
             sessionNotes: notesDraft,
-            shouldRecalculateSummary: hasPendingSummaryRebuild,
             exerciseSnapshotsByID: snapshots
         )
     }
@@ -819,13 +800,16 @@ struct HistoryDetailView: View {
         command: HistorySaveCommand,
         modelContext: ModelContext
     ) throws -> Bool {
-        let sessionRepository = WorkoutSessionRepository(modelContext: modelContext)
+        let sessionRepository = WorkoutSessionRepository(
+            modelContext: modelContext,
+            autoSaveChanges: false
+        )
         guard let session = try sessionRepository.session(id: command.sessionID) else {
             throw WorkoutSessionRepositoryError.sessionNotFound
         }
 
         let exercises = try sessionRepository.sessionExercises(sessionID: command.sessionID)
-        var didPersistChanges = command.shouldRecalculateSummary
+        var didPersistChanges = false
 
         let trimmedName = command.sessionName.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedName.isEmpty, trimmedName != session.name {
@@ -863,25 +847,10 @@ struct HistoryDetailView: View {
 
         if didPersistChanges {
             try sessionRepository.recalculateSessionSummary(sessionID: command.sessionID)
+            try sessionRepository.finalizeDeferredUserDataChangesIfNeeded()
         }
 
         return didPersistChanges
-    }
-
-    nonisolated private static func addExercise(
-        sessionID: UUID,
-        catalogExerciseUUID: String,
-        modelContext: ModelContext
-    ) throws {
-        guard let catalogItem = try ExerciseCatalogRepository(modelContext: modelContext)
-            .exerciseMap(for: [catalogExerciseUUID])[catalogExerciseUUID] else {
-            throw WorkoutSessionRepositoryError.invalidSessionState
-        }
-
-        try WorkoutSessionRepository(modelContext: modelContext).addExercise(
-            sessionID: sessionID,
-            catalogItem: catalogItem
-        )
     }
 
     private func cardioDescriptor(category: String, muscleSummary: String) -> String? {
@@ -905,7 +874,6 @@ private struct HistorySaveCommand: Sendable {
     let sessionID: UUID
     let sessionName: String
     let sessionNotes: String
-    let shouldRecalculateSummary: Bool
     let exerciseSnapshotsByID: [UUID: HistoryExerciseSaveSnapshot]
 }
 
