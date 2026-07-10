@@ -77,7 +77,7 @@ struct WGJApp: App {
     }
 
     nonisolated private static func makeLocalFallbackContainer() throws -> ModelContainer {
-        let appSchema = fullAppSchema()
+        let appSchema = AppSchema.makeFull()
         try AppStoreLayout.prepareAppGroupStoreDirectory()
         return try ModelContainer(
             for: appSchema,
@@ -89,7 +89,7 @@ struct WGJApp: App {
 #if DEBUG
         resetActiveWorkoutSnapshotForUITestsIfRequested()
 #endif
-        let appSchema = fullAppSchema()
+        let appSchema = AppSchema.makeFull()
         let inMemory = ModelConfiguration(
             "UITest",
             schema: appSchema,
@@ -111,7 +111,7 @@ struct WGJApp: App {
 #endif
 
     nonisolated private static func makeEmergencyInMemoryContainer() throws -> ModelContainer {
-        let appSchema = fullAppSchema()
+        let appSchema = AppSchema.makeFull()
         return try ModelContainer(
             for: appSchema,
             configurations: [
@@ -148,44 +148,6 @@ struct WGJApp: App {
         launchBootstrapState.enterDiagnosticMode { reason in
             try Self.makeEmergencyBootstrap(reason: reason)
         }
-    }
-
-    nonisolated private static func fullAppSchema() -> Schema {
-        Schema([
-            ExerciseCatalogItem.self,
-            MuscleGroup.self,
-            ExerciseImageAsset.self,
-            ExerciseAlias.self,
-            ExerciseAttribution.self,
-            ExerciseCatalogSyncState.self,
-            UserProfile.self,
-            UserDataDeletionTombstone.self,
-            ProfileWidgetConfig.self,
-            CachedCoachNarrative.self,
-            CachedCoachFollowUpNarrative.self,
-            TemplateFolder.self,
-            WorkoutTemplate.self,
-            TemplateCardioBlock.self,
-            TemplateExercise.self,
-            TemplateExerciseComponent.self,
-            TemplateExerciseSet.self,
-            TemplateSupersetGroup.self,
-            TemplateExerciseDropStage.self,
-            ActiveWorkoutDraftSession.self,
-            ActiveWorkoutDraftCardioBlock.self,
-            ActiveWorkoutDraftExercise.self,
-            ActiveWorkoutDraftExerciseComponent.self,
-            ActiveWorkoutDraftSet.self,
-            ActiveWorkoutDraftSupersetGroup.self,
-            ActiveWorkoutDraftDropStage.self,
-            WorkoutSession.self,
-            WorkoutSessionCardioBlock.self,
-            WorkoutSessionExercise.self,
-            WorkoutSessionSet.self,
-            WorkoutSessionSupersetGroup.self,
-            WorkoutSessionDropStage.self,
-            CompletedSetFact.self,
-        ])
     }
 
     nonisolated private static func storeConfigurations() -> [ModelConfiguration] {

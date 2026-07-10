@@ -1433,26 +1433,5 @@ private struct HistoryCalendarDay: Identifiable {
     NavigationStack {
         HistoryOverviewView()
     }
-    .modelContainer(for: [
-        ExerciseCatalogItem.self,
-        MuscleGroup.self,
-        ExerciseImageAsset.self,
-        ExerciseAlias.self,
-        ExerciseAttribution.self,
-        ExerciseCatalogSyncState.self,
-        UserProfile.self,
-        ProfileWidgetConfig.self,
-        TemplateFolder.self,
-        WorkoutTemplate.self,
-        TemplateExercise.self,
-        TemplateExerciseComponent.self,
-        TemplateExerciseSet.self,
-        ActiveWorkoutDraftSession.self,
-        ActiveWorkoutDraftExercise.self,
-        ActiveWorkoutDraftExerciseComponent.self,
-        ActiveWorkoutDraftSet.self,
-        WorkoutSession.self,
-        WorkoutSessionExercise.self,
-        WorkoutSessionSet.self,
-    ], inMemory: true)
+    .wgjPreviewModelContainer()
 }

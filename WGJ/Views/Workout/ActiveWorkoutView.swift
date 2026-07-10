@@ -3830,35 +3830,5 @@ private struct ActiveWorkoutSupersetHeader: View {
     .environment(ActiveWorkoutPresentationState())
     .environment(ActiveWorkoutCoordinator.preview(session: session))
     .environment(RestTimerState())
-    .modelContainer(for: [
-        ExerciseCatalogItem.self,
-        MuscleGroup.self,
-        ExerciseImageAsset.self,
-        ExerciseAlias.self,
-        ExerciseAttribution.self,
-        ExerciseCatalogSyncState.self,
-        UserProfile.self,
-        ProfileWidgetConfig.self,
-        TemplateFolder.self,
-        WorkoutTemplate.self,
-        TemplateCardioBlock.self,
-        TemplateExercise.self,
-        TemplateExerciseComponent.self,
-        TemplateExerciseSet.self,
-        TemplateSupersetGroup.self,
-        TemplateExerciseDropStage.self,
-        ActiveWorkoutDraftSession.self,
-        ActiveWorkoutDraftCardioBlock.self,
-        ActiveWorkoutDraftExercise.self,
-        ActiveWorkoutDraftExerciseComponent.self,
-        ActiveWorkoutDraftSet.self,
-        ActiveWorkoutDraftSupersetGroup.self,
-        ActiveWorkoutDraftDropStage.self,
-        WorkoutSession.self,
-        WorkoutSessionCardioBlock.self,
-        WorkoutSessionExercise.self,
-        WorkoutSessionSet.self,
-        WorkoutSessionSupersetGroup.self,
-        WorkoutSessionDropStage.self,
-    ], inMemory: true)
+    .wgjPreviewModelContainer()
 }

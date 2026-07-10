@@ -780,22 +780,5 @@ struct TemplateFolderEditorSheet: View {
     NavigationStack {
         TemplatesOverviewView()
     }
-    .modelContainer(for: [
-        ExerciseCatalogItem.self,
-        MuscleGroup.self,
-        ExerciseImageAsset.self,
-        ExerciseAlias.self,
-        ExerciseAttribution.self,
-        ExerciseCatalogSyncState.self,
-        UserProfile.self,
-        TemplateFolder.self,
-        WorkoutTemplate.self,
-        TemplateExercise.self,
-        TemplateExerciseComponent.self,
-        TemplateExerciseSet.self,
-        ActiveWorkoutDraftSession.self,
-        ActiveWorkoutDraftExercise.self,
-        ActiveWorkoutDraftExerciseComponent.self,
-        ActiveWorkoutDraftSet.self,
-    ], inMemory: true)
+    .wgjPreviewModelContainer()
 }

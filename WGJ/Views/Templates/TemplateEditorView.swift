@@ -1630,24 +1630,5 @@ nonisolated struct TemplateEditorSaveResult: Sendable, Equatable {
 
 #Preview {
     TemplateEditorView(folderID: UUID())
-        .modelContainer(for: [
-            ExerciseCatalogItem.self,
-            MuscleGroup.self,
-            ExerciseImageAsset.self,
-            ExerciseAlias.self,
-            ExerciseAttribution.self,
-            ExerciseCatalogSyncState.self,
-            UserProfile.self,
-            TemplateFolder.self,
-            WorkoutTemplate.self,
-            TemplateCardioBlock.self,
-            TemplateExercise.self,
-            TemplateExerciseComponent.self,
-            TemplateExerciseSet.self,
-            ActiveWorkoutDraftSession.self,
-            ActiveWorkoutDraftCardioBlock.self,
-            ActiveWorkoutDraftExercise.self,
-            ActiveWorkoutDraftExerciseComponent.self,
-            ActiveWorkoutDraftSet.self,
-        ], inMemory: true)
+        .wgjPreviewModelContainer()
 }
