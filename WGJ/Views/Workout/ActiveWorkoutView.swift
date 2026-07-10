@@ -2805,8 +2805,9 @@ struct ActiveWorkoutView: View {
         notes: String,
         modelContext: ModelContext
     ) throws -> ActiveWorkoutFinishResult {
-        let finishedSessionID = try ActiveWorkoutCompletionWriter(modelContext: modelContext)
-            .finish(session: runtimeSession, notes: notes)
+        let completion = try WorkoutCompletionRepository(modelContext: modelContext)
+            .completeWorkout(session: runtimeSession, notes: notes)
+        let finishedSessionID = completion.sessionID
         let completedSessionRepository = WorkoutSessionRepository(modelContext: modelContext)
         guard let completedSession = try completedSessionRepository.session(id: finishedSessionID) else {
             throw WorkoutSessionRepositoryError.sessionNotFound

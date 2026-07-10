@@ -9,6 +9,68 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         case artifactCleanup
     }
 
+    func testCompletionRepositoryReturnsExistingCompletedSessionWithoutDuplicateInsert() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let fixedSessionID = UUID(uuidString: "11111111-2222-3333-4444-555555555555")!
+        let runtime = ActiveWorkoutRuntimeSession(id: fixedSessionID, name: "Push")
+        let repository = WorkoutCompletionRepository(modelContext: context)
+
+        let first = try repository.completeWorkout(session: runtime)
+        let second = try repository.completeWorkout(session: runtime)
+
+        XCTAssertEqual(
+            first,
+            WorkoutCompletionCommitResult(sessionID: fixedSessionID, disposition: .inserted)
+        )
+        XCTAssertEqual(
+            second,
+            WorkoutCompletionCommitResult(sessionID: fixedSessionID, disposition: .alreadyCompleted)
+        )
+        XCTAssertEqual(try context.fetch(FetchDescriptor<WorkoutSession>()).count, 1)
+    }
+
+    func testRestorePolicyRejectsSnapshotForCompletedSession() {
+        let fixedSessionID = UUID(uuidString: "11111111-2222-3333-4444-555555555555")!
+
+        XCTAssertFalse(
+            ActiveWorkoutRestorePolicy.shouldRestore(
+                snapshotSessionID: fixedSessionID,
+                completedSessionIDs: [fixedSessionID]
+            )
+        )
+    }
+
+    func testPresentationRestoreDeletesSnapshotForCompletedSession() async throws {
+        try? await ActiveWorkoutSnapshotStore.shared.delete()
+        addTeardownBlock {
+            try? await ActiveWorkoutSnapshotStore.shared.delete()
+        }
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let fixedSessionID = UUID(uuidString: "11111111-2222-3333-4444-555555555555")!
+        context.insert(WorkoutSession(
+            id: fixedSessionID,
+            name: "Push",
+            status: .completed,
+            endedAt: .now
+        ))
+        try context.save()
+        try await ActiveWorkoutSnapshotStore.shared.save(
+            ActiveWorkoutRuntimeSession(id: fixedSessionID, name: "Push")
+        )
+        let presentationState = ActiveWorkoutPresentationState()
+
+        await presentationState.restoreActiveSessionIfNeeded(
+            modelContext: context,
+            allowsLegacyDraftImport: false
+        )
+
+        let retainedSnapshot = try await ActiveWorkoutSnapshotStore.shared.loadStoredSnapshot()
+        XCTAssertNil(presentationState.activeSessionID)
+        XCTAssertNil(retainedSnapshot)
+    }
+
     func testStageLocalDataDeletionDoesNotCommitUntilCallerSaves() throws {
         let container = try makeInMemoryContainer()
         let seedContext = ModelContext(container)

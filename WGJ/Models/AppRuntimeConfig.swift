@@ -1019,6 +1019,14 @@ final class ActiveWorkoutPresentationState {
     ) async -> ActiveWorkoutRestoredPresentation? {
         do {
             if let snapshot = try await ActiveWorkoutSnapshotStore.shared.loadStoredSnapshot() {
+                guard await shouldRestoreSnapshot(
+                    sessionID: snapshot.session.id,
+                    modelContext: modelContext,
+                    backgroundStore: backgroundStore
+                ) else {
+                    try? await ActiveWorkoutSnapshotStore.shared.delete()
+                    return nil
+                }
                 return ActiveWorkoutRestoredPresentation(
                     sessionID: snapshot.session.id,
                     presentationMode: snapshot.presentationMode,
@@ -1053,6 +1061,43 @@ final class ActiveWorkoutPresentationState {
         }
 
         return nil
+    }
+
+    private static func shouldRestoreSnapshot(
+        sessionID: UUID,
+        modelContext: ModelContext,
+        backgroundStore: AppBackgroundStore?
+    ) async -> Bool {
+        let completedSessionIDs: Set<UUID>
+        if let backgroundStore {
+            completedSessionIDs = (try? await backgroundStore.perform(
+                "active-workout.restore.completed-session-check"
+            ) { backgroundContext in
+                try fetchCompletedSessionIDs(matching: sessionID, in: backgroundContext)
+            }) ?? []
+        } else {
+            completedSessionIDs = (try? fetchCompletedSessionIDs(
+                matching: sessionID,
+                in: modelContext
+            )) ?? []
+        }
+        return ActiveWorkoutRestorePolicy.shouldRestore(
+            snapshotSessionID: sessionID,
+            completedSessionIDs: completedSessionIDs
+        )
+    }
+
+    nonisolated private static func fetchCompletedSessionIDs(
+        matching sessionID: UUID,
+        in modelContext: ModelContext
+    ) throws -> Set<UUID> {
+        let completedStatus = WorkoutSessionStatus.completed.rawValue
+        let descriptor = FetchDescriptor<WorkoutSession>(
+            predicate: #Predicate { session in
+                session.id == sessionID && session.statusRaw == completedStatus
+            }
+        )
+        return Set(try modelContext.fetch(descriptor).map(\.id))
     }
 }
 
