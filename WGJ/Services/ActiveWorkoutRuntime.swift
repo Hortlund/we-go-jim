@@ -56,7 +56,20 @@ nonisolated enum ActiveWorkoutStoredPresentationMode: String, Codable, Sendable 
     case collapsed
 }
 
+nonisolated enum ActiveWorkoutSnapshotWriteResult: Equatable, Sendable {
+    case written
+    case unchanged
+    case rejectedStale(currentRevision: UInt64)
+}
+
+nonisolated protocol ActiveWorkoutSnapshotStoring: Sendable {
+    func loadStoredSnapshot() async throws -> ActiveWorkoutStoredSnapshot?
+    func save(_ snapshot: ActiveWorkoutStoredSnapshot) async throws -> ActiveWorkoutSnapshotWriteResult
+    func delete() async throws
+}
+
 nonisolated struct ActiveWorkoutStoredSnapshot: Equatable, Codable, Sendable {
+    let revision: UInt64
     let session: ActiveWorkoutRuntimeSession
     let restTimer: RestTimerSnapshot?
     let presentationMode: ActiveWorkoutStoredPresentationMode?
@@ -64,12 +77,14 @@ nonisolated struct ActiveWorkoutStoredSnapshot: Equatable, Codable, Sendable {
     let expandedExerciseIDs: Set<UUID>
 
     init(
+        revision: UInt64 = 0,
         session: ActiveWorkoutRuntimeSession,
         restTimer: RestTimerSnapshot? = nil,
         presentationMode: ActiveWorkoutStoredPresentationMode? = nil,
         scrollTarget: ActiveWorkoutScrollTarget? = nil,
         expandedExerciseIDs: Set<UUID> = []
     ) {
+        self.revision = revision
         self.session = session
         self.restTimer = restTimer
         self.presentationMode = presentationMode
@@ -78,6 +93,7 @@ nonisolated struct ActiveWorkoutStoredSnapshot: Equatable, Codable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
+        case revision
         case session
         case restTimer
         case presentationMode
@@ -87,6 +103,7 @@ nonisolated struct ActiveWorkoutStoredSnapshot: Equatable, Codable, Sendable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        revision = try container.decodeIfPresent(UInt64.self, forKey: .revision) ?? 0
         session = try container.decode(ActiveWorkoutRuntimeSession.self, forKey: .session)
         restTimer = try container.decodeIfPresent(RestTimerSnapshot.self, forKey: .restTimer)
         presentationMode = try container.decodeIfPresent(ActiveWorkoutStoredPresentationMode.self, forKey: .presentationMode)
@@ -488,7 +505,7 @@ nonisolated extension ExerciseComponentSnapshot {
     }
 }
 
-actor ActiveWorkoutSnapshotStore {
+actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
     static let shared = ActiveWorkoutSnapshotStore()
 
     private static let defaultFileName = "active-workout-snapshot.json"
@@ -546,6 +563,7 @@ actor ActiveWorkoutSnapshotStore {
             var session = storedSnapshot.session
             session.normalizeSetRestToExerciseDefaults()
             return ActiveWorkoutStoredSnapshot(
+                revision: storedSnapshot.revision,
                 session: session,
                 restTimer: storedSnapshot.restTimer,
                 presentationMode: storedSnapshot.presentationMode,
@@ -560,7 +578,55 @@ actor ActiveWorkoutSnapshotStore {
     }
 
     func save(
+        _ snapshot: ActiveWorkoutStoredSnapshot
+    ) throws -> ActiveWorkoutSnapshotWriteResult {
+        try Task.checkCancellation()
+        try FileManager.default.createDirectory(
+            at: baseDirectory,
+            withIntermediateDirectories: true
+        )
+        var normalizedSession = snapshot.session
+        normalizedSession.normalizeSetRestToExerciseDefaults()
+        let normalizedSnapshot = ActiveWorkoutStoredSnapshot(
+            revision: snapshot.revision,
+            session: normalizedSession,
+            restTimer: snapshot.restTimer?.isExpired == true ? nil : snapshot.restTimer,
+            presentationMode: snapshot.presentationMode,
+            scrollTarget: snapshot.scrollTarget,
+            expandedExerciseIDs: snapshot.expandedExerciseIDs
+        )
+        let currentSnapshot = try loadStoredSnapshot()
+        if let currentRevision = currentSnapshot?.revision,
+           normalizedSnapshot.revision < currentRevision {
+            return .rejectedStale(currentRevision: currentRevision)
+        }
+
+        try Task.checkCancellation()
+        let data = try encoder.encode(normalizedSnapshot)
+        let url = snapshotURL
+        if cachedSnapshotData == data,
+           FileManager.default.fileExists(atPath: url.path) {
+            return .unchanged
+        }
+        if cachedSnapshotData == nil,
+           FileManager.default.fileExists(atPath: url.path) {
+            let existingData = try Data(contentsOf: url)
+            cachedSnapshotData = existingData
+            if existingData == data {
+                return .unchanged
+            }
+        }
+
+        try Task.checkCancellation()
+        try data.write(to: url, options: [.atomic])
+        cachedSnapshotData = data
+        return .written
+    }
+
+    @discardableResult
+    func save(
         _ session: ActiveWorkoutRuntimeSession,
+        revision: UInt64? = nil,
         restTimer: RestTimerSnapshot? = nil,
         presentationMode: ActiveWorkoutStoredPresentationMode? = nil,
         scrollTarget: ActiveWorkoutScrollTarget? = nil,
@@ -569,7 +635,7 @@ actor ActiveWorkoutSnapshotStore {
         preservesExistingPresentationMode: Bool = true,
         preservesExistingScrollTarget: Bool = true,
         preservesExistingExpandedExerciseIDs: Bool = true
-    ) throws {
+    ) throws -> ActiveWorkoutSnapshotWriteResult {
         try Task.checkCancellation()
         try FileManager.default.createDirectory(
             at: baseDirectory,
@@ -595,30 +661,14 @@ actor ActiveWorkoutSnapshotStore {
         let resolvedScrollTarget = scrollTarget ?? existingScrollTarget
         let resolvedExpandedExerciseIDs = expandedExerciseIDs ?? existingExpandedExerciseIDs ?? []
         let storedSnapshot = ActiveWorkoutStoredSnapshot(
+            revision: revision ?? existingSnapshot?.revision ?? 0,
             session: normalizedSession,
             restTimer: resolvedRestTimer?.isExpired == true ? nil : resolvedRestTimer,
             presentationMode: resolvedPresentationMode,
             scrollTarget: resolvedScrollTarget,
             expandedExerciseIDs: resolvedExpandedExerciseIDs
         )
-        try Task.checkCancellation()
-        let data = try encoder.encode(storedSnapshot)
-        let url = snapshotURL
-        if cachedSnapshotData == data,
-           FileManager.default.fileExists(atPath: url.path) {
-            return
-        }
-        if cachedSnapshotData == nil,
-           FileManager.default.fileExists(atPath: url.path),
-           let existingData = try? Data(contentsOf: url) {
-            cachedSnapshotData = existingData
-            if existingData == data {
-                return
-            }
-        }
-        try Task.checkCancellation()
-        try data.write(to: url, options: [.atomic])
-        cachedSnapshotData = data
+        return try save(storedSnapshot)
     }
 
     func delete() throws {

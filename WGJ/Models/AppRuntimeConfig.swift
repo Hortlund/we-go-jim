@@ -1056,7 +1056,7 @@ final class ActiveWorkoutPresentationState {
         }
 
         if let imported {
-            try? await ActiveWorkoutSnapshotStore.shared.save(imported)
+            _ = try? await ActiveWorkoutSnapshotStore.shared.save(imported)
             return ActiveWorkoutRestoredPresentation(sessionID: imported.id, presentationMode: nil)
         }
 
