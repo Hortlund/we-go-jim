@@ -460,7 +460,7 @@ struct ContentView: View {
 
         await WGJPerformance.measureAsync("app.maintenance") {
             let backgroundStore = rootBackgroundStore
-            let outcome = await ((try? backgroundStore.performAsync("app.maintenance.work") { backgroundContext in
+            let outcome = await ((try? backgroundStore.perform("app.maintenance.work") { backgroundContext in
                 if work.shouldPrimeCatalog {
                     try? ExerciseCatalogRepository(modelContext: backgroundContext).ensureSeedImportedIfNeeded()
                 }
@@ -588,11 +588,17 @@ struct ContentView: View {
         )
 
         let backgroundStore = rootBackgroundStore
-        let snapshot = try? await backgroundStore.performAsync("profile.startup-warmup") { backgroundContext in
-            try await Self.buildProfileWarmSnapshot(modelContext: backgroundContext)
+        let snapshot = try? await backgroundStore.perform("profile.startup-warmup") { backgroundContext in
+            try Self.buildProfileWarmSnapshot(modelContext: backgroundContext)
         }
 
         let completedSnapshot = Task.isCancelled ? nil : snapshot
+        if let completedSnapshot {
+            await AvatarThumbnailCacheService.shared.prime(
+                data: completedSnapshot.profile.avatarImageData,
+                maxPixelSize: 176
+            )
+        }
         appWarmupState.finishProfileWarmup(runID: runID, snapshot: completedSnapshot)
         if let completedSnapshot {
             AppRuntimeState.shared.updateWorkoutRuntimePreferences(
@@ -623,25 +629,24 @@ struct ContentView: View {
 
         let backgroundStore = rootBackgroundStore
         Task {
-            await backgroundStore.scheduleCoalesced(
-                key: .feature("profile.warmup"),
-                operationName: "profile.warmup",
-                priority: .utility,
-                cancelExisting: force
+            let snapshot = Task.isCancelled ? nil : (try? await backgroundStore.perform(
+                "profile.warmup"
             ) { backgroundContext in
-                let snapshot = Task.isCancelled ? nil : (try? await Self.buildProfileWarmSnapshot(
-                    modelContext: backgroundContext
-                ))
-                await MainActor.run {
-                    let completedSnapshot = Task.isCancelled ? nil : snapshot
-                    appWarmupState.finishProfileWarmup(runID: runID, snapshot: completedSnapshot)
-                    if let snapshot = completedSnapshot {
-                        AppRuntimeState.shared.updateWorkoutRuntimePreferences(
-                            notificationStyle: snapshot.profile.workoutNotificationStyle,
-                            keepsScreenAwake: snapshot.profile.keepsScreenAwake
-                        )
-                    }
-                }
+                try Self.buildProfileWarmSnapshot(modelContext: backgroundContext)
+            })
+            if let snapshot {
+                await AvatarThumbnailCacheService.shared.prime(
+                    data: snapshot.profile.avatarImageData,
+                    maxPixelSize: 176
+                )
+            }
+            let completedSnapshot = Task.isCancelled ? nil : snapshot
+            appWarmupState.finishProfileWarmup(runID: runID, snapshot: completedSnapshot)
+            if let snapshot = completedSnapshot {
+                AppRuntimeState.shared.updateWorkoutRuntimePreferences(
+                    notificationStyle: snapshot.profile.workoutNotificationStyle,
+                    keepsScreenAwake: snapshot.profile.keepsScreenAwake
+                )
             }
         }
         return true
@@ -650,26 +655,21 @@ struct ContentView: View {
     private func scheduleCoachWarmupIfNeeded() {
         let backgroundStore = rootBackgroundStore
         Task {
-            await backgroundStore.scheduleCoalesced(
-                key: .feature("profile.coach.warmup"),
-                operationName: "profile.coach.warmup",
-                priority: .utility
+            let snapshot = try? await backgroundStore.perform(
+                "profile.coach.warmup.snapshot"
             ) { backgroundContext in
-                await Self.warmCoachBriefIfNeeded(modelContext: backgroundContext)
+                try Self.coachWarmupSnapshot(modelContext: backgroundContext)
             }
+            guard let snapshot else { return }
+            let cache = await backgroundStore.narrativeCache()
+            _ = try? await AppleCoachNarrativeService(cache: cache)
+                .refreshRecapIfNeeded(for: snapshot)
         }
     }
 
-    private static func warmCoachBriefIfNeeded(modelContext: ModelContext) async {
-        do {
-            guard let snapshot = try await coachWarmupSnapshot(modelContext: modelContext) else { return }
-            _ = try await AppleCoachNarrativeService(modelContext: modelContext).refreshRecapIfNeeded(for: snapshot)
-        } catch {
-            return
-        }
-    }
-
-    private static func coachWarmupSnapshot(modelContext: ModelContext) async throws -> WeeklyCoachInsightSnapshot? {
+    nonisolated private static func coachWarmupSnapshot(
+        modelContext: ModelContext
+    ) throws -> WeeklyCoachInsightSnapshot? {
         let widgetRepository = ProfileWidgetRepository(modelContext: modelContext)
         let enabledWidgets = try widgetRepository.enabledConfigurationSnapshots()
         guard enabledWidgets.contains(where: { $0.kind == .coachBrief }) else {
@@ -713,13 +713,17 @@ struct ContentView: View {
         guard shouldRun else { return }
 
         let backgroundStore = rootBackgroundStore
-        let result = try? await backgroundStore.performAsync("app.first-run.local-bootstrap") { backgroundContext in
+        let result = try? await backgroundStore.perform("app.first-run.local-bootstrap") { backgroundContext in
             try ExerciseCatalogRepository(modelContext: backgroundContext).ensureSeedImportedIfNeeded()
-            return try? await Self.buildProfileWarmSnapshot(modelContext: backgroundContext)
+            return try? Self.buildProfileWarmSnapshot(modelContext: backgroundContext)
         }
 
         catalogSyncCoordinator.markPrimed()
         if let profileWarmSnapshot = result {
+            await AvatarThumbnailCacheService.shared.prime(
+                data: profileWarmSnapshot.profile.avatarImageData,
+                maxPixelSize: 176
+            )
             appWarmupState.storeProfile(profileWarmSnapshot)
             AppRuntimeState.shared.updateWorkoutRuntimePreferences(
                 notificationStyle: profileWarmSnapshot.profile.workoutNotificationStyle,
@@ -729,11 +733,11 @@ struct ContentView: View {
         FirstRunLocalBootstrapProgress.markCompleted()
     }
 
-    private static func buildProfileWarmSnapshot(modelContext: ModelContext) async throws -> ProfileWarmSnapshot {
-        let profile = try await ProfileRepository(modelContext: modelContext).bootstrapProfileIdentitySnapshot(
-            cloudSyncEnabled: false
-        )
-        await AvatarThumbnailCacheService.shared.prime(data: profile.avatarImageData, maxPixelSize: 176)
+    nonisolated private static func buildProfileWarmSnapshot(
+        modelContext: ModelContext
+    ) throws -> ProfileWarmSnapshot {
+        let profile = try ProfileRepository(modelContext: modelContext)
+            .bootstrapProfileIdentitySnapshot(preferredDisplayName: nil)
         let widgetRepository = ProfileWidgetRepository(modelContext: modelContext)
         let metricsService = WorkoutMetricsService(
             modelContext: modelContext,

@@ -79,9 +79,20 @@ nonisolated final class AppDataDeletionService {
         try deleteAll(UserProfile.self)
     }
 
-    private func invalidateCommittedCaches() {
+    func invalidateCommittedCaches() {
         ExerciseSearchService.invalidateCatalogIndex(for: modelContext)
         HistoryAnalyticsCache.shared.clear()
+    }
+
+    static func deleteConfiguredCloudBackup() async throws {
+        guard AppRuntimeConfig.canUseConfiguredCloudKitContainer else { return }
+        try await CloudKitUserDataCloudBackupStore().deleteBackup()
+    }
+
+    static func clearDefaultLocalArtifacts() async throws {
+        removeExerciseImageCacheDirectory()
+        WeeklyGoalWidgetPublisher()?.clear()
+        try await ActiveWorkoutSnapshotStore.shared.delete()
     }
 
     func clearLocalArtifacts() async throws {

@@ -337,10 +337,13 @@ struct SettingsView: View {
         let backgroundStore = settingsBackgroundStore
         let cloudSyncEnabled = cloudSyncEnabled
         do {
-            let snapshot = try await backgroundStore.performAsync("settings.profile.load") { backgroundContext in
+            let preferredDisplayName = cloudSyncEnabled
+                ? await ICloudProfileDefaultDisplayNameProvider().defaultDisplayName()
+                : nil
+            let snapshot = try await backgroundStore.perform("settings.profile.load") { backgroundContext in
                 SettingsProfileSnapshot(
-                    profile: try await ProfileRepository(modelContext: backgroundContext)
-                        .bootstrapProfileIdentity(cloudSyncEnabled: cloudSyncEnabled)
+                    profile: try ProfileRepository(modelContext: backgroundContext)
+                        .bootstrapProfileIdentitySnapshot(preferredDisplayName: preferredDisplayName)
                 )
             }
             applyProfileSnapshot(snapshot)
@@ -493,6 +496,14 @@ private struct SettingsProfileSnapshot: Sendable {
     let workoutNotificationStyle: WorkoutNotificationStyle
 
     nonisolated init(profile: UserProfile) {
+        weeklyGoal = profile.weeklyWorkoutGoal
+        isTrainingGuidanceEnabled = profile.isTrainingGuidanceEnabled
+        keepsScreenAwake = profile.keepsScreenAwake
+        preferredWeightUnit = profile.preferredWeightUnit
+        workoutNotificationStyle = profile.workoutNotificationStyle
+    }
+
+    nonisolated init(profile: ProfileIdentitySnapshot) {
         weeklyGoal = profile.weeklyWorkoutGoal
         isTrainingGuidanceEnabled = profile.isTrainingGuidanceEnabled
         keepsScreenAwake = profile.keepsScreenAwake

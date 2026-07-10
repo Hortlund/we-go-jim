@@ -1577,9 +1577,12 @@ final class ProfileViewController {
         cloudSyncEnabled: Bool,
         backgroundStore: AppBackgroundStore
     ) async throws -> ProfileIdentitySnapshot {
-        try await backgroundStore.performAsync("profile.identity") { backgroundContext in
-            try await ProfileRepository(modelContext: backgroundContext).bootstrapProfileIdentitySnapshot(
-                cloudSyncEnabled: cloudSyncEnabled
+        let preferredDisplayName = cloudSyncEnabled
+            ? await ICloudProfileDefaultDisplayNameProvider().defaultDisplayName()
+            : nil
+        return try await backgroundStore.perform("profile.identity") { backgroundContext in
+            try ProfileRepository(modelContext: backgroundContext).bootstrapProfileIdentitySnapshot(
+                preferredDisplayName: preferredDisplayName
             )
         }
     }
@@ -1666,12 +1669,15 @@ final class ProfileViewController {
             return nil
         }
 
-        return try await backgroundStore.performAsync("profile.coach.presentation") { backgroundContext in
-            try await Self.loadCoachBriefPresentation(
-                modelContext: backgroundContext,
-                enabledWidgets: enabledWidgets
-            )
+        let snapshot = try await backgroundStore.perform("profile.coach.presentation.snapshot") {
+            backgroundContext in
+            try WGJPerformance.measure("profile.coach.snapshot") {
+                try WeeklyCoachInsightService(modelContext: backgroundContext).weeklyInsightSnapshot()
+            }
         }
+        let cache = await backgroundStore.narrativeCache()
+        let recap = try await AppleCoachNarrativeService(cache: cache).recapForDisplay(for: snapshot)
+        return ProfileCoachPresentation(snapshot: snapshot, recap: recap)
     }
 
     func loadCoachFollowUpSummary(
@@ -1679,29 +1685,11 @@ final class ProfileViewController {
         snapshot: WeeklyCoachInsightSnapshot,
         backgroundStore: AppBackgroundStore
     ) async throws -> CoachNarrativeSummary {
-        try await backgroundStore.performAsync("profile.coach.followup") { backgroundContext in
-            try await AppleCoachNarrativeService(modelContext: backgroundContext).followUp(
-                for: kind,
-                snapshot: snapshot
-            )
-        }
-    }
-
-    private static func loadCoachBriefPresentation(
-        modelContext: ModelContext,
-        enabledWidgets: [ProfileWidgetConfigSnapshot]
-    ) async throws -> ProfileCoachPresentation? {
-        guard enabledWidgets.contains(where: { $0.kind == .coachBrief }) else {
-            return nil
-        }
-
-        let snapshot: WeeklyCoachInsightSnapshot
-        snapshot = try WGJPerformance.measure("profile.coach.snapshot") {
-            try WeeklyCoachInsightService(modelContext: modelContext).weeklyInsightSnapshot()
-        }
-
-        let recap = try await AppleCoachNarrativeService(modelContext: modelContext).recapForDisplay(for: snapshot)
-        return ProfileCoachPresentation(snapshot: snapshot, recap: recap)
+        let cache = await backgroundStore.narrativeCache()
+        return try await AppleCoachNarrativeService(cache: cache).followUp(
+            for: kind,
+            snapshot: snapshot
+        )
     }
 }
 

@@ -21,10 +21,16 @@ struct AppBackgroundJobKey: Hashable, Sendable {
 
 actor AppBackgroundStore {
     private let container: ModelContainer
+    private let coachNarrativeStore: CoachNarrativeStore
     private var runningJobs: [AppBackgroundJobKey: Task<Void, Never>] = [:]
 
     init(container: ModelContainer) {
         self.container = container
+        self.coachNarrativeStore = CoachNarrativeStore(modelContainer: container)
+    }
+
+    func narrativeCache() -> CoachNarrativeStore {
+        coachNarrativeStore
     }
 
     func perform<T: Sendable>(
@@ -35,16 +41,6 @@ actor AppBackgroundStore {
 
         let context = makeContext()
         return try operation(context)
-    }
-
-    func performAsync<T: Sendable>(
-        _ operationName: StaticString? = nil,
-        _ operation: @Sendable (ModelContext) async throws -> T
-    ) async throws -> T {
-        _ = operationName
-
-        let context = makeContext()
-        return try await operation(context)
     }
 
     func performWrite<T: Sendable>(
@@ -61,26 +57,12 @@ actor AppBackgroundStore {
         return result
     }
 
-    func performWriteAsync<T: Sendable>(
-        _ operationName: StaticString? = nil,
-        _ operation: @Sendable (ModelContext) async throws -> T
-    ) async throws -> T {
-        _ = operationName
-
-        let context = makeContext()
-        let result = try await operation(context)
-        if context.hasChanges {
-            try context.save()
-        }
-        return result
-    }
-
     func scheduleCoalesced(
         key: AppBackgroundJobKey,
         operationName: StaticString? = nil,
         priority: TaskPriority = .utility,
         cancelExisting: Bool = false,
-        _ operation: @Sendable @escaping (ModelContext) async -> Void
+        _ operation: @Sendable @escaping (ModelContext) -> Void
     ) {
         if cancelExisting {
             runningJobs[key]?.cancel()
@@ -94,7 +76,7 @@ actor AppBackgroundStore {
             _ = operationName
 
             let context = Self.makeContext(container: container)
-            await operation(context)
+            operation(context)
             await self?.finishJob(for: key)
         }
 

@@ -88,6 +88,33 @@ nonisolated final class ProfileRepository {
         )
     }
 
+    /// Applies an already-resolved Cloud display name without holding a
+    /// `ModelContext` across an async suspension point.
+    func bootstrapProfileIdentitySnapshot(
+        preferredDisplayName: String?
+    ) throws -> ProfileIdentitySnapshot {
+        let sanitizedPreferredName = preferredDisplayName
+            .map { ReviewModerationService.sanitizedForSharing($0, kind: .displayName) }
+            .flatMap { value in
+                value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
+            }
+
+        if let existing = try currentProfile() {
+            if let sanitizedPreferredName,
+               shouldReplaceDefaultDisplayName(for: existing, with: sanitizedPreferredName) {
+                existing.displayName = sanitizedPreferredName
+                existing.updatedAt = .now
+                try saveUserDataChanges()
+            }
+            return ProfileIdentitySnapshot(profile: existing)
+        }
+
+        let profile = UserProfile(displayName: sanitizedPreferredName ?? Self.localDefaultDisplayName)
+        modelContext.insert(profile)
+        try saveUserDataChanges()
+        return ProfileIdentitySnapshot(profile: profile)
+    }
+
     func updateIdentity(name: String, athleteType: ProfileAthleteType?) throws {
         let profile = try loadOrCreateProfile()
         try saveProfile(

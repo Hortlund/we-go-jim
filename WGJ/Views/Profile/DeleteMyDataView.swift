@@ -92,10 +92,14 @@ struct DeleteMyDataView: View {
         let backgroundStore = appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
 
         do {
-            try await backgroundStore.performAsync("profile.delete-all-data") { backgroundContext in
-                let service = AppDataDeletionService(modelContext: backgroundContext)
-                try await service.deleteAllUserData()
+            try await AppDataDeletionService.deleteConfiguredCloudBackup()
+            try await backgroundStore.performWrite("profile.delete-all-data.local") { backgroundContext in
+                try AppDataDeletionService(modelContext: backgroundContext).stageLocalDataDeletion()
             }
+            try await backgroundStore.perform("profile.delete-all-data.invalidate-caches") { backgroundContext in
+                AppDataDeletionService(modelContext: backgroundContext).invalidateCommittedCaches()
+            }
+            try await AppDataDeletionService.clearDefaultLocalArtifacts()
             alertTitle = "Data Deleted"
             alertMessage = "Your CloudKit backup and local WGJ data were deleted. WGJ will return to setup after you tap OK."
             shouldReturnToSetupAfterAlert = true
