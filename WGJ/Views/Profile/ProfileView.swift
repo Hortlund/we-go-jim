@@ -41,6 +41,11 @@ nonisolated enum ProfileWeeklyGoalChartScalePolicy {
 }
 
 struct ProfileView: View {
+    private struct RouteConsumptionTaskID: Equatable {
+        let requestID: UUID?
+        let isTabActive: Bool
+    }
+
     private enum ScrollTarget {
         static let weeklyGoal = "profile-weekly-goal-section"
         static let cloudBackupSection = "profile-cloud-backup-section"
@@ -78,6 +83,7 @@ struct ProfileView: View {
     @State private var isLoadingTrendSeries = false
     @State private var shouldRenderDashboardContent = false
     @State private var hasRenderedDashboardContent = false
+    @State private var showsRoutedWeeklyGoal = false
     @State private var showingWidgetManager = false
     @State private var showingProfileManagement = false
     @State private var showingCoachAnalysis = false
@@ -121,7 +127,12 @@ struct ProfileView: View {
             .scrollDismissesKeyboard(.interactively)
             .wgjScreenBackground()
             .accessibilityIdentifier("profile-content-root")
-            .task(id: appRouteState.pendingRequest?.id) {
+            .task(
+                id: RouteConsumptionTaskID(
+                    requestID: appRouteState.pendingRequest?.id,
+                    isTabActive: isTabActive
+                )
+            ) {
                 await consumePendingRouteIfNeeded(scrollProxy: scrollProxy)
             }
         }
@@ -322,6 +333,12 @@ struct ProfileView: View {
                 ForEach(dashboardContent.enabledWidgets) { config in
                     dashboardWidget(config)
                 }
+
+                if showsRoutedWeeklyGoal,
+                   !dashboardContent.enabledWidgets.contains(where: { $0.kind == .weeklyGoals })
+                {
+                    weeklyGoalsWidget
+                }
             }
         }
     }
@@ -461,10 +478,11 @@ struct ProfileView: View {
         else { return }
 
         await handleInitialActivation()
+        showsRoutedWeeklyGoal = true
+        shouldRenderDashboardContent = true
+        hasRenderedDashboardContent = true
         await Task.yield()
-        withAnimation(.easeInOut(duration: 0.25)) {
-            scrollProxy.scrollTo(ScrollTarget.weeklyGoal, anchor: .center)
-        }
+        scrollProxy.scrollTo(ScrollTarget.weeklyGoal, anchor: .center)
         appRouteState.consume(id: request.id)
     }
 
