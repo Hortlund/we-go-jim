@@ -57,7 +57,7 @@ struct WGJApp: App {
         }
     }
 
-    private static func makeContainerBootstrap() async throws -> ModelContainerBootstrap {
+    nonisolated private static func makeContainerBootstrap() async throws -> ModelContainerBootstrap {
         AppStoreLayout.clearPersistentStoreFilesForPendingReset()
 #if DEBUG
         try AppStoreLayout.clearPersistentStoreFilesForUITestsIfRequested()
@@ -76,7 +76,7 @@ struct WGJApp: App {
         )
     }
 
-    private static func makeLocalFallbackContainer() throws -> ModelContainer {
+    nonisolated private static func makeLocalFallbackContainer() throws -> ModelContainer {
         let appSchema = fullAppSchema()
         try AppStoreLayout.prepareAppGroupStoreDirectory()
         return try ModelContainer(
@@ -85,7 +85,7 @@ struct WGJApp: App {
         )
     }
 
-    private static func makeUITestContainer() throws -> ModelContainer {
+    nonisolated private static func makeUITestContainer() throws -> ModelContainer {
 #if DEBUG
         resetActiveWorkoutSnapshotForUITestsIfRequested()
 #endif
@@ -103,7 +103,7 @@ struct WGJApp: App {
     }
 
 #if DEBUG
-    private static func resetActiveWorkoutSnapshotForUITestsIfRequested() {
+    nonisolated private static func resetActiveWorkoutSnapshotForUITestsIfRequested() {
         if ProcessInfo.processInfo.arguments.contains("UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT") {
             ActiveWorkoutSnapshotStore.deleteDefaultSnapshotFileForUITests()
         }
@@ -188,7 +188,7 @@ struct WGJApp: App {
         ])
     }
 
-    private static func storeConfigurations() -> [ModelConfiguration] {
+    nonisolated private static func storeConfigurations() -> [ModelConfiguration] {
         let localCatalogSchema = Schema([
             ExerciseCatalogItem.self,
             MuscleGroup.self,
@@ -272,7 +272,7 @@ struct WGJApp: App {
         return "\(nsError.domain)(\(nsError.code)): \(nsError.localizedDescription) [\(userInfo)]"
     }
 
-    private static func seedUITestCatalogIfNeeded(container: ModelContainer) throws {
+    nonisolated private static func seedUITestCatalogIfNeeded(container: ModelContainer) throws {
         let context = ModelContext(container)
         var descriptor = FetchDescriptor<ExerciseCatalogItem>()
         descriptor.fetchLimit = 1

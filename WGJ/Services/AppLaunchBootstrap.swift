@@ -221,6 +221,7 @@ enum AppLaunchBootstrapResolver {
     }
 }
 
+@MainActor
 final class AppLifecycleDiagnostics {
     static let shared = AppLifecycleDiagnostics()
     nonisolated private static let logger = Logger(
@@ -282,39 +283,57 @@ final class AppLifecycleDiagnostics {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.defaults.set(State.active, forKey: Key.state)
+            Task { @MainActor [weak self] in
+                self?.recordState(State.active)
+            }
         })
         observers.append(center.addObserver(
             forName: UIApplication.willResignActiveNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.defaults.set(State.inactive, forKey: Key.state)
+            Task { @MainActor [weak self] in
+                self?.recordState(State.inactive)
+            }
         })
         observers.append(center.addObserver(
             forName: UIApplication.didEnterBackgroundNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.defaults.set(State.background, forKey: Key.state)
-            self?.purgeVolatileMemoryCaches()
+            Task { @MainActor [weak self] in
+                self?.recordState(State.background)
+                self?.purgeVolatileMemoryCaches()
+            }
         })
         observers.append(center.addObserver(
             forName: UIApplication.willTerminateNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.defaults.set(State.terminated, forKey: Key.state)
+            Task { @MainActor [weak self] in
+                self?.recordState(State.terminated)
+            }
         })
         observers.append(center.addObserver(
             forName: UIApplication.didReceiveMemoryWarningNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.defaults.set(Date(), forKey: Key.lastMemoryWarningAt)
-            self?.defaults.set("memory-warning", forKey: Key.state)
-            self?.purgeVolatileMemoryCaches()
+            Task { @MainActor [weak self] in
+                self?.recordMemoryWarning()
+            }
         })
+    }
+
+    private func recordState(_ state: String) {
+        defaults.set(state, forKey: Key.state)
+    }
+
+    private func recordMemoryWarning() {
+        defaults.set(Date(), forKey: Key.lastMemoryWarningAt)
+        defaults.set("memory-warning", forKey: Key.state)
+        purgeVolatileMemoryCaches()
     }
 
     private func purgeVolatileMemoryCaches() {

@@ -367,13 +367,14 @@ final class AppRuntimeState {
 
         let statusProvider = accountService ?? AccountStatusService()
 
-        let refreshTask = Task.detached(priority: .utility) { [weak self, statusProvider] in
-            let status = await Self.accountStatus(
-                from: statusProvider,
+        let refreshTask = Task(priority: .utility) { [weak self, statusProvider] in
+            let status = await accountStatusWithTimeout(
+                provider: statusProvider,
                 timeout: runtimeTimeout
             )
+            guard !Task.isCancelled else { return }
             guard let self else { return }
-            await self.finishRuntimeCloudAvailabilityRefresh(
+            self.finishRuntimeCloudAvailabilityRefresh(
                 refreshGeneration: refreshGeneration,
                 status: status,
                 taskWasCancelled: Task.isCancelled
@@ -412,40 +413,6 @@ final class AppRuntimeState {
         }
 
         return .degraded(errorDescription)
-    }
-
-    nonisolated private static func accountStatus(
-        from statusProvider: any AccountStatusProviding,
-        timeout: Duration
-    ) async -> AccountStatus {
-        await withCheckedContinuation { (continuation: CheckedContinuation<AccountStatus, Never>) in
-            let lock = NSLock()
-            var didResume = false
-            var statusTask: Task<Void, Never>?
-            var timeoutTask: Task<Void, Never>?
-
-            func resumeOnce(_ status: AccountStatus) {
-                lock.lock()
-                guard !didResume else {
-                    lock.unlock()
-                    return
-                }
-                didResume = true
-                lock.unlock()
-                statusTask?.cancel()
-                timeoutTask?.cancel()
-                continuation.resume(returning: status)
-            }
-
-            statusTask = Task.detached(priority: .utility) {
-                let status = await statusProvider.fetchAccountStatus()
-                resumeOnce(status)
-            }
-            timeoutTask = Task.detached(priority: .utility) {
-                try? await Task.sleep(for: timeout)
-                resumeOnce(.unavailable(.unknown))
-            }
-        }
     }
 
     private func beginRuntimeCloudAvailabilityRefresh(now: Date) -> Int {
