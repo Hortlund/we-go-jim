@@ -182,6 +182,10 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     var body: some View {
+        interactionObservedCard
+    }
+
+    private var baseCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             headerContent
 
@@ -193,94 +197,110 @@ struct WorkoutSessionExerciseGridEditor: View {
                 setsSection
             }
         }
-        .padding(16)
-        .background {
-            cardBackgroundLayer
-                .transaction { transaction in
-                    transaction.animation = nil
-                }
-        }
-        .wgjCardContainer(strong: true)
-        .overlay {
-            cardOverlayLayer
-                .transaction { transaction in
-                    transaction.animation = nil
-                }
-        }
-        .shadow(
-            color: shouldEmphasizeCompletedExercise ? WGJTheme.success.opacity(0.12) : .clear,
-            radius: 16,
-            x: 0,
-            y: 8
-        )
-        .onAppear {
-            syncCompletedSetCount()
-            if isExpanded {
-                refreshDisplayRows()
+    }
+
+    private var styledCard: some View {
+        baseCard
+            .padding(16)
+            .background {
+                cardBackgroundLayer
+                    .transaction { transaction in
+                        transaction.animation = nil
+                    }
             }
-            if let flushIdentifier {
-                flushCoordinator?.register(exerciseID: flushIdentifier) {
-                    flushPendingEditorState()
-                }
+            .wgjCardContainer(strong: true)
+            .overlay {
+                cardOverlayLayer
+                    .transaction { transaction in
+                        transaction.animation = nil
+                    }
             }
-        }
-        .onDisappear {
-            onInputFocusChange(false)
-            flushPendingEditorState()
-            if let flushIdentifier {
-                flushCoordinator?.unregister(exerciseID: flushIdentifier)
-            }
-        }
-        .onChange(of: setDrafts) { previousValue, newValue in
-            handleSetDraftsChange(previousValue: previousValue, currentValue: newValue)
-        }
-        .onChange(of: previousPerformanceResolution) { _, _ in
-            handlePreviousPerformanceResolutionChange()
-        }
-        .onChange(of: exerciseNotes) { previousValue, currentValue in
-            scheduleCommitRequest(
-                ActiveWorkoutEditorCommitDisposition.fieldChange(
-                    previous: previousValue,
-                    current: currentValue
-                )
+            .shadow(
+                color: shouldEmphasizeCompletedExercise ? WGJTheme.success.opacity(0.12) : .clear,
+                radius: 16,
+                x: 0,
+                y: 8
             )
-        }
-        .onChange(of: restSeconds) { _, _ in
-            refreshDisplayRows()
-        }
-        .onChange(of: targetRepMin) { _, _ in
-            refreshDisplayRows()
-        }
-        .onChange(of: targetRepMax) { _, _ in
-            refreshDisplayRows()
-        }
-        .onChange(of: focusedInput) { previousFocus, newFocus in
-            onInputFocusChange(newFocus != nil)
-            handleFocusedInputChange(previousFocus, newFocus)
-        }
-        .onChange(of: keyboardDismissToken) { _, _ in
-            dismissInputFocus()
-        }
-        .onChange(of: scenePhase) { _, newPhase in
-            guard ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: newPhase) else { return }
-            guard focusedInput != nil else { return }
-            dismissInputFocus()
-        }
-        .onChange(of: isExpanded) { _, newValue in
-            if newValue {
-                refreshDisplayRows()
-            } else {
-                debounceCoordinator.cancelDisplayRefresh()
-                projection = WorkoutSessionExerciseGridProjectionBuilder.build(
-                    setDrafts: setDrafts
+    }
+
+    private var lifecycleObservedCard: some View {
+        styledCard
+            .onAppear {
+                syncCompletedSetCount()
+                if isExpanded {
+                    refreshDisplayRows()
+                }
+                if let flushIdentifier {
+                    flushCoordinator?.register(exerciseID: flushIdentifier) {
+                        flushPendingEditorState()
+                    }
+                }
+            }
+            .onDisappear {
+                onInputFocusChange(false)
+                flushPendingEditorState()
+                if let flushIdentifier {
+                    flushCoordinator?.unregister(exerciseID: flushIdentifier)
+                }
+            }
+    }
+
+    private var valueObservedCard: some View {
+        lifecycleObservedCard
+            .onChange(of: setDrafts) { previousValue, newValue in
+                handleSetDraftsChange(previousValue: previousValue, currentValue: newValue)
+            }
+            .onChange(of: previousPerformanceResolution) { _, _ in
+                handlePreviousPerformanceResolutionChange()
+            }
+            .onChange(of: exerciseNotes) { previousValue, currentValue in
+                scheduleCommitRequest(
+                    ActiveWorkoutEditorCommitDisposition.fieldChange(
+                        previous: previousValue,
+                        current: currentValue
+                    )
                 )
             }
-        }
-        .onChange(of: isSetCompletionEnabled) { _, isEnabled in
-            if isEnabled {
-                revealedCompletionGateSetIDs.removeAll()
+            .onChange(of: restSeconds) { _, _ in
+                refreshDisplayRows()
             }
-        }
+            .onChange(of: targetRepMin) { _, _ in
+                refreshDisplayRows()
+            }
+            .onChange(of: targetRepMax) { _, _ in
+                refreshDisplayRows()
+            }
+    }
+
+    private var interactionObservedCard: some View {
+        valueObservedCard
+            .onChange(of: focusedInput) { previousFocus, newFocus in
+                onInputFocusChange(newFocus != nil)
+                handleFocusedInputChange(previousFocus, newFocus)
+            }
+            .onChange(of: keyboardDismissToken) { _, _ in
+                dismissInputFocus()
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                guard ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: newPhase) else { return }
+                guard focusedInput != nil else { return }
+                dismissInputFocus()
+            }
+            .onChange(of: isExpanded) { _, newValue in
+                if newValue {
+                    refreshDisplayRows()
+                } else {
+                    debounceCoordinator.cancelDisplayRefresh()
+                    projection = WorkoutSessionExerciseGridProjectionBuilder.build(
+                        setDrafts: setDrafts
+                    )
+                }
+            }
+            .onChange(of: isSetCompletionEnabled) { _, isEnabled in
+                if isEnabled {
+                    revealedCompletionGateSetIDs.removeAll()
+                }
+            }
     }
 
     private var previousBySetIndex: [Int: WorkoutPreviousSetSnapshot] {
