@@ -971,39 +971,6 @@ nonisolated final class WorkoutSessionRepository {
         return maps
     }
 
-    func finishSession(sessionID: UUID, notes: String? = nil) throws {
-        guard let session = try session(id: sessionID) else {
-            throw WorkoutSessionRepositoryError.sessionNotFound
-        }
-
-        if let notes {
-            session.notes = notes
-        }
-
-        session.status = .completed
-        let now = Date()
-        session.endedAt = now
-        session.durationSeconds = max(0, Int((session.endedAt ?? .now).timeIntervalSince(session.startedAt)))
-        session.updatedAt = now
-
-        let metrics = WorkoutMetricsService(modelContext: modelContext)
-        let projectedFacts = try HistoryProjectionSnapshotBuilder.projectedFacts(from: session, repository: self)
-        let summary = try metrics.sessionSummary(session: session, projectedFacts: projectedFacts)
-        session.totalVolume = summary.totalVolume
-        session.prHitsCount = summary.prHitsCount
-        session.summaryMetricsVersion = WorkoutMetricsService.currentSummaryMetricsVersion
-
-        try saveUserDataChanges()
-        invalidateAnalyticsCache()
-        scheduleProjectionRebuild(for: sessionID)
-        publishWeeklyGoalWidgetProgress()
-        WorkoutHistoryChangeBroadcaster.post()
-        BoundaryCloudBackupScheduler.exportBestEffort(
-            container: modelContext.container,
-            reason: .workoutCompleted
-        )
-    }
-
     func archiveSession(id: UUID) throws {
         guard let session = try session(id: id) else {
             throw WorkoutSessionRepositoryError.sessionNotFound

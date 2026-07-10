@@ -164,15 +164,19 @@ nonisolated private final class WorkoutCompletionMaterializer {
         )
 
         let projectedFacts = HistoryProjectionSnapshotBuilder.projectedFacts(from: completedSession)
-        let summary = try WorkoutMetricsService(modelContext: modelContext).sessionSummary(
-            session: completedSession,
-            projectedFacts: projectedFacts
-        )
+        let summary = try WGJPerformance.measure("workout-completion.metrics") {
+            try WorkoutMetricsService(modelContext: modelContext).sessionSummary(
+                session: completedSession,
+                projectedFacts: projectedFacts
+            )
+        }
         completedSession.totalVolume = summary.totalVolume
         completedSession.prHitsCount = summary.prHitsCount
         completedSession.summaryMetricsVersion = WorkoutMetricsService.currentSummaryMetricsVersion
 
-        try modelContext.save()
+        try WGJPerformance.measure("workout-completion.save") {
+            try modelContext.save()
+        }
         HistoryAnalyticsCache.shared.invalidate(container: modelContext.container)
         HistoryProjectionBackgroundReconciler.shared.scheduleRebuild(
             sessionID: completedSession.id,
