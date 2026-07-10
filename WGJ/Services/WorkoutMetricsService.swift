@@ -273,20 +273,11 @@ nonisolated private enum WorkoutMetricsPolicy {
     nonisolated static let summaryMetricsVersion = 3
 
     nonisolated static func estimatedOneRepMax(weight: Double, reps: Int) -> Double {
-        guard reps > 0 else { return weight }
-        if reps == 1 { return weight }
-        return weight * (1 + (Double(reps) / 30.0))
+        WorkoutPerformanceMath.estimatedOneRepMax(weight: weight, reps: reps)
     }
 
     nonisolated static func normalizedLoad(_ value: Double, unit: TemplateLoadUnit) -> Double {
-        switch unit {
-        case .kg:
-            return value
-        case .lb:
-            return value * 0.45359237
-        case .bodyweight:
-            return value
-        }
+        WorkoutPerformanceMath.normalizedLoadInKilograms(value, unit: unit)
     }
 
     nonisolated static func completedWorkingMetric(from set: WorkoutSessionSet) -> CompletedWorkingSetMetric? {
@@ -430,7 +421,11 @@ nonisolated private enum WorkoutMetricsPolicy {
     }
 
     nonisolated static func normalizedVolume(for metric: WeightedWorkingSetMetric) -> Double {
-        normalizedWeight(for: metric) * Double(metric.reps)
+        WorkoutPerformanceMath.weightedVolumeInKilograms(
+            weight: metric.weight,
+            reps: metric.reps,
+            unit: metric.unit
+        )
     }
 
     nonisolated static func isBetterWeightedMetric(_ candidate: WeightedWorkingSetMetric, than existing: WeightedWorkingSetMetric) -> Bool {

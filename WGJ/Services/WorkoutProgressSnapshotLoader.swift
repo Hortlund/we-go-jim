@@ -321,16 +321,20 @@ nonisolated enum WorkoutProgressSnapshotBuilder {
         previous: SessionMetrics,
         current: SessionMetrics
     ) -> [WorkoutProgressMetricDelta] {
-        [
+        let volumeDelta = displayedVolumeDelta(
+            previous: previous.totalVolumeKg,
+            current: current.totalVolumeKg
+        )
+        return [
             metricDelta(
                 kind: .volume,
                 title: "Volume",
                 systemImage: "scalemass.fill",
-                previousValue: previous.totalVolumeKg,
-                currentValue: current.totalVolumeKg,
+                previousValue: 0,
+                currentValue: volumeDelta,
                 previousText: formattedVolume(previous.totalVolumeKg),
                 currentText: formattedVolume(current.totalVolumeKg),
-                deltaText: signedVolume(current.totalVolumeKg - previous.totalVolumeKg)
+                deltaText: signedVolume(volumeDelta)
             ),
             metricDelta(
                 kind: .duration,
@@ -404,37 +408,42 @@ nonisolated enum WorkoutProgressSnapshotBuilder {
         let sharedIDs = Set(previous.exercisesByCatalogUUID.keys)
             .intersection(current.exercisesByCatalogUUID.keys)
 
-        return sharedIDs.compactMap { catalogExerciseUUID in
+        let rankedComparisons: [RankedExerciseComparison] = sharedIDs.compactMap { catalogExerciseUUID in
             guard let previousExercise = previous.exercisesByCatalogUUID[catalogExerciseUUID],
                   let currentExercise = current.exercisesByCatalogUUID[catalogExerciseUUID]
             else {
                 return nil
             }
 
-            let direction = WorkoutProgressDirection.compare(
-                currentExercise.comparisonScore,
-                previousExercise.comparisonScore
+            let delta = exerciseProgressDelta(
+                previous: previousExercise.progressMetric,
+                current: currentExercise.progressMetric
             )
-            return WorkoutProgressExerciseComparison(
-                id: catalogExerciseUUID,
-                catalogExerciseUUID: catalogExerciseUUID,
-                exerciseName: currentExercise.exerciseName,
-                previousBestSetText: previousExercise.bestSetText,
-                currentBestSetText: currentExercise.bestSetText,
-                previousVolumeText: formattedVolume(previousExercise.totalVolumeKg),
-                currentVolumeText: formattedVolume(currentExercise.totalVolumeKg),
-                deltaText: exerciseDeltaText(previous: previousExercise, current: currentExercise),
-                direction: direction
+            return RankedExerciseComparison(
+                comparison: WorkoutProgressExerciseComparison(
+                    id: catalogExerciseUUID,
+                    catalogExerciseUUID: catalogExerciseUUID,
+                    exerciseName: currentExercise.exerciseName,
+                    previousBestSetText: previousExercise.bestSetText,
+                    currentBestSetText: currentExercise.bestSetText,
+                    previousVolumeText: formattedVolume(previousExercise.totalVolumeKg),
+                    currentVolumeText: formattedVolume(currentExercise.totalVolumeKg),
+                    deltaText: delta.text,
+                    direction: delta.direction
+                ),
+                relativeMagnitude: delta.relativeMagnitude
             )
         }
-        .sorted { lhs, rhs in
-            let lhsMagnitude = abs(deltaMagnitude(for: lhs.deltaText))
-            let rhsMagnitude = abs(deltaMagnitude(for: rhs.deltaText))
-            if lhsMagnitude != rhsMagnitude {
-                return lhsMagnitude > rhsMagnitude
+
+        return rankedComparisons.sorted { lhs, rhs in
+            if lhs.relativeMagnitude != rhs.relativeMagnitude {
+                return lhs.relativeMagnitude > rhs.relativeMagnitude
             }
-            return lhs.exerciseName.localizedStandardCompare(rhs.exerciseName) == .orderedAscending
+            return lhs.comparison.exerciseName.localizedStandardCompare(
+                rhs.comparison.exerciseName
+            ) == .orderedAscending
         }
+        .map(\.comparison)
     }
 
     private static func highlightCards(
@@ -458,8 +467,31 @@ nonisolated enum WorkoutProgressSnapshotBuilder {
         let improvedCount = exerciseComparisons.filter { $0.direction == .up }.count
         let repeatedCount = exerciseComparisons.count
         let biggestMover = exerciseComparisons.first
-        let volumeDelta = current.totalVolumeKg - previous.totalVolumeKg
+        let volumeDelta = displayedVolumeDelta(
+            previous: previous.totalVolumeKg,
+            current: current.totalVolumeKg
+        )
         let prDelta = current.prHitsCount - previous.prHitsCount
+        let workloadDirection = WorkoutProgressDirection.compare(volumeDelta, 0)
+        let prDirection = WorkoutProgressDirection.compare(Double(prDelta), 0)
+        let workloadValue: String
+        switch workloadDirection {
+        case .up:
+            workloadValue = "More work"
+        case .down:
+            workloadValue = "Less work"
+        case .flat:
+            workloadValue = "Same work"
+        }
+        let prValue: String
+        switch prDirection {
+        case .up:
+            prValue = "New hits"
+        case .down:
+            prValue = "Fewer hits"
+        case .flat:
+            prValue = "Steady"
+        }
 
         return [
             WorkoutProgressHighlightCard(
@@ -481,31 +513,70 @@ nonisolated enum WorkoutProgressSnapshotBuilder {
             WorkoutProgressHighlightCard(
                 id: "workload",
                 title: "Workload signal",
-                value: volumeDelta >= 0 ? "More work" : "Less work",
+                value: workloadValue,
                 detail: signedVolume(volumeDelta),
                 systemImage: "chart.line.uptrend.xyaxis",
-                direction: .compare(current.totalVolumeKg, previous.totalVolumeKg)
+                direction: workloadDirection
             ),
             WorkoutProgressHighlightCard(
                 id: "prs",
                 title: "PR signal",
-                value: prDelta > 0 ? "New hits" : "Steady",
+                value: prValue,
                 detail: signedInteger(prDelta),
                 systemImage: "trophy.fill",
-                direction: .compare(Double(current.prHitsCount), Double(previous.prHitsCount))
+                direction: prDirection
             ),
         ]
     }
 
-    private static func exerciseDeltaText(
-        previous: ExerciseMetrics,
-        current: ExerciseMetrics
-    ) -> String {
-        if previous.bestWeightedOneRepMaxKg != nil || current.bestWeightedOneRepMaxKg != nil {
-            return signedVolume(current.totalVolumeKg - previous.totalVolumeKg)
-        }
+    private static func exerciseProgressDelta(
+        previous: ExerciseProgressMetric,
+        current: ExerciseProgressMetric
+    ) -> ExerciseProgressDelta {
+        switch (previous, current) {
+        case let (.estimatedOneRepMaxKg(previousValue), .estimatedOneRepMaxKg(currentValue)):
+            let roundedDelta = roundedToOneDecimal(currentValue - previousValue)
+            return ExerciseProgressDelta(
+                direction: .compare(roundedDelta, 0),
+                text: "\(signedOneDecimal(roundedDelta)) kg e1RM",
+                relativeMagnitude: relativeMagnitude(current: currentValue, previous: previousValue)
+            )
 
-        return signedInteger(current.maxReps - previous.maxReps) + " reps"
+        case let (.repetitions(previousValue), .repetitions(currentValue)):
+            let delta = currentValue - previousValue
+            return ExerciseProgressDelta(
+                direction: .compare(Double(delta), 0),
+                text: "\(signedInteger(delta)) \(abs(delta) == 1 ? "rep" : "reps")",
+                relativeMagnitude: relativeMagnitude(
+                    current: Double(currentValue),
+                    previous: Double(previousValue)
+                )
+            )
+
+        default:
+            return ExerciseProgressDelta(
+                direction: .flat,
+                text: "Not comparable",
+                relativeMagnitude: 0
+            )
+        }
+    }
+
+    private static func roundedToOneDecimal(_ value: Double) -> Double {
+        let rounded = (value * 10).rounded() / 10
+        return rounded == 0 ? 0 : rounded
+    }
+
+    private static func signedOneDecimal(_ value: Double) -> String {
+        let prefix = value > 0 ? "+" : ""
+        return "\(prefix)\(WGJFormatters.oneDecimalString(value))"
+    }
+
+    private static func relativeMagnitude(current: Double, previous: Double) -> Double {
+        guard previous != 0 else {
+            return current == 0 ? 0 : 1
+        }
+        return abs((current - previous) / previous)
     }
 
     private static func formattedDuration(_ seconds: Int) -> String {
@@ -523,16 +594,32 @@ nonisolated enum WorkoutProgressSnapshotBuilder {
     }
 
     private static func signedVolume(_ value: Double) -> String {
-        let prefix = value > 0 ? "+" : ""
-        return "\(prefix)\(WGJFormatters.integerString(value)) kg"
+        let roundedValue = roundedToWholeKilogram(value)
+        let prefix = roundedValue > 0 ? "+" : ""
+        return "\(prefix)\(WGJFormatters.integerString(roundedValue)) kg"
     }
 
     private static func signedDuration(_ seconds: Int) -> String {
-        guard abs(seconds) >= 60 else {
-            return formattedDuration(0)
-        }
+        guard seconds != 0 else { return formattedDuration(0) }
+
         let prefix = seconds > 0 ? "+" : seconds < 0 ? "-" : ""
-        return "\(prefix)\(formattedDuration(abs(seconds)))"
+        let absoluteSeconds = abs(seconds)
+        let hours = absoluteSeconds / 3600
+        let minutes = (absoluteSeconds % 3600) / 60
+        let remainingSeconds = absoluteSeconds % 60
+        var components: [String] = []
+
+        if hours > 0 {
+            components.append("\(hours)h")
+        }
+        if minutes > 0 {
+            components.append("\(minutes)m")
+        }
+        if remainingSeconds > 0 {
+            components.append("\(remainingSeconds)s")
+        }
+
+        return prefix + components.joined(separator: " ")
     }
 
     private static func signedInteger(_ value: Int) -> String {
@@ -540,9 +627,31 @@ nonisolated enum WorkoutProgressSnapshotBuilder {
         return "\(prefix)\(value)"
     }
 
-    private static func deltaMagnitude(for text: String) -> Double {
-        Double(text.filter { $0 == "-" || $0 == "." || $0.isNumber }) ?? 0
+    private static func roundedToWholeKilogram(_ value: Double) -> Double {
+        let rounded = value.rounded()
+        return rounded == 0 ? 0 : rounded
     }
+
+    private static func displayedVolumeDelta(previous: Double, current: Double) -> Double {
+        roundedToWholeKilogram(current) - roundedToWholeKilogram(previous)
+    }
+
+}
+
+nonisolated private struct RankedExerciseComparison: Equatable, Sendable {
+    let comparison: WorkoutProgressExerciseComparison
+    let relativeMagnitude: Double
+}
+
+nonisolated private enum ExerciseProgressMetric: Equatable, Sendable {
+    case estimatedOneRepMaxKg(Double)
+    case repetitions(Int)
+}
+
+nonisolated private struct ExerciseProgressDelta: Equatable, Sendable {
+    let direction: WorkoutProgressDirection
+    let text: String
+    let relativeMagnitude: Double
 }
 
 nonisolated private struct SessionMetrics: Equatable, Sendable {
@@ -582,6 +691,13 @@ nonisolated private struct ExerciseMetrics: Equatable, Sendable {
     let bestWeightedOneRepMaxKg: Double?
     let maxReps: Int
 
+    var progressMetric: ExerciseProgressMetric {
+        if let bestWeightedOneRepMaxKg {
+            return .estimatedOneRepMaxKg(bestWeightedOneRepMaxKg)
+        }
+        return .repetitions(maxReps)
+    }
+
     var comparisonScore: Double {
         bestWeightedOneRepMaxKg ?? Double(maxReps)
     }
@@ -611,7 +727,11 @@ nonisolated private struct ExerciseMetrics: Equatable, Sendable {
             else {
                 return total
             }
-            return total + normalizedLoad(weight, unit: set.loadUnit) * Double(reps)
+            return total + WorkoutPerformanceMath.weightedVolumeInKilograms(
+                weight: weight,
+                reps: reps,
+                unit: set.loadUnit
+            )
         }
         maxReps = workingSets.compactMap(\.reps).max() ?? 0
 
@@ -624,7 +744,10 @@ nonisolated private struct ExerciseMetrics: Equatable, Sendable {
            let reps = bestWeightedSet.reps,
            let weight = bestWeightedSet.weight
         {
-            bestWeightedOneRepMaxKg = normalizedLoad(estimatedOneRepMax(weight: weight, reps: reps), unit: bestWeightedSet.loadUnit)
+            bestWeightedOneRepMaxKg = WorkoutPerformanceMath.normalizedLoadInKilograms(
+                WorkoutPerformanceMath.estimatedOneRepMax(weight: weight, reps: reps),
+                unit: bestWeightedSet.loadUnit
+            )
             bestSetText = "\(WGJFormatters.decimalString(weight)) \(bestWeightedSet.loadUnit.shortLabel) x \(reps)"
         } else if let bestBodyweightSet = workingSets.max(by: { ($0.reps ?? 0) < ($1.reps ?? 0) }),
                   let reps = bestBodyweightSet.reps
@@ -640,24 +763,10 @@ nonisolated private struct ExerciseMetrics: Equatable, Sendable {
 
 nonisolated private func weightedScore(_ set: WorkoutProgressSetInput) -> Double {
     guard let weight = set.weight, let reps = set.reps else { return 0 }
-    return normalizedLoad(estimatedOneRepMax(weight: weight, reps: reps), unit: set.loadUnit)
-}
-
-nonisolated private func estimatedOneRepMax(weight: Double, reps: Int) -> Double {
-    guard reps > 0 else { return weight }
-    if reps == 1 { return weight }
-    return weight * (1 + (Double(reps) / 30.0))
-}
-
-nonisolated private func normalizedLoad(_ value: Double, unit: TemplateLoadUnit) -> Double {
-    switch unit {
-    case .kg:
-        return value
-    case .lb:
-        return value * 0.45359237
-    case .bodyweight:
-        return value
-    }
+    return WorkoutPerformanceMath.normalizedLoadInKilograms(
+        WorkoutPerformanceMath.estimatedOneRepMax(weight: weight, reps: reps),
+        unit: set.loadUnit
+    )
 }
 
 nonisolated enum WorkoutProgressSnapshotLoader {

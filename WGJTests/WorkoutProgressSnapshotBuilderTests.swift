@@ -230,6 +230,137 @@ final class WorkoutProgressSnapshotBuilderTests: XCTestCase {
         XCTAssertEqual(comparison.exerciseComparisons.first?.currentBestSetText, "90 kg x 8")
     }
 
+    func testWeightedStrengthIncreaseUsesPositiveE1RMDeltaWhenVolumeDrops() {
+        let comparison = comparison(
+            previousExercises: [
+                exercise(
+                    catalogExerciseUUID: "bench",
+                    name: "Bench Press",
+                    sets: [set(reps: 10, weight: 80), set(reps: 10, weight: 80)]
+                ),
+            ],
+            currentExercises: [
+                exercise(
+                    catalogExerciseUUID: "bench",
+                    name: "Bench Press",
+                    sets: [set(reps: 5, weight: 100)]
+                ),
+            ]
+        )
+
+        let exercise = tryUnwrap(comparison.exerciseComparisons.first)
+        XCTAssertEqual(exercise.direction, .up)
+        XCTAssertTrue(exercise.deltaText.hasPrefix("+"))
+        XCTAssertTrue(exercise.deltaText.hasSuffix("kg e1RM"))
+        XCTAssertNotEqual(exercise.previousVolumeText, exercise.currentVolumeText)
+    }
+
+    func testWeightedStrengthDecreaseUsesNegativeE1RMDeltaWhenVolumeRises() {
+        let comparison = comparison(
+            previousExercises: [
+                exercise(
+                    catalogExerciseUUID: "bench",
+                    name: "Bench Press",
+                    sets: [set(reps: 5, weight: 100)]
+                ),
+            ],
+            currentExercises: [
+                exercise(
+                    catalogExerciseUUID: "bench",
+                    name: "Bench Press",
+                    sets: [set(reps: 10, weight: 80), set(reps: 10, weight: 80)]
+                ),
+            ]
+        )
+
+        let exercise = tryUnwrap(comparison.exerciseComparisons.first)
+        XCTAssertEqual(exercise.direction, .down)
+        XCTAssertTrue(exercise.deltaText.hasPrefix("-"))
+        XCTAssertTrue(exercise.deltaText.hasSuffix("kg e1RM"))
+        XCTAssertNotEqual(exercise.previousVolumeText, exercise.currentVolumeText)
+    }
+
+    func testWeightedComparisonNormalizesEquivalentKilogramsAndPounds() {
+        let comparison = comparison(
+            previousExercises: [
+                exercise(
+                    catalogExerciseUUID: "bench",
+                    name: "Bench Press",
+                    sets: [set(reps: 5, weight: 100)]
+                ),
+            ],
+            currentExercises: [
+                exercise(
+                    catalogExerciseUUID: "bench",
+                    name: "Bench Press",
+                    sets: [set(reps: 5, weight: 220.462_262, unit: .lb)]
+                ),
+            ]
+        )
+
+        let exercise = tryUnwrap(comparison.exerciseComparisons.first)
+        XCTAssertEqual(exercise.direction, .flat)
+        XCTAssertEqual(exercise.deltaText, "0 kg e1RM")
+    }
+
+    func testIncompatibleExerciseMetricTypesAreNeutral() {
+        let comparison = comparison(
+            previousExercises: [
+                exercise(
+                    catalogExerciseUUID: "pull-up",
+                    name: "Pull-Up",
+                    sets: [set(reps: 5, weight: 20)]
+                ),
+            ],
+            currentExercises: [
+                exercise(
+                    catalogExerciseUUID: "pull-up",
+                    name: "Pull-Up",
+                    sets: [set(reps: 12, weight: nil, unit: .bodyweight)]
+                ),
+            ]
+        )
+
+        let exercise = tryUnwrap(comparison.exerciseComparisons.first)
+        XCTAssertEqual(exercise.direction, .flat)
+        XCTAssertEqual(exercise.deltaText, "Not comparable")
+    }
+
+    func testBiggestMoverUsesSameProgressDeltaAsExerciseRow() {
+        let comparison = comparison(
+            previousExercises: [
+                exercise(
+                    catalogExerciseUUID: "bench",
+                    name: "Bench Press",
+                    sets: [set(reps: 5, weight: 100)]
+                ),
+                exercise(
+                    catalogExerciseUUID: "row",
+                    name: "Row",
+                    sets: [set(reps: 5, weight: 50)]
+                ),
+            ],
+            currentExercises: [
+                exercise(
+                    catalogExerciseUUID: "bench",
+                    name: "Bench Press",
+                    sets: [set(reps: 5, weight: 110)]
+                ),
+                exercise(
+                    catalogExerciseUUID: "row",
+                    name: "Row",
+                    sets: [set(reps: 5, weight: 60)]
+                ),
+            ]
+        )
+
+        let biggestMover = tryUnwrap(comparison.highlightCards.first { $0.id == "biggest-mover" })
+        XCTAssertEqual(comparison.exerciseComparisons.first?.exerciseName, "Row")
+        XCTAssertEqual(biggestMover.value, comparison.exerciseComparisons.first?.exerciseName)
+        XCTAssertEqual(biggestMover.detail, comparison.exerciseComparisons.first?.deltaText)
+        XCTAssertEqual(biggestMover.direction, comparison.exerciseComparisons.first?.direction)
+    }
+
     func testComparisonHandlesBodyweightExercises() {
         let previous = session(
             id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
@@ -270,6 +401,37 @@ final class WorkoutProgressSnapshotBuilderTests: XCTestCase {
         XCTAssertEqual(comparison.exerciseComparisons.first?.previousBestSetText, "8 reps")
         XCTAssertEqual(comparison.exerciseComparisons.first?.currentBestSetText, "11 reps")
         XCTAssertEqual(comparison.exerciseComparisons.first?.direction, .up)
+        XCTAssertEqual(comparison.exerciseComparisons.first?.deltaText, "+3 reps")
+    }
+
+    func testComparisonExcludesWarmupsAndIncompleteSets() {
+        let comparison = comparison(
+            previousExercises: [
+                exercise(
+                    catalogExerciseUUID: "bench",
+                    name: "Bench Press",
+                    sets: [set(reps: 5, weight: 50)]
+                ),
+            ],
+            currentExercises: [
+                exercise(
+                    catalogExerciseUUID: "bench",
+                    name: "Bench Press",
+                    sets: [
+                        set(reps: 5, weight: 50),
+                        set(reps: 20, weight: 200, isCompleted: false),
+                        set(reps: 20, weight: 200, isWarmup: true),
+                    ]
+                ),
+            ]
+        )
+
+        XCTAssertEqual(
+            comparison.metricDeltas.first { $0.kind == .volume }?.direction,
+            .flat
+        )
+        XCTAssertEqual(comparison.exerciseComparisons.first?.direction, .flat)
+        XCTAssertEqual(comparison.exerciseComparisons.first?.deltaText, "0 kg e1RM")
     }
 
     func testComparisonReportsNoOverlap() {
@@ -332,6 +494,32 @@ final class WorkoutProgressSnapshotBuilderTests: XCTestCase {
         )
     }
 
+    func testComparisonFormatsSubMinuteDurationDelta() {
+        let comparison = comparison(
+            previousExercises: [],
+            currentExercises: [],
+            previousDurationSeconds: 300,
+            currentDurationSeconds: 345
+        )
+
+        let duration = comparison.metricDeltas.first { $0.kind == .duration }
+        XCTAssertEqual(duration?.deltaText, "+45s")
+        XCTAssertEqual(duration?.direction, .up)
+    }
+
+    func testComparisonFormatsMinuteAndSecondDurationDelta() {
+        let comparison = comparison(
+            previousExercises: [],
+            currentExercises: [],
+            previousDurationSeconds: 375,
+            currentDurationSeconds: 300
+        )
+
+        let duration = comparison.metricDeltas.first { $0.kind == .duration }
+        XCTAssertEqual(duration?.deltaText, "-1m 15s")
+        XCTAssertEqual(duration?.direction, .down)
+    }
+
     func testComparisonDoesNotShowSignedZeroDurationDelta() {
         let previous = session(
             id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
@@ -345,7 +533,7 @@ final class WorkoutProgressSnapshotBuilderTests: XCTestCase {
             templateID: nil,
             name: "Shorter",
             completedAt: 200,
-            durationSeconds: 0
+            durationSeconds: 30
         )
 
         let snapshot = WorkoutProgressSnapshotBuilder.build(
@@ -361,6 +549,107 @@ final class WorkoutProgressSnapshotBuilderTests: XCTestCase {
             comparison.metricDeltas.first { $0.kind == WorkoutProgressMetricKind.duration }?.deltaText,
             "0m"
         )
+        XCTAssertEqual(
+            comparison.metricDeltas.first { $0.kind == WorkoutProgressMetricKind.duration }?.direction,
+            .flat
+        )
+    }
+
+    func testHighlightCardsDistinguishNeutralAndNegativeSignals() {
+        let repeatedExercise = exercise(
+            catalogExerciseUUID: "bench",
+            name: "Bench Press",
+            sets: [set(reps: 5, weight: 100)]
+        )
+        let neutral = comparison(
+            previousExercises: [repeatedExercise],
+            currentExercises: [repeatedExercise],
+            previousPRHitsCount: 2,
+            currentPRHitsCount: 2
+        )
+
+        XCTAssertEqual(
+            neutral.highlightCards.first { $0.id == "workload" }?.value,
+            "Same work"
+        )
+        XCTAssertEqual(
+            neutral.highlightCards.first { $0.id == "prs" }?.value,
+            "Steady"
+        )
+
+        let lower = comparison(
+            previousExercises: [repeatedExercise],
+            currentExercises: [
+                exercise(
+                    catalogExerciseUUID: "bench",
+                    name: "Bench Press",
+                    sets: [set(reps: 5, weight: 90)]
+                ),
+            ],
+            previousPRHitsCount: 2,
+            currentPRHitsCount: 1
+        )
+
+        XCTAssertEqual(
+            lower.highlightCards.first { $0.id == "workload" }?.value,
+            "Less work"
+        )
+        XCTAssertEqual(
+            lower.highlightCards.first { $0.id == "prs" }?.value,
+            "Fewer hits"
+        )
+    }
+
+    func testEquivalentMixedUnitVolumeDoesNotDisplayNegativeZero() {
+        let comparison = comparison(
+            previousExercises: [
+                exercise(
+                    catalogExerciseUUID: "bench",
+                    name: "Bench Press",
+                    sets: [set(reps: 5, weight: 100)]
+                ),
+            ],
+            currentExercises: [
+                exercise(
+                    catalogExerciseUUID: "bench",
+                    name: "Bench Press",
+                    sets: [set(reps: 5, weight: 220.462_262, unit: .lb)]
+                ),
+            ]
+        )
+
+        let volume = comparison.metricDeltas.first { $0.kind == .volume }
+        XCTAssertEqual(volume?.deltaText, "0 kg")
+        XCTAssertEqual(volume?.direction, .flat)
+        XCTAssertEqual(
+            comparison.highlightCards.first { $0.id == "workload" }?.value,
+            "Same work"
+        )
+    }
+
+    func testVolumeDeltaMatchesIndividuallyRoundedDisplayedValues() {
+        let comparison = comparison(
+            previousExercises: [
+                exercise(
+                    catalogExerciseUUID: "carry",
+                    name: "Carry",
+                    sets: [set(reps: 1, weight: 100.4)]
+                ),
+            ],
+            currentExercises: [
+                exercise(
+                    catalogExerciseUUID: "carry",
+                    name: "Carry",
+                    sets: [set(reps: 1, weight: 100.6)]
+                ),
+            ]
+        )
+
+        let volume = comparison.metricDeltas.first { $0.kind == .volume }
+        XCTAssertEqual(volume?.previousText, "100 kg")
+        XCTAssertEqual(volume?.currentText, "101 kg")
+        XCTAssertEqual(volume?.deltaText, "+1 kg")
+        XCTAssertEqual(volume?.direction, .up)
     }
 
     private func session(
@@ -384,6 +673,56 @@ final class WorkoutProgressSnapshotBuilderTests: XCTestCase {
             archivedAt: isArchived ? Date(timeIntervalSince1970: completedAt + 10) : nil,
             exercises: exercises
         )
+    }
+
+    private func comparison(
+        previousExercises: [WorkoutProgressExerciseInput],
+        currentExercises: [WorkoutProgressExerciseInput],
+        previousDurationSeconds: Int = 1800,
+        currentDurationSeconds: Int = 1800,
+        previousPRHitsCount: Int = 0,
+        currentPRHitsCount: Int = 0
+    ) -> WorkoutProgressComparison {
+        let previous = session(
+            id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
+            templateID: nil,
+            name: "Earlier",
+            completedAt: 100,
+            durationSeconds: previousDurationSeconds,
+            prHitsCount: previousPRHitsCount,
+            exercises: previousExercises
+        )
+        let current = session(
+            id: UUID(uuidString: "22222222-2222-2222-2222-222222222222")!,
+            templateID: nil,
+            name: "Later",
+            completedAt: 200,
+            durationSeconds: currentDurationSeconds,
+            prHitsCount: currentPRHitsCount,
+            exercises: currentExercises
+        )
+        let snapshot = WorkoutProgressSnapshotBuilder.build(
+            sessions: [previous, current],
+            selectedPreviousSessionID: previous.id,
+            selectedCurrentSessionID: current.id
+        )
+        guard case let .ready(comparison) = snapshot.state else {
+            XCTFail("Expected comparison snapshot")
+            fatalError("Expected comparison snapshot")
+        }
+        return comparison
+    }
+
+    private func tryUnwrap<T>(
+        _ value: T?,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> T {
+        guard let value else {
+            XCTFail("Expected non-nil value", file: file, line: line)
+            fatalError("Expected non-nil value")
+        }
+        return value
     }
 
     private func exercise(

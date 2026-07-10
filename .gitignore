@@ -9,6 +9,7 @@ xcuserdata/
 # Build products and derived data
 build/
 DerivedData/
+.worktrees/
 
 # Signing material must stay local
 *.mobileprovision
