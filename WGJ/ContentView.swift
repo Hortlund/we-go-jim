@@ -21,6 +21,7 @@ struct ContentView: View {
     @State private var appWarmupState = AppWarmupState()
     @State private var deferredMaintenanceRunTracker = DeferredMaintenanceRunTracker()
     @State private var resumeCriticalMaintenanceTracker = ResumeCriticalMaintenanceTracker()
+    @State private var workoutIdleTimerController = WorkoutIdleTimerController()
     @State private var resumeCriticalMaintenanceTask: Task<Void, Never>?
     @State private var enteredMainDeferredMaintenanceTask: Task<Void, Never>?
     @State private var enteredMainNoncriticalWorkTask: Task<Void, Never>?
@@ -106,6 +107,12 @@ struct ContentView: View {
         }
         .onChange(of: appRuntimeState.keepsScreenAwake) { _, _ in
             updateIdleTimerState()
+        }
+        .onChange(of: activeWorkoutCoordinator.storedSnapshot?.session.id) { _, _ in
+            updateIdleTimerState()
+        }
+        .onDisappear {
+            workoutIdleTimerController.reset()
         }
         .onReceive(NotificationCenter.default.publisher(for: .wgjDidDeleteAllUserData)) { _ in
             resetToStartupFlow()
@@ -747,12 +754,12 @@ struct ContentView: View {
         )
     }
 
-    private var shouldKeepScreenAwake: Bool {
-        scenePhase == .active && appRuntimeState.keepsScreenAwake
-    }
-
     private func updateIdleTimerState() {
-        UIApplication.shared.isIdleTimerDisabled = shouldKeepScreenAwake
+        workoutIdleTimerController.update(
+            isSceneActive: scenePhase == .active,
+            keepsScreenAwake: appRuntimeState.keepsScreenAwake,
+            hasActiveWorkout: activeWorkoutCoordinator.storedSnapshot != nil
+        )
     }
 }
 

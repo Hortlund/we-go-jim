@@ -98,7 +98,7 @@ struct SettingsView: View {
                             Text("Keep screen awake")
                                 .foregroundStyle(WGJTheme.textPrimary)
 
-                            Text("Prevents dimming and auto-lock while the app is open and active.")
+                            Text("Prevents dimming and auto-lock while a workout is active.")
                                 .font(.caption)
                                 .foregroundStyle(WGJTheme.textSecondary)
                         }
