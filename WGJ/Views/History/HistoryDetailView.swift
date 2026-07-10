@@ -1769,13 +1769,14 @@ private struct HistoryExerciseDetailEditorCard: View {
                     Image(systemName: "ellipsis.circle")
                         .font(.title3)
                         .foregroundStyle(WGJTheme.accentBlue)
-                        .frame(width: 34, height: 34)
+                        .frame(width: 44, height: 44)
                         .background(
                             RoundedRectangle(cornerRadius: 10, style: .continuous)
                                 .fill(WGJTheme.field)
                         )
                 }
                 .menuIndicator(.hidden)
+                .accessibilityLabel("\(exerciseName), set \(index + 1), actions")
                 .accessibilityIdentifier("\(exerciseAccessibilityIdentifier)-set-\(index + 1)-actions-button")
             }
 
@@ -1786,6 +1787,28 @@ private struct HistoryExerciseDetailEditorCard: View {
                         .multilineTextAlignment(.center)
                         .disabled(draft.isLocked)
                         .wgjPillField()
+                        .accessibilityLabel(
+                            WorkoutMetricAccessibilityPolicy.field(
+                                exerciseName: exerciseName,
+                                setNumber: index + 1,
+                                dropStageNumber: nil,
+                                metric: .weight,
+                                value: draft.actualWeight.map(WGJFormatters.decimalString),
+                                unit: draft.actualLoadUnit.shortLabel,
+                                isWarmup: draft.isWarmup
+                            ).label
+                        )
+                        .accessibilityValue(
+                            WorkoutMetricAccessibilityPolicy.field(
+                                exerciseName: exerciseName,
+                                setNumber: index + 1,
+                                dropStageNumber: nil,
+                                metric: .weight,
+                                value: draft.actualWeight.map(WGJFormatters.decimalString),
+                                unit: draft.actualLoadUnit.shortLabel,
+                                isWarmup: draft.isWarmup
+                            ).value
+                        )
                         .accessibilityIdentifier("workout-set-\(index)-weight-field")
                 }
 
@@ -1795,6 +1818,28 @@ private struct HistoryExerciseDetailEditorCard: View {
                         .multilineTextAlignment(.center)
                         .disabled(draft.isLocked)
                         .wgjPillField()
+                        .accessibilityLabel(
+                            WorkoutMetricAccessibilityPolicy.field(
+                                exerciseName: exerciseName,
+                                setNumber: index + 1,
+                                dropStageNumber: nil,
+                                metric: .reps,
+                                value: draft.actualReps.map(String.init),
+                                unit: nil,
+                                isWarmup: draft.isWarmup
+                            ).label
+                        )
+                        .accessibilityValue(
+                            WorkoutMetricAccessibilityPolicy.field(
+                                exerciseName: exerciseName,
+                                setNumber: index + 1,
+                                dropStageNumber: nil,
+                                metric: .reps,
+                                value: draft.actualReps.map(String.init),
+                                unit: nil,
+                                isWarmup: draft.isWarmup
+                            ).value
+                        )
                         .accessibilityIdentifier("workout-set-\(index)-reps-field")
                 }
             }

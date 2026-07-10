@@ -1584,7 +1584,12 @@ private struct TemplateExerciseSetCardView: View, Equatable {
     }
 
     private var setBadge: some View {
-        Button {
+        let accessibility = WorkoutMetricAccessibilityPolicy.warmupControl(
+            exerciseName: "Template exercise",
+            setNumber: row.index + 1,
+            isWarmup: set.isWarmup
+        )
+        return Button {
             onToggleWarmup()
         } label: {
             ZStack {
@@ -1602,9 +1607,12 @@ private struct TemplateExerciseSetCardView: View, Equatable {
                     .font(.subheadline.weight(.bold))
                     .foregroundStyle(set.isWarmup ? WGJTheme.accentGold : WGJTheme.textPrimary)
             }
-            .frame(width: 40, height: 40)
+            .frame(width: 44, height: 44)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(accessibility.label)
+        .accessibilityValue(accessibility.value)
+        .accessibilityHint(accessibility.hint ?? "")
     }
 
     private var setMenu: some View {

@@ -911,6 +911,8 @@ struct WorkoutSessionExerciseGridEditor: View {
                         focusMetric(.reps, at: index)
                     }
                     .disabled(!isSetEditingEnabled || setDrafts[index].isLocked)
+                    .accessibilityLabel(metricAccessibilityDescriptor(at: index, metric: .reps).label)
+                    .accessibilityValue(metricAccessibilityDescriptor(at: index, metric: .reps).value)
                     .accessibilityIdentifier("workout-set-\(index)-reps-field")
             }
             .contentShape(Rectangle())
@@ -1003,6 +1005,8 @@ struct WorkoutSessionExerciseGridEditor: View {
                             focusMetric(.weight, at: index)
                         }
                         .disabled(!isSetEditingEnabled || isLocked)
+                        .accessibilityLabel(metricAccessibilityDescriptor(at: index, metric: .weight).label)
+                        .accessibilityValue(metricAccessibilityDescriptor(at: index, metric: .weight).value)
                         .accessibilityIdentifier("workout-set-\(index)-weight-field")
                 }
                 .contentShape(Rectangle())
@@ -1042,8 +1046,35 @@ struct WorkoutSessionExerciseGridEditor: View {
         return previousPerformanceResolution.isLoading ? "" : "0"
     }
 
+    private func metricAccessibilityDescriptor(
+        at index: Int,
+        metric: WorkoutMetricInputDraftBuffer.Metric
+    ) -> WorkoutMetricAccessibilityDescriptor {
+        let draft = setDrafts[index]
+        let value = metricInputDraftBuffer.text(for: draft.id, metric: metric) ?? {
+            switch metric {
+            case .weight: return draft.actualWeight.map(WGJFormatters.decimalString)
+            case .reps: return draft.actualReps.map(String.init)
+            }
+        }()
+        return WorkoutMetricAccessibilityPolicy.field(
+            exerciseName: exerciseName,
+            setNumber: index + 1,
+            dropStageNumber: nil,
+            metric: metric,
+            value: value,
+            unit: metric == .weight ? draft.actualLoadUnit.shortLabel : nil,
+            isWarmup: draft.isWarmup
+        )
+    }
+
     private func setBadge(for row: WorkoutSessionExerciseSetRowDisplaySnapshot) -> some View {
         let set = row.set
+        let accessibility = WorkoutMetricAccessibilityPolicy.warmupControl(
+            exerciseName: exerciseName,
+            setNumber: row.index + 1,
+            isWarmup: set.isWarmup
+        )
 
         return Button {
             toggleWarmup(at: row.index)
@@ -1067,6 +1098,9 @@ struct WorkoutSessionExerciseGridEditor: View {
         }
         .buttonStyle(.plain)
         .disabled(!isSetEditingEnabled || set.isLocked)
+        .accessibilityLabel(accessibility.label)
+        .accessibilityValue(accessibility.value)
+        .accessibilityHint(accessibility.hint ?? "")
     }
 
     private func setMenu(for row: WorkoutSessionExerciseSetRowDisplaySnapshot) -> some View {
@@ -2296,6 +2330,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         stage: WorkoutSessionDropStageDraft
     ) -> some View {
         return WorkoutExerciseDropStageCardView(
+            exerciseName: exerciseName,
             setIndex: setIndex,
             stageIndex: stageIndex,
             stage: stage,
@@ -2714,6 +2749,7 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.scenePhase) private var scenePhase
 
+    let exerciseName: String
     let setIndex: Int
     let stageIndex: Int
     let stage: WorkoutSessionDropStageDraft
@@ -2738,6 +2774,7 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
     }
 
     init(
+        exerciseName: String,
         setIndex: Int,
         stageIndex: Int,
         stage: WorkoutSessionDropStageDraft,
@@ -2752,6 +2789,7 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
         onCommitPendingInput: @escaping () -> Void = {},
         onInputFocusChange: @escaping (Bool) -> Void = { _ in }
     ) {
+        self.exerciseName = exerciseName
         self.setIndex = setIndex
         self.stageIndex = stageIndex
         self.stage = stage
@@ -2903,6 +2941,8 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
                 .wgjPillField()
                 .focused($focusedField, equals: .weight)
                 .disabled(!isEditingEnabled)
+                .accessibilityLabel(weightAccessibility.label)
+                .accessibilityValue(weightAccessibility.value)
                 .accessibilityIdentifier("workout-set-\(setIndex)-drop-stage-\(stageIndex)-weight-field")
 
             WGJActionMenuButton("Drop Load Unit", titleVisibility: .hidden) {
@@ -2937,7 +2977,31 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
             .wgjPillField()
             .focused($focusedField, equals: .reps)
             .disabled(!isEditingEnabled)
+            .accessibilityLabel(repsAccessibility.label)
+            .accessibilityValue(repsAccessibility.value)
             .accessibilityIdentifier("workout-set-\(setIndex)-drop-stage-\(stageIndex)-reps-field")
+    }
+
+    private var weightAccessibility: WorkoutMetricAccessibilityDescriptor {
+        WorkoutMetricAccessibilityPolicy.field(
+            exerciseName: exerciseName,
+            setNumber: setIndex + 1,
+            dropStageNumber: stageIndex + 1,
+            metric: .weight,
+            value: weightText,
+            unit: stage.actualLoadUnit.shortLabel
+        )
+    }
+
+    private var repsAccessibility: WorkoutMetricAccessibilityDescriptor {
+        WorkoutMetricAccessibilityPolicy.field(
+            exerciseName: exerciseName,
+            setNumber: setIndex + 1,
+            dropStageNumber: stageIndex + 1,
+            metric: .reps,
+            value: repsText,
+            unit: nil
+        )
     }
 
     private func repsFieldWithCompletionControl(
