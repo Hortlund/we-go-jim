@@ -12,6 +12,7 @@ struct ContentView: View {
     @State private var appRuntimeState = AppRuntimeState.shared
     @State private var appPhase: AppPhase = .splash
     @State private var appTabState = AppTabState()
+    @State private var appRouteState = AppRouteState()
     @State private var templateFileOpenState = TemplateFileOpenState()
     @State private var workoutCompletionPresentationState = WorkoutCompletionPresentationState()
     @State private var activeWorkoutPresentationState = ActiveWorkoutPresentationState()
@@ -28,7 +29,6 @@ struct ContentView: View {
     @State private var isPreparingMainPhase = false
     @State private var hasInstalledUITestPendingTemplate = false
     @State private var hasScheduledInitialDeferredMaintenance = false
-    @State private var pendingDeepLinkURL: URL?
 
     private var rootBackgroundStore: AppBackgroundStore {
         appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
@@ -54,6 +54,7 @@ struct ContentView: View {
         .environment(\.cloudSyncErrorDescription, appRuntimeState.cloudSyncErrorDescription)
         .environment(\.userDataSyncStatus, AppRuntimeState.shared.userDataSyncStatus)
         .environment(appTabState)
+        .environment(appRouteState)
         .environment(templateFileOpenState)
         .environment(workoutCompletionPresentationState)
         .environment(activeWorkoutPresentationState)
@@ -65,6 +66,7 @@ struct ContentView: View {
         .task {
             installUITestPendingTemplateIfNeeded()
             updateIdleTimerState()
+            handleInitialUITestURLIfNeeded()
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
@@ -199,8 +201,8 @@ struct ContentView: View {
     }
 
     private func handleIncomingURL(_ url: URL) {
-        if AppDeepLinkRouter.supports(url: url) {
-            pendingDeepLinkURL = url
+        if let route = AppRouteParser.parse(url) {
+            appRouteState.enqueue(route)
             routePendingDeepLinkIfNeeded()
             return
         }
@@ -209,12 +211,19 @@ struct ContentView: View {
     }
 
     private func routePendingDeepLinkIfNeeded() {
-        guard let pendingDeepLinkURL else { return }
-        guard AppDeepLinkRouter.route(url: pendingDeepLinkURL, appPhase: appPhase, tabState: appTabState) else {
-            return
-        }
+        guard appPhase == .main,
+              case .profile = appRouteState.pendingRequest?.route
+        else { return }
+        appTabState.selectedTab = .profile
+    }
 
-        self.pendingDeepLinkURL = nil
+    private func handleInitialUITestURLIfNeeded() {
+#if DEBUG
+        guard let rawURL = ProcessInfo.processInfo.environment["UITEST_INITIAL_URL"],
+              let url = URL(string: rawURL)
+        else { return }
+        handleIncomingURL(url)
+#endif
     }
 
     private func handleIncomingTemplateFileURL(_ url: URL) {

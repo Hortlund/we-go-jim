@@ -42,6 +42,7 @@ nonisolated enum ProfileWeeklyGoalChartScalePolicy {
 
 struct ProfileView: View {
     private enum ScrollTarget {
+        static let weeklyGoal = "profile-weekly-goal-section"
         static let cloudBackupSection = "profile-cloud-backup-section"
         static let cloudBackupDetailsEnd = "profile-cloud-backup-details-end"
         static let profileBottomPadding = "profile-bottom-padding"
@@ -59,6 +60,7 @@ struct ProfileView: View {
     @Environment(\.userDataSyncStatus) private var userDataSyncStatus
     @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(AppWarmupState.self) private var appWarmupState
+    @Environment(AppRouteState.self) private var appRouteState
 
     private var profileBackgroundStore: AppBackgroundStore {
         appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
@@ -119,6 +121,9 @@ struct ProfileView: View {
             .scrollDismissesKeyboard(.interactively)
             .wgjScreenBackground()
             .accessibilityIdentifier("profile-content-root")
+            .task(id: appRouteState.pendingRequest?.id) {
+                await consumePendingRouteIfNeeded(scrollProxy: scrollProxy)
+            }
         }
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {
@@ -444,6 +449,23 @@ struct ProfileView: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .wgjCardContainer()
+        .id(ScrollTarget.weeklyGoal)
+        .accessibilityIdentifier("profile-weekly-goal-section")
+    }
+
+    @MainActor
+    private func consumePendingRouteIfNeeded(scrollProxy: ScrollViewProxy) async {
+        guard isTabActive,
+              let request = appRouteState.pendingRequest,
+              request.route == .profile(.weeklyGoal)
+        else { return }
+
+        await handleInitialActivation()
+        await Task.yield()
+        withAnimation(.easeInOut(duration: 0.25)) {
+            scrollProxy.scrollTo(ScrollTarget.weeklyGoal, anchor: .center)
+        }
+        appRouteState.consume(id: request.id)
     }
 
     private var coachBriefWidget: some View {
