@@ -12,7 +12,7 @@ struct ProfileManagementView: View {
     @State private var savedDisplayName = ""
     @State private var athleteType: ProfileAthleteType?
     @State private var savedAthleteType: ProfileAthleteType?
-    @State private var avatarImageData: Data?
+    @State private var avatarSelection = AvatarSelectionCoordinator()
     @State private var savedAvatarImageData: Data?
     @State private var selectedAvatarItem: PhotosPickerItem?
     @State private var hasLoadedProfile = false
@@ -75,6 +75,14 @@ struct ProfileManagementView: View {
         .onChange(of: selectedAvatarItem) { _, newItem in
             guard let newItem else { return }
             stageAvatarSelection(newItem)
+        }
+        .onChange(of: avatarSelection.errorDescription) { _, errorDescription in
+            guard let errorDescription else { return }
+            errorMessage = errorDescription
+            showingError = true
+        }
+        .onDisappear {
+            avatarSelection.cancel()
         }
         .sheet(isPresented: $showingAthleteTypePicker) {
             ProfileAthleteTypePickerView(selectedAthleteType: $athleteType)
@@ -154,7 +162,7 @@ struct ProfileManagementView: View {
     private var removeAvatarButton: some View {
         if avatarImageData != nil {
             Button(role: .destructive) {
-                avatarImageData = nil
+                avatarSelection.remove()
                 selectedAvatarItem = nil
             } label: {
                 Image(systemName: "trash")
@@ -199,6 +207,10 @@ struct ProfileManagementView: View {
 
     private var trimmedDisplayName: String {
         displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var avatarImageData: Data? {
+        avatarSelection.imageData
     }
 
     private var identityPreviewName: String {
@@ -261,24 +273,9 @@ struct ProfileManagementView: View {
         }
     }
 
-    private func stageAvatar(from item: PhotosPickerItem) async {
-        do {
-            guard let rawData = try await item.loadTransferable(type: Data.self) else {
-                avatarImageData = nil
-                return
-            }
-            avatarImageData = await AvatarImageCodec.compressedAvatarData(
-                from: rawData,
-                maxPixelSize: 640
-            ) ?? rawData
-        } catch {
-            showError(error)
-        }
-    }
-
     private func stageAvatarSelection(_ item: PhotosPickerItem) {
-        Task {
-            await stageAvatar(from: item)
+        avatarSelection.select {
+            try await item.loadTransferable(type: Data.self)
         }
     }
 
@@ -293,7 +290,7 @@ struct ProfileManagementView: View {
         savedDisplayName = profile.displayName
         athleteType = profile.athleteType
         savedAthleteType = profile.athleteType
-        avatarImageData = profile.avatarImageData
+        avatarSelection.reset(to: profile.avatarImageData)
         savedAvatarImageData = profile.avatarImageData
     }
 }
