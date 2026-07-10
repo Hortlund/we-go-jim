@@ -77,6 +77,26 @@ final class ActiveWorkoutRuntimeTests: XCTestCase {
         XCTAssertEqual(loadedSession?.id, session.id)
     }
 
+    func testSnapshotInvalidationPreventsRestoreOfOlderSnapshot() async throws {
+        let baseDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("active-workout-snapshot-invalidation-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: baseDirectory)
+        }
+        let store = ActiveWorkoutSnapshotStore(baseDirectory: baseDirectory)
+        let session = ActiveWorkoutRuntimeSession(
+            id: UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!,
+            name: "Push",
+            startedAt: Date(timeIntervalSince1970: 100)
+        )
+        try await store.save(session)
+
+        try await store.invalidateSnapshotsSavedBefore(.distantFuture)
+
+        let loadedSession = try await store.load()
+        XCTAssertNil(loadedSession)
+    }
+
     func testHydrationStampChangesWhenSetDraftsChange() {
         let exerciseID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
         let firstSetID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!

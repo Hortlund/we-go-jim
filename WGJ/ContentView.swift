@@ -116,6 +116,13 @@ struct ContentView: View {
         ) { _ in
             handleWorkoutHistoryChanged()
         }
+        .onReceive(
+            NotificationCenter.default
+                .publisher(for: .wgjUserDataRestoreDidComplete)
+                .receive(on: RunLoop.main)
+        ) { _ in
+            handleUserDataRestoreCompleted()
+        }
     }
 
     private func transitionFromSplashIfNeeded() async {
@@ -299,6 +306,12 @@ struct ContentView: View {
         appWarmupState.invalidateProfile()
         scheduleWeeklyGoalWidgetPublish()
         requestWarmups(trigger: .activeWorkoutEnded)
+    }
+
+    private func handleUserDataRestoreCompleted() {
+        activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
+        requestNewDeferredMaintenanceRun()
+        handleWorkoutHistoryChanged()
     }
 
     private func scheduleWeeklyGoalWidgetPublish() {

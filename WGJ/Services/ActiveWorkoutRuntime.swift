@@ -492,6 +492,7 @@ actor ActiveWorkoutSnapshotStore {
     static let shared = ActiveWorkoutSnapshotStore()
 
     private static let defaultFileName = "active-workout-snapshot.json"
+    private static let invalidationFileName = "active-workout-invalidated-before.json"
 
     private let baseDirectory: URL
     private var cachedSnapshotData: Data?
@@ -532,6 +533,11 @@ actor ActiveWorkoutSnapshotStore {
         let url = snapshotURL
         guard FileManager.default.fileExists(atPath: url.path) else {
             cachedSnapshotData = nil
+            return nil
+        }
+        if try isSnapshotInvalidated(url) {
+            cachedSnapshotData = nil
+            try? FileManager.default.removeItem(at: url)
             return nil
         }
         let data = try Data(contentsOf: url)
@@ -625,12 +631,51 @@ actor ActiveWorkoutSnapshotStore {
         cachedSnapshotData = nil
     }
 
+    func invalidateSnapshotsSavedBefore(_ cutoff: Date) throws {
+        try FileManager.default.createDirectory(
+            at: baseDirectory,
+            withIntermediateDirectories: true
+        )
+        let existingCutoff = try invalidationCutoff()
+        let resolvedCutoff = max(existingCutoff ?? .distantPast, cutoff)
+        let markerData = try encoder.encode(resolvedCutoff)
+        try markerData.write(to: invalidationURL, options: [.atomic])
+
+        let url = snapshotURL
+        guard FileManager.default.fileExists(atPath: url.path),
+              try isSnapshotInvalidated(url) else {
+            return
+        }
+        try FileManager.default.removeItem(at: url)
+        cachedSnapshotData = nil
+    }
+
     func hasSnapshot() throws -> Bool {
         FileManager.default.fileExists(atPath: snapshotURL.path)
     }
 
     private var snapshotURL: URL {
         baseDirectory.appendingPathComponent(Self.defaultFileName, isDirectory: false)
+    }
+
+    private var invalidationURL: URL {
+        baseDirectory.appendingPathComponent(Self.invalidationFileName, isDirectory: false)
+    }
+
+    private func invalidationCutoff() throws -> Date? {
+        guard FileManager.default.fileExists(atPath: invalidationURL.path) else {
+            return nil
+        }
+        return try decoder.decode(Date.self, from: Data(contentsOf: invalidationURL))
+    }
+
+    private func isSnapshotInvalidated(_ url: URL) throws -> Bool {
+        guard let cutoff = try invalidationCutoff() else { return false }
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        guard let modificationDate = attributes[.modificationDate] as? Date else {
+            return true
+        }
+        return modificationDate <= cutoff
     }
 
     nonisolated private static func defaultBaseDirectory() -> URL {

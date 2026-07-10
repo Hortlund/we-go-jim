@@ -186,6 +186,9 @@ struct StartWorkoutHomeView: View {
         .onReceive(NotificationCenter.default.publisher(for: .wgjTemplateLibraryDidChange)) { _ in
             markHomeDirtyAndReloadIfActive()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .wgjUserDataRestoreDidComplete)) { _ in
+            markHomeDirtyAndReloadIfActive()
+        }
     }
 
     private var quickStartSection: some View {

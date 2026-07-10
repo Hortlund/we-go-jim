@@ -4,6 +4,11 @@ import XCTest
 
 @MainActor
 final class UserDataCloudBackupServiceTests: XCTestCase {
+    private enum RestoreTestError: Error {
+        case checkpoint(UserDataCloudRestoreCheckpoint)
+        case artifactCleanup
+    }
+
     func testStageLocalDataDeletionDoesNotCommitUntilCallerSaves() throws {
         let container = try makeInMemoryContainer()
         let seedContext = ModelContext(container)
@@ -25,6 +30,255 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         XCTAssertEqual(try observerContext.fetch(FetchDescriptor<UserProfile>()).count, 1)
         restoreContext.rollback()
         XCTAssertEqual(try observerContext.fetch(FetchDescriptor<UserProfile>()).count, 1)
+    }
+
+    func testReplacementRestoreFailuresPreserveOriginalData() async throws {
+        let source = try makeInMemoryContainer()
+        let sourceContext = ModelContext(source)
+        sourceContext.insert(UserProfile(displayName: "Restored"))
+        try sourceContext.save()
+        let backupStore = CapturingBackupStore()
+        _ = try await UserDataCloudBackupService(
+            localContainer: source,
+            backupStore: backupStore
+        ).exportCurrentBackup()
+
+        for checkpoint in UserDataCloudRestoreCheckpoint.allCases {
+            let local = try makeInMemoryContainer()
+            let localContext = ModelContext(local)
+            localContext.insert(UserProfile(displayName: "Original"))
+            try localContext.save()
+            let transaction = UserDataCloudRestoreTransaction(
+                container: local,
+                dependencies: UserDataCloudRestoreDependencies(
+                    checkpoint: { reached in
+                        if reached == checkpoint {
+                            throw RestoreTestError.checkpoint(reached)
+                        }
+                    },
+                    save: { try $0.save() }
+                )
+            )
+            let service = UserDataCloudBackupService(
+                localContainer: local,
+                backupStore: backupStore,
+                restoreTransaction: transaction
+            )
+
+            do {
+                _ = try await service.restoreLatestBackup(replacingLocalData: true)
+                XCTFail("Expected checkpoint failure at \(checkpoint)")
+            } catch RestoreTestError.checkpoint(let reached) {
+                XCTAssertEqual(reached, checkpoint)
+            }
+
+            XCTAssertEqual(
+                try ModelContext(local).fetch(FetchDescriptor<UserProfile>()).map(\.displayName),
+                ["Original"]
+            )
+        }
+    }
+
+    func testRestoreRejectsUnsupportedSchemaBeforeDeletingLocalData() async throws {
+        let source = try makeInMemoryContainer()
+        let sourceContext = ModelContext(source)
+        sourceContext.insert(UserProfile(displayName: "Restored"))
+        try sourceContext.save()
+        let backupStore = CapturingBackupStore()
+        _ = try await UserDataCloudBackupService(
+            localContainer: source,
+            backupStore: backupStore
+        ).exportCurrentBackup()
+        let fetchedRecord = try await backupStore.fetchBackup()
+        let exported = try XCTUnwrap(fetchedRecord)
+        var json = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: exported.payloadData) as? [String: Any]
+        )
+        json["schemaVersion"] = 999
+        await backupStore.replaceRecord(UserDataCloudBackupRemoteRecord(
+            updatedAt: exported.updatedAt,
+            payloadData: try JSONSerialization.data(withJSONObject: json)
+        ))
+
+        let local = try makeInMemoryContainer()
+        let localContext = ModelContext(local)
+        localContext.insert(UserProfile(displayName: "Original"))
+        try localContext.save()
+
+        do {
+            _ = try await UserDataCloudBackupService(
+                localContainer: local,
+                backupStore: backupStore
+            ).restoreLatestBackup(replacingLocalData: true)
+            XCTFail("Expected unsupported schema validation to fail")
+        } catch let error as UserDataCloudRestoreValidationError {
+            XCTAssertEqual(error, .unsupportedSchemaVersion(999))
+        }
+
+        XCTAssertEqual(
+            try ModelContext(local).fetch(FetchDescriptor<UserProfile>()).map(\.displayName),
+            ["Original"]
+        )
+    }
+
+    func testRestoreValidationRejectsOrphanedWorkoutSet() async throws {
+        let sessionID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let exerciseID = UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
+        let setID = UUID(uuidString: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")!
+        let missingExerciseID = UUID(uuidString: "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD")!
+        let source = try makeInMemoryContainer()
+        let sourceContext = ModelContext(source)
+        let session = WorkoutSession(
+            id: sessionID,
+            name: "Upper",
+            status: .completed,
+            endedAt: Date(timeIntervalSince1970: 2_000)
+        )
+        let exercise = WorkoutSessionExercise(
+            id: exerciseID,
+            sessionID: sessionID,
+            catalogExerciseUUID: "bench-press",
+            exerciseNameSnapshot: "Bench Press",
+            categorySnapshot: "Strength",
+            muscleSummarySnapshot: "Chest",
+            session: session
+        )
+        let set = WorkoutSessionSet(
+            id: setID,
+            sessionExerciseID: exerciseID,
+            actualReps: 8,
+            actualWeight: 100,
+            isCompleted: true,
+            sessionExercise: exercise
+        )
+        session.exercises = [exercise]
+        exercise.sets = [set]
+        sourceContext.insert(session)
+        sourceContext.insert(exercise)
+        sourceContext.insert(set)
+        try sourceContext.save()
+        let backupStore = CapturingBackupStore()
+        _ = try await UserDataCloudBackupService(
+            localContainer: source,
+            backupStore: backupStore
+        ).exportCurrentBackup()
+        let fetchedRecord = try await backupStore.fetchBackup()
+        let exported = try XCTUnwrap(fetchedRecord)
+        var json = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: exported.payloadData) as? [String: Any]
+        )
+        var workoutSets = try XCTUnwrap(json["workoutSets"] as? [[String: Any]])
+        workoutSets[0]["sessionExerciseID"] = missingExerciseID.uuidString
+        json["workoutSets"] = workoutSets
+        await backupStore.replaceRecord(UserDataCloudBackupRemoteRecord(
+            updatedAt: exported.updatedAt,
+            payloadData: try JSONSerialization.data(withJSONObject: json)
+        ))
+
+        let local = try makeInMemoryContainer()
+        let localContext = ModelContext(local)
+        localContext.insert(UserProfile(displayName: "Original"))
+        try localContext.save()
+
+        do {
+            _ = try await UserDataCloudBackupService(
+                localContainer: local,
+                backupStore: backupStore
+            ).restoreLatestBackup(replacingLocalData: true)
+            XCTFail("Expected orphan validation to fail")
+        } catch let error as UserDataCloudRestoreValidationError {
+            XCTAssertEqual(
+                error,
+                .missingParent(
+                    childEntity: "WorkoutSessionSet",
+                    childIdentifier: setID.uuidString,
+                    parentIdentifier: missingExerciseID.uuidString
+                )
+            )
+        }
+
+        XCTAssertEqual(
+            try ModelContext(local).fetch(FetchDescriptor<UserProfile>()).map(\.displayName),
+            ["Original"]
+        )
+    }
+
+    func testReplacementRestoreArtifactFailureKeepsCommittedRestore() async throws {
+        let source = try makeInMemoryContainer()
+        let sourceContext = ModelContext(source)
+        sourceContext.insert(UserProfile(displayName: "Restored"))
+        try sourceContext.save()
+        let backupStore = CapturingBackupStore()
+        _ = try await UserDataCloudBackupService(
+            localContainer: source,
+            backupStore: backupStore
+        ).exportCurrentBackup()
+        let local = try makeInMemoryContainer()
+        let localContext = ModelContext(local)
+        localContext.insert(UserProfile(displayName: "Original"))
+        try localContext.save()
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: UUID().uuidString))
+        let queue = AppDataArtifactCleanupQueue(
+            defaults: defaults,
+            cleanup: { _ in throw RestoreTestError.artifactCleanup }
+        )
+        let service = UserDataCloudBackupService(
+            localContainer: local,
+            backupStore: backupStore,
+            artifactCleanupQueue: queue
+        )
+
+        let result = try await service.restoreLatestBackup(replacingLocalData: true)
+
+        XCTAssertEqual(result?.cleanupWarnings.count, AppDataArtifact.allCases.count)
+        XCTAssertEqual(
+            try ModelContext(local).fetch(FetchDescriptor<UserProfile>()).map(\.displayName),
+            ["Restored"]
+        )
+    }
+
+    func testStorageDiagnosticsDoesNotPostLegacyRefreshEventsAfterRestore() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("WGJ/Views/Profile/AppStorageDiagnosticsView.swift"),
+            encoding: .utf8
+        )
+        let restoreStart = try XCTUnwrap(source.range(of: "private func restoreCloudBackup()"))
+        let restoreBody = source[restoreStart.lowerBound...]
+
+        XCTAssertFalse(restoreBody.contains("WorkoutHistoryChangeBroadcaster.post()"))
+        XCTAssertFalse(restoreBody.contains("TemplateLibraryChangeBroadcaster.post()"))
+    }
+
+    func testRootAndTemplateHomeObserveSingleRestoreEvent() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let contentView = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("WGJ/ContentView.swift"),
+            encoding: .utf8
+        )
+        let startWorkoutHome = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("WGJ/Views/Workout/StartWorkoutHomeView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(contentView.contains(".wgjUserDataRestoreDidComplete"))
+        XCTAssertTrue(startWorkoutHome.contains(".wgjUserDataRestoreDidComplete"))
+    }
+
+    func testAppRetriesPendingArtifactCleanupAtLaunch() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("WGJ/WGJApp.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(source.contains("AppDataArtifactCleanupQueue.shared.retryPending()"))
     }
 
     func testStartupRootViewDoesNotReadOrRestoreCloudBackup() throws {
@@ -1448,5 +1702,9 @@ private actor CapturingBackupStore: UserDataCloudBackupStoring {
 
     func fetchBackupMetadata() async throws -> UserDataCloudBackupRemoteMetadata? {
         nil
+    }
+
+    func replaceRecord(_ record: UserDataCloudBackupRemoteRecord) {
+        self.record = record
     }
 }

@@ -50,6 +50,9 @@ struct WGJApp: App {
                         }
                 }
             }
+            .task {
+                _ = await AppDataArtifactCleanupQueue.shared.retryPending()
+            }
         }
     }
 

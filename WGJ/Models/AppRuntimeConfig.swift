@@ -536,6 +536,7 @@ extension Notification.Name {
     nonisolated static let wgjDidDeleteAllUserData = Notification.Name("wgj.didDeleteAllUserData")
     nonisolated static let wgjWorkoutHistoryDidChange = Notification.Name("wgj.workoutHistoryDidChange")
     nonisolated static let wgjTemplateLibraryDidChange = Notification.Name("wgj.templateLibraryDidChange")
+    nonisolated static let wgjUserDataRestoreDidComplete = Notification.Name("wgj.userDataRestoreDidComplete")
 }
 
 nonisolated enum WorkoutHistoryChangeBroadcaster {

@@ -18,6 +18,7 @@ struct UserDataCloudBackupRemoteSnapshot: Equatable, Sendable {
 
 struct UserDataCloudBackupRestoreResult: Equatable, Sendable {
     var restoredAt: Date
+    var cleanupWarnings: [AppDataArtifactCleanupWarning]
 }
 
 struct UserDataCloudBackupContentSummary: Equatable, Sendable {
@@ -155,13 +156,20 @@ private actor BoundaryCloudBackupExportQueue {
 nonisolated final class UserDataCloudBackupService {
     private let localContainer: ModelContainer
     private let backupStore: any UserDataCloudBackupStoring
+    private let restoreTransaction: UserDataCloudRestoreTransaction
+    private let artifactCleanupQueue: AppDataArtifactCleanupQueue
 
     init(
         localContainer: ModelContainer,
-        backupStore: any UserDataCloudBackupStoring
+        backupStore: any UserDataCloudBackupStoring,
+        restoreTransaction: UserDataCloudRestoreTransaction? = nil,
+        artifactCleanupQueue: AppDataArtifactCleanupQueue = .shared
     ) {
         self.localContainer = localContainer
         self.backupStore = backupStore
+        self.restoreTransaction = restoreTransaction
+            ?? UserDataCloudRestoreTransaction(container: localContainer)
+        self.artifactCleanupQueue = artifactCleanupQueue
     }
 
     @discardableResult
@@ -207,28 +215,32 @@ nonisolated final class UserDataCloudBackupService {
         }
 
         let payload = try Self.makeDecoder().decode(UserDataCloudBackupPayload.self, from: record.payloadData)
-        let context = ModelContext(localContainer)
-        context.autosaveEnabled = false
+        try payload.validate()
 
-        if replacingLocalData {
-            try await AppDataDeletionService(
-                modelContext: context,
-                deleteCloudBackup: {},
-                clearActiveWorkoutSnapshot: {
-                    try await ActiveWorkoutSnapshotStore.shared.delete()
-                }
-            ).deleteLocalDeviceData()
-        } else {
-            guard try Self.isLocalUserDataEmpty(context: context) else {
+        if !replacingLocalData {
+            let checkContext = ModelContext(localContainer)
+            guard try Self.isLocalUserDataEmpty(context: checkContext) else {
                 return nil
             }
         }
 
-        try payload.mergeIntoLocalStore(in: context)
-        if context.hasChanges {
-            try context.save()
-        }
-        return UserDataCloudBackupRestoreResult(restoredAt: record.updatedAt)
+        try restoreTransaction.commit(
+            replacingLocalData: replacingLocalData,
+            mergeDatabaseGraph: { context in
+                try payload.mergeDatabaseGraph(into: context)
+            },
+            relinkRelationships: { context in
+                try payload.relinkRelationships(in: context)
+            }
+        )
+        ExerciseSearchService.invalidateCatalogIndex(for: ModelContext(localContainer))
+        HistoryAnalyticsCache.shared.clear()
+        let cleanupWarnings = await artifactCleanupQueue.enqueue(Set(AppDataArtifact.allCases))
+        NotificationCenter.default.post(name: .wgjUserDataRestoreDidComplete, object: nil)
+        return UserDataCloudBackupRestoreResult(
+            restoredAt: record.updatedAt,
+            cleanupWarnings: cleanupWarnings
+        )
     }
 
     private static func makeEncoder() -> JSONEncoder {
@@ -510,7 +522,219 @@ nonisolated private struct UserDataCloudBackupPayload: Codable {
         )
     }
 
-    func mergeIntoLocalStore(in context: ModelContext) throws {
+    func validate() throws {
+        guard schemaVersion == Self.schemaVersion else {
+            throw UserDataCloudRestoreValidationError.unsupportedSchemaVersion(schemaVersion)
+        }
+
+        try validateUnique(profiles.map(\.id), entity: "UserProfile", render: \.uuidString)
+        try validateUnique(profileWidgets.map(\.id), entity: "ProfileWidgetConfig", render: \.uuidString)
+        try validateUnique(customExercises.map(\.remoteUUID), entity: "ExerciseCatalogItem") { $0 }
+        try validateUnique(templateFolders.map(\.id), entity: "TemplateFolder", render: \.uuidString)
+        try validateUnique(workoutTemplates.map(\.id), entity: "WorkoutTemplate", render: \.uuidString)
+        try validateUnique(templateCardioBlocks.map(\.id), entity: "TemplateCardioBlock", render: \.uuidString)
+        try validateUnique(templateExercises.map(\.id), entity: "TemplateExercise", render: \.uuidString)
+        try validateUnique(templateComponents.map(\.id), entity: "TemplateExerciseComponent", render: \.uuidString)
+        try validateUnique(templateSets.map(\.id), entity: "TemplateExerciseSet", render: \.uuidString)
+        try validateUnique((templateSupersetGroups ?? []).map(\.id), entity: "TemplateSupersetGroup", render: \.uuidString)
+        try validateUnique(templateDropStages.map(\.id), entity: "TemplateExerciseDropStage", render: \.uuidString)
+        try validateUnique(workoutSessions.map(\.id), entity: "WorkoutSession", render: \.uuidString)
+        try validateUnique((workoutSupersetGroups ?? []).map(\.id), entity: "WorkoutSessionSupersetGroup", render: \.uuidString)
+        try validateUnique(workoutCardioBlocks.map(\.id), entity: "WorkoutSessionCardioBlock", render: \.uuidString)
+        try validateUnique(workoutExercises.map(\.id), entity: "WorkoutSessionExercise", render: \.uuidString)
+        try validateUnique(workoutSets.map(\.id), entity: "WorkoutSessionSet", render: \.uuidString)
+        try validateUnique(workoutDropStages.map(\.id), entity: "WorkoutSessionDropStage", render: \.uuidString)
+
+        let folderIDs = Set(templateFolders.map(\.id))
+        let templateIDs = Set(workoutTemplates.map(\.id))
+        let templateExerciseIDs = Set(templateExercises.map(\.id))
+        let templateSetIDs = Set(templateSets.map(\.id))
+        let templateGroupsByID = Dictionary(
+            uniqueKeysWithValues: (templateSupersetGroups ?? []).map { ($0.id, $0) }
+        )
+        let workoutSessionIDs = Set(workoutSessions.map(\.id))
+        let workoutExerciseIDs = Set(workoutExercises.map(\.id))
+        let workoutSetIDs = Set(workoutSets.map(\.id))
+        let workoutGroupsByID = Dictionary(
+            uniqueKeysWithValues: (workoutSupersetGroups ?? []).map { ($0.id, $0) }
+        )
+
+        for template in workoutTemplates where template.folderID != TemplateRepository.unfiledFolderID {
+            try requireParent(
+                folderIDs.contains(template.folderID),
+                childEntity: "WorkoutTemplate",
+                childID: template.id,
+                parentID: template.folderID
+            )
+        }
+        for block in templateCardioBlocks {
+            try requireParent(
+                templateIDs.contains(block.templateID),
+                childEntity: "TemplateCardioBlock",
+                childID: block.id,
+                parentID: block.templateID
+            )
+        }
+        for exercise in templateExercises {
+            try requireParent(
+                templateIDs.contains(exercise.templateID),
+                childEntity: "TemplateExercise",
+                childID: exercise.id,
+                parentID: exercise.templateID
+            )
+        }
+        for component in templateComponents {
+            try requireParent(
+                templateExerciseIDs.contains(component.templateExerciseID),
+                childEntity: "TemplateExerciseComponent",
+                childID: component.id,
+                parentID: component.templateExerciseID
+            )
+        }
+        for set in templateSets {
+            try requireParent(
+                templateExerciseIDs.contains(set.templateExerciseID),
+                childEntity: "TemplateExerciseSet",
+                childID: set.id,
+                parentID: set.templateExerciseID
+            )
+        }
+        for group in templateSupersetGroups ?? [] {
+            try requireParent(
+                templateIDs.contains(group.templateID),
+                childEntity: "TemplateSupersetGroup",
+                childID: group.id,
+                parentID: group.templateID
+            )
+        }
+        for stage in templateDropStages {
+            try requireParent(
+                templateSetIDs.contains(stage.templateExerciseSetID),
+                childEntity: "TemplateExerciseDropStage",
+                childID: stage.id,
+                parentID: stage.templateExerciseSetID
+            )
+        }
+        try validateTemplateSupersetMemberships(groupsByID: templateGroupsByID)
+
+        for session in workoutSessions where session.statusRaw != WorkoutSessionStatus.completed.rawValue {
+            throw UserDataCloudRestoreValidationError.invalidCompletedWorkoutStatus(session.id)
+        }
+        for group in workoutSupersetGroups ?? [] {
+            try requireParent(
+                workoutSessionIDs.contains(group.sessionID),
+                childEntity: "WorkoutSessionSupersetGroup",
+                childID: group.id,
+                parentID: group.sessionID
+            )
+        }
+        for block in workoutCardioBlocks {
+            try requireParent(
+                workoutSessionIDs.contains(block.sessionID),
+                childEntity: "WorkoutSessionCardioBlock",
+                childID: block.id,
+                parentID: block.sessionID
+            )
+        }
+        for exercise in workoutExercises {
+            try requireParent(
+                workoutSessionIDs.contains(exercise.sessionID),
+                childEntity: "WorkoutSessionExercise",
+                childID: exercise.id,
+                parentID: exercise.sessionID
+            )
+        }
+        for set in workoutSets {
+            try requireParent(
+                workoutExerciseIDs.contains(set.sessionExerciseID),
+                childEntity: "WorkoutSessionSet",
+                childID: set.id,
+                parentID: set.sessionExerciseID
+            )
+        }
+        for stage in workoutDropStages {
+            try requireParent(
+                workoutSetIDs.contains(stage.sessionSetID),
+                childEntity: "WorkoutSessionDropStage",
+                childID: stage.id,
+                parentID: stage.sessionSetID
+            )
+        }
+        try validateWorkoutSupersetMemberships(groupsByID: workoutGroupsByID)
+    }
+
+    private func validateUnique<Identifier: Hashable>(
+        _ identifiers: [Identifier],
+        entity: String,
+        render: (Identifier) -> String
+    ) throws {
+        var seen: Set<Identifier> = []
+        for identifier in identifiers where !seen.insert(identifier).inserted {
+            throw UserDataCloudRestoreValidationError.duplicateIdentifier(
+                entity: entity,
+                identifier: render(identifier)
+            )
+        }
+    }
+
+    private func requireParent(
+        _ condition: Bool,
+        childEntity: String,
+        childID: UUID,
+        parentID: UUID
+    ) throws {
+        guard condition else {
+            throw UserDataCloudRestoreValidationError.missingParent(
+                childEntity: childEntity,
+                childIdentifier: childID.uuidString,
+                parentIdentifier: parentID.uuidString
+            )
+        }
+    }
+
+    private func validateTemplateSupersetMemberships(
+        groupsByID: [UUID: TemplateSupersetGroupBackup]
+    ) throws {
+        var positionsByGroupID: [UUID: Set<String>] = [:]
+        for exercise in templateExercises {
+            switch (exercise.supersetGroupID, exercise.supersetPositionRaw) {
+            case (nil, nil):
+                continue
+            case let (groupID?, positionRaw?):
+                guard let group = groupsByID[groupID],
+                      group.templateID == exercise.templateID,
+                      SupersetExercisePosition(rawValue: positionRaw) != nil,
+                      positionsByGroupID[groupID, default: []].insert(positionRaw).inserted else {
+                    throw UserDataCloudRestoreValidationError.invalidSupersetMembership(exercise.id)
+                }
+            default:
+                throw UserDataCloudRestoreValidationError.invalidSupersetMembership(exercise.id)
+            }
+        }
+    }
+
+    private func validateWorkoutSupersetMemberships(
+        groupsByID: [UUID: WorkoutSupersetGroupBackup]
+    ) throws {
+        var positionsByGroupID: [UUID: Set<String>] = [:]
+        for exercise in workoutExercises {
+            switch (exercise.supersetGroupID, exercise.supersetPositionRaw) {
+            case (nil, nil):
+                continue
+            case let (groupID?, positionRaw?):
+                guard let group = groupsByID[groupID],
+                      group.sessionID == exercise.sessionID,
+                      SupersetExercisePosition(rawValue: positionRaw) != nil,
+                      positionsByGroupID[groupID, default: []].insert(positionRaw).inserted else {
+                    throw UserDataCloudRestoreValidationError.invalidSupersetMembership(exercise.id)
+                }
+            default:
+                throw UserDataCloudRestoreValidationError.invalidSupersetMembership(exercise.id)
+            }
+        }
+    }
+
+    func mergeDatabaseGraph(into context: ModelContext) throws {
         try upsertProfiles(in: context)
         try upsertProfileWidgets(in: context)
         try upsertCustomExercises(in: context)
@@ -528,6 +752,9 @@ nonisolated private struct UserDataCloudBackupPayload: Codable {
         try upsertWorkoutExercises(in: context)
         try upsertWorkoutSets(in: context)
         try upsertWorkoutDropStages(in: context)
+    }
+
+    func relinkRelationships(in context: ModelContext) throws {
         try relinkSupersetRelationships(in: context)
     }
 
