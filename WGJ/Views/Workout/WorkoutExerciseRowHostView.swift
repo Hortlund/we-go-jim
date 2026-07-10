@@ -1,7 +1,25 @@
 import SwiftUI
 
+nonisolated struct WorkoutExerciseRowContentIdentity: Hashable, Sendable {
+    let runtimeExerciseID: UUID
+    let catalogExerciseUUID: String
+
+    init(runtimeExerciseID: UUID, catalogExerciseUUID: String) {
+        self.runtimeExerciseID = runtimeExerciseID
+        self.catalogExerciseUUID = catalogExerciseUUID
+    }
+
+    init(exercise: ActiveWorkoutRuntimeExercise) {
+        self.init(
+            runtimeExerciseID: exercise.id,
+            catalogExerciseUUID: exercise.catalogExerciseUUID
+        )
+    }
+}
+
 struct WorkoutExerciseRowHostView: View, Equatable {
     let exerciseID: UUID
+    let contentIdentity: WorkoutExerciseRowContentIdentity
     let exerciseAccessibilityIdentifier: String
     let exerciseName: String
     let muscleSummary: String
@@ -52,6 +70,7 @@ struct WorkoutExerciseRowHostView: View, Equatable {
 
     init(
         exerciseID: UUID,
+        catalogExerciseUUID: String,
         exerciseAccessibilityIdentifier: String,
         exerciseName: String,
         muscleSummary: String,
@@ -96,6 +115,10 @@ struct WorkoutExerciseRowHostView: View, Equatable {
         onInputFocusChange: @escaping (Bool) -> Void = { _ in }
     ) {
         self.exerciseID = exerciseID
+        self.contentIdentity = WorkoutExerciseRowContentIdentity(
+            runtimeExerciseID: exerciseID,
+            catalogExerciseUUID: catalogExerciseUUID
+        )
         self.exerciseAccessibilityIdentifier = exerciseAccessibilityIdentifier
         self.exerciseName = exerciseName
         self.muscleSummary = muscleSummary
@@ -273,6 +296,7 @@ struct WorkoutExerciseRowHostView: View, Equatable {
 
     static func == (lhs: WorkoutExerciseRowHostView, rhs: WorkoutExerciseRowHostView) -> Bool {
         lhs.exerciseID == rhs.exerciseID
+            && lhs.contentIdentity == rhs.contentIdentity
             && lhs.exerciseAccessibilityIdentifier == rhs.exerciseAccessibilityIdentifier
             && lhs.exerciseName == rhs.exerciseName
             && lhs.muscleSummary == rhs.muscleSummary

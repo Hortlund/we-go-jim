@@ -3,6 +3,25 @@ import SwiftUI
 @testable import WGJ
 
 final class ActiveWorkoutRuntimeTests: XCTestCase {
+    func testRowContentIdentityChangesOnlyWhenCatalogExerciseChanges() {
+        let runtimeID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let first = WorkoutExerciseRowContentIdentity(
+            runtimeExerciseID: runtimeID,
+            catalogExerciseUUID: "bench"
+        )
+        let valueEdit = WorkoutExerciseRowContentIdentity(
+            runtimeExerciseID: runtimeID,
+            catalogExerciseUUID: "bench"
+        )
+        let replacement = WorkoutExerciseRowContentIdentity(
+            runtimeExerciseID: runtimeID,
+            catalogExerciseUUID: "incline"
+        )
+
+        XCTAssertEqual(first, valueEdit)
+        XCTAssertNotEqual(first, replacement)
+    }
+
     func testWorkoutEditorsDoNotUseSwipeDeleteRows() throws {
         let testFileURL = URL(fileURLWithPath: #filePath)
         let projectRootURL = testFileURL

@@ -596,6 +596,7 @@ struct ActiveWorkoutView: View {
             if let drafts = renderableDrafts(for: exerciseID) {
                 WorkoutExerciseRowHostView(
                     exerciseID: exerciseID,
+                    catalogExerciseUUID: exercise.catalogExerciseUUID,
                     exerciseAccessibilityIdentifier: "active-workout-exercise-\(exercise.catalogExerciseUUID)",
                     exerciseName: exerciseName,
                     muscleSummary: exercise.muscleSummarySnapshot,
@@ -681,6 +682,7 @@ struct ActiveWorkoutView: View {
                     }
                 )
                 .equatable()
+                .id(WorkoutExerciseRowContentIdentity(exercise: exercise))
             } else {
                 ActiveWorkoutExerciseLoadingCard(
                     exerciseAccessibilityIdentifier: "active-workout-exercise-\(exercise.catalogExerciseUUID)",
@@ -1338,6 +1340,8 @@ struct ActiveWorkoutView: View {
     }
 
     private func replaceExercise(exerciseID: UUID, with item: ExerciseCatalogSelection) -> ExercisePickerSelectionResult {
+        dismissKeyboard()
+        rowFlushCoordinator.flush(for: exerciseID)
         guard let existingExercise = sessionExercises.first(where: { $0.id == exerciseID }) else { return .accepted }
         let duplicateResult = ExerciseReplacementSelectionPolicy.result(
             catalogExerciseUUID: item.remoteUUID,
