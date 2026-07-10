@@ -4,13 +4,32 @@ import OSLog
 import SwiftData
 import UIKit
 
-struct ModelContainerBootstrap {
+nonisolated struct ModelContainerBootstrap {
     let container: ModelContainer
     let cloudRuntimeMode: CloudRuntimeMode
     let cloudFeaturesEnabled: Bool
     let userDataSyncEnabled: Bool
     let cloudSyncEnabled: Bool
     let cloudSyncErrorDescription: String?
+    let persistenceMode: AppPersistenceMode
+
+    init(
+        container: ModelContainer,
+        cloudRuntimeMode: CloudRuntimeMode,
+        cloudFeaturesEnabled: Bool,
+        userDataSyncEnabled: Bool,
+        cloudSyncEnabled: Bool,
+        cloudSyncErrorDescription: String?,
+        persistenceMode: AppPersistenceMode = .durable
+    ) {
+        self.container = container
+        self.cloudRuntimeMode = cloudRuntimeMode
+        self.cloudFeaturesEnabled = cloudFeaturesEnabled
+        self.userDataSyncEnabled = userDataSyncEnabled
+        self.cloudSyncEnabled = cloudSyncEnabled
+        self.cloudSyncErrorDescription = cloudSyncErrorDescription
+        self.persistenceMode = persistenceMode
+    }
 }
 
 struct ResolvedAppLaunchBootstrap {
@@ -27,13 +46,20 @@ final class AppLaunchBootstrapState {
     )
 
     private(set) var resolvedBootstrap: ResolvedAppLaunchBootstrap?
+    private(set) var recoveryState: AppStorageRecoveryState?
 
+    @ObservationIgnored private let runtimeStateUpdater: @MainActor (ModelContainerBootstrap) -> Void
     @ObservationIgnored private var resolutionTask: Task<Void, Never>?
     @ObservationIgnored private var resolutionGeneration = 0
 
+    init(
+        runtimeStateUpdater: @escaping @MainActor (ModelContainerBootstrap) -> Void = AppLaunchBootstrapState.updateRuntimeState
+    ) {
+        self.runtimeStateUpdater = runtimeStateUpdater
+    }
+
     func resolveIfNeeded(
-        resolver: @escaping @Sendable () async throws -> ModelContainerBootstrap,
-        failureFallback: (@Sendable (Error) async throws -> ModelContainerBootstrap)? = nil
+        resolver: @escaping @Sendable () async throws -> ModelContainerBootstrap
     ) {
         guard resolvedBootstrap == nil, resolutionTask == nil else { return }
 
@@ -61,29 +87,8 @@ final class AppLaunchBootstrapState {
                 await self.clearResolutionTask(generation: currentGeneration)
             } catch {
                 guard let self else { return }
-                if let failureFallback {
-                    do {
-                        let bootstrap = try await failureFallback(error)
-                        guard !Task.isCancelled else { return }
-
-                        let resolved = ResolvedAppLaunchBootstrap(
-                            bootstrap: bootstrap,
-                            backgroundStore: AppBackgroundStore(container: bootstrap.container)
-                        )
-
-                        await self.finishResolution(
-                            resolved,
-                            bootstrap: bootstrap,
-                            generation: currentGeneration
-                        )
-                    } catch {
-                        await self.clearResolutionTask(generation: currentGeneration)
-                        Self.logger.error("Could not create ModelContainer bootstrap: \(error.localizedDescription, privacy: .public)")
-                    }
-                } else {
-                    await self.clearResolutionTask(generation: currentGeneration)
-                    Self.logger.error("Could not create ModelContainer bootstrap: \(error.localizedDescription, privacy: .public)")
-                }
+                await self.finishFailure(error, generation: currentGeneration)
+                Self.logger.error("Could not create ModelContainer bootstrap: \(error.localizedDescription, privacy: .public)")
             }
         }
 
@@ -95,6 +100,30 @@ final class AppLaunchBootstrapState {
         resolutionTask?.cancel()
         resolutionTask = nil
         resolvedBootstrap = nil
+        recoveryState = nil
+    }
+
+    func retry(
+        resolver: @escaping @Sendable () async throws -> ModelContainerBootstrap
+    ) {
+        resolutionGeneration += 1
+        resolutionTask?.cancel()
+        resolutionTask = nil
+        resolvedBootstrap = nil
+        recoveryState = nil
+        resolveIfNeeded(resolver: resolver)
+    }
+
+    func enterDiagnosticMode(
+        using makeBootstrap: @escaping @Sendable (String) async throws -> ModelContainerBootstrap
+    ) {
+        guard let recoveryState else { return }
+        let reason = [recoveryState.message, recoveryState.diagnosticReport]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+        retry {
+            try await makeBootstrap(reason)
+        }
     }
 
     private func finishResolution(
@@ -105,6 +134,28 @@ final class AppLaunchBootstrapState {
         guard resolutionGeneration == generation else { return }
         guard resolutionTask != nil else { return }
 
+        runtimeStateUpdater(bootstrap)
+        resolvedBootstrap = resolved
+        recoveryState = nil
+        resolutionTask = nil
+    }
+
+    private func finishFailure(_ error: Error, generation: Int) {
+        guard resolutionGeneration == generation else { return }
+        resolvedBootstrap = nil
+        recoveryState = AppStorageRecoveryState(
+            message: "WGJ could not open durable app storage.",
+            diagnosticReport: String(describing: error)
+        )
+        resolutionTask = nil
+    }
+
+    private func clearResolutionTask(generation: Int) {
+        guard resolutionGeneration == generation else { return }
+        resolutionTask = nil
+    }
+
+    private static func updateRuntimeState(_ bootstrap: ModelContainerBootstrap) {
         AppRuntimeState.shared.updateCloudState(
             runtimeMode: bootstrap.cloudRuntimeMode,
             isEnabled: bootstrap.cloudFeaturesEnabled,
@@ -115,13 +166,6 @@ final class AppLaunchBootstrapState {
                 ? .backedUp(at: nil)
                 : .localOnly(reason: bootstrap.cloudSyncErrorDescription)
         )
-        resolvedBootstrap = resolved
-        resolutionTask = nil
-    }
-
-    private func clearResolutionTask(generation: Int) {
-        guard resolutionGeneration == generation else { return }
-        resolutionTask = nil
     }
 }
 
@@ -133,7 +177,6 @@ enum AppLaunchBootstrapResolver {
         canUseConfiguredCloudKitContainer: Bool = AppRuntimeConfig.canUseConfiguredCloudKitContainer,
         makeUITestContainer: @escaping @Sendable () throws -> ModelContainer,
         makeLocalFallbackContainer: @escaping @Sendable () throws -> ModelContainer,
-        makeEmergencyInMemoryContainer: (@Sendable () throws -> ModelContainer)? = nil,
         describeError: @escaping @Sendable (Error) -> String
     ) async throws -> ModelContainerBootstrap {
         if processArguments.contains(uiTestInMemoryStoreArgument) {
@@ -150,50 +193,28 @@ enum AppLaunchBootstrapResolver {
         guard canUseConfiguredCloudKitContainer else {
             return try makeLocalBootstrap(
                 makeLocalFallbackContainer: makeLocalFallbackContainer,
-                makeEmergencyInMemoryContainer: makeEmergencyInMemoryContainer,
-                localOnlyDescription: "CloudKit is unavailable for this build. Using local-only mode for this session.",
-                describeError: describeError
+                localOnlyDescription: "CloudKit is unavailable for this build. Using local-only mode for this session."
             )
         }
 
         return try makeLocalBootstrap(
             makeLocalFallbackContainer: makeLocalFallbackContainer,
-            makeEmergencyInMemoryContainer: makeEmergencyInMemoryContainer,
-            localOnlyDescription: nil,
-            describeError: describeError
+            localOnlyDescription: nil
         )
     }
 
     private static func makeLocalBootstrap(
         makeLocalFallbackContainer: @escaping @Sendable () throws -> ModelContainer,
-        makeEmergencyInMemoryContainer: (@Sendable () throws -> ModelContainer)?,
-        localOnlyDescription: String?,
-        describeError: @escaping @Sendable (Error) -> String
+        localOnlyDescription: String?
     ) throws -> ModelContainerBootstrap {
-        do {
-            return ModelContainerBootstrap(
-                container: try makeLocalFallbackContainer(),
-                cloudRuntimeMode: localOnlyDescription.map(CloudRuntimeMode.unavailable) ?? .checking,
-                cloudFeaturesEnabled: localOnlyDescription == nil,
-                userDataSyncEnabled: false,
-                cloudSyncEnabled: localOnlyDescription == nil,
-                cloudSyncErrorDescription: localOnlyDescription
-            )
-        } catch {
-            guard let makeEmergencyInMemoryContainer else {
-                throw error
-            }
-
-            let description = "Local storage could not be opened. Keeping the app running in temporary local-only mode. \(describeError(error))"
-            return ModelContainerBootstrap(
-                container: try makeEmergencyInMemoryContainer(),
-                cloudRuntimeMode: .unavailable(description),
-                cloudFeaturesEnabled: false,
-                userDataSyncEnabled: false,
-                cloudSyncEnabled: false,
-                cloudSyncErrorDescription: description
-            )
-        }
+        ModelContainerBootstrap(
+            container: try makeLocalFallbackContainer(),
+            cloudRuntimeMode: localOnlyDescription.map(CloudRuntimeMode.unavailable) ?? .checking,
+            cloudFeaturesEnabled: localOnlyDescription == nil,
+            userDataSyncEnabled: false,
+            cloudSyncEnabled: localOnlyDescription == nil,
+            cloudSyncErrorDescription: localOnlyDescription
+        )
     }
 }
 

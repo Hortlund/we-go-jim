@@ -17,22 +17,34 @@ struct WGJApp: App {
         WindowGroup {
             Group {
                 if let resolvedBootstrap = launchBootstrapState.resolvedBootstrap {
-                    ContentView()
-                        .environment(\.cloudSyncEnabled, resolvedBootstrap.bootstrap.cloudSyncEnabled)
-                        .environment(\.cloudSyncErrorDescription, resolvedBootstrap.bootstrap.cloudSyncErrorDescription)
-                        .environment(\.userDataSyncStatus, AppRuntimeState.shared.userDataSyncStatus)
-                        .environment(\.appBackgroundStore, resolvedBootstrap.backgroundStore)
-                        .environment(AppNotificationRouter.shared)
-                        .modelContainer(resolvedBootstrap.bootstrap.container)
+                    switch resolvedBootstrap.bootstrap.persistenceMode {
+                    case .durable:
+                        ContentView()
+                            .environment(\.appPersistenceMode, resolvedBootstrap.bootstrap.persistenceMode)
+                            .environment(\.cloudSyncEnabled, resolvedBootstrap.bootstrap.cloudSyncEnabled)
+                            .environment(\.cloudSyncErrorDescription, resolvedBootstrap.bootstrap.cloudSyncErrorDescription)
+                            .environment(\.userDataSyncStatus, AppRuntimeState.shared.userDataSyncStatus)
+                            .environment(\.appBackgroundStore, resolvedBootstrap.backgroundStore)
+                            .environment(AppNotificationRouter.shared)
+                            .modelContainer(resolvedBootstrap.bootstrap.container)
+                    case .volatileDiagnostic(let reason):
+                        AppStorageDiagnosticModeView(
+                            reason: reason,
+                            onRetry: retryDurableStorage
+                        )
+                    }
+                } else if let recoveryState = launchBootstrapState.recoveryState {
+                    AppStorageRecoveryView(
+                        state: recoveryState,
+                        onRetry: retryDurableStorage,
+                        onEnterDiagnosticMode: enterDiagnosticMode
+                    )
                 } else {
                     SplashView()
                         .task {
                             launchBootstrapState.resolveIfNeeded(
                                 resolver: {
                                     try await Self.makeContainerBootstrap()
-                                },
-                                failureFallback: { error in
-                                    try Self.makeEmergencyBootstrap(after: error)
                                 }
                             )
                         }
@@ -53,9 +65,6 @@ struct WGJApp: App {
             },
             makeLocalFallbackContainer: {
                 try makeLocalFallbackContainer()
-            },
-            makeEmergencyInMemoryContainer: {
-                try makeEmergencyInMemoryContainer()
             },
             describeError: { error in
                 describe(error)
@@ -112,16 +121,29 @@ struct WGJApp: App {
         )
     }
 
-    nonisolated private static func makeEmergencyBootstrap(after error: Error) throws -> ModelContainerBootstrap {
-        let description = "App storage could not be opened. Keeping WGJ running in temporary local-only mode. \(describe(error))"
+    nonisolated private static func makeEmergencyBootstrap(reason: String) throws -> ModelContainerBootstrap {
+        let description = "Temporary diagnostics — changes cannot be saved. \(reason)"
         return ModelContainerBootstrap(
             container: try makeEmergencyInMemoryContainer(),
             cloudRuntimeMode: .unavailable(description),
             cloudFeaturesEnabled: false,
             userDataSyncEnabled: false,
             cloudSyncEnabled: false,
-            cloudSyncErrorDescription: description
+            cloudSyncErrorDescription: description,
+            persistenceMode: .volatileDiagnostic(reason: description)
         )
+    }
+
+    private func retryDurableStorage() {
+        launchBootstrapState.retry {
+            try await Self.makeContainerBootstrap()
+        }
+    }
+
+    private func enterDiagnosticMode() {
+        launchBootstrapState.enterDiagnosticMode { reason in
+            try Self.makeEmergencyBootstrap(reason: reason)
+        }
     }
 
     nonisolated private static func fullAppSchema() -> Schema {
