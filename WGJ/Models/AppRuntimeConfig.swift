@@ -544,9 +544,8 @@ nonisolated struct PendingTemplateFileOpen: Equatable, Identifiable {
     var id: UUID { requestID }
 }
 
-@MainActor
 @Observable
-final class AppTabState {
+nonisolated final class AppTabState {
     static let selectedTabDefaultsKey = "selectedMainTab"
 
     var selectedTab: AppMainTab {
@@ -557,9 +556,14 @@ final class AppTabState {
 
     @ObservationIgnored private let defaults: UserDefaults
 
-    init(defaults: UserDefaults = .standard) {
+    init(
+        defaults: UserDefaults = .standard,
+        arguments: [String] = ProcessInfo.processInfo.arguments
+    ) {
         self.defaults = defaults
-        if let rawValue = defaults.string(forKey: Self.selectedTabDefaultsKey),
+        if arguments.contains("UITEST_IN_MEMORY_STORE") {
+            selectedTab = .startWorkout
+        } else if let rawValue = defaults.string(forKey: Self.selectedTabDefaultsKey),
            let persistedTab = AppMainTab(rawValue: rawValue) {
             selectedTab = persistedTab
         } else {
