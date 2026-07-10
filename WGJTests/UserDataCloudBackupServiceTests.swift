@@ -4,6 +4,29 @@ import XCTest
 
 @MainActor
 final class UserDataCloudBackupServiceTests: XCTestCase {
+    func testStageLocalDataDeletionDoesNotCommitUntilCallerSaves() throws {
+        let container = try makeInMemoryContainer()
+        let seedContext = ModelContext(container)
+        seedContext.insert(UserProfile(displayName: "Durable Athlete"))
+        try seedContext.save()
+
+        let restoreContext = ModelContext(container)
+        restoreContext.autosaveEnabled = false
+        let service = AppDataDeletionService(
+            modelContext: restoreContext,
+            deleteCloudBackup: {},
+            clearWeeklyGoalWidgetSnapshot: {},
+            clearActiveWorkoutSnapshot: {}
+        )
+
+        try service.stageLocalDataDeletion()
+
+        let observerContext = ModelContext(container)
+        XCTAssertEqual(try observerContext.fetch(FetchDescriptor<UserProfile>()).count, 1)
+        restoreContext.rollback()
+        XCTAssertEqual(try observerContext.fetch(FetchDescriptor<UserProfile>()).count, 1)
+    }
+
     func testStartupRootViewDoesNotReadOrRestoreCloudBackup() throws {
         let testFileURL = URL(fileURLWithPath: #filePath)
         let repositoryRoot = testFileURL
