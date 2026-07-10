@@ -7,16 +7,18 @@ final class WorkoutGridDebounceCoordinatorTests: XCTestCase {
         let sleeper = ControlledDebounceSleeper()
         let recorder = DebounceValueRecorder()
         let coordinator = WorkoutGridDebounceCoordinator(sleep: sleeper.sleep)
+        let latestCommitCompleted = expectation(description: "Latest commit completed")
 
         coordinator.scheduleCommit(.currentState, after: .seconds(1)) {
             recorder.append(1)
         }
         coordinator.scheduleCommit(.bufferedInput, after: .seconds(1)) {
             recorder.append(2)
+            latestCommitCompleted.fulfill()
         }
         await sleeper.waitUntilPending()
         await sleeper.resumeAll()
-        await Task.yield()
+        await fulfillment(of: [latestCommitCompleted], timeout: 1)
 
         XCTAssertEqual(recorder.values, [2])
         XCTAssertNil(coordinator.pendingCommitKind)
@@ -44,6 +46,7 @@ private actor ControlledDebounceSleeper {
 
     func sleep(_ duration: Duration) async throws {
         _ = duration
+        try Task.checkCancellation()
         try await withCheckedThrowingContinuation { continuation in
             continuations.append(continuation)
         }
