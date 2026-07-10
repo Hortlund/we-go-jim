@@ -367,13 +367,14 @@ final class AppRuntimeState {
 
         let statusProvider = accountService ?? AccountStatusService()
 
-        let refreshTask = Task.detached(priority: .utility) { [weak self, statusProvider] in
-            let status = await Self.accountStatus(
-                from: statusProvider,
+        let refreshTask = Task(priority: .utility) { [weak self, statusProvider] in
+            let status = await accountStatusWithTimeout(
+                provider: statusProvider,
                 timeout: runtimeTimeout
             )
+            guard !Task.isCancelled else { return }
             guard let self else { return }
-            await self.finishRuntimeCloudAvailabilityRefresh(
+            self.finishRuntimeCloudAvailabilityRefresh(
                 refreshGeneration: refreshGeneration,
                 status: status,
                 taskWasCancelled: Task.isCancelled
@@ -412,40 +413,6 @@ final class AppRuntimeState {
         }
 
         return .degraded(errorDescription)
-    }
-
-    nonisolated private static func accountStatus(
-        from statusProvider: any AccountStatusProviding,
-        timeout: Duration
-    ) async -> AccountStatus {
-        await withCheckedContinuation { (continuation: CheckedContinuation<AccountStatus, Never>) in
-            let lock = NSLock()
-            var didResume = false
-            var statusTask: Task<Void, Never>?
-            var timeoutTask: Task<Void, Never>?
-
-            func resumeOnce(_ status: AccountStatus) {
-                lock.lock()
-                guard !didResume else {
-                    lock.unlock()
-                    return
-                }
-                didResume = true
-                lock.unlock()
-                statusTask?.cancel()
-                timeoutTask?.cancel()
-                continuation.resume(returning: status)
-            }
-
-            statusTask = Task.detached(priority: .utility) {
-                let status = await statusProvider.fetchAccountStatus()
-                resumeOnce(status)
-            }
-            timeoutTask = Task.detached(priority: .utility) {
-                try? await Task.sleep(for: timeout)
-                resumeOnce(.unavailable(.unknown))
-            }
-        }
     }
 
     private func beginRuntimeCloudAvailabilityRefresh(now: Date) -> Int {
@@ -536,6 +503,7 @@ extension Notification.Name {
     nonisolated static let wgjDidDeleteAllUserData = Notification.Name("wgj.didDeleteAllUserData")
     nonisolated static let wgjWorkoutHistoryDidChange = Notification.Name("wgj.workoutHistoryDidChange")
     nonisolated static let wgjTemplateLibraryDidChange = Notification.Name("wgj.templateLibraryDidChange")
+    nonisolated static let wgjUserDataRestoreDidComplete = Notification.Name("wgj.userDataRestoreDidComplete")
 }
 
 nonisolated enum WorkoutHistoryChangeBroadcaster {
@@ -576,9 +544,8 @@ nonisolated struct PendingTemplateFileOpen: Equatable, Identifiable {
     var id: UUID { requestID }
 }
 
-@MainActor
 @Observable
-final class AppTabState {
+nonisolated final class AppTabState {
     static let selectedTabDefaultsKey = "selectedMainTab"
 
     var selectedTab: AppMainTab {
@@ -589,9 +556,14 @@ final class AppTabState {
 
     @ObservationIgnored private let defaults: UserDefaults
 
-    init(defaults: UserDefaults = .standard) {
+    init(
+        defaults: UserDefaults = .standard,
+        arguments: [String] = ProcessInfo.processInfo.arguments
+    ) {
         self.defaults = defaults
-        if let rawValue = defaults.string(forKey: Self.selectedTabDefaultsKey),
+        if arguments.contains("UITEST_IN_MEMORY_STORE") {
+            selectedTab = .startWorkout
+        } else if let rawValue = defaults.string(forKey: Self.selectedTabDefaultsKey),
            let persistedTab = AppMainTab(rawValue: rawValue) {
             selectedTab = persistedTab
         } else {
@@ -639,28 +611,6 @@ final class TemplateFileOpenState {
         return TemplateTransferFileFormat.supportedImportFilenameExtensions.contains(
             url.pathExtension.lowercased()
         )
-    }
-}
-
-@MainActor
-enum AppDeepLinkRouter {
-    @discardableResult
-    static func route(url: URL, appPhase: AppPhase, tabState: AppTabState) -> Bool {
-        guard supports(url: url) else {
-            return false
-        }
-        guard appPhase == .main else {
-            return false
-        }
-
-        tabState.selectedTab = .profile
-        return true
-    }
-
-    static func supports(url: URL) -> Bool {
-        url.scheme?.lowercased() == "wgj"
-            && url.host?.lowercased() == "profile"
-            && url.path.lowercased() == "/weekly-goal"
     }
 }
 
@@ -743,11 +693,6 @@ nonisolated struct ActiveWorkoutPreparedFirstRenderSnapshot: Equatable, Sendable
     )
 }
 
-nonisolated struct ActiveWorkoutPreparedStartState: Equatable, Sendable {
-    let session: ActiveWorkoutRuntimeSession
-    let firstRenderSnapshot: ActiveWorkoutPreparedFirstRenderSnapshot
-}
-
 nonisolated enum MainTabOverlayLayoutPolicy {
     private static let modernTabChromeStripBottomGap: CGFloat = 45
     private static let compactLegacyTabChromeStripBottomGap: CGFloat = 78
@@ -799,7 +744,6 @@ final class ActiveWorkoutPresentationState {
     var activeSessionID: UUID?
     var isActiveWorkoutPresented = false
     var isActiveWorkoutStripCollapsed = false
-    @ObservationIgnored private var preparedRuntimeSessionBySessionID: [UUID: ActiveWorkoutRuntimeSession] = [:]
     @ObservationIgnored private var preparedPreviousPerformanceResolutionBySessionID: [UUID: [UUID: WorkoutPreviousPerformanceResolution]] = [:]
     @ObservationIgnored private var preparedFirstRenderSnapshotBySessionID: [UUID: ActiveWorkoutPreparedFirstRenderSnapshot] = [:]
     @ObservationIgnored private var preparedScrollTargetBySessionID: [UUID: ActiveWorkoutScrollTarget] = [:]
@@ -808,7 +752,6 @@ final class ActiveWorkoutPresentationState {
     func present(sessionID: UUID) {
         if activeSessionID != sessionID {
             if let activeSessionID {
-                preparedRuntimeSessionBySessionID.removeValue(forKey: activeSessionID)
                 preparedPreviousPerformanceResolutionBySessionID.removeValue(forKey: activeSessionID)
                 preparedFirstRenderSnapshotBySessionID.removeValue(forKey: activeSessionID)
                 preparedScrollTargetBySessionID.removeValue(forKey: activeSessionID)
@@ -845,7 +788,6 @@ final class ActiveWorkoutPresentationState {
             return
         }
         if let activeSessionID {
-            preparedRuntimeSessionBySessionID.removeValue(forKey: activeSessionID)
             preparedPreviousPerformanceResolutionBySessionID.removeValue(forKey: activeSessionID)
             preparedFirstRenderSnapshotBySessionID.removeValue(forKey: activeSessionID)
             preparedScrollTargetBySessionID.removeValue(forKey: activeSessionID)
@@ -861,28 +803,6 @@ final class ActiveWorkoutPresentationState {
         for sessionID: UUID
     ) {
         preparedPreviousPerformanceResolutionBySessionID[sessionID] = resolutionByExerciseID
-    }
-
-    func stageRuntimeSession(
-        _ session: ActiveWorkoutRuntimeSession,
-        for sessionID: UUID
-    ) {
-        preparedRuntimeSessionBySessionID[sessionID] = session
-    }
-
-    func stagePreparedStart(_ preparedStart: ActiveWorkoutPreparedStartState) {
-        stageRuntimeSession(preparedStart.session, for: preparedStart.session.id)
-        stagePreparedFirstRenderSnapshot(preparedStart.firstRenderSnapshot, for: preparedStart.session.id)
-    }
-
-    func preparedRuntimeSession(
-        for sessionID: UUID
-    ) -> ActiveWorkoutRuntimeSession? {
-        preparedRuntimeSessionBySessionID[sessionID]
-    }
-
-    func clearPreparedRuntimeSession(for sessionID: UUID) {
-        preparedRuntimeSessionBySessionID.removeValue(forKey: sessionID)
     }
 
     func stagePreparedFirstRenderSnapshot(
@@ -960,6 +880,7 @@ final class ActiveWorkoutPresentationState {
     }
 
     func restoreActiveSessionIfMissing(
+        coordinator: ActiveWorkoutCoordinator,
         modelContext: ModelContext,
         backgroundStore: AppBackgroundStore? = nil,
         allowsLegacyDraftImport: Bool = true,
@@ -967,6 +888,7 @@ final class ActiveWorkoutPresentationState {
     ) async {
         guard activeSessionID == nil else { return }
         await restoreActiveSessionIfNeeded(
+            coordinator: coordinator,
             modelContext: modelContext,
             backgroundStore: backgroundStore,
             allowsLegacyDraftImport: allowsLegacyDraftImport,
@@ -975,27 +897,44 @@ final class ActiveWorkoutPresentationState {
     }
 
     func restoreActiveSessionIfNeeded(
+        coordinator: ActiveWorkoutCoordinator,
         modelContext: ModelContext,
         backgroundStore: AppBackgroundStore? = nil,
         allowsLegacyDraftImport: Bool = true,
         shouldApplyRestoredSession: @escaping @MainActor () -> Bool = { true }
     ) async {
-        let restoredPresentation = await Self.fetchActiveSessionPresentationIfNeeded(
-            modelContext: modelContext,
-            backgroundStore: backgroundStore,
-            allowsLegacyDraftImport: allowsLegacyDraftImport
-        )
+        if coordinator.storedSnapshot == nil {
+            await coordinator.restore()
+        }
+
+        if coordinator.storedSnapshot == nil, allowsLegacyDraftImport {
+            let imported: ActiveWorkoutRuntimeSession?
+            if let backgroundStore {
+                imported = try? await backgroundStore.perform(
+                    "active-workout.restore.legacy-active-session"
+                ) { backgroundContext in
+                    try ActiveWorkoutSessionFactory(modelContext: backgroundContext)
+                        .importLegacyActiveSessionIfNeeded()
+                }
+            } else {
+                imported = try? ActiveWorkoutSessionFactory(modelContext: modelContext)
+                    .importLegacyActiveSessionIfNeeded()
+            }
+            if let imported {
+                _ = coordinator.send(.start(imported))
+            }
+        }
 
         guard shouldApplyRestoredSession() else { return }
 
-        if let restoredPresentation {
-            activeSessionID = restoredPresentation.sessionID
-            stageScrollTarget(restoredPresentation.scrollTarget, for: restoredPresentation.sessionID)
+        if let snapshot = coordinator.storedSnapshot {
+            activeSessionID = snapshot.session.id
+            stageScrollTarget(snapshot.scrollTarget, for: snapshot.session.id)
             stageExpandedExerciseIDs(
-                restoredPresentation.expandedExerciseIDs,
-                for: restoredPresentation.sessionID
+                snapshot.expandedExerciseIDs,
+                for: snapshot.session.id
             )
-            switch restoredPresentation.presentationMode {
+            switch snapshot.presentationMode {
             case .some(.presented):
                 isActiveWorkoutPresented = true
                 isActiveWorkoutStripCollapsed = false
@@ -1008,50 +947,6 @@ final class ActiveWorkoutPresentationState {
         } else {
             clearPresentation()
         }
-    }
-
-    @MainActor
-    private static func fetchActiveSessionPresentationIfNeeded(
-        modelContext: ModelContext,
-        backgroundStore: AppBackgroundStore?,
-        allowsLegacyDraftImport: Bool
-    ) async -> ActiveWorkoutRestoredPresentation? {
-        do {
-            if let snapshot = try await ActiveWorkoutSnapshotStore.shared.loadStoredSnapshot() {
-                return ActiveWorkoutRestoredPresentation(
-                    sessionID: snapshot.session.id,
-                    presentationMode: snapshot.presentationMode,
-                    scrollTarget: snapshot.scrollTarget,
-                    expandedExerciseIDs: snapshot.expandedExerciseIDs
-                )
-            }
-        } catch {
-            // Fall through to legacy draft import. A bad local snapshot should not block
-            // one-time migration from old active SwiftData rows.
-        }
-
-        guard allowsLegacyDraftImport else {
-            return nil
-        }
-
-        let imported: ActiveWorkoutRuntimeSession?
-        if let backgroundStore {
-            imported = try? await backgroundStore.perform("active-workout.restore.legacy-active-session") {
-                backgroundContext in
-                try ActiveWorkoutSessionFactory(modelContext: backgroundContext)
-                    .importLegacyActiveSessionIfNeeded()
-            }
-        } else {
-            imported = try? ActiveWorkoutSessionFactory(modelContext: modelContext)
-                .importLegacyActiveSessionIfNeeded()
-        }
-
-        if let imported {
-            try? await ActiveWorkoutSnapshotStore.shared.save(imported)
-            return ActiveWorkoutRestoredPresentation(sessionID: imported.id, presentationMode: nil)
-        }
-
-        return nil
     }
 }
 
@@ -1406,7 +1301,8 @@ nonisolated final class RestTimerNotificationManager: @unchecked Sendable {
     static let shared = RestTimerNotificationManager()
 
     private let worker = RestTimerNotificationWorker(
-        notificationIdentifierPrefix: AppNotificationManager.restTimerIdentifierPrefix
+        notificationIdentifierPrefix: AppNotificationManager.restTimerIdentifierPrefix,
+        client: SystemUserNotificationCenterClient()
     )
     private let operationLock = NSLock()
     private var operationChain: Task<Void, Never>?
@@ -1414,6 +1310,7 @@ nonisolated final class RestTimerNotificationManager: @unchecked Sendable {
 
     private init() { }
 
+    @MainActor
     func configureNotifications() {
         AppNotificationManager.shared.configureNotifications()
     }
@@ -1434,14 +1331,18 @@ nonisolated final class RestTimerNotificationManager: @unchecked Sendable {
     }
 
     static func notificationDescriptor(
-        style: WorkoutNotificationStyle
+        style: WorkoutNotificationStyle,
+        permissions: NotificationPermissionSnapshot
     ) -> RestTimerNotificationDescriptor {
         RestTimerNotificationDescriptor(
-            title: "Rest complete",
+            title: L10n.restTimerTitle,
             subtitle: "",
-            body: "Time for your next set.",
+            body: L10n.restTimerBody,
             usesDefaultSound: true,
-            interruptionLevel: style.notificationInterruptionLevel
+            interruptionLevel: RestTimerInterruptionPolicy.effectiveLevel(
+                style: style,
+                permissions: permissions
+            )
         )
     }
 
@@ -1483,118 +1384,125 @@ nonisolated final class RestTimerNotificationManager: @unchecked Sendable {
 
 private actor RestTimerNotificationWorker {
     private let notificationIdentifierPrefix: String
+    private let client: any UserNotificationCenterClient
     private var schedulingTask: Task<Void, Never>?
     private var schedulingGeneration = 0
     private var currentNotificationIdentifier: String?
 
-    init(notificationIdentifierPrefix: String) {
+    init(
+        notificationIdentifierPrefix: String,
+        client: any UserNotificationCenterClient
+    ) {
         self.notificationIdentifierPrefix = notificationIdentifierPrefix
+        self.client = client
     }
 
     func scheduleRestTimer(
         seconds: Int,
         style: WorkoutNotificationStyle
-    ) {
+    ) async {
         schedulingGeneration += 1
         let generation = schedulingGeneration
-        clearCurrentRestTimerNotifications()
+        await clearCurrentRestTimerNotifications()
         let notificationIdentifier = "\(notificationIdentifierPrefix).\(generation)"
         currentNotificationIdentifier = notificationIdentifier
         schedulingTask?.cancel()
 
-        schedulingTask = Task.detached(priority: .utility) { [notificationIdentifierPrefix] in
-            let center = UNUserNotificationCenter.current()
-            let isAuthorized = await AppNotificationManager.shared.requestAlertAuthorizationIfNeeded()
+        let client = self.client
+        schedulingTask = Task(priority: .utility) { [notificationIdentifierPrefix] in
+            let permissions = await RestTimerNotificationAuthorization(client: client)
+                .ensureAuthorization()
 
-            guard isAuthorized else {
-                await self.finishSchedulingWithoutAuthorization(
+            guard permissions.allowsAlerts else {
+                self.finishSchedulingWithoutAuthorization(
                     generation: generation,
                     notificationIdentifier: notificationIdentifier
                 )
                 return
             }
-            guard await self.isCurrent(generation: generation, notificationIdentifier: notificationIdentifier) else {
+            guard self.isCurrent(generation: generation, notificationIdentifier: notificationIdentifier) else {
                 return
             }
 
-            let descriptor = RestTimerNotificationManager.notificationDescriptor(style: style)
-            let content = RestTimerNotificationManager.makeNotificationContent(from: descriptor)
+            let descriptor = RestTimerNotificationManager.notificationDescriptor(
+                style: style,
+                permissions: permissions
+            )
             await Self.clearAllRestTimerNotifications(
-                using: center,
+                using: client,
                 notificationIdentifierPrefix: notificationIdentifierPrefix
             )
-            guard await self.isCurrent(generation: generation, notificationIdentifier: notificationIdentifier) else {
+            guard self.isCurrent(generation: generation, notificationIdentifier: notificationIdentifier) else {
                 return
             }
 
-            let trigger = UNTimeIntervalNotificationTrigger(
-                timeInterval: TimeInterval(max(1, seconds)),
-                repeats: false
-            )
-            let request = UNNotificationRequest(
+            let request = UserNotificationRequestDescriptor(
                 identifier: notificationIdentifier,
-                content: content,
-                trigger: trigger
+                title: descriptor.title,
+                subtitle: descriptor.subtitle,
+                body: descriptor.body,
+                usesDefaultSound: descriptor.usesDefaultSound,
+                interruptionLevel: descriptor.interruptionLevel,
+                timeInterval: TimeInterval(seconds)
             )
 
-            try? await center.add(request)
+            try? await client.add(request)
             await self.finishScheduling(
                 generation: generation,
                 notificationIdentifier: notificationIdentifier,
-                center: center
+                client: client
             )
         }
     }
 
-    func cancelRestTimerNotification() {
+    func cancelRestTimerNotification() async {
         schedulingGeneration += 1
         let generation = schedulingGeneration
         schedulingTask?.cancel()
         schedulingTask = nil
-        clearCurrentRestTimerNotifications()
+        await clearCurrentRestTimerNotifications()
 
-        Task.detached(priority: .utility) { [notificationIdentifierPrefix] in
-            guard await self.isGenerationCurrent(generation) else { return }
+        let client = self.client
+        Task(priority: .utility) { [notificationIdentifierPrefix] in
+            guard self.isGenerationCurrent(generation) else { return }
             await Self.clearAllRestTimerNotifications(
-                using: UNUserNotificationCenter.current(),
+                using: client,
                 notificationIdentifierPrefix: notificationIdentifierPrefix
             )
         }
     }
 
-    private func clearCurrentRestTimerNotifications() {
+    private func clearCurrentRestTimerNotifications() async {
         guard let currentNotificationIdentifier else { return }
-        Self.clearRestTimerNotifications(
-            using: UNUserNotificationCenter.current(),
+        await Self.clearRestTimerNotifications(
+            using: client,
             identifier: currentNotificationIdentifier
         )
         self.currentNotificationIdentifier = nil
     }
 
     private static func clearRestTimerNotifications(
-        using center: UNUserNotificationCenter,
+        using client: any UserNotificationCenterClient,
         identifier: String
-    ) {
-        center.removePendingNotificationRequests(withIdentifiers: [identifier])
-        center.removeDeliveredNotifications(withIdentifiers: [identifier])
+    ) async {
+        await client.removePendingRequests(withIdentifiers: [identifier])
+        await client.removeDeliveredRequests(withIdentifiers: [identifier])
     }
 
     private static func clearAllRestTimerNotifications(
-        using center: UNUserNotificationCenter,
+        using client: any UserNotificationCenterClient,
         notificationIdentifierPrefix: String
     ) async {
-        let pendingIdentifiers = await center.pendingNotificationRequests()
-            .map(\.identifier)
+        let pendingIdentifiers = await client.pendingRequestIdentifiers()
             .filter { $0.hasPrefix(notificationIdentifierPrefix) }
-        let deliveredIdentifiers = await center.deliveredNotifications()
-            .map(\.request.identifier)
+        let deliveredIdentifiers = await client.deliveredRequestIdentifiers()
             .filter { $0.hasPrefix(notificationIdentifierPrefix) }
 
         if !pendingIdentifiers.isEmpty {
-            center.removePendingNotificationRequests(withIdentifiers: pendingIdentifiers)
+            await client.removePendingRequests(withIdentifiers: pendingIdentifiers)
         }
         if !deliveredIdentifiers.isEmpty {
-            center.removeDeliveredNotifications(withIdentifiers: deliveredIdentifiers)
+            await client.removeDeliveredRequests(withIdentifiers: deliveredIdentifiers)
         }
     }
 
@@ -1613,11 +1521,11 @@ private actor RestTimerNotificationWorker {
     private func finishScheduling(
         generation: Int,
         notificationIdentifier: String,
-        center: UNUserNotificationCenter
-    ) {
+        client: any UserNotificationCenterClient
+    ) async {
         if generation != schedulingGeneration || currentNotificationIdentifier != notificationIdentifier {
-            Self.clearRestTimerNotifications(
-                using: center,
+            await Self.clearRestTimerNotifications(
+                using: client,
                 identifier: notificationIdentifier
             )
             return
@@ -1640,10 +1548,11 @@ private actor RestTimerNotificationWorker {
     }
 }
 
-nonisolated final class AppNotificationManager {
+@MainActor
+final class AppNotificationManager {
     static let shared = AppNotificationManager()
 
-    static let restTimerIdentifierPrefix = "wgj.activeWorkout.restTimer"
+    nonisolated static let restTimerIdentifierPrefix = "wgj.activeWorkout.restTimer"
 
     private init() { }
 
@@ -1673,15 +1582,16 @@ nonisolated final class AppNotificationManager {
         }
     }
 
-    func isRestTimerNotification(_ notification: UNNotification) -> Bool {
+    nonisolated static func isRestTimerNotification(_ notification: UNNotification) -> Bool {
         notification.request.identifier.hasPrefix(Self.restTimerIdentifierPrefix)
     }
 }
 
-nonisolated final class WGJNotificationCenterDelegate: NSObject, UNUserNotificationCenterDelegate {
+@MainActor
+final class WGJNotificationCenterDelegate: NSObject, UNUserNotificationCenterDelegate {
     static let shared = WGJNotificationCenterDelegate()
 
-    static func presentationOptions(
+    nonisolated static func presentationOptions(
         isRestTimerNotification: Bool
     ) -> UNNotificationPresentationOptions {
         if isRestTimerNotification {
@@ -1691,19 +1601,19 @@ nonisolated final class WGJNotificationCenterDelegate: NSObject, UNUserNotificat
         return [.banner, .list, .sound, .badge]
     }
 
-    func userNotificationCenter(
+    nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         completionHandler(
             Self.presentationOptions(
-                isRestTimerNotification: AppNotificationManager.shared.isRestTimerNotification(notification)
+                isRestTimerNotification: AppNotificationManager.isRestTimerNotification(notification)
             )
         )
     }
 
-    func userNotificationCenter(
+    nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void

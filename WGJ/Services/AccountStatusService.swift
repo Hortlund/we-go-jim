@@ -1,55 +1,49 @@
 import CloudKit
 import Foundation
 
-enum AccountUnavailableReason: Equatable, Sendable {
+nonisolated enum AccountUnavailableReason: Equatable, Sendable {
     case noAccount
     case restricted
     case temporarilyUnavailable
     case unknown
 }
 
-enum AccountStatus: Equatable, Sendable {
+nonisolated enum AccountStatus: Equatable, Sendable {
     case checking
     case available
     case unavailable(AccountUnavailableReason)
 }
 
-protocol AccountStatusProviding {
+nonisolated protocol AccountStatusProviding: Sendable {
     func fetchAccountStatus() async -> AccountStatus
 }
 
-protocol CloudAccountStatusClient {
+nonisolated protocol CloudAccountStatusClient: Sendable {
     func accountStatus() async throws -> CKAccountStatus
 }
 
-struct CKContainerAccountStatusClient: CloudAccountStatusClient {
-    let container: CKContainer?
+nonisolated struct CKContainerAccountStatusClient: CloudAccountStatusClient, Sendable {
+    let containerIdentifier: String?
 
     init(container: CKContainer? = nil) {
-        self.container = container ?? AppRuntimeConfig.makeCloudKitContainer()
+        containerIdentifier = container?.containerIdentifier
+            ?? (AppRuntimeConfig.canUseConfiguredCloudKitContainer
+                ? AppRuntimeConfig.cloudKitContainerIdentifier
+                : nil)
     }
 
     func accountStatus() async throws -> CKAccountStatus {
-        guard let container else {
+        guard let containerIdentifier else {
             throw CloudKitContainerAvailabilityError.unavailable
         }
-
-        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<CKAccountStatus, any Error>) in
-            container.accountStatus { status, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume(returning: status)
-                }
-            }
-        }
+        return try await CKContainer(identifier: containerIdentifier).accountStatus()
     }
 }
 
-struct AccountStatusService: AccountStatusProviding {
-    private let client: CloudAccountStatusClient
+nonisolated struct AccountStatusService: AccountStatusProviding, Sendable {
+    private let client: any CloudAccountStatusClient
 
-    init(client: CloudAccountStatusClient = CKContainerAccountStatusClient()) {
+    init(client: any CloudAccountStatusClient = CKContainerAccountStatusClient()) {
         self.client = client
     }
 
@@ -79,5 +73,23 @@ struct AccountStatusService: AccountStatusProviding {
         } catch {
             return .unavailable(.unknown)
         }
+    }
+}
+
+nonisolated func accountStatusWithTimeout(
+    provider: any AccountStatusProviding,
+    timeout: Duration
+) async -> AccountStatus {
+    await withTaskGroup(of: AccountStatus.self) { group in
+        group.addTask {
+            await provider.fetchAccountStatus()
+        }
+        group.addTask {
+            try? await Task.sleep(for: timeout)
+            return .unavailable(.unknown)
+        }
+        let result = await group.next() ?? .unavailable(.unknown)
+        group.cancelAll()
+        return result
     }
 }

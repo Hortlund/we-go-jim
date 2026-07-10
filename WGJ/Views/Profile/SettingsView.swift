@@ -6,8 +6,10 @@ struct SettingsView: View {
     @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
     @Environment(AppWarmupState.self) private var appWarmupState
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var appRuntimeState = AppRuntimeState.shared
+    @State private var settingsPersistenceCoordinator = SettingsDraftCoordinator()
     @State private var libraryStatusText = "Not loaded yet"
     @State private var visibleExerciseCount = 0
     @State private var weeklyGoal = 4
@@ -18,6 +20,8 @@ struct SettingsView: View {
     @State private var keepsScreenAwake = false
     @State private var preferredWeightUnit: PreferredWeightUnit = .kg
     @State private var workoutNotificationStyle: WorkoutNotificationStyle = .timeSensitive
+    @State private var notificationPermissions: NotificationPermissionSnapshot?
+    @State private var submittedSettingsDraft = UserSettingsDraft.default
     @State private var hasLoadedProfile = false
     @State private var showingDiagnostics = false
 
@@ -98,7 +102,7 @@ struct SettingsView: View {
                             Text("Keep screen awake")
                                 .foregroundStyle(WGJTheme.textPrimary)
 
-                            Text("Prevents dimming and auto-lock while the app is open and active.")
+                            Text("Prevents dimming and auto-lock while a workout is active.")
                                 .font(.caption)
                                 .foregroundStyle(WGJTheme.textSecondary)
                         }
@@ -146,6 +150,20 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(WGJTheme.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
+
+                        if workoutNotificationStyle == .timeSensitive,
+                           let notificationPermissions,
+                           !notificationPermissions.allowsTimeSensitive {
+                            Label(
+                                notificationPermissions.allowsAlerts
+                                    ? "Time-sensitive alerts are off in iOS Settings; rest alerts will arrive as standard."
+                                    : "Notifications are off in iOS Settings; background rest alerts cannot be delivered.",
+                                systemImage: "exclamationmark.triangle.fill"
+                            )
+                            .font(.caption)
+                            .foregroundStyle(WGJTheme.warning)
+                            .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
                 .padding(14)
@@ -248,8 +266,14 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .task {
+            configureSettingsPersistenceIfNeeded()
             await bootstrapCatalog()
             await loadProfileIfNeeded()
+            await refreshNotificationPermissions()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
+            Task { await refreshNotificationPermissions() }
         }
         .onChange(of: isTrainingGuidanceEnabled) { _, newValue in
             guard hasLoadedProfile else { return }
@@ -273,6 +297,15 @@ struct SettingsView: View {
             guard hasLoadedProfile else { return }
             saveWorkoutNotificationStylePreference(newValue)
         }
+        .onChange(of: settingsPersistenceCoordinator.latestCommit) { _, commit in
+            guard let commit else { return }
+            applySettingsCommit(commit)
+        }
+        .onChange(of: settingsPersistenceCoordinator.errorDescription) { _, description in
+            guard let description else { return }
+            errorMessage = description
+            showingError = true
+        }
         .alert("Settings Error", isPresented: $showingError) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -280,6 +313,10 @@ struct SettingsView: View {
         }
         .onDisappear {
             weeklyGoalSaveFeedbackTask?.cancel()
+            let coordinator = settingsPersistenceCoordinator
+            Task {
+                await coordinator.flush()
+            }
         }
     }
 
@@ -314,6 +351,10 @@ struct SettingsView: View {
         }
     }
 
+    private func refreshNotificationPermissions() async {
+        notificationPermissions = await SystemUserNotificationCenterClient().settings()
+    }
+
     private func loadProfileIfNeeded() async {
         guard !hasLoadedProfile else { return }
         hasLoadedProfile = true
@@ -321,10 +362,13 @@ struct SettingsView: View {
         let backgroundStore = settingsBackgroundStore
         let cloudSyncEnabled = cloudSyncEnabled
         do {
-            let snapshot = try await backgroundStore.performAsync("settings.profile.load") { backgroundContext in
+            let preferredDisplayName = cloudSyncEnabled
+                ? await ICloudProfileDefaultDisplayNameProvider().defaultDisplayName()
+                : nil
+            let snapshot = try await backgroundStore.perform("settings.profile.load") { backgroundContext in
                 SettingsProfileSnapshot(
-                    profile: try await ProfileRepository(modelContext: backgroundContext)
-                        .bootstrapProfileIdentity(cloudSyncEnabled: cloudSyncEnabled)
+                    profile: try ProfileRepository(modelContext: backgroundContext)
+                        .bootstrapProfileIdentitySnapshot(preferredDisplayName: preferredDisplayName)
                 )
             }
             applyProfileSnapshot(snapshot)
@@ -355,22 +399,21 @@ struct SettingsView: View {
         keepsScreenAwake = snapshot.keepsScreenAwake
         preferredWeightUnit = snapshot.preferredWeightUnit
         workoutNotificationStyle = snapshot.workoutNotificationStyle
+        submittedSettingsDraft = UserSettingsDraft(
+            weeklyWorkoutGoal: snapshot.weeklyGoal,
+            isTrainingGuidanceEnabled: snapshot.isTrainingGuidanceEnabled,
+            keepsScreenAwake: snapshot.keepsScreenAwake,
+            preferredWeightUnit: snapshot.preferredWeightUnit,
+            workoutNotificationStyle: snapshot.workoutNotificationStyle
+        )
     }
 
     private func saveWeeklyGoal() {
-        let goal = weeklyGoal
-        let backgroundStore = settingsBackgroundStore
-        Task.detached(priority: .utility) {
-            do {
-                let normalizedGoal = try await backgroundStore.perform("settings.weekly-goal.save") { backgroundContext in
-                    try ProfileRepository(modelContext: backgroundContext).updateWeeklyWorkoutGoal(goal)
-                    return max(1, min(14, goal))
-                }
-                await self.applyWeeklyGoalSave(normalizedGoal)
-            } catch {
-                await self.showError(error)
-            }
-        }
+        guard weeklyGoal != submittedSettingsDraft.weeklyWorkoutGoal else { return }
+        submittedSettingsDraft.weeklyWorkoutGoal = weeklyGoal
+        settingsPersistenceCoordinator.submit(
+            UserSettingsPatch(weeklyWorkoutGoal: weeklyGoal)
+        )
     }
 
     @MainActor
@@ -384,10 +427,10 @@ struct SettingsView: View {
     private func showWeeklyGoalSaveFeedback() {
         weeklyGoalSaveMessage = "Weekly goal updated"
         weeklyGoalSaveFeedbackTask?.cancel()
-        weeklyGoalSaveFeedbackTask = Task.detached(priority: .utility) {
+        weeklyGoalSaveFeedbackTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(2))
             guard !Task.isCancelled else { return }
-            await self.clearWeeklyGoalSaveFeedbackAfterDelayIfStillNeeded()
+            clearWeeklyGoalSaveFeedbackAfterDelayIfStillNeeded()
         }
     }
 
@@ -405,76 +448,57 @@ struct SettingsView: View {
     }
 
     private func saveTrainingGuidancePreference(_ isEnabled: Bool) {
-        let backgroundStore = settingsBackgroundStore
-        Task.detached(priority: .utility) {
-            do {
-                try await backgroundStore.perform("settings.training-guidance.save") { backgroundContext in
-                    try ProfileRepository(modelContext: backgroundContext).updateTrainingGuidanceEnabled(isEnabled)
-                }
-                await self.invalidateProfileWarmup()
-            } catch {
-                await self.showError(error)
-            }
-        }
+        guard isEnabled != submittedSettingsDraft.isTrainingGuidanceEnabled else { return }
+        submittedSettingsDraft.isTrainingGuidanceEnabled = isEnabled
+        settingsPersistenceCoordinator.submit(
+            UserSettingsPatch(isTrainingGuidanceEnabled: isEnabled)
+        )
     }
 
     private func saveKeepsScreenAwakePreference(_ isEnabled: Bool) {
-        let backgroundStore = settingsBackgroundStore
-        Task.detached(priority: .utility) {
-            do {
-                try await backgroundStore.perform("settings.keeps-screen-awake.save") { backgroundContext in
-                    try ProfileRepository(modelContext: backgroundContext).updateKeepsScreenAwake(isEnabled)
-                }
-                await self.applyKeepsScreenAwakePreference(isEnabled)
-            } catch {
-                await self.showError(error)
-            }
-        }
+        guard isEnabled != submittedSettingsDraft.keepsScreenAwake else { return }
+        submittedSettingsDraft.keepsScreenAwake = isEnabled
+        settingsPersistenceCoordinator.submit(
+            UserSettingsPatch(keepsScreenAwake: isEnabled)
+        )
     }
 
     private func savePreferredWeightUnitPreference(_ unit: PreferredWeightUnit) {
-        let backgroundStore = settingsBackgroundStore
-        Task.detached(priority: .utility) {
-            do {
-                try await backgroundStore.perform("settings.weight-unit.save") { backgroundContext in
-                    try ProfileRepository(modelContext: backgroundContext).updatePreferredWeightUnit(unit)
-                }
-                await self.invalidateProfileWarmup()
-            } catch {
-                await self.showError(error)
-            }
-        }
+        guard unit != submittedSettingsDraft.preferredWeightUnit else { return }
+        submittedSettingsDraft.preferredWeightUnit = unit
+        settingsPersistenceCoordinator.submit(
+            UserSettingsPatch(preferredWeightUnit: unit)
+        )
     }
 
     private func saveWorkoutNotificationStylePreference(_ style: WorkoutNotificationStyle) {
+        guard style != submittedSettingsDraft.workoutNotificationStyle else { return }
+        submittedSettingsDraft.workoutNotificationStyle = style
+        settingsPersistenceCoordinator.submit(
+            UserSettingsPatch(workoutNotificationStyle: style)
+        )
+    }
+
+    private func configureSettingsPersistenceIfNeeded() {
         let backgroundStore = settingsBackgroundStore
-        Task.detached(priority: .utility) {
-            do {
-                try await backgroundStore.perform("settings.notification-style.save") { backgroundContext in
-                    try ProfileRepository(modelContext: backgroundContext).updateWorkoutNotificationStyle(style)
-                }
-                await self.applyWorkoutNotificationStylePreference(style)
-            } catch {
-                await self.showError(error)
+        settingsPersistenceCoordinator.configure { write in
+            try await backgroundStore.perform("settings.patch.save") { backgroundContext in
+                try ProfileRepository(modelContext: backgroundContext)
+                    .applySettingsPatch(write.patch)
             }
         }
     }
 
     @MainActor
-    private func invalidateProfileWarmup() {
+    private func applySettingsCommit(_ commit: RevisionedSettingsCommit) {
         appWarmupState.invalidateProfile()
-    }
-
-    @MainActor
-    private func applyKeepsScreenAwakePreference(_ isEnabled: Bool) {
-        appWarmupState.invalidateProfile()
-        AppRuntimeState.shared.keepsScreenAwake = isEnabled
-    }
-
-    @MainActor
-    private func applyWorkoutNotificationStylePreference(_ style: WorkoutNotificationStyle) {
-        appWarmupState.invalidateProfile()
-        AppRuntimeState.shared.updateWorkoutNotificationStyle(style)
+        AppRuntimeState.shared.keepsScreenAwake = commit.persistedDraft.keepsScreenAwake
+        AppRuntimeState.shared.updateWorkoutNotificationStyle(
+            commit.persistedDraft.workoutNotificationStyle
+        )
+        if commit.write.patch.weeklyWorkoutGoal != nil {
+            applyWeeklyGoalSave(commit.persistedDraft.weeklyWorkoutGoal)
+        }
     }
 
     @MainActor
@@ -503,33 +527,20 @@ private struct SettingsProfileSnapshot: Sendable {
         preferredWeightUnit = profile.preferredWeightUnit
         workoutNotificationStyle = profile.workoutNotificationStyle
     }
+
+    nonisolated init(profile: ProfileIdentitySnapshot) {
+        weeklyGoal = profile.weeklyWorkoutGoal
+        isTrainingGuidanceEnabled = profile.isTrainingGuidanceEnabled
+        keepsScreenAwake = profile.keepsScreenAwake
+        preferredWeightUnit = profile.preferredWeightUnit
+        workoutNotificationStyle = profile.workoutNotificationStyle
+    }
 }
 
 #Preview {
     NavigationStack {
         SettingsView()
     }
-    .modelContainer(for: [
-        ExerciseCatalogItem.self,
-        MuscleGroup.self,
-        ExerciseImageAsset.self,
-        ExerciseAlias.self,
-        ExerciseAttribution.self,
-        ExerciseCatalogSyncState.self,
-        UserProfile.self,
-        ProfileWidgetConfig.self,
-        TemplateFolder.self,
-        WorkoutTemplate.self,
-        TemplateExercise.self,
-        TemplateExerciseComponent.self,
-        TemplateExerciseSet.self,
-        ActiveWorkoutDraftSession.self,
-        ActiveWorkoutDraftExercise.self,
-        ActiveWorkoutDraftExerciseComponent.self,
-        ActiveWorkoutDraftSet.self,
-        WorkoutSession.self,
-        WorkoutSessionExercise.self,
-        WorkoutSessionSet.self,
-    ], inMemory: true)
+    .wgjPreviewModelContainer()
     .environment(\.cloudSyncEnabled, false)
 }

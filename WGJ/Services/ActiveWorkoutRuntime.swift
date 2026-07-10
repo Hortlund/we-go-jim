@@ -1,5 +1,4 @@
 import Foundation
-import Observation
 import SwiftData
 
 nonisolated struct ActiveWorkoutRuntimeSession: Identifiable, Equatable, Codable, Sendable {
@@ -56,20 +55,35 @@ nonisolated enum ActiveWorkoutStoredPresentationMode: String, Codable, Sendable 
     case collapsed
 }
 
+nonisolated enum ActiveWorkoutSnapshotWriteResult: Equatable, Sendable {
+    case written
+    case unchanged
+    case rejectedStale(currentRevision: UInt64)
+}
+
+nonisolated protocol ActiveWorkoutSnapshotStoring: Sendable {
+    func loadStoredSnapshot() async throws -> ActiveWorkoutStoredSnapshot?
+    func save(_ snapshot: ActiveWorkoutStoredSnapshot) async throws -> ActiveWorkoutSnapshotWriteResult
+    func delete() async throws
+}
+
 nonisolated struct ActiveWorkoutStoredSnapshot: Equatable, Codable, Sendable {
-    let session: ActiveWorkoutRuntimeSession
-    let restTimer: RestTimerSnapshot?
-    let presentationMode: ActiveWorkoutStoredPresentationMode?
-    let scrollTarget: ActiveWorkoutScrollTarget?
-    let expandedExerciseIDs: Set<UUID>
+    var revision: UInt64
+    var session: ActiveWorkoutRuntimeSession
+    var restTimer: RestTimerSnapshot?
+    var presentationMode: ActiveWorkoutStoredPresentationMode?
+    var scrollTarget: ActiveWorkoutScrollTarget?
+    var expandedExerciseIDs: Set<UUID>
 
     init(
+        revision: UInt64 = 0,
         session: ActiveWorkoutRuntimeSession,
         restTimer: RestTimerSnapshot? = nil,
         presentationMode: ActiveWorkoutStoredPresentationMode? = nil,
         scrollTarget: ActiveWorkoutScrollTarget? = nil,
         expandedExerciseIDs: Set<UUID> = []
     ) {
+        self.revision = revision
         self.session = session
         self.restTimer = restTimer
         self.presentationMode = presentationMode
@@ -78,6 +92,7 @@ nonisolated struct ActiveWorkoutStoredSnapshot: Equatable, Codable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
+        case revision
         case session
         case restTimer
         case presentationMode
@@ -87,6 +102,7 @@ nonisolated struct ActiveWorkoutStoredSnapshot: Equatable, Codable, Sendable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        revision = try container.decodeIfPresent(UInt64.self, forKey: .revision) ?? 0
         session = try container.decode(ActiveWorkoutRuntimeSession.self, forKey: .session)
         restTimer = try container.decodeIfPresent(RestTimerSnapshot.self, forKey: .restTimer)
         presentationMode = try container.decodeIfPresent(ActiveWorkoutStoredPresentationMode.self, forKey: .presentationMode)
@@ -488,10 +504,11 @@ nonisolated extension ExerciseComponentSnapshot {
     }
 }
 
-actor ActiveWorkoutSnapshotStore {
+actor ActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring {
     static let shared = ActiveWorkoutSnapshotStore()
 
     private static let defaultFileName = "active-workout-snapshot.json"
+    private static let invalidationFileName = "active-workout-invalidated-before.json"
 
     private let baseDirectory: URL
     private var cachedSnapshotData: Data?
@@ -534,12 +551,18 @@ actor ActiveWorkoutSnapshotStore {
             cachedSnapshotData = nil
             return nil
         }
+        if try isSnapshotInvalidated(url) {
+            cachedSnapshotData = nil
+            try? FileManager.default.removeItem(at: url)
+            return nil
+        }
         let data = try Data(contentsOf: url)
         cachedSnapshotData = data
         if let storedSnapshot = try? decoder.decode(ActiveWorkoutStoredSnapshot.self, from: data) {
             var session = storedSnapshot.session
             session.normalizeSetRestToExerciseDefaults()
             return ActiveWorkoutStoredSnapshot(
+                revision: storedSnapshot.revision,
                 session: session,
                 restTimer: storedSnapshot.restTimer,
                 presentationMode: storedSnapshot.presentationMode,
@@ -554,7 +577,55 @@ actor ActiveWorkoutSnapshotStore {
     }
 
     func save(
+        _ snapshot: ActiveWorkoutStoredSnapshot
+    ) throws -> ActiveWorkoutSnapshotWriteResult {
+        try Task.checkCancellation()
+        try FileManager.default.createDirectory(
+            at: baseDirectory,
+            withIntermediateDirectories: true
+        )
+        var normalizedSession = snapshot.session
+        normalizedSession.normalizeSetRestToExerciseDefaults()
+        let normalizedSnapshot = ActiveWorkoutStoredSnapshot(
+            revision: snapshot.revision,
+            session: normalizedSession,
+            restTimer: snapshot.restTimer?.isExpired == true ? nil : snapshot.restTimer,
+            presentationMode: snapshot.presentationMode,
+            scrollTarget: snapshot.scrollTarget,
+            expandedExerciseIDs: snapshot.expandedExerciseIDs
+        )
+        let currentSnapshot = try loadStoredSnapshot()
+        if let currentRevision = currentSnapshot?.revision,
+           normalizedSnapshot.revision < currentRevision {
+            return .rejectedStale(currentRevision: currentRevision)
+        }
+
+        try Task.checkCancellation()
+        let data = try encoder.encode(normalizedSnapshot)
+        let url = snapshotURL
+        if cachedSnapshotData == data,
+           FileManager.default.fileExists(atPath: url.path) {
+            return .unchanged
+        }
+        if cachedSnapshotData == nil,
+           FileManager.default.fileExists(atPath: url.path) {
+            let existingData = try Data(contentsOf: url)
+            cachedSnapshotData = existingData
+            if existingData == data {
+                return .unchanged
+            }
+        }
+
+        try Task.checkCancellation()
+        try data.write(to: url, options: [.atomic])
+        cachedSnapshotData = data
+        return .written
+    }
+
+    @discardableResult
+    func save(
         _ session: ActiveWorkoutRuntimeSession,
+        revision: UInt64? = nil,
         restTimer: RestTimerSnapshot? = nil,
         presentationMode: ActiveWorkoutStoredPresentationMode? = nil,
         scrollTarget: ActiveWorkoutScrollTarget? = nil,
@@ -563,7 +634,7 @@ actor ActiveWorkoutSnapshotStore {
         preservesExistingPresentationMode: Bool = true,
         preservesExistingScrollTarget: Bool = true,
         preservesExistingExpandedExerciseIDs: Bool = true
-    ) throws {
+    ) throws -> ActiveWorkoutSnapshotWriteResult {
         try Task.checkCancellation()
         try FileManager.default.createDirectory(
             at: baseDirectory,
@@ -589,30 +660,14 @@ actor ActiveWorkoutSnapshotStore {
         let resolvedScrollTarget = scrollTarget ?? existingScrollTarget
         let resolvedExpandedExerciseIDs = expandedExerciseIDs ?? existingExpandedExerciseIDs ?? []
         let storedSnapshot = ActiveWorkoutStoredSnapshot(
+            revision: revision ?? existingSnapshot?.revision ?? 0,
             session: normalizedSession,
             restTimer: resolvedRestTimer?.isExpired == true ? nil : resolvedRestTimer,
             presentationMode: resolvedPresentationMode,
             scrollTarget: resolvedScrollTarget,
             expandedExerciseIDs: resolvedExpandedExerciseIDs
         )
-        try Task.checkCancellation()
-        let data = try encoder.encode(storedSnapshot)
-        let url = snapshotURL
-        if cachedSnapshotData == data,
-           FileManager.default.fileExists(atPath: url.path) {
-            return
-        }
-        if cachedSnapshotData == nil,
-           FileManager.default.fileExists(atPath: url.path),
-           let existingData = try? Data(contentsOf: url) {
-            cachedSnapshotData = existingData
-            if existingData == data {
-                return
-            }
-        }
-        try Task.checkCancellation()
-        try data.write(to: url, options: [.atomic])
-        cachedSnapshotData = data
+        return try save(storedSnapshot)
     }
 
     func delete() throws {
@@ -625,12 +680,51 @@ actor ActiveWorkoutSnapshotStore {
         cachedSnapshotData = nil
     }
 
+    func invalidateSnapshotsSavedBefore(_ cutoff: Date) throws {
+        try FileManager.default.createDirectory(
+            at: baseDirectory,
+            withIntermediateDirectories: true
+        )
+        let existingCutoff = try invalidationCutoff()
+        let resolvedCutoff = max(existingCutoff ?? .distantPast, cutoff)
+        let markerData = try encoder.encode(resolvedCutoff)
+        try markerData.write(to: invalidationURL, options: [.atomic])
+
+        let url = snapshotURL
+        guard FileManager.default.fileExists(atPath: url.path),
+              try isSnapshotInvalidated(url) else {
+            return
+        }
+        try FileManager.default.removeItem(at: url)
+        cachedSnapshotData = nil
+    }
+
     func hasSnapshot() throws -> Bool {
         FileManager.default.fileExists(atPath: snapshotURL.path)
     }
 
     private var snapshotURL: URL {
         baseDirectory.appendingPathComponent(Self.defaultFileName, isDirectory: false)
+    }
+
+    private var invalidationURL: URL {
+        baseDirectory.appendingPathComponent(Self.invalidationFileName, isDirectory: false)
+    }
+
+    private func invalidationCutoff() throws -> Date? {
+        guard FileManager.default.fileExists(atPath: invalidationURL.path) else {
+            return nil
+        }
+        return try decoder.decode(Date.self, from: Data(contentsOf: invalidationURL))
+    }
+
+    private func isSnapshotInvalidated(_ url: URL) throws -> Bool {
+        guard let cutoff = try invalidationCutoff() else { return false }
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        guard let modificationDate = attributes[.modificationDate] as? Date else {
+            return true
+        }
+        return modificationDate <= cutoff
     }
 
     nonisolated private static func defaultBaseDirectory() -> URL {
@@ -899,332 +993,6 @@ nonisolated final class ActiveWorkoutSessionFactory {
     }
 }
 
-nonisolated final class ActiveWorkoutCompletionWriter {
-    private let modelContext: ModelContext
-
-    init(modelContext: ModelContext) {
-        self.modelContext = modelContext
-    }
-
-    @discardableResult
-    func finish(session runtimeSession: ActiveWorkoutRuntimeSession, notes: String? = nil) throws -> UUID {
-        var runtimeSession = runtimeSession
-        runtimeSession.normalizeSetRestToExerciseDefaults()
-        let completedAt = Date()
-        let completedSession = WorkoutSession(
-            id: runtimeSession.id,
-            templateID: runtimeSession.templateID,
-            name: runtimeSession.name,
-            status: .completed,
-            startedAt: runtimeSession.startedAt,
-            endedAt: completedAt,
-            durationSeconds: max(0, Int(completedAt.timeIntervalSince(runtimeSession.startedAt))),
-            totalVolume: 0,
-            prHitsCount: 0,
-            summaryMetricsVersion: 0,
-            notes: notes ?? runtimeSession.notes,
-            createdAt: runtimeSession.createdAt,
-            updatedAt: completedAt
-        )
-        modelContext.insert(completedSession)
-
-        completedSession.cardioBlocks = runtimeSession.cardioBlocks
-            .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
-            .map { runtimeCardioBlock in
-                let completedCardioBlock = WorkoutSessionCardioBlock(
-                    id: runtimeCardioBlock.id,
-                    sessionID: completedSession.id,
-                    phase: runtimeCardioBlock.phase,
-                    catalogExerciseUUID: runtimeCardioBlock.catalogExerciseUUID,
-                    exerciseNameSnapshot: runtimeCardioBlock.exerciseNameSnapshot,
-                    categorySnapshot: runtimeCardioBlock.categorySnapshot,
-                    muscleSummarySnapshot: runtimeCardioBlock.muscleSummarySnapshot,
-                    targetDurationSeconds: runtimeCardioBlock.targetDurationSeconds,
-                    isCompleted: runtimeCardioBlock.isCompleted,
-                    createdAt: runtimeCardioBlock.createdAt,
-                    updatedAt: runtimeCardioBlock.updatedAt,
-                    session: completedSession
-                )
-                modelContext.insert(completedCardioBlock)
-                return completedCardioBlock
-            }
-
-        let orderedRuntimeExercises = runtimeSession.exercises.sorted { $0.sortOrder < $1.sortOrder }
-        var completedExercises: [WorkoutSessionExercise] = []
-        var membershipsByExerciseID: [UUID: ExerciseSupersetMembershipDraft] = [:]
-        completedExercises.reserveCapacity(orderedRuntimeExercises.count)
-
-        for (exerciseIndex, runtimeExercise) in orderedRuntimeExercises.enumerated() {
-            let completedExercise = WorkoutSessionExercise(
-                id: runtimeExercise.id,
-                sessionID: completedSession.id,
-                templateExerciseID: runtimeExercise.templateExerciseID,
-                catalogExerciseUUID: runtimeExercise.catalogExerciseUUID,
-                exerciseNameSnapshot: runtimeExercise.exerciseNameSnapshot,
-                categorySnapshot: runtimeExercise.categorySnapshot,
-                muscleSummarySnapshot: runtimeExercise.muscleSummarySnapshot,
-                notes: runtimeExercise.notes,
-                targetRepMin: runtimeExercise.targetRepMin,
-                targetRepMax: runtimeExercise.targetRepMax,
-                restSeconds: runtimeExercise.restSeconds,
-                sortOrder: exerciseIndex,
-                createdAt: runtimeExercise.createdAt,
-                updatedAt: runtimeExercise.updatedAt,
-                session: completedSession
-            )
-            modelContext.insert(completedExercise)
-
-            let completedSets = materializeSets(
-                from: runtimeExercise.setDrafts,
-                exerciseID: completedExercise.id,
-                completedAt: completedAt,
-                sessionExercise: completedExercise
-            )
-            completedExercise.sets = completedSets
-            completedExercise.updateSetSummary(
-                totalSetCount: completedSets.count,
-                completedSetCount: completedSets.filter { set in
-                    set.isCompleted && (set.dropStages ?? []).allSatisfy(\.isCompleted)
-                }.count,
-                hasDropsets: completedSets.contains { !($0.dropStages ?? []).isEmpty }
-            )
-            completedExercises.append(completedExercise)
-
-            if let superset = runtimeExercise.superset {
-                membershipsByExerciseID[completedExercise.id] = superset
-            }
-        }
-
-        completedSession.exercises = completedExercises
-        syncSupersetGroups(
-            for: completedSession,
-            exercises: completedExercises,
-            membershipsByExerciseID: membershipsByExerciseID
-        )
-
-        let projectedFacts = HistoryProjectionSnapshotBuilder.projectedFacts(from: completedSession)
-        let summary = try WorkoutMetricsService(modelContext: modelContext).sessionSummary(
-            session: completedSession,
-            projectedFacts: projectedFacts
-        )
-        completedSession.totalVolume = summary.totalVolume
-        completedSession.prHitsCount = summary.prHitsCount
-        completedSession.summaryMetricsVersion = WorkoutMetricsService.currentSummaryMetricsVersion
-
-        try modelContext.save()
-        HistoryAnalyticsCache.shared.invalidate(container: modelContext.container)
-        HistoryProjectionBackgroundReconciler.shared.scheduleRebuild(
-            sessionID: completedSession.id,
-            container: modelContext.container
-        )
-        WorkoutHistoryChangeBroadcaster.post()
-        BoundaryCloudBackupScheduler.exportBestEffort(
-            container: modelContext.container,
-            reason: .workoutCompleted
-        )
-
-        return completedSession.id
-    }
-
-    private func materializeSets(
-        from drafts: [WorkoutSessionSetDraft],
-        exerciseID: UUID,
-        completedAt: Date,
-        sessionExercise: WorkoutSessionExercise
-    ) -> [WorkoutSessionSet] {
-        drafts.enumerated().map { setIndex, draft in
-            let normalizedLoad = WorkoutLoggedLoadNormalization.resolved(
-                actualWeight: draft.actualWeight,
-                actualLoadUnit: draft.actualLoadUnit,
-                targetLoadUnit: draft.targetLoadUnit
-            )
-            let completedSet = WorkoutSessionSet(
-                id: draft.id,
-                sessionExerciseID: exerciseID,
-                sortOrder: setIndex,
-                isWarmup: draft.isWarmup,
-                restSeconds: draft.restSeconds,
-                targetReps: draft.targetReps,
-                targetWeight: draft.targetWeight,
-                targetLoadUnit: draft.targetLoadUnit,
-                actualReps: draft.actualReps,
-                actualWeight: normalizedLoad.weight,
-                actualLoadUnit: normalizedLoad.unit,
-                isCompleted: draft.isCompleted,
-                isLocked: draft.isLocked,
-                createdAt: sessionExercise.createdAt,
-                updatedAt: completedAt,
-                sessionExercise: sessionExercise
-            )
-            modelContext.insert(completedSet)
-
-            completedSet.dropStages = draft.dropStages.enumerated().map { dropStageIndex, dropStageDraft in
-                let normalizedStageLoad = WorkoutLoggedLoadNormalization.resolved(
-                    actualWeight: dropStageDraft.actualWeight,
-                    actualLoadUnit: dropStageDraft.actualLoadUnit,
-                    targetLoadUnit: dropStageDraft.targetLoadUnit
-                )
-                let dropStage = WorkoutSessionDropStage(
-                    id: dropStageDraft.id,
-                    sessionSetID: completedSet.id,
-                    sortOrder: dropStageIndex,
-                    targetReps: dropStageDraft.targetReps,
-                    targetWeight: dropStageDraft.targetWeight,
-                    targetLoadUnit: dropStageDraft.targetLoadUnit,
-                    actualReps: dropStageDraft.actualReps,
-                    actualWeight: normalizedStageLoad.weight,
-                    actualLoadUnit: normalizedStageLoad.unit,
-                    isCompleted: dropStageDraft.isCompleted,
-                    createdAt: sessionExercise.createdAt,
-                    updatedAt: completedAt,
-                    sessionSet: completedSet
-                )
-                modelContext.insert(dropStage)
-                return dropStage
-            }
-            return completedSet
-        }
-    }
-
-    private func syncSupersetGroups(
-        for session: WorkoutSession,
-        exercises: [WorkoutSessionExercise],
-        membershipsByExerciseID: [UUID: ExerciseSupersetMembershipDraft]
-    ) {
-        let normalized = normalizedSupersetMemberships(
-            exercises: exercises.sorted { $0.sortOrder < $1.sortOrder },
-            membershipsByExerciseID: membershipsByExerciseID
-        )
-        var groups: [WorkoutSessionSupersetGroup] = []
-
-        for exercise in exercises {
-            guard let membership = normalized.membershipsByExerciseID[exercise.id] else {
-                if let standaloneRest = normalized.standaloneRestSecondsByExerciseID[exercise.id] {
-                    exercise.restSeconds = standaloneRest
-                    for set in exercise.sets ?? [] {
-                        set.restSeconds = standaloneRest
-                    }
-                }
-                continue
-            }
-
-            let group = normalized.groupsByID[membership.groupID] ?? WorkoutSessionSupersetGroup(
-                id: membership.groupID,
-                sessionID: session.id,
-                roundRestSeconds: membership.roundRestSeconds,
-                session: session
-            )
-            if group.modelContext == nil {
-                modelContext.insert(group)
-            }
-            group.sessionID = session.id
-            group.session = session
-            group.roundRestSeconds = membership.roundRestSeconds
-
-            exercise.supersetGroupID = group.id
-            exercise.supersetPosition = membership.position
-            exercise.supersetGroup = group
-
-            if groups.contains(where: { $0.id == group.id }) == false {
-                groups.append(group)
-            }
-        }
-
-        for group in groups {
-            group.exercises = exercises
-                .filter { $0.supersetGroupID == group.id }
-                .sorted {
-                    ($0.supersetPosition?.sortOrder ?? Int.max) < ($1.supersetPosition?.sortOrder ?? Int.max)
-                }
-        }
-        session.supersetGroups = groups
-    }
-
-    private func normalizedSupersetMemberships(
-        exercises: [WorkoutSessionExercise],
-        membershipsByExerciseID: [UUID: ExerciseSupersetMembershipDraft]
-    ) -> ActiveWorkoutRuntimeSupersetNormalization {
-        var memberships: [UUID: ExerciseSupersetMembershipDraft] = [:]
-        var standaloneRestSecondsByExerciseID: [UUID: Int] = [:]
-        var groupsByID: [UUID: WorkoutSessionSupersetGroup] = [:]
-        var duplicateGroupIDs: Set<UUID> = []
-        var index = 0
-
-        while index < exercises.count {
-            let exercise = exercises[index]
-            guard let membership = membershipsByExerciseID[exercise.id] else {
-                index += 1
-                continue
-            }
-
-            guard membership.position == .first else {
-                standaloneRestSecondsByExerciseID[exercise.id] = membership.roundRestSeconds
-                index += 1
-                continue
-            }
-
-            let nextIndex = index + 1
-            guard nextIndex < exercises.count,
-                  let nextMembership = membershipsByExerciseID[exercises[nextIndex].id],
-                  nextMembership.groupID == membership.groupID,
-                  nextMembership.position == .second else {
-                standaloneRestSecondsByExerciseID[exercise.id] = membership.roundRestSeconds
-                index += 1
-                continue
-            }
-
-            if groupsByID[membership.groupID] != nil {
-                duplicateGroupIDs.insert(membership.groupID)
-            } else {
-                let roundRestSeconds = max(0, min(3600, membership.roundRestSeconds))
-                memberships[exercise.id] = ExerciseSupersetMembershipDraft(
-                    groupID: membership.groupID,
-                    position: .first,
-                    roundRestSeconds: roundRestSeconds
-                )
-                memberships[exercises[nextIndex].id] = ExerciseSupersetMembershipDraft(
-                    groupID: membership.groupID,
-                    position: .second,
-                    roundRestSeconds: roundRestSeconds
-                )
-                groupsByID[membership.groupID] = WorkoutSessionSupersetGroup(
-                    id: membership.groupID,
-                    sessionID: exercise.sessionID,
-                    roundRestSeconds: roundRestSeconds
-                )
-            }
-
-            index += 2
-        }
-
-        for duplicateGroupID in duplicateGroupIDs {
-            guard let group = groupsByID.removeValue(forKey: duplicateGroupID) else { continue }
-            for exercise in exercises where memberships[exercise.id]?.groupID == duplicateGroupID {
-                memberships.removeValue(forKey: exercise.id)
-                standaloneRestSecondsByExerciseID[exercise.id] = group.roundRestSeconds
-            }
-        }
-
-        for exercise in exercises where membershipsByExerciseID[exercise.id] != nil && memberships[exercise.id] == nil {
-            standaloneRestSecondsByExerciseID[exercise.id] = max(
-                0,
-                min(3600, membershipsByExerciseID[exercise.id]?.roundRestSeconds ?? exercise.restSeconds)
-            )
-        }
-
-        return ActiveWorkoutRuntimeSupersetNormalization(
-            membershipsByExerciseID: memberships,
-            standaloneRestSecondsByExerciseID: standaloneRestSecondsByExerciseID,
-            groupsByID: groupsByID
-        )
-    }
-}
-
-nonisolated private struct ActiveWorkoutRuntimeSupersetNormalization {
-    let membershipsByExerciseID: [UUID: ExerciseSupersetMembershipDraft]
-    let standaloneRestSecondsByExerciseID: [UUID: Int]
-    let groupsByID: [UUID: WorkoutSessionSupersetGroup]
-}
 
 nonisolated enum ActiveWorkoutRuntimeFirstRenderSnapshotBuilder {
     static func build(
@@ -1344,40 +1112,5 @@ nonisolated enum ActiveWorkoutRuntimeFirstRenderSnapshotBuilder {
         }
 
         return resolved
-    }
-}
-
-@MainActor
-@Observable
-final class ActiveWorkoutRuntimeController {
-    private let snapshotStore: ActiveWorkoutSnapshotStore
-    private(set) var session: ActiveWorkoutRuntimeSession?
-
-    init(
-        session: ActiveWorkoutRuntimeSession? = nil,
-        snapshotStore: ActiveWorkoutSnapshotStore = .shared
-    ) {
-        self.session = session
-        self.snapshotStore = snapshotStore
-    }
-
-    func loadSnapshot() async throws -> ActiveWorkoutRuntimeSession? {
-        let loaded = try await snapshotStore.load()
-        session = loaded
-        return loaded
-    }
-
-    func replaceSession(_ session: ActiveWorkoutRuntimeSession) {
-        self.session = session
-    }
-
-    func saveLifecycleSnapshot() async throws {
-        guard let session else { return }
-        try await snapshotStore.save(session)
-    }
-
-    func discard() async throws {
-        session = nil
-        try await snapshotStore.delete()
     }
 }

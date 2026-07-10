@@ -1,5 +1,4 @@
 import Foundation
-import SwiftData
 #if canImport(FoundationModels)
 import FoundationModels
 #endif
@@ -19,7 +18,7 @@ actor AppleCoachNarrativeService {
     typealias RecapGenerator = @Sendable (RecapGenerationInput) async throws -> CoachNarrativeSummary?
     typealias FollowUpGenerator = @Sendable (FollowUpGenerationInput) async throws -> CoachNarrativeSummary?
 
-    private let cacheRepository: CoachNarrativeCacheRepository
+    private let cache: any CoachNarrativeCaching
     private let availabilityProvider: @Sendable () -> Bool
     private let recapGenerator: RecapGenerator
     private let followUpGenerator: FollowUpGenerator
@@ -113,24 +112,12 @@ actor AppleCoachNarrativeService {
     private var inFlightWaiters: [String: Set<UUID>] = [:]
 
     init(
-        cacheRepository: CoachNarrativeCacheRepository,
+        cache: any CoachNarrativeCaching,
         availabilityProvider: (@Sendable () -> Bool)? = nil,
         recapGenerator: RecapGenerator? = nil,
         followUpGenerator: FollowUpGenerator? = nil
     ) {
-        self.cacheRepository = cacheRepository
-        self.availabilityProvider = availabilityProvider ?? AppleCoachNarrativeService.foundationModelsAvailable
-        self.recapGenerator = recapGenerator ?? AppleCoachNarrativeService.defaultRecapGenerator
-        self.followUpGenerator = followUpGenerator ?? AppleCoachNarrativeService.defaultFollowUpGenerator
-    }
-
-    init(
-        modelContext: ModelContext,
-        availabilityProvider: (@Sendable () -> Bool)? = nil,
-        recapGenerator: RecapGenerator? = nil,
-        followUpGenerator: FollowUpGenerator? = nil
-    ) {
-        cacheRepository = CoachNarrativeCacheRepository(modelContext: modelContext)
+        self.cache = cache
         self.availabilityProvider = availabilityProvider ?? AppleCoachNarrativeService.foundationModelsAvailable
         self.recapGenerator = recapGenerator ?? AppleCoachNarrativeService.defaultRecapGenerator
         self.followUpGenerator = followUpGenerator ?? AppleCoachNarrativeService.defaultFollowUpGenerator
@@ -145,11 +132,11 @@ actor AppleCoachNarrativeService {
         now: Date = .now,
         maxAge: TimeInterval = AppleCoachNarrativeService.recapRefreshMaxAge
     ) async throws -> CoachNarrativeSummary {
-        let cached = try cacheRepository.recap(
-            forWeekStart: snapshot.weekStart,
+        let cached = try await cache.recap(
+            weekStart: snapshot.weekStart,
             revisionKey: snapshot.revisionKey
         )
-        let shouldRefresh = try cacheRepository.needsRecapRefresh(
+        let shouldRefresh = try await cache.needsRecapRefresh(
             weekStart: snapshot.weekStart,
             revisionKey: snapshot.revisionKey,
             now: now,
@@ -163,7 +150,7 @@ actor AppleCoachNarrativeService {
 
         if shouldRefresh {
             let fallbackSummary = fallbackRecap(for: snapshot)
-            try cacheRepository.saveRecap(
+            try await cache.saveRecap(
                 fallbackSummary,
                 weekStart: snapshot.weekStart,
                 revisionKey: snapshot.revisionKey
@@ -180,7 +167,7 @@ actor AppleCoachNarrativeService {
         now: Date = .now,
         maxAge: TimeInterval = AppleCoachNarrativeService.recapRefreshMaxAge
     ) async throws -> CoachNarrativeSummary {
-        let shouldRefresh = try cacheRepository.needsRecapRefresh(
+        let shouldRefresh = try await cache.needsRecapRefresh(
             weekStart: snapshot.weekStart,
             revisionKey: snapshot.revisionKey,
             now: now,
@@ -212,8 +199,8 @@ actor AppleCoachNarrativeService {
         )
         let fallbackSummary = fallbackRecap(for: snapshot)
         let availabilityProvider = self.availabilityProvider
-        let cached = try cacheRepository.recap(
-            forWeekStart: snapshot.weekStart,
+        let cached = try await cache.recap(
+            weekStart: snapshot.weekStart,
             revisionKey: snapshot.revisionKey
         )
         if !forceRefresh, let cached, cached.availabilityMode != .fallback {
@@ -232,8 +219,8 @@ actor AppleCoachNarrativeService {
                     fallback: fallbackSummary
                 )
             },
-            persist: { [cacheRepository] summary in
-                try cacheRepository.saveRecap(
+            persist: { [cache] summary in
+                try await cache.saveRecap(
                     summary,
                     weekStart: snapshot.weekStart,
                     revisionKey: snapshot.revisionKey
@@ -253,7 +240,7 @@ actor AppleCoachNarrativeService {
         )
         let fallbackSummary = fallbackFollowUp(for: kind, snapshot: snapshot)
         let availabilityProvider = self.availabilityProvider
-        let cached = try cacheRepository.followUp(
+        let cached = try await cache.followUp(
             kind: kind,
             weekStart: snapshot.weekStart,
             revisionKey: snapshot.revisionKey
@@ -274,8 +261,8 @@ actor AppleCoachNarrativeService {
                     fallback: fallbackSummary
                 )
             },
-            persist: { [cacheRepository] summary in
-                try cacheRepository.saveFollowUp(
+            persist: { [cache] summary in
+                try await cache.saveFollowUp(
                     summary,
                     kind: kind,
                     weekStart: snapshot.weekStart,
@@ -288,12 +275,12 @@ actor AppleCoachNarrativeService {
     private func awaitResolvedSummary(
         from task: Task<SharedResolution, Error>,
         cacheKey: String,
-        persist: @escaping @Sendable (CoachNarrativeSummary) throws -> Void
+        persist: @escaping @Sendable (CoachNarrativeSummary) async throws -> Void
     ) async throws -> CoachNarrativeSummary {
         let resolution = try await awaitSharedTask(task, cacheKey: cacheKey)
         try Task.checkCancellation()
         if resolution.shouldPersist {
-            try persist(resolution.summary)
+            try await persist(resolution.summary)
         }
         return resolution.summary
     }
@@ -303,7 +290,7 @@ actor AppleCoachNarrativeService {
         cachedFallback: CoachNarrativeSummary?,
         fallback: @autoclosure @escaping () -> CoachNarrativeSummary,
         generate: @escaping @Sendable () async throws -> CoachNarrativeSummary?,
-        persist: @escaping @Sendable (CoachNarrativeSummary) throws -> Void
+        persist: @escaping @Sendable (CoachNarrativeSummary) async throws -> Void
     ) async throws -> CoachNarrativeSummary {
         if let task = inFlightRequests[cacheKey] {
             return try await awaitResolvedSummary(
@@ -319,7 +306,7 @@ actor AppleCoachNarrativeService {
             }
 
             let fallbackSummary = fallback()
-            try persist(fallbackSummary)
+            try await persist(fallbackSummary)
             return fallbackSummary
         }
 

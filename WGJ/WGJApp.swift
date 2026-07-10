@@ -17,31 +17,47 @@ struct WGJApp: App {
         WindowGroup {
             Group {
                 if let resolvedBootstrap = launchBootstrapState.resolvedBootstrap {
-                    ContentView()
-                        .environment(\.cloudSyncEnabled, resolvedBootstrap.bootstrap.cloudSyncEnabled)
-                        .environment(\.cloudSyncErrorDescription, resolvedBootstrap.bootstrap.cloudSyncErrorDescription)
-                        .environment(\.userDataSyncStatus, AppRuntimeState.shared.userDataSyncStatus)
-                        .environment(\.appBackgroundStore, resolvedBootstrap.backgroundStore)
-                        .environment(AppNotificationRouter.shared)
-                        .modelContainer(resolvedBootstrap.bootstrap.container)
+                    switch resolvedBootstrap.bootstrap.persistenceMode {
+                    case .durable:
+                        ContentView()
+                            .environment(\.appPersistenceMode, resolvedBootstrap.bootstrap.persistenceMode)
+                            .environment(\.cloudSyncEnabled, resolvedBootstrap.bootstrap.cloudSyncEnabled)
+                            .environment(\.cloudSyncErrorDescription, resolvedBootstrap.bootstrap.cloudSyncErrorDescription)
+                            .environment(\.userDataSyncStatus, AppRuntimeState.shared.userDataSyncStatus)
+                            .environment(\.appBackgroundStore, resolvedBootstrap.backgroundStore)
+                            .environment(AppNotificationRouter.shared)
+                            .environment(resolvedBootstrap.activeWorkoutCoordinator)
+                            .modelContainer(resolvedBootstrap.bootstrap.container)
+                    case .volatileDiagnostic(let reason):
+                        AppStorageDiagnosticModeView(
+                            reason: reason,
+                            onRetry: retryDurableStorage
+                        )
+                    }
+                } else if let recoveryState = launchBootstrapState.recoveryState {
+                    AppStorageRecoveryView(
+                        state: recoveryState,
+                        onRetry: retryDurableStorage,
+                        onEnterDiagnosticMode: enterDiagnosticMode
+                    )
                 } else {
                     SplashView()
                         .task {
                             launchBootstrapState.resolveIfNeeded(
                                 resolver: {
                                     try await Self.makeContainerBootstrap()
-                                },
-                                failureFallback: { error in
-                                    try Self.makeEmergencyBootstrap(after: error)
                                 }
                             )
                         }
                 }
             }
+            .task {
+                _ = await AppDataArtifactCleanupQueue.shared.retryPending()
+            }
         }
     }
 
-    private static func makeContainerBootstrap() async throws -> ModelContainerBootstrap {
+    nonisolated private static func makeContainerBootstrap() async throws -> ModelContainerBootstrap {
         AppStoreLayout.clearPersistentStoreFilesForPendingReset()
 #if DEBUG
         try AppStoreLayout.clearPersistentStoreFilesForUITestsIfRequested()
@@ -54,17 +70,14 @@ struct WGJApp: App {
             makeLocalFallbackContainer: {
                 try makeLocalFallbackContainer()
             },
-            makeEmergencyInMemoryContainer: {
-                try makeEmergencyInMemoryContainer()
-            },
             describeError: { error in
                 describe(error)
             }
         )
     }
 
-    private static func makeLocalFallbackContainer() throws -> ModelContainer {
-        let appSchema = fullAppSchema()
+    nonisolated private static func makeLocalFallbackContainer() throws -> ModelContainer {
+        let appSchema = AppSchema.makeFull()
         try AppStoreLayout.prepareAppGroupStoreDirectory()
         return try ModelContainer(
             for: appSchema,
@@ -72,11 +85,11 @@ struct WGJApp: App {
         )
     }
 
-    private static func makeUITestContainer() throws -> ModelContainer {
+    nonisolated private static func makeUITestContainer() throws -> ModelContainer {
 #if DEBUG
         resetActiveWorkoutSnapshotForUITestsIfRequested()
 #endif
-        let appSchema = fullAppSchema()
+        let appSchema = AppSchema.makeFull()
         let inMemory = ModelConfiguration(
             "UITest",
             schema: appSchema,
@@ -90,7 +103,7 @@ struct WGJApp: App {
     }
 
 #if DEBUG
-    private static func resetActiveWorkoutSnapshotForUITestsIfRequested() {
+    nonisolated private static func resetActiveWorkoutSnapshotForUITestsIfRequested() {
         if ProcessInfo.processInfo.arguments.contains("UITEST_RESET_ACTIVE_WORKOUT_SNAPSHOT") {
             ActiveWorkoutSnapshotStore.deleteDefaultSnapshotFileForUITests()
         }
@@ -98,7 +111,7 @@ struct WGJApp: App {
 #endif
 
     nonisolated private static func makeEmergencyInMemoryContainer() throws -> ModelContainer {
-        let appSchema = fullAppSchema()
+        let appSchema = AppSchema.makeFull()
         return try ModelContainer(
             for: appSchema,
             configurations: [
@@ -112,57 +125,32 @@ struct WGJApp: App {
         )
     }
 
-    nonisolated private static func makeEmergencyBootstrap(after error: Error) throws -> ModelContainerBootstrap {
-        let description = "App storage could not be opened. Keeping WGJ running in temporary local-only mode. \(describe(error))"
+    nonisolated private static func makeEmergencyBootstrap(reason: String) throws -> ModelContainerBootstrap {
+        let description = "Temporary diagnostics — changes cannot be saved. \(reason)"
         return ModelContainerBootstrap(
             container: try makeEmergencyInMemoryContainer(),
             cloudRuntimeMode: .unavailable(description),
             cloudFeaturesEnabled: false,
             userDataSyncEnabled: false,
             cloudSyncEnabled: false,
-            cloudSyncErrorDescription: description
+            cloudSyncErrorDescription: description,
+            persistenceMode: .volatileDiagnostic(reason: description)
         )
     }
 
-    nonisolated private static func fullAppSchema() -> Schema {
-        Schema([
-            ExerciseCatalogItem.self,
-            MuscleGroup.self,
-            ExerciseImageAsset.self,
-            ExerciseAlias.self,
-            ExerciseAttribution.self,
-            ExerciseCatalogSyncState.self,
-            UserProfile.self,
-            UserDataDeletionTombstone.self,
-            ProfileWidgetConfig.self,
-            CachedCoachNarrative.self,
-            CachedCoachFollowUpNarrative.self,
-            TemplateFolder.self,
-            WorkoutTemplate.self,
-            TemplateCardioBlock.self,
-            TemplateExercise.self,
-            TemplateExerciseComponent.self,
-            TemplateExerciseSet.self,
-            TemplateSupersetGroup.self,
-            TemplateExerciseDropStage.self,
-            ActiveWorkoutDraftSession.self,
-            ActiveWorkoutDraftCardioBlock.self,
-            ActiveWorkoutDraftExercise.self,
-            ActiveWorkoutDraftExerciseComponent.self,
-            ActiveWorkoutDraftSet.self,
-            ActiveWorkoutDraftSupersetGroup.self,
-            ActiveWorkoutDraftDropStage.self,
-            WorkoutSession.self,
-            WorkoutSessionCardioBlock.self,
-            WorkoutSessionExercise.self,
-            WorkoutSessionSet.self,
-            WorkoutSessionSupersetGroup.self,
-            WorkoutSessionDropStage.self,
-            CompletedSetFact.self,
-        ])
+    private func retryDurableStorage() {
+        launchBootstrapState.retry {
+            try await Self.makeContainerBootstrap()
+        }
     }
 
-    private static func storeConfigurations() -> [ModelConfiguration] {
+    private func enterDiagnosticMode() {
+        launchBootstrapState.enterDiagnosticMode { reason in
+            try Self.makeEmergencyBootstrap(reason: reason)
+        }
+    }
+
+    nonisolated private static func storeConfigurations() -> [ModelConfiguration] {
         let localCatalogSchema = Schema([
             ExerciseCatalogItem.self,
             MuscleGroup.self,
@@ -246,7 +234,7 @@ struct WGJApp: App {
         return "\(nsError.domain)(\(nsError.code)): \(nsError.localizedDescription) [\(userInfo)]"
     }
 
-    private static func seedUITestCatalogIfNeeded(container: ModelContainer) throws {
+    nonisolated private static func seedUITestCatalogIfNeeded(container: ModelContainer) throws {
         let context = ModelContext(container)
         var descriptor = FetchDescriptor<ExerciseCatalogItem>()
         descriptor.fetchLimit = 1

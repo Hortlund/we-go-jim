@@ -1,12 +1,12 @@
 import Foundation
 
-enum WorkoutSetProgressTone: Equatable {
+nonisolated enum WorkoutSetProgressTone: Equatable, Sendable {
     case accent
     case success
     case caution
 }
 
-struct WorkoutSetProgressReference: Equatable {
+nonisolated struct WorkoutSetProgressReference: Equatable, Sendable {
     let lastValue: String
     let aimValue: String
     let statusText: String?

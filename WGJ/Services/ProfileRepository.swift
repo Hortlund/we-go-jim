@@ -88,6 +88,33 @@ nonisolated final class ProfileRepository {
         )
     }
 
+    /// Applies an already-resolved Cloud display name without holding a
+    /// `ModelContext` across an async suspension point.
+    func bootstrapProfileIdentitySnapshot(
+        preferredDisplayName: String?
+    ) throws -> ProfileIdentitySnapshot {
+        let sanitizedPreferredName = preferredDisplayName
+            .map { ReviewModerationService.sanitizedForSharing($0, kind: .displayName) }
+            .flatMap { value in
+                value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
+            }
+
+        if let existing = try currentProfile() {
+            if let sanitizedPreferredName,
+               shouldReplaceDefaultDisplayName(for: existing, with: sanitizedPreferredName) {
+                existing.displayName = sanitizedPreferredName
+                existing.updatedAt = .now
+                try saveUserDataChanges()
+            }
+            return ProfileIdentitySnapshot(profile: existing)
+        }
+
+        let profile = UserProfile(displayName: sanitizedPreferredName ?? Self.localDefaultDisplayName)
+        modelContext.insert(profile)
+        try saveUserDataChanges()
+        return ProfileIdentitySnapshot(profile: profile)
+    }
+
     func updateIdentity(name: String, athleteType: ProfileAthleteType?) throws {
         let profile = try loadOrCreateProfile()
         try saveProfile(
@@ -160,6 +187,41 @@ nonisolated final class ProfileRepository {
         profile.workoutNotificationStyle = style
         profile.updatedAt = .now
         try saveUserDataChanges()
+    }
+
+    func applySettingsPatch(_ patch: UserSettingsPatch) throws -> UserSettingsDraft {
+        let profile = try loadOrCreateProfile()
+        var changed = false
+
+        if let value = patch.weeklyWorkoutGoal {
+            profile.weeklyWorkoutGoal = max(1, min(14, value))
+            changed = true
+        }
+        if let value = patch.isTrainingGuidanceEnabled {
+            profile.isTrainingGuidanceEnabled = value
+            changed = true
+        }
+        if let value = patch.keepsScreenAwake {
+            profile.keepsScreenAwake = value
+            changed = true
+        }
+        if let value = patch.preferredWeightUnit {
+            profile.preferredWeightUnit = value
+            changed = true
+        }
+        if let value = patch.workoutNotificationStyle {
+            profile.workoutNotificationStyle = value
+            changed = true
+        }
+
+        if changed {
+            profile.updatedAt = .now
+            try saveUserDataChanges()
+            if patch.weeklyWorkoutGoal != nil {
+                WeeklyGoalWidgetPublisher.publishBestEffort(modelContext: modelContext)
+            }
+        }
+        return UserSettingsDraft(profile: profile)
     }
 
     private func resolvedDefaultDisplayName(

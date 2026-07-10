@@ -77,17 +77,11 @@
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
-		<true/>
+		<false/>
 		<key>UISceneConfigurations</key>
 		<dict/>
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
-	<true/>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>remote-notification</string>
-	</array>
-	<key>UIRequiresFullScreen</key>
 	<true/>
 	<key>UILaunchScreen</key>
 	<dict>
@@ -101,6 +95,9 @@
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 </dict>
 </plist>

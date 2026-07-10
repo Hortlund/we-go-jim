@@ -157,16 +157,27 @@ nonisolated final class WorkoutSessionRepository {
 
     private let modelContext: ModelContext
     private let weeklyGoalWidgetPublisher: WeeklyGoalWidgetPublisher?
+    private let autoSaveChanges: Bool
+    private var pendingPostCommitEffects: Set<PostCommitEffect> = []
+
+    private enum PostCommitEffect: Hashable {
+        case invalidateAnalytics
+        case scheduleProjection(UUID)
+        case publishWeeklyGoalWidget
+        case broadcastHistoryChange
+    }
     private var historyProjectionRepository: HistoryProjectionRepository {
         HistoryProjectionRepository(modelContext: modelContext)
     }
 
     init(
         modelContext: ModelContext,
-        weeklyGoalWidgetPublisher: WeeklyGoalWidgetPublisher? = WeeklyGoalWidgetPublisher()
+        weeklyGoalWidgetPublisher: WeeklyGoalWidgetPublisher? = WeeklyGoalWidgetPublisher(),
+        autoSaveChanges: Bool = true
     ) {
         self.modelContext = modelContext
         self.weeklyGoalWidgetPublisher = weeklyGoalWidgetPublisher
+        self.autoSaveChanges = autoSaveChanges
     }
 
     private func preferredLoadUnit() -> TemplateLoadUnit {
@@ -183,7 +194,52 @@ nonisolated final class WorkoutSessionRepository {
     }
 
     private func saveUserDataChanges() throws {
+        guard autoSaveChanges else { return }
+        guard modelContext.hasChanges else { return }
         try modelContext.save()
+    }
+
+    private func saveUserDataChanges(
+        postCommitEffects: Set<PostCommitEffect>
+    ) throws {
+        if autoSaveChanges {
+            if modelContext.hasChanges {
+                try modelContext.save()
+            }
+            apply(postCommitEffects)
+        } else {
+            pendingPostCommitEffects.formUnion(postCommitEffects)
+        }
+    }
+
+    func finalizeDeferredUserDataChangesIfNeeded() throws {
+        guard !autoSaveChanges else { return }
+        guard modelContext.hasChanges else {
+            pendingPostCommitEffects.removeAll()
+            return
+        }
+
+        try modelContext.save()
+        let effects = pendingPostCommitEffects
+        pendingPostCommitEffects.removeAll()
+        apply(effects)
+    }
+
+    private func apply(_ effects: Set<PostCommitEffect>) {
+        if effects.contains(.invalidateAnalytics) {
+            invalidateAnalyticsCache()
+        }
+        for effect in effects {
+            if case .scheduleProjection(let sessionID) = effect {
+                scheduleProjectionRebuild(for: sessionID)
+            }
+        }
+        if effects.contains(.publishWeeklyGoalWidget) {
+            publishWeeklyGoalWidgetProgress()
+        }
+        if effects.contains(.broadcastHistoryChange) {
+            WorkoutHistoryChangeBroadcaster.post()
+        }
     }
 
     private func scheduleProjectionRebuild(for sessionID: UUID) {
@@ -569,12 +625,24 @@ nonisolated final class WorkoutSessionRepository {
     }
 
     func addExercise(sessionID: UUID, catalogItem: ExerciseCatalogItem, restSeconds: Int = 120) throws {
+        try addExercise(
+            sessionID: sessionID,
+            selection: ExerciseCatalogSelection(catalogItem: catalogItem),
+            restSeconds: restSeconds
+        )
+    }
+
+    func addExercise(
+        sessionID: UUID,
+        selection: ExerciseCatalogSelection,
+        restSeconds: Int = 120
+    ) throws {
         guard let session = try session(id: sessionID) else {
             throw WorkoutSessionRepositoryError.sessionNotFound
         }
 
         let existing = try sessionExercises(sessionID: sessionID)
-        if existing.contains(where: { $0.catalogExerciseUUID == catalogItem.remoteUUID }) {
+        if existing.contains(where: { $0.catalogExerciseUUID == selection.remoteUUID }) {
             return
         }
 
@@ -582,10 +650,10 @@ nonisolated final class WorkoutSessionRepository {
         let created = WorkoutSessionExercise(
             sessionID: sessionID,
             templateExerciseID: nil,
-            catalogExerciseUUID: catalogItem.remoteUUID,
-            exerciseNameSnapshot: catalogItem.displayName,
-            categorySnapshot: catalogItem.categoryName,
-            muscleSummarySnapshot: catalogItem.primaryMuscleNames,
+            catalogExerciseUUID: selection.remoteUUID,
+            exerciseNameSnapshot: selection.displayName,
+            categorySnapshot: selection.categoryName,
+            muscleSummarySnapshot: selection.primaryMuscleNames,
             restSeconds: sanitizedRest(restSeconds),
             sortOrder: nextIndex,
             session: session
@@ -595,7 +663,7 @@ nonisolated final class WorkoutSessionRepository {
         let sets = defaultSessionSets(
             sessionExerciseID: created.id,
             restSeconds: created.restSeconds,
-            loadUnit: TemplateLoadUnit.inferredDefault(fromEquipmentSummary: catalogItem.equipmentSummary)
+            loadUnit: TemplateLoadUnit.inferredDefault(fromEquipmentSummary: selection.equipmentSummary)
                 ?? preferredLoadUnit(),
             sessionExercise: created
         )
@@ -1012,15 +1080,13 @@ nonisolated final class WorkoutSessionRepository {
             )
         }
 
-        try saveUserDataChanges()
-        invalidateAnalyticsCache()
-        if session.status != .completed {
-            scheduleProjectionRebuild(for: sessionID)
-        }
+        var effects: Set<PostCommitEffect> = [.invalidateAnalytics]
         if session.status == .completed {
-            publishWeeklyGoalWidgetProgress()
-            WorkoutHistoryChangeBroadcaster.post()
+            effects.formUnion([.publishWeeklyGoalWidget, .broadcastHistoryChange])
+        } else {
+            effects.insert(.scheduleProjection(sessionID))
         }
+        try saveUserDataChanges(postCommitEffects: effects)
     }
 
     @discardableResult

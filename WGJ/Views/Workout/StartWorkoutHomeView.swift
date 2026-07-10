@@ -9,6 +9,7 @@ struct StartWorkoutHomeView: View {
     @Environment(\.isTabActive) private var isTabActive
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
+    @Environment(ActiveWorkoutCoordinator.self) private var activeWorkoutCoordinator
     @Environment(TemplateFileOpenState.self) private var templateFileOpenState
 
     @State private var expandedFolderIDs = StartWorkoutFolderExpansionPersistence.load()
@@ -45,6 +46,10 @@ struct StartWorkoutHomeView: View {
     }
 
     var body: some View {
+        taskObservedScreen
+    }
+
+    private var baseScreen: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 WGJRootHeader("Start Workout", subtitle: "Pick a template or start fresh.")
@@ -71,121 +76,144 @@ struct StartWorkoutHomeView: View {
         }
         .wgjScreenBackground()
         .toolbar(.hidden, for: .navigationBar)
-        .sheet(item: $selectedTemplatePreview) { preview in
-            TemplateStartPreviewSheet(
-                preview: preview,
-                isStarting: isPreparingActiveWorkoutStart,
-                onStart: {
-                    requestStartFromTemplate(templateID: preview.templateID)
-                },
-                onEdit: {
-                    editTemplate(templateID: preview.templateID, folderID: preview.folderID)
-                },
-                onExport: {
-                    presentExportOptions(for: .template(preview.templateID))
-                }
-            )
-        }
-        .sheet(item: $shareSheetItem) { sheet in
-            WGJActivityShareSheet(activityItems: [sheet.fileURL]) {
-                cleanupExportedFile(at: sheet.fileURL)
-            }
-        }
-        .sheet(item: $templateEditorContext, onDismiss: markHomeDirtyAndReloadIfActive) { context in
-            TemplateEditorView(folderID: context.folderID, templateID: context.templateID) { result in
-                handleTemplateEditorSaved(result)
-            }
-        }
-        .sheet(isPresented: $showingFolderEditor, onDismiss: markHomeDirtyAndReloadIfActive) {
-            TemplateFolderEditorSheet(
-                isEditing: editingFolderID != nil,
-                folderNameDraft: $folderNameDraft,
-                onCancel: {
-                    showingFolderEditor = false
-                },
-                onSave: saveFolderDraft
-            )
-        }
-        .alert("Start Workout Error", isPresented: $showingError) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text(errorMessage)
-        }
-        .fileImporter(
-            isPresented: $showingTemplateImporter,
-            allowedContentTypes: [.wgjTemplate, .json]
-        ) { result in
-            handleTemplateImport(result)
-        }
-        .alert("Workout already in progress", isPresented: $showingActiveWorkoutConflict) {
-            Button("Resume Current Workout") {
-                resumeConflictingActiveWorkout()
-            }
-            Button("Stay Here", role: .cancel) {
-                clearActiveWorkoutConflict()
-            }
-        } message: {
-            Text("Finish or cancel the current workout before starting a new one.")
-        }
-        .confirmationDialog(
-            "Delete folder?",
-            isPresented: Binding(
-                get: { pendingFolderDeletion != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        pendingFolderDeletion = nil
+    }
+
+    private var sheetPresentedScreen: some View {
+        baseScreen
+            .sheet(item: $selectedTemplatePreview) { preview in
+                TemplateStartPreviewSheet(
+                    preview: preview,
+                    isStarting: isPreparingActiveWorkoutStart,
+                    onStart: {
+                        requestStartFromTemplate(templateID: preview.templateID)
+                    },
+                    onEdit: {
+                        editTemplate(templateID: preview.templateID, folderID: preview.folderID)
+                    },
+                    onExport: {
+                        presentExportOptions(for: .template(preview.templateID))
                     }
+                )
+            }
+            .sheet(item: $shareSheetItem) { sheet in
+                WGJActivityShareSheet(activityItems: [sheet.fileURL]) {
+                    cleanupExportedFile(at: sheet.fileURL)
                 }
-            ),
-            titleVisibility: .visible,
-            presenting: pendingFolderDeletion
-        ) { folder in
-            Button("Delete Folder", role: .destructive) {
-                deleteFolder(folder.id)
             }
-            Button("Cancel", role: .cancel) {
-                pendingFolderDeletion = nil
+            .sheet(item: $templateEditorContext, onDismiss: markHomeDirtyAndReloadIfActive) { context in
+                TemplateEditorView(folderID: context.folderID, templateID: context.templateID) { result in
+                    handleTemplateEditorSaved(result)
+                }
             }
-        } message: { folder in
-            Text(folderDeletionMessage(for: folder))
-        }
-        .confirmationDialog(
-            "Export / Share",
-            isPresented: Binding(
-                get: { exportRequest != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        exportRequest = nil
+            .sheet(isPresented: $showingFolderEditor, onDismiss: markHomeDirtyAndReloadIfActive) {
+                TemplateFolderEditorSheet(
+                    isEditing: editingFolderID != nil,
+                    folderNameDraft: $folderNameDraft,
+                    onCancel: {
+                        showingFolderEditor = false
+                    },
+                    onSave: saveFolderDraft
+                )
+            }
+    }
+
+    private var alertPresentedScreen: some View {
+        sheetPresentedScreen
+            .alert("Start Workout Error", isPresented: $showingError) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(errorMessage)
+            }
+            .fileImporter(
+                isPresented: $showingTemplateImporter,
+                allowedContentTypes: [.wgjTemplate, .json]
+            ) { result in
+                handleTemplateImport(result)
+            }
+            .alert("Workout already in progress", isPresented: $showingActiveWorkoutConflict) {
+                Button("Resume Current Workout") {
+                    resumeConflictingActiveWorkout()
+                }
+                Button("Stay Here", role: .cancel) {
+                    clearActiveWorkoutConflict()
+                }
+            } message: {
+                Text("Finish or cancel the current workout before starting a new one.")
+            }
+    }
+
+    private var deletionDialogScreen: some View {
+        alertPresentedScreen
+            .confirmationDialog(
+                "Delete folder?",
+                isPresented: Binding(
+                    get: { pendingFolderDeletion != nil },
+                    set: { isPresented in
+                        if !isPresented {
+                            pendingFolderDeletion = nil
+                        }
                     }
+                ),
+                titleVisibility: .visible,
+                presenting: pendingFolderDeletion
+            ) { folder in
+                Button("Delete Folder", role: .destructive) {
+                    deleteFolder(folder.id)
                 }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button("WGJ Template File") {
-                exportSelectedTransfer(format: .bundle)
+                Button("Cancel", role: .cancel) {
+                    pendingFolderDeletion = nil
+                }
+            } message: { folder in
+                Text(folderDeletionMessage(for: folder))
             }
-            Button("JSON") {
-                exportSelectedTransfer(format: .json)
+    }
+
+    private var exportDialogScreen: some View {
+        deletionDialogScreen
+            .confirmationDialog(
+                "Export / Share",
+                isPresented: Binding(
+                    get: { exportRequest != nil },
+                    set: { isPresented in
+                        if !isPresented {
+                            exportRequest = nil
+                        }
+                    }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("WGJ Template File") {
+                    exportSelectedTransfer(format: .bundle)
+                }
+                Button("JSON") {
+                    exportSelectedTransfer(format: .json)
+                }
+                Button("Text") {
+                    exportSelectedTransfer(format: .text)
+                }
+                Button("Cancel", role: .cancel) {
+                    exportRequest = nil
+                }
+            } message: {
+                Text("Choose a format to export or share this item.")
             }
-            Button("Text") {
-                exportSelectedTransfer(format: .text)
+    }
+
+    private var taskObservedScreen: some View {
+        exportDialogScreen
+            .task(id: isTabActive) {
+                guard isTabActive else { return }
+                await reloadHomeSnapshotIfNeeded(force: false)
             }
-            Button("Cancel", role: .cancel) {
-                exportRequest = nil
+            .task(id: pendingTemplateFileTaskKey) {
+                importPendingTemplateFileIfNeeded()
             }
-        } message: {
-            Text("Choose a format to export or share this item.")
-        }
-        .task(id: isTabActive) {
-            guard isTabActive else { return }
-            await reloadHomeSnapshotIfNeeded(force: false)
-        }
-        .task(id: pendingTemplateFileTaskKey) {
-            importPendingTemplateFileIfNeeded()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .wgjTemplateLibraryDidChange)) { _ in
-            markHomeDirtyAndReloadIfActive()
-        }
+            .onReceive(NotificationCenter.default.publisher(for: .wgjTemplateLibraryDidChange)) { _ in
+                markHomeDirtyAndReloadIfActive()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .wgjUserDataRestoreDidComplete)) { _ in
+                markHomeDirtyAndReloadIfActive()
+            }
     }
 
     private var quickStartSection: some View {
@@ -675,27 +703,16 @@ struct StartWorkoutHomeView: View {
         templateID: UUID?,
         backgroundStore: AppBackgroundStore
     ) async throws -> ActiveWorkoutStartPreparation {
-        if let snapshot = try await ActiveWorkoutSnapshotStore.shared.loadDiscardingCorruptSnapshot() {
-            return ActiveWorkoutStartPreparation(
-                sessionID: snapshot.id,
-                isExistingConflict: true,
-                runtimeSession: nil,
-                previousPerformanceResolutionByExerciseID: [:],
-                firstRenderSnapshot: nil
-            )
-        }
-
         let importedLegacy = try await backgroundStore.performWrite("start-workout.import-legacy-active-session") { backgroundContext in
             try ActiveWorkoutSessionFactory(modelContext: backgroundContext)
                 .importLegacyActiveSessionIfNeeded()
         }
 
         if let importedLegacy {
-            try await ActiveWorkoutSnapshotStore.shared.save(importedLegacy)
             return ActiveWorkoutStartPreparation(
                 sessionID: importedLegacy.id,
                 isExistingConflict: true,
-                runtimeSession: nil,
+                runtimeSession: importedLegacy,
                 previousPerformanceResolutionByExerciseID: [:],
                 firstRenderSnapshot: nil
             )
@@ -705,11 +722,6 @@ struct StartWorkoutHomeView: View {
             try Self.prepareActiveWorkoutStart(templateID: templateID, modelContext: backgroundContext)
         }
 
-        try await ActiveWorkoutSnapshotStore.shared.save(
-            runtimePreparation.session,
-            presentationMode: .presented,
-            preservesExistingPresentationMode: false
-        )
         return ActiveWorkoutStartPreparation(
             sessionID: runtimePreparation.session.id,
             isExistingConflict: false,
@@ -738,6 +750,9 @@ struct StartWorkoutHomeView: View {
     }
 
     private func handlePreparedActiveWorkoutStart(_ preparation: ActiveWorkoutStartPreparation) {
+        if let runtimeSession = preparation.runtimeSession {
+            _ = activeWorkoutCoordinator.send(.start(runtimeSession))
+        }
         if preparation.isExistingConflict {
             presentActiveWorkoutConflict(for: preparation.sessionID)
             return
@@ -745,11 +760,14 @@ struct StartWorkoutHomeView: View {
 
         if let runtimeSession = preparation.runtimeSession,
            let firstRenderSnapshot = preparation.firstRenderSnapshot {
-            activeWorkoutPresentationState.stagePreparedStart(
-                ActiveWorkoutPreparedStartState(
-                    session: runtimeSession,
-                    firstRenderSnapshot: firstRenderSnapshot
-                )
+            _ = activeWorkoutCoordinator.send(.updatePresentation(
+                mode: .presented,
+                scrollTarget: nil,
+                expandedExerciseIDs: []
+            ))
+            activeWorkoutPresentationState.stagePreparedFirstRenderSnapshot(
+                firstRenderSnapshot,
+                for: runtimeSession.id
             )
         } else {
             activeWorkoutPresentationState.stagePreparedPreviousPerformanceResolution(
@@ -2499,30 +2517,7 @@ private struct ActiveWorkoutStartRuntimePreparation: Sendable {
         StartWorkoutHomeView()
     }
     .environment(ActiveWorkoutPresentationState())
+    .environment(ActiveWorkoutCoordinator.preview())
     .environment(TemplateFileOpenState())
-    .modelContainer(for: [
-        ExerciseCatalogItem.self,
-        MuscleGroup.self,
-        ExerciseImageAsset.self,
-        ExerciseAlias.self,
-        ExerciseAttribution.self,
-        ExerciseCatalogSyncState.self,
-        UserProfile.self,
-        ProfileWidgetConfig.self,
-        TemplateFolder.self,
-        WorkoutTemplate.self,
-        TemplateCardioBlock.self,
-        TemplateExercise.self,
-        TemplateExerciseComponent.self,
-        TemplateExerciseSet.self,
-        ActiveWorkoutDraftSession.self,
-        ActiveWorkoutDraftCardioBlock.self,
-        ActiveWorkoutDraftExercise.self,
-        ActiveWorkoutDraftExerciseComponent.self,
-        ActiveWorkoutDraftSet.self,
-        WorkoutSession.self,
-        WorkoutSessionCardioBlock.self,
-        WorkoutSessionExercise.self,
-        WorkoutSessionSet.self,
-    ], inMemory: true)
+    .wgjPreviewModelContainer()
 }

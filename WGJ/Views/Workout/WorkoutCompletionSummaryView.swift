@@ -19,9 +19,9 @@ nonisolated enum WorkoutCompletionConfettiOrigin {
         )
     }
 
-    static func defaultOrigin(heroFrame: CGRect, fallbackScreenWidth: CGFloat) -> CGPoint {
+    static func defaultOrigin(heroFrame: CGRect, fallbackContainerWidth: CGFloat) -> CGPoint {
         guard !heroFrame.isEmpty else {
-            return CGPoint(x: fallbackScreenWidth / 2, y: 220)
+            return CGPoint(x: max(fallbackContainerWidth, 0) / 2, y: 220)
         }
 
         return CGPoint(x: heroFrame.midX, y: heroFrame.minY + min(heroFrame.height - 28, heroFrame.height * 0.68))
@@ -104,6 +104,7 @@ struct WorkoutCompletionSummaryView: View {
     @State private var confettiDismissTasks: [UUID: Task<Void, Never>] = [:]
     @State private var automaticCelebrationTask: Task<Void, Never>?
     @State private var heroCardFrame: CGRect = .zero
+    @State private var completionContainerFrame: CGRect = .zero
 
     private var completionBackgroundStore: AppBackgroundStore {
         appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
@@ -147,6 +148,7 @@ struct WorkoutCompletionSummaryView: View {
             }
         }
         .coordinateSpace(name: "workout-completion-summary-space")
+        .wgjTrackContainerFrame($completionContainerFrame)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             bottomAction
         }
@@ -498,7 +500,7 @@ struct WorkoutCompletionSummaryView: View {
     private func defaultConfettiOrigin() -> CGPoint {
         WorkoutCompletionConfettiOrigin.defaultOrigin(
             heroFrame: heroCardFrame,
-            fallbackScreenWidth: UIScreen.main.bounds.width
+            fallbackContainerWidth: completionContainerFrame.width
         )
     }
 

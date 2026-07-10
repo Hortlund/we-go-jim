@@ -3,6 +3,25 @@ import SwiftUI
 @testable import WGJ
 
 final class ActiveWorkoutRuntimeTests: XCTestCase {
+    func testRowContentIdentityChangesOnlyWhenCatalogExerciseChanges() {
+        let runtimeID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let first = WorkoutExerciseRowContentIdentity(
+            runtimeExerciseID: runtimeID,
+            catalogExerciseUUID: "bench"
+        )
+        let valueEdit = WorkoutExerciseRowContentIdentity(
+            runtimeExerciseID: runtimeID,
+            catalogExerciseUUID: "bench"
+        )
+        let replacement = WorkoutExerciseRowContentIdentity(
+            runtimeExerciseID: runtimeID,
+            catalogExerciseUUID: "incline"
+        )
+
+        XCTAssertEqual(first, valueEdit)
+        XCTAssertNotEqual(first, replacement)
+    }
+
     func testWorkoutEditorsDoNotUseSwipeDeleteRows() throws {
         let testFileURL = URL(fileURLWithPath: #filePath)
         let projectRootURL = testFileURL
@@ -75,6 +94,26 @@ final class ActiveWorkoutRuntimeTests: XCTestCase {
 
         let loadedSession = try await store.load()
         XCTAssertEqual(loadedSession?.id, session.id)
+    }
+
+    func testSnapshotInvalidationPreventsRestoreOfOlderSnapshot() async throws {
+        let baseDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("active-workout-snapshot-invalidation-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: baseDirectory)
+        }
+        let store = ActiveWorkoutSnapshotStore(baseDirectory: baseDirectory)
+        let session = ActiveWorkoutRuntimeSession(
+            id: UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!,
+            name: "Push",
+            startedAt: Date(timeIntervalSince1970: 100)
+        )
+        try await store.save(session)
+
+        try await store.invalidateSnapshotsSavedBefore(.distantFuture)
+
+        let loadedSession = try await store.load()
+        XCTAssertNil(loadedSession)
     }
 
     func testHydrationStampChangesWhenSetDraftsChange() {

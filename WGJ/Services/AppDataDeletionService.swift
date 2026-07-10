@@ -35,12 +35,16 @@ nonisolated final class AppDataDeletionService {
     }
 
     func deleteLocalDeviceData() async throws {
-        try deleteLocalData()
+        try stageLocalDataDeletion()
+        if modelContext.hasChanges {
+            try modelContext.save()
+        }
+        invalidateCommittedCaches()
         try await clearLocalArtifacts()
     }
 
-    private func deleteLocalData() throws {
-        try clearExerciseImageCache()
+    func stageLocalDataDeletion() throws {
+        try stageExerciseImageMetadataReset()
         try deleteCustomExercises()
 
         try deleteAll(TemplateExerciseDropStage.self)
@@ -73,17 +77,31 @@ nonisolated final class AppDataDeletionService {
         try deleteAll(ProfileWidgetConfig.self)
         try deleteAll(UserDataDeletionTombstone.self)
         try deleteAll(UserProfile.self)
-        try modelContext.save()
+    }
+
+    func invalidateCommittedCaches() {
         ExerciseSearchService.invalidateCatalogIndex(for: modelContext)
         HistoryAnalyticsCache.shared.clear()
     }
 
-    private func clearLocalArtifacts() async throws {
+    static func deleteConfiguredCloudBackup() async throws {
+        guard AppRuntimeConfig.canUseConfiguredCloudKitContainer else { return }
+        try await CloudKitUserDataCloudBackupStore().deleteBackup()
+    }
+
+    static func clearDefaultLocalArtifacts() async throws {
+        removeExerciseImageCacheDirectory()
+        WeeklyGoalWidgetPublisher()?.clear()
+        try await ActiveWorkoutSnapshotStore.shared.delete()
+    }
+
+    func clearLocalArtifacts() async throws {
+        Self.removeExerciseImageCacheDirectory(fileManager: fileManager)
         clearWeeklyGoalWidgetSnapshot()
         try await clearActiveWorkoutSnapshot()
     }
 
-    private func clearExerciseImageCache() throws {
+    static func removeExerciseImageCacheDirectory(fileManager: FileManager = .default) {
         let cacheDirectory = fileManager
             .urls(for: .cachesDirectory, in: .userDomainMask)
             .first?
@@ -92,7 +110,9 @@ nonisolated final class AppDataDeletionService {
         if let cacheDirectory, fileManager.fileExists(atPath: cacheDirectory.path) {
             try? fileManager.removeItem(at: cacheDirectory)
         }
+    }
 
+    private func stageExerciseImageMetadataReset() throws {
         let assets = try modelContext.fetch(FetchDescriptor<ExerciseImageAsset>())
         for asset in assets {
             asset.localPath = nil

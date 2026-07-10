@@ -41,7 +41,13 @@ nonisolated enum ProfileWeeklyGoalChartScalePolicy {
 }
 
 struct ProfileView: View {
+    private struct RouteConsumptionTaskID: Equatable {
+        let requestID: UUID?
+        let isTabActive: Bool
+    }
+
     private enum ScrollTarget {
+        static let weeklyGoal = "profile-weekly-goal-section"
         static let cloudBackupSection = "profile-cloud-backup-section"
         static let cloudBackupDetailsEnd = "profile-cloud-backup-details-end"
         static let profileBottomPadding = "profile-bottom-padding"
@@ -59,6 +65,7 @@ struct ProfileView: View {
     @Environment(\.userDataSyncStatus) private var userDataSyncStatus
     @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(AppWarmupState.self) private var appWarmupState
+    @Environment(AppRouteState.self) private var appRouteState
 
     private var profileBackgroundStore: AppBackgroundStore {
         appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
@@ -76,6 +83,7 @@ struct ProfileView: View {
     @State private var isLoadingTrendSeries = false
     @State private var shouldRenderDashboardContent = false
     @State private var hasRenderedDashboardContent = false
+    @State private var showsRoutedWeeklyGoal = false
     @State private var showingWidgetManager = false
     @State private var showingProfileManagement = false
     @State private var showingCoachAnalysis = false
@@ -119,6 +127,14 @@ struct ProfileView: View {
             .scrollDismissesKeyboard(.interactively)
             .wgjScreenBackground()
             .accessibilityIdentifier("profile-content-root")
+            .task(
+                id: RouteConsumptionTaskID(
+                    requestID: appRouteState.pendingRequest?.id,
+                    isTabActive: isTabActive
+                )
+            ) {
+                await consumePendingRouteIfNeeded(scrollProxy: scrollProxy)
+            }
         }
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {
@@ -317,6 +333,12 @@ struct ProfileView: View {
                 ForEach(dashboardContent.enabledWidgets) { config in
                     dashboardWidget(config)
                 }
+
+                if showsRoutedWeeklyGoal,
+                   !dashboardContent.enabledWidgets.contains(where: { $0.kind == .weeklyGoals })
+                {
+                    weeklyGoalsWidget
+                }
             }
         }
     }
@@ -444,6 +466,24 @@ struct ProfileView: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .wgjCardContainer()
+        .id(ScrollTarget.weeklyGoal)
+        .accessibilityIdentifier("profile-weekly-goal-section")
+    }
+
+    @MainActor
+    private func consumePendingRouteIfNeeded(scrollProxy: ScrollViewProxy) async {
+        guard isTabActive,
+              let request = appRouteState.pendingRequest,
+              request.route == .profile(.weeklyGoal)
+        else { return }
+
+        await handleInitialActivation()
+        showsRoutedWeeklyGoal = true
+        shouldRenderDashboardContent = true
+        hasRenderedDashboardContent = true
+        await Task.yield()
+        scrollProxy.scrollTo(ScrollTarget.weeklyGoal, anchor: .center)
+        appRouteState.consume(id: request.id)
     }
 
     private var coachBriefWidget: some View {
@@ -1577,9 +1617,12 @@ final class ProfileViewController {
         cloudSyncEnabled: Bool,
         backgroundStore: AppBackgroundStore
     ) async throws -> ProfileIdentitySnapshot {
-        try await backgroundStore.performAsync("profile.identity") { backgroundContext in
-            try await ProfileRepository(modelContext: backgroundContext).bootstrapProfileIdentitySnapshot(
-                cloudSyncEnabled: cloudSyncEnabled
+        let preferredDisplayName = cloudSyncEnabled
+            ? await ICloudProfileDefaultDisplayNameProvider().defaultDisplayName()
+            : nil
+        return try await backgroundStore.perform("profile.identity") { backgroundContext in
+            try ProfileRepository(modelContext: backgroundContext).bootstrapProfileIdentitySnapshot(
+                preferredDisplayName: preferredDisplayName
             )
         }
     }
@@ -1666,12 +1709,15 @@ final class ProfileViewController {
             return nil
         }
 
-        return try await backgroundStore.performAsync("profile.coach.presentation") { backgroundContext in
-            try await Self.loadCoachBriefPresentation(
-                modelContext: backgroundContext,
-                enabledWidgets: enabledWidgets
-            )
+        let snapshot = try await backgroundStore.perform("profile.coach.presentation.snapshot") {
+            backgroundContext in
+            try WGJPerformance.measure("profile.coach.snapshot") {
+                try WeeklyCoachInsightService(modelContext: backgroundContext).weeklyInsightSnapshot()
+            }
         }
+        let cache = await backgroundStore.narrativeCache()
+        let recap = try await AppleCoachNarrativeService(cache: cache).recapForDisplay(for: snapshot)
+        return ProfileCoachPresentation(snapshot: snapshot, recap: recap)
     }
 
     func loadCoachFollowUpSummary(
@@ -1679,29 +1725,11 @@ final class ProfileViewController {
         snapshot: WeeklyCoachInsightSnapshot,
         backgroundStore: AppBackgroundStore
     ) async throws -> CoachNarrativeSummary {
-        try await backgroundStore.performAsync("profile.coach.followup") { backgroundContext in
-            try await AppleCoachNarrativeService(modelContext: backgroundContext).followUp(
-                for: kind,
-                snapshot: snapshot
-            )
-        }
-    }
-
-    private static func loadCoachBriefPresentation(
-        modelContext: ModelContext,
-        enabledWidgets: [ProfileWidgetConfigSnapshot]
-    ) async throws -> ProfileCoachPresentation? {
-        guard enabledWidgets.contains(where: { $0.kind == .coachBrief }) else {
-            return nil
-        }
-
-        let snapshot: WeeklyCoachInsightSnapshot
-        snapshot = try WGJPerformance.measure("profile.coach.snapshot") {
-            try WeeklyCoachInsightService(modelContext: modelContext).weeklyInsightSnapshot()
-        }
-
-        let recap = try await AppleCoachNarrativeService(modelContext: modelContext).recapForDisplay(for: snapshot)
-        return ProfileCoachPresentation(snapshot: snapshot, recap: recap)
+        let cache = await backgroundStore.narrativeCache()
+        return try await AppleCoachNarrativeService(cache: cache).followUp(
+            for: kind,
+            snapshot: snapshot
+        )
     }
 }
 
@@ -2069,27 +2097,6 @@ private struct ProfileConsistencyDayCell: View {
     NavigationStack {
         ProfileView()
     }
-    .modelContainer(for: [
-        ExerciseCatalogItem.self,
-        MuscleGroup.self,
-        ExerciseImageAsset.self,
-        ExerciseAlias.self,
-        ExerciseAttribution.self,
-        ExerciseCatalogSyncState.self,
-        UserProfile.self,
-        ProfileWidgetConfig.self,
-        TemplateFolder.self,
-        WorkoutTemplate.self,
-        TemplateExercise.self,
-        TemplateExerciseComponent.self,
-        TemplateExerciseSet.self,
-        ActiveWorkoutDraftSession.self,
-        ActiveWorkoutDraftExercise.self,
-        ActiveWorkoutDraftExerciseComponent.self,
-        ActiveWorkoutDraftSet.self,
-        WorkoutSession.self,
-        WorkoutSessionExercise.self,
-        WorkoutSessionSet.self,
-    ], inMemory: true)
+    .wgjPreviewModelContainer()
     .environment(\.cloudSyncEnabled, false)
 }

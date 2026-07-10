@@ -231,9 +231,10 @@ struct AppStorageDiagnosticsView: View {
                     if let restoreResult {
                         AppRuntimeState.shared.updateUserDataSyncStatus(.backedUp(at: restoreResult.restoredAt))
                         activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
-                        WorkoutHistoryChangeBroadcaster.post()
-                        TemplateLibraryChangeBroadcaster.post()
-                        showAlert(title: "Backup Restored", message: "Latest CloudKit backup was restored on this device.")
+                        let message = restoreResult.cleanupWarnings.isEmpty
+                            ? "Latest CloudKit backup was restored on this device."
+                            : "Latest CloudKit backup was restored. Some old local artifacts will be cleaned up automatically on the next launch."
+                        showAlert(title: "Backup Restored", message: message)
                     } else {
                         showAlert(title: "No Backup Found", message: "WGJ could not find a CloudKit backup to restore.")
                     }

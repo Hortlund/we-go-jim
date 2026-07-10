@@ -275,7 +275,7 @@ nonisolated struct CustomExerciseDraft: Equatable {
     }
 }
 
-struct ExerciseMuscleGroupSection: Identifiable {
+nonisolated struct ExerciseMuscleGroupSection: Identifiable {
     let id: String
     let title: String
     let exercises: [ExerciseCatalogItem]

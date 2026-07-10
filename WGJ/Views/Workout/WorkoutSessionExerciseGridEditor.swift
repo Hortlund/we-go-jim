@@ -57,12 +57,10 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private let externalIsExpanded: Binding<Bool>?
     @State private var localIsExpanded: Bool
-    @State private var rowSnapshots: [WorkoutSessionExerciseSetRowDisplaySnapshot]
-    @State private var cachedCompletedSetCount: Int
+    @State private var projection: WorkoutSessionExerciseGridProjection
     @State private var metricInputDraftBuffer = WorkoutMetricInputDraftStore()
     @State private var revealedCompletionGateSetIDs: Set<UUID> = []
-    @State private var pendingDisplayRefreshTask: Task<Void, Never>?
-    @State private var pendingCommitTask: Task<Void, Never>?
+    @State private var debounceCoordinator = WorkoutGridDebounceCoordinator()
     @State private var suppressNextSetDraftsDisplayRefresh = false
     @State private var suppressNextFocusLossCommit = false
     @FocusState private var focusedInput: SetInputFocus?
@@ -168,8 +166,8 @@ struct WorkoutSessionExerciseGridEditor: View {
         self.onDirtyStateChange = onDirtyStateChange
         self._localIsExpanded = State(initialValue: isExpanded?.wrappedValue ?? initiallyExpanded)
         let startsExpanded = isExpanded?.wrappedValue ?? initiallyExpanded
-        let initialRows = startsExpanded
-            ? Self.makeDisplayRows(
+        let initialProjection = startsExpanded
+            ? Self.makeProjection(
                 setDrafts: setDrafts.wrappedValue,
                 previousPerformanceResolution: previousPerformanceResolution,
                 targetRepMin: targetRepMin,
@@ -177,16 +175,17 @@ struct WorkoutSessionExerciseGridEditor: View {
                 restSeconds: restSeconds.wrappedValue,
                 formatWeight: { WGJFormatters.decimalString($0) }
             )
-            : []
-        self._rowSnapshots = State(initialValue: initialRows)
-        self._cachedCompletedSetCount = State(
-            initialValue: setDrafts.wrappedValue.reduce(0) { partialResult, draft in
-                partialResult + (draft.isCycleCompleted ? 1 : 0)
-            }
-        )
+            : WorkoutSessionExerciseGridProjectionBuilder.build(
+                setDrafts: setDrafts.wrappedValue
+            )
+        self._projection = State(initialValue: initialProjection)
     }
 
     var body: some View {
+        interactionObservedCard
+    }
+
+    private var baseCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             headerContent
 
@@ -198,93 +197,110 @@ struct WorkoutSessionExerciseGridEditor: View {
                 setsSection
             }
         }
-        .padding(16)
-        .background {
-            cardBackgroundLayer
-                .transaction { transaction in
-                    transaction.animation = nil
-                }
-        }
-        .wgjCardContainer(strong: true)
-        .overlay {
-            cardOverlayLayer
-                .transaction { transaction in
-                    transaction.animation = nil
-                }
-        }
-        .shadow(
-            color: shouldEmphasizeCompletedExercise ? WGJTheme.success.opacity(0.12) : .clear,
-            radius: 16,
-            x: 0,
-            y: 8
-        )
-        .onAppear {
-            syncCompletedSetCount()
-            if isExpanded {
-                refreshDisplayRows()
+    }
+
+    private var styledCard: some View {
+        baseCard
+            .padding(16)
+            .background {
+                cardBackgroundLayer
+                    .transaction { transaction in
+                        transaction.animation = nil
+                    }
             }
-            if let flushIdentifier {
-                flushCoordinator?.register(exerciseID: flushIdentifier) {
-                    flushPendingEditorState()
-                }
+            .wgjCardContainer(strong: true)
+            .overlay {
+                cardOverlayLayer
+                    .transaction { transaction in
+                        transaction.animation = nil
+                    }
             }
-        }
-        .onDisappear {
-            onInputFocusChange(false)
-            flushPendingEditorState()
-            if let flushIdentifier {
-                flushCoordinator?.unregister(exerciseID: flushIdentifier)
-            }
-        }
-        .onChange(of: setDrafts) { previousValue, newValue in
-            handleSetDraftsChange(previousValue: previousValue, currentValue: newValue)
-        }
-        .onChange(of: previousPerformanceResolution) { _, _ in
-            handlePreviousPerformanceResolutionChange()
-        }
-        .onChange(of: exerciseNotes) { previousValue, currentValue in
-            scheduleCommitRequest(
-                ActiveWorkoutEditorCommitDisposition.fieldChange(
-                    previous: previousValue,
-                    current: currentValue
-                )
+            .shadow(
+                color: shouldEmphasizeCompletedExercise ? WGJTheme.success.opacity(0.12) : .clear,
+                radius: 16,
+                x: 0,
+                y: 8
             )
-        }
-        .onChange(of: restSeconds) { _, _ in
-            refreshDisplayRows()
-        }
-        .onChange(of: targetRepMin) { _, _ in
-            refreshDisplayRows()
-        }
-        .onChange(of: targetRepMax) { _, _ in
-            refreshDisplayRows()
-        }
-        .onChange(of: focusedInput) { previousFocus, newFocus in
-            onInputFocusChange(newFocus != nil)
-            handleFocusedInputChange(previousFocus, newFocus)
-        }
-        .onChange(of: keyboardDismissToken) { _, _ in
-            dismissInputFocus()
-        }
-        .onChange(of: scenePhase) { _, newPhase in
-            guard ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: newPhase) else { return }
-            guard focusedInput != nil else { return }
-            dismissInputFocus()
-        }
-        .onChange(of: isExpanded) { _, newValue in
-            if newValue {
+    }
+
+    private var lifecycleObservedCard: some View {
+        styledCard
+            .onAppear {
+                syncCompletedSetCount()
+                if isExpanded {
+                    refreshDisplayRows()
+                }
+                if let flushIdentifier {
+                    flushCoordinator?.register(exerciseID: flushIdentifier) {
+                        flushPendingEditorState()
+                    }
+                }
+            }
+            .onDisappear {
+                onInputFocusChange(false)
+                flushPendingEditorState()
+                if let flushIdentifier {
+                    flushCoordinator?.unregister(exerciseID: flushIdentifier)
+                }
+            }
+    }
+
+    private var valueObservedCard: some View {
+        lifecycleObservedCard
+            .onChange(of: setDrafts) { previousValue, newValue in
+                handleSetDraftsChange(previousValue: previousValue, currentValue: newValue)
+            }
+            .onChange(of: previousPerformanceResolution) { _, _ in
+                handlePreviousPerformanceResolutionChange()
+            }
+            .onChange(of: exerciseNotes) { previousValue, currentValue in
+                scheduleCommitRequest(
+                    ActiveWorkoutEditorCommitDisposition.fieldChange(
+                        previous: previousValue,
+                        current: currentValue
+                    )
+                )
+            }
+            .onChange(of: restSeconds) { _, _ in
                 refreshDisplayRows()
-            } else {
-                pendingDisplayRefreshTask?.cancel()
-                pendingDisplayRefreshTask = nil
-                rowSnapshots = []
             }
-        }
-        .onChange(of: isSetCompletionEnabled) { _, isEnabled in
-            if isEnabled {
-                revealedCompletionGateSetIDs.removeAll()
+            .onChange(of: targetRepMin) { _, _ in
+                refreshDisplayRows()
             }
-        }
+            .onChange(of: targetRepMax) { _, _ in
+                refreshDisplayRows()
+            }
+    }
+
+    private var interactionObservedCard: some View {
+        valueObservedCard
+            .onChange(of: focusedInput) { previousFocus, newFocus in
+                onInputFocusChange(newFocus != nil)
+                handleFocusedInputChange(previousFocus, newFocus)
+            }
+            .onChange(of: keyboardDismissToken) { _, _ in
+                dismissInputFocus()
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                guard ActiveWorkoutKeyboardChromePolicy.shouldResetKeyboardState(scenePhase: newPhase) else { return }
+                guard focusedInput != nil else { return }
+                dismissInputFocus()
+            }
+            .onChange(of: isExpanded) { _, newValue in
+                if newValue {
+                    refreshDisplayRows()
+                } else {
+                    debounceCoordinator.cancelDisplayRefresh()
+                    projection = WorkoutSessionExerciseGridProjectionBuilder.build(
+                        setDrafts: setDrafts
+                    )
+                }
+            }
+            .onChange(of: isSetCompletionEnabled) { _, isEnabled in
+                if isEnabled {
+                    revealedCompletionGateSetIDs.removeAll()
+                }
+            }
     }
 
     private var previousBySetIndex: [Int: WorkoutPreviousSetSnapshot] {
@@ -626,10 +642,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             return row
         }
 
-        let workingSetNumber = setDrafts
-            .prefix(currentIndex + 1)
-            .filter { !$0.isWarmup }
-            .count
+        let workingSetNumber = projection.workingSetNumberBySetID[currentSet.id] ?? 0
         let row = Self.makeDisplayRow(
             draft: currentSet,
             index: currentIndex,
@@ -898,6 +911,8 @@ struct WorkoutSessionExerciseGridEditor: View {
                         focusMetric(.reps, at: index)
                     }
                     .disabled(!isSetEditingEnabled || setDrafts[index].isLocked)
+                    .accessibilityLabel(metricAccessibilityDescriptor(at: index, metric: .reps).label)
+                    .accessibilityValue(metricAccessibilityDescriptor(at: index, metric: .reps).value)
                     .accessibilityIdentifier("workout-set-\(index)-reps-field")
             }
             .contentShape(Rectangle())
@@ -990,6 +1005,8 @@ struct WorkoutSessionExerciseGridEditor: View {
                             focusMetric(.weight, at: index)
                         }
                         .disabled(!isSetEditingEnabled || isLocked)
+                        .accessibilityLabel(metricAccessibilityDescriptor(at: index, metric: .weight).label)
+                        .accessibilityValue(metricAccessibilityDescriptor(at: index, metric: .weight).value)
                         .accessibilityIdentifier("workout-set-\(index)-weight-field")
                 }
                 .contentShape(Rectangle())
@@ -1029,8 +1046,35 @@ struct WorkoutSessionExerciseGridEditor: View {
         return previousPerformanceResolution.isLoading ? "" : "0"
     }
 
+    private func metricAccessibilityDescriptor(
+        at index: Int,
+        metric: WorkoutMetricInputDraftBuffer.Metric
+    ) -> WorkoutMetricAccessibilityDescriptor {
+        let draft = setDrafts[index]
+        let value = metricInputDraftBuffer.text(for: draft.id, metric: metric) ?? {
+            switch metric {
+            case .weight: return draft.actualWeight.map(WGJFormatters.decimalString)
+            case .reps: return draft.actualReps.map(String.init)
+            }
+        }()
+        return WorkoutMetricAccessibilityPolicy.field(
+            exerciseName: exerciseName,
+            setNumber: index + 1,
+            dropStageNumber: nil,
+            metric: metric,
+            value: value,
+            unit: metric == .weight ? draft.actualLoadUnit.shortLabel : nil,
+            isWarmup: draft.isWarmup
+        )
+    }
+
     private func setBadge(for row: WorkoutSessionExerciseSetRowDisplaySnapshot) -> some View {
         let set = row.set
+        let accessibility = WorkoutMetricAccessibilityPolicy.warmupControl(
+            exerciseName: exerciseName,
+            setNumber: row.index + 1,
+            isWarmup: set.isWarmup
+        )
 
         return Button {
             toggleWarmup(at: row.index)
@@ -1054,6 +1098,9 @@ struct WorkoutSessionExerciseGridEditor: View {
         }
         .buttonStyle(.plain)
         .disabled(!isSetEditingEnabled || set.isLocked)
+        .accessibilityLabel(accessibility.label)
+        .accessibilityValue(accessibility.value)
+        .accessibilityHint(accessibility.hint ?? "")
     }
 
     private func setMenu(for row: WorkoutSessionExerciseSetRowDisplaySnapshot) -> some View {
@@ -1400,21 +1447,21 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private var displayRows: [WorkoutSessionExerciseSetRowDisplaySnapshot] {
         let currentIDs = setDrafts.map(\.id)
-        guard rowSnapshots.map(\.id) == currentIDs else {
-            return Self.makeDisplayRows(
+        guard projection.rows.map(\.id) == currentIDs else {
+            return Self.makeProjection(
                 setDrafts: setDrafts,
                 previousPerformanceResolution: previousPerformanceResolution,
                 targetRepMin: targetRepMin,
                 targetRepMax: targetRepMax,
                 restSeconds: restSeconds,
                 formatWeight: formatWeight
-            )
+            ).rows
         }
-        return rowSnapshots
+        return projection.rows
     }
 
     private var completedSetCount: Int {
-        cachedCompletedSetCount
+        projection.completedSetCount
     }
 
     private var isExerciseCompleted: Bool {
@@ -1606,7 +1653,12 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func indexForSetID(_ setID: UUID) -> Int? {
-        WorkoutSetRowIdentityResolver.currentIndex(for: setID, in: setDrafts)
+        if let index = projection.indexBySetID[setID],
+           setDrafts.indices.contains(index),
+           setDrafts[index].id == setID {
+            return index
+        }
+        return WorkoutSetRowIdentityResolver.currentIndex(for: setID, in: setDrafts)
     }
 
     private func toggleWarmup(at index: Int) {
@@ -1711,7 +1763,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         let currentDrafts = drafts ?? _setDrafts.wrappedValue
         let currentRestSeconds = overrideRestSeconds ?? restSeconds
         let snapshot = WGJPerformance.measure("workout-grid.row-refresh") {
-            Self.makeDisplayRows(
+            Self.makeProjection(
                 setDrafts: currentDrafts,
                 previousPerformanceResolution: previousPerformanceResolution,
                 targetRepMin: targetRepMin,
@@ -1720,41 +1772,30 @@ struct WorkoutSessionExerciseGridEditor: View {
                 formatWeight: formatWeight
             )
         }
-        rowSnapshots = snapshot
-        cachedCompletedSetCount = snapshot.reduce(0) { partialResult, row in
-            partialResult + (row.set.isCycleCompleted ? 1 : 0)
-        }
+        projection = snapshot
     }
 
     private func scheduleDisplayRefresh() {
         guard isExpanded else { return }
         guard focusedInput != nil else {
-            pendingDisplayRefreshTask?.cancel()
-            pendingDisplayRefreshTask = nil
+            debounceCoordinator.cancelDisplayRefresh()
             refreshDisplayRows()
             return
         }
 
-        pendingDisplayRefreshTask?.cancel()
         let delay = displayRefreshDebounce
-        pendingDisplayRefreshTask = Task.detached(priority: .utility) {
-            try? await Task.sleep(for: delay)
-            guard !Task.isCancelled else { return }
-            await refreshDisplayRowsAfterDebounceIfStillNeeded()
+        debounceCoordinator.scheduleDisplayRefresh(after: delay) {
+            refreshDisplayRowsAfterDebounceIfStillNeeded()
         }
     }
 
     @MainActor
     private func refreshDisplayRowsAfterDebounceIfStillNeeded() {
-        guard !Task.isCancelled else { return }
-        pendingDisplayRefreshTask = nil
         refreshDisplayRows()
     }
 
     private func flushPendingDisplayRefresh() {
-        guard pendingDisplayRefreshTask != nil else { return }
-        pendingDisplayRefreshTask?.cancel()
-        pendingDisplayRefreshTask = nil
+        guard debounceCoordinator.cancelDisplayRefresh() else { return }
         if isExpanded {
             refreshDisplayRows()
         }
@@ -1771,9 +1812,7 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     @discardableResult
     private func flushPendingMetricInputForImmediateUse() -> Bool {
-        let hadPendingCommit = pendingCommitTask != nil
-        pendingCommitTask?.cancel()
-        pendingCommitTask = nil
+        let hadPendingCommit = debounceCoordinator.cancelCommit()
         let changed = commitAllBufferedInput(clearsText: true)
         if changed || hadPendingCommit {
             requestImmediateCommitForCurrentState()
@@ -1803,38 +1842,28 @@ struct WorkoutSessionExerciseGridEditor: View {
         refreshDisplayRows()
     }
 
-    private static func makeDisplayRows(
+    private static func makeProjection(
         setDrafts: [WorkoutSessionSetDraft],
         previousPerformanceResolution: WorkoutPreviousPerformanceResolution,
         targetRepMin: Int?,
         targetRepMax: Int?,
         restSeconds: Int,
         formatWeight: (Double) -> String
-    ) -> [WorkoutSessionExerciseSetRowDisplaySnapshot] {
-        var rows: [WorkoutSessionExerciseSetRowDisplaySnapshot] = []
-        rows.reserveCapacity(setDrafts.count)
-        var workingSetNumber = 0
-
-        for (index, draft) in setDrafts.enumerated() {
-            if !draft.isWarmup {
-                workingSetNumber += 1
-            }
-
-            rows.append(
-                makeDisplayRow(
-                    draft: draft,
-                    index: index,
-                    workingSetNumber: workingSetNumber,
-                    previousPerformanceResolution: previousPerformanceResolution,
-                    targetRepMin: targetRepMin,
-                    targetRepMax: targetRepMax,
-                    restSeconds: restSeconds,
-                    formatWeight: formatWeight
-                )
+    ) -> WorkoutSessionExerciseGridProjection {
+        return WorkoutSessionExerciseGridProjectionBuilder.build(
+            setDrafts: setDrafts
+        ) { draft, index, workingSetNumber in
+            makeDisplayRow(
+                draft: draft,
+                index: index,
+                workingSetNumber: workingSetNumber,
+                previousPerformanceResolution: previousPerformanceResolution,
+                targetRepMin: targetRepMin,
+                targetRepMax: targetRepMax,
+                restSeconds: restSeconds,
+                formatWeight: formatWeight
             )
         }
-
-        return rows
     }
 
     private static func makeDisplayRow(
@@ -1948,8 +1977,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         guard setDrafts.indices.contains(index) else { return }
         guard isSetEditingEnabled, !setDrafts[index].isLocked else { return }
 
-        pendingCommitTask?.cancel()
-        pendingCommitTask = nil
+        debounceCoordinator.cancelCommit()
         _ = commitAllBufferedInput(clearsText: true)
 
         guard setDrafts.indices.contains(index) else { return }
@@ -1963,8 +1991,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             return
         }
 
-        pendingCommitTask?.cancel()
-        pendingCommitTask = nil
+        debounceCoordinator.cancelCommit()
         let retainedFocus = focusedInput?.setID == targetSetID ? focusedInput : nil
 
         if !manualCompletionMode {
@@ -2087,10 +2114,13 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func updateDropStageLoadUnit(_ loadUnit: TemplateLoadUnit, stageID: UUID, setIndex: Int) {
-        guard setDrafts.indices.contains(setIndex),
-              let stageIndex = setDrafts[setIndex].dropStages.firstIndex(where: { $0.id == stageID }) else {
+        guard let location = projection.dropStageLocationByID[stageID],
+              location.setIndex == setIndex,
+              setDrafts.indices.contains(location.setIndex),
+              setDrafts[location.setIndex].dropStages.indices.contains(location.stageIndex) else {
             return
         }
+        let stageIndex = location.stageIndex
         guard setDrafts[setIndex].dropStages[stageIndex].actualLoadUnit != loadUnit else { return }
         setDrafts[setIndex].dropStages[stageIndex].actualLoadUnit = loadUnit
         if loadUnit == .bodyweight {
@@ -2100,10 +2130,13 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func toggleDropStageCompletion(_ stageID: UUID, in setIndex: Int) {
-        guard setDrafts.indices.contains(setIndex),
-              let stageIndex = setDrafts[setIndex].dropStages.firstIndex(where: { $0.id == stageID }) else {
+        guard let location = projection.dropStageLocationByID[stageID],
+              location.setIndex == setIndex,
+              setDrafts.indices.contains(location.setIndex),
+              setDrafts[location.setIndex].dropStages.indices.contains(location.stageIndex) else {
             return
         }
+        let stageIndex = location.stageIndex
         guard !setDrafts[setIndex].isLocked, setDrafts[setIndex].isCompleted else { return }
 
         let isCompleted = !setDrafts[setIndex].dropStages[stageIndex].isCompleted
@@ -2297,6 +2330,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         stage: WorkoutSessionDropStageDraft
     ) -> some View {
         return WorkoutExerciseDropStageCardView(
+            exerciseName: exerciseName,
             setIndex: setIndex,
             stageIndex: stageIndex,
             stage: stage,
@@ -2427,10 +2461,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func notifyChanged(drafts: [WorkoutSessionSetDraft]? = nil) {
-        pendingCommitTask?.cancel()
-        pendingCommitTask = nil
-        pendingDisplayRefreshTask?.cancel()
-        pendingDisplayRefreshTask = nil
+        debounceCoordinator.cancelAll()
         let currentDrafts = canonicalizedSetDrafts(drafts ?? setDrafts)
         suppressNextSetDraftsDisplayRefresh = true
         if setDrafts != currentDrafts {
@@ -2479,8 +2510,7 @@ struct WorkoutSessionExerciseGridEditor: View {
             stageCurrentInputDraftIfNeeded(for: newFocus)
         }
         if newFocus == nil {
-            pendingDisplayRefreshTask?.cancel()
-            pendingDisplayRefreshTask = nil
+            debounceCoordinator.cancelDisplayRefresh()
             if isExpanded {
                 refreshDisplayRows()
             }
@@ -2622,8 +2652,7 @@ struct WorkoutSessionExerciseGridEditor: View {
         drafts: [WorkoutSessionSetDraft]? = nil,
         restSeconds overrideRestSeconds: Int? = nil
     ) {
-        pendingCommitTask?.cancel()
-        pendingCommitTask = nil
+        debounceCoordinator.cancelCommit()
         requestCommitForCurrentState(drafts: drafts, restSeconds: overrideRestSeconds)
         markEditorClean()
     }
@@ -2635,40 +2664,30 @@ struct WorkoutSessionExerciseGridEditor: View {
         case .immediate:
             requestImmediateCommitForCurrentState()
         case .debounced:
-            pendingCommitTask?.cancel()
             markEditorDirty()
             let delay = commitDebounce
-            pendingCommitTask = Task.detached(priority: .utility) {
-                try? await Task.sleep(for: delay)
-                guard !Task.isCancelled else { return }
-                await commitCurrentStateAfterDebounceIfStillNeeded()
+            debounceCoordinator.scheduleCommit(.currentState, after: delay) {
+                commitCurrentStateAfterDebounceIfStillNeeded()
             }
         }
     }
 
     private func scheduleBufferedInputCommit() {
-        pendingCommitTask?.cancel()
         markEditorDirty()
         let delay = commitDebounce
-        pendingCommitTask = Task.detached(priority: .utility) {
-            try? await Task.sleep(for: delay)
-            guard !Task.isCancelled else { return }
-            await commitBufferedInputAfterDebounceIfStillNeeded()
+        debounceCoordinator.scheduleCommit(.bufferedInput, after: delay) {
+            commitBufferedInputAfterDebounceIfStillNeeded()
         }
     }
 
     @MainActor
     private func commitCurrentStateAfterDebounceIfStillNeeded() {
-        guard !Task.isCancelled else { return }
-        pendingCommitTask = nil
         requestCommitForCurrentState()
         markEditorClean()
     }
 
     @MainActor
     private func commitBufferedInputAfterDebounceIfStillNeeded() {
-        guard !Task.isCancelled else { return }
-        pendingCommitTask = nil
         if commitAllBufferedInput(clearsText: false) {
             requestCommitForCurrentState()
         }
@@ -2680,7 +2699,7 @@ struct WorkoutSessionExerciseGridEditor: View {
     }
 
     private func markEditorClean() {
-        guard pendingCommitTask == nil, metricInputDraftBuffer.isEmpty else { return }
+        guard !debounceCoordinator.hasPendingCommit, metricInputDraftBuffer.isEmpty else { return }
         onDirtyStateChange(false)
     }
 
@@ -2703,9 +2722,10 @@ struct WorkoutSessionExerciseGridEditor: View {
 
     private func syncCompletedSetCount(using drafts: [WorkoutSessionSetDraft]? = nil) {
         let currentDrafts = drafts ?? setDrafts
-        cachedCompletedSetCount = currentDrafts.reduce(0) { partialResult, draft in
+        let completedSetCount = currentDrafts.reduce(0) { partialResult, draft in
             partialResult + (draft.isCycleCompleted ? 1 : 0)
         }
+        projection = projection.updatingCompletedSetCount(completedSetCount)
     }
 
     private func syncInputDraft(for focus: SetInputFocus, using draft: WorkoutSessionSetDraft) {
@@ -2729,6 +2749,7 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.scenePhase) private var scenePhase
 
+    let exerciseName: String
     let setIndex: Int
     let stageIndex: Int
     let stage: WorkoutSessionDropStageDraft
@@ -2753,6 +2774,7 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
     }
 
     init(
+        exerciseName: String,
         setIndex: Int,
         stageIndex: Int,
         stage: WorkoutSessionDropStageDraft,
@@ -2767,6 +2789,7 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
         onCommitPendingInput: @escaping () -> Void = {},
         onInputFocusChange: @escaping (Bool) -> Void = { _ in }
     ) {
+        self.exerciseName = exerciseName
         self.setIndex = setIndex
         self.stageIndex = stageIndex
         self.stage = stage
@@ -2918,6 +2941,8 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
                 .wgjPillField()
                 .focused($focusedField, equals: .weight)
                 .disabled(!isEditingEnabled)
+                .accessibilityLabel(weightAccessibility.label)
+                .accessibilityValue(weightAccessibility.value)
                 .accessibilityIdentifier("workout-set-\(setIndex)-drop-stage-\(stageIndex)-weight-field")
 
             WGJActionMenuButton("Drop Load Unit", titleVisibility: .hidden) {
@@ -2952,7 +2977,31 @@ private struct WorkoutExerciseDropStageCardView: View, Equatable {
             .wgjPillField()
             .focused($focusedField, equals: .reps)
             .disabled(!isEditingEnabled)
+            .accessibilityLabel(repsAccessibility.label)
+            .accessibilityValue(repsAccessibility.value)
             .accessibilityIdentifier("workout-set-\(setIndex)-drop-stage-\(stageIndex)-reps-field")
+    }
+
+    private var weightAccessibility: WorkoutMetricAccessibilityDescriptor {
+        WorkoutMetricAccessibilityPolicy.field(
+            exerciseName: exerciseName,
+            setNumber: setIndex + 1,
+            dropStageNumber: stageIndex + 1,
+            metric: .weight,
+            value: weightText,
+            unit: stage.actualLoadUnit.shortLabel
+        )
+    }
+
+    private var repsAccessibility: WorkoutMetricAccessibilityDescriptor {
+        WorkoutMetricAccessibilityPolicy.field(
+            exerciseName: exerciseName,
+            setNumber: setIndex + 1,
+            dropStageNumber: stageIndex + 1,
+            metric: .reps,
+            value: repsText,
+            unit: nil
+        )
     }
 
     private func repsFieldWithCompletionControl(
@@ -3097,18 +3146,6 @@ private struct WorkoutSessionExerciseSetRowLabel {
     let title: String
 }
 
-private struct WorkoutSessionExerciseSetRowDisplaySnapshot: Identifiable, Equatable {
-    let id: UUID
-    let index: Int
-    let set: WorkoutSessionSetDraft
-    let badgeTitle: String
-    let title: String
-    let previousSummary: String
-    let metadataLine: String?
-    let inlineHintPresentation: WorkoutSetInlineHintPresentation?
-    let completionButtonTitle: String
-}
-
 nonisolated struct WorkoutSetCompletionGatePresentation: Equatable {
     let title: String
     let detail: String
@@ -3191,7 +3228,7 @@ nonisolated struct WorkoutSetCompletionControlPresentation: Equatable {
     }
 }
 
-struct WorkoutSetInlineHintPresentation: Equatable {
+nonisolated struct WorkoutSetInlineHintPresentation: Equatable, Sendable {
     let weightGhostText: String?
     let repsGhostText: String?
     let aimText: String

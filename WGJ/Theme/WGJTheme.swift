@@ -228,7 +228,7 @@ private struct WGJGlassButtonBackground: View {
 }
 
 private extension UIColor {
-    static func dynamic(light: UInt32, dark: UInt32) -> UIColor {
+    nonisolated static func dynamic(light: UInt32, dark: UInt32) -> UIColor {
         UIColor { traits in
             traits.userInterfaceStyle == .dark
                 ? UIColor(hex: dark)
@@ -236,11 +236,35 @@ private extension UIColor {
         }
     }
 
-    convenience init(hex: UInt32, alpha: CGFloat = 1.0) {
+    nonisolated convenience init(hex: UInt32, alpha: CGFloat = 1.0) {
         let red = CGFloat((hex >> 16) & 0xFF) / 255.0
         let green = CGFloat((hex >> 8) & 0xFF) / 255.0
         let blue = CGFloat(hex & 0xFF) / 255.0
         self.init(red: red, green: green, blue: blue, alpha: alpha)
+    }
+}
+
+struct WGJAdaptiveControlLabelModifier: ViewModifier {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let minimumScaleFactor: CGFloat
+
+    init(minimumScaleFactor: CGFloat = 0.8) {
+        self.minimumScaleFactor = minimumScaleFactor
+    }
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            content
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(.center)
+        } else {
+            content
+                .lineLimit(1)
+                .minimumScaleFactor(minimumScaleFactor)
+                .allowsTightening(true)
+        }
     }
 }
 
@@ -249,9 +273,7 @@ struct WGJPrimaryButtonStyle: ButtonStyle {
         configuration.label
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(WGJTheme.textInverse)
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
-            .allowsTightening(true)
+            .modifier(WGJAdaptiveControlLabelModifier())
             .frame(minHeight: 44)
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -267,10 +289,8 @@ struct WGJCompactPrimaryButtonStyle: ButtonStyle {
         configuration.label
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(WGJTheme.textInverse)
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
-            .allowsTightening(true)
-            .frame(minHeight: 40)
+            .modifier(WGJAdaptiveControlLabelModifier())
+            .frame(minHeight: 44)
             .padding(.horizontal, 14)
             .padding(.vertical, 6)
             .background(
@@ -285,10 +305,8 @@ struct WGJCompactGhostButtonStyle: ButtonStyle {
         configuration.label
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(WGJTheme.textPrimary)
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
-            .allowsTightening(true)
-            .frame(minHeight: 40)
+            .modifier(WGJAdaptiveControlLabelModifier())
+            .frame(minHeight: 44)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .background(
@@ -303,9 +321,7 @@ struct WGJGhostButtonStyle: ButtonStyle {
         configuration.label
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(WGJTheme.textPrimary)
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
-            .allowsTightening(true)
+            .modifier(WGJAdaptiveControlLabelModifier())
             .frame(minHeight: 44)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
@@ -321,9 +337,7 @@ struct WGJDestructiveButtonStyle: ButtonStyle {
         configuration.label
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(Color.white)
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
-            .allowsTightening(true)
+            .modifier(WGJAdaptiveControlLabelModifier())
             .frame(minHeight: 44)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
@@ -845,10 +859,8 @@ extension View {
     }
 
     func wgjSingleLineText(scale: CGFloat = 0.82) -> some View {
-        lineLimit(1)
+        modifier(WGJAdaptiveControlLabelModifier(minimumScaleFactor: scale))
             .truncationMode(.tail)
-            .minimumScaleFactor(scale)
-            .allowsTightening(true)
     }
 
     @ViewBuilder

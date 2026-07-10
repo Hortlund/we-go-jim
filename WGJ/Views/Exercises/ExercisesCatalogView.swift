@@ -39,6 +39,7 @@ struct ExercisesCatalogView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(AppTabState.self) private var appTabState
     @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
+    @Environment(ActiveWorkoutCoordinator.self) private var activeWorkoutCoordinator
 
     private let mode: ExercisesCatalogMode
 
@@ -55,8 +56,7 @@ struct ExercisesCatalogView: View {
 
     @State private var errorMessage = ""
     @State private var showingError = false
-    @State private var catalogScrollOffset: CGFloat = 0
-    @State private var catalogTopMarkerBaseline: CGFloat?
+    @State private var headerPresentation = ExercisesCatalogHeaderPresentationModel()
     @State private var isSearchToolbarExpanded = false
     @State private var activeFilterDropdown: ExerciseFilterDropdown?
     @State private var showingMuscleMapFilterSheet = false
@@ -142,23 +142,6 @@ struct ExercisesCatalogView: View {
         14
     }
 
-    private var scrollDrivenHeaderCollapseProgress: CGFloat {
-        ExercisesCatalogHeaderCollapsePolicy.progress(forScrollOffset: catalogScrollOffset)
-    }
-
-    private var headerCollapseProgress: CGFloat {
-        guard !isPickerMode && !isSearchFieldFocused && !isSearchToolbarExpanded else { return 0 }
-        return scrollDrivenHeaderCollapseProgress
-    }
-
-    private var shouldRenderHeader: Bool {
-        !isPickerMode && headerCollapseProgress < 0.99
-    }
-
-    private var shouldRenderExpandedControls: Bool {
-        isPickerMode || headerCollapseProgress < 0.99
-    }
-
     private var expandedControlsHeight: CGFloat {
         let baseHeight = ExercisesCatalogHeaderCollapsePolicy.expandedControlsHeight(
             usesCompactFilterLayout: shouldUseCompactFilterLayout
@@ -222,7 +205,7 @@ struct ExercisesCatalogView: View {
                         }
                         .scrollDismissesKeyboard(.interactively)
                         .modifier(ExercisesCatalogScrollOffsetModifier { offset in
-                            catalogScrollOffset = -offset
+                            headerPresentation.consume(contentOffsetY: offset)
                         })
 
                         if activeFilterDropdown != nil {
@@ -291,7 +274,7 @@ struct ExercisesCatalogView: View {
             }
             .onPreferenceChange(ExercisesCatalogScrollOffsetPreferenceKey.self) { offset in
                 if #unavailable(iOS 18.0) {
-                    updateCatalogScrollOffset(markerY: offset)
+                    headerPresentation.consumeFallback(markerY: offset)
                 }
             }
         }
@@ -375,10 +358,12 @@ struct ExercisesCatalogView: View {
     }
 
     private var pinnedSearchControls: some View {
-        let progress = headerCollapseProgress
-
-        return VStack(alignment: .leading, spacing: 0) {
-            if shouldRenderHeader {
+        ExercisesCatalogCollapsingHeader(model: headerPresentation) { storedProgress in
+            let progress = !isPickerMode && !isSearchFieldFocused && !isSearchToolbarExpanded
+                ? storedProgress
+                : 0
+            VStack(alignment: .leading, spacing: 0) {
+            if !isPickerMode && progress < 0.99 {
                 WGJRootHeader(
                     "Exercises",
                     subtitle: "Find exercises by name, body part, or category.",
@@ -397,7 +382,7 @@ struct ExercisesCatalogView: View {
 
             searchField
 
-            if shouldRenderExpandedControls {
+            if isPickerMode || progress < 0.99 {
                 Color.clear
                     .frame(height: controlsSpacing * (1 - progress))
 
@@ -417,6 +402,7 @@ struct ExercisesCatalogView: View {
         .padding(.top, isPickerMode ? 10 : (16 - (2 * progress)))
         .padding(.bottom, 10)
         .background(WGJTheme.bgBase)
+            }
     }
 
     private var scrollOffsetReader: some View {
@@ -845,28 +831,13 @@ struct ExercisesCatalogView: View {
     }
 
     private func applyCurrentFilters() {
-        catalogScrollOffset = 0
-        catalogTopMarkerBaseline = nil
+        headerPresentation.reset()
         controller.applyFilters(
             query: searchState.debouncedQuery,
             selectedPrimaryMuscleID: searchState.selectedPrimaryMuscleID,
             selectedCategory: searchState.selectedCategory,
             sortDescending: searchState.sortDescending
         )
-    }
-
-    private func updateCatalogScrollOffset(markerY: CGFloat) {
-        if let baseline = catalogTopMarkerBaseline {
-            if markerY > baseline {
-                catalogTopMarkerBaseline = markerY
-                catalogScrollOffset = 0
-            } else {
-                catalogScrollOffset = markerY - baseline
-            }
-        } else {
-            catalogTopMarkerBaseline = markerY
-            catalogScrollOffset = 0
-        }
     }
 
     private func clearSearchAndFilters() {
@@ -952,7 +923,7 @@ struct ExercisesCatalogView: View {
 
     @MainActor
     private func resolvedActiveRuntimeSessionForAdd() async throws -> ActiveWorkoutRuntimeSession? {
-        if let snapshot = try await ActiveWorkoutSnapshotStore.shared.load() {
+        if let snapshot = activeWorkoutCoordinator.storedSnapshot?.session {
             if activeWorkoutPresentationState.activeSessionID != snapshot.id {
                 activeWorkoutPresentationState.activeSessionID = snapshot.id
             }
@@ -963,7 +934,7 @@ struct ExercisesCatalogView: View {
         if let importedLegacy = try await backgroundStore.performWrite("exercises.import-legacy-active-session", { backgroundContext in
             try ActiveWorkoutSessionFactory(modelContext: backgroundContext).importLegacyActiveSessionIfNeeded()
         }) {
-            try await ActiveWorkoutSnapshotStore.shared.save(importedLegacy)
+            _ = activeWorkoutCoordinator.send(.start(importedLegacy))
             activeWorkoutPresentationState.activeSessionID = importedLegacy.id
             return importedLegacy
         }
@@ -979,8 +950,7 @@ struct ExercisesCatalogView: View {
         _ exercise: ExerciseRuntimeAppendInput,
         to session: ActiveWorkoutRuntimeSession
     ) async throws {
-        var updatedSession = session
-        let sortOrder = updatedSession.exercises.count
+        let sortOrder = session.exercises.count
         let backgroundStore = exercisesBackgroundStore
         let preferredLoadUnit = try await backgroundStore.perform("exercises.preferred-load-unit") { backgroundContext in
             (try? ProfileRepository(modelContext: backgroundContext).currentProfile()?.preferredLoadUnit) ?? .kg
@@ -990,19 +960,19 @@ struct ExercisesCatalogView: View {
             sortOrder: sortOrder,
             preferredLoadUnit: preferredLoadUnit
         )
-        updatedSession.exercises.append(runtimeExercise)
-        updatedSession.normalizeExerciseSortOrder()
-        updatedSession.touch()
+        if activeWorkoutCoordinator.storedSnapshot?.session.id != session.id {
+            _ = activeWorkoutCoordinator.send(.start(session))
+        }
         let expandedExerciseIDs = activeWorkoutPresentationState
-            .preparedExpandedExerciseIDs(for: updatedSession.id)
+            .preparedExpandedExerciseIDs(for: session.id)
             .union([runtimeExercise.id])
-        try await ActiveWorkoutSnapshotStore.shared.save(
-            updatedSession,
-            presentationMode: .presented,
-            preservesExistingPresentationMode: false
-        )
-        activeWorkoutPresentationState.stageRuntimeSession(updatedSession, for: updatedSession.id)
-        activeWorkoutPresentationState.stageExpandedExerciseIDs(expandedExerciseIDs, for: updatedSession.id)
+        _ = activeWorkoutCoordinator.send(.appendExercise(runtimeExercise))
+        _ = activeWorkoutCoordinator.send(.updatePresentation(
+            mode: .presented,
+            scrollTarget: .exercise(runtimeExercise.id),
+            expandedExerciseIDs: expandedExerciseIDs
+        ))
+        activeWorkoutPresentationState.stageExpandedExerciseIDs(expandedExerciseIDs, for: session.id)
     }
 
     nonisolated private static func makeEmptyRuntimeSession() -> ActiveWorkoutRuntimeSession {
@@ -1183,19 +1153,6 @@ struct ExercisesCatalogSearchState: Equatable {
         selectedCategory = nil
         sortDescending = false
         resetToken += 1
-    }
-}
-
-enum ExercisesCatalogHeaderCollapsePolicy {
-    static let collapseDistance: CGFloat = 36
-
-    static func progress(forScrollOffset scrollOffset: CGFloat) -> CGFloat {
-        let rawProgress = -scrollOffset / collapseDistance
-        return min(max(rawProgress, 0), 1)
-    }
-
-    static func expandedControlsHeight(usesCompactFilterLayout: Bool) -> CGFloat {
-        usesCompactFilterLayout ? 158 : 112
     }
 }
 
@@ -2174,26 +2131,6 @@ private struct ExerciseCatalogThumbnail: View {
     }
     .environment(AppTabState())
     .environment(ActiveWorkoutPresentationState())
-    .modelContainer(for: [
-        ExerciseCatalogItem.self,
-        MuscleGroup.self,
-        ExerciseImageAsset.self,
-        ExerciseAlias.self,
-        ExerciseAttribution.self,
-        ExerciseCatalogSyncState.self,
-        UserProfile.self,
-        ProfileWidgetConfig.self,
-        TemplateFolder.self,
-        WorkoutTemplate.self,
-        TemplateExercise.self,
-        TemplateExerciseComponent.self,
-        TemplateExerciseSet.self,
-        ActiveWorkoutDraftSession.self,
-        ActiveWorkoutDraftExercise.self,
-        ActiveWorkoutDraftExerciseComponent.self,
-        ActiveWorkoutDraftSet.self,
-        WorkoutSession.self,
-        WorkoutSessionExercise.self,
-        WorkoutSessionSet.self,
-    ], inMemory: true)
+    .environment(ActiveWorkoutCoordinator.preview())
+    .wgjPreviewModelContainer()
 }

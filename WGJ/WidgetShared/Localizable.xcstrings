@@ -1,0 +1,1200 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "/%lld" : {
+
+    },
+    "%@ · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ · %2$@"
+          }
+        }
+      }
+    },
+    "%@ %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ %2$@"
+          }
+        }
+      }
+    },
+    "%@ muscle map" : {
+
+    },
+    "%@ weekly muscle heatmap" : {
+
+    },
+    "%@ workout muscle heatmap" : {
+
+    },
+    "%@, set %lld, actions" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@, set %2$lld, actions"
+          }
+        }
+      }
+    },
+    "%@:" : {
+
+    },
+    "%lld" : {
+
+    },
+    "%lld / %lld sets completed" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld / %2$lld sets completed"
+          }
+        }
+      }
+    },
+    "%lld cardio" : {
+
+    },
+    "%lld dropset stage%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld dropset stage%2$@"
+          }
+        }
+      }
+    },
+    "%lld exercise options" : {
+
+    },
+    "%lld exercises" : {
+
+    },
+    "%lld logged workout%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld logged workout%2$@"
+          }
+        }
+      }
+    },
+    "%lld min" : {
+
+    },
+    "%lld of %lld workouts" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld of %2$lld workouts"
+          }
+        }
+      }
+    },
+    "%lld of %lld workouts this week" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld of %2$lld workouts this week"
+          }
+        }
+      }
+    },
+    "%lld sessions" : {
+
+    },
+    "%lld templates" : {
+
+    },
+    "%lld total" : {
+
+    },
+    "0" : {
+
+    },
+    "1 session" : {
+
+    },
+    "Actions" : {
+
+    },
+    "Active Workout" : {
+
+    },
+    "Add" : {
+
+    },
+    "Add %@" : {
+
+    },
+    "Add another exercise metric card to your profile." : {
+
+    },
+    "Add Cardio" : {
+
+    },
+    "Add Drop" : {
+
+    },
+    "Add drop stage" : {
+
+    },
+    "Add Exercise" : {
+
+    },
+    "Add Exercise Trend" : {
+
+    },
+    "Add Existing" : {
+
+    },
+    "Add Set" : {
+
+    },
+    "AI" : {
+
+    },
+    "Aliases (comma separated)" : {
+
+    },
+    "All you bro, PR or ER" : {
+
+    },
+    "Analyzing your recent sessions…" : {
+
+    },
+    "Any Body Part" : {
+
+    },
+    "Athlete Type" : {
+
+    },
+    "Attribution" : {
+
+    },
+    "Author GitHub" : {
+
+    },
+    "Author: %@" : {
+
+    },
+    "Author: Melih Colpan" : {
+
+    },
+    "Available Body Parts" : {
+
+    },
+    "Back Up Now" : {
+
+    },
+    "Background rest-timer alerts use the strongest alert style currently available, but Silent Mode may still affect them." : {
+
+    },
+    "Backup comparison" : {
+
+    },
+    "Best Set" : {
+
+    },
+    "Body Part" : {
+
+    },
+    "Calendar" : {
+
+    },
+    "Cancel" : {
+
+    },
+    "Cancel Workout" : {
+
+    },
+    "Cardio Actions" : {
+
+    },
+    "Cardio Settings" : {
+
+    },
+    "Catalog Credits" : {
+
+    },
+    "Category" : {
+
+    },
+    "Celebration burst %lld" : {
+
+    },
+    "Change" : {
+
+    },
+    "Change Exercise" : {
+
+    },
+    "Checking iCloud account..." : {
+
+    },
+    "Choose a format to export or share this folder." : {
+
+    },
+    "Choose a format to export or share this item." : {
+
+    },
+    "Choose an exercise before enabling this graph." : {
+
+    },
+    "Choose exercise" : {
+
+    },
+    "Choose Exercise" : {
+
+    },
+    "Clear Disposable Storage" : {
+
+    },
+    "Clear logged values" : {
+
+    },
+    "Clear Search and Filters" : {
+
+    },
+    "Close" : {
+
+    },
+    "Cloud" : {
+
+    },
+    "Cloud Backup" : {
+
+    },
+    "Coach Brief" : {
+
+    },
+    "Collapse %@" : {
+
+    },
+    "Collapsed" : {
+
+    },
+    "Commas and line breaks will appear as separate steps." : {
+
+    },
+    "Complete A1, move straight into A2, then rest %@." : {
+
+    },
+    "Complete set" : {
+
+    },
+    "Complete Workout" : {
+
+    },
+    "Continue Locally" : {
+
+    },
+    "Continue with iCloud" : {
+
+    },
+    "Copy Support Link" : {
+
+    },
+    "Create a template here or move one into Unfiled." : {
+
+    },
+    "Create a template in this folder to keep it organized." : {
+
+    },
+    "Create Custom Exercise" : {
+
+    },
+    "Create Exercise" : {
+
+    },
+    "Create Folder" : {
+
+    },
+    "Current" : {
+
+    },
+    "Current position: %lld" : {
+
+    },
+    "Darker squares mean busier training days." : {
+
+    },
+    "Default Rest" : {
+
+    },
+    "Default weight unit" : {
+
+    },
+    "Delete" : {
+
+    },
+    "Delete Everything" : {
+
+    },
+    "Delete exercise" : {
+
+    },
+    "Delete Exercise" : {
+
+    },
+    "Delete Exercise?" : {
+
+    },
+    "Delete Folder" : {
+
+    },
+    "Delete folder?" : {
+
+    },
+    "Delete hidden workout?" : {
+
+    },
+    "Delete Local and Cloud Data" : {
+
+    },
+    "Delete local and CloudKit data?" : {
+
+    },
+    "Delete My Data" : {
+
+    },
+    "Delete Permanently" : {
+
+    },
+    "Delete set" : {
+
+    },
+    "Delete Set" : {
+
+    },
+    "Delete Workout" : {
+
+    },
+    "Demo Seed Failed" : {
+
+    },
+    "Device" : {
+
+    },
+    "Discard this workout and all logged sets?" : {
+
+    },
+    "Discard Workout" : {
+
+    },
+    "Dismiss rest timer" : {
+
+    },
+    "Done" : {
+
+    },
+    "Double tap to launch more confetti." : {
+
+    },
+    "Double tap to replay the celebration feedback." : {
+
+    },
+    "Drop %lld" : {
+
+    },
+    "Dropset" : {
+
+    },
+    "Duplicate" : {
+
+    },
+    "Edit" : {
+
+    },
+    "Edit Duration" : {
+
+    },
+    "Edit Folder" : {
+
+    },
+    "Edit Profile" : {
+
+    },
+    "Edit Template" : {
+
+    },
+    "Elapsed Time" : {
+
+    },
+    "Enable training guidance" : {
+
+    },
+    "Enter Temporary Diagnostics" : {
+
+    },
+    "Equipment (optional)" : {
+
+    },
+    "Exercise" : {
+
+    },
+    "Exercise Error" : {
+
+    },
+    "Exercise Options" : {
+
+    },
+    "Exercise Settings" : {
+
+    },
+    "Exercise Trend" : {
+
+    },
+    "Exercises Error" : {
+
+    },
+    "Expand %@" : {
+
+    },
+    "Expanded" : {
+
+    },
+    "Export" : {
+
+    },
+    "Export / Share" : {
+
+    },
+    "Fill Last" : {
+
+    },
+    "Filter Body Part" : {
+
+    },
+    "Finish" : {
+
+    },
+    "Finish a few workouts and your top lifts will show up here." : {
+
+    },
+    "Finish a workout this week and the muscle map will light up from your logged sets." : {
+
+    },
+    "Finish a workout to start tracking your weekly pace." : {
+
+    },
+    "Finish or cancel the current workout before starting a new one." : {
+
+    },
+    "Finish the main set before completing the drop stages." : {
+
+    },
+    "Folder" : {
+
+    },
+    "Folder Name" : {
+
+    },
+    "from %@" : {
+
+    },
+    "Goal" : {
+
+    },
+    "Goal: %lld workouts each week" : {
+
+    },
+    "Guidance is informational only and never replaces your own judgment, coaching, or medical advice." : {
+
+    },
+    "Hidden" : {
+
+    },
+    "Hidden Workouts" : {
+
+    },
+    "Hide" : {
+
+    },
+    "Hide backup contents" : {
+
+    },
+    "Hide Workout" : {
+
+    },
+    "Hide workout?" : {
+
+    },
+    "Hides the coach tip details." : {
+
+    },
+    "History Error" : {
+
+    },
+    "history.completed.count.plural" : {
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%lld completed workouts"
+          }
+        }
+      }
+    },
+    "history.completed.count.singular" : {
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%lld completed workout"
+          }
+        }
+      }
+    },
+    "How to perform (optional)" : {
+
+    },
+    "Import Template" : {
+
+    },
+    "Insert below" : {
+
+    },
+    "Item" : {
+
+    },
+    "JSON" : {
+
+    },
+    "Jump to %@" : {
+
+    },
+    "Keep logging sessions and your go-to lifts will rise here." : {
+
+    },
+    "Keep screen awake" : {
+
+    },
+    "Keep Template" : {
+
+    },
+    "Keep Workout" : {
+
+    },
+    "Last logged %@" : {
+
+    },
+    "Last trained %@" : {
+
+    },
+    "Latest" : {
+
+    },
+    "License URL" : {
+
+    },
+    "License: %@" : {
+
+    },
+    "License: MIT" : {
+
+    },
+    "Loading more history" : {
+
+    },
+    "Loading sets" : {
+
+    },
+    "Loading trend data…" : {
+
+    },
+    "Loading your workout recap..." : {
+
+    },
+    "Local" : {
+
+    },
+    "Lock set" : {
+
+    },
+    "Log one more weighted session for this lift to unlock the chart." : {
+
+    },
+    "Logged %@" : {
+
+    },
+    "Logged days are highlighted. Darker days have more workouts." : {
+
+    },
+    "Logged Sets" : {
+
+    },
+    "Make dropset" : {
+
+    },
+    "Make Superset With Next Exercise" : {
+
+    },
+    "Manage" : {
+
+    },
+    "Manage Widgets" : {
+
+    },
+    "Mark as warmup" : {
+
+    },
+    "Mark as working" : {
+
+    },
+    "Mark Complete" : {
+
+    },
+    "Mark incomplete" : {
+
+    },
+    "Mark Incomplete" : {
+
+    },
+    "Mark Warmup" : {
+
+    },
+    "Mark Working Set" : {
+
+    },
+    "Max" : {
+
+    },
+    "Metric" : {
+
+    },
+    "Min" : {
+
+    },
+    "Minimize" : {
+
+    },
+    "Minutes" : {
+
+    },
+    "Most trained" : {
+
+    },
+    "Most worked" : {
+
+    },
+    "Move" : {
+
+    },
+    "Move down" : {
+
+    },
+    "Move Down" : {
+
+    },
+    "Move Exercise" : {
+
+    },
+    "Move exercise down" : {
+
+    },
+    "Move exercise up" : {
+
+    },
+    "Move to %@" : {
+
+    },
+    "Move to position" : {
+
+    },
+    "Move to Unfiled" : {
+
+    },
+    "Move up" : {
+
+    },
+    "Move Up" : {
+
+    },
+    "Muscle map" : {
+
+    },
+    "MuscleMap" : {
+
+    },
+    "Name" : {
+
+    },
+    "New Folder" : {
+
+    },
+    "New Template" : {
+
+    },
+    "No active workout" : {
+
+    },
+    "No athlete type selected" : {
+
+    },
+    "No completed workout history for this exercise yet." : {
+
+    },
+    "No files found." : {
+
+    },
+    "No other folders" : {
+
+    },
+    "No sets yet." : {
+
+    },
+    "No template needed. Log freeform or build the session as you go." : {
+
+    },
+    "No templates in this folder yet" : {
+
+    },
+    "No unfiled templates yet" : {
+
+    },
+    "notification.rest.body" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Time for your next set."
+          }
+        }
+      }
+    },
+    "notification.rest.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rest complete"
+          }
+        }
+      }
+    },
+    "Notifications are off in iOS Settings; background rest alerts cannot be delivered." : {
+
+    },
+    "OK" : {
+
+    },
+    "Open GitHub Issues" : {
+
+    },
+    "Open Privacy Policy" : {
+
+    },
+    "Open Template Editor" : {
+
+    },
+    "Open Terms Website" : {
+
+    },
+    "Options: %@" : {
+
+    },
+    "Override" : {
+
+    },
+    "Paired with %@" : {
+
+    },
+    "Position %lld" : {
+
+    },
+    "Preparing dashboard" : {
+
+    },
+    "Prevents dimming and auto-lock while a workout is active." : {
+
+    },
+    "Privacy" : {
+
+    },
+    "Pro widget" : {
+
+    },
+    "Profile" : {
+
+    },
+    "Profile Error" : {
+
+    },
+    "Progress Error" : {
+
+    },
+    "Push / Pull / Legs" : {
+
+    },
+    "Quick Start" : {
+
+    },
+    "Refresh" : {
+
+    },
+    "Refreshing" : {
+
+    },
+    "Remove" : {
+
+    },
+    "Remove Avatar" : {
+
+    },
+    "Remove dropset" : {
+
+    },
+    "Rename Folder" : {
+
+    },
+    "Reorder" : {
+
+    },
+    "Rep Range" : {
+
+    },
+    "Replace exercise" : {
+
+    },
+    "Reps" : {
+
+    },
+    "Reset Local Stores on Next Launch" : {
+
+    },
+    "Reset local stores on next launch?" : {
+
+    },
+    "Rest Timer" : {
+
+    },
+    "Rest timer alert style" : {
+
+    },
+    "Restore Backup" : {
+
+    },
+    "Restore Latest Cloud Backup" : {
+
+    },
+    "Restore latest CloudKit backup?" : {
+
+    },
+    "Restore Workout" : {
+
+    },
+    "Resume Current Workout" : {
+
+    },
+    "Retry" : {
+
+    },
+    "Review workout changes" : {
+
+    },
+    "Reviewing your recent sessions…" : {
+
+    },
+    "Round Rest" : {
+
+    },
+    "Round rest %@" : {
+
+    },
+    "Save" : {
+
+    },
+    "Save Changes" : {
+
+    },
+    "Save Folder" : {
+
+    },
+    "Save Profile" : {
+
+    },
+    "Save Weekly Goal" : {
+
+    },
+    "Saved" : {
+
+    },
+    "Saving Changes" : {
+
+    },
+    "Saving the session and preparing your summary." : {
+
+    },
+    "Schedule Reset" : {
+
+    },
+    "Search exercise history" : {
+
+    },
+    "Select %@" : {
+
+    },
+    "Selected" : {
+
+    },
+    "Set Plan" : {
+
+    },
+    "Settings" : {
+
+    },
+    "Settings Error" : {
+
+    },
+    "Setup Tips" : {
+
+    },
+    "Share Diagnostics" : {
+
+    },
+    "Shared widget data is the app-group container used by WGJ and its widget for widget snapshots and shared history data." : {
+
+    },
+    "Short names are easiest to scan." : {
+
+    },
+    "Show All" : {
+
+    },
+    "Show backup contents" : {
+
+    },
+    "Shows the coach tip details." : {
+
+    },
+    "Skip" : {
+
+    },
+    "Source URL" : {
+
+    },
+    "Source: %@" : {
+
+    },
+    "Start" : {
+
+    },
+    "Start a workout now and this exercise will be added." : {
+
+    },
+    "Start Empty" : {
+
+    },
+    "Start Empty Workout and Add" : {
+
+    },
+    "Start Workout" : {
+
+    },
+    "Start Workout Error" : {
+
+    },
+    "Started %@" : {
+
+    },
+    "Starting" : {
+
+    },
+    "Starting workout" : {
+
+    },
+    "Starting Workout" : {
+
+    },
+    "Stay Here" : {
+
+    },
+    "Step %lld" : {
+
+    },
+    "Storage" : {
+
+    },
+    "Superset" : {
+
+    },
+    "Support" : {
+
+    },
+    "Template" : {
+
+    },
+    "Template Error" : {
+
+    },
+    "Template name" : {
+
+    },
+    "Template Preview" : {
+
+    },
+    "Temporary diagnostics cannot save workouts, templates, profile changes, or history edits." : {
+
+    },
+    "Terms & Safety" : {
+
+    },
+    "Text" : {
+
+    },
+    "This cannot be undone. WGJ will delete the CloudKit backup first, then clear this device, and return to setup after you dismiss the success message." : {
+
+    },
+    "This permanently removes the workout from history." : {
+
+    },
+    "This removes %@ from your exercises. Built-in exercises cannot be deleted." : {
+
+    },
+    "This removes local profiles, workouts, templates, active drafts, history projections, and catalog stores from this device. It does not delete your CloudKit backup." : {
+
+    },
+    "This replaces local WGJ data on this device with the latest CloudKit backup. It does not delete the CloudKit backup." : {
+
+    },
+    "Time-sensitive alerts are off in iOS Settings; rest alerts will arrive as standard." : {
+
+    },
+    "to" : {
+
+    },
+    "Track this week's workout target." : {
+
+    },
+    "Train a few days and your calendar will start to fill in." : {
+
+    },
+    "Unfiled" : {
+
+    },
+    "Unlock set" : {
+
+    },
+    "Unpair" : {
+
+    },
+    "Update Template" : {
+
+    },
+    "Update the template with these changes, or keep it as-is and save only this workout." : {
+
+    },
+    "Used for new weighted sets and new template set plans. Existing entries keep their saved units." : {
+
+    },
+    "Using your pick" : {
+
+    },
+    "View History" : {
+
+    },
+    "W" : {
+
+    },
+    "We Go Jim" : {
+
+    },
+    "Week" : {
+
+    },
+    "Weekly Goal" : {
+
+    },
+    "Weekly workout history" : {
+
+    },
+    "Weekly workouts: %lld" : {
+
+    },
+    "Weight" : {
+
+    },
+    "WGJ" : {
+
+    },
+    "WGJ Template File" : {
+
+    },
+    "Widget Error" : {
+
+    },
+    "widget.weekly_goal.beaten" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Goal beaten"
+          }
+        }
+      }
+    },
+    "widget.weekly_goal.hit" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Goal hit"
+          }
+        }
+      }
+    },
+    "widget.weekly_goal.remaining.format" : {
+      "comment" : "Number of workouts remaining to reach the weekly goal. The placeholder is the count.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld to go"
+          }
+        }
+      }
+    },
+    "Workout" : {
+
+    },
+    "Workout already in progress" : {
+
+    },
+    "Workout Calendar" : {
+
+    },
+    "Workout completion celebration" : {
+
+    },
+    "Workout Error" : {
+
+    },
+    "Workouts" : {
+
+    },
+    "Your dashboard stats are still local and up to date. Pull to refresh or finish another workout to try again." : {
+
+    },
+    "Your name, avatar, and athlete type shape your profile." : {
+
+    },
+    "Your profile is ready. Widgets will appear in a moment." : {
+
+    }
+  },
+  "version" : "1.0"
+}

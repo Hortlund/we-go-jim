@@ -2,12 +2,12 @@ import Foundation
 import OSLog
 
 enum WGJPerformance {
-#if DEBUG
-    nonisolated private static let logger = Logger(
+    nonisolated private static let signposter = OSSignposter(
         subsystem: Bundle.main.bundleIdentifier ?? "WGJ",
         category: "Performance"
     )
-    nonisolated private static let signposter = OSSignposter(
+#if DEBUG
+    nonisolated private static let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "WGJ",
         category: "Performance"
     )
@@ -16,9 +16,7 @@ enum WGJPerformance {
     struct TraceToken {
         fileprivate let name: StaticString
         fileprivate let startedAt: ContinuousClock.Instant
-#if DEBUG
         fileprivate let intervalState: OSSignpostIntervalState
-#endif
     }
 
     @discardableResult
@@ -36,20 +34,16 @@ enum WGJPerformance {
     }
 
     nonisolated static func begin(_ name: StaticString) -> TraceToken {
-#if DEBUG
         TraceToken(
             name: name,
             startedAt: ContinuousClock.now,
             intervalState: signposter.beginInterval(name)
         )
-#else
-        TraceToken(name: name, startedAt: ContinuousClock.now)
-#endif
     }
 
     nonisolated static func end(_ token: TraceToken) {
-#if DEBUG
         signposter.endInterval(token.name, token.intervalState)
+#if DEBUG
         let elapsed = token.startedAt.duration(to: ContinuousClock.now)
         let seconds = Double(elapsed.components.seconds)
             + (Double(elapsed.components.attoseconds) / 1_000_000_000_000_000_000)
