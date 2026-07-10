@@ -2,7 +2,7 @@ import Foundation
 import ImageIO
 import UIKit
 
-nonisolated private final class AvatarThumbnailCacheEntry: NSObject {
+private final class AvatarThumbnailCacheEntry: NSObject {
     let thumbnail: UIImage?
     let maxPixelSize: CGFloat
 
@@ -12,7 +12,8 @@ nonisolated private final class AvatarThumbnailCacheEntry: NSObject {
     }
 }
 
-nonisolated final class AvatarThumbnailCacheService {
+@MainActor
+final class AvatarThumbnailCacheService {
     static let shared = AvatarThumbnailCacheService()
 
     private let cache = NSCache<NSString, AvatarThumbnailCacheEntry>()
@@ -55,7 +56,7 @@ nonisolated final class AvatarThumbnailCacheService {
         cache.removeAllObjects()
     }
 
-    static func fingerprint(for data: Data) -> String {
+    nonisolated static func fingerprint(for data: Data) -> String {
         "\(data.count)-\(data.hashValue)"
     }
 

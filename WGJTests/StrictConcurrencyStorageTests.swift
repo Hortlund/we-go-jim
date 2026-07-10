@@ -1,4 +1,5 @@
 import SwiftData
+import UIKit
 import XCTest
 @testable import WGJ
 
@@ -46,5 +47,45 @@ final class StrictConcurrencyStorageTests: XCTestCase {
             maxAge: 3_600
         )
         XCTAssertFalse(needsRefresh)
+    }
+
+    func testImageMemoryCacheSupportsConcurrentAccessAndClear() async {
+        let cache = ExerciseImageMemoryCache(countLimit: 200, totalCostLimit: 1_000_000)
+        let image = UIImage()
+
+        await withTaskGroup(of: Void.self) { group in
+            for index in 0..<100 {
+                group.addTask {
+                    let key = "image-\(index)"
+                    cache.insert(image, for: key, cost: 1)
+                    _ = cache.image(for: key)
+                }
+            }
+        }
+
+        XCTAssertNotNil(cache.image(for: "image-99"))
+        cache.removeAll()
+        XCTAssertNil(cache.image(for: "image-99"))
+    }
+
+    func testHistoryCacheRevisionIsAtomic() async throws {
+        let schema = Schema([CachedCoachNarrative.self])
+        let configuration = ModelConfiguration(
+            schema: schema,
+            isStoredInMemoryOnly: true,
+            cloudKitDatabase: .none
+        )
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        let cache = HistoryAnalyticsCache()
+
+        await withTaskGroup(of: Void.self) { group in
+            for _ in 0..<100 {
+                group.addTask {
+                    cache.invalidate(container: container)
+                }
+            }
+        }
+
+        XCTAssertEqual(cache.currentRevision(for: container), 100)
     }
 }

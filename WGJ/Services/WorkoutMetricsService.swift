@@ -1049,7 +1049,7 @@ nonisolated final class WorkoutMetricsService {
             )
         }
         let overviewStats = buildOverviewStats(
-            completedWorkoutCount: snapshot.completedSessions.count,
+            completedWorkoutCount: snapshot.completedSessionCount,
             totalPRHits: snapshot.totalPRHits,
             totalDurationSeconds: snapshot.totalDurationSeconds,
             workoutCountsByDay: snapshot.countsByDay,
@@ -1087,10 +1087,6 @@ nonisolated final class WorkoutMetricsService {
             topExercises: topExercises,
             activityDays: activityDays
         )
-    }
-
-    private func completedSessions() throws -> [WorkoutSession] {
-        try metricsSnapshot().completedSessions
     }
 
     private func visibleCompletedSessionIDs() throws -> Set<UUID> {
@@ -1319,7 +1315,7 @@ nonisolated final class WorkoutMetricsService {
         }
 
         return MetricsSnapshotCache(
-            completedSessions: sessions,
+            completedSessionCount: sessions.count,
             bestPRByExercise: bestPRByExercise,
             bestBodyweightByExercise: bestBodyweightByExercise,
             countsByWeek: countsByWeek,
@@ -1712,8 +1708,8 @@ nonisolated private struct PriorSetMetricPeaks {
     var volume: Double = 0
 }
 
-nonisolated struct MetricsSnapshotCache {
-    let completedSessions: [WorkoutSession]
+nonisolated struct MetricsSnapshotCache: Sendable {
+    let completedSessionCount: Int
     let bestPRByExercise: [String: WorkoutPRRecord]
     let bestBodyweightByExercise: [String: BodyweightExerciseBestRecord]
     let countsByWeek: [Date: Int]
@@ -1726,7 +1722,7 @@ nonisolated struct MetricsSnapshotCache {
     let firstWorkoutDate: Date?
 }
 
-nonisolated struct CompletedExerciseHistoryEntry {
+nonisolated struct CompletedExerciseHistoryEntry: Sendable {
     let sessionID: UUID
     let completedAt: Date
     let exerciseName: String
@@ -1773,13 +1769,13 @@ nonisolated private struct WorkingExerciseHistoryEntry {
     var hasWeightedMetrics = false
 }
 
-nonisolated struct CollectedExerciseFrequency {
+nonisolated struct CollectedExerciseFrequency: Sendable {
     let exerciseName: String
     let sessionCount: Int
     let lastPerformedAt: Date
 }
 
-nonisolated struct BodyweightExerciseBestRecord {
+nonisolated struct BodyweightExerciseBestRecord: Sendable {
     let catalogExerciseUUID: String
     let exerciseName: String
     let reps: Int

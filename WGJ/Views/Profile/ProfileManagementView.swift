@@ -152,8 +152,9 @@ struct ProfileManagementView: View {
     }
 
     private var changeAvatarButton: some View {
-        PhotosPicker(selection: $selectedAvatarItem, matching: .images) {
-            Label(avatarImageData == nil ? "Choose Avatar" : "Change Avatar", systemImage: "photo")
+        let pickerTitle = avatarImageData == nil ? "Choose Avatar" : "Change Avatar"
+        return PhotosPicker(selection: $selectedAvatarItem, matching: .images) {
+            Label(pickerTitle, systemImage: "photo")
         }
         .buttonStyle(WGJCompactGhostButtonStyle())
     }

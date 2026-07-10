@@ -36,6 +36,14 @@ actor AppDataArtifactCleanupQueue {
         self.cleanup = cleanup
     }
 
+    init(
+        defaultsSuiteName: String,
+        cleanup: @escaping @Sendable (AppDataArtifact) async throws -> Void
+    ) {
+        self.defaults = UserDefaults(suiteName: defaultsSuiteName) ?? .standard
+        self.cleanup = cleanup
+    }
+
     func enqueue(_ artifacts: Set<AppDataArtifact>) async -> [AppDataArtifactCleanupWarning] {
         setPendingArtifacts(pendingArtifacts().union(artifacts))
         return await retryPending()

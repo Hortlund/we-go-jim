@@ -3,29 +3,19 @@ import SwiftData
 
 nonisolated final class ExerciseSearchService {
     private let modelContext: ModelContext
-    private static let cacheLock = NSLock()
-    private static var cachedCatalogIndexByContextID: [ObjectIdentifier: CatalogSearchCacheEntry] = [:]
-    private static var catalogGenerationByContainerID: [ObjectIdentifier: Int] = [:]
+    private static let generationStore = CatalogSearchGenerationStore()
+    private var cachedCatalogIndex: CatalogSearchCacheEntry?
 
     init(modelContext: ModelContext) {
         self.modelContext = modelContext
     }
 
     static func invalidateCatalogIndex(for modelContext: ModelContext) {
-        let containerID = ObjectIdentifier(modelContext.container)
-
-        cacheLock.lock()
-        catalogGenerationByContainerID[containerID, default: 0] += 1
-        cachedCatalogIndexByContextID = cachedCatalogIndexByContextID.filter { _, entry in
-            entry.containerID != containerID
-        }
-        cacheLock.unlock()
+        generationStore.invalidate(container: modelContext.container)
     }
 
     static func clearCachedCatalogIndexes() {
-        cacheLock.lock()
-        cachedCatalogIndexByContextID.removeAll()
-        cacheLock.unlock()
+        generationStore.invalidateAll()
     }
 
     func searchExercises(query: String, filters: ExerciseFilters) throws -> [ExerciseCatalogItem] {
@@ -109,11 +99,8 @@ nonisolated final class ExerciseSearchService {
     }
 
     private func catalogIndex() throws -> CatalogSearchIndex {
-        let contextID = ObjectIdentifier(modelContext)
-        let containerID = ObjectIdentifier(modelContext.container)
-        let generation = Self.catalogGeneration(for: containerID)
-        if let cachedEntry = Self.cachedCatalogIndex(for: contextID),
-           cachedEntry.containerID == containerID,
+        let generation = Self.generationStore.generation(for: modelContext.container)
+        if let cachedEntry = cachedCatalogIndex,
            cachedEntry.generation == generation {
             return cachedEntry.index
         }
@@ -126,30 +113,11 @@ nonisolated final class ExerciseSearchService {
             rows: exercises.map(CatalogSearchRow.init(exercise:))
         )
         let cacheEntry = CatalogSearchCacheEntry(
-            containerID: containerID,
             generation: generation,
             index: index
         )
-        Self.setCachedCatalogIndex(cacheEntry, for: contextID)
+        cachedCatalogIndex = cacheEntry
         return index
-    }
-
-    private static func catalogGeneration(for containerID: ObjectIdentifier) -> Int {
-        cacheLock.lock()
-        defer { cacheLock.unlock() }
-        return catalogGenerationByContainerID[containerID, default: 0]
-    }
-
-    private static func cachedCatalogIndex(for contextID: ObjectIdentifier) -> CatalogSearchCacheEntry? {
-        cacheLock.lock()
-        defer { cacheLock.unlock() }
-        return cachedCatalogIndexByContextID[contextID]
-    }
-
-    private static func setCachedCatalogIndex(_ entry: CatalogSearchCacheEntry, for contextID: ObjectIdentifier) {
-        cacheLock.lock()
-        cachedCatalogIndexByContextID[contextID] = entry
-        cacheLock.unlock()
     }
 
     private func matchesVisibility(row: CatalogSearchRow, filters: ExerciseFilters) -> Bool {
@@ -222,9 +190,45 @@ nonisolated final class ExerciseSearchService {
 }
 
 nonisolated private struct CatalogSearchCacheEntry {
-    let containerID: ObjectIdentifier
-    let generation: Int
+    let generation: CatalogSearchGeneration
     let index: CatalogSearchIndex
+}
+
+nonisolated private struct CatalogSearchGeneration: Equatable, Sendable {
+    let global: Int
+    let container: Int
+}
+
+/// The only process-wide search state is a revision counter. Context-bound
+/// SwiftData models stay in each service instance and never enter this store.
+nonisolated private final class CatalogSearchGenerationStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var globalGeneration = 0
+    private var generationByContainerID: [ObjectIdentifier: Int] = [:]
+
+    func generation(for container: ModelContainer) -> CatalogSearchGeneration {
+        let containerID = ObjectIdentifier(container)
+        lock.lock()
+        defer { lock.unlock() }
+        return CatalogSearchGeneration(
+            global: globalGeneration,
+            container: generationByContainerID[containerID, default: 0]
+        )
+    }
+
+    func invalidate(container: ModelContainer) {
+        let containerID = ObjectIdentifier(container)
+        lock.lock()
+        generationByContainerID[containerID, default: 0] += 1
+        lock.unlock()
+    }
+
+    func invalidateAll() {
+        lock.lock()
+        globalGeneration += 1
+        generationByContainerID.removeAll(keepingCapacity: true)
+        lock.unlock()
+    }
 }
 
 nonisolated private struct CatalogSearchIndex {

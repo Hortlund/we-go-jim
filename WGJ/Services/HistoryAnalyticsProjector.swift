@@ -160,7 +160,7 @@ nonisolated enum HistoryProjectionSnapshotBuilder {
 
 }
 
-nonisolated final class HistoryAnalyticsCache {
+nonisolated final class HistoryAnalyticsCache: @unchecked Sendable {
     static let shared = HistoryAnalyticsCache()
 
     private struct Entry {

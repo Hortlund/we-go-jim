@@ -2,27 +2,52 @@ import Foundation
 import ImageIO
 import UIKit
 
+/// Swift does not model `NSCache` as Sendable. All access is serialized by
+/// this lock-backed wrapper; cached images are treated as immutable values.
+nonisolated final class ExerciseImageMemoryCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private let cache: NSCache<NSString, UIImage>
+
+    init(countLimit: Int = 48, totalCostLimit: Int = 12 * 1024 * 1024) {
+        let cache = NSCache<NSString, UIImage>()
+        cache.countLimit = countLimit
+        cache.totalCostLimit = totalCostLimit
+        self.cache = cache
+    }
+
+    func image(for key: String) -> UIImage? {
+        lock.lock()
+        defer { lock.unlock() }
+        return cache.object(forKey: key as NSString)
+    }
+
+    func insert(_ image: UIImage, for key: String, cost: Int) {
+        lock.lock()
+        cache.setObject(image, forKey: key as NSString, cost: cost)
+        lock.unlock()
+    }
+
+    func removeAll() {
+        lock.lock()
+        cache.removeAllObjects()
+        lock.unlock()
+    }
+}
+
 nonisolated final class ExerciseImageCacheService {
     private let fileManager: FileManager
     private let decodedThumbnailMaxPixelSize = 192
 
-    private static let diskCacheLimitBytes = 64 * 1024 * 1024
-    private static let diskCacheTrimTargetBytes = 48 * 1024 * 1024
     private static let fullImageFallbackLimitBytes = 1 * 1024 * 1024
 
-    private static let sharedMemoryImageCache: NSCache<NSString, UIImage> = {
-        let cache = NSCache<NSString, UIImage>()
-        cache.countLimit = 48
-        cache.totalCostLimit = 12 * 1024 * 1024
-        return cache
-    }()
+    private static let sharedMemoryImageCache = ExerciseImageMemoryCache()
 
     init(fileManager: FileManager = .default) {
         self.fileManager = fileManager
     }
 
     static func clearMemoryCache() {
-        sharedMemoryImageCache.removeAllObjects()
+        sharedMemoryImageCache.removeAll()
     }
 
     func image(for exercise: ExerciseCatalogItem) async -> UIImage? {
@@ -31,15 +56,14 @@ nonisolated final class ExerciseImageCacheService {
         }
 
         let cacheToken = imageAsset.localPath ?? imageAsset.remoteURL
-        let cacheKey = NSString(string: cacheToken)
-        if let cached = Self.sharedMemoryImageCache.object(forKey: cacheKey) {
+        if let cached = Self.sharedMemoryImageCache.image(for: cacheToken) {
             return cached
         }
 
         if let cached = await loadCachedImage(from: imageAsset) {
-            Self.sharedMemoryImageCache.setObject(
+            Self.sharedMemoryImageCache.insert(
                 cached,
-                forKey: cacheKey,
+                for: cacheToken,
                 cost: Self.memoryCost(for: cached)
             )
             return cached
@@ -54,8 +78,7 @@ nonisolated final class ExerciseImageCacheService {
         }
 
         let cacheToken = snapshot.localPath ?? snapshot.remoteURL
-        let cacheKey = NSString(string: cacheToken)
-        if let cached = Self.sharedMemoryImageCache.object(forKey: cacheKey) {
+        if let cached = Self.sharedMemoryImageCache.image(for: cacheToken) {
             return cached
         }
 
@@ -71,9 +94,9 @@ nonisolated final class ExerciseImageCacheService {
             return nil
         }
 
-        Self.sharedMemoryImageCache.setObject(
+        Self.sharedMemoryImageCache.insert(
             image,
-            forKey: cacheKey,
+            for: cacheToken,
             cost: Self.memoryCost(for: image)
         )
         return image
@@ -81,10 +104,7 @@ nonisolated final class ExerciseImageCacheService {
 
     func trimDiskCacheIfNeeded() async {
         let cacheDirectoryURL = self.cacheDirectoryURL
-        await Task.detached(priority: .utility) {
-            Self.trimDiskCache(at: cacheDirectoryURL)
-        }
-        .value
+        await ExerciseImageDiskWorker.shared.trimDiskCache(at: cacheDirectoryURL)
     }
 
     private func loadCachedImage(from asset: ExerciseImageAsset) async -> UIImage? {
@@ -119,33 +139,37 @@ nonisolated final class ExerciseImageCacheService {
     }
 
     private func readData(from fileURL: URL) async -> Data? {
-        await Task.detached(priority: .utility) {
-            try? Data(contentsOf: fileURL)
-        }
-        .value
+        await ExerciseImageDiskWorker.shared.readData(from: fileURL)
     }
 
     private func decodeImage(from data: Data) async -> UIImage? {
-        await Task.detached(priority: .utility) { [decodedThumbnailMaxPixelSize] in
-            let options = [kCGImageSourceShouldCache: false] as CFDictionary
-            guard let source = CGImageSourceCreateWithData(data as CFData, options) else {
-                return Self.fallbackImage(from: data)
-            }
+        Self.decodeImageSynchronously(
+            from: data,
+            maxPixelSize: decodedThumbnailMaxPixelSize
+        )
+    }
 
-            let thumbnailOptions = [
-                kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceThumbnailMaxPixelSize: decodedThumbnailMaxPixelSize,
-                kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceShouldCacheImmediately: false,
-            ] as CFDictionary
-
-            if let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions) {
-                return UIImage(cgImage: cgImage)
-            }
-
-            return Self.fallbackImage(from: data)
+    private static func decodeImageSynchronously(
+        from data: Data,
+        maxPixelSize: Int
+    ) -> UIImage? {
+        let options = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithData(data as CFData, options) else {
+            return fallbackImage(from: data)
         }
-        .value
+
+        let thumbnailOptions = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: false,
+        ] as CFDictionary
+
+        if let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions) {
+            return UIImage(cgImage: cgImage)
+        }
+
+        return fallbackImage(from: data)
     }
 
     private static func memoryCost(for image: UIImage) -> Int {
@@ -166,7 +190,19 @@ nonisolated final class ExerciseImageCacheService {
         return UIImage(data: data)
     }
 
-    private static func trimDiskCache(at cacheDirectoryURL: URL) {
+}
+
+actor ExerciseImageDiskWorker {
+    static let shared = ExerciseImageDiskWorker()
+
+    private static let diskCacheLimitBytes = 64 * 1024 * 1024
+    private static let diskCacheTrimTargetBytes = 48 * 1024 * 1024
+
+    func readData(from fileURL: URL) -> Data? {
+        try? Data(contentsOf: fileURL)
+    }
+
+    func trimDiskCache(at cacheDirectoryURL: URL) {
         let fileManager = FileManager.default
         guard fileManager.fileExists(atPath: cacheDirectoryURL.path),
               let enumerator = fileManager.enumerator(
@@ -206,12 +242,12 @@ nonisolated final class ExerciseImageCacheService {
             ))
         }
 
-        guard totalSize > diskCacheLimitBytes else { return }
+        guard totalSize > Self.diskCacheLimitBytes else { return }
 
         for file in files.sorted(by: { $0.lastUsedAt < $1.lastUsedAt }) {
             try? fileManager.removeItem(at: file.url)
             totalSize -= file.size
-            if totalSize <= diskCacheTrimTargetBytes {
+            if totalSize <= Self.diskCacheTrimTargetBytes {
                 break
             }
         }

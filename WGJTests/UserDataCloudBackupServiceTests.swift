@@ -285,9 +285,9 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         let localContext = ModelContext(local)
         localContext.insert(UserProfile(displayName: "Original"))
         try localContext.save()
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: UUID().uuidString))
+        let defaultsSuiteName = UUID().uuidString
         let queue = AppDataArtifactCleanupQueue(
-            defaults: defaults,
+            defaultsSuiteName: defaultsSuiteName,
             cleanup: { _ in throw RestoreTestError.artifactCleanup }
         )
         let service = UserDataCloudBackupService(
