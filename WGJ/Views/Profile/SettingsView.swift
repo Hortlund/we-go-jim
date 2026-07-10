@@ -6,6 +6,7 @@ struct SettingsView: View {
     @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(\.cloudSyncEnabled) private var cloudSyncEnabled
     @Environment(AppWarmupState.self) private var appWarmupState
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var appRuntimeState = AppRuntimeState.shared
     @State private var settingsPersistenceCoordinator = SettingsDraftCoordinator()
@@ -19,6 +20,7 @@ struct SettingsView: View {
     @State private var keepsScreenAwake = false
     @State private var preferredWeightUnit: PreferredWeightUnit = .kg
     @State private var workoutNotificationStyle: WorkoutNotificationStyle = .timeSensitive
+    @State private var notificationPermissions: NotificationPermissionSnapshot?
     @State private var submittedSettingsDraft = UserSettingsDraft.default
     @State private var hasLoadedProfile = false
     @State private var showingDiagnostics = false
@@ -148,6 +150,20 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(WGJTheme.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
+
+                        if workoutNotificationStyle == .timeSensitive,
+                           let notificationPermissions,
+                           !notificationPermissions.allowsTimeSensitive {
+                            Label(
+                                notificationPermissions.allowsAlerts
+                                    ? "Time-sensitive alerts are off in iOS Settings; rest alerts will arrive as standard."
+                                    : "Notifications are off in iOS Settings; background rest alerts cannot be delivered.",
+                                systemImage: "exclamationmark.triangle.fill"
+                            )
+                            .font(.caption)
+                            .foregroundStyle(WGJTheme.warning)
+                            .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
                 .padding(14)
@@ -253,6 +269,11 @@ struct SettingsView: View {
             configureSettingsPersistenceIfNeeded()
             await bootstrapCatalog()
             await loadProfileIfNeeded()
+            await refreshNotificationPermissions()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
+            Task { await refreshNotificationPermissions() }
         }
         .onChange(of: isTrainingGuidanceEnabled) { _, newValue in
             guard hasLoadedProfile else { return }
@@ -328,6 +349,10 @@ struct SettingsView: View {
             libraryStatusText = "Import failed"
             showError(error)
         }
+    }
+
+    private func refreshNotificationPermissions() async {
+        notificationPermissions = await SystemUserNotificationCenterClient().settings()
     }
 
     private func loadProfileIfNeeded() async {

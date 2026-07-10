@@ -1319,7 +1319,8 @@ nonisolated final class RestTimerNotificationManager: @unchecked Sendable {
     static let shared = RestTimerNotificationManager()
 
     private let worker = RestTimerNotificationWorker(
-        notificationIdentifierPrefix: AppNotificationManager.restTimerIdentifierPrefix
+        notificationIdentifierPrefix: AppNotificationManager.restTimerIdentifierPrefix,
+        client: SystemUserNotificationCenterClient()
     )
     private let operationLock = NSLock()
     private var operationChain: Task<Void, Never>?
@@ -1348,14 +1349,18 @@ nonisolated final class RestTimerNotificationManager: @unchecked Sendable {
     }
 
     static func notificationDescriptor(
-        style: WorkoutNotificationStyle
+        style: WorkoutNotificationStyle,
+        permissions: NotificationPermissionSnapshot
     ) -> RestTimerNotificationDescriptor {
         RestTimerNotificationDescriptor(
             title: "Rest complete",
             subtitle: "",
             body: "Time for your next set.",
             usesDefaultSound: true,
-            interruptionLevel: style.notificationInterruptionLevel
+            interruptionLevel: RestTimerInterruptionPolicy.effectiveLevel(
+                style: style,
+                permissions: permissions
+            )
         )
     }
 
@@ -1397,118 +1402,125 @@ nonisolated final class RestTimerNotificationManager: @unchecked Sendable {
 
 private actor RestTimerNotificationWorker {
     private let notificationIdentifierPrefix: String
+    private let client: any UserNotificationCenterClient
     private var schedulingTask: Task<Void, Never>?
     private var schedulingGeneration = 0
     private var currentNotificationIdentifier: String?
 
-    init(notificationIdentifierPrefix: String) {
+    init(
+        notificationIdentifierPrefix: String,
+        client: any UserNotificationCenterClient
+    ) {
         self.notificationIdentifierPrefix = notificationIdentifierPrefix
+        self.client = client
     }
 
     func scheduleRestTimer(
         seconds: Int,
         style: WorkoutNotificationStyle
-    ) {
+    ) async {
         schedulingGeneration += 1
         let generation = schedulingGeneration
-        clearCurrentRestTimerNotifications()
+        await clearCurrentRestTimerNotifications()
         let notificationIdentifier = "\(notificationIdentifierPrefix).\(generation)"
         currentNotificationIdentifier = notificationIdentifier
         schedulingTask?.cancel()
 
-        schedulingTask = Task.detached(priority: .utility) { [notificationIdentifierPrefix] in
-            let center = UNUserNotificationCenter.current()
-            let isAuthorized = await AppNotificationManager.shared.requestAlertAuthorizationIfNeeded()
+        let client = self.client
+        schedulingTask = Task(priority: .utility) { [notificationIdentifierPrefix] in
+            let permissions = await RestTimerNotificationAuthorization(client: client)
+                .ensureAuthorization()
 
-            guard isAuthorized else {
-                await self.finishSchedulingWithoutAuthorization(
+            guard permissions.allowsAlerts else {
+                self.finishSchedulingWithoutAuthorization(
                     generation: generation,
                     notificationIdentifier: notificationIdentifier
                 )
                 return
             }
-            guard await self.isCurrent(generation: generation, notificationIdentifier: notificationIdentifier) else {
+            guard self.isCurrent(generation: generation, notificationIdentifier: notificationIdentifier) else {
                 return
             }
 
-            let descriptor = RestTimerNotificationManager.notificationDescriptor(style: style)
-            let content = RestTimerNotificationManager.makeNotificationContent(from: descriptor)
+            let descriptor = RestTimerNotificationManager.notificationDescriptor(
+                style: style,
+                permissions: permissions
+            )
             await Self.clearAllRestTimerNotifications(
-                using: center,
+                using: client,
                 notificationIdentifierPrefix: notificationIdentifierPrefix
             )
-            guard await self.isCurrent(generation: generation, notificationIdentifier: notificationIdentifier) else {
+            guard self.isCurrent(generation: generation, notificationIdentifier: notificationIdentifier) else {
                 return
             }
 
-            let trigger = UNTimeIntervalNotificationTrigger(
-                timeInterval: TimeInterval(max(1, seconds)),
-                repeats: false
-            )
-            let request = UNNotificationRequest(
+            let request = UserNotificationRequestDescriptor(
                 identifier: notificationIdentifier,
-                content: content,
-                trigger: trigger
+                title: descriptor.title,
+                subtitle: descriptor.subtitle,
+                body: descriptor.body,
+                usesDefaultSound: descriptor.usesDefaultSound,
+                interruptionLevel: descriptor.interruptionLevel,
+                timeInterval: TimeInterval(seconds)
             )
 
-            try? await center.add(request)
+            try? await client.add(request)
             await self.finishScheduling(
                 generation: generation,
                 notificationIdentifier: notificationIdentifier,
-                center: center
+                client: client
             )
         }
     }
 
-    func cancelRestTimerNotification() {
+    func cancelRestTimerNotification() async {
         schedulingGeneration += 1
         let generation = schedulingGeneration
         schedulingTask?.cancel()
         schedulingTask = nil
-        clearCurrentRestTimerNotifications()
+        await clearCurrentRestTimerNotifications()
 
-        Task.detached(priority: .utility) { [notificationIdentifierPrefix] in
-            guard await self.isGenerationCurrent(generation) else { return }
+        let client = self.client
+        Task(priority: .utility) { [notificationIdentifierPrefix] in
+            guard self.isGenerationCurrent(generation) else { return }
             await Self.clearAllRestTimerNotifications(
-                using: UNUserNotificationCenter.current(),
+                using: client,
                 notificationIdentifierPrefix: notificationIdentifierPrefix
             )
         }
     }
 
-    private func clearCurrentRestTimerNotifications() {
+    private func clearCurrentRestTimerNotifications() async {
         guard let currentNotificationIdentifier else { return }
-        Self.clearRestTimerNotifications(
-            using: UNUserNotificationCenter.current(),
+        await Self.clearRestTimerNotifications(
+            using: client,
             identifier: currentNotificationIdentifier
         )
         self.currentNotificationIdentifier = nil
     }
 
     private static func clearRestTimerNotifications(
-        using center: UNUserNotificationCenter,
+        using client: any UserNotificationCenterClient,
         identifier: String
-    ) {
-        center.removePendingNotificationRequests(withIdentifiers: [identifier])
-        center.removeDeliveredNotifications(withIdentifiers: [identifier])
+    ) async {
+        await client.removePendingRequests(withIdentifiers: [identifier])
+        await client.removeDeliveredRequests(withIdentifiers: [identifier])
     }
 
     private static func clearAllRestTimerNotifications(
-        using center: UNUserNotificationCenter,
+        using client: any UserNotificationCenterClient,
         notificationIdentifierPrefix: String
     ) async {
-        let pendingIdentifiers = await center.pendingNotificationRequests()
-            .map(\.identifier)
+        let pendingIdentifiers = await client.pendingRequestIdentifiers()
             .filter { $0.hasPrefix(notificationIdentifierPrefix) }
-        let deliveredIdentifiers = await center.deliveredNotifications()
-            .map(\.request.identifier)
+        let deliveredIdentifiers = await client.deliveredRequestIdentifiers()
             .filter { $0.hasPrefix(notificationIdentifierPrefix) }
 
         if !pendingIdentifiers.isEmpty {
-            center.removePendingNotificationRequests(withIdentifiers: pendingIdentifiers)
+            await client.removePendingRequests(withIdentifiers: pendingIdentifiers)
         }
         if !deliveredIdentifiers.isEmpty {
-            center.removeDeliveredNotifications(withIdentifiers: deliveredIdentifiers)
+            await client.removeDeliveredRequests(withIdentifiers: deliveredIdentifiers)
         }
     }
 
@@ -1527,11 +1539,11 @@ private actor RestTimerNotificationWorker {
     private func finishScheduling(
         generation: Int,
         notificationIdentifier: String,
-        center: UNUserNotificationCenter
-    ) {
+        client: any UserNotificationCenterClient
+    ) async {
         if generation != schedulingGeneration || currentNotificationIdentifier != notificationIdentifier {
-            Self.clearRestTimerNotifications(
-                using: center,
+            await Self.clearRestTimerNotifications(
+                using: client,
                 identifier: notificationIdentifier
             )
             return
