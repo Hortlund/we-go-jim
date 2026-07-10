@@ -39,6 +39,7 @@ struct ExercisesCatalogView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(AppTabState.self) private var appTabState
     @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
+    @Environment(ActiveWorkoutCoordinator.self) private var activeWorkoutCoordinator
 
     private let mode: ExercisesCatalogMode
 
@@ -952,7 +953,7 @@ struct ExercisesCatalogView: View {
 
     @MainActor
     private func resolvedActiveRuntimeSessionForAdd() async throws -> ActiveWorkoutRuntimeSession? {
-        if let snapshot = try await ActiveWorkoutSnapshotStore.shared.load() {
+        if let snapshot = activeWorkoutCoordinator.storedSnapshot?.session {
             if activeWorkoutPresentationState.activeSessionID != snapshot.id {
                 activeWorkoutPresentationState.activeSessionID = snapshot.id
             }
@@ -963,7 +964,7 @@ struct ExercisesCatalogView: View {
         if let importedLegacy = try await backgroundStore.performWrite("exercises.import-legacy-active-session", { backgroundContext in
             try ActiveWorkoutSessionFactory(modelContext: backgroundContext).importLegacyActiveSessionIfNeeded()
         }) {
-            try await ActiveWorkoutSnapshotStore.shared.save(importedLegacy)
+            _ = activeWorkoutCoordinator.send(.start(importedLegacy))
             activeWorkoutPresentationState.activeSessionID = importedLegacy.id
             return importedLegacy
         }
@@ -979,8 +980,7 @@ struct ExercisesCatalogView: View {
         _ exercise: ExerciseRuntimeAppendInput,
         to session: ActiveWorkoutRuntimeSession
     ) async throws {
-        var updatedSession = session
-        let sortOrder = updatedSession.exercises.count
+        let sortOrder = session.exercises.count
         let backgroundStore = exercisesBackgroundStore
         let preferredLoadUnit = try await backgroundStore.perform("exercises.preferred-load-unit") { backgroundContext in
             (try? ProfileRepository(modelContext: backgroundContext).currentProfile()?.preferredLoadUnit) ?? .kg
@@ -990,19 +990,19 @@ struct ExercisesCatalogView: View {
             sortOrder: sortOrder,
             preferredLoadUnit: preferredLoadUnit
         )
-        updatedSession.exercises.append(runtimeExercise)
-        updatedSession.normalizeExerciseSortOrder()
-        updatedSession.touch()
+        if activeWorkoutCoordinator.storedSnapshot?.session.id != session.id {
+            _ = activeWorkoutCoordinator.send(.start(session))
+        }
         let expandedExerciseIDs = activeWorkoutPresentationState
-            .preparedExpandedExerciseIDs(for: updatedSession.id)
+            .preparedExpandedExerciseIDs(for: session.id)
             .union([runtimeExercise.id])
-        try await ActiveWorkoutSnapshotStore.shared.save(
-            updatedSession,
-            presentationMode: .presented,
-            preservesExistingPresentationMode: false
-        )
-        activeWorkoutPresentationState.stageRuntimeSession(updatedSession, for: updatedSession.id)
-        activeWorkoutPresentationState.stageExpandedExerciseIDs(expandedExerciseIDs, for: updatedSession.id)
+        _ = activeWorkoutCoordinator.send(.appendExercise(runtimeExercise))
+        _ = activeWorkoutCoordinator.send(.updatePresentation(
+            mode: .presented,
+            scrollTarget: .exercise(runtimeExercise.id),
+            expandedExerciseIDs: expandedExerciseIDs
+        ))
+        activeWorkoutPresentationState.stageExpandedExerciseIDs(expandedExerciseIDs, for: session.id)
     }
 
     nonisolated private static func makeEmptyRuntimeSession() -> ActiveWorkoutRuntimeSession {
@@ -2174,6 +2174,7 @@ private struct ExerciseCatalogThumbnail: View {
     }
     .environment(AppTabState())
     .environment(ActiveWorkoutPresentationState())
+    .environment(ActiveWorkoutCoordinator.preview())
     .modelContainer(for: [
         ExerciseCatalogItem.self,
         MuscleGroup.self,

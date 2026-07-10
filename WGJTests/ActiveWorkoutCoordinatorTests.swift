@@ -3,6 +3,28 @@ import XCTest
 
 @MainActor
 final class ActiveWorkoutCoordinatorTests: XCTestCase {
+    func testActiveWorkoutCallersDoNotAccessSnapshotStoreDirectly() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let callerPaths = [
+            "WGJ/ContentView.swift",
+            "WGJ/Models/AppRuntimeConfig.swift",
+            "WGJ/Views/Exercises/ExercisesCatalogView.swift",
+            "WGJ/Views/Workout/StartWorkoutHomeView.swift",
+            "WGJ/Views/Workout/ActiveWorkoutStripView.swift",
+            "WGJ/Views/Workout/ActiveWorkoutView.swift",
+        ]
+
+        for callerPath in callerPaths {
+            let source = try String(
+                contentsOf: repositoryRoot.appendingPathComponent(callerPath),
+                encoding: .utf8
+            )
+            XCTAssertFalse(source.contains("ActiveWorkoutSnapshotStore.shared"), callerPath)
+        }
+    }
+
     func testInterleavedCommandsPersistOneLatestRevisionWithoutLosingFields() async throws {
         let store = RecordingActiveWorkoutSnapshotStore()
         let coordinator = ActiveWorkoutCoordinator(
@@ -79,6 +101,48 @@ final class ActiveWorkoutCoordinatorTests: XCTestCase {
         XCTAssertEqual(maximumConcurrentWrites, 1)
     }
 
+    func testRestoreRejectsCompletedSnapshotBeforePublishing() async throws {
+        let session = ActiveWorkoutRuntimeSession(
+            id: UUID(uuidString: "11111111-2222-3333-4444-555555555555")!,
+            name: "Completed"
+        )
+        let store = RecordingActiveWorkoutSnapshotStore(
+            initialSnapshot: ActiveWorkoutStoredSnapshot(revision: 4, session: session)
+        )
+        let persistence = StubActiveWorkoutPersistence(completedSessionIDs: [session.id])
+        let coordinator = ActiveWorkoutCoordinator(
+            snapshotStore: store,
+            persistence: persistence
+        )
+
+        await coordinator.restore()
+
+        let retainedSnapshot = await store.lastSnapshot()
+        XCTAssertNil(coordinator.storedSnapshot)
+        XCTAssertNil(retainedSnapshot)
+    }
+
+    func testConcurrentCompletionCallsShareOnePersistenceOperation() async throws {
+        let session = ActiveWorkoutRuntimeSession(name: "Push")
+        let store = RecordingActiveWorkoutSnapshotStore()
+        let persistence = StubActiveWorkoutPersistence(completionDelayNanoseconds: 5_000_000)
+        let coordinator = ActiveWorkoutCoordinator(
+            snapshotStore: store,
+            persistence: persistence
+        )
+        _ = coordinator.send(.start(session))
+
+        async let first = coordinator.complete(notes: "Done")
+        async let second = coordinator.complete(notes: "Done")
+        let results = try await [first, second]
+        let completionCallCount = await persistence.completionCallCount()
+
+        XCTAssertEqual(results[0].sessionID, session.id)
+        XCTAssertEqual(results[1].sessionID, session.id)
+        XCTAssertEqual(completionCallCount, 1)
+        XCTAssertNil(coordinator.storedSnapshot)
+    }
+
     private func makeExercise(id: UUID, name: String, sortOrder: Int) -> ActiveWorkoutRuntimeExercise {
         ActiveWorkoutRuntimeExercise(
             id: id,
@@ -97,7 +161,13 @@ private actor RecordingActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring 
     private var maxActiveWrites = 0
     private let writeDelayNanoseconds: UInt64
 
-    init(writeDelayNanoseconds: UInt64 = 0) {
+    init(
+        initialSnapshot: ActiveWorkoutStoredSnapshot? = nil,
+        writeDelayNanoseconds: UInt64 = 0
+    ) {
+        if let initialSnapshot {
+            snapshots = [initialSnapshot]
+        }
         self.writeDelayNanoseconds = writeDelayNanoseconds
     }
 
@@ -133,14 +203,34 @@ private actor RecordingActiveWorkoutSnapshotStore: ActiveWorkoutSnapshotStoring 
 }
 
 private actor StubActiveWorkoutPersistence: ActiveWorkoutPersistence {
+    private let completedSessionIDs: Set<UUID>
+    private let completionDelayNanoseconds: UInt64
+    private var completionCalls = 0
+
+    init(
+        completedSessionIDs: Set<UUID> = [],
+        completionDelayNanoseconds: UInt64 = 0
+    ) {
+        self.completedSessionIDs = completedSessionIDs
+        self.completionDelayNanoseconds = completionDelayNanoseconds
+    }
+
     func isCompleted(sessionID: UUID) async throws -> Bool {
-        false
+        completedSessionIDs.contains(sessionID)
     }
 
     func complete(
         session: ActiveWorkoutRuntimeSession,
         notes: String?
     ) async throws -> WorkoutCompletionCommitResult {
-        WorkoutCompletionCommitResult(sessionID: session.id, disposition: .inserted)
+        completionCalls += 1
+        if completionDelayNanoseconds > 0 {
+            try await Task.sleep(nanoseconds: completionDelayNanoseconds)
+        }
+        return WorkoutCompletionCommitResult(sessionID: session.id, disposition: .inserted)
+    }
+
+    func completionCallCount() -> Int {
+        completionCalls
     }
 }

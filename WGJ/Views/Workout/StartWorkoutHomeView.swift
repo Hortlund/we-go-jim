@@ -9,6 +9,7 @@ struct StartWorkoutHomeView: View {
     @Environment(\.isTabActive) private var isTabActive
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
+    @Environment(ActiveWorkoutCoordinator.self) private var activeWorkoutCoordinator
     @Environment(TemplateFileOpenState.self) private var templateFileOpenState
 
     @State private var expandedFolderIDs = StartWorkoutFolderExpansionPersistence.load()
@@ -678,27 +679,16 @@ struct StartWorkoutHomeView: View {
         templateID: UUID?,
         backgroundStore: AppBackgroundStore
     ) async throws -> ActiveWorkoutStartPreparation {
-        if let snapshot = try await ActiveWorkoutSnapshotStore.shared.loadDiscardingCorruptSnapshot() {
-            return ActiveWorkoutStartPreparation(
-                sessionID: snapshot.id,
-                isExistingConflict: true,
-                runtimeSession: nil,
-                previousPerformanceResolutionByExerciseID: [:],
-                firstRenderSnapshot: nil
-            )
-        }
-
         let importedLegacy = try await backgroundStore.performWrite("start-workout.import-legacy-active-session") { backgroundContext in
             try ActiveWorkoutSessionFactory(modelContext: backgroundContext)
                 .importLegacyActiveSessionIfNeeded()
         }
 
         if let importedLegacy {
-            try await ActiveWorkoutSnapshotStore.shared.save(importedLegacy)
             return ActiveWorkoutStartPreparation(
                 sessionID: importedLegacy.id,
                 isExistingConflict: true,
-                runtimeSession: nil,
+                runtimeSession: importedLegacy,
                 previousPerformanceResolutionByExerciseID: [:],
                 firstRenderSnapshot: nil
             )
@@ -708,11 +698,6 @@ struct StartWorkoutHomeView: View {
             try Self.prepareActiveWorkoutStart(templateID: templateID, modelContext: backgroundContext)
         }
 
-        try await ActiveWorkoutSnapshotStore.shared.save(
-            runtimePreparation.session,
-            presentationMode: .presented,
-            preservesExistingPresentationMode: false
-        )
         return ActiveWorkoutStartPreparation(
             sessionID: runtimePreparation.session.id,
             isExistingConflict: false,
@@ -741,6 +726,9 @@ struct StartWorkoutHomeView: View {
     }
 
     private func handlePreparedActiveWorkoutStart(_ preparation: ActiveWorkoutStartPreparation) {
+        if let runtimeSession = preparation.runtimeSession {
+            _ = activeWorkoutCoordinator.send(.start(runtimeSession))
+        }
         if preparation.isExistingConflict {
             presentActiveWorkoutConflict(for: preparation.sessionID)
             return
@@ -748,11 +736,14 @@ struct StartWorkoutHomeView: View {
 
         if let runtimeSession = preparation.runtimeSession,
            let firstRenderSnapshot = preparation.firstRenderSnapshot {
-            activeWorkoutPresentationState.stagePreparedStart(
-                ActiveWorkoutPreparedStartState(
-                    session: runtimeSession,
-                    firstRenderSnapshot: firstRenderSnapshot
-                )
+            _ = activeWorkoutCoordinator.send(.updatePresentation(
+                mode: .presented,
+                scrollTarget: nil,
+                expandedExerciseIDs: []
+            ))
+            activeWorkoutPresentationState.stagePreparedFirstRenderSnapshot(
+                firstRenderSnapshot,
+                for: runtimeSession.id
             )
         } else {
             activeWorkoutPresentationState.stagePreparedPreviousPerformanceResolution(
@@ -2502,6 +2493,7 @@ private struct ActiveWorkoutStartRuntimePreparation: Sendable {
         StartWorkoutHomeView()
     }
     .environment(ActiveWorkoutPresentationState())
+    .environment(ActiveWorkoutCoordinator.preview())
     .environment(TemplateFileOpenState())
     .modelContainer(for: [
         ExerciseCatalogItem.self,

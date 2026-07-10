@@ -3,13 +3,11 @@ import SwiftData
 import SwiftUI
 
 struct ActiveWorkoutStripView: View {
-    @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
+    @Environment(ActiveWorkoutCoordinator.self) private var activeWorkoutCoordinator
     @Environment(RestTimerState.self) private var restTimerState
 
     let sessionID: UUID
     let onExpand: () -> Void
-
-    @State private var session: ActiveWorkoutRuntimeSession?
 
     init(sessionID: UUID, onExpand: @escaping () -> Void) {
         self.sessionID = sessionID
@@ -68,33 +66,13 @@ struct ActiveWorkoutStripView: View {
             )
             .padding(.horizontal, 12)
         }
-        .task(id: sessionID) {
-            await loadSnapshot()
-        }
-        .onAppear {
-            applyPreparedSnapshotIfAvailable()
-        }
     }
 
-    @MainActor
-    private func loadSnapshot() async {
-        if let preparedSession = activeWorkoutPresentationState.preparedRuntimeSession(for: sessionID) {
-            session = preparedSession
-            return
+    private var session: ActiveWorkoutRuntimeSession? {
+        guard activeWorkoutCoordinator.storedSnapshot?.session.id == sessionID else {
+            return nil
         }
-
-        guard let snapshot = try? await ActiveWorkoutSnapshotStore.shared.load(),
-              snapshot.id == sessionID else {
-            session = nil
-            return
-        }
-        session = snapshot
-    }
-
-    @MainActor
-    private func applyPreparedSnapshotIfAvailable() {
-        guard session == nil else { return }
-        session = activeWorkoutPresentationState.preparedRuntimeSession(for: sessionID)
+        return activeWorkoutCoordinator.storedSnapshot?.session
     }
 
     private func elapsedText(now: Date) -> String {
@@ -148,8 +126,10 @@ private struct ActiveWorkoutStripStatusPresentation {
 }
 
 #Preview {
-    ActiveWorkoutStripView(sessionID: UUID(), onExpand: {})
+    let session = ActiveWorkoutRuntimeSession(name: "Preview Workout")
+    ActiveWorkoutStripView(sessionID: session.id, onExpand: {})
         .environment(ActiveWorkoutPresentationState())
+        .environment(ActiveWorkoutCoordinator.preview(session: session))
         .environment(RestTimerState())
         .modelContainer(for: [
             ExerciseCatalogItem.self,

@@ -23,6 +23,13 @@ nonisolated enum ActiveWorkoutCommand: Sendable {
         expandedExerciseIDs: Set<UUID>
     )
     case updateRestTimer(RestTimerSnapshot?)
+    case synchronize(
+        session: ActiveWorkoutRuntimeSession,
+        restTimer: RestTimerSnapshot?,
+        presentationMode: ActiveWorkoutStoredPresentationMode,
+        scrollTarget: ActiveWorkoutScrollTarget?,
+        expandedExerciseIDs: Set<UUID>
+    )
 }
 
 nonisolated struct ActiveWorkoutMutationReceipt: Equatable, Sendable {
@@ -96,6 +103,14 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
 
     @discardableResult
     func send(_ command: ActiveWorkoutCommand) -> ActiveWorkoutMutationReceipt {
+        send(command, persist: true)
+    }
+
+    @discardableResult
+    func send(
+        _ command: ActiveWorkoutCommand,
+        persist shouldPersist: Bool
+    ) -> ActiveWorkoutMutationReceipt {
         var snapshot: ActiveWorkoutStoredSnapshot
         switch command {
         case .start(let session):
@@ -114,7 +129,9 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
         snapshot.revision &+= 1
         storedSnapshot = snapshot
         persistenceWarning = nil
-        scheduleSnapshotSave(snapshot)
+        if shouldPersist {
+            scheduleSnapshotSave(snapshot)
+        }
         return ActiveWorkoutMutationReceipt(
             revision: snapshot.revision,
             session: snapshot.session
@@ -132,6 +149,103 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
             return
         }
         await persist(snapshot)
+    }
+
+    func restore() async {
+        let snapshot: ActiveWorkoutStoredSnapshot
+        do {
+            guard let loadedSnapshot = try await snapshotStore.loadStoredSnapshot() else {
+                storedSnapshot = nil
+                return
+            }
+            snapshot = loadedSnapshot
+        } catch {
+            storedSnapshot = nil
+            do {
+                try await snapshotStore.delete()
+            } catch {
+                // Keep the original read failure as the actionable warning.
+            }
+            persistenceWarning = String(describing: error)
+            return
+        }
+
+        do {
+            if try await persistence.isCompleted(sessionID: snapshot.session.id) {
+                storedSnapshot = nil
+                do {
+                    try await snapshotStore.delete()
+                    persistenceWarning = nil
+                } catch {
+                    persistenceWarning = String(describing: error)
+                }
+                return
+            }
+            storedSnapshot = snapshot
+            lastPersistedRevision = snapshot.revision
+            persistenceWarning = nil
+        } catch {
+            storedSnapshot = nil
+            persistenceWarning = String(describing: error)
+        }
+    }
+
+    func complete(notes: String?) async throws -> WorkoutCompletionCommitResult {
+        if let completionTask {
+            return try await completionTask.value
+        }
+        guard let session = storedSnapshot?.session else {
+            throw WorkoutSessionRepositoryError.sessionNotFound
+        }
+
+        let task = Task {
+            try await persistence.complete(session: session, notes: notes)
+        }
+        completionTask = task
+
+        do {
+            let result = try await task.value
+            completionTask = nil
+            saveTask?.cancel()
+            saveTask = nil
+            storedSnapshot = nil
+            lastPersistedRevision = nil
+            do {
+                try await snapshotStore.delete()
+                persistenceWarning = nil
+            } catch {
+                persistenceWarning = String(describing: error)
+            }
+            return result
+        } catch {
+            completionTask = nil
+            throw error
+        }
+    }
+
+    func discard() async {
+        saveTask?.cancel()
+        saveTask = nil
+        completionTask?.cancel()
+        completionTask = nil
+        storedSnapshot = nil
+        lastPersistedRevision = nil
+        do {
+            try await snapshotStore.delete()
+            persistenceWarning = nil
+        } catch {
+            persistenceWarning = String(describing: error)
+        }
+    }
+
+    func clearInMemory() {
+        saveTask?.cancel()
+        saveTask = nil
+        completionTask?.cancel()
+        completionTask = nil
+        storedSnapshot = nil
+        lastPersistedRevision = nil
+        persistenceWarning = nil
     }
 
     private func scheduleSnapshotSave(_ snapshot: ActiveWorkoutStoredSnapshot) {
@@ -263,6 +377,19 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
             snapshot.expandedExerciseIDs = expandedExerciseIDs
         case .updateRestTimer(let restTimer):
             snapshot.restTimer = restTimer?.isExpired == true ? nil : restTimer
+        case .synchronize(
+            let session,
+            let restTimer,
+            let presentationMode,
+            let scrollTarget,
+            let expandedExerciseIDs
+        ):
+            guard session.id == snapshot.session.id else { break }
+            snapshot.session = session
+            snapshot.restTimer = restTimer?.isExpired == true ? nil : restTimer
+            snapshot.presentationMode = presentationMode
+            snapshot.scrollTarget = scrollTarget
+            snapshot.expandedExerciseIDs = expandedExerciseIDs
         }
     }
 
@@ -278,3 +405,52 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
         snapshot.session.touch()
     }
 }
+
+#if DEBUG
+@MainActor
+extension ActiveWorkoutCoordinator {
+    static func preview(session: ActiveWorkoutRuntimeSession? = nil) -> ActiveWorkoutCoordinator {
+        let coordinator = ActiveWorkoutCoordinator(
+            snapshotStore: ActiveWorkoutPreviewSnapshotStore(),
+            persistence: ActiveWorkoutPreviewPersistence()
+        )
+        if let session {
+            _ = coordinator.send(.start(session), persist: false)
+        }
+        return coordinator
+    }
+}
+
+private actor ActiveWorkoutPreviewSnapshotStore: ActiveWorkoutSnapshotStoring {
+    private var snapshot: ActiveWorkoutStoredSnapshot?
+
+    func loadStoredSnapshot() async throws -> ActiveWorkoutStoredSnapshot? {
+        snapshot
+    }
+
+    func save(_ snapshot: ActiveWorkoutStoredSnapshot) async throws -> ActiveWorkoutSnapshotWriteResult {
+        if self.snapshot == snapshot {
+            return .unchanged
+        }
+        self.snapshot = snapshot
+        return .written
+    }
+
+    func delete() async throws {
+        snapshot = nil
+    }
+}
+
+private actor ActiveWorkoutPreviewPersistence: ActiveWorkoutPersistence {
+    func isCompleted(sessionID: UUID) async throws -> Bool {
+        false
+    }
+
+    func complete(
+        session: ActiveWorkoutRuntimeSession,
+        notes: String?
+    ) async throws -> WorkoutCompletionCommitResult {
+        WorkoutCompletionCommitResult(sessionID: session.id, disposition: .inserted)
+    }
+}
+#endif

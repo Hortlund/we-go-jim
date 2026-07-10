@@ -60,9 +60,15 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
             ActiveWorkoutRuntimeSession(id: fixedSessionID, name: "Push")
         )
         let presentationState = ActiveWorkoutPresentationState()
+        let backgroundStore = AppBackgroundStore(container: container)
+        let coordinator = ActiveWorkoutCoordinator(
+            persistence: ModelContainerActiveWorkoutPersistence(backgroundStore: backgroundStore)
+        )
 
         await presentationState.restoreActiveSessionIfNeeded(
+            coordinator: coordinator,
             modelContext: context,
+            backgroundStore: backgroundStore,
             allowsLegacyDraftImport: false
         )
 

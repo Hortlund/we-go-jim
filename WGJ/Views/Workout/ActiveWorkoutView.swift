@@ -11,6 +11,7 @@ struct ActiveWorkoutView: View {
     @Environment(\.appBackgroundStore) private var appBackgroundStore
     @Environment(WorkoutCompletionPresentationState.self) private var workoutCompletionPresentationState
     @Environment(ActiveWorkoutPresentationState.self) private var activeWorkoutPresentationState
+    @Environment(ActiveWorkoutCoordinator.self) private var activeWorkoutCoordinator
     @Environment(RestTimerState.self) private var restTimerState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
@@ -39,8 +40,6 @@ struct ActiveWorkoutView: View {
     @State private var deferredHydrationTask: Task<Void, Never>?
     @State private var foregroundNonCriticalInteractionWorkTask: Task<Void, Never>?
     @State private var pendingGuidanceRefreshTask: Task<Void, Never>?
-    @State private var pendingUserEditSnapshotTask: Task<Void, Never>?
-    @State private var pendingMinimizedSnapshotTask: Task<Void, Never>?
     @State private var pendingTemplateUpdatePreviewTask: Task<Void, Never>?
     @State private var pendingGuidanceRefreshExerciseIDs: Set<UUID> = []
     @State private var shouldRefreshAllGuidance = false
@@ -933,16 +932,11 @@ struct ActiveWorkoutView: View {
         presentActiveWorkout()
 
         do {
-            if let preparedSession = activeWorkoutPresentationState.preparedRuntimeSession(for: sessionID) {
-                applyRuntimeSessionState(preparedSession)
-                activeWorkoutPresentationState.clearPreparedRuntimeSession(for: sessionID)
-            } else {
-                guard let storedSession = try await ActiveWorkoutSnapshotStore.shared.load(),
-                      storedSession.id == sessionID else {
-                    throw WorkoutSessionRepositoryError.sessionNotFound
-                }
-                applyRuntimeSessionState(storedSession)
+            guard let storedSession = activeWorkoutCoordinator.storedSnapshot?.session,
+                  storedSession.id == sessionID else {
+                throw WorkoutSessionRepositoryError.sessionNotFound
             }
+            applyRuntimeSessionState(storedSession)
         } catch {
             showError(error)
             return
@@ -1934,7 +1928,6 @@ struct ActiveWorkoutView: View {
             isEndingSession = true
             rowFlushCoordinator.flushAll()
             dismissKeyboard()
-            await awaitPendingSnapshotWrites(cancelMinimizedWrite: true)
             guard let finishingSession = currentRuntimeSnapshot() else {
                 isEndingSession = false
                 showError(WorkoutSessionRepositoryError.sessionNotFound)
@@ -1945,11 +1938,6 @@ struct ActiveWorkoutView: View {
 
             do {
                 let result = try await performFinishCommand(session: finishingSession, notes: finalNotes)
-                do {
-                    try await ActiveWorkoutSnapshotStore.shared.delete()
-                } catch {
-                    Self.logger.error("Active workout snapshot cleanup failed after completion: \(error.localizedDescription, privacy: .public)")
-                }
                 handleCompletedSessionTransition(result)
             } catch {
                 isEndingSession = false
@@ -2090,7 +2078,6 @@ struct ActiveWorkoutView: View {
         runtimeSession = snapshot
         pendingCardioCompletionsByPhase = [:]
         refreshRenderProjection()
-        activeWorkoutPresentationState.stageRuntimeSession(snapshot, for: sessionID)
         activeWorkoutPresentationState.stagePreparedFirstRenderSnapshot(
             currentPreparedFirstRenderSnapshot(),
             for: sessionID
@@ -2112,28 +2099,13 @@ struct ActiveWorkoutView: View {
         let restTimerSnapshot = restTimerState.restTimerSnapshot()
         let scrollTarget = minimizedScrollRestoreTarget()
         let expandedExerciseIDs = cardStateController.expandedExerciseIDs()
-        pendingMinimizedSnapshotTask?.cancel()
-        pendingMinimizedSnapshotTask = Task.detached(priority: .utility) {
-            guard !Task.isCancelled else { return }
-            do {
-                try await ActiveWorkoutSnapshotStore.shared.save(
-                    snapshot,
-                    restTimer: restTimerSnapshot,
-                    presentationMode: .collapsed,
-                    scrollTarget: scrollTarget,
-                    expandedExerciseIDs: expandedExerciseIDs,
-                    preservesExistingRestTimer: false,
-                    preservesExistingPresentationMode: false,
-                    preservesExistingScrollTarget: false,
-                    preservesExistingExpandedExerciseIDs: false
-                )
-            } catch {
-                guard !Task.isCancelled else { return }
-                await MainActor.run {
-                    showError(error)
-                }
-            }
-        }
+        _ = activeWorkoutCoordinator.send(.synchronize(
+            session: snapshot,
+            restTimer: restTimerSnapshot,
+            presentationMode: .collapsed,
+            scrollTarget: scrollTarget,
+            expandedExerciseIDs: expandedExerciseIDs
+        ))
     }
 
     @MainActor
@@ -2201,20 +2173,11 @@ struct ActiveWorkoutView: View {
             guard !isEndingSession else { return }
             isEndingSession = true
             rowFlushCoordinator.flushAll()
-            let pendingSnapshotWrites = cancelPendingSnapshotWrites(cancelMinimizedWrite: true)
             restTimerState.clearRestTimer()
             activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
             dismiss()
 
-            Task.detached(priority: .utility) {
-                await pendingSnapshotWrites.userEdit?.value
-                await pendingSnapshotWrites.minimized?.value
-                do {
-                    try await ActiveWorkoutSnapshotStore.shared.delete()
-                } catch {
-                    Self.logger.error("Active workout snapshot cleanup failed after discard: \(error.localizedDescription, privacy: .public)")
-                }
-            }
+            await activeWorkoutCoordinator.discard()
         }
     }
 
@@ -2544,17 +2507,7 @@ struct ActiveWorkoutView: View {
             flushBatchedRenderProjectionIfNeeded()
         }
 
-        let pendingSnapshotTask = pendingUserEditSnapshotTask
-        pendingUserEditSnapshotTask = nil
-        let pendingMinimizedSnapshotTask = pendingMinimizedSnapshotTask
-        self.pendingMinimizedSnapshotTask = nil
-
         if checkpoint == .sceneTransition {
-            pendingSnapshotTask?.cancel()
-            pendingMinimizedSnapshotTask?.cancel()
-            await pendingSnapshotTask?.value
-            await pendingMinimizedSnapshotTask?.value
-
             guard let snapshot = currentRuntimeSnapshot() else {
                 pendingCardioCompletionsByPhase = [:]
                 return true
@@ -2568,29 +2521,13 @@ struct ActiveWorkoutView: View {
             activeWorkoutPresentationState.stageScrollTarget(scrollTarget, for: sessionID)
             activeWorkoutPresentationState.stageExpandedExerciseIDs(expandedExerciseIDs, for: sessionID)
 
-            do {
-                try await ActiveWorkoutSnapshotStore.shared.save(
-                    snapshot,
-                    restTimer: restTimerState.restTimerSnapshot(),
-                    presentationMode: .presented,
-                    scrollTarget: scrollTarget,
-                    expandedExerciseIDs: expandedExerciseIDs,
-                    preservesExistingRestTimer: false,
-                    preservesExistingPresentationMode: false,
-                    preservesExistingScrollTarget: false,
-                    preservesExistingExpandedExerciseIDs: false
-                )
-                return true
-            } catch {
-                showError(error)
-                return false
-            }
+            return await flushCoordinatorSnapshot(
+                snapshot,
+                presentationMode: .presented,
+                scrollTarget: scrollTarget,
+                expandedExerciseIDs: expandedExerciseIDs
+            )
         }
-
-        pendingSnapshotTask?.cancel()
-        pendingMinimizedSnapshotTask?.cancel()
-        await pendingSnapshotTask?.value
-        await pendingMinimizedSnapshotTask?.value
 
         switch checkpoint {
         case .finish, .cancel:
@@ -2615,23 +2552,33 @@ struct ActiveWorkoutView: View {
             return true
         }
 
-        do {
-            try await ActiveWorkoutSnapshotStore.shared.save(
-                snapshot,
-                restTimer: restTimerState.restTimerSnapshot(),
-                presentationMode: .presented,
-                scrollTarget: scrollTarget,
-                expandedExerciseIDs: expandedExerciseIDs,
-                preservesExistingRestTimer: false,
-                preservesExistingPresentationMode: false,
-                preservesExistingScrollTarget: false,
-                preservesExistingExpandedExerciseIDs: false
-            )
-            return true
-        } catch {
-            showError(error)
+        return await flushCoordinatorSnapshot(
+            snapshot,
+            presentationMode: .presented,
+            scrollTarget: scrollTarget,
+            expandedExerciseIDs: expandedExerciseIDs
+        )
+    }
+
+    @MainActor
+    private func flushCoordinatorSnapshot(
+        _ snapshot: ActiveWorkoutRuntimeSession,
+        presentationMode: ActiveWorkoutStoredPresentationMode,
+        scrollTarget: ActiveWorkoutScrollTarget?,
+        expandedExerciseIDs: Set<UUID>
+    ) async -> Bool {
+        _ = activeWorkoutCoordinator.send(.synchronize(
+            session: snapshot,
+            restTimer: restTimerState.restTimerSnapshot(),
+            presentationMode: presentationMode,
+            scrollTarget: scrollTarget,
+            expandedExerciseIDs: expandedExerciseIDs
+        ))
+        await activeWorkoutCoordinator.flushSnapshot()
+        guard activeWorkoutCoordinator.persistenceWarning == nil else {
             return false
         }
+        return true
     }
 
     @MainActor
@@ -2724,92 +2671,50 @@ struct ActiveWorkoutView: View {
         runtimeSession = snapshot
         pendingCardioCompletionsByPhase = [:]
         refreshRenderProjection()
-        activeWorkoutPresentationState.stageRuntimeSession(snapshot, for: sessionID)
         let scrollTarget = minimizedScrollRestoreTarget()
         let expandedExerciseIDs = cardStateController.expandedExerciseIDs()
         activeWorkoutPresentationState.stageScrollTarget(scrollTarget, for: sessionID)
         activeWorkoutPresentationState.stageExpandedExerciseIDs(expandedExerciseIDs, for: sessionID)
 
-        guard writeDurableSnapshot,
-              ActiveWorkoutSnapshotPersistencePolicy.shouldWriteDurableSnapshot(for: .userEdit)
-        else {
-            return
-        }
-
-        pendingUserEditSnapshotTask?.cancel()
-        let restTimerSnapshot = restTimerState.restTimerSnapshot()
-        pendingUserEditSnapshotTask = Task.detached(priority: .utility) {
-            guard !Task.isCancelled else { return }
-            do {
-                try await ActiveWorkoutSnapshotStore.shared.save(
-                    snapshot,
-                    restTimer: restTimerSnapshot,
-                    presentationMode: .presented,
-                    scrollTarget: scrollTarget,
-                    expandedExerciseIDs: expandedExerciseIDs,
-                    preservesExistingRestTimer: false,
-                    preservesExistingPresentationMode: false,
-                    preservesExistingScrollTarget: false,
-                    preservesExistingExpandedExerciseIDs: false
-                )
-            } catch {
-                guard !Task.isCancelled else { return }
-                await MainActor.run {
-                    showError(error)
-                }
-            }
-        }
+        _ = activeWorkoutCoordinator.send(.synchronize(
+            session: snapshot,
+            restTimer: restTimerState.restTimerSnapshot(),
+            presentationMode: .presented,
+            scrollTarget: scrollTarget,
+            expandedExerciseIDs: expandedExerciseIDs
+        ), persist: writeDurableSnapshot)
     }
 
     @MainActor
-    private func awaitPendingSnapshotWrites(cancelMinimizedWrite: Bool) async {
-        let pendingSnapshotWrites = cancelPendingSnapshotWrites(cancelMinimizedWrite: cancelMinimizedWrite)
-        await pendingSnapshotWrites.userEdit?.value
-        await pendingSnapshotWrites.minimized?.value
-    }
-
-    @MainActor
-    private func cancelPendingSnapshotWrites(
-        cancelMinimizedWrite: Bool
-    ) -> (userEdit: Task<Void, Never>?, minimized: Task<Void, Never>?) {
-        let pendingUserEditSnapshotTask = pendingUserEditSnapshotTask
-        self.pendingUserEditSnapshotTask = nil
-        let pendingMinimizedSnapshotTask = pendingMinimizedSnapshotTask
-        self.pendingMinimizedSnapshotTask = nil
-
-        pendingUserEditSnapshotTask?.cancel()
-        if cancelMinimizedWrite {
-            pendingMinimizedSnapshotTask?.cancel()
-        }
-        return (pendingUserEditSnapshotTask, pendingMinimizedSnapshotTask)
-    }
-
     private func performFinishCommand(
         session: ActiveWorkoutRuntimeSession,
         notes: String
     ) async throws -> ActiveWorkoutFinishResult {
         return try await WGJPerformance.measureAsync("active-workout.finish") {
+            _ = activeWorkoutCoordinator.send(.synchronize(
+                session: session,
+                restTimer: restTimerState.restTimerSnapshot(),
+                presentationMode: .presented,
+                scrollTarget: minimizedScrollRestoreTarget(),
+                expandedExerciseIDs: cardStateController.expandedExerciseIDs()
+            ))
+            let completion = try await activeWorkoutCoordinator.complete(notes: notes)
             let backgroundStore = persistenceBackgroundStore
-            return try await backgroundStore.performWrite("active-workout.finish") { backgroundContext in
-                try Self.finishSession(
-                    session: session,
-                    notes: notes,
+            return try await backgroundStore.perform("active-workout.finish-presentation") { backgroundContext in
+                try Self.finishSessionPresentation(
+                    completedSessionID: completion.sessionID,
                     modelContext: backgroundContext
                 )
             }
         }
     }
 
-    nonisolated private static func finishSession(
-        session runtimeSession: ActiveWorkoutRuntimeSession,
-        notes: String,
+    nonisolated private static func finishSessionPresentation(
+        completedSessionID: UUID,
         modelContext: ModelContext
     ) throws -> ActiveWorkoutFinishResult {
-        let completion = try WorkoutCompletionRepository(modelContext: modelContext)
-            .completeWorkout(session: runtimeSession, notes: notes)
-        let finishedSessionID = completion.sessionID
         let completedSessionRepository = WorkoutSessionRepository(modelContext: modelContext)
-        guard let completedSession = try completedSessionRepository.session(id: finishedSessionID) else {
+        guard let completedSession = try completedSessionRepository.session(id: completedSessionID) else {
             throw WorkoutSessionRepositoryError.sessionNotFound
         }
         WeeklyGoalWidgetPublisher.publishBestEffort(modelContext: modelContext)
@@ -3897,11 +3802,13 @@ private struct ActiveWorkoutSupersetHeader: View {
 }
 
 #Preview {
+    let session = ActiveWorkoutRuntimeSession(name: "Preview Workout")
     NavigationStack {
-        ActiveWorkoutView(sessionID: UUID())
+        ActiveWorkoutView(sessionID: session.id)
     }
     .environment(WorkoutCompletionPresentationState())
     .environment(ActiveWorkoutPresentationState())
+    .environment(ActiveWorkoutCoordinator.preview(session: session))
     .environment(RestTimerState())
     .modelContainer(for: [
         ExerciseCatalogItem.self,

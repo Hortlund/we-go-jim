@@ -744,11 +744,6 @@ nonisolated struct ActiveWorkoutPreparedFirstRenderSnapshot: Equatable, Sendable
     )
 }
 
-nonisolated struct ActiveWorkoutPreparedStartState: Equatable, Sendable {
-    let session: ActiveWorkoutRuntimeSession
-    let firstRenderSnapshot: ActiveWorkoutPreparedFirstRenderSnapshot
-}
-
 nonisolated enum MainTabOverlayLayoutPolicy {
     private static let modernTabChromeStripBottomGap: CGFloat = 45
     private static let compactLegacyTabChromeStripBottomGap: CGFloat = 78
@@ -800,7 +795,6 @@ final class ActiveWorkoutPresentationState {
     var activeSessionID: UUID?
     var isActiveWorkoutPresented = false
     var isActiveWorkoutStripCollapsed = false
-    @ObservationIgnored private var preparedRuntimeSessionBySessionID: [UUID: ActiveWorkoutRuntimeSession] = [:]
     @ObservationIgnored private var preparedPreviousPerformanceResolutionBySessionID: [UUID: [UUID: WorkoutPreviousPerformanceResolution]] = [:]
     @ObservationIgnored private var preparedFirstRenderSnapshotBySessionID: [UUID: ActiveWorkoutPreparedFirstRenderSnapshot] = [:]
     @ObservationIgnored private var preparedScrollTargetBySessionID: [UUID: ActiveWorkoutScrollTarget] = [:]
@@ -809,7 +803,6 @@ final class ActiveWorkoutPresentationState {
     func present(sessionID: UUID) {
         if activeSessionID != sessionID {
             if let activeSessionID {
-                preparedRuntimeSessionBySessionID.removeValue(forKey: activeSessionID)
                 preparedPreviousPerformanceResolutionBySessionID.removeValue(forKey: activeSessionID)
                 preparedFirstRenderSnapshotBySessionID.removeValue(forKey: activeSessionID)
                 preparedScrollTargetBySessionID.removeValue(forKey: activeSessionID)
@@ -846,7 +839,6 @@ final class ActiveWorkoutPresentationState {
             return
         }
         if let activeSessionID {
-            preparedRuntimeSessionBySessionID.removeValue(forKey: activeSessionID)
             preparedPreviousPerformanceResolutionBySessionID.removeValue(forKey: activeSessionID)
             preparedFirstRenderSnapshotBySessionID.removeValue(forKey: activeSessionID)
             preparedScrollTargetBySessionID.removeValue(forKey: activeSessionID)
@@ -862,28 +854,6 @@ final class ActiveWorkoutPresentationState {
         for sessionID: UUID
     ) {
         preparedPreviousPerformanceResolutionBySessionID[sessionID] = resolutionByExerciseID
-    }
-
-    func stageRuntimeSession(
-        _ session: ActiveWorkoutRuntimeSession,
-        for sessionID: UUID
-    ) {
-        preparedRuntimeSessionBySessionID[sessionID] = session
-    }
-
-    func stagePreparedStart(_ preparedStart: ActiveWorkoutPreparedStartState) {
-        stageRuntimeSession(preparedStart.session, for: preparedStart.session.id)
-        stagePreparedFirstRenderSnapshot(preparedStart.firstRenderSnapshot, for: preparedStart.session.id)
-    }
-
-    func preparedRuntimeSession(
-        for sessionID: UUID
-    ) -> ActiveWorkoutRuntimeSession? {
-        preparedRuntimeSessionBySessionID[sessionID]
-    }
-
-    func clearPreparedRuntimeSession(for sessionID: UUID) {
-        preparedRuntimeSessionBySessionID.removeValue(forKey: sessionID)
     }
 
     func stagePreparedFirstRenderSnapshot(
@@ -961,6 +931,7 @@ final class ActiveWorkoutPresentationState {
     }
 
     func restoreActiveSessionIfMissing(
+        coordinator: ActiveWorkoutCoordinator,
         modelContext: ModelContext,
         backgroundStore: AppBackgroundStore? = nil,
         allowsLegacyDraftImport: Bool = true,
@@ -968,6 +939,7 @@ final class ActiveWorkoutPresentationState {
     ) async {
         guard activeSessionID == nil else { return }
         await restoreActiveSessionIfNeeded(
+            coordinator: coordinator,
             modelContext: modelContext,
             backgroundStore: backgroundStore,
             allowsLegacyDraftImport: allowsLegacyDraftImport,
@@ -976,27 +948,44 @@ final class ActiveWorkoutPresentationState {
     }
 
     func restoreActiveSessionIfNeeded(
+        coordinator: ActiveWorkoutCoordinator,
         modelContext: ModelContext,
         backgroundStore: AppBackgroundStore? = nil,
         allowsLegacyDraftImport: Bool = true,
         shouldApplyRestoredSession: @escaping @MainActor () -> Bool = { true }
     ) async {
-        let restoredPresentation = await Self.fetchActiveSessionPresentationIfNeeded(
-            modelContext: modelContext,
-            backgroundStore: backgroundStore,
-            allowsLegacyDraftImport: allowsLegacyDraftImport
-        )
+        if coordinator.storedSnapshot == nil {
+            await coordinator.restore()
+        }
+
+        if coordinator.storedSnapshot == nil, allowsLegacyDraftImport {
+            let imported: ActiveWorkoutRuntimeSession?
+            if let backgroundStore {
+                imported = try? await backgroundStore.perform(
+                    "active-workout.restore.legacy-active-session"
+                ) { backgroundContext in
+                    try ActiveWorkoutSessionFactory(modelContext: backgroundContext)
+                        .importLegacyActiveSessionIfNeeded()
+                }
+            } else {
+                imported = try? ActiveWorkoutSessionFactory(modelContext: modelContext)
+                    .importLegacyActiveSessionIfNeeded()
+            }
+            if let imported {
+                _ = coordinator.send(.start(imported))
+            }
+        }
 
         guard shouldApplyRestoredSession() else { return }
 
-        if let restoredPresentation {
-            activeSessionID = restoredPresentation.sessionID
-            stageScrollTarget(restoredPresentation.scrollTarget, for: restoredPresentation.sessionID)
+        if let snapshot = coordinator.storedSnapshot {
+            activeSessionID = snapshot.session.id
+            stageScrollTarget(snapshot.scrollTarget, for: snapshot.session.id)
             stageExpandedExerciseIDs(
-                restoredPresentation.expandedExerciseIDs,
-                for: restoredPresentation.sessionID
+                snapshot.expandedExerciseIDs,
+                for: snapshot.session.id
             )
-            switch restoredPresentation.presentationMode {
+            switch snapshot.presentationMode {
             case .some(.presented):
                 isActiveWorkoutPresented = true
                 isActiveWorkoutStripCollapsed = false
@@ -1009,95 +998,6 @@ final class ActiveWorkoutPresentationState {
         } else {
             clearPresentation()
         }
-    }
-
-    @MainActor
-    private static func fetchActiveSessionPresentationIfNeeded(
-        modelContext: ModelContext,
-        backgroundStore: AppBackgroundStore?,
-        allowsLegacyDraftImport: Bool
-    ) async -> ActiveWorkoutRestoredPresentation? {
-        do {
-            if let snapshot = try await ActiveWorkoutSnapshotStore.shared.loadStoredSnapshot() {
-                guard await shouldRestoreSnapshot(
-                    sessionID: snapshot.session.id,
-                    modelContext: modelContext,
-                    backgroundStore: backgroundStore
-                ) else {
-                    try? await ActiveWorkoutSnapshotStore.shared.delete()
-                    return nil
-                }
-                return ActiveWorkoutRestoredPresentation(
-                    sessionID: snapshot.session.id,
-                    presentationMode: snapshot.presentationMode,
-                    scrollTarget: snapshot.scrollTarget,
-                    expandedExerciseIDs: snapshot.expandedExerciseIDs
-                )
-            }
-        } catch {
-            // Fall through to legacy draft import. A bad local snapshot should not block
-            // one-time migration from old active SwiftData rows.
-        }
-
-        guard allowsLegacyDraftImport else {
-            return nil
-        }
-
-        let imported: ActiveWorkoutRuntimeSession?
-        if let backgroundStore {
-            imported = try? await backgroundStore.perform("active-workout.restore.legacy-active-session") {
-                backgroundContext in
-                try ActiveWorkoutSessionFactory(modelContext: backgroundContext)
-                    .importLegacyActiveSessionIfNeeded()
-            }
-        } else {
-            imported = try? ActiveWorkoutSessionFactory(modelContext: modelContext)
-                .importLegacyActiveSessionIfNeeded()
-        }
-
-        if let imported {
-            _ = try? await ActiveWorkoutSnapshotStore.shared.save(imported)
-            return ActiveWorkoutRestoredPresentation(sessionID: imported.id, presentationMode: nil)
-        }
-
-        return nil
-    }
-
-    private static func shouldRestoreSnapshot(
-        sessionID: UUID,
-        modelContext: ModelContext,
-        backgroundStore: AppBackgroundStore?
-    ) async -> Bool {
-        let completedSessionIDs: Set<UUID>
-        if let backgroundStore {
-            completedSessionIDs = (try? await backgroundStore.perform(
-                "active-workout.restore.completed-session-check"
-            ) { backgroundContext in
-                try fetchCompletedSessionIDs(matching: sessionID, in: backgroundContext)
-            }) ?? []
-        } else {
-            completedSessionIDs = (try? fetchCompletedSessionIDs(
-                matching: sessionID,
-                in: modelContext
-            )) ?? []
-        }
-        return ActiveWorkoutRestorePolicy.shouldRestore(
-            snapshotSessionID: sessionID,
-            completedSessionIDs: completedSessionIDs
-        )
-    }
-
-    nonisolated private static func fetchCompletedSessionIDs(
-        matching sessionID: UUID,
-        in modelContext: ModelContext
-    ) throws -> Set<UUID> {
-        let completedStatus = WorkoutSessionStatus.completed.rawValue
-        let descriptor = FetchDescriptor<WorkoutSession>(
-            predicate: #Predicate { session in
-                session.id == sessionID && session.statusRaw == completedStatus
-            }
-        )
-        return Set(try modelContext.fetch(descriptor).map(\.id))
     }
 }
 

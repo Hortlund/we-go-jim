@@ -7,6 +7,7 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.appBackgroundStore) private var appBackgroundStore
+    @Environment(ActiveWorkoutCoordinator.self) private var activeWorkoutCoordinator
 
     @State private var appRuntimeState = AppRuntimeState.shared
     @State private var appPhase: AppPhase = .splash
@@ -175,6 +176,7 @@ struct ContentView: View {
         }
 
         await activeWorkoutPresentationState.restoreActiveSessionIfMissing(
+            coordinator: activeWorkoutCoordinator,
             modelContext: modelContext,
             backgroundStore: rootBackgroundStore,
             allowsLegacyDraftImport: true
@@ -309,6 +311,7 @@ struct ContentView: View {
     }
 
     private func handleUserDataRestoreCompleted() {
+        activeWorkoutCoordinator.clearInMemory()
         activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
         requestNewDeferredMaintenanceRun()
         handleWorkoutHistoryChanged()
@@ -377,6 +380,7 @@ struct ContentView: View {
         restTimerState.handleRestTimerExpirationIfNeeded()
         guard !Task.isCancelled, resumeCriticalMaintenanceTracker.isCurrent(runID) else { return }
         await activeWorkoutPresentationState.restoreActiveSessionIfMissing(
+            coordinator: activeWorkoutCoordinator,
             modelContext: modelContext,
             backgroundStore: rootBackgroundStore,
             shouldApplyRestoredSession: {
@@ -400,7 +404,7 @@ struct ContentView: View {
     private func restoreRestTimerFromStoredActiveWorkoutIfNeeded() async {
         guard let activeSessionID = activeWorkoutPresentationState.activeSessionID else { return }
         guard restTimerState.restTimerEndsAt == nil else { return }
-        guard let storedSnapshot = try? await ActiveWorkoutSnapshotStore.shared.loadStoredSnapshot(),
+        guard let storedSnapshot = activeWorkoutCoordinator.storedSnapshot,
               storedSnapshot.session.id == activeSessionID
         else {
             return
@@ -506,6 +510,7 @@ struct ContentView: View {
         enteredMainDeferredMaintenanceTask = nil
         enteredMainNoncriticalWorkTask?.cancel()
         enteredMainNoncriticalWorkTask = nil
+        activeWorkoutCoordinator.clearInMemory()
         activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
         clearWeeklyGoalWidgetSnapshot()
         catalogSyncCoordinator = CatalogSyncCoordinator()
@@ -781,6 +786,7 @@ private enum AppStartupRouting {
 
 #Preview {
     ContentView()
+        .environment(ActiveWorkoutCoordinator.preview())
         .modelContainer(for: [
             ExerciseCatalogItem.self,
             MuscleGroup.self,
