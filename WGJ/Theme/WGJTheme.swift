@@ -228,7 +228,7 @@ private struct WGJGlassButtonBackground: View {
 }
 
 private extension UIColor {
-    static func dynamic(light: UInt32, dark: UInt32) -> UIColor {
+    nonisolated static func dynamic(light: UInt32, dark: UInt32) -> UIColor {
         UIColor { traits in
             traits.userInterfaceStyle == .dark
                 ? UIColor(hex: dark)
@@ -236,7 +236,7 @@ private extension UIColor {
         }
     }
 
-    convenience init(hex: UInt32, alpha: CGFloat = 1.0) {
+    nonisolated convenience init(hex: UInt32, alpha: CGFloat = 1.0) {
         let red = CGFloat((hex >> 16) & 0xFF) / 255.0
         let green = CGFloat((hex >> 8) & 0xFF) / 255.0
         let blue = CGFloat(hex & 0xFF) / 255.0
