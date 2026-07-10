@@ -1327,6 +1327,7 @@ nonisolated final class RestTimerNotificationManager: @unchecked Sendable {
 
     private init() { }
 
+    @MainActor
     func configureNotifications() {
         AppNotificationManager.shared.configureNotifications()
     }
@@ -1553,10 +1554,11 @@ private actor RestTimerNotificationWorker {
     }
 }
 
-nonisolated final class AppNotificationManager {
+@MainActor
+final class AppNotificationManager {
     static let shared = AppNotificationManager()
 
-    static let restTimerIdentifierPrefix = "wgj.activeWorkout.restTimer"
+    nonisolated static let restTimerIdentifierPrefix = "wgj.activeWorkout.restTimer"
 
     private init() { }
 
@@ -1586,15 +1588,16 @@ nonisolated final class AppNotificationManager {
         }
     }
 
-    func isRestTimerNotification(_ notification: UNNotification) -> Bool {
+    nonisolated static func isRestTimerNotification(_ notification: UNNotification) -> Bool {
         notification.request.identifier.hasPrefix(Self.restTimerIdentifierPrefix)
     }
 }
 
-nonisolated final class WGJNotificationCenterDelegate: NSObject, UNUserNotificationCenterDelegate {
+@MainActor
+final class WGJNotificationCenterDelegate: NSObject, UNUserNotificationCenterDelegate {
     static let shared = WGJNotificationCenterDelegate()
 
-    static func presentationOptions(
+    nonisolated static func presentationOptions(
         isRestTimerNotification: Bool
     ) -> UNNotificationPresentationOptions {
         if isRestTimerNotification {
@@ -1604,19 +1607,19 @@ nonisolated final class WGJNotificationCenterDelegate: NSObject, UNUserNotificat
         return [.banner, .list, .sound, .badge]
     }
 
-    func userNotificationCenter(
+    nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         completionHandler(
             Self.presentationOptions(
-                isRestTimerNotification: AppNotificationManager.shared.isRestTimerNotification(notification)
+                isRestTimerNotification: AppNotificationManager.isRestTimerNotification(notification)
             )
         )
     }
 
-    func userNotificationCenter(
+    nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
