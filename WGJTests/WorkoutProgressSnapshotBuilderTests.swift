@@ -627,6 +627,31 @@ final class WorkoutProgressSnapshotBuilderTests: XCTestCase {
         )
     }
 
+    func testVolumeDeltaMatchesIndividuallyRoundedDisplayedValues() {
+        let comparison = comparison(
+            previousExercises: [
+                exercise(
+                    catalogExerciseUUID: "carry",
+                    name: "Carry",
+                    sets: [set(reps: 1, weight: 100.4)]
+                ),
+            ],
+            currentExercises: [
+                exercise(
+                    catalogExerciseUUID: "carry",
+                    name: "Carry",
+                    sets: [set(reps: 1, weight: 100.6)]
+                ),
+            ]
+        )
+
+        let volume = comparison.metricDeltas.first { $0.kind == .volume }
+        XCTAssertEqual(volume?.previousText, "100 kg")
+        XCTAssertEqual(volume?.currentText, "101 kg")
+        XCTAssertEqual(volume?.deltaText, "+1 kg")
+        XCTAssertEqual(volume?.direction, .up)
+    }
+
     private func session(
         id: UUID,
         templateID: UUID?,

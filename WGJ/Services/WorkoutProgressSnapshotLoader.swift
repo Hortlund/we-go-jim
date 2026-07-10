@@ -321,8 +321,9 @@ nonisolated enum WorkoutProgressSnapshotBuilder {
         previous: SessionMetrics,
         current: SessionMetrics
     ) -> [WorkoutProgressMetricDelta] {
-        let volumeDelta = roundedToWholeKilogram(
-            current.totalVolumeKg - previous.totalVolumeKg
+        let volumeDelta = displayedVolumeDelta(
+            previous: previous.totalVolumeKg,
+            current: current.totalVolumeKg
         )
         return [
             metricDelta(
@@ -466,8 +467,9 @@ nonisolated enum WorkoutProgressSnapshotBuilder {
         let improvedCount = exerciseComparisons.filter { $0.direction == .up }.count
         let repeatedCount = exerciseComparisons.count
         let biggestMover = exerciseComparisons.first
-        let volumeDelta = roundedToWholeKilogram(
-            current.totalVolumeKg - previous.totalVolumeKg
+        let volumeDelta = displayedVolumeDelta(
+            previous: previous.totalVolumeKg,
+            current: current.totalVolumeKg
         )
         let prDelta = current.prHitsCount - previous.prHitsCount
         let workloadDirection = WorkoutProgressDirection.compare(volumeDelta, 0)
@@ -628,6 +630,10 @@ nonisolated enum WorkoutProgressSnapshotBuilder {
     private static func roundedToWholeKilogram(_ value: Double) -> Double {
         let rounded = value.rounded()
         return rounded == 0 ? 0 : rounded
+    }
+
+    private static func displayedVolumeDelta(previous: Double, current: Double) -> Double {
+        roundedToWholeKilogram(current) - roundedToWholeKilogram(previous)
     }
 
 }
