@@ -33,7 +33,7 @@ final class WorkoutCompletionConfettiTests: XCTestCase {
     func testAutomaticCelebrationHasVisibleFallbackOriginBeforeHeroLayout() {
         let origin = WorkoutCompletionConfettiOrigin.defaultOrigin(
             heroFrame: .zero,
-            fallbackScreenWidth: 390
+            fallbackContainerWidth: 390
         )
 
         XCTAssertEqual(origin, CGPoint(x: 195, y: 220))

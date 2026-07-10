@@ -79,6 +79,7 @@ struct ActiveWorkoutView: View {
     @State private var showingError = false
     @State private var keyboardDismissToken = ActiveWorkoutKeyboardDismissToken()
     @State private var isKeyboardVisible = false
+    @State private var keyboardContainerFrame = CGRect.zero
     @State private var isMetricInputFocused = false
     @State private var focusedMetricInputExerciseID: UUID?
     @State private var keyboardDismissTargetExerciseID: UUID?
@@ -222,6 +223,7 @@ struct ActiveWorkoutView: View {
                 guard canRunNonCriticalInteractionWork else { return }
                 scheduleForegroundNonCriticalInteractionWorkResume()
             }
+            .wgjTrackContainerFrame($keyboardContainerFrame)
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
                 updateKeyboardFrameState(from: notification)
             }
@@ -2624,7 +2626,10 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func updateKeyboardFrameState(from notification: Notification) {
-        let keyboardIsVisible = WGJKeyboard.isVisible(from: notification)
+        let keyboardIsVisible = WGJKeyboard.isVisible(
+            from: notification,
+            containerFrame: keyboardContainerFrame
+        )
         isKeyboardVisible = keyboardIsVisible
     }
 

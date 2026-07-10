@@ -6,29 +6,51 @@ enum WGJKeyboard {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 
-    static func isVisible(from notification: Notification, screenMaxY: CGFloat = UIScreen.main.bounds.maxY) -> Bool {
-        guard
-            screenMaxY.isFinite,
-            screenMaxY > 0,
-            let endFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
-            endFrame.minY.isFinite
-        else {
-            return false
-        }
-
-        return endFrame.minY < screenMaxY
+    static func isVisible(from notification: Notification, containerFrame: CGRect) -> Bool {
+        guard let endFrame = endFrame(from: notification) else { return false }
+        return WGJKeyboardGeometry.isVisible(
+            keyboardEndFrame: endFrame,
+            containerFrame: containerFrame
+        )
     }
 
-    static func bottomOverlap(from notification: Notification, screenMaxY: CGFloat = UIScreen.main.bounds.maxY) -> CGFloat {
-        guard
-            isVisible(from: notification, screenMaxY: screenMaxY),
-            let endFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
-            endFrame.minY.isFinite
-        else {
-            return 0
-        }
+    static func bottomOverlap(from notification: Notification, containerFrame: CGRect) -> CGFloat {
+        guard let endFrame = endFrame(from: notification) else { return 0 }
+        return WGJKeyboardGeometry.bottomOverlap(
+            keyboardEndFrame: endFrame,
+            containerFrame: containerFrame
+        )
+    }
 
-        return max(0, screenMaxY - endFrame.minY)
+    private static func endFrame(from notification: Notification) -> CGRect? {
+        guard let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+              frame.minX.isFinite,
+              frame.minY.isFinite,
+              frame.width.isFinite,
+              frame.height.isFinite
+        else { return nil }
+        return frame
+    }
+}
+
+nonisolated enum WGJKeyboardGeometry {
+    static func isVisible(keyboardEndFrame: CGRect, containerFrame: CGRect) -> Bool {
+        bottomOverlap(keyboardEndFrame: keyboardEndFrame, containerFrame: containerFrame) > 0
+    }
+
+    static func bottomOverlap(keyboardEndFrame: CGRect, containerFrame: CGRect) -> CGFloat {
+        guard !containerFrame.isEmpty,
+              keyboardEndFrame.maxY >= containerFrame.maxY,
+              keyboardEndFrame.intersects(containerFrame)
+        else { return 0 }
+        return max(0, containerFrame.intersection(keyboardEndFrame).height)
+    }
+}
+
+private struct WGJContainerFramePreferenceKey: PreferenceKey {
+    static let defaultValue = CGRect.zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        value = nextValue()
     }
 }
 
@@ -177,14 +199,26 @@ struct WGJAccessoryTextField: UIViewRepresentable {
 private struct WGJKeyboardVisibilityModifier: ViewModifier {
     @Binding var isVisible: Bool
     let isEnabled: Bool
+    @State private var containerFrame = CGRect.zero
 
     @ViewBuilder
     func body(content: Content) -> some View {
         if isEnabled {
             content
+                .background {
+                    GeometryReader { geometry in
+                        Color.clear.preference(
+                            key: WGJContainerFramePreferenceKey.self,
+                            value: geometry.frame(in: .global)
+                        )
+                    }
+                }
+                .onPreferenceChange(WGJContainerFramePreferenceKey.self) { containerFrame = $0 }
                 .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
-                    guard WGJKeyboard.isVisible(from: notification) else { return }
-                    updateVisibility(true)
+                    updateVisibility(WGJKeyboard.isVisible(
+                        from: notification,
+                        containerFrame: containerFrame
+                    ))
                 }
                 .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
                     updateVisibility(false)
@@ -205,6 +239,23 @@ private struct WGJKeyboardVisibilityModifier: ViewModifier {
     }
 }
 
+private struct WGJContainerFrameModifier: ViewModifier {
+    @Binding var frame: CGRect
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                GeometryReader { geometry in
+                    Color.clear.preference(
+                        key: WGJContainerFramePreferenceKey.self,
+                        value: geometry.frame(in: .global)
+                    )
+                }
+            }
+            .onPreferenceChange(WGJContainerFramePreferenceKey.self) { frame = $0 }
+    }
+}
+
 extension View {
     @MainActor
     func wgjTrackKeyboardVisibility(
@@ -212,6 +263,10 @@ extension View {
         isEnabled: Bool = true
     ) -> some View {
         modifier(WGJKeyboardVisibilityModifier(isVisible: isVisible, isEnabled: isEnabled))
+    }
+
+    func wgjTrackContainerFrame(_ frame: Binding<CGRect>) -> some View {
+        modifier(WGJContainerFrameModifier(frame: frame))
     }
 
     @MainActor
