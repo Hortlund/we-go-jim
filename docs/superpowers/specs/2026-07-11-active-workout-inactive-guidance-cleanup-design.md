@@ -61,4 +61,3 @@ After cleanup:
 ## Expected Impact
 
 The cleanup removes dormant state invalidations, no-op scheduling and cancellation paths, unnecessary dictionary work during hydration/edit events, and an unused projection allocation. It also reduces the size and cognitive load of the Active Workout view without changing user-visible behavior.
-
