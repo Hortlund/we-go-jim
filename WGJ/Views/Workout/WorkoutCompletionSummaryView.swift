@@ -2,6 +2,24 @@ import SwiftData
 import SwiftUI
 import UIKit
 
+nonisolated enum WorkoutCompletionCelebrationVariant: Equatable, Sendable {
+    case standard
+    case personalRecord
+
+    static func make(hasPersonalRecords: Bool) -> Self {
+        hasPersonalRecords ? .personalRecord : .standard
+    }
+}
+
+nonisolated enum WorkoutCompletionConfettiColorRole: Equatable, Sendable {
+    case blue
+    case gold
+    case success
+    case cyan
+    case purple
+    case warning
+}
+
 nonisolated enum WorkoutCompletionConfettiOrigin {
     static func tapOrigin(locationInGlobalSpace location: CGPoint, heroFrame: CGRect) -> CGPoint {
         location
@@ -19,12 +37,20 @@ nonisolated enum WorkoutCompletionConfettiOrigin {
         )
     }
 
-    static func defaultOrigin(heroFrame: CGRect, fallbackContainerWidth: CGFloat) -> CGPoint {
-        guard !heroFrame.isEmpty else {
-            return CGPoint(x: max(fallbackContainerWidth, 0) / 2, y: 220)
+    static func defaultOrigin(
+        containerFrameInGlobalSpace frame: CGRect,
+        fallbackContainerSize: CGSize
+    ) -> CGPoint {
+        if frame.width > 0, frame.height > 0 {
+            return CGPoint(x: frame.midX, y: frame.midY)
         }
 
-        return CGPoint(x: heroFrame.midX, y: heroFrame.minY + min(heroFrame.height - 28, heroFrame.height * 0.68))
+        let width = max(fallbackContainerSize.width, 0)
+        if fallbackContainerSize.height > 0 {
+            return CGPoint(x: width / 2, y: fallbackContainerSize.height / 2)
+        }
+
+        return CGPoint(x: width / 2, y: 360)
     }
 }
 
@@ -42,16 +68,55 @@ nonisolated struct WorkoutCompletionConfettiBurstDescriptor: Equatable, Sendable
     let role: WorkoutCompletionConfettiBurstRole
     let pieceCount: Int
     let delay: Double
+    let variant: WorkoutCompletionCelebrationVariant
+}
+
+nonisolated struct WorkoutCompletionCelebrationPresentation: Equatable, Sendable {
+    let showsConfetti: Bool
+    let initialHeroScale: CGFloat
+    let initialIconScale: CGFloat
+    let peakIconScale: CGFloat
+    let peakGlowOpacity: Double
+    let settledGlowOpacity: Double
+
+    static func make(
+        variant: WorkoutCompletionCelebrationVariant,
+        reduceMotion: Bool
+    ) -> Self {
+        if reduceMotion {
+            let glow = variant == .personalRecord ? 0.18 : 0.12
+            return Self(
+                showsConfetti: false,
+                initialHeroScale: 1,
+                initialIconScale: 1,
+                peakIconScale: 1,
+                peakGlowOpacity: glow,
+                settledGlowOpacity: glow
+            )
+        }
+
+        return Self(
+            showsConfetti: true,
+            initialHeroScale: 0.96,
+            initialIconScale: variant == .personalRecord ? 0.74 : 0.84,
+            peakIconScale: variant == .personalRecord ? 1.18 : 1.08,
+            peakGlowOpacity: variant == .personalRecord ? 0.46 : 0.30,
+            settledGlowOpacity: variant == .personalRecord ? 0.18 : 0.12
+        )
+    }
 }
 
 nonisolated enum WorkoutCompletionConfettiPolicy {
     static let automaticCelebrationDelay: Duration = .milliseconds(180)
     static let burstLifetime: Duration = .seconds(7.0)
 
-    static func pieceCount(for intensity: WorkoutCompletionConfettiIntensity) -> Int {
+    static func pieceCount(
+        for intensity: WorkoutCompletionConfettiIntensity,
+        variant: WorkoutCompletionCelebrationVariant
+    ) -> Int {
         switch intensity {
         case .completedWorkout:
-            return 34
+            return variant == .personalRecord ? 46 : 38
         case .manualTap:
             return 18
         }
@@ -59,16 +124,29 @@ nonisolated enum WorkoutCompletionConfettiPolicy {
 
     static func burstDescriptors(
         origin: CGPoint,
-        intensity: WorkoutCompletionConfettiIntensity
+        intensity: WorkoutCompletionConfettiIntensity,
+        variant: WorkoutCompletionCelebrationVariant
     ) -> [WorkoutCompletionConfettiBurstDescriptor] {
         [
             WorkoutCompletionConfettiBurstDescriptor(
                 origin: origin,
                 role: .centralThrow,
-                pieceCount: pieceCount(for: intensity),
-                delay: 0.0
+                pieceCount: pieceCount(for: intensity, variant: variant),
+                delay: 0.0,
+                variant: variant
             ),
         ]
+    }
+
+    static func colorRoles(
+        for variant: WorkoutCompletionCelebrationVariant
+    ) -> [WorkoutCompletionConfettiColorRole] {
+        switch variant {
+        case .standard:
+            return [.blue, .gold, .success, .cyan, .purple, .warning]
+        case .personalRecord:
+            return [.gold, .blue, .gold, .success, .gold, .cyan, .purple, .warning]
+        }
     }
 
     static func initialSpreadX(for screenWidth: CGFloat) -> CGFloat {
@@ -471,7 +549,14 @@ struct WorkoutCompletionSummaryView: View {
             return
         }
 
-        for descriptor in WorkoutCompletionConfettiPolicy.burstDescriptors(origin: origin, intensity: intensity) {
+        let variant = WorkoutCompletionCelebrationVariant.make(
+            hasPersonalRecords: !(snapshot?.personalRecords.isEmpty ?? true)
+        )
+        for descriptor in WorkoutCompletionConfettiPolicy.burstDescriptors(
+            origin: origin,
+            intensity: intensity,
+            variant: variant
+        ) {
             let burst = WorkoutCompletionConfettiBurst(descriptor: descriptor)
             confettiBursts.append(burst)
             confettiDismissTasks[burst.id]?.cancel()
@@ -499,8 +584,8 @@ struct WorkoutCompletionSummaryView: View {
 
     private func defaultConfettiOrigin() -> CGPoint {
         WorkoutCompletionConfettiOrigin.defaultOrigin(
-            heroFrame: heroCardFrame,
-            fallbackContainerWidth: completionContainerFrame.width
+            containerFrameInGlobalSpace: completionContainerFrame,
+            fallbackContainerSize: completionContainerFrame.size
         )
     }
 
@@ -909,7 +994,8 @@ private struct WorkoutCompletionConfettiBurst: Identifiable {
         self.pieces = WorkoutCompletionConfettiPiece.random(
             seed: UInt64.random(in: 1...UInt64.max),
             role: descriptor.role,
-            count: descriptor.pieceCount
+            count: descriptor.pieceCount,
+            variant: descriptor.variant
         )
     }
 }
@@ -990,17 +1076,11 @@ struct WorkoutCompletionConfettiPiece: Identifiable {
     static func random(
         seed: UInt64,
         role: WorkoutCompletionConfettiBurstRole,
-        count: Int
+        count: Int,
+        variant: WorkoutCompletionCelebrationVariant
     ) -> [WorkoutCompletionConfettiPiece] {
         var generator = WorkoutCompletionConfettiRandom(seed: seed)
-        let colors = [
-            WGJTheme.accentBlue,
-            WGJTheme.accentGold,
-            WGJTheme.success,
-            WGJTheme.accentCyan,
-            WGJTheme.accentPurple,
-            WGJTheme.warning,
-        ]
+        let colorRoles = WorkoutCompletionConfettiPolicy.colorRoles(for: variant)
 
         return (0..<count).map { index in
             let width = generator.value(in: CGFloat(6)...CGFloat(12))
@@ -1031,8 +1111,25 @@ struct WorkoutCompletionConfettiPiece: Identifiable {
                 rotationDelta: generator.value(in: 210...520) * (generator.nextBool() ? 1 : -1),
                 delay: delay,
                 duration: generator.value(in: 4.2...5.4),
-                color: colors[index % colors.count]
+                color: color(for: colorRoles[index % colorRoles.count])
             )
+        }
+    }
+
+    private static func color(for role: WorkoutCompletionConfettiColorRole) -> Color {
+        switch role {
+        case .blue:
+            return WGJTheme.accentBlue
+        case .gold:
+            return WGJTheme.accentGold
+        case .success:
+            return WGJTheme.success
+        case .cyan:
+            return WGJTheme.accentCyan
+        case .purple:
+            return WGJTheme.accentPurple
+        case .warning:
+            return WGJTheme.warning
         }
     }
 
