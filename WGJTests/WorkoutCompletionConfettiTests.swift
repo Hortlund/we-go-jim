@@ -78,6 +78,15 @@ final class WorkoutCompletionConfettiTests: XCTestCase {
         )
     }
 
+    func testContainerGeometryKeepsLocalSizeWhenGlobalFrameIsUnavailable() {
+        let geometry = WorkoutCompletionContainerGeometry(
+            globalFrame: .zero,
+            localSize: CGSize(width: 390, height: 780)
+        )
+
+        XCTAssertEqual(geometry.automaticConfettiOrigin, CGPoint(x: 195, y: 390))
+    }
+
     func testReducedMotionUsesStaticPresentationWithoutParticles() {
         let reduced = WorkoutCompletionCelebrationPresentation.make(
             variant: .standard,
@@ -113,6 +122,17 @@ final class WorkoutCompletionConfettiTests: XCTestCase {
         XCTAssertEqual(WorkoutCompletionCelebrationPhase.settled.heroScale(using: presentation), 1)
         XCTAssertEqual(WorkoutCompletionCelebrationPhase.settled.iconScale(using: presentation), 1)
         XCTAssertEqual(WorkoutCompletionCelebrationPhase.settled.glowOpacity(using: presentation), 0.18)
+    }
+
+    func testCelebrationStartRechecksReducedMotion() {
+        XCTAssertEqual(
+            WorkoutCompletionCelebrationPhase.startingPhase(reduceMotion: false),
+            .peak
+        )
+        XCTAssertEqual(
+            WorkoutCompletionCelebrationPhase.startingPhase(reduceMotion: true),
+            .settled
+        )
     }
 
     func testConfettiPiecesStartWideAndDriftSlowly() {

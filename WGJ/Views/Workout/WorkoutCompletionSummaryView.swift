@@ -54,6 +54,18 @@ nonisolated enum WorkoutCompletionConfettiOrigin {
     }
 }
 
+nonisolated struct WorkoutCompletionContainerGeometry: Equatable, Sendable {
+    var globalFrame: CGRect = .zero
+    var localSize: CGSize = .zero
+
+    var automaticConfettiOrigin: CGPoint {
+        WorkoutCompletionConfettiOrigin.defaultOrigin(
+            containerFrameInGlobalSpace: globalFrame,
+            fallbackContainerSize: localSize
+        )
+    }
+}
+
 nonisolated enum WorkoutCompletionConfettiIntensity {
     case completedWorkout
     case manualTap
@@ -110,6 +122,10 @@ nonisolated enum WorkoutCompletionCelebrationPhase: Equatable, Sendable {
     case prepared
     case peak
     case settled
+
+    static func startingPhase(reduceMotion: Bool) -> Self {
+        reduceMotion ? .settled : .peak
+    }
 
     func heroScale(using presentation: WorkoutCompletionCelebrationPresentation) -> CGFloat {
         self == .prepared ? presentation.initialHeroScale : 1
@@ -215,7 +231,7 @@ struct WorkoutCompletionSummaryView: View {
     @State private var confettiDismissTasks: [UUID: Task<Void, Never>] = [:]
     @State private var automaticCelebrationTask: Task<Void, Never>?
     @State private var heroCardFrame: CGRect = .zero
-    @State private var completionContainerFrame: CGRect = .zero
+    @State private var completionContainerGeometry = WorkoutCompletionContainerGeometry()
 
     private var completionBackgroundStore: AppBackgroundStore {
         appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
@@ -267,7 +283,19 @@ struct WorkoutCompletionSummaryView: View {
             }
         }
         .coordinateSpace(name: "workout-completion-summary-space")
-        .wgjTrackContainerFrame($completionContainerFrame)
+        .background {
+            GeometryReader { geometry in
+                Color.clear.preference(
+                    key: WorkoutCompletionContainerSizePreferenceKey.self,
+                    value: geometry.size
+                )
+            }
+        }
+        .onPreferenceChange(WorkoutCompletionContainerSizePreferenceKey.self) { size in
+            guard completionContainerGeometry.localSize != size else { return }
+            completionContainerGeometry.localSize = size
+        }
+        .wgjTrackContainerFrame($completionContainerGeometry.globalFrame)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             bottomAction
         }
@@ -592,10 +620,15 @@ struct WorkoutCompletionSummaryView: View {
             try? await Task.sleep(for: WorkoutCompletionConfettiPolicy.automaticCelebrationDelay)
             guard !Task.isCancelled, snapshot != nil else { return }
 
-            if !reduceMotion {
+            let startingPhase = WorkoutCompletionCelebrationPhase.startingPhase(
+                reduceMotion: reduceMotion
+            )
+            if startingPhase == .peak {
                 withAnimation(.spring(duration: 0.52, bounce: 0.30)) {
-                    celebrationPhase = .peak
+                    celebrationPhase = startingPhase
                 }
+            } else {
+                celebrationPhase = startingPhase
             }
 
             triggerCelebration(
@@ -604,7 +637,7 @@ struct WorkoutCompletionSummaryView: View {
                 variant: celebrationVariant
             )
 
-            guard !reduceMotion else {
+            guard startingPhase == .peak else {
                 automaticCelebrationTask = nil
                 return
             }
@@ -660,10 +693,7 @@ struct WorkoutCompletionSummaryView: View {
     }
 
     private func defaultConfettiOrigin() -> CGPoint {
-        WorkoutCompletionConfettiOrigin.defaultOrigin(
-            containerFrameInGlobalSpace: completionContainerFrame,
-            fallbackContainerSize: completionContainerFrame.size
-        )
+        completionContainerGeometry.automaticConfettiOrigin
     }
 
     private func continueToHistory() {
@@ -1055,6 +1085,14 @@ private struct WorkoutCompletionHeroFramePreferenceKey: PreferenceKey {
     static let defaultValue: CGRect = .zero
 
     static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        value = nextValue()
+    }
+}
+
+private struct WorkoutCompletionContainerSizePreferenceKey: PreferenceKey {
+    static let defaultValue: CGSize = .zero
+
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
         value = nextValue()
     }
 }
