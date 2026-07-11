@@ -31,16 +31,12 @@ struct ActiveWorkoutView: View {
 
     @State private var previousResolutionByExerciseID: [UUID: WorkoutPreviousPerformanceResolution] = [:]
     @State private var componentResolutionByExerciseID: [UUID: ExerciseComponentRotationResolution] = [:]
-    @State private var guidanceByExerciseID: [UUID: ActiveWorkoutExerciseGuidancePresentation?] = [:]
     @State private var catalogMatchesByUUID: [String: TrainingGuidanceCatalogSnapshot] = [:]
     @State private var loadedExerciseStateStamp: ActiveWorkoutExerciseInteractionStamp?
     @State private var exerciseHydrationInvalidation = 0
     @State private var deferredHydrationTask: Task<Void, Never>?
     @State private var foregroundNonCriticalInteractionWorkTask: Task<Void, Never>?
-    @State private var pendingGuidanceRefreshTask: Task<Void, Never>?
     @State private var pendingTemplateUpdatePreviewTask: Task<Void, Never>?
-    @State private var pendingGuidanceRefreshExerciseIDs: Set<UUID> = []
-    @State private var shouldRefreshAllGuidance = false
     @State private var cardStateController = ActiveWorkoutExerciseCardStateController()
     @State private var renderProjection = ActiveWorkoutRenderProjection.empty
     @State private var scrollPositionTracker = ActiveWorkoutScrollPositionTracker()
@@ -243,12 +239,8 @@ struct ActiveWorkoutView: View {
                 deferredHydrationTask = nil
                 foregroundNonCriticalInteractionWorkTask?.cancel()
                 foregroundNonCriticalInteractionWorkTask = nil
-                pendingGuidanceRefreshTask?.cancel()
-                pendingGuidanceRefreshTask = nil
                 pendingTemplateUpdatePreviewTask?.cancel()
                 pendingTemplateUpdatePreviewTask = nil
-                pendingGuidanceRefreshExerciseIDs = []
-                shouldRefreshAllGuidance = false
             }
             .alert("Workout Error", isPresented: $showingError) {
                 Button("OK", role: .cancel) { }
@@ -417,12 +409,6 @@ struct ActiveWorkoutView: View {
     @MainActor
     private var exerciseDisplayGroups: [WorkoutExerciseDisplayGroup<ActiveWorkoutRuntimeExercise>] {
         renderProjection.exerciseDisplayGroups
-    }
-
-    nonisolated static func supersetRoundRestSecondsByGroupID(
-        _ pairs: [(id: UUID, roundRestSeconds: Int)]
-    ) -> [UUID: Int] {
-        Dictionary(pairs.map { ($0.id, $0.roundRestSeconds) }, uniquingKeysWith: { existing, _ in existing })
     }
 
     @MainActor
@@ -925,8 +911,7 @@ struct ActiveWorkoutView: View {
             restsByExerciseID: draftState.restsByExerciseID,
             notesByExerciseID: draftState.notesByExerciseID,
             catalogMatchesByUUID: catalogMatchesByUUID,
-            previousResolutionByExerciseID: previousResolutionByExerciseID.filter { currentExerciseIDs.contains($0.key) },
-            guidanceByExerciseID: guidanceByExerciseID.filter { currentExerciseIDs.contains($0.key) }
+            previousResolutionByExerciseID: previousResolutionByExerciseID.filter { currentExerciseIDs.contains($0.key) }
         )
     }
 
@@ -996,7 +981,6 @@ struct ActiveWorkoutView: View {
 
         profilePreferences = resolvedPreferences
         preferredLoadUnit = resolvedPreferences.preferredLoadUnit
-        scheduleGuidanceRefreshForAll()
     }
 
     nonisolated private static func profilePreferences(modelContext: ModelContext) -> ActiveWorkoutProfilePreferences {
@@ -1005,8 +989,7 @@ struct ActiveWorkoutView: View {
         }
 
         return ActiveWorkoutProfilePreferences(
-            preferredLoadUnit: profile.preferredLoadUnit,
-            isTrainingGuidanceEnabled: profile.isTrainingGuidanceEnabled
+            preferredLoadUnit: profile.preferredLoadUnit
         )
     }
 
@@ -1075,13 +1058,7 @@ struct ActiveWorkoutView: View {
                     previousResolutionByExerciseID[exerciseID] = .loading
                 }
                 componentResolutionByExerciseID[exerciseID] = nil
-                guidanceByExerciseID[exerciseID] = nil
             }
-        }
-
-        let changedExercises = sessionExercises.filter { changedExerciseIDs.contains($0.id) }
-        for exercise in changedExercises {
-            scheduleGuidanceRefresh(for: exercise.id)
         }
 
         syncExerciseCardState()
@@ -1129,9 +1106,6 @@ struct ActiveWorkoutView: View {
         refreshRenderProjection()
         previousResolutionByExerciseID.merge(
             snapshot.previousResolutionByExerciseID.filter { exerciseIDs.contains($0.key) }
-        ) { _, new in new }
-        guidanceByExerciseID.merge(
-            snapshot.guidanceByExerciseID.filter { exerciseIDs.contains($0.key) }
         ) { _, new in new }
         catalogMatchesByUUID.merge(snapshot.catalogMatchesByUUID) { _, new in new }
     }
@@ -1393,7 +1367,6 @@ struct ActiveWorkoutView: View {
             )
             previousResolutionByExerciseID[exerciseID] = nil
             componentResolutionByExerciseID[exerciseID] = nil
-            guidanceByExerciseID[exerciseID] = nil
             rowFlushCoordinator.setDirty(false, for: exerciseID)
 
             if let restTimerSourceSetID = restTimerState.restTimerSourceSetID,
@@ -1405,7 +1378,6 @@ struct ActiveWorkoutView: View {
             loadedExerciseStateStamp = nil
             exerciseHydrationInvalidation += 1
         }
-        scheduleGuidanceRefresh(for: exerciseID)
         persistCommittedUserEditSnapshot()
         return .accepted
     }
@@ -1683,174 +1655,11 @@ struct ActiveWorkoutView: View {
         !drafts.isEmpty && drafts.allSatisfy(\.isCycleCompleted)
     }
 
-    private var isTrainingGuidanceEnabled: Bool {
-        false
-    }
-
     private var canRunNonCriticalInteractionWork: Bool {
         ActiveWorkoutInteractionWorkPolicy.shouldRunNonCriticalInteractionWork(
             scenePhase: scenePhase,
             isMetricInputFocused: isMetricInputFocused
         )
-    }
-
-    @MainActor
-    private func schedulePendingGuidanceRefreshTask() {
-        pendingGuidanceRefreshTask?.cancel()
-        let delay = guidanceRefreshDelay
-        pendingGuidanceRefreshTask = Task.detached(priority: .utility) {
-            try? await Task.sleep(for: delay)
-            guard !Task.isCancelled else { return }
-
-            let snapshot = await MainActor.run {
-                takePendingGuidanceRefreshSnapshot()
-            }
-            guard let snapshot else { return }
-
-            let refreshedGuidance = Self.buildGuidanceCacheOffMain(snapshot)
-            guard !Task.isCancelled else { return }
-
-            await MainActor.run {
-                guard !Task.isCancelled else { return }
-                applyGuidanceRefresh(
-                    refreshedGuidance,
-                    refreshedExerciseIDs: snapshot.exerciseIDs,
-                    refreshesAll: snapshot.refreshesAll
-                )
-                pendingGuidanceRefreshTask = nil
-            }
-        }
-    }
-
-    @MainActor
-    private func takePendingGuidanceRefreshSnapshot() -> ActiveWorkoutGuidanceRefreshSnapshot? {
-        guard canRunNonCriticalInteractionWork else {
-            pendingGuidanceRefreshTask = nil
-            return nil
-        }
-
-        let refreshesAll = shouldRefreshAllGuidance
-        let requestedExerciseIDs = refreshesAll
-            ? Set(sessionExercises.map(\.id))
-            : pendingGuidanceRefreshExerciseIDs
-        shouldRefreshAllGuidance = false
-        pendingGuidanceRefreshExerciseIDs = []
-
-        guard !requestedExerciseIDs.isEmpty else {
-            pendingGuidanceRefreshTask = nil
-            return nil
-        }
-
-        let draftState = draftStateStore.snapshot()
-        return ActiveWorkoutGuidanceRefreshSnapshot(
-            exerciseIDs: requestedExerciseIDs,
-            refreshesAll: refreshesAll,
-            isTrainingGuidanceEnabled: isTrainingGuidanceEnabled,
-            sessionExercises: sessionExercises,
-            draftsByExerciseID: draftState.draftsByExerciseID,
-            catalogMatchesByUUID: catalogMatchesByUUID
-        )
-    }
-
-    @MainActor
-    private func applyGuidanceRefresh(
-        _ refreshedGuidance: [UUID: ActiveWorkoutExerciseGuidancePresentation?],
-        refreshedExerciseIDs: Set<UUID>,
-        refreshesAll: Bool
-    ) {
-        if refreshesAll {
-            guidanceByExerciseID = refreshedGuidance
-            return
-        }
-
-        for exerciseID in refreshedExerciseIDs {
-            guidanceByExerciseID[exerciseID] = refreshedGuidance[exerciseID] ?? nil
-        }
-    }
-
-    nonisolated private static func buildGuidanceCacheOffMain(
-        _ snapshot: ActiveWorkoutGuidanceRefreshSnapshot
-    ) -> [UUID: ActiveWorkoutExerciseGuidancePresentation?] {
-        guard snapshot.isTrainingGuidanceEnabled else {
-            return Dictionary(
-                snapshot.sessionExercises.map { ($0.id, nil as ActiveWorkoutExerciseGuidancePresentation?) },
-                uniquingKeysWith: { existing, _ in existing }
-            )
-        }
-
-        let guidanceService = TrainingGuidanceService()
-        return Dictionary(snapshot.sessionExercises.compactMap { exercise in
-            guard snapshot.refreshesAll || snapshot.exerciseIDs.contains(exercise.id) else {
-                return nil
-            }
-
-            let drafts = snapshot.draftsByExerciseID[exercise.id] ?? []
-            let catalogExercise = snapshot.catalogMatchesByUUID[exercise.catalogExerciseUUID] ?? TrainingGuidanceCatalogSnapshot(
-                exerciseName: exercise.exerciseNameSnapshot,
-                categoryName: exercise.categorySnapshot,
-                equipmentSummary: "",
-                primaryMuscleNames: exercise.muscleSummarySnapshot
-            )
-            let guidance = WGJPerformance.measure("active-workout.guidance") {
-                guidanceService.activeWorkoutGuidance(
-                    for: catalogExercise,
-                    targetRepMin: exercise.targetRepMin,
-                    targetRepMax: exercise.targetRepMax,
-                    setDrafts: drafts
-                )
-            }
-            return (exercise.id, guidance)
-        }, uniquingKeysWith: { existing, _ in existing })
-    }
-
-    @MainActor
-    private func clearGuidanceRefreshStateForDisabledGuidance() {
-        pendingGuidanceRefreshTask?.cancel()
-        pendingGuidanceRefreshTask = nil
-        shouldRefreshAllGuidance = false
-        pendingGuidanceRefreshExerciseIDs = []
-        guidanceByExerciseID = Dictionary(
-            sessionExercises.map { ($0.id, nil as ActiveWorkoutExerciseGuidancePresentation?) },
-            uniquingKeysWith: { existing, _ in existing }
-        )
-    }
-
-    @MainActor
-    private func scheduleGuidanceRefresh(for exerciseID: UUID) {
-        guard isTrainingGuidanceEnabled else {
-            clearGuidanceRefreshStateForDisabledGuidance()
-            return
-        }
-
-        guard canRunNonCriticalInteractionWork else {
-            pendingGuidanceRefreshExerciseIDs.insert(exerciseID)
-            pendingGuidanceRefreshTask?.cancel()
-            pendingGuidanceRefreshTask = nil
-            return
-        }
-
-        pendingGuidanceRefreshExerciseIDs.insert(exerciseID)
-        schedulePendingGuidanceRefreshTask()
-    }
-
-    @MainActor
-    private func scheduleGuidanceRefreshForAll() {
-        guard isTrainingGuidanceEnabled else {
-            clearGuidanceRefreshStateForDisabledGuidance()
-            return
-        }
-
-        guard canRunNonCriticalInteractionWork else {
-            shouldRefreshAllGuidance = true
-            pendingGuidanceRefreshExerciseIDs = []
-            pendingGuidanceRefreshTask?.cancel()
-            pendingGuidanceRefreshTask = nil
-            return
-        }
-
-        shouldRefreshAllGuidance = true
-        pendingGuidanceRefreshExerciseIDs = []
-        schedulePendingGuidanceRefreshTask()
     }
 
     @MainActor
@@ -1873,10 +1682,6 @@ struct ActiveWorkoutView: View {
 
     private var previousPerformanceHydrationDelay: Duration {
         ActiveWorkoutInteractionWorkPolicy.previousPerformanceHydrationDelay()
-    }
-
-    private var guidanceRefreshDelay: Duration {
-        ActiveWorkoutInteractionWorkPolicy.defaultGuidanceRefreshDelay
     }
 
     private func showExerciseSettings(for exercise: ActiveWorkoutRuntimeExercise) {
@@ -1927,7 +1732,6 @@ struct ActiveWorkoutView: View {
         )
         refreshRenderProjection()
         exerciseSettingsDraft = nil
-        scheduleGuidanceRefresh(for: draft.exerciseID)
         persistCommittedUserEditSnapshot()
     }
 
@@ -2287,7 +2091,6 @@ struct ActiveWorkoutView: View {
             .union(draftState.notesByExerciseID.keys)
             .union(previousResolutionByExerciseID.keys)
             .union(componentResolutionByExerciseID.keys)
-            .union(guidanceByExerciseID.keys)
 
         for exerciseID in knownIDs where !currentIDs.contains(exerciseID) {
             discardExerciseState(for: exerciseID)
@@ -2301,7 +2104,6 @@ struct ActiveWorkoutView: View {
         draftStateStore.remove(exerciseID: exerciseID)
         previousResolutionByExerciseID[exerciseID] = nil
         componentResolutionByExerciseID[exerciseID] = nil
-        guidanceByExerciseID[exerciseID] = nil
 
         if let restTimerSourceSetID = restTimerState.restTimerSourceSetID,
            removedSetIDs.contains(restTimerSourceSetID) {
@@ -2644,13 +2446,11 @@ struct ActiveWorkoutView: View {
         deferredHydrationTask = nil
         foregroundNonCriticalInteractionWorkTask?.cancel()
         foregroundNonCriticalInteractionWorkTask = nil
-        pendingGuidanceRefreshTask?.cancel()
-        pendingGuidanceRefreshTask = nil
     }
 
     @MainActor
     private func scheduleForegroundNonCriticalInteractionWorkResume() {
-        guard loadedExerciseStateStamp != nil || shouldRefreshAllGuidance || !pendingGuidanceRefreshExerciseIDs.isEmpty else {
+        guard loadedExerciseStateStamp != nil else {
             return
         }
 
@@ -2661,23 +2461,9 @@ struct ActiveWorkoutView: View {
 
             await MainActor.run {
                 guard !Task.isCancelled else { return }
-                resumeForegroundNonCriticalInteractionWorkIfStillAllowed()
                 foregroundNonCriticalInteractionWorkTask = nil
-            }
-        }
-    }
-
-    @MainActor
-    private func resumeForegroundNonCriticalInteractionWorkIfStillAllowed() {
-        guard canRunNonCriticalInteractionWork else { return }
-
-        scheduleExpandedExerciseHydrationIfNeeded()
-        if shouldRefreshAllGuidance {
-            scheduleGuidanceRefreshForAll()
-        } else {
-            let pendingExerciseIDs = pendingGuidanceRefreshExerciseIDs
-            for exerciseID in pendingExerciseIDs {
-                scheduleGuidanceRefresh(for: exerciseID)
+                guard canRunNonCriticalInteractionWork else { return }
+                scheduleExpandedExerciseHydrationIfNeeded()
             }
         }
     }
@@ -3206,11 +2992,9 @@ private struct ActiveWorkoutCancelSection: View {
 
 private struct ActiveWorkoutProfilePreferences: Equatable {
     let preferredLoadUnit: TemplateLoadUnit
-    let isTrainingGuidanceEnabled: Bool
 
     nonisolated static let `default` = ActiveWorkoutProfilePreferences(
-        preferredLoadUnit: .kg,
-        isTrainingGuidanceEnabled: true
+        preferredLoadUnit: .kg
     )
 }
 
@@ -3576,15 +3360,6 @@ private actor ActiveWorkoutDeferredHydrationWorker {
             )
         }
     }
-}
-
-private struct ActiveWorkoutGuidanceRefreshSnapshot: Sendable {
-    let exerciseIDs: Set<UUID>
-    let refreshesAll: Bool
-    let isTrainingGuidanceEnabled: Bool
-    let sessionExercises: [ActiveWorkoutRuntimeExercise]
-    let draftsByExerciseID: [UUID: [WorkoutSessionSetDraft]]
-    let catalogMatchesByUUID: [String: TrainingGuidanceCatalogSnapshot]
 }
 
 nonisolated private struct ActiveWorkoutTemplateFolderSnapshot: Identifiable, Equatable, Sendable {

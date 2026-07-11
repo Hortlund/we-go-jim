@@ -25,6 +25,9 @@
 - Modify WGJ/Views/Workout/ActiveWorkoutView.swift: remove the inactive guidance pipeline and its call sites.
 - Modify WGJ/Models/AppRuntimeConfig.swift: remove guidance from ActiveWorkoutPreparedFirstRenderSnapshot.
 - Modify WGJ/Models/ActiveWorkoutRenderProjection.swift: remove the unused exerciseIDs property and initializer arguments.
+- Modify WGJ/Models/ActiveWorkoutSceneTransitionPolicy.swift: remove the unused guidance refresh delay.
+- Modify WGJ/Services/ActiveWorkoutRuntime.swift: stop precomputing retired guidance in prepared snapshots.
+- Modify WGJ/Services/ActiveWorkoutDraftRepository.swift: stop precomputing retired guidance in prepared snapshots.
 
 ---
 
@@ -35,6 +38,9 @@
 - Modify: WGJ/Views/Workout/ActiveWorkoutView.swift
 - Modify: WGJ/Models/AppRuntimeConfig.swift
 - Modify: WGJ/Models/ActiveWorkoutRenderProjection.swift
+- Modify: WGJ/Models/ActiveWorkoutSceneTransitionPolicy.swift
+- Modify: WGJ/Services/ActiveWorkoutRuntime.swift
+- Modify: WGJ/Services/ActiveWorkoutDraftRepository.swift
 
 **Interfaces:**
 - Consumes: existing source-boundary test pattern in ActiveWorkoutRuntimeTests.
@@ -159,6 +165,8 @@ In AppRuntimeConfig.swift, change ActiveWorkoutPreparedFirstRenderSnapshot to:
 
 Update every initializer call to match this exact signature.
 
+In ActiveWorkoutRuntime.swift and ActiveWorkoutDraftRepository.swift, delete the local guidance dictionary, TrainingGuidanceService construction, and per-exercise activeWorkoutGuidance calculation. Preserve catalog matching, previous-performance resolution, and draft normalization.
+
 - [ ] **Step 5: Remove the inactive guidance pipeline**
 
 Delete from ActiveWorkoutView:
@@ -232,7 +240,7 @@ Expected: PASS with no compile failures or behavior regressions.
 
 - [ ] **Step 9: Commit the cleanup**
 
-    git add WGJTests/ActiveWorkoutRuntimeTests.swift WGJ/Views/Workout/ActiveWorkoutView.swift WGJ/Models/AppRuntimeConfig.swift WGJ/Models/ActiveWorkoutRenderProjection.swift
+    git add WGJTests/ActiveWorkoutRuntimeTests.swift WGJ/Views/Workout/ActiveWorkoutView.swift WGJ/Models/AppRuntimeConfig.swift WGJ/Models/ActiveWorkoutRenderProjection.swift WGJ/Models/ActiveWorkoutSceneTransitionPolicy.swift WGJ/Services/ActiveWorkoutRuntime.swift WGJ/Services/ActiveWorkoutDraftRepository.swift
     git commit -m "perf(workout): remove inactive guidance pipeline"
 
 ---
@@ -275,4 +283,3 @@ Run:
     git diff --stat main..HEAD
 
 Expected: rg returns no matches; diff has no whitespace errors and is limited to the design/plan, four production/test files, and no UI copy or persistence repository changes.
-

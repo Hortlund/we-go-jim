@@ -804,14 +804,11 @@ nonisolated final class ActiveWorkoutDraftRepository {
         var restsByExerciseID: [UUID: Int] = [:]
         var notesByExerciseID: [UUID: String] = [:]
         var previousResolutionByExerciseID: [UUID: WorkoutPreviousPerformanceResolution] = [:]
-        var guidanceByExerciseID: [UUID: ActiveWorkoutExerciseGuidancePresentation?] = [:]
-        let guidanceService = TrainingGuidanceService()
 
         draftsByExerciseID.reserveCapacity(exercises.count)
         restsByExerciseID.reserveCapacity(exercises.count)
         notesByExerciseID.reserveCapacity(exercises.count)
         previousResolutionByExerciseID.reserveCapacity(exercises.count)
-        guidanceByExerciseID.reserveCapacity(exercises.count)
 
         for exercise in exercises {
             let drafts = orderedSessionSets(for: exercise)
@@ -829,19 +826,6 @@ nonisolated final class ActiveWorkoutDraftRepository {
                     maxSetCount: normalizedDrafts.count
                 )
             )
-            let catalogExercise = catalogMatchesByUUID[exercise.catalogExerciseUUID]
-                ?? TrainingGuidanceCatalogSnapshot(
-                    exerciseName: exercise.exerciseNameSnapshot,
-                    categoryName: exercise.categorySnapshot,
-                    equipmentSummary: "",
-                    primaryMuscleNames: exercise.muscleSummarySnapshot
-                )
-            guidanceByExerciseID[exercise.id] = guidanceService.activeWorkoutGuidance(
-                for: catalogExercise,
-                targetRepMin: exercise.targetRepMin,
-                targetRepMax: exercise.targetRepMax,
-                setDrafts: normalizedDrafts
-            )
         }
 
         return ActiveWorkoutPreparedFirstRenderSnapshot(
@@ -849,8 +833,7 @@ nonisolated final class ActiveWorkoutDraftRepository {
             restsByExerciseID: restsByExerciseID,
             notesByExerciseID: notesByExerciseID,
             catalogMatchesByUUID: catalogMatchesByUUID,
-            previousResolutionByExerciseID: previousResolutionByExerciseID,
-            guidanceByExerciseID: guidanceByExerciseID
+            previousResolutionByExerciseID: previousResolutionByExerciseID
         )
     }
 
