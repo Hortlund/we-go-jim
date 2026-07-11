@@ -11,7 +11,6 @@ nonisolated struct ActiveWorkoutRenderProjection: Sendable {
     var sessionExercises: [ActiveWorkoutRuntimeExercise]
     var orderedCardioBlocks: [ActiveWorkoutRuntimeCardioBlock]
     var exerciseDisplayGroups: [WorkoutExerciseDisplayGroup<ActiveWorkoutRuntimeExercise>]
-    var exerciseIDs: [UUID]
     var preWorkoutCardio: ActiveWorkoutRuntimeCardioBlock?
     var postWorkoutCardio: ActiveWorkoutRuntimeCardioBlock?
     var cardioByPhase: [WorkoutCardioPhase: ActiveWorkoutRuntimeCardioBlock]
@@ -26,7 +25,6 @@ nonisolated struct ActiveWorkoutRenderProjection: Sendable {
         sessionExercises: [],
         orderedCardioBlocks: [],
         exerciseDisplayGroups: [],
-        exerciseIDs: [],
         preWorkoutCardio: nil,
         postWorkoutCardio: nil,
         cardioByPhase: [:],
@@ -80,7 +78,6 @@ nonisolated enum ActiveWorkoutRenderProjectionBuilder {
             sessionExercises: exercises,
             orderedCardioBlocks: cardioBlocks,
             exerciseDisplayGroups: displayGroups,
-            exerciseIDs: exercises.map(\.id),
             preWorkoutCardio: preWorkoutCardio,
             postWorkoutCardio: postWorkoutCardio,
             cardioByPhase: cardioByPhase,

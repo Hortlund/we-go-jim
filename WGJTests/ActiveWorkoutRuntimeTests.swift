@@ -3,6 +3,78 @@ import SwiftUI
 @testable import WGJ
 
 final class ActiveWorkoutRuntimeTests: XCTestCase {
+    private func projectSource(_ relativePath: String) throws -> String {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let projectRootURL = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        return try String(
+            contentsOf: projectRootURL.appendingPathComponent(relativePath),
+            encoding: .utf8
+        )
+    }
+
+    func testActiveWorkoutDoesNotRetainInactiveGuidancePipeline() throws {
+        let activeWorkoutSource = try projectSource(
+            "WGJ/Views/Workout/ActiveWorkoutView.swift"
+        )
+        let runtimeConfigSource = try projectSource(
+            "WGJ/Models/AppRuntimeConfig.swift"
+        )
+        let runtimeSource = try projectSource(
+            "WGJ/Services/ActiveWorkoutRuntime.swift"
+        )
+        let repositorySource = try projectSource(
+            "WGJ/Services/ActiveWorkoutDraftRepository.swift"
+        )
+        let interactionPolicySource = try projectSource(
+            "WGJ/Models/ActiveWorkoutSceneTransitionPolicy.swift"
+        )
+        let retiredSymbols = [
+            "guidanceByExerciseID",
+            "pendingGuidanceRefreshTask",
+            "pendingGuidanceRefreshExerciseIDs",
+            "shouldRefreshAllGuidance",
+            "isTrainingGuidanceEnabled",
+            "scheduleGuidanceRefresh",
+            "ActiveWorkoutGuidanceRefreshSnapshot",
+            "active-workout.guidance",
+        ]
+
+        for symbol in retiredSymbols {
+            XCTAssertFalse(
+                activeWorkoutSource.contains(symbol),
+                "Active Workout should not retain retired guidance symbol \(symbol)"
+            )
+        }
+        XCTAssertFalse(
+            runtimeConfigSource.contains("guidanceByExerciseID"),
+            "Prepared Active Workout snapshots should not retain retired guidance state"
+        )
+        for source in [runtimeSource, repositorySource] {
+            XCTAssertFalse(source.contains("guidanceByExerciseID"))
+            XCTAssertFalse(source.contains("activeWorkoutGuidance("))
+        }
+        XCTAssertFalse(
+            interactionPolicySource.contains("defaultGuidanceRefreshDelay")
+        )
+    }
+
+    func testActiveWorkoutDoesNotRetainDeadProjectionArtifacts() throws {
+        let activeWorkoutSource = try projectSource(
+            "WGJ/Views/Workout/ActiveWorkoutView.swift"
+        )
+        let projectionSource = try projectSource(
+            "WGJ/Models/ActiveWorkoutRenderProjection.swift"
+        )
+
+        XCTAssertFalse(
+            activeWorkoutSource.contains("supersetRoundRestSecondsByGroupID")
+        )
+        XCTAssertFalse(projectionSource.contains("var exerciseIDs:"))
+        XCTAssertFalse(projectionSource.contains("exerciseIDs:"))
+    }
+
     func testFinishPresentationDoesNotPublishWeeklyGoalWidgetSynchronously() throws {
         let testFileURL = URL(fileURLWithPath: #filePath)
         let projectRootURL = testFileURL
