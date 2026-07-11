@@ -3,25 +3,49 @@ import XCTest
 
 @MainActor
 final class WorkoutCompletionConfettiTests: XCTestCase {
-    func testCompletedWorkoutCelebrationUsesSingleCentralThrowBurst() {
+    func testStandardCompletionUsesOneCenteredBoundedBurst() {
+        let origin = WorkoutCompletionConfettiOrigin.defaultOrigin(
+            containerFrameInGlobalSpace: CGRect(x: 12, y: 48, width: 390, height: 780),
+            fallbackContainerSize: .zero
+        )
         let bursts = WorkoutCompletionConfettiPolicy.burstDescriptors(
-            origin: CGPoint(x: 200, y: 180),
-            intensity: .completedWorkout
+            origin: origin,
+            intensity: .completedWorkout,
+            variant: .standard
         )
 
+        XCTAssertEqual(origin, CGPoint(x: 207, y: 438))
         XCTAssertEqual(bursts.count, 1)
         XCTAssertEqual(bursts.first?.role, .centralThrow)
-        XCTAssertEqual(bursts.first?.origin, CGPoint(x: 200, y: 180))
-        XCTAssertEqual(bursts.first?.pieceCount, 34)
+        XCTAssertEqual(bursts.first?.origin, origin)
+        XCTAssertEqual(bursts.first?.pieceCount, 38)
+        XCTAssertEqual(bursts.first?.variant, .standard)
         XCTAssertEqual(bursts.first?.delay, 0)
         XCTAssertEqual(WorkoutCompletionConfettiPolicy.automaticCelebrationDelay, .milliseconds(180))
     }
 
-    func testManualTapCelebrationUsesSingleUpwardBurst() {
+    func testPersonalRecordCompletionIsStrongerButBounded() {
+        let bursts = WorkoutCompletionConfettiPolicy.burstDescriptors(
+            origin: CGPoint(x: 195, y: 390),
+            intensity: .completedWorkout,
+            variant: .personalRecord
+        )
+
+        XCTAssertEqual(bursts.count, 1)
+        XCTAssertEqual(bursts.first?.pieceCount, 46)
+        XCTAssertEqual(bursts.first?.variant, .personalRecord)
+        XCTAssertGreaterThan(
+            WorkoutCompletionConfettiPolicy.colorRoles(for: .personalRecord).filter { $0 == .gold }.count,
+            WorkoutCompletionConfettiPolicy.colorRoles(for: .standard).filter { $0 == .gold }.count
+        )
+    }
+
+    func testManualReplayRetainsTapOriginAndLightCount() {
         let origin = CGPoint(x: 120, y: 220)
         let bursts = WorkoutCompletionConfettiPolicy.burstDescriptors(
             origin: origin,
-            intensity: .manualTap
+            intensity: .manualTap,
+            variant: .personalRecord
         )
 
         XCTAssertEqual(bursts.count, 1)
@@ -30,20 +54,93 @@ final class WorkoutCompletionConfettiTests: XCTestCase {
         XCTAssertEqual(bursts.first?.pieceCount, 18)
     }
 
-    func testAutomaticCelebrationHasVisibleFallbackOriginBeforeHeroLayout() {
-        let origin = WorkoutCompletionConfettiOrigin.defaultOrigin(
-            heroFrame: .zero,
-            fallbackContainerWidth: 390
+    func testAutomaticOriginUsesContainerCenterAndFallbacks() {
+        XCTAssertEqual(
+            WorkoutCompletionConfettiOrigin.defaultOrigin(
+                containerFrameInGlobalSpace: CGRect(x: 0, y: 20, width: 440, height: 880),
+                fallbackContainerSize: .zero
+            ),
+            CGPoint(x: 220, y: 460)
+        )
+        XCTAssertEqual(
+            WorkoutCompletionConfettiOrigin.defaultOrigin(
+                containerFrameInGlobalSpace: .zero,
+                fallbackContainerSize: CGSize(width: 320, height: 568)
+            ),
+            CGPoint(x: 160, y: 284)
+        )
+        XCTAssertEqual(
+            WorkoutCompletionConfettiOrigin.defaultOrigin(
+                containerFrameInGlobalSpace: .zero,
+                fallbackContainerSize: CGSize(width: 390, height: 0)
+            ),
+            CGPoint(x: 195, y: 360)
+        )
+    }
+
+    func testContainerGeometryKeepsLocalSizeWhenGlobalFrameIsUnavailable() {
+        let geometry = WorkoutCompletionContainerGeometry(
+            globalFrame: .zero,
+            localSize: CGSize(width: 390, height: 780)
         )
 
-        XCTAssertEqual(origin, CGPoint(x: 195, y: 220))
+        XCTAssertEqual(geometry.automaticConfettiOrigin, CGPoint(x: 195, y: 390))
+    }
+
+    func testReducedMotionUsesStaticPresentationWithoutParticles() {
+        let reduced = WorkoutCompletionCelebrationPresentation.make(
+            variant: .standard,
+            reduceMotion: true
+        )
+        let personalRecord = WorkoutCompletionCelebrationPresentation.make(
+            variant: .personalRecord,
+            reduceMotion: false
+        )
+
+        XCTAssertFalse(reduced.showsConfetti)
+        XCTAssertEqual(reduced.initialHeroScale, 1)
+        XCTAssertEqual(reduced.initialIconScale, 1)
+        XCTAssertEqual(reduced.peakIconScale, 1)
+        XCTAssertEqual(reduced.peakGlowOpacity, reduced.settledGlowOpacity)
+
+        XCTAssertTrue(personalRecord.showsConfetti)
+        XCTAssertEqual(personalRecord.initialHeroScale, 0.96)
+        XCTAssertLessThan(personalRecord.initialIconScale, 1)
+        XCTAssertGreaterThan(personalRecord.peakIconScale, 1)
+        XCTAssertGreaterThan(personalRecord.peakGlowOpacity, personalRecord.settledGlowOpacity)
+    }
+
+    func testCelebrationPhaseProjectsOneHeroChoreography() {
+        let presentation = WorkoutCompletionCelebrationPresentation.make(
+            variant: .personalRecord,
+            reduceMotion: false
+        )
+
+        XCTAssertEqual(WorkoutCompletionCelebrationPhase.prepared.heroScale(using: presentation), 0.96)
+        XCTAssertEqual(WorkoutCompletionCelebrationPhase.peak.iconScale(using: presentation), 1.18)
+        XCTAssertEqual(WorkoutCompletionCelebrationPhase.peak.glowOpacity(using: presentation), 0.46)
+        XCTAssertEqual(WorkoutCompletionCelebrationPhase.settled.heroScale(using: presentation), 1)
+        XCTAssertEqual(WorkoutCompletionCelebrationPhase.settled.iconScale(using: presentation), 1)
+        XCTAssertEqual(WorkoutCompletionCelebrationPhase.settled.glowOpacity(using: presentation), 0.18)
+    }
+
+    func testCelebrationStartRechecksReducedMotion() {
+        XCTAssertEqual(
+            WorkoutCompletionCelebrationPhase.startingPhase(reduceMotion: false),
+            .peak
+        )
+        XCTAssertEqual(
+            WorkoutCompletionCelebrationPhase.startingPhase(reduceMotion: true),
+            .settled
+        )
     }
 
     func testConfettiPiecesStartWideAndDriftSlowly() {
         let pieces = WorkoutCompletionConfettiPiece.random(
             seed: 42,
             role: .centralThrow,
-            count: 38
+            count: 38,
+            variant: .standard
         )
 
         XCTAssertEqual(pieces.count, 38)
@@ -58,7 +155,8 @@ final class WorkoutCompletionConfettiTests: XCTestCase {
         let pieces = WorkoutCompletionConfettiPiece.random(
             seed: 42,
             role: .centralThrow,
-            count: 38
+            count: 38,
+            variant: .standard
         )
 
         XCTAssertGreaterThanOrEqual(pieces.filter { $0.progress(at: 1.0 / 30.0) > 0 }.count, 8)
@@ -68,7 +166,8 @@ final class WorkoutCompletionConfettiTests: XCTestCase {
         let piece = WorkoutCompletionConfettiPiece.random(
             seed: 7,
             role: .centralThrow,
-            count: 1
+            count: 1,
+            variant: .standard
         )[0]
 
         XCTAssertLessThan(piece.yOffset(progress: 0.20), 0)
