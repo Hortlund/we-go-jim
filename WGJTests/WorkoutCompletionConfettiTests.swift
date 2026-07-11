@@ -101,6 +101,20 @@ final class WorkoutCompletionConfettiTests: XCTestCase {
         XCTAssertGreaterThan(personalRecord.peakGlowOpacity, personalRecord.settledGlowOpacity)
     }
 
+    func testCelebrationPhaseProjectsOneHeroChoreography() {
+        let presentation = WorkoutCompletionCelebrationPresentation.make(
+            variant: .personalRecord,
+            reduceMotion: false
+        )
+
+        XCTAssertEqual(WorkoutCompletionCelebrationPhase.prepared.heroScale(using: presentation), 0.96)
+        XCTAssertEqual(WorkoutCompletionCelebrationPhase.peak.iconScale(using: presentation), 1.18)
+        XCTAssertEqual(WorkoutCompletionCelebrationPhase.peak.glowOpacity(using: presentation), 0.46)
+        XCTAssertEqual(WorkoutCompletionCelebrationPhase.settled.heroScale(using: presentation), 1)
+        XCTAssertEqual(WorkoutCompletionCelebrationPhase.settled.iconScale(using: presentation), 1)
+        XCTAssertEqual(WorkoutCompletionCelebrationPhase.settled.glowOpacity(using: presentation), 0.18)
+    }
+
     func testConfettiPiecesStartWideAndDriftSlowly() {
         let pieces = WorkoutCompletionConfettiPiece.random(
             seed: 42,

@@ -106,6 +106,38 @@ nonisolated struct WorkoutCompletionCelebrationPresentation: Equatable, Sendable
     }
 }
 
+nonisolated enum WorkoutCompletionCelebrationPhase: Equatable, Sendable {
+    case prepared
+    case peak
+    case settled
+
+    func heroScale(using presentation: WorkoutCompletionCelebrationPresentation) -> CGFloat {
+        self == .prepared ? presentation.initialHeroScale : 1
+    }
+
+    func iconScale(using presentation: WorkoutCompletionCelebrationPresentation) -> CGFloat {
+        switch self {
+        case .prepared:
+            return presentation.initialIconScale
+        case .peak:
+            return presentation.peakIconScale
+        case .settled:
+            return 1
+        }
+    }
+
+    func glowOpacity(using presentation: WorkoutCompletionCelebrationPresentation) -> Double {
+        switch self {
+        case .prepared:
+            return 0
+        case .peak:
+            return presentation.peakGlowOpacity
+        case .settled:
+            return presentation.settledGlowOpacity
+        }
+    }
+}
+
 nonisolated enum WorkoutCompletionConfettiPolicy {
     static let automaticCelebrationDelay: Duration = .milliseconds(180)
     static let burstLifetime: Duration = .seconds(7.0)
@@ -178,6 +210,7 @@ struct WorkoutCompletionSummaryView: View {
     @State private var snapshot: WorkoutCompletionSnapshot?
     @State private var hasTriggeredCelebration = false
     @State private var celebrationBurstCount = 0
+    @State private var celebrationPhase = WorkoutCompletionCelebrationPhase.prepared
     @State private var confettiBursts: [WorkoutCompletionConfettiBurst] = []
     @State private var confettiDismissTasks: [UUID: Task<Void, Never>] = [:]
     @State private var automaticCelebrationTask: Task<Void, Never>?
@@ -186,6 +219,14 @@ struct WorkoutCompletionSummaryView: View {
 
     private var completionBackgroundStore: AppBackgroundStore {
         appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
+    }
+
+    private var celebrationVariant: WorkoutCompletionCelebrationVariant {
+        .make(hasPersonalRecords: !(snapshot?.personalRecords.isEmpty ?? true))
+    }
+
+    private var celebrationPresentation: WorkoutCompletionCelebrationPresentation {
+        .make(variant: celebrationVariant, reduceMotion: reduceMotion)
     }
 
     var body: some View {
@@ -319,6 +360,7 @@ struct WorkoutCompletionSummaryView: View {
                             .font(.title.weight(.bold))
                             .foregroundStyle(WGJTheme.textInverse)
                     }
+                    .scaleEffect(celebrationPhase.iconScale(using: celebrationPresentation))
                 }
 
                 ViewThatFits(in: .horizontal) {
@@ -381,9 +423,23 @@ struct WorkoutCompletionSummaryView: View {
                         RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
                             .stroke(WGJTheme.accentBlue.opacity(0.18), lineWidth: 1)
                     }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: celebrationVariant == .personalRecord
+                                        ? [WGJTheme.accentGold.opacity(0.34), Color.clear]
+                                        : [WGJTheme.accentCyan.opacity(0.22), Color.clear],
+                                    startPoint: .topTrailing,
+                                    endPoint: .bottomLeading
+                                )
+                            )
+                            .opacity(celebrationPhase.glowOpacity(using: celebrationPresentation))
+                    }
             }
         }
         .buttonStyle(.plain)
+        .scaleEffect(celebrationPhase.heroScale(using: celebrationPresentation))
         .contentShape(RoundedRectangle(cornerRadius: WGJRadius.card, style: .continuous))
         .onPreferenceChange(WorkoutCompletionHeroFramePreferenceKey.self) { frame in
             guard !heroFrameMatches(frame, heroCardFrame) else { return }
@@ -524,38 +580,59 @@ struct WorkoutCompletionSummaryView: View {
     }
 
     private func scheduleAutomaticCelebrationIfReady() {
-        guard snapshot != nil else { return }
-        guard !hasTriggeredCelebration else { return }
+        guard snapshot != nil, !hasTriggeredCelebration else { return }
         hasTriggeredCelebration = true
+
+        if reduceMotion {
+            celebrationPhase = .settled
+        }
+
         automaticCelebrationTask?.cancel()
         automaticCelebrationTask = Task { @MainActor in
             try? await Task.sleep(for: WorkoutCompletionConfettiPolicy.automaticCelebrationDelay)
+            guard !Task.isCancelled, snapshot != nil else { return }
+
+            if !reduceMotion {
+                withAnimation(.spring(duration: 0.52, bounce: 0.30)) {
+                    celebrationPhase = .peak
+                }
+            }
+
+            triggerCelebration(
+                origin: defaultConfettiOrigin(),
+                intensity: .completedWorkout,
+                variant: celebrationVariant
+            )
+
+            guard !reduceMotion else {
+                automaticCelebrationTask = nil
+                return
+            }
+
+            try? await Task.sleep(for: .milliseconds(520))
             guard !Task.isCancelled else { return }
-            guard snapshot != nil else { return }
-            triggerCelebration(origin: defaultConfettiOrigin(), intensity: .completedWorkout)
+            withAnimation(.easeOut(duration: 0.20)) {
+                celebrationPhase = .settled
+            }
             automaticCelebrationTask = nil
         }
     }
 
     private func triggerCelebration(
         origin: CGPoint,
-        intensity: WorkoutCompletionConfettiIntensity
+        intensity: WorkoutCompletionConfettiIntensity,
+        variant: WorkoutCompletionCelebrationVariant? = nil
     ) {
         celebrationBurstCount += 1
 
         WorkoutFeedbackCenter.shared.workoutCompleted()
 
-        guard !reduceMotion else {
-            return
-        }
+        guard celebrationPresentation.showsConfetti else { return }
 
-        let variant = WorkoutCompletionCelebrationVariant.make(
-            hasPersonalRecords: !(snapshot?.personalRecords.isEmpty ?? true)
-        )
         for descriptor in WorkoutCompletionConfettiPolicy.burstDescriptors(
             origin: origin,
             intensity: intensity,
-            variant: variant
+            variant: variant ?? celebrationVariant
         ) {
             let burst = WorkoutCompletionConfettiBurst(descriptor: descriptor)
             confettiBursts.append(burst)
