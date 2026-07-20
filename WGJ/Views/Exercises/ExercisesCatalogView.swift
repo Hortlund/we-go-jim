@@ -849,8 +849,7 @@ struct ExercisesCatalogView: View {
         headerPresentation.reset()
         controller.applyFilters(
             query: searchState.debouncedQuery,
-            selectedPrimaryMuscleID: searchState.selectedPrimaryMuscleID,
-            selectedCategory: searchState.selectedCategory,
+            filters: searchState.exerciseFilters,
             sortDescending: searchState.sortDescending
         )
     }
@@ -1148,19 +1147,38 @@ struct ExercisesCatalogSearchState: Equatable {
     private(set) var debouncedQuery = ""
     private(set) var resetToken = 0
     var selectedPrimaryMuscleID: Int?
+    var selectedSecondaryMuscleID: Int?
+    var selectedEquipmentToken: String?
     var selectedCategory: String?
+    var includeUncurated: Bool
     var sortDescending = false
 
     init(filters: ExerciseFilters = .default) {
         selectedPrimaryMuscleID = filters.primaryMuscleID
+        selectedSecondaryMuscleID = filters.secondaryMuscleID
+        selectedEquipmentToken = filters.equipmentToken
         selectedCategory = filters.categoryName
+        includeUncurated = filters.includeUncurated
     }
 
     var hasActiveFilters: Bool {
         !debouncedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || selectedPrimaryMuscleID != nil
+            || selectedSecondaryMuscleID != nil
+            || selectedEquipmentToken != nil
             || selectedCategory != nil
+            || includeUncurated
             || sortDescending
+    }
+
+    var exerciseFilters: ExerciseFilters {
+        ExerciseFilters(
+            primaryMuscleID: selectedPrimaryMuscleID,
+            secondaryMuscleID: selectedSecondaryMuscleID,
+            equipmentToken: selectedEquipmentToken,
+            categoryName: selectedCategory,
+            includeUncurated: includeUncurated
+        )
     }
 
     mutating func updateDebouncedQuery(_ query: String) {
@@ -1170,7 +1188,10 @@ struct ExercisesCatalogSearchState: Equatable {
     mutating func clearSearchAndFilters() {
         debouncedQuery = ""
         selectedPrimaryMuscleID = nil
+        selectedSecondaryMuscleID = nil
+        selectedEquipmentToken = nil
         selectedCategory = nil
+        includeUncurated = false
         sortDescending = false
         resetToken += 1
     }
@@ -1211,14 +1232,12 @@ final class ExercisesCatalogController {
 
     func applyFilters(
         query: String,
-        selectedPrimaryMuscleID: Int?,
-        selectedCategory: String?,
+        filters: ExerciseFilters,
         sortDescending: Bool
     ) {
         snapshot.applyFilters(
             query: query,
-            selectedPrimaryMuscleID: selectedPrimaryMuscleID,
-            selectedCategory: selectedCategory,
+            filters: filters,
             sortDescending: sortDescending
         )
     }
@@ -1270,6 +1289,7 @@ nonisolated struct ExerciseCatalogItemSnapshot: Identifiable, Equatable, Sendabl
     let secondaryMuscleIDs: Set<Int>
     let instructionSteps: [String]
     let isHidden: Bool
+    let isCurated: Bool
     let isCustomExercise: Bool
     let searchBlob: String
     let image: ExerciseCatalogImageSnapshot?
@@ -1298,6 +1318,7 @@ nonisolated struct ExerciseCatalogItemSnapshot: Identifiable, Equatable, Sendabl
         secondaryMuscleIDs = Set(exercise.secondaryMuscles.map(\.remoteID))
         instructionSteps = exercise.instructionSteps
         isHidden = exercise.isHidden
+        isCurated = exercise.isCurated
         isCustomExercise = exercise.isCustomExercise
         searchBlob = exercise.searchableTerms
             .joined(separator: " ")
@@ -1367,6 +1388,13 @@ nonisolated struct ExercisesCatalogSnapshot: Sendable {
                     categoryName: exercise.categoryName,
                     searchBlob: exercise.searchBlob,
                     primaryMuscleIDs: exercise.primaryMuscleIDs,
+                    secondaryMuscleIDs: exercise.secondaryMuscleIDs,
+                    equipmentTokens: Set(exercise.equipmentSummary
+                        .split(separator: ",")
+                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                        .filter { !$0.isEmpty }),
+                    isCurated: exercise.isCurated,
+                    isCustomExercise: exercise.isCustomExercise,
                     indexKey: indexKey
                 )
             )
@@ -1383,23 +1411,20 @@ nonisolated struct ExercisesCatalogSnapshot: Sendable {
         sections = Self.sections(
             from: rows,
             query: "",
-            selectedPrimaryMuscleID: nil,
-            selectedCategory: nil,
+            filters: .default,
             sortDescending: false
         )
     }
 
     mutating func applyFilters(
         query: String,
-        selectedPrimaryMuscleID: Int?,
-        selectedCategory: String?,
+        filters: ExerciseFilters,
         sortDescending: Bool
     ) {
         sections = Self.sections(
             from: allRows,
             query: query,
-            selectedPrimaryMuscleID: selectedPrimaryMuscleID,
-            selectedCategory: selectedCategory,
+            filters: filters,
             sortDescending: sortDescending
         )
     }
@@ -1412,8 +1437,7 @@ nonisolated struct ExercisesCatalogSnapshot: Sendable {
     private static func sections(
         from rows: [ExerciseCatalogRowSnapshot],
         query: String,
-        selectedPrimaryMuscleID: Int?,
-        selectedCategory: String?,
+        filters: ExerciseFilters,
         sortDescending: Bool
     ) -> [ExercisesSectionSnapshot] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -1423,11 +1447,28 @@ nonisolated struct ExercisesCatalogSnapshot: Sendable {
             .split(whereSeparator: \.isWhitespace)
             .map(String.init)
 
-        if let selectedPrimaryMuscleID {
+        if !filters.includeUncurated {
+            filtered = filtered.filter { $0.isCustomExercise || $0.isCurated }
+        }
+        if let selectedPrimaryMuscleID = filters.primaryMuscleID {
             filtered = filtered.filter { $0.primaryMuscleIDs.contains(selectedPrimaryMuscleID) }
         }
-        if let selectedCategory {
-            filtered = filtered.filter { $0.categoryName == selectedCategory }
+        if let selectedSecondaryMuscleID = filters.secondaryMuscleID {
+            filtered = filtered.filter { $0.secondaryMuscleIDs.contains(selectedSecondaryMuscleID) }
+        }
+        if let selectedEquipmentToken = filters.equipmentToken {
+            let normalizedEquipment = selectedEquipmentToken
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            filtered = filtered.filter { $0.equipmentTokens.contains(normalizedEquipment) }
+        }
+        if let selectedCategory = filters.categoryName {
+            let normalizedCategory = selectedCategory.trimmingCharacters(in: .whitespacesAndNewlines)
+            filtered = filtered.filter { row in
+                row.categoryName
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .localizedCaseInsensitiveCompare(normalizedCategory) == .orderedSame
+            }
         }
         if !queryTokens.isEmpty {
             filtered = filtered.filter { row in
@@ -1459,6 +1500,10 @@ nonisolated struct ExerciseCatalogRowSnapshot: Identifiable, Equatable, Sendable
     let categoryName: String
     let searchBlob: String
     let primaryMuscleIDs: Set<Int>
+    let secondaryMuscleIDs: Set<Int>
+    let equipmentTokens: Set<String>
+    let isCurated: Bool
+    let isCustomExercise: Bool
     let indexKey: String
 }
 
