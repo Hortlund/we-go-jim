@@ -14,6 +14,17 @@ nonisolated final class ActiveWorkoutScrollPositionTracker {
     }
 }
 
+nonisolated enum ActiveWorkoutCompletedExercisePresentationEffect: Equatable, Sendable {
+    case none
+    case collapseCard
+}
+
+nonisolated enum ActiveWorkoutCompletedExercisePresentationPolicy {
+    static func effect(wasExpanded: Bool) -> ActiveWorkoutCompletedExercisePresentationEffect {
+        wasExpanded ? .collapseCard : .none
+    }
+}
+
 nonisolated enum ActiveWorkoutScrollRestorePolicy {
     static func target(
         focusedExerciseID: UUID?,
@@ -32,6 +43,13 @@ nonisolated enum ActiveWorkoutScrollRestorePolicy {
             return .exercise(keyboardExerciseID)
         }
 
+        if trackedTarget == .cancelSection {
+            return terminalRestoreTarget(
+                orderedExerciseIDs: orderedExerciseIDs,
+                isRestorable: isRestorable
+            ) ?? (hasSession ? .header : nil)
+        }
+
         if let trackedTarget,
            trackedTarget != .header,
            isRestorable(trackedTarget) {
@@ -47,5 +65,30 @@ nonisolated enum ActiveWorkoutScrollRestorePolicy {
         }
 
         return hasSession ? .header : nil
+    }
+
+    private static func terminalRestoreTarget(
+        orderedExerciseIDs: [UUID],
+        isRestorable: (ActiveWorkoutScrollTarget) -> Bool
+    ) -> ActiveWorkoutScrollTarget? {
+        if isRestorable(.postWorkoutCardio) {
+            return .postWorkoutCardio
+        }
+
+        if let exerciseTarget = orderedExerciseIDs.reversed()
+            .map(ActiveWorkoutScrollTarget.exercise)
+            .first(where: isRestorable) {
+            return exerciseTarget
+        }
+
+        if isRestorable(.preWorkoutCardio) {
+            return .preWorkoutCardio
+        }
+
+        if isRestorable(.header) {
+            return .header
+        }
+
+        return nil
     }
 }
