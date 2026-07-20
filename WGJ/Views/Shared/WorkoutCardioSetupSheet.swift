@@ -61,12 +61,29 @@ nonisolated struct WorkoutCardioSetupDraft: Equatable, Sendable {
 
     init(
         activeCardio: ActiveWorkoutRuntimeCardioBlock,
+        replacementSelection: ExerciseCatalogSelection? = nil,
         fallbackDistanceUnit: WorkoutDistanceUnit = .regionalDefault(locale: .current)
     ) {
         let distanceUnit = activeCardio.preferredDistanceUnit ?? fallbackDistanceUnit
         let distanceText = activeCardio.targetDistanceMeters.map {
             WorkoutCardioSetupNumericCodec.distanceText(meters: $0, unit: distanceUnit)
         } ?? ""
+        let trackingProfile: WorkoutCardioTrackingProfile
+        if let replacementSelection {
+            trackingProfile = WorkoutCardioTrackingProfileResolver.resolved(
+                storedProfile: replacementSelection.cardioTrackingProfile,
+                catalogExerciseUUID: replacementSelection.remoteUUID,
+                exerciseName: replacementSelection.displayName,
+                hasDistance: activeCardio.targetDistanceMeters != nil
+            )
+        } else {
+            trackingProfile = WorkoutCardioTrackingProfileResolver.resolved(
+                storedProfile: activeCardio.trackingProfile,
+                catalogExerciseUUID: activeCardio.catalogExerciseUUID,
+                exerciseName: activeCardio.exerciseNameSnapshot,
+                hasDistance: activeCardio.targetDistanceMeters != nil
+            )
+        }
 
         self.role = activeCardio.role
         self.goalKind = activeCardio.goalKind
@@ -75,12 +92,7 @@ nonisolated struct WorkoutCardioSetupDraft: Equatable, Sendable {
         )
         self.distanceText = distanceText
         self.distanceUnit = distanceUnit
-        self.trackingProfile = WorkoutCardioTrackingProfileResolver.resolved(
-            storedProfile: activeCardio.trackingProfile,
-            catalogExerciseUUID: activeCardio.catalogExerciseUUID,
-            exerciseName: activeCardio.exerciseNameSnapshot,
-            hasDistance: activeCardio.targetDistanceMeters != nil
-        )
+        self.trackingProfile = trackingProfile
         self.originalDistanceMeters = activeCardio.targetDistanceMeters
         self.originalDistanceText = distanceText
         self.originalDistanceUnit = distanceUnit

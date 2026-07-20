@@ -325,6 +325,68 @@ final class ActiveWorkoutCardioPresentationTests: XCTestCase {
         XCTAssertEqual(draft.trackingProfile, .treadmill)
         XCTAssertEqual(validated.trackingProfile, .treadmill)
     }
+
+    func testReplacingBikeWithTreadmillPreservesPlanButUsesReplacementProfile() throws {
+        let originalMeters = 3_218.688
+        let bike = ActiveWorkoutRuntimeCardioBlock(
+            phase: .preWorkout,
+            role: .main,
+            catalogExerciseUUID: "seed-bike",
+            exerciseNameSnapshot: "Bike",
+            categorySnapshot: "Cardio",
+            muscleSummarySnapshot: "Legs",
+            trackingProfile: .machineDistance,
+            goalKind: .distance,
+            targetDurationSeconds: 0,
+            targetDistanceMeters: originalMeters,
+            preferredDistanceUnit: .miles,
+            createdAt: .now,
+            updatedAt: .now
+        )
+        let treadmill = ExerciseCatalogSelection(
+            remoteUUID: "seed-treadmill-walk",
+            displayName: "Treadmill Walk",
+            categoryName: "Cardio",
+            equipmentSummary: "Treadmill",
+            primaryMuscleNames: "Legs",
+            cardioTrackingProfileRaw: WorkoutCardioTrackingProfile.treadmill.rawValue
+        )
+
+        let draft = WorkoutCardioSetupDraft(
+            activeCardio: bike,
+            replacementSelection: treadmill
+        )
+        let validated = try WorkoutCardioSetupValidator.validated(draft)
+
+        XCTAssertEqual(draft.role, bike.role)
+        XCTAssertEqual(draft.goalKind, .distance)
+        XCTAssertEqual(draft.distanceUnit, .miles)
+        XCTAssertEqual(validated.targetDistanceMeters, originalMeters)
+        XCTAssertEqual(validated.trackingProfile, .treadmill)
+        XCTAssertTrue(validated.trackingProfile.supportsIncline)
+        XCTAssertFalse(validated.trackingProfile.supportsResistanceOrLevel)
+    }
+
+    func testReplacingTreadmillWithRowerUsesRowerResultFields() throws {
+        let treadmill = ActiveWorkoutRuntimeCardioBlock.fixture()
+        let rower = ExerciseCatalogSelection(
+            remoteUUID: "seed-row-machine",
+            displayName: "Rowing Machine",
+            categoryName: "Cardio",
+            equipmentSummary: "Rower",
+            primaryMuscleNames: "Full Body",
+            cardioTrackingProfileRaw: nil
+        )
+
+        let draft = WorkoutCardioSetupDraft(
+            activeCardio: treadmill,
+            replacementSelection: rower
+        )
+
+        XCTAssertEqual(draft.trackingProfile, .rower)
+        XCTAssertFalse(draft.trackingProfile.supportsIncline)
+        XCTAssertTrue(draft.trackingProfile.supportsResistanceOrLevel)
+    }
 }
 
 private extension ActiveWorkoutRuntimeCardioBlock {

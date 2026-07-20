@@ -1583,7 +1583,11 @@ struct ActiveWorkoutView: View {
             isNewActivity: activityID == nil,
             selection: selection,
             setupDraft: existing.map {
-                WorkoutCardioSetupDraft(activeCardio: $0, fallbackDistanceUnit: distanceUnit)
+                WorkoutCardioSetupDraft(
+                    activeCardio: $0,
+                    replacementSelection: resetsResult ? selection : nil,
+                    fallbackDistanceUnit: distanceUnit
+                )
             } ?? WorkoutCardioSetupDraft(
                 role: role,
                 goalKind: .time,
