@@ -429,8 +429,28 @@ struct ActiveWorkoutView: View {
         case .timerConflict(let conflict):
             Button(conflict.requestedTransition.conflictConfirmationActionTitle) {
                 cardioConfirmation = nil
-                if finishCardioTimer(activityID: conflict.runningActivityID, presentsResult: false) {
-                    requestCardioTimerTransition(conflict.requestedTransition)
+                do {
+                    try ActiveWorkoutCardioConflictTransitionOrchestrator.perform(
+                        conflict: conflict
+                    ) { boundary in
+                        switch boundary {
+                        case .finishCurrent(let activityID):
+                            try performCardioTimerTransition(activityID: activityID) { activityID, blocks, date in
+                                try WorkoutCardioTimerCoordinator.finish(
+                                    activityID: activityID,
+                                    blocks: &blocks,
+                                    at: date
+                                )
+                            }
+                            WorkoutFeedbackCenter.shared.exerciseCompleted()
+                        case .requested(let transition):
+                            try performCardioTimerTransition(activityID: transition.activityID) { _, blocks, date in
+                                try transition.apply(to: &blocks, at: date)
+                            }
+                        }
+                    }
+                } catch {
+                    showError(error)
                 }
             }
 
@@ -1557,25 +1577,25 @@ struct ActiveWorkoutView: View {
     ) -> ActiveWorkoutCardioSetupRequest {
         let existing = activityID.flatMap(cardioBlock(activityID:))
         let distanceUnit = existing?.preferredDistanceUnit ?? preferredDistanceUnit
-        let distanceText = existing?.targetDistanceMeters.map {
-            WorkoutCardioSetupNumericCodec.distanceText(meters: $0, unit: distanceUnit)
-        } ?? ""
 
         return ActiveWorkoutCardioSetupRequest(
             activityID: activityID ?? UUID(),
             isNewActivity: activityID == nil,
             selection: selection,
-            setupDraft: WorkoutCardioSetupDraft(
-                role: existing?.role ?? role,
-                goalKind: existing?.goalKind ?? .time,
-                durationMinutesText: WorkoutCardioSetupNumericCodec.durationMinutesText(
-                    seconds: existing?.targetDurationSeconds ?? 600
-                ),
-                distanceText: distanceText,
+            setupDraft: existing.map {
+                WorkoutCardioSetupDraft(activeCardio: $0, fallbackDistanceUnit: distanceUnit)
+            } ?? WorkoutCardioSetupDraft(
+                role: role,
+                goalKind: .time,
+                durationMinutesText: "10",
+                distanceText: "",
                 distanceUnit: distanceUnit,
-                trackingProfile: selection.cardioTrackingProfile
-                    ?? existing?.trackingProfile
-                    ?? .machineDistance
+                trackingProfile: WorkoutCardioTrackingProfileResolver.resolved(
+                    storedProfile: selection.cardioTrackingProfile,
+                    catalogExerciseUUID: selection.remoteUUID,
+                    exerciseName: selection.displayName,
+                    hasDistance: false
+                )
             ),
             resetsResult: resetsResult
         )
@@ -1773,7 +1793,9 @@ struct ActiveWorkoutView: View {
         )
         self.runtimeSession = plan.session
 
-        switch plan.persistenceBoundary {
+        switch plan.disposition {
+        case .noOp:
+            break
         case .committedSnapshot:
             // Result Save is one explicit local-first active-workout snapshot boundary.
             persistCommittedUserEditSnapshot()

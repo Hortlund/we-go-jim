@@ -2,6 +2,39 @@ import XCTest
 @testable import WGJ
 
 final class WorkoutCardioTimerCoordinatorTests: XCTestCase {
+    private enum TestError: Error { case finish }
+
+    func testConflictOrchestratorCommitsFinishBeforeRequestedTransition() throws {
+        let runningID = UUID()
+        let requested = ActiveWorkoutCardioRequestedTimerTransition.start(activityID: UUID())
+        var boundaries: [ActiveWorkoutCardioConflictTransitionOrchestrator.Boundary] = []
+
+        try ActiveWorkoutCardioConflictTransitionOrchestrator.perform(
+            conflict: .init(runningActivityID: runningID, requestedTransition: requested)
+        ) { boundary in
+            boundaries.append(boundary)
+        }
+
+        XCTAssertEqual(boundaries, [.finishCurrent(runningID), .requested(requested)])
+    }
+
+    func testConflictOrchestratorDoesNotAttemptRequestedTransitionWhenFinishFails() {
+        let runningID = UUID()
+        let requested = ActiveWorkoutCardioRequestedTimerTransition.resume(activityID: UUID())
+        var boundaries: [ActiveWorkoutCardioConflictTransitionOrchestrator.Boundary] = []
+
+        XCTAssertThrowsError(
+            try ActiveWorkoutCardioConflictTransitionOrchestrator.perform(
+                conflict: .init(runningActivityID: runningID, requestedTransition: requested)
+            ) { boundary in
+                boundaries.append(boundary)
+                if case .finishCurrent = boundary { throw TestError.finish }
+            }
+        )
+
+        XCTAssertEqual(boundaries, [.finishCurrent(runningID)])
+    }
+
     func testPauseAndResumeAccumulateOnlyRunningIntervals() throws {
         let base = Date(timeIntervalSince1970: 1_000)
         var blocks = [ActiveWorkoutRuntimeCardioBlock.fixture()]

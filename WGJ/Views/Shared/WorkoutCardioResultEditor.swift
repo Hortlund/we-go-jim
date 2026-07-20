@@ -22,7 +22,7 @@ struct WorkoutCardioResultEditor: View {
         self._draft = State(initialValue: draft)
         self._durationMinutesText = State(
             initialValue: draft.actualDurationSeconds.map {
-                WorkoutCardioSetupNumericCodec.durationMinutesText(seconds: $0)
+                WorkoutCardioResultDurationCodec.durationMinutesText(seconds: $0)
             } ?? ""
         )
         self._showsDetails = State(
@@ -253,7 +253,7 @@ struct WorkoutCardioResultEditor: View {
         if durationText.isEmpty {
             candidate.actualDurationSeconds = nil
         } else {
-            guard let seconds = WorkoutCardioSetupNumericCodec.durationSeconds(
+            guard let seconds = WorkoutCardioResultDurationCodec.durationSeconds(
                 fromMinutesText: durationText,
                 locale: .current
             ) else {

@@ -12,6 +12,7 @@ nonisolated enum WorkoutMetricAccessibilityPolicy {
         case pause
         case resume
         case finish
+        case logResult
         case editResult
     }
 
@@ -143,6 +144,7 @@ private extension WorkoutMetricAccessibilityPolicy.CardioAction {
         case .pause: return .pause
         case .resume: return .resume
         case .finish: return .finish
+        case .logResult: return .logResult
         case .editResult: return .editResult
         }
     }

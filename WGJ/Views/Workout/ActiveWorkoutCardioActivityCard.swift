@@ -15,6 +15,7 @@ nonisolated struct ActiveWorkoutCardioPresentation: Identifiable, Equatable, Sen
         case pause
         case resume
         case finish
+        case logResult
         case editResult
     }
 
@@ -69,7 +70,7 @@ nonisolated struct ActiveWorkoutCardioPresentation: Identifiable, Equatable, Sen
             switch activity.timerState {
             case .idle:
                 state = .idle
-                actionLayout = [.start]
+                actionLayout = [.start, .logResult]
             case .running:
                 state = .running
                 actionLayout = [.pause, .finish]
@@ -258,6 +259,7 @@ private extension ActiveWorkoutCardioPresentation.Action {
         case .pause: return .pause
         case .resume: return .resume
         case .finish: return .finish
+        case .logResult: return .logResult
         case .editResult: return .editResult
         }
     }
@@ -565,7 +567,7 @@ struct ActiveWorkoutCardioActivityCard: View {
             )
             .accessibilityIdentifier("active-workout-cardio-\(presentation.id)-\(action.rawValue)-button")
 
-        if action == .pause {
+        if action == .pause || action == .logResult {
             button.buttonStyle(WGJGhostButtonStyle())
         } else {
             button.buttonStyle(WGJPrimaryButtonStyle())
@@ -584,6 +586,8 @@ struct ActiveWorkoutCardioActivityCard: View {
             return .resume
         case .finish:
             return .finish
+        case .logResult:
+            return .logResult
         case .editResult:
             return .editResult
         }
@@ -603,6 +607,8 @@ struct ActiveWorkoutCardioActivityCard: View {
             return onResume
         case .finish:
             return onFinish
+        case .logResult:
+            return onEditResult
         case .editResult:
             return onEditResult
         }

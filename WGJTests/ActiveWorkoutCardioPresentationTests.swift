@@ -54,7 +54,7 @@ final class ActiveWorkoutCardioPresentationTests: XCTestCase {
         )
 
         XCTAssertEqual(idle.state, .idle)
-        XCTAssertEqual(idle.actionLayout, [.start])
+        XCTAssertEqual(idle.actionLayout, [.start, .logResult])
         XCTAssertEqual(running.state, .running)
         XCTAssertEqual(running.actionLayout, [.pause, .finish])
         XCTAssertEqual(paused.state, .paused)
@@ -225,7 +225,10 @@ final class ActiveWorkoutCardioPresentationTests: XCTestCase {
             actualDurationSeconds: 300,
             actualDistanceMeters: 1_000
         )
-        let target = ActiveWorkoutRuntimeCardioBlock.fixture(id: secondID)
+        let target = ActiveWorkoutRuntimeCardioBlock.fixture(
+            id: secondID,
+            timerAccumulatedSeconds: 42
+        )
         let session = ActiveWorkoutRuntimeSession(
             name: "Cardio",
             cardioBlocks: [unchanged, target],
@@ -255,9 +258,72 @@ final class ActiveWorkoutCardioPresentationTests: XCTestCase {
         XCTAssertEqual(plan.session.cardioBlocks[1].actualDistanceMeters, 5_000)
         XCTAssertEqual(plan.session.cardioBlocks[1].resistanceLevel, 7)
         XCTAssertEqual(plan.session.cardioBlocks[1].cardioNotes, "Intervals")
+        XCTAssertTrue(plan.session.cardioBlocks[1].isCompleted)
+        XCTAssertEqual(plan.session.cardioBlocks[1].timerState, .idle)
+        XCTAssertNil(plan.session.cardioBlocks[1].timerSegmentStartedAt)
+        XCTAssertEqual(plan.session.cardioBlocks[1].timerAccumulatedSeconds, 0)
         XCTAssertEqual(plan.session.cardioBlocks[1].updatedAt, savedAt)
         XCTAssertEqual(plan.session.updatedAt, savedAt)
-        XCTAssertEqual(plan.persistenceBoundary, .committedSnapshot)
+        XCTAssertEqual(plan.disposition, .committedSnapshot)
+    }
+
+    func testUnchangedCompletedResultSaveIsNoOpWithoutTouchingTimestamps() throws {
+        let savedAt = Date(timeIntervalSince1970: 2)
+        let activity = ActiveWorkoutRuntimeCardioBlock.fixture(
+            actualDurationSeconds: 600,
+            actualDistanceMeters: 5_000,
+            resistanceLevel: 7,
+            cardioNotes: "Intervals",
+            isCompleted: true
+        )
+        let session = ActiveWorkoutRuntimeSession(
+            name: "Cardio",
+            cardioBlocks: [activity],
+            createdAt: Date(timeIntervalSince1970: 1),
+            updatedAt: Date(timeIntervalSince1970: 1)
+        )
+
+        let plan = try ActiveWorkoutCardioResultSavePlan.make(
+            session: session,
+            activityID: activity.id,
+            result: ValidatedWorkoutCardioResult(
+                actualDurationSeconds: 600,
+                actualDistanceMeters: 5_000,
+                preferredDistanceUnit: .kilometers,
+                inclinePercent: nil,
+                resistanceLevel: 7,
+                notes: "Intervals"
+            ),
+            at: savedAt
+        )
+
+        XCTAssertEqual(plan.disposition, .noOp)
+        XCTAssertEqual(plan.session, session)
+        XCTAssertEqual(plan.session.updatedAt, Date(timeIntervalSince1970: 1))
+        XCTAssertEqual(plan.session.cardioBlocks[0].updatedAt, Date(timeIntervalSince1970: 1))
+    }
+
+    func testLegacyActiveEditInfersTreadmillProfileAndRoundTripsIt() throws {
+        let legacy = ActiveWorkoutRuntimeCardioBlock(
+            phase: .preWorkout,
+            role: .main,
+            catalogExerciseUUID: "seed-treadmill-walk",
+            exerciseNameSnapshot: "Treadmill Walk",
+            categorySnapshot: "Cardio",
+            muscleSummarySnapshot: "Legs",
+            trackingProfile: nil,
+            goalKind: .time,
+            targetDurationSeconds: 600,
+            targetDistanceMeters: nil,
+            createdAt: .now,
+            updatedAt: .now
+        )
+
+        let draft = WorkoutCardioSetupDraft(activeCardio: legacy)
+        let validated = try WorkoutCardioSetupValidator.validated(draft)
+
+        XCTAssertEqual(draft.trackingProfile, .treadmill)
+        XCTAssertEqual(validated.trackingProfile, .treadmill)
     }
 }
 

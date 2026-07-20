@@ -161,6 +161,28 @@ final class WorkoutCardioSetupTests: XCTestCase {
         XCTAssertEqual(reopened.targetDistanceMeters, originalMeters)
     }
 
+    func testLegacyTemplateEditInfersRowerProfileAndRoundTripsIt() throws {
+        let legacy = TemplateCardioBlockDraft(
+            phase: .preWorkout,
+            role: .main,
+            catalogExerciseUUID: "seed-row-machine",
+            exerciseNameSnapshot: "Rowing Machine",
+            categorySnapshot: "Cardio",
+            muscleSummarySnapshot: "Full Body",
+            trackingProfile: nil,
+            goalKind: .distance,
+            targetDurationSeconds: 0,
+            targetDistanceMeters: 2_000,
+            preferredDistanceUnit: .meters
+        )
+
+        let draft = WorkoutCardioSetupDraft(templateCardio: legacy)
+        let validated = try WorkoutCardioSetupValidator.validated(draft)
+
+        XCTAssertEqual(draft.trackingProfile, .rower)
+        XCTAssertEqual(validated.trackingProfile, .rower)
+    }
+
     private func assertDurationEditRoundTrip(seconds: Int) throws {
         let editText = WorkoutCardioSetupNumericCodec.durationMinutesText(seconds: seconds)
         let result = try WorkoutCardioSetupValidator.validated(

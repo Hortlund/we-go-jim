@@ -85,7 +85,8 @@ nonisolated struct WorkoutHistoryMutationService: Sendable {
                         || activity.preferredDistanceUnit != result.preferredDistanceUnit
                         || activity.inclinePercent != result.inclinePercent
                         || activity.resistanceLevel != result.resistanceLevel
-                        || activity.cardioNotes != result.notes else {
+                        || activity.cardioNotes != result.notes
+                        || !activity.isCompleted else {
                     return
                 }
 
@@ -96,6 +97,7 @@ nonisolated struct WorkoutHistoryMutationService: Sendable {
                 activity.inclinePercent = result.inclinePercent
                 activity.resistanceLevel = result.resistanceLevel
                 activity.cardioNotes = result.notes
+                activity.isCompleted = true
                 activity.updatedAt = updatedAt
 
                 try repository.recalculateSessionSummary(sessionID: sessionID)

@@ -48,8 +48,40 @@ nonisolated struct WorkoutCardioSetupDraft: Equatable, Sendable {
         )
         self.distanceText = distanceText
         self.distanceUnit = distanceUnit
-        self.trackingProfile = templateCardio.trackingProfile ?? .machineDistance
+        self.trackingProfile = WorkoutCardioTrackingProfileResolver.resolved(
+            storedProfile: templateCardio.trackingProfile,
+            catalogExerciseUUID: templateCardio.catalogExerciseUUID,
+            exerciseName: templateCardio.exerciseNameSnapshot,
+            hasDistance: templateCardio.targetDistanceMeters != nil
+        )
         self.originalDistanceMeters = templateCardio.targetDistanceMeters
+        self.originalDistanceText = distanceText
+        self.originalDistanceUnit = distanceUnit
+    }
+
+    init(
+        activeCardio: ActiveWorkoutRuntimeCardioBlock,
+        fallbackDistanceUnit: WorkoutDistanceUnit = .regionalDefault(locale: .current)
+    ) {
+        let distanceUnit = activeCardio.preferredDistanceUnit ?? fallbackDistanceUnit
+        let distanceText = activeCardio.targetDistanceMeters.map {
+            WorkoutCardioSetupNumericCodec.distanceText(meters: $0, unit: distanceUnit)
+        } ?? ""
+
+        self.role = activeCardio.role
+        self.goalKind = activeCardio.goalKind
+        self.durationMinutesText = WorkoutCardioSetupNumericCodec.durationMinutesText(
+            seconds: activeCardio.targetDurationSeconds
+        )
+        self.distanceText = distanceText
+        self.distanceUnit = distanceUnit
+        self.trackingProfile = WorkoutCardioTrackingProfileResolver.resolved(
+            storedProfile: activeCardio.trackingProfile,
+            catalogExerciseUUID: activeCardio.catalogExerciseUUID,
+            exerciseName: activeCardio.exerciseNameSnapshot,
+            hasDistance: activeCardio.targetDistanceMeters != nil
+        )
+        self.originalDistanceMeters = activeCardio.targetDistanceMeters
         self.originalDistanceText = distanceText
         self.originalDistanceUnit = distanceUnit
     }

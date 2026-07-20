@@ -11,6 +11,7 @@ nonisolated enum CardioLocalizedCopy {
         case pause
         case resume
         case finish
+        case logResult
         case editResult
     }
 
@@ -166,6 +167,8 @@ nonisolated enum CardioLocalizedCopy {
             return String(localized: "Resume")
         case .finish:
             return String(localized: "Finish")
+        case .logResult:
+            return String(localized: "Log Result")
         case .editResult:
             return String(localized: "Edit Result")
         }
@@ -186,6 +189,8 @@ nonisolated enum CardioLocalizedCopy {
             return String(localized: "Resume \(trimmedName)")
         case .finish:
             return String(localized: "Finish \(trimmedName)")
+        case .logResult:
+            return String(localized: "Log Result \(trimmedName)")
         case .editResult:
             return String(localized: "Edit Result \(trimmedName)")
         }

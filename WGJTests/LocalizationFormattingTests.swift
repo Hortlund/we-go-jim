@@ -106,11 +106,11 @@ final class LocalizationFormattingTests: XCTestCase {
     func testTypedCardioCopyCoversActionsStatesAndValidation() {
         XCTAssertEqual(
             CardioLocalizedCopy.Action.allCases.map(CardioLocalizedCopy.actionTitle),
-            ["Start", "Pause", "Resume", "Finish", "Edit Result"]
+            ["Start", "Pause", "Resume", "Finish", "Log Result", "Edit Result"]
         )
         XCTAssertEqual(
             CardioLocalizedCopy.Action.allCases.map { CardioLocalizedCopy.actionAccessibilityLabel($0, activityName: "Bike") },
-            ["Start Bike", "Pause Bike", "Resume Bike", "Finish Bike", "Edit Result Bike"]
+            ["Start Bike", "Pause Bike", "Resume Bike", "Finish Bike", "Log Result Bike", "Edit Result Bike"]
         )
         XCTAssertEqual(
             CardioLocalizedCopy.State.allCases.map(CardioLocalizedCopy.stateTitle),

@@ -5,9 +5,6 @@ import SwiftData
 nonisolated enum ActiveWorkoutCommand: Sendable {
     case start(ActiveWorkoutRuntimeSession)
     case updateMetadata(name: String, notes: String)
-    case upsertCardio(ActiveWorkoutRuntimeCardioBlock)
-    case removeCardio(WorkoutCardioPhase)
-    case setCardioCompleted(phase: WorkoutCardioPhase, isCompleted: Bool)
     case appendExercise(ActiveWorkoutRuntimeExercise)
     case replaceExercise(exerciseID: UUID, replacement: ActiveWorkoutRuntimeExercise)
     case removeExercise(UUID)
@@ -293,21 +290,6 @@ final class ActiveWorkoutCoordinator: ActiveWorkoutCommandHandling {
                 )
             }
             snapshot.session.notes = notes
-            snapshot.session.touch()
-        case .upsertCardio(let block):
-            snapshot.session.cardioBlocks.removeAll { $0.phase == block.phase }
-            snapshot.session.cardioBlocks.append(block)
-            snapshot.session.cardioBlocks.sort { $0.phase.sortOrder < $1.phase.sortOrder }
-            snapshot.session.touch()
-        case .removeCardio(let phase):
-            snapshot.session.cardioBlocks.removeAll { $0.phase == phase }
-            snapshot.session.touch()
-        case .setCardioCompleted(let phase, let isCompleted):
-            guard let index = snapshot.session.cardioBlocks.firstIndex(where: { $0.phase == phase }) else {
-                break
-            }
-            snapshot.session.cardioBlocks[index].isCompleted = isCompleted
-            snapshot.session.cardioBlocks[index].updatedAt = .now
             snapshot.session.touch()
         case .appendExercise(var exercise):
             exercise.sortOrder = snapshot.session.exercises.count

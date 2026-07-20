@@ -106,6 +106,30 @@ final class WorkoutCardioResultDraftTests: XCTestCase {
 
         XCTAssertEqual(result.actualDistanceMeters, originalMeters)
     }
+
+    func testActualDurationOverTwentyFourHoursRoundTripsWithoutClamping() {
+        let seconds = 49 * 60 * 60 + 37
+        let text = WorkoutCardioResultDurationCodec.durationMinutesText(seconds: seconds)
+
+        XCTAssertEqual(
+            WorkoutCardioResultDurationCodec.durationSeconds(
+                fromMinutesText: text,
+                locale: Locale(identifier: "en_US")
+            ),
+            seconds
+        )
+        XCTAssertGreaterThan(Double(text) ?? 0, 24 * 60)
+    }
+
+    func testActualDurationManualEntrySupportsMoreThanTwentyFourHours() {
+        XCTAssertEqual(
+            WorkoutCardioResultDurationCodec.durationSeconds(
+                fromMinutesText: "2880.5",
+                locale: Locale(identifier: "en_US")
+            ),
+            172_830
+        )
+    }
 }
 
 private extension WorkoutCardioResultDraft {

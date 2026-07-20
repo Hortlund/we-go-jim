@@ -86,12 +86,13 @@ nonisolated struct ValidatedWorkoutCardioResult: Equatable, Sendable {
 }
 
 nonisolated struct ActiveWorkoutCardioResultSavePlan: Equatable, Sendable {
-    nonisolated enum PersistenceBoundary: Equatable, Sendable {
+    nonisolated enum Disposition: Equatable, Sendable {
+        case noOp
         case committedSnapshot
     }
 
     let session: ActiveWorkoutRuntimeSession
-    let persistenceBoundary: PersistenceBoundary
+    let disposition: Disposition
 
     static func make(
         session: ActiveWorkoutRuntimeSession,
@@ -104,18 +105,37 @@ nonisolated struct ActiveWorkoutCardioResultSavePlan: Equatable, Sendable {
             throw WorkoutCardioTimerError.activityNotFound
         }
 
+        let activity = updatedSession.cardioBlocks[index]
+        guard activity.actualDurationSeconds != result.actualDurationSeconds
+                || activity.actualDistanceMeters != result.actualDistanceMeters
+                || activity.preferredDistanceUnit != result.preferredDistanceUnit
+                || activity.inclinePercent != result.inclinePercent
+                || activity.resistanceLevel != result.resistanceLevel
+                || activity.cardioNotes != result.notes
+                || !activity.isCompleted
+                || activity.timerState != .idle
+                || activity.timerSegmentStartedAt != nil else {
+            return ActiveWorkoutCardioResultSavePlan(session: session, disposition: .noOp)
+        }
+
         updatedSession.cardioBlocks[index].actualDurationSeconds = result.actualDurationSeconds
         updatedSession.cardioBlocks[index].actualDistanceMeters = result.actualDistanceMeters
         updatedSession.cardioBlocks[index].preferredDistanceUnit = result.preferredDistanceUnit
         updatedSession.cardioBlocks[index].inclinePercent = result.inclinePercent
         updatedSession.cardioBlocks[index].resistanceLevel = result.resistanceLevel
         updatedSession.cardioBlocks[index].cardioNotes = result.notes
+        updatedSession.cardioBlocks[index].timerState = .idle
+        updatedSession.cardioBlocks[index].timerSegmentStartedAt = nil
+        if !activity.isCompleted {
+            updatedSession.cardioBlocks[index].timerAccumulatedSeconds = 0
+        }
+        updatedSession.cardioBlocks[index].isCompleted = true
         updatedSession.cardioBlocks[index].updatedAt = date
         updatedSession.touch(date: date)
 
         return ActiveWorkoutCardioResultSavePlan(
             session: updatedSession,
-            persistenceBoundary: .committedSnapshot
+            disposition: .committedSnapshot
         )
     }
 }
@@ -249,6 +269,19 @@ nonisolated extension WorkoutCardioTrackingProfile {
 }
 
 nonisolated enum WorkoutCardioTrackingProfileResolver {
+    static func resolved(
+        storedProfile: WorkoutCardioTrackingProfile?,
+        catalogExerciseUUID: String,
+        exerciseName: String,
+        hasDistance: Bool
+    ) -> WorkoutCardioTrackingProfile {
+        resolved(
+            storedProfile: storedProfile,
+            identity: "\(catalogExerciseUUID) \(exerciseName)",
+            hasDistance: hasDistance
+        )
+    }
+
     static func resolved(
         storedProfile: WorkoutCardioTrackingProfile?,
         identity: String,

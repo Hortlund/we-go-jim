@@ -79,6 +79,21 @@ nonisolated struct ActiveWorkoutCardioTimerConflict: Equatable, Sendable {
     }
 }
 
+nonisolated enum ActiveWorkoutCardioConflictTransitionOrchestrator {
+    enum Boundary: Equatable, Sendable {
+        case finishCurrent(UUID)
+        case requested(ActiveWorkoutCardioRequestedTimerTransition)
+    }
+
+    static func perform(
+        conflict: ActiveWorkoutCardioTimerConflict,
+        boundary: (Boundary) throws -> Void
+    ) rethrows {
+        try boundary(.finishCurrent(conflict.runningActivityID))
+        try boundary(.requested(conflict.requestedTransition))
+    }
+}
+
 nonisolated enum WorkoutCardioTimerCoordinator {
     static func elapsedSeconds(
         for activity: ActiveWorkoutRuntimeCardioBlock,

@@ -84,3 +84,53 @@ nonisolated enum WorkoutCardioSetupNumericCodec {
         return value
     }
 }
+
+/// Actual results intentionally use an uncapped codec. Planned targets remain
+/// bounded by `WorkoutCardioSetupNumericCodec`, while imported or manually
+/// entered results can represent multi-day activities without data loss.
+nonisolated enum WorkoutCardioResultDurationCodec {
+    static func durationMinutesText(seconds: Int) -> String {
+        let safeSeconds = max(0, seconds)
+        guard safeSeconds % 60 != 0 else {
+            return String(safeSeconds / 60)
+        }
+        let roundedMinutes = (Double(safeSeconds) / 60 * 100).rounded() / 100
+        return String(roundedMinutes)
+    }
+
+    static func durationSeconds(
+        fromMinutesText text: String,
+        locale: Locale
+    ) -> Int? {
+        var normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        normalized.removeAll(where: \.isWhitespace)
+        guard !normalized.isEmpty else { return nil }
+
+        let decimalSeparator = locale.decimalSeparator ?? "."
+        let groupingSeparator = locale.groupingSeparator ?? ","
+        if decimalSeparator == "." {
+            if groupingSeparator != "." {
+                normalized = normalized.replacingOccurrences(of: groupingSeparator, with: "")
+            }
+        } else if normalized.contains(decimalSeparator) {
+            if groupingSeparator != decimalSeparator {
+                normalized = normalized.replacingOccurrences(of: groupingSeparator, with: "")
+            }
+            normalized = normalized.replacingOccurrences(of: decimalSeparator, with: ".")
+        } else if groupingSeparator != "." {
+            normalized = normalized.replacingOccurrences(of: groupingSeparator, with: "")
+        }
+
+        guard let minutes = Double(normalized),
+              minutes.isFinite,
+              minutes > 0,
+              minutes <= Double(Int.max / 60) else {
+            return nil
+        }
+        let seconds = (minutes * 60).rounded()
+        guard seconds.isFinite, seconds >= 1, seconds <= Double(Int.max) else {
+            return nil
+        }
+        return Int(seconds)
+    }
+}

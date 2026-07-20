@@ -50,6 +50,7 @@ final class WorkoutHistoryMutationServiceTests: XCTestCase {
         XCTAssertEqual(persisted[1].actualDistanceMeters, 5_000)
         XCTAssertEqual(persisted[1].resistanceLevel, 7)
         XCTAssertEqual(persisted[1].cardioNotes, "Intervals")
+        XCTAssertTrue(persisted[1].isCompleted)
         XCTAssertEqual(persisted[1].targetDurationSeconds, 900)
         XCTAssertEqual(beforeSaveCounter.value, 1)
         XCTAssertGreaterThan(
@@ -102,6 +103,7 @@ final class WorkoutHistoryMutationServiceTests: XCTestCase {
         XCTAssertNil(persistedActivity.actualDurationSeconds)
         XCTAssertNil(persistedActivity.actualDistanceMeters)
         XCTAssertEqual(persistedActivity.cardioNotes, "")
+        XCTAssertFalse(persistedActivity.isCompleted)
         XCTAssertEqual(
             try XCTUnwrap(verificationRepository.session(id: sessionID)).updatedAt,
             Date(timeIntervalSince1970: 2_000)
@@ -422,7 +424,7 @@ final class WorkoutHistoryMutationServiceTests: XCTestCase {
                 goalKind: .time,
                 targetDurationSeconds: 600,
                 preferredDistanceUnit: .kilometers,
-                isCompleted: true,
+                isCompleted: false,
                 session: session
             ),
             WorkoutSessionCardioBlock(
@@ -438,7 +440,7 @@ final class WorkoutHistoryMutationServiceTests: XCTestCase {
                 goalKind: .time,
                 targetDurationSeconds: 900,
                 preferredDistanceUnit: .kilometers,
-                isCompleted: true,
+                isCompleted: false,
                 session: session
             ),
         ]
