@@ -82,9 +82,9 @@ nonisolated enum WorkoutCardioSetupValidationError: LocalizedError, Equatable, S
     var errorDescription: String? {
         switch self {
         case .durationMustBePositive:
-            return "Enter a duration greater than 0 minutes."
+            return String(localized: "Enter a duration greater than 0 minutes.")
         case .distanceMustBePositive(let unit):
-            return "Enter a distance greater than 0 \(unit.validationName)."
+            return String(localized: "Enter a distance greater than 0 \(unit.validationName).")
         }
     }
 }

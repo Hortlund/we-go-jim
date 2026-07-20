@@ -130,15 +130,13 @@ struct WorkoutCardioResultEditor: View {
     @ViewBuilder
     private var derivedMetrics: some View {
         let summary = previewSummary
-        if summary.metrics.contains(where: { ["Pace", "Avg Speed", "500 m Pace"].contains($0.title) }) {
+        if summary.metrics.contains(where: { $0.kind.isDerived }) {
             VStack(alignment: .leading, spacing: 12) {
                 WGJSectionHeader(
                     "Calculated",
                     subtitle: "Updates from your duration and distance."
                 )
-                resultMetrics(summary.metrics.filter {
-                    ["Pace", "Avg Speed", "500 m Pace"].contains($0.title)
-                })
+                resultMetrics(summary.metrics.filter(\.kind.isDerived))
             }
             .padding(16)
             .wgjCardContainer(strong: true)
@@ -273,7 +271,8 @@ struct WorkoutCardioResultEditor: View {
                 .accessibilityLabel(
                     WorkoutMetricAccessibilityPolicy.cardioMetric(
                         label: metric.title,
-                        value: metric.value
+                        value: metric.accessibilityValue,
+                        semantic: metric.accessibilitySemantic
                     )
                 )
             }
@@ -389,7 +388,8 @@ struct WorkoutCardioResultSummaryCard<Actions: View>: View {
                         .accessibilityLabel(
                             WorkoutMetricAccessibilityPolicy.cardioMetric(
                                 label: metric.title,
-                                value: metric.value
+                                value: metric.accessibilityValue,
+                                semantic: metric.accessibilitySemantic
                             )
                         )
                     }
@@ -429,13 +429,24 @@ struct WorkoutCardioResultSummaryCard<Actions: View>: View {
     }
 
     private func metricTint(_ metric: WorkoutCardioResultSummary.Metric) -> Color {
-        switch metric.title {
-        case "Pace", "Avg Speed", "500 m Pace":
+        switch metric.kind {
+        case .pace, .averageSpeed, .rowingPace:
             return WGJTheme.accentCyan
-        case "Incline", "Resistance", "Level":
+        case .incline, .resistance, .level:
             return WGJTheme.accentGold
-        default:
+        case .duration, .distance:
             return WGJTheme.textSecondary
+        }
+    }
+}
+
+private extension WorkoutCardioResultSummary.Metric.Kind {
+    var isDerived: Bool {
+        switch self {
+        case .pace, .averageSpeed, .rowingPace:
+            return true
+        case .level, .duration, .distance, .incline, .resistance:
+            return false
         }
     }
 }

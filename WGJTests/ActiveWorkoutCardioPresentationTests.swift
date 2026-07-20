@@ -74,6 +74,32 @@ final class ActiveWorkoutCardioPresentationTests: XCTestCase {
         )
     }
 
+#if DEBUG
+    @MainActor
+    func testRuntimeDiagnosticsDistinguishDisplayTicksFromPersistenceBoundaries() {
+        var events: [ActiveWorkoutCardioRuntimeDiagnostics.Event] = []
+        ActiveWorkoutCardioRuntimeDiagnostics.installTestObserver { events.append($0) }
+        defer { ActiveWorkoutCardioRuntimeDiagnostics.installTestObserver(nil) }
+
+        let activityID = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
+        ActiveWorkoutCardioRuntimeDiagnostics.recordDisplayTick(
+            activityID: activityID,
+            elapsedText: "00:00:15"
+        )
+
+        XCTAssertEqual(events, [.displayTick(activityID: activityID, elapsedText: "00:00:15")])
+
+        ActiveWorkoutCardioRuntimeDiagnostics.recordPersistenceBoundary(
+            activityID: activityID,
+            kind: .timerTransition
+        )
+        XCTAssertEqual(
+            events.last,
+            .persistenceBoundary(activityID: activityID, kind: .timerTransition)
+        )
+    }
+#endif
+
     func testQuickAddDefaultsToMainWithoutStrengthAndFinisherWithStrength() {
         XCTAssertEqual(
             ActiveWorkoutCardioQuickAddPolicy.defaultRole(hasStrengthExercises: false),

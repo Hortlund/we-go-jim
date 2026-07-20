@@ -7,12 +7,21 @@ nonisolated struct WorkoutMetricAccessibilityDescriptor: Equatable, Sendable {
 }
 
 nonisolated enum WorkoutMetricAccessibilityPolicy {
-    enum CardioAction: String, Equatable, Sendable {
-        case start = "Start"
-        case pause = "Pause"
-        case resume = "Resume"
-        case finish = "Finish"
-        case editResult = "Edit Result"
+    enum CardioAction: Equatable, Sendable {
+        case start
+        case pause
+        case resume
+        case finish
+        case editResult
+    }
+
+    enum CardioMetricSemantic: Equatable, Sendable {
+        case plain
+        case distance(WorkoutDistanceUnit)
+        case speed(WorkoutDistanceUnit)
+        case pace(WorkoutDistanceUnit)
+        case rowingPace
+        case incline
     }
 
     static func field(
@@ -69,38 +78,70 @@ nonisolated enum WorkoutMetricAccessibilityPolicy {
 
     static func cardioAction(_ action: CardioAction, activityName: String) -> String {
         let trimmedName = activityName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmedName.isEmpty ? action.rawValue : "\(action.rawValue) \(trimmedName)"
+        switch action {
+        case .start:
+            return trimmedName.isEmpty
+                ? String(localized: "Start")
+                : String(localized: "Start \(trimmedName)")
+        case .pause:
+            return trimmedName.isEmpty
+                ? String(localized: "Pause")
+                : String(localized: "Pause \(trimmedName)")
+        case .resume:
+            return trimmedName.isEmpty
+                ? String(localized: "Resume")
+                : String(localized: "Resume \(trimmedName)")
+        case .finish:
+            return trimmedName.isEmpty
+                ? String(localized: "Finish")
+                : String(localized: "Finish \(trimmedName)")
+        case .editResult:
+            return trimmedName.isEmpty
+                ? String(localized: "Edit Result")
+                : String(localized: "Edit Result \(trimmedName)")
+        }
     }
 
-    /// Converts compact, visual cardio units into unambiguous VoiceOver speech.
-    /// Keep this policy centralized so cards, result editors, and history agree.
-    static func cardioMetricValue(_ value: String, metricTitle: String? = nil) -> String {
+    /// Formats semantic cardio units for unambiguous, localized VoiceOver speech.
+    static func cardioMetricValue(
+        _ value: String,
+        semantic: CardioMetricSemantic
+    ) -> String {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if metricTitle?.caseInsensitiveCompare("Incline") == .orderedSame,
-           trimmed.hasSuffix("%") {
-            return "\(trimmed.dropLast()) percent incline"
+        switch semantic {
+        case .plain:
+            return trimmed
+        case .distance(.kilometers):
+            return String(localized: "\(trimmed) kilometers")
+        case .distance(.miles):
+            return String(localized: "\(trimmed) miles")
+        case .distance(.meters):
+            return String(localized: "\(trimmed) meters")
+        case .speed(.kilometers):
+            return String(localized: "\(trimmed) kilometers per hour")
+        case .speed(.miles):
+            return String(localized: "\(trimmed) miles per hour")
+        case .speed(.meters):
+            return String(localized: "\(trimmed) meters per hour")
+        case .pace(.kilometers):
+            return String(localized: "\(trimmed) per kilometer")
+        case .pace(.miles):
+            return String(localized: "\(trimmed) per mile")
+        case .pace(.meters):
+            return String(localized: "\(trimmed) per meter")
+        case .rowingPace:
+            return String(localized: "\(trimmed) per 500 meters")
+        case .incline:
+            return String(localized: "\(trimmed) percent incline")
         }
-
-        let suffixes: [(visual: String, spoken: String)] = [
-            (" /500 m", " per 500 meters"),
-            (" km/h", " kilometers per hour"),
-            (" mph", " miles per hour"),
-            (" /km", " per kilometer"),
-            (" /mi", " per mile"),
-            (" km", " kilometers"),
-            (" mi", " miles"),
-            (" m", " meters"),
-        ]
-
-        for suffix in suffixes where trimmed.hasSuffix(suffix.visual) {
-            return "\(trimmed.dropLast(suffix.visual.count))\(suffix.spoken)"
-        }
-        return trimmed
     }
 
-    static func cardioMetric(label: String, value: String) -> String {
-        "\(label), \(cardioMetricValue(value, metricTitle: label))"
+    static func cardioMetric(
+        label: String,
+        value: String,
+        semantic: CardioMetricSemantic
+    ) -> String {
+        String(localized: "\(label), \(cardioMetricValue(value, semantic: semantic))")
     }
 
     private static func spokenWeightUnit(_ unit: String?) -> String? {

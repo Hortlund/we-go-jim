@@ -9,4 +9,12 @@ final class LocalizationFormattingTests: XCTestCase {
         XCTAssertEqual(L10n.completedWorkoutCount(1), "1 completed workout")
         XCTAssertEqual(L10n.completedWorkoutCount(3), "3 completed workouts")
     }
+
+    func testCardioHelperFormattingUsesLocalizedResources() {
+        XCTAssertEqual(WorkoutCardioRole.warmUp.title, "Warm-up")
+        XCTAssertEqual(WorkoutCardioRole.main.title, "Main Cardio")
+        XCTAssertEqual(WorkoutCardioRole.finisher.compactTitle, "Finisher")
+        XCTAssertEqual(WorkoutCardioGoalKind.open.title, "No Target")
+        XCTAssertEqual(WorkoutCardioDurationFormatter.text(seconds: 300), "5 min")
+    }
 }

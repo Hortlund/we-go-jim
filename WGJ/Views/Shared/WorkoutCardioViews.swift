@@ -1,23 +1,23 @@
 import SwiftUI
 
 enum WorkoutCardioDurationFormatter {
-    static func text(seconds: Int) -> String {
+    nonisolated static func text(seconds: Int) -> String {
         let safeSeconds = max(0, seconds)
         let minutes = safeSeconds / 60
         let remainingSeconds = safeSeconds % 60
 
         if remainingSeconds == 0 {
-            return "\(minutes) min"
+            return String(localized: "\(minutes) min")
         }
 
         return "\(minutes):\(String(format: "%02d", remainingSeconds))"
     }
 
-    static func minutesText(seconds: Int) -> String {
+    nonisolated static func minutesText(seconds: Int) -> String {
         String(max(0, seconds) / 60)
     }
 
-    static func seconds(fromMinutesText text: String) -> Int {
+    nonisolated static func seconds(fromMinutesText text: String) -> Int {
         let cleaned = text.filter(\.isNumber)
         guard let minutes = Int(cleaned) else {
             return 0
@@ -31,22 +31,22 @@ extension WorkoutCardioRole {
     nonisolated var title: String {
         switch self {
         case .warmUp:
-            return "Warm-up"
+            return String(localized: "Warm-up")
         case .main:
-            return "Main Cardio"
+            return String(localized: "Main Cardio")
         case .finisher:
-            return "Finisher"
+            return String(localized: "Finisher")
         }
     }
 
     nonisolated var compactTitle: String {
         switch self {
         case .warmUp:
-            return "Warm-up"
+            return String(localized: "Warm-up")
         case .main:
-            return "Main"
+            return String(localized: "Main")
         case .finisher:
-            return "Finisher"
+            return String(localized: "Finisher")
         }
     }
 
@@ -66,11 +66,11 @@ extension WorkoutCardioGoalKind {
     nonisolated var title: String {
         switch self {
         case .time:
-            return "Time"
+            return String(localized: "Time")
         case .distance:
-            return "Distance"
+            return String(localized: "Distance")
         case .open:
-            return "No Target"
+            return String(localized: "No Target")
         }
     }
 }
@@ -148,7 +148,7 @@ struct WorkoutCardioActivityPlanCard<Actions: View>: View {
                 tint: WGJTheme.accentCyan
             )
             .accessibilityLabel(
-                WorkoutMetricAccessibilityPolicy.cardioMetricValue(goalSummary)
+                goalAccessibilitySummary
             )
 
             actions
@@ -187,12 +187,32 @@ struct WorkoutCardioActivityPlanCard<Actions: View>: View {
             return WorkoutCardioDurationFormatter.text(seconds: targetDurationSeconds)
         case .distance:
             guard let targetDistanceMeters, targetDistanceMeters > 0 else {
-                return "Distance"
+                return String(localized: "Distance")
             }
             let value = preferredDistanceUnit.value(fromMeters: targetDistanceMeters)
             return "\(value.formatted(.number.precision(.fractionLength(0...2)))) \(preferredDistanceUnit.symbol)"
         case .open:
-            return "No target"
+            return String(localized: "No target")
+        }
+    }
+
+    private var goalAccessibilitySummary: String {
+        switch goalKind {
+        case .time:
+            let minutes = max(0, targetDurationSeconds) / 60
+            return String(localized: "\(minutes) minutes")
+        case .distance:
+            guard let targetDistanceMeters, targetDistanceMeters > 0 else {
+                return String(localized: "Distance")
+            }
+            let number = preferredDistanceUnit.value(fromMeters: targetDistanceMeters)
+                .formatted(.number.precision(.fractionLength(0...2)))
+            return WorkoutMetricAccessibilityPolicy.cardioMetricValue(
+                number,
+                semantic: .distance(preferredDistanceUnit)
+            )
+        case .open:
+            return String(localized: "No target")
         }
     }
 }

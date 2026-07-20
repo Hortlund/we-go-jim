@@ -1742,6 +1742,12 @@ struct ActiveWorkoutView: View {
         runtimeSession = updatedSession
 
         // This existing committed boundary performs the one projection refresh and snapshot write.
+#if DEBUG
+        ActiveWorkoutCardioRuntimeDiagnostics.recordPersistenceBoundary(
+            activityID: activityID,
+            kind: .timerTransition
+        )
+#endif
         persistCommittedUserEditSnapshot()
     }
 
@@ -2748,6 +2754,13 @@ struct ActiveWorkoutView: View {
             pendingCardioCompletionsByID = [:]
             return
         }
+
+#if DEBUG
+        ActiveWorkoutCardioRuntimeDiagnostics.recordPersistenceBoundary(
+            activityID: nil,
+            kind: .activeWorkoutSnapshot
+        )
+#endif
 
         runtimeSession = snapshot
         pendingCardioCompletionsByID = [:]

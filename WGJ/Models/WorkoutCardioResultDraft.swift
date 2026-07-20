@@ -131,17 +131,17 @@ nonisolated enum WorkoutCardioResultValidationError: LocalizedError, Equatable, 
     var errorDescription: String? {
         switch self {
         case .negativeDuration:
-            return "Duration cannot be negative."
+            return String(localized: "Duration cannot be negative.")
         case .invalidDistance:
-            return "Enter a valid distance, or leave it empty."
+            return String(localized: "Enter a valid distance, or leave it empty.")
         case .missingDurationAndDistance:
-            return "Enter a duration or distance."
+            return String(localized: "Enter a duration or distance.")
         case .invalidIncline:
-            return "Enter a valid incline percentage."
+            return String(localized: "Enter a valid incline percentage.")
         case .invalidResistanceLevel:
-            return "Enter a valid resistance or level."
+            return String(localized: "Enter a valid resistance or level.")
         case .negativeResistanceLevel:
-            return "Resistance or level cannot be negative."
+            return String(localized: "Resistance or level cannot be negative.")
         }
     }
 }
@@ -300,11 +300,41 @@ nonisolated enum WorkoutCardioTrackingProfileResolver {
 
 nonisolated struct WorkoutCardioResultSummary: Equatable, Sendable {
     nonisolated struct Metric: Identifiable, Equatable, Sendable {
+        enum Kind: String, Equatable, Sendable {
+            case pace
+            case averageSpeed
+            case rowingPace
+            case level
+            case duration
+            case distance
+            case incline
+            case resistance
+        }
+
+        let kind: Kind
         let title: String
         let value: String
         let systemImage: String
+        let accessibilityValue: String
+        let accessibilitySemantic: WorkoutMetricAccessibilityPolicy.CardioMetricSemantic
 
-        var id: String { title }
+        init(
+            kind: Kind,
+            title: String,
+            value: String,
+            systemImage: String,
+            accessibilityValue: String? = nil,
+            accessibilitySemantic: WorkoutMetricAccessibilityPolicy.CardioMetricSemantic = .plain
+        ) {
+            self.kind = kind
+            self.title = title
+            self.value = value
+            self.systemImage = systemImage
+            self.accessibilityValue = accessibilityValue ?? value
+            self.accessibilitySemantic = accessibilitySemantic
+        }
+
+        var id: String { kind.rawValue }
     }
 
     let metrics: [Metric]
@@ -335,25 +365,34 @@ nonisolated enum WorkoutCardioResultSummaryFormatter {
         case .walkRun, .treadmill:
             if let pace = calculated.paceSecondsPerDisplayUnit {
                 metrics.append(.init(
-                    title: "Pace",
+                    kind: .pace,
+                    title: String(localized: "Pace"),
                     value: "\(paceText(seconds: pace)) /\(displayUnit.symbol)",
-                    systemImage: "figure.run"
+                    systemImage: "figure.run",
+                    accessibilityValue: paceText(seconds: pace),
+                    accessibilitySemantic: .pace(displayUnit)
                 ))
             }
         case .machineDistance:
             if let speed = calculated.averageSpeedPerHour {
                 metrics.append(.init(
-                    title: "Avg Speed",
+                    kind: .averageSpeed,
+                    title: String(localized: "Avg Speed"),
                     value: speedText(speed, unit: displayUnit),
-                    systemImage: "speedometer"
+                    systemImage: "speedometer",
+                    accessibilityValue: numberText(speed),
+                    accessibilitySemantic: .speed(displayUnit)
                 ))
             }
         case .rower:
             if let pace = calculated.rowingPaceSecondsPer500Meters {
                 metrics.append(.init(
-                    title: "500 m Pace",
+                    kind: .rowingPace,
+                    title: String(localized: "500 m Pace"),
                     value: "\(paceText(seconds: pace)) /500 m",
-                    systemImage: "figure.rower"
+                    systemImage: "figure.rower",
+                    accessibilityValue: paceText(seconds: pace),
+                    accessibilitySemantic: .rowingPace
                 ))
             }
         case .stairClimber, .timeOnly:
@@ -365,7 +404,8 @@ nonisolated enum WorkoutCardioResultSummaryFormatter {
            resistanceLevel.isFinite,
            resistanceLevel >= 0 {
             metrics.append(.init(
-                title: "Level",
+                kind: .level,
+                title: String(localized: "Level"),
                 value: numberText(resistanceLevel),
                 systemImage: "dial.medium.fill"
             ))
@@ -373,33 +413,43 @@ nonisolated enum WorkoutCardioResultSummaryFormatter {
 
         if let validDuration {
             metrics.append(.init(
-                title: "Duration",
+                kind: .duration,
+                title: String(localized: "Duration"),
                 value: durationText(seconds: validDuration),
                 systemImage: "clock.fill"
             ))
         }
         if let validDistance {
             metrics.append(.init(
-                title: "Distance",
+                kind: .distance,
+                title: String(localized: "Distance"),
                 value: distanceText(meters: validDistance, unit: displayUnit),
-                systemImage: "point.topleft.down.to.point.bottomright.curvepath.fill"
+                systemImage: "point.topleft.down.to.point.bottomright.curvepath.fill",
+                accessibilityValue: numberText(displayUnit.value(fromMeters: validDistance)),
+                accessibilitySemantic: .distance(displayUnit)
             ))
         }
 
         if (profile == .walkRun || profile == .treadmill),
            let speed = calculated.averageSpeedPerHour {
             metrics.append(.init(
-                title: "Avg Speed",
+                kind: .averageSpeed,
+                title: String(localized: "Avg Speed"),
                 value: speedText(speed, unit: displayUnit),
-                systemImage: "speedometer"
+                systemImage: "speedometer",
+                accessibilityValue: numberText(speed),
+                accessibilitySemantic: .speed(displayUnit)
             ))
         }
 
         if profile.supportsIncline, let inclinePercent, inclinePercent.isFinite {
             metrics.append(.init(
-                title: "Incline",
+                kind: .incline,
+                title: String(localized: "Incline"),
                 value: "\(numberText(min(100, max(0, inclinePercent))))%",
-                systemImage: "angle"
+                systemImage: "angle",
+                accessibilityValue: numberText(min(100, max(0, inclinePercent))),
+                accessibilitySemantic: .incline
             ))
         }
         if profile.supportsResistanceOrLevel,
@@ -408,7 +458,8 @@ nonisolated enum WorkoutCardioResultSummaryFormatter {
            resistanceLevel.isFinite,
            resistanceLevel >= 0 {
             metrics.append(.init(
-                title: "Resistance",
+                kind: .resistance,
+                title: String(localized: "Resistance"),
                 value: numberText(resistanceLevel),
                 systemImage: "dial.medium.fill"
             ))
@@ -438,7 +489,7 @@ nonisolated enum WorkoutCardioResultSummaryFormatter {
         let minutes = safeSeconds / 60
         let remainingSeconds = safeSeconds % 60
         if remainingSeconds == 0 {
-            return "\(minutes) min"
+            return String(localized: "\(minutes) min")
         }
         return "\(minutes):\(String(format: "%02d", remainingSeconds))"
     }

@@ -24,7 +24,40 @@
         }
       }
     },
+    "%@ kilometers" : {
+
+    },
+    "%@ kilometers per hour" : {
+
+    },
+    "%@ meters" : {
+
+    },
+    "%@ meters per hour" : {
+
+    },
+    "%@ miles" : {
+
+    },
+    "%@ miles per hour" : {
+
+    },
     "%@ muscle map" : {
+
+    },
+    "%@ per 500 meters" : {
+
+    },
+    "%@ per kilometer" : {
+
+    },
+    "%@ per meter" : {
+
+    },
+    "%@ per mile" : {
+
+    },
+    "%@ percent incline" : {
 
     },
     "%@ weekly muscle heatmap" : {
@@ -32,6 +65,16 @@
     },
     "%@ workout muscle heatmap" : {
 
+    },
+    "%@, %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@, %2$@"
+          }
+        }
+      }
     },
     "%@, set %lld, actions" : {
       "localizations" : {
@@ -78,6 +121,16 @@
     "%lld exercises" : {
 
     },
+    "%lld hours, %lld minutes, %lld seconds" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld hours, %2$lld minutes, %3$lld seconds"
+          }
+        }
+      }
+    },
     "%lld logged workout%@" : {
       "localizations" : {
         "en" : {
@@ -90,6 +143,19 @@
     },
     "%lld min" : {
 
+    },
+    "%lld minutes" : {
+
+    },
+    "%lld minutes, %lld seconds" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld minutes, %2$lld seconds"
+          }
+        }
+      }
     },
     "%lld of %lld workouts" : {
       "localizations" : {
@@ -124,6 +190,9 @@
 
     },
     "1 session" : {
+
+    },
+    "500 m Pace" : {
 
     },
     "Actions" : {
@@ -204,6 +273,9 @@
     "Available Body Parts" : {
 
     },
+    "Avg Speed" : {
+
+    },
     "Back Up Now" : {
 
     },
@@ -214,6 +286,9 @@
 
     },
     "Best Set" : {
+
+    },
+    "Bike" : {
 
     },
     "Body Part" : {
@@ -315,6 +390,9 @@
     "Commas and line breaks will appear as separate steps." : {
 
     },
+    "Complete" : {
+
+    },
     "Complete A1, move straight into A2, then rest %@." : {
 
     },
@@ -322,6 +400,9 @@
 
     },
     "Complete Workout" : {
+
+    },
+    "Completed" : {
 
     },
     "Continue Locally" : {
@@ -349,6 +430,9 @@
 
     },
     "Create Folder" : {
+
+    },
+    "Crosstrainer" : {
 
     },
     "Current" : {
@@ -432,6 +516,9 @@
     "Distance (optional)" : {
 
     },
+    "Distance goal" : {
+
+    },
     "Distance unit" : {
 
     },
@@ -454,6 +541,9 @@
 
     },
     "Duration" : {
+
+    },
+    "Duration cannot be negative." : {
 
     },
     "Duration in minutes" : {
@@ -487,6 +577,24 @@
 
     },
     "Enable training guidance" : {
+
+    },
+    "Enter a distance greater than 0 %@." : {
+
+    },
+    "Enter a duration greater than 0 minutes." : {
+
+    },
+    "Enter a duration or distance." : {
+
+    },
+    "Enter a valid distance, or leave it empty." : {
+
+    },
+    "Enter a valid incline percentage." : {
+
+    },
+    "Enter a valid resistance or level." : {
 
     },
     "Enter Temporary Diagnostics" : {
@@ -531,6 +639,9 @@
     "Finish" : {
 
     },
+    "Finish %@" : {
+
+    },
     "Finish a few workouts and your top lifts will show up here." : {
 
     },
@@ -546,6 +657,9 @@
     "Finish the main set before completing the drop stages." : {
 
     },
+    "Finisher" : {
+
+    },
     "Folder" : {
 
     },
@@ -556,6 +670,12 @@
 
     },
     "Goal" : {
+
+    },
+    "Goal · %@" : {
+
+    },
+    "Goal, %@" : {
 
     },
     "Goal: %lld workouts each week" : {
@@ -622,6 +742,9 @@
     "Import Template" : {
 
     },
+    "Incline" : {
+
+    },
     "Insert below" : {
 
     },
@@ -661,6 +784,9 @@
     "Latest" : {
 
     },
+    "Level" : {
+
+    },
     "License URL" : {
 
     },
@@ -698,6 +824,12 @@
 
     },
     "Logged Sets" : {
+
+    },
+    "Main" : {
+
+    },
+    "Main Cardio" : {
 
     },
     "Make dropset" : {
@@ -835,6 +967,12 @@
     "No sets yet." : {
 
     },
+    "No target" : {
+
+    },
+    "No Target" : {
+
+    },
     "No target. Track the activity freely when you work out." : {
 
     },
@@ -891,10 +1029,31 @@
     "Options: %@" : {
 
     },
+    "Outdoor" : {
+
+    },
+    "Outdoor Run" : {
+
+    },
+    "Outdoor Walk" : {
+
+    },
     "Override" : {
 
     },
+    "Pace" : {
+
+    },
     "Paired with %@" : {
+
+    },
+    "Pause" : {
+
+    },
+    "Pause %@" : {
+
+    },
+    "Paused" : {
 
     },
     "Position %lld" : {
@@ -929,6 +1088,9 @@
 
     },
     "Quick Start" : {
+
+    },
+    "Ready" : {
 
     },
     "Refresh" : {
@@ -967,6 +1129,12 @@
     "Reset local stores on next launch?" : {
 
     },
+    "Resistance" : {
+
+    },
+    "Resistance or level cannot be negative." : {
+
+    },
     "Rest Timer" : {
 
     },
@@ -983,6 +1151,12 @@
 
     },
     "Restore Workout" : {
+
+    },
+    "Resume" : {
+
+    },
+    "Resume %@" : {
 
     },
     "Resume Current Workout" : {
@@ -1004,6 +1178,15 @@
 
     },
     "Round rest %@" : {
+
+    },
+    "Row Machine" : {
+
+    },
+    "Rower" : {
+
+    },
+    "Running" : {
 
     },
     "Save" : {
@@ -1087,7 +1270,13 @@
     "Source: %@" : {
 
     },
+    "Stair Climber" : {
+
+    },
     "Start" : {
+
+    },
+    "Start %@" : {
 
     },
     "Start a workout now and this exercise will be added." : {
@@ -1172,6 +1361,9 @@
     "This replaces local WGJ data on this device with the latest CloudKit backup. It does not delete the CloudKit backup." : {
 
     },
+    "Time" : {
+
+    },
     "Time-sensitive alerts are off in iOS Settings; rest alerts will arrive as standard." : {
 
     },
@@ -1185,6 +1377,15 @@
 
     },
     "Train a few days and your calendar will start to fill in." : {
+
+    },
+    "Treadmill" : {
+
+    },
+    "Treadmill Run" : {
+
+    },
+    "Treadmill Walk" : {
 
     },
     "Unfiled" : {
@@ -1215,6 +1416,9 @@
 
     },
     "W" : {
+
+    },
+    "Warm-up" : {
 
     },
     "We Go Jim" : {

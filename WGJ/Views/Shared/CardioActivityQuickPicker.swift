@@ -23,57 +23,57 @@ nonisolated struct CardioActivityQuickChoice: Identifiable, Equatable, Sendable 
     static let all: [CardioActivityQuickChoice] = [
         .init(
             remoteUUID: "seed-treadmill-walk",
-            displayName: "Treadmill Walk",
-            equipmentSummary: "Treadmill",
+            displayName: String(localized: "Treadmill Walk"),
+            equipmentSummary: String(localized: "Treadmill"),
             systemImage: "figure.walk",
             trackingProfile: .treadmill
         ),
         .init(
             remoteUUID: "seed-treadmill-run",
-            displayName: "Treadmill Run",
-            equipmentSummary: "Treadmill",
+            displayName: String(localized: "Treadmill Run"),
+            equipmentSummary: String(localized: "Treadmill"),
             systemImage: "figure.run",
             trackingProfile: .treadmill
         ),
         .init(
             remoteUUID: "seed-outdoor-walk",
-            displayName: "Outdoor Walk",
-            equipmentSummary: "Outdoor",
+            displayName: String(localized: "Outdoor Walk"),
+            equipmentSummary: String(localized: "Outdoor"),
             systemImage: "figure.walk",
             trackingProfile: .walkRun
         ),
         .init(
             remoteUUID: "seed-outdoor-run",
-            displayName: "Outdoor Run",
-            equipmentSummary: "Outdoor",
+            displayName: String(localized: "Outdoor Run"),
+            equipmentSummary: String(localized: "Outdoor"),
             systemImage: "figure.run",
             trackingProfile: .walkRun
         ),
         .init(
             remoteUUID: "seed-bike",
-            displayName: "Bike",
-            equipmentSummary: "Bike",
+            displayName: String(localized: "Bike"),
+            equipmentSummary: String(localized: "Bike"),
             systemImage: "bicycle",
             trackingProfile: .machineDistance
         ),
         .init(
             remoteUUID: "seed-crosstrainer",
-            displayName: "Crosstrainer",
-            equipmentSummary: "Crosstrainer",
+            displayName: String(localized: "Crosstrainer"),
+            equipmentSummary: String(localized: "Crosstrainer"),
             systemImage: "figure.elliptical",
             trackingProfile: .machineDistance
         ),
         .init(
             remoteUUID: "seed-row-machine",
-            displayName: "Row Machine",
-            equipmentSummary: "Rower",
+            displayName: String(localized: "Row Machine"),
+            equipmentSummary: String(localized: "Rower"),
             systemImage: "figure.rower",
             trackingProfile: .rower
         ),
         .init(
             remoteUUID: "seed-stair-climber",
-            displayName: "Stair Climber",
-            equipmentSummary: "Stair Climber",
+            displayName: String(localized: "Stair Climber"),
+            equipmentSummary: String(localized: "Stair Climber"),
             systemImage: "figure.stair.stepper",
             trackingProfile: .stairClimber
         ),

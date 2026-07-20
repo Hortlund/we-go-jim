@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import SwiftUI
 
 nonisolated struct ActiveWorkoutCardioPresentation: Identifiable, Equatable, Sendable {
@@ -33,6 +34,7 @@ nonisolated struct ActiveWorkoutCardioPresentation: Identifiable, Equatable, Sen
     let descriptor: String?
     let goalText: String
     let resultText: String?
+    let metricAccessibilityText: String
     let state: State
     let actionLayout: [Action]
     let reservedTimerWidth: Double
@@ -84,6 +86,7 @@ nonisolated struct ActiveWorkoutCardioPresentation: Identifiable, Equatable, Sen
             descriptor: descriptor(for: activity),
             goalText: goalText(for: activity),
             resultText: resultText(for: activity),
+            metricAccessibilityText: metricAccessibilityText(for: activity),
             state: state,
             actionLayout: actionLayout,
             reservedTimerWidth: timerWidth,
@@ -119,15 +122,15 @@ nonisolated struct ActiveWorkoutCardioPresentation: Identifiable, Equatable, Sen
     private static func goalText(for activity: ActiveWorkoutRuntimeCardioBlock) -> String {
         switch activity.goalKind {
         case .time:
-            return "Goal · \(durationText(seconds: activity.targetDurationSeconds, alwaysShowsHours: false))"
+            return String(localized: "Goal · \(durationText(seconds: activity.targetDurationSeconds, alwaysShowsHours: false))")
         case .distance:
             guard let meters = activity.targetDistanceMeters, meters > 0 else {
-                return "Distance goal"
+                return String(localized: "Distance goal")
             }
             let unit = activity.preferredDistanceUnit ?? .kilometers
-            return "Goal · \(distanceText(meters: meters, unit: unit))"
+            return String(localized: "Goal · \(distanceText(meters: meters, unit: unit))")
         case .open:
-            return "No target"
+            return String(localized: "No target")
         }
     }
 
@@ -147,7 +150,60 @@ nonisolated struct ActiveWorkoutCardioPresentation: Identifiable, Equatable, Sen
             )
         }
 
-        return parts.isEmpty ? "Completed" : parts.joined(separator: " · ")
+        guard let first = parts.first else { return String(localized: "Completed") }
+        guard parts.count > 1 else { return first }
+        return String(localized: "\(first) · \(parts[1])")
+    }
+
+    private static func metricAccessibilityText(
+        for activity: ActiveWorkoutRuntimeCardioBlock
+    ) -> String {
+        if activity.isCompleted {
+            var parts: [String] = []
+            if let duration = activity.actualDurationSeconds, duration > 0 {
+                parts.append(spokenDuration(seconds: duration))
+            }
+            if let distance = activity.actualDistanceMeters, distance > 0 {
+                let unit = activity.preferredDistanceUnit ?? .kilometers
+                parts.append(
+                    WorkoutMetricAccessibilityPolicy.cardioMetricValue(
+                        distanceValueText(meters: distance, unit: unit),
+                        semantic: .distance(unit)
+                    )
+                )
+            }
+            guard let first = parts.first else { return String(localized: "Completed") }
+            guard parts.count > 1 else { return first }
+            return String(localized: "\(first), \(parts[1])")
+        }
+
+        switch activity.goalKind {
+        case .time:
+            return String(localized: "Goal, \(spokenDuration(seconds: activity.targetDurationSeconds))")
+        case .distance:
+            guard let meters = activity.targetDistanceMeters, meters > 0 else {
+                return String(localized: "Distance goal")
+            }
+            let unit = activity.preferredDistanceUnit ?? .kilometers
+            let distance = WorkoutMetricAccessibilityPolicy.cardioMetricValue(
+                distanceValueText(meters: meters, unit: unit),
+                semantic: .distance(unit)
+            )
+            return String(localized: "Goal, \(distance)")
+        case .open:
+            return String(localized: "No target")
+        }
+    }
+
+    private static func spokenDuration(seconds: Int) -> String {
+        let safeSeconds = max(0, seconds)
+        let hours = safeSeconds / 3_600
+        let minutes = (safeSeconds % 3_600) / 60
+        let seconds = safeSeconds % 60
+        if hours > 0 {
+            return String(localized: "\(hours) hours, \(minutes) minutes, \(seconds) seconds")
+        }
+        return String(localized: "\(minutes) minutes, \(seconds) seconds")
     }
 
     private static func durationText(seconds: Int, alwaysShowsHours: Bool) -> String {
@@ -169,6 +225,14 @@ nonisolated struct ActiveWorkoutCardioPresentation: Identifiable, Equatable, Sen
         let value = unit.value(fromMeters: meters)
         let formatted = value.formatted(.number.precision(.fractionLength(0...2)))
         return "\(formatted) \(unit.symbol)"
+    }
+
+    private static func distanceValueText(
+        meters: Double,
+        unit: WorkoutDistanceUnit
+    ) -> String {
+        unit.value(fromMeters: meters)
+            .formatted(.number.precision(.fractionLength(0...2)))
     }
 }
 
@@ -226,6 +290,50 @@ nonisolated enum ActiveWorkoutCardioControlLayout {
         isAccessibilitySize ? .vertical : .adaptive
     }
 }
+
+#if DEBUG
+@MainActor
+enum ActiveWorkoutCardioRuntimeDiagnostics {
+    enum PersistenceKind: String, Equatable, Sendable {
+        case timerTransition
+        case activeWorkoutSnapshot
+    }
+
+    enum Event: Equatable, Sendable {
+        case displayTick(activityID: UUID, elapsedText: String)
+        case persistenceBoundary(activityID: UUID?, kind: PersistenceKind)
+    }
+
+    private static let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "WGJ",
+        category: "CardioTimerDiagnostics"
+    )
+    private static var testObserver: ((Event) -> Void)?
+
+    static func installTestObserver(_ observer: ((Event) -> Void)?) {
+        testObserver = observer
+    }
+
+    static func recordDisplayTick(activityID: UUID, elapsedText: String) {
+        let event = Event.displayTick(activityID: activityID, elapsedText: elapsedText)
+        testObserver?(event)
+        logger.debug(
+            "cardio.timer.display.tick activity=\(activityID.uuidString, privacy: .public) elapsed=\(elapsedText, privacy: .public)"
+        )
+    }
+
+    static func recordPersistenceBoundary(
+        activityID: UUID?,
+        kind: PersistenceKind
+    ) {
+        let event = Event.persistenceBoundary(activityID: activityID, kind: kind)
+        testObserver?(event)
+        logger.debug(
+            "cardio.timer.persistence.boundary kind=\(kind.rawValue, privacy: .public) activity=\(activityID?.uuidString ?? "none", privacy: .public)"
+        )
+    }
+}
+#endif
 
 nonisolated struct ActiveWorkoutPendingCardioResult: Identifiable, Equatable, Sendable {
     let id: UUID
@@ -309,12 +417,11 @@ struct ActiveWorkoutCardioActivityCard: View {
 
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 5) {
-                    let metricText = presentation.resultText ?? presentation.goalText
-                    Text(metricText)
+                    Text(presentation.resultText ?? presentation.goalText)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(presentation.state == .completed ? WGJTheme.success : WGJTheme.textSecondary)
                         .accessibilityLabel(
-                            WorkoutMetricAccessibilityPolicy.cardioMetricValue(metricText)
+                            presentation.metricAccessibilityText
                         )
 
                     if presentation.isRunning || presentation.isPaused {
@@ -340,7 +447,14 @@ struct ActiveWorkoutCardioActivityCard: View {
     private var timerDisplay: some View {
         if presentation.isRunning {
             TimelineView(.periodic(from: .now, by: 1)) { context in
-                timerText(presentation.elapsedText(at: context.date))
+                let elapsedText = presentation.elapsedText(at: context.date)
+#if DEBUG
+                let _ = ActiveWorkoutCardioRuntimeDiagnostics.recordDisplayTick(
+                    activityID: presentation.id,
+                    elapsedText: elapsedText
+                )
+#endif
+                timerText(elapsedText)
             }
         } else {
             timerText(presentation.elapsedText)
@@ -423,15 +537,15 @@ struct ActiveWorkoutCardioActivityCard: View {
     private func actionTitle(for action: ActiveWorkoutCardioPresentation.Action) -> String {
         switch action {
         case .start:
-            return "Start"
+            return String(localized: "Start")
         case .pause:
-            return "Pause"
+            return String(localized: "Pause")
         case .resume:
-            return "Resume"
+            return String(localized: "Resume")
         case .finish:
-            return "Finish"
+            return String(localized: "Finish")
         case .editResult:
-            return "Edit Result"
+            return String(localized: "Edit Result")
         }
     }
 
@@ -465,13 +579,13 @@ struct ActiveWorkoutCardioActivityCard: View {
     private var stateTitle: String {
         switch presentation.state {
         case .idle:
-            return "Ready"
+            return String(localized: "Ready")
         case .running:
-            return "Running"
+            return String(localized: "Running")
         case .paused:
-            return "Paused"
+            return String(localized: "Paused")
         case .completed:
-            return "Complete"
+            return String(localized: "Complete")
         }
     }
 
