@@ -102,8 +102,10 @@ struct CardioActivityQuickPicker: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     WGJSectionHeader(
-                        "Quick choices",
-                        subtitle: "Pick an activity now, or open the full Cardio catalog."
+                        String(localized: "Quick choices"),
+                        subtitle: String(
+                            localized: "Pick an activity now, or open the full Cardio catalog."
+                        )
                     )
 
                     LazyVGrid(columns: columns, spacing: 12) {
@@ -148,7 +150,10 @@ struct CardioActivityQuickPicker: View {
                 switch destination {
                 case .catalog:
                     ExercisesCatalogView(
-                        mode: .pick(actionTitle: "Add Cardio", onSelect: select),
+                        mode: .pick(
+                            actionTitle: String(localized: "Add Cardio"),
+                            onSelect: select
+                        ),
                         initialFilters: ExerciseFilters(
                             categoryName: "Cardio",
                             includeUncurated: true

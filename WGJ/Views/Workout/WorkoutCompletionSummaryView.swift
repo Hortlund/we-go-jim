@@ -541,8 +541,8 @@ struct WorkoutCompletionSummaryView: View {
         if !snapshot.cardioRecap.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 WGJActionHeader(
-                    "Cardio Activities",
-                    subtitle: "Your saved results grouped by workout role."
+                    String(localized: "Cardio Activities"),
+                    subtitle: String(localized: "Your saved results grouped by workout role.")
                 )
 
                 ForEach(WorkoutCardioRole.allCases) { role in
@@ -559,11 +559,15 @@ struct WorkoutCompletionSummaryView: View {
                                     exerciseName: cardio.exerciseName,
                                     descriptor: cardio.descriptor,
                                     summary: cardio.summary,
-                                    statusText: cardio.isCompleted ? "Complete" : "Not finished",
+                                    statusText: cardio.isCompleted
+                                        ? String(localized: "Complete")
+                                        : String(localized: "Not finished"),
                                     isCompleted: cardio.isCompleted,
                                     footnote: cardio.isCompleted
                                         ? nil
-                                        : "This workout was finished before this activity was completed."
+                                        : String(
+                                            localized: "This workout was finished before this activity was completed."
+                                        )
                                 )
                             }
                         }
@@ -922,6 +926,9 @@ nonisolated enum WorkoutCompletionSnapshotBuilder {
         }
 
         let trimmedCategory = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedCategory.caseInsensitiveCompare("Cardio") == .orderedSame {
+            return String(localized: "Cardio")
+        }
         return trimmedCategory.isEmpty ? nil : trimmedCategory
     }
 }

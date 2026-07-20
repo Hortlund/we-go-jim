@@ -195,11 +195,11 @@ struct TemplateEditorView: View {
 
             if roleDrafts.isEmpty {
                 WGJEmptyStateCard(
-                    title: "No \(role.title.lowercased()) activity",
+                    title: cardioEmptyStateTitle(for: role),
                     message: cardioEmptyStateMessage(for: role),
                     icon: role.systemImage
                 ) {
-                    Button("Add \(role.title)") {
+                    Button(String(localized: "Add \(role.title)")) {
                         cardioPickerRequest = TemplateCardioPickerRequest(role: role)
                     }
                     .buttonStyle(WGJPrimaryButtonStyle())
@@ -846,22 +846,33 @@ struct TemplateEditorView: View {
     private func cardioSectionSubtitle(for role: WorkoutCardioRole) -> String {
         switch role {
         case .warmUp:
-            return "Activities to prepare for the main work."
+            return String(localized: "Activities to prepare for the main work.")
         case .main:
-            return "Primary cardio for cardio-only or cardio-focused workouts."
+            return String(localized: "Primary cardio for cardio-only or cardio-focused workouts.")
         case .finisher:
-            return "Activities to close out the workout."
+            return String(localized: "Activities to close out the workout.")
+        }
+    }
+
+    private func cardioEmptyStateTitle(for role: WorkoutCardioRole) -> String {
+        switch role {
+        case .warmUp:
+            return String(localized: "No warm-up activity")
+        case .main:
+            return String(localized: "No main cardio activity")
+        case .finisher:
+            return String(localized: "No finisher activity")
         }
     }
 
     private func cardioEmptyStateMessage(for role: WorkoutCardioRole) -> String {
         switch role {
         case .warmUp:
-            return "Add an easy walk, bike, row, or other warm-up."
+            return String(localized: "Add an easy walk, bike, row, or other warm-up.")
         case .main:
-            return "Add the primary activities for a cardio-focused workout."
+            return String(localized: "Add the primary activities for a cardio-focused workout.")
         case .finisher:
-            return "Add a final activity after the main work."
+            return String(localized: "Add a final activity after the main work.")
         }
     }
 
@@ -872,6 +883,9 @@ struct TemplateEditorView: View {
         }
 
         let trimmedCategory = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedCategory.caseInsensitiveCompare("Cardio") == .orderedSame {
+            return String(localized: "Cardio")
+        }
         return trimmedCategory.isEmpty ? nil : trimmedCategory
     }
 

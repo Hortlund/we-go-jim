@@ -20,9 +20,9 @@ nonisolated enum ActiveWorkoutCardioRequestedTimerTransition: Equatable, Sendabl
     var conflictConfirmationActionTitle: String {
         switch self {
         case .start:
-            return "Finish current and start new"
+            return String(localized: "Finish current and start new")
         case .resume:
-            return "Finish current and resume"
+            return String(localized: "Finish current and resume")
         }
     }
 

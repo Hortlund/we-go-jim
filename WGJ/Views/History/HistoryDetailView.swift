@@ -316,8 +316,8 @@ struct HistoryDetailView: View {
         if !orderedCardioBlocks.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 WGJActionHeader(
-                    "Cardio Activities",
-                    subtitle: "Saved results grouped by workout role."
+                    String(localized: "Cardio Activities"),
+                    subtitle: String(localized: "Saved results grouped by workout role.")
                 )
 
                 ForEach(WorkoutCardioRole.allCases) { role in
@@ -337,11 +337,15 @@ struct HistoryDetailView: View {
                                         muscleSummary: cardioBlock.muscleSummarySnapshot
                                     ),
                                     summary: cardioBlock.resultSummary,
-                                    statusText: cardioBlock.isCompleted ? "Complete" : "Not finished",
+                                    statusText: cardioBlock.isCompleted
+                                        ? String(localized: "Complete")
+                                        : String(localized: "Not finished"),
                                     isCompleted: cardioBlock.isCompleted,
                                     footnote: cardioBlock.isCompleted
                                         ? nil
-                                        : "This activity was not completed before the workout ended."
+                                        : String(
+                                            localized: "This activity was not completed before the workout ended."
+                                        )
                                 ) {
                                     Button("Edit Result") {
                                         pendingCardioResultEdit = cardioBlock
@@ -920,6 +924,9 @@ struct HistoryDetailView: View {
         }
 
         let trimmedCategory = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedCategory.caseInsensitiveCompare("Cardio") == .orderedSame {
+            return String(localized: "Cardio")
+        }
         return trimmedCategory.isEmpty ? nil : trimmedCategory
     }
 }

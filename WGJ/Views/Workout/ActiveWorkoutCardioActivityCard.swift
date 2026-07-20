@@ -116,6 +116,9 @@ nonisolated struct ActiveWorkoutCardioPresentation: Identifiable, Equatable, Sen
         }
 
         let category = activity.categorySnapshot.trimmingCharacters(in: .whitespacesAndNewlines)
+        if category.caseInsensitiveCompare("Cardio") == .orderedSame {
+            return String(localized: "Cardio")
+        }
         return category.isEmpty ? nil : category
     }
 
@@ -268,7 +271,9 @@ nonisolated enum ActiveWorkoutCardioReplacementPolicy {
         case confirmClearingRecordedData
     }
 
-    static let confirmationMessage = "Recorded cardio data will be cleared."
+    static var confirmationMessage: String {
+        String(localized: "Recorded cardio data will be cleared.")
+    }
 
     static func decision(activity: ActiveWorkoutRuntimeCardioBlock) -> Decision {
         guard activity.timerState == .idle,
@@ -277,6 +282,34 @@ nonisolated enum ActiveWorkoutCardioReplacementPolicy {
             return .confirmClearingRecordedData
         }
         return .replaceDirectly
+    }
+}
+
+nonisolated enum ActiveWorkoutCardioConfirmationCopy {
+    static var timerConflictTitle: String {
+        String(localized: "Another cardio activity is running")
+    }
+
+    static func replacementTitle(activityName: String) -> String {
+        String(localized: "Change \(activityName)?")
+    }
+
+    static func removalTitle(activityName: String) -> String {
+        String(localized: "Remove \(activityName)?")
+    }
+
+    static var timerConflictMessage: String {
+        String(localized: "Only one cardio timer can run at a time.")
+    }
+
+    static var replacementMessage: String {
+        String(localized: "Recorded cardio data will be cleared. This cannot be undone.")
+    }
+
+    static var removalMessage: String {
+        String(
+            localized: "This activity contains saved progress or a result. Removing it cannot be undone."
+        )
     }
 }
 

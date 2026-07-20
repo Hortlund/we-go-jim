@@ -84,7 +84,14 @@ nonisolated enum WorkoutCardioSetupValidationError: LocalizedError, Equatable, S
         case .durationMustBePositive:
             return String(localized: "Enter a duration greater than 0 minutes.")
         case .distanceMustBePositive(let unit):
-            return String(localized: "Enter a distance greater than 0 \(unit.validationName).")
+            switch unit {
+            case .kilometers:
+                return String(localized: "Enter a distance greater than 0 kilometers.")
+            case .miles:
+                return String(localized: "Enter a distance greater than 0 miles.")
+            case .meters:
+                return String(localized: "Enter a distance greater than 0 meters.")
+            }
         }
     }
 }
@@ -194,7 +201,10 @@ struct WorkoutCardioSetupSheet: View {
 
     private var setupCard: some View {
         VStack(alignment: .leading, spacing: 18) {
-            WGJSectionHeader("Plan \(activityName)", subtitle: "Choose where it fits and what to aim for.")
+            WGJSectionHeader(
+                String(localized: "Plan \(activityName)"),
+                subtitle: String(localized: "Choose where it fits and what to aim for.")
+            )
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Role")
@@ -259,7 +269,7 @@ struct WorkoutCardioSetupSheet: View {
 
                 Picker("Unit", selection: $draft.distanceUnit) {
                     ForEach(WorkoutDistanceUnit.allCases) { unit in
-                        Text(unit.shortTitle).tag(unit)
+                        Text(unit.symbol).tag(unit)
                     }
                 }
                 .pickerStyle(.menu)
@@ -291,30 +301,6 @@ struct WorkoutCardioSetupSheet: View {
             dismiss()
         } catch {
             validationMessage = error.localizedDescription
-        }
-    }
-}
-
-private extension WorkoutDistanceUnit {
-    nonisolated var validationName: String {
-        switch self {
-        case .kilometers:
-            return "kilometers"
-        case .miles:
-            return "miles"
-        case .meters:
-            return "meters"
-        }
-    }
-
-    nonisolated var shortTitle: String {
-        switch self {
-        case .kilometers:
-            return "km"
-        case .miles:
-            return "mi"
-        case .meters:
-            return "m"
         }
     }
 }

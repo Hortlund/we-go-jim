@@ -17,4 +17,35 @@ final class LocalizationFormattingTests: XCTestCase {
         XCTAssertEqual(WorkoutCardioGoalKind.open.title, "No Target")
         XCTAssertEqual(WorkoutCardioDurationFormatter.text(seconds: 300), "5 min")
     }
+
+    func testCardioValidationAndConfirmationCopyUsesLocalizedResources() {
+        XCTAssertEqual(
+            WorkoutCardioSetupValidationError.distanceMustBePositive(unit: .kilometers).errorDescription,
+            "Enter a distance greater than 0 kilometers."
+        )
+        XCTAssertEqual(
+            WorkoutCardioSetupValidationError.distanceMustBePositive(unit: .miles).errorDescription,
+            "Enter a distance greater than 0 miles."
+        )
+        XCTAssertEqual(
+            WorkoutCardioSetupValidationError.distanceMustBePositive(unit: .meters).errorDescription,
+            "Enter a distance greater than 0 meters."
+        )
+        XCTAssertEqual(
+            ActiveWorkoutCardioConfirmationCopy.replacementTitle(activityName: "Bike"),
+            "Change Bike?"
+        )
+        XCTAssertEqual(
+            ActiveWorkoutCardioConfirmationCopy.removalTitle(activityName: "Bike"),
+            "Remove Bike?"
+        )
+        XCTAssertEqual(
+            ActiveWorkoutCardioConfirmationCopy.replacementMessage,
+            "Recorded cardio data will be cleared. This cannot be undone."
+        )
+        XCTAssertEqual(
+            ActiveWorkoutCardioConfirmationCopy.removalMessage,
+            "This activity contains saved progress or a result. Removing it cannot be undone."
+        )
+    }
 }

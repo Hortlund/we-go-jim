@@ -291,7 +291,7 @@ struct ActiveWorkoutView: View {
                 workoutErrorAlertMessage
             }
             .confirmationDialog(
-                cardioConfirmation?.title ?? "Cardio",
+                cardioConfirmation?.title ?? String(localized: "Cardio"),
                 isPresented: cardioConfirmationBinding,
                 titleVisibility: .visible,
                 presenting: cardioConfirmation
@@ -2924,11 +2924,11 @@ struct ActiveWorkoutView: View {
     private func cardioSectionSubtitle(for role: WorkoutCardioRole) -> String {
         switch role {
         case .warmUp:
-            return "Cardio to prepare for the main work."
+            return String(localized: "Cardio to prepare for the main work.")
         case .main:
-            return "Primary cardio for this workout."
+            return String(localized: "Primary cardio for this workout.")
         case .finisher:
-            return "Cardio to close out the workout."
+            return String(localized: "Cardio to close out the workout.")
         }
     }
 
@@ -3575,22 +3575,22 @@ private enum ActiveWorkoutCardioConfirmation: Identifiable {
     var title: String {
         switch self {
         case .timerConflict:
-            return "Another cardio activity is running"
+            return ActiveWorkoutCardioConfirmationCopy.timerConflictTitle
         case .replace(_, let activityName):
-            return "Change \(activityName)?"
+            return ActiveWorkoutCardioConfirmationCopy.replacementTitle(activityName: activityName)
         case .remove(_, let activityName):
-            return "Remove \(activityName)?"
+            return ActiveWorkoutCardioConfirmationCopy.removalTitle(activityName: activityName)
         }
     }
 
     var message: String {
         switch self {
         case .timerConflict:
-            return "Only one cardio timer can run at a time."
+            return ActiveWorkoutCardioConfirmationCopy.timerConflictMessage
         case .replace:
-            return "\(ActiveWorkoutCardioReplacementPolicy.confirmationMessage) This cannot be undone."
+            return ActiveWorkoutCardioConfirmationCopy.replacementMessage
         case .remove:
-            return "This activity contains saved progress or a result. Removing it cannot be undone."
+            return ActiveWorkoutCardioConfirmationCopy.removalMessage
         }
     }
 }

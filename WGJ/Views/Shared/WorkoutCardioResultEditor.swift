@@ -64,7 +64,11 @@ struct WorkoutCardioResultEditor: View {
                 }
 
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(isSaving ? "Saving…" : "Save Result") {
+                    Button(
+                        isSaving
+                            ? String(localized: "Saving…")
+                            : String(localized: "Save Result")
+                    ) {
                         save()
                     }
                     .disabled(isSaving)
@@ -80,7 +84,7 @@ struct WorkoutCardioResultEditor: View {
         VStack(alignment: .leading, spacing: 18) {
             WGJSectionHeader(
                 activityName,
-                subtitle: "Log at least a duration or distance."
+                subtitle: String(localized: "Log at least a duration or distance.")
             )
 
             VStack(alignment: .leading, spacing: 8) {
@@ -133,8 +137,8 @@ struct WorkoutCardioResultEditor: View {
         if summary.metrics.contains(where: { $0.kind.isDerived }) {
             VStack(alignment: .leading, spacing: 12) {
                 WGJSectionHeader(
-                    "Calculated",
-                    subtitle: "Updates from your duration and distance."
+                    String(localized: "Calculated"),
+                    subtitle: String(localized: "Updates from your duration and distance.")
                 )
                 resultMetrics(summary.metrics.filter(\.kind.isDerived))
             }
@@ -152,7 +156,9 @@ struct WorkoutCardioResultEditor: View {
             } label: {
                 HStack {
                     Label(
-                        showsDetails ? "Hide detail" : "Add detail",
+                        showsDetails
+                            ? String(localized: "Hide detail")
+                            : String(localized: "Add detail"),
                         systemImage: "slider.horizontal.3"
                     )
                     Spacer()
@@ -167,8 +173,8 @@ struct WorkoutCardioResultEditor: View {
             if showsDetails {
                 if draft.trackingProfile.supportsIncline {
                     detailField(
-                        title: "Incline",
-                        placeholder: "Percent",
+                        title: String(localized: "Incline"),
+                        placeholder: String(localized: "Percent"),
                         suffix: "%",
                         text: $draft.inclineText,
                         accessibilityIdentifier: "cardio-result-incline-field"
@@ -177,8 +183,10 @@ struct WorkoutCardioResultEditor: View {
 
                 if draft.trackingProfile.supportsResistanceOrLevel {
                     detailField(
-                        title: draft.trackingProfile == .stairClimber ? "Level" : "Resistance",
-                        placeholder: "Optional",
+                        title: draft.trackingProfile == .stairClimber
+                            ? String(localized: "Level")
+                            : String(localized: "Resistance"),
+                        placeholder: String(localized: "Optional"),
                         suffix: nil,
                         text: $draft.resistanceLevelText,
                         accessibilityIdentifier: "cardio-result-resistance-field"
@@ -282,7 +290,9 @@ struct WorkoutCardioResultEditor: View {
     private func save() {
         guard !isSaving else { return }
         guard let candidate = candidateDraft() else {
-            validationMessage = "Enter a valid duration in minutes, or leave it empty."
+            validationMessage = String(
+                localized: "Enter a valid duration in minutes, or leave it empty."
+            )
             return
         }
 
