@@ -965,11 +965,6 @@ nonisolated final class TemplateRepository {
             .sorted(by: cardioActivityOrder)
     }
 
-    @available(*, deprecated, renamed: "cardioActivities(templateID:)")
-    func cardioBlocks(templateID: UUID) throws -> [TemplateCardioBlock] {
-        try cardioActivities(templateID: templateID)
-    }
-
     private func cardioActivity(templateID: UUID, activityID: UUID) throws -> TemplateCardioBlock? {
         let descriptor = FetchDescriptor<TemplateCardioBlock>(
             predicate: #Predicate { item in
@@ -1050,11 +1045,6 @@ nonisolated final class TemplateRepository {
         )
         template.updatedAt = .now
         try saveUserDataChanges()
-    }
-
-    @available(*, deprecated, renamed: "setCardioActivities(templateID:drafts:)")
-    func setCardioBlocks(templateID: UUID, drafts: [TemplateCardioBlockDraft]) throws {
-        try setCardioActivities(templateID: templateID, drafts: drafts)
     }
 
     func setDrafts(for templateExerciseID: UUID) throws -> [TemplateExerciseSetDraft] {

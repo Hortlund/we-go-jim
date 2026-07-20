@@ -4,6 +4,19 @@ import XCTest
 
 @MainActor
 final class TemplateTransferServiceTests: XCTestCase {
+    func testTemplateRepositoryDoesNotExposeDeprecatedPhaseAdapters() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("WGJ/Services/TemplateRepository.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertFalse(source.contains("func cardioBlocks(templateID:"))
+        XCTAssertFalse(source.contains("func setCardioBlocks(templateID:"))
+    }
+
     func testFlexibleCardioRoundTripPreservesOrderedPlansAndCanonicalDistance() throws {
         let sourceContainer = try makeInMemoryContainer()
         let sourceContext = ModelContext(sourceContainer)
