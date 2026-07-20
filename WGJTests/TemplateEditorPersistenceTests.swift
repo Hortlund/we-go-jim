@@ -58,6 +58,57 @@ final class TemplateEditorPersistenceTests: XCTestCase {
         XCTAssertEqual(recorded.backupReasons, [.templateSaved])
     }
 
+    func testTemplateEditorSavePersistsMultipleActivitiesInOneRole() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let request = TemplateEditorSaveRequest(
+            folderID: nil,
+            templateID: nil,
+            name: "Cardio",
+            notes: "",
+            exerciseDrafts: [],
+            cardioDrafts: [
+                TemplateCardioBlockDraft(
+                    phase: .preWorkout,
+                    role: .main,
+                    sortOrder: 0,
+                    catalogExerciseUUID: "seed-treadmill-walk",
+                    exerciseNameSnapshot: "Treadmill Walk",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Legs",
+                    trackingProfile: .treadmill,
+                    goalKind: .distance,
+                    targetDurationSeconds: 0,
+                    targetDistanceMeters: 5_000,
+                    preferredDistanceUnit: .kilometers
+                ),
+                TemplateCardioBlockDraft(
+                    phase: .preWorkout,
+                    role: .main,
+                    sortOrder: 1,
+                    catalogExerciseUUID: "seed-bike",
+                    exerciseNameSnapshot: "Bike",
+                    categorySnapshot: "Cardio",
+                    muscleSummarySnapshot: "Legs",
+                    trackingProfile: .machineDistance,
+                    goalKind: .time,
+                    targetDurationSeconds: 1_200,
+                    preferredDistanceUnit: .kilometers
+                ),
+            ]
+        )
+
+        _ = try TemplateEditorPersistence.save(request, modelContext: context)
+
+        let verificationContext = ModelContext(container)
+        let activities = try verificationContext.fetch(FetchDescriptor<TemplateCardioBlock>())
+            .sorted { $0.sortOrder < $1.sortOrder }
+        XCTAssertEqual(activities.map(\.exerciseNameSnapshot), ["Treadmill Walk", "Bike"])
+        XCTAssertEqual(activities.map(\.role), [.main, .main])
+        XCTAssertEqual(activities.map(\.sortOrder), [0, 1])
+    }
+
     private func makeRequest(name: String) -> TemplateEditorSaveRequest {
         TemplateEditorSaveRequest(
             folderID: nil,

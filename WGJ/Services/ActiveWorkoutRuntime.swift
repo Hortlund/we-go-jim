@@ -984,12 +984,19 @@ nonisolated final class ActiveWorkoutSessionFactory {
         session.cardioBlocks = try templateCardioBlocks(templateID: template.id)
             .map { templateCardioBlock in
                 ActiveWorkoutRuntimeCardioBlock(
+                    sourceTemplateCardioID: templateCardioBlock.id,
                     phase: templateCardioBlock.phase,
+                    role: templateCardioBlock.role,
+                    sortOrder: templateCardioBlock.sortOrder,
                     catalogExerciseUUID: templateCardioBlock.catalogExerciseUUID,
                     exerciseNameSnapshot: templateCardioBlock.exerciseNameSnapshot,
                     categorySnapshot: templateCardioBlock.categorySnapshot,
                     muscleSummarySnapshot: templateCardioBlock.muscleSummarySnapshot,
+                    trackingProfile: templateCardioBlock.trackingProfile,
+                    goalKind: templateCardioBlock.goalKind,
                     targetDurationSeconds: templateCardioBlock.targetDurationSeconds,
+                    targetDistanceMeters: templateCardioBlock.targetDistanceMeters,
+                    preferredDistanceUnit: templateCardioBlock.preferredDistanceUnit,
                     isCompleted: false,
                     createdAt: now,
                     updatedAt: now
@@ -1140,7 +1147,15 @@ nonisolated final class ActiveWorkoutSessionFactory {
             sortBy: [SortDescriptor(\.phaseRaw, order: .forward)]
         )
         return try modelContext.fetch(descriptor)
-            .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
+            .sorted { lhs, rhs in
+                if lhs.role.sortOrder != rhs.role.sortOrder {
+                    return lhs.role.sortOrder < rhs.role.sortOrder
+                }
+                if lhs.sortOrder != rhs.sortOrder {
+                    return lhs.sortOrder < rhs.sortOrder
+                }
+                return lhs.createdAt < rhs.createdAt
+            }
     }
 
     private func templateExercises(templateID: UUID) throws -> [TemplateExercise] {

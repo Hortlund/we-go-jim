@@ -284,12 +284,19 @@ nonisolated final class WorkoutSessionRepository {
         for templateCardioBlock in orderedCardioBlocks {
             let cardioBlock = WorkoutSessionCardioBlock(
                 sessionID: session.id,
+                sourceTemplateCardioID: templateCardioBlock.id,
                 phase: templateCardioBlock.phase,
+                role: templateCardioBlock.role,
+                sortOrder: templateCardioBlock.sortOrder,
                 catalogExerciseUUID: templateCardioBlock.catalogExerciseUUID,
                 exerciseNameSnapshot: templateCardioBlock.exerciseNameSnapshot,
                 categorySnapshot: templateCardioBlock.categorySnapshot,
                 muscleSummarySnapshot: templateCardioBlock.muscleSummarySnapshot,
+                trackingProfile: templateCardioBlock.trackingProfile,
+                goalKind: templateCardioBlock.goalKind,
                 targetDurationSeconds: templateCardioBlock.targetDurationSeconds,
+                targetDistanceMeters: templateCardioBlock.targetDistanceMeters,
+                preferredDistanceUnit: templateCardioBlock.preferredDistanceUnit,
                 isCompleted: false,
                 session: session
             )
@@ -591,7 +598,7 @@ nonisolated final class WorkoutSessionRepository {
             }
         )
         return try modelContext.fetch(descriptor)
-            .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
+            .sorted(by: cardioActivityOrder)
     }
 
     func setDrafts(sessionExerciseID: UUID) throws -> [WorkoutSessionSetDraft] {
@@ -1299,7 +1306,31 @@ nonisolated final class WorkoutSessionRepository {
 
     private func orderedTemplateCardioBlocks(_ template: WorkoutTemplate) -> [TemplateCardioBlock] {
         (template.cardioBlocks ?? [])
-            .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
+            .sorted { lhs, rhs in
+                if lhs.role.sortOrder != rhs.role.sortOrder {
+                    return lhs.role.sortOrder < rhs.role.sortOrder
+                }
+                if lhs.sortOrder != rhs.sortOrder {
+                    return lhs.sortOrder < rhs.sortOrder
+                }
+                return lhs.createdAt < rhs.createdAt
+            }
+    }
+
+    private func cardioActivityOrder(
+        _ lhs: WorkoutSessionCardioBlock,
+        _ rhs: WorkoutSessionCardioBlock
+    ) -> Bool {
+        if lhs.role.sortOrder != rhs.role.sortOrder {
+            return lhs.role.sortOrder < rhs.role.sortOrder
+        }
+        if lhs.sortOrder != rhs.sortOrder {
+            return lhs.sortOrder < rhs.sortOrder
+        }
+        if lhs.createdAt != rhs.createdAt {
+            return lhs.createdAt < rhs.createdAt
+        }
+        return lhs.id.uuidString < rhs.id.uuidString
     }
 
     private func previousSnapshot(from set: WorkoutSessionSet) -> WorkoutPreviousSetSnapshot {

@@ -90,17 +90,29 @@ nonisolated private final class WorkoutCompletionMaterializer {
         modelContext.insert(completedSession)
 
         completedSession.cardioBlocks = runtimeSession.cardioBlocks
-            .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
+            .sorted(by: ActiveWorkoutRuntimeCardioBlock.areInIncreasingOrder)
             .map { runtimeCardioBlock in
                 let completedCardioBlock = WorkoutSessionCardioBlock(
                     id: runtimeCardioBlock.id,
                     sessionID: completedSession.id,
+                    sourceTemplateCardioID: runtimeCardioBlock.sourceTemplateCardioID,
                     phase: runtimeCardioBlock.phase,
+                    role: runtimeCardioBlock.role,
+                    sortOrder: runtimeCardioBlock.sortOrder,
                     catalogExerciseUUID: runtimeCardioBlock.catalogExerciseUUID,
                     exerciseNameSnapshot: runtimeCardioBlock.exerciseNameSnapshot,
                     categorySnapshot: runtimeCardioBlock.categorySnapshot,
                     muscleSummarySnapshot: runtimeCardioBlock.muscleSummarySnapshot,
+                    trackingProfile: runtimeCardioBlock.trackingProfile,
+                    goalKind: runtimeCardioBlock.goalKind,
                     targetDurationSeconds: runtimeCardioBlock.targetDurationSeconds,
+                    targetDistanceMeters: runtimeCardioBlock.targetDistanceMeters,
+                    actualDurationSeconds: runtimeCardioBlock.actualDurationSeconds,
+                    actualDistanceMeters: runtimeCardioBlock.actualDistanceMeters,
+                    preferredDistanceUnit: runtimeCardioBlock.preferredDistanceUnit,
+                    inclinePercent: runtimeCardioBlock.inclinePercent,
+                    resistanceLevel: runtimeCardioBlock.resistanceLevel,
+                    cardioNotes: runtimeCardioBlock.cardioNotes,
                     isCompleted: runtimeCardioBlock.isCompleted,
                     createdAt: runtimeCardioBlock.createdAt,
                     updatedAt: runtimeCardioBlock.updatedAt,

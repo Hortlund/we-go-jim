@@ -1,5 +1,6 @@
 import XCTest
 import SwiftUI
+import SwiftData
 @testable import WGJ
 
 final class ActiveWorkoutRuntimeTests: XCTestCase {
@@ -343,6 +344,60 @@ final class ActiveWorkoutRuntimeTests: XCTestCase {
         )
 
         XCTAssertEqual(snapshot.cardioBlocks.map(\.isCompleted), [false, true])
+    }
+
+    @MainActor
+    func testSessionFactoryCopiesFlexibleTemplateCardioPlanWithSourceIDs() throws {
+        let container = try AppSchema.makeInMemoryContainer(name: "ActiveWorkoutRuntimeFactoryTests")
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let repository = TemplateRepository(modelContext: context)
+        let template = try repository.createTemplate(name: "Cardio", notes: "")
+        let drafts = [
+            TemplateCardioBlockDraft(
+                phase: .preWorkout,
+                role: .main,
+                sortOrder: 0,
+                catalogExerciseUUID: "seed-treadmill-walk",
+                exerciseNameSnapshot: "Treadmill Walk",
+                categorySnapshot: "Cardio",
+                muscleSummarySnapshot: "Legs",
+                trackingProfile: .treadmill,
+                goalKind: .distance,
+                targetDurationSeconds: 0,
+                targetDistanceMeters: 5_000,
+                preferredDistanceUnit: .kilometers
+            ),
+            TemplateCardioBlockDraft(
+                phase: .preWorkout,
+                role: .main,
+                sortOrder: 1,
+                catalogExerciseUUID: "seed-bike",
+                exerciseNameSnapshot: "Bike",
+                categorySnapshot: "Cardio",
+                muscleSummarySnapshot: "Legs",
+                trackingProfile: .machineDistance,
+                goalKind: .time,
+                targetDurationSeconds: 1_200,
+                targetDistanceMeters: 8_000,
+                preferredDistanceUnit: .kilometers
+            ),
+        ]
+        try repository.setCardioActivities(templateID: template.id, drafts: drafts)
+
+        let runtime = try ActiveWorkoutSessionFactory(modelContext: context)
+            .createSessionFromTemplate(templateID: template.id)
+
+        XCTAssertEqual(runtime.cardioBlocks.map(\.sourceTemplateCardioID), drafts.map(\.id))
+        XCTAssertTrue(Set(runtime.cardioBlocks.map(\.id)).isDisjoint(with: Set(drafts.map(\.id))))
+        XCTAssertEqual(runtime.cardioBlocks.map(\.exerciseNameSnapshot), ["Treadmill Walk", "Bike"])
+        XCTAssertEqual(runtime.cardioBlocks.map(\.role), [.main, .main])
+        XCTAssertEqual(runtime.cardioBlocks.map(\.sortOrder), [0, 1])
+        XCTAssertEqual(runtime.cardioBlocks.map(\.trackingProfile), [.treadmill, .machineDistance])
+        XCTAssertEqual(runtime.cardioBlocks.map(\.goalKind), [.distance, .time])
+        XCTAssertEqual(runtime.cardioBlocks.map(\.targetDurationSeconds), [0, 1_200])
+        XCTAssertEqual(runtime.cardioBlocks.map(\.targetDistanceMeters), [5_000, 8_000])
+        XCTAssertEqual(runtime.cardioBlocks.map(\.preferredDistanceUnit), [.kilometers, .kilometers])
     }
 
     func testTemplateExerciseReplacementPreservesSetIdentityAndPreviousTargets() {
