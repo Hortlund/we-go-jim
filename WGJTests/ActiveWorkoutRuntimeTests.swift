@@ -494,6 +494,38 @@ final class ActiveWorkoutRuntimeTests: XCTestCase {
         XCTAssertEqual(updated?[0].actualLoadUnit, .kg)
     }
 
+    func testFillLastKeepsInlineHintLayoutContentStable() throws {
+        let previous = WorkoutPreviousSetSnapshot(reps: 8, weight: 100, unit: .kg)
+        let emptyDraft = WorkoutSessionSetDraft(actualLoadUnit: .kg)
+        let filledDraft = WorkoutSessionSetDraft(
+            actualReps: 8,
+            actualWeight: 100,
+            actualLoadUnit: .kg
+        )
+
+        let beforeFill = try XCTUnwrap(
+            WorkoutSetInlineHintPresentation.make(
+                draft: emptyDraft,
+                previous: previous,
+                targetRepMin: nil,
+                targetRepMax: nil
+            )
+        )
+        let afterFill = try XCTUnwrap(
+            WorkoutSetInlineHintPresentation.make(
+                draft: filledDraft,
+                previous: previous,
+                targetRepMin: nil,
+                targetRepMax: nil
+            )
+        )
+
+        XCTAssertTrue(beforeFill.canApplyPrevious)
+        XCTAssertFalse(afterFill.canApplyPrevious)
+        XCTAssertEqual(beforeFill.statusLayoutText, afterFill.statusLayoutText)
+        XCTAssertEqual(beforeFill.actionLayoutText, afterFill.actionLayoutText)
+    }
+
     func testActiveWorkoutBottomDockReservesSafeAreaOnlyWhenEditableWorkoutIsVisible() {
         XCTAssertTrue(
             ActiveWorkoutBottomDockPlacementPolicy.shouldReserveBottomSafeAreaInset(
