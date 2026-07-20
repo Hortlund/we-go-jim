@@ -80,12 +80,10 @@ nonisolated enum BoundaryCloudBackupReason: String, Sendable {
 }
 
 nonisolated enum BoundaryCloudBackupScheduler {
-    static let workoutCompletionSettleDelay: Duration = .seconds(2)
-
     static func enqueueDelay(for reason: BoundaryCloudBackupReason) -> Duration {
         switch reason {
         case .workoutCompleted, .workoutCompletionTemplateSaved:
-            return workoutCompletionSettleDelay
+            return WorkoutCompletionBackgroundWorkPolicy.quiescenceDelay
         case .workoutDeleted, .templateSaved:
             return .zero
         }

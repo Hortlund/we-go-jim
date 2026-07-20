@@ -178,13 +178,19 @@ nonisolated private final class WorkoutCompletionMaterializer {
             try modelContext.save()
         }
         HistoryAnalyticsCache.shared.invalidate(container: modelContext.container)
-        HistoryProjectionBackgroundReconciler.shared.scheduleRebuild(
-            sessionID: completedSession.id,
-            container: modelContext.container
-        )
+        let completedSessionID = completedSession.id
+        let container = modelContext.container
+        Task.detached(priority: .utility) {
+            try? await Task.sleep(for: WorkoutCompletionBackgroundWorkPolicy.quiescenceDelay)
+            guard !Task.isCancelled else { return }
+            HistoryProjectionBackgroundReconciler.shared.scheduleRebuild(
+                sessionID: completedSessionID,
+                container: container
+            )
+        }
         WorkoutHistoryChangeBroadcaster.post()
         BoundaryCloudBackupScheduler.exportBestEffort(
-            container: modelContext.container,
+            container: container,
             reason: .workoutCompleted
         )
 
