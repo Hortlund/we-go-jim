@@ -178,13 +178,41 @@ nonisolated enum ActiveWorkoutCardioQuickAddPolicy {
     }
 }
 
-nonisolated enum ActiveWorkoutCardioRemovalPolicy {
-    static func requiresConfirmation(activity: ActiveWorkoutRuntimeCardioBlock) -> Bool {
+nonisolated enum ActiveWorkoutCardioRecordedDataPolicy {
+    static func hasRecordedData(activity: ActiveWorkoutRuntimeCardioBlock) -> Bool {
         activity.actualDurationSeconds != nil
             || activity.actualDistanceMeters != nil
-            || activity.isCompleted
+            || activity.inclinePercent != nil
+            || activity.resistanceLevel != nil
+            || !activity.cardioNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || activity.timerAccumulatedSeconds > 0
+            || activity.timerSegmentStartedAt != nil
+    }
+}
+
+nonisolated enum ActiveWorkoutCardioRemovalPolicy {
+    static func requiresConfirmation(activity: ActiveWorkoutRuntimeCardioBlock) -> Bool {
+        ActiveWorkoutCardioRecordedDataPolicy.hasRecordedData(activity: activity)
+            || activity.isCompleted
             || activity.timerState != .idle
+    }
+}
+
+nonisolated enum ActiveWorkoutCardioReplacementPolicy {
+    enum Decision: Equatable, Sendable {
+        case replaceDirectly
+        case confirmClearingRecordedData
+    }
+
+    static let confirmationMessage = "Recorded cardio data will be cleared."
+
+    static func decision(activity: ActiveWorkoutRuntimeCardioBlock) -> Decision {
+        guard activity.timerState == .idle,
+              !activity.isCompleted,
+              !ActiveWorkoutCardioRecordedDataPolicy.hasRecordedData(activity: activity) else {
+            return .confirmClearingRecordedData
+        }
+        return .replaceDirectly
     }
 }
 
@@ -253,7 +281,6 @@ struct ActiveWorkoutCardioActivityCard: View {
                 Menu {
                     Button("Edit Plan", action: onEditPlan)
                     Button("Change Exercise", action: onChangeExercise)
-                        .disabled(presentation.state != .idle)
                     Button("Remove", role: .destructive, action: onRemove)
                 } label: {
                     Image(systemName: "ellipsis")

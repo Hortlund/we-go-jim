@@ -6,6 +6,79 @@ nonisolated enum WorkoutCardioTimerError: Error, Equatable, Sendable {
     case anotherActivityRunning(UUID)
 }
 
+nonisolated enum ActiveWorkoutCardioRequestedTimerTransition: Equatable, Sendable {
+    case start(activityID: UUID)
+    case resume(activityID: UUID)
+
+    var activityID: UUID {
+        switch self {
+        case .start(let activityID), .resume(let activityID):
+            return activityID
+        }
+    }
+
+    var conflictConfirmationActionTitle: String {
+        switch self {
+        case .start:
+            return "Finish current and start new"
+        case .resume:
+            return "Finish current and resume"
+        }
+    }
+
+    var identifierComponent: String {
+        switch self {
+        case .start:
+            return "start"
+        case .resume:
+            return "resume"
+        }
+    }
+
+    func apply(
+        to blocks: inout [ActiveWorkoutRuntimeCardioBlock],
+        at date: Date
+    ) throws {
+        switch self {
+        case .start(let activityID):
+            try WorkoutCardioTimerCoordinator.start(
+                activityID: activityID,
+                blocks: &blocks,
+                at: date
+            )
+        case .resume(let activityID):
+            try WorkoutCardioTimerCoordinator.resume(
+                activityID: activityID,
+                blocks: &blocks,
+                at: date
+            )
+        }
+    }
+}
+
+nonisolated struct ActiveWorkoutCardioTimerConflict: Equatable, Sendable {
+    let runningActivityID: UUID
+    let requestedTransition: ActiveWorkoutCardioRequestedTimerTransition
+
+    var identifier: String {
+        "timer-conflict-\(runningActivityID)-\(requestedTransition.identifierComponent)-\(requestedTransition.activityID)"
+    }
+
+    func resolvedBlocks(
+        from blocks: [ActiveWorkoutRuntimeCardioBlock],
+        at date: Date
+    ) throws -> [ActiveWorkoutRuntimeCardioBlock] {
+        var resolved = blocks
+        try WorkoutCardioTimerCoordinator.finish(
+            activityID: runningActivityID,
+            blocks: &resolved,
+            at: date
+        )
+        try requestedTransition.apply(to: &resolved, at: date)
+        return resolved
+    }
+}
+
 nonisolated enum WorkoutCardioTimerCoordinator {
     static func elapsedSeconds(
         for activity: ActiveWorkoutRuntimeCardioBlock,

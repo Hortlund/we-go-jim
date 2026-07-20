@@ -47,6 +47,83 @@ final class WorkoutCardioTimerCoordinatorTests: XCTestCase {
         XCTAssertEqual(blocks[1].timerAccumulatedSeconds, 0)
     }
 
+    func testStartConflictResolutionFinishesCurrentAndStartsRequestedActivity() throws {
+        let base = Date(timeIntervalSince1970: 1_000)
+        let runningID = UUID()
+        let requestedID = UUID()
+        var blocks = [
+            ActiveWorkoutRuntimeCardioBlock.fixture(
+                id: runningID,
+                timerState: .running,
+                timerSegmentStartedAt: base
+            ),
+            .fixture(id: requestedID)
+        ]
+        let requestedTransition = ActiveWorkoutCardioRequestedTimerTransition.start(
+            activityID: requestedID
+        )
+
+        XCTAssertThrowsError(
+            try requestedTransition.apply(to: &blocks, at: base.addingTimeInterval(60))
+        ) {
+            XCTAssertEqual($0 as? WorkoutCardioTimerError, .anotherActivityRunning(runningID))
+        }
+
+        let conflict = ActiveWorkoutCardioTimerConflict(
+            runningActivityID: runningID,
+            requestedTransition: requestedTransition
+        )
+        blocks = try conflict.resolvedBlocks(from: blocks, at: base.addingTimeInterval(60))
+
+        XCTAssertTrue(blocks[0].isCompleted)
+        XCTAssertEqual(blocks[0].actualDurationSeconds, 60)
+        XCTAssertEqual(blocks[0].timerState, .idle)
+        XCTAssertEqual(blocks[1].timerState, .running)
+        XCTAssertEqual(blocks[1].timerSegmentStartedAt, base.addingTimeInterval(60))
+        XCTAssertFalse(blocks[1].isCompleted)
+    }
+
+    func testResumeConflictResolutionFinishesCurrentAndResumesRequestedActivity() throws {
+        let base = Date(timeIntervalSince1970: 1_000)
+        let runningID = UUID()
+        let requestedID = UUID()
+        var blocks = [
+            ActiveWorkoutRuntimeCardioBlock.fixture(
+                id: runningID,
+                timerState: .running,
+                timerSegmentStartedAt: base
+            ),
+            .fixture(
+                id: requestedID,
+                timerState: .paused,
+                timerAccumulatedSeconds: 30
+            )
+        ]
+        let requestedTransition = ActiveWorkoutCardioRequestedTimerTransition.resume(
+            activityID: requestedID
+        )
+
+        XCTAssertThrowsError(
+            try requestedTransition.apply(to: &blocks, at: base.addingTimeInterval(60))
+        ) {
+            XCTAssertEqual($0 as? WorkoutCardioTimerError, .anotherActivityRunning(runningID))
+        }
+
+        let conflict = ActiveWorkoutCardioTimerConflict(
+            runningActivityID: runningID,
+            requestedTransition: requestedTransition
+        )
+        blocks = try conflict.resolvedBlocks(from: blocks, at: base.addingTimeInterval(60))
+
+        XCTAssertTrue(blocks[0].isCompleted)
+        XCTAssertEqual(blocks[0].actualDurationSeconds, 60)
+        XCTAssertEqual(blocks[0].timerState, .idle)
+        XCTAssertEqual(blocks[1].timerState, .running)
+        XCTAssertEqual(blocks[1].timerSegmentStartedAt, base.addingTimeInterval(60))
+        XCTAssertEqual(blocks[1].timerAccumulatedSeconds, 30)
+        XCTAssertFalse(blocks[1].isCompleted)
+    }
+
     func testElapsedSecondsReconstructsRunningSegmentAfterColdLaunch() {
         let base = Date(timeIntervalSince1970: 1_000)
         let activity = ActiveWorkoutRuntimeCardioBlock.fixture(

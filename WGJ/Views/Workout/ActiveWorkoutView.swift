@@ -404,15 +404,26 @@ struct ActiveWorkoutView: View {
         _ confirmation: ActiveWorkoutCardioConfirmation
     ) -> some View {
         switch confirmation {
-        case .timerConflict(let runningActivityID, let requestedActivityID):
-            Button("Finish current and start new") {
+        case .timerConflict(let conflict):
+            Button(conflict.requestedTransition.conflictConfirmationActionTitle) {
                 cardioConfirmation = nil
-                if finishCardioTimer(activityID: runningActivityID, presentsResult: false) {
-                    startCardioTimer(activityID: requestedActivityID)
+                if finishCardioTimer(activityID: conflict.runningActivityID, presentsResult: false) {
+                    requestCardioTimerTransition(conflict.requestedTransition)
                 }
             }
 
             Button("Keep current running", role: .cancel) {
+                cardioConfirmation = nil
+            }
+
+        case .replace(let activityID, _):
+            Button("Clear data and change exercise", role: .destructive) {
+                cardioConfirmation = nil
+                guard let activity = cardioBlock(activityID: activityID) else { return }
+                showCardioReplacementPicker(for: activity)
+            }
+
+            Button("Cancel", role: .cancel) {
                 cardioConfirmation = nil
             }
 
@@ -586,7 +597,7 @@ struct ActiveWorkoutView: View {
                         onFinish: { finishCardioTimer(activityID: activity.id) },
                         onEditResult: { presentCardioResult(activityID: activity.id) },
                         onEditPlan: { presentCardioSetup(for: activity) },
-                        onChangeExercise: { showCardioReplacementPicker(for: activity) },
+                        onChangeExercise: { requestCardioReplacement(for: activity) },
                         onRemove: { requestCardioRemoval(for: activity) }
                     )
                     .id(cardioScrollTarget(for: activity))
@@ -1344,6 +1355,18 @@ struct ActiveWorkoutView: View {
         )
     }
 
+    private func requestCardioReplacement(for activity: ActiveWorkoutRuntimeCardioBlock) {
+        switch ActiveWorkoutCardioReplacementPolicy.decision(activity: activity) {
+        case .replaceDirectly:
+            showCardioReplacementPicker(for: activity)
+        case .confirmClearingRecordedData:
+            cardioConfirmation = .replace(
+                activityID: activity.id,
+                activityName: activity.exerciseNameSnapshot
+            )
+        }
+    }
+
     private func presentPendingCardioSetup() {
         guard let pendingCardioSelection else { return }
         self.pendingCardioSelection = nil
@@ -1617,14 +1640,24 @@ struct ActiveWorkoutView: View {
     }
 
     private func startCardioTimer(activityID: UUID) {
+        requestCardioTimerTransition(.start(activityID: activityID))
+    }
+
+    private func requestCardioTimerTransition(
+        _ requestedTransition: ActiveWorkoutCardioRequestedTimerTransition
+    ) {
         do {
-            try performCardioTimerTransition(activityID: activityID) { activityID, blocks, date in
-                try WorkoutCardioTimerCoordinator.start(activityID: activityID, blocks: &blocks, at: date)
+            try performCardioTimerTransition(
+                activityID: requestedTransition.activityID
+            ) { _, blocks, date in
+                try requestedTransition.apply(to: &blocks, at: date)
             }
         } catch WorkoutCardioTimerError.anotherActivityRunning(let runningActivityID) {
             cardioConfirmation = .timerConflict(
-                runningActivityID: runningActivityID,
-                requestedActivityID: activityID
+                ActiveWorkoutCardioTimerConflict(
+                    runningActivityID: runningActivityID,
+                    requestedTransition: requestedTransition
+                )
             )
         } catch {
             showError(error)
@@ -1642,18 +1675,7 @@ struct ActiveWorkoutView: View {
     }
 
     private func resumeCardioTimer(activityID: UUID) {
-        do {
-            try performCardioTimerTransition(activityID: activityID) { activityID, blocks, date in
-                try WorkoutCardioTimerCoordinator.resume(activityID: activityID, blocks: &blocks, at: date)
-            }
-        } catch WorkoutCardioTimerError.anotherActivityRunning(let runningActivityID) {
-            cardioConfirmation = .timerConflict(
-                runningActivityID: runningActivityID,
-                requestedActivityID: activityID
-            )
-        } catch {
-            showError(error)
-        }
+        requestCardioTimerTransition(.resume(activityID: activityID))
     }
 
     @discardableResult
@@ -3477,13 +3499,16 @@ private struct ActiveWorkoutCardioSetupRequest: Identifiable {
 }
 
 private enum ActiveWorkoutCardioConfirmation: Identifiable {
-    case timerConflict(runningActivityID: UUID, requestedActivityID: UUID)
+    case timerConflict(ActiveWorkoutCardioTimerConflict)
+    case replace(activityID: UUID, activityName: String)
     case remove(activityID: UUID, activityName: String)
 
     var id: String {
         switch self {
-        case .timerConflict(let runningActivityID, let requestedActivityID):
-            return "timer-conflict-\(runningActivityID)-\(requestedActivityID)"
+        case .timerConflict(let conflict):
+            return conflict.identifier
+        case .replace(let activityID, _):
+            return "replace-\(activityID)"
         case .remove(let activityID, _):
             return "remove-\(activityID)"
         }
@@ -3493,6 +3518,8 @@ private enum ActiveWorkoutCardioConfirmation: Identifiable {
         switch self {
         case .timerConflict:
             return "Another cardio activity is running"
+        case .replace(_, let activityName):
+            return "Change \(activityName)?"
         case .remove(_, let activityName):
             return "Remove \(activityName)?"
         }
@@ -3502,6 +3529,8 @@ private enum ActiveWorkoutCardioConfirmation: Identifiable {
         switch self {
         case .timerConflict:
             return "Only one cardio timer can run at a time."
+        case .replace:
+            return "\(ActiveWorkoutCardioReplacementPolicy.confirmationMessage) This cannot be undone."
         case .remove:
             return "This activity contains saved progress or a result. Removing it cannot be undone."
         }

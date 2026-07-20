@@ -76,6 +76,74 @@ final class ActiveWorkoutCardioPresentationTests: XCTestCase {
         )
     }
 
+    func testRecordedDataPolicyCoversIncompleteResultsDetailsAndTimerProgress() {
+        XCTAssertFalse(
+            ActiveWorkoutCardioRecordedDataPolicy.hasRecordedData(activity: .fixture())
+        )
+        XCTAssertTrue(
+            ActiveWorkoutCardioRecordedDataPolicy.hasRecordedData(
+                activity: .fixture(actualDurationSeconds: 600)
+            )
+        )
+        XCTAssertTrue(
+            ActiveWorkoutCardioRecordedDataPolicy.hasRecordedData(
+                activity: .fixture(actualDistanceMeters: 5_000)
+            )
+        )
+        XCTAssertTrue(
+            ActiveWorkoutCardioRecordedDataPolicy.hasRecordedData(
+                activity: .fixture(inclinePercent: 4.5)
+            )
+        )
+        XCTAssertTrue(
+            ActiveWorkoutCardioRecordedDataPolicy.hasRecordedData(
+                activity: .fixture(resistanceLevel: 7)
+            )
+        )
+        XCTAssertTrue(
+            ActiveWorkoutCardioRecordedDataPolicy.hasRecordedData(
+                activity: .fixture(cardioNotes: "Steady effort")
+            )
+        )
+        XCTAssertTrue(
+            ActiveWorkoutCardioRecordedDataPolicy.hasRecordedData(
+                activity: .fixture(timerAccumulatedSeconds: 45)
+            )
+        )
+    }
+
+    func testReplacementRequiresConfirmationUnlessActivityIsIdleAndRecordedDataEmpty() {
+        XCTAssertEqual(
+            ActiveWorkoutCardioReplacementPolicy.decision(activity: .fixture()),
+            .replaceDirectly
+        )
+
+        let recordedActivities: [ActiveWorkoutRuntimeCardioBlock] = [
+            .fixture(actualDurationSeconds: 600),
+            .fixture(actualDistanceMeters: 5_000),
+            .fixture(inclinePercent: 4.5),
+            .fixture(resistanceLevel: 7),
+            .fixture(cardioNotes: "Steady effort"),
+            .fixture(timerAccumulatedSeconds: 45),
+            .fixture(isCompleted: true),
+            .fixture(
+                timerState: .running,
+                timerSegmentStartedAt: Date(timeIntervalSince1970: 50)
+            )
+        ]
+
+        for activity in recordedActivities {
+            XCTAssertEqual(
+                ActiveWorkoutCardioReplacementPolicy.decision(activity: activity),
+                .confirmClearingRecordedData
+            )
+        }
+        XCTAssertEqual(
+            ActiveWorkoutCardioReplacementPolicy.confirmationMessage,
+            "Recorded cardio data will be cleared."
+        )
+    }
+
     func testFinishedResultPrefillRetainsExactActivityResult() {
         let activity = ActiveWorkoutRuntimeCardioBlock.fixture(
             actualDurationSeconds: 755,
@@ -107,6 +175,9 @@ private extension ActiveWorkoutRuntimeCardioBlock {
         timerAccumulatedSeconds: Int = 0,
         actualDurationSeconds: Int? = nil,
         actualDistanceMeters: Double? = nil,
+        inclinePercent: Double? = nil,
+        resistanceLevel: Double? = nil,
+        cardioNotes: String = "",
         isCompleted: Bool = false
     ) -> Self {
         ActiveWorkoutRuntimeCardioBlock(
@@ -124,6 +195,9 @@ private extension ActiveWorkoutRuntimeCardioBlock {
             actualDurationSeconds: actualDurationSeconds,
             actualDistanceMeters: actualDistanceMeters,
             preferredDistanceUnit: .kilometers,
+            inclinePercent: inclinePercent,
+            resistanceLevel: resistanceLevel,
+            cardioNotes: cardioNotes,
             timerState: timerState,
             timerSegmentStartedAt: timerSegmentStartedAt,
             timerAccumulatedSeconds: timerAccumulatedSeconds,
