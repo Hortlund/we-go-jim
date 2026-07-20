@@ -35,6 +35,7 @@ nonisolated enum ActiveWorkoutScrollRestorePolicy {
         trackedTarget: ActiveWorkoutScrollTarget?,
         expandedExerciseIDs: Set<UUID>,
         orderedExerciseIDs: [UUID],
+        orderedCardioActivityIDsByRole: [WorkoutCardioRole: [UUID]],
         isRestorable: (ActiveWorkoutScrollTarget) -> Bool,
         hasSession: Bool
     ) -> ActiveWorkoutScrollTarget? {
@@ -49,22 +50,32 @@ nonisolated enum ActiveWorkoutScrollRestorePolicy {
         if trackedTarget == .cancelSection {
             return terminalRestoreTarget(
                 orderedExerciseIDs: orderedExerciseIDs,
+                orderedCardioActivityIDsByRole: orderedCardioActivityIDsByRole,
                 isRestorable: isRestorable
             ) ?? (hasSession ? .header : nil)
         }
 
         if let trackedTarget,
            trackedTarget != .header,
-           isRestorable(trackedTarget) {
-            return trackedTarget
+           let resolvedTrackedTarget = resolvedRestorableTarget(
+               trackedTarget,
+               orderedCardioActivityIDsByRole: orderedCardioActivityIDsByRole,
+               isRestorable: isRestorable
+           ) {
+            return resolvedTrackedTarget
         }
 
         if let expandedExerciseID = orderedExerciseIDs.first(where: expandedExerciseIDs.contains) {
             return .exercise(expandedExerciseID)
         }
 
-        if let trackedTarget, isRestorable(trackedTarget) {
-            return trackedTarget
+        if let trackedTarget,
+           let resolvedTrackedTarget = resolvedRestorableTarget(
+               trackedTarget,
+               orderedCardioActivityIDsByRole: orderedCardioActivityIDsByRole,
+               isRestorable: isRestorable
+           ) {
+            return resolvedTrackedTarget
         }
 
         return hasSession ? .header : nil
@@ -72,10 +83,15 @@ nonisolated enum ActiveWorkoutScrollRestorePolicy {
 
     private static func terminalRestoreTarget(
         orderedExerciseIDs: [UUID],
+        orderedCardioActivityIDsByRole: [WorkoutCardioRole: [UUID]],
         isRestorable: (ActiveWorkoutScrollTarget) -> Bool
     ) -> ActiveWorkoutScrollTarget? {
-        if isRestorable(.postWorkoutCardio) {
-            return .postWorkoutCardio
+        if let finisherTarget = lastRestorableCardioTarget(
+            role: .finisher,
+            orderedCardioActivityIDsByRole: orderedCardioActivityIDsByRole,
+            isRestorable: isRestorable
+        ) {
+            return finisherTarget
         }
 
         if let exerciseTarget = orderedExerciseIDs.reversed()
@@ -84,8 +100,20 @@ nonisolated enum ActiveWorkoutScrollRestorePolicy {
             return exerciseTarget
         }
 
-        if isRestorable(.preWorkoutCardio) {
-            return .preWorkoutCardio
+        if let mainTarget = lastRestorableCardioTarget(
+            role: .main,
+            orderedCardioActivityIDsByRole: orderedCardioActivityIDsByRole,
+            isRestorable: isRestorable
+        ) {
+            return mainTarget
+        }
+
+        if let warmUpTarget = lastRestorableCardioTarget(
+            role: .warmUp,
+            orderedCardioActivityIDsByRole: orderedCardioActivityIDsByRole,
+            isRestorable: isRestorable
+        ) {
+            return warmUpTarget
         }
 
         if isRestorable(.header) {
@@ -93,5 +121,32 @@ nonisolated enum ActiveWorkoutScrollRestorePolicy {
         }
 
         return nil
+    }
+
+    static func resolvedRestorableTarget(
+        _ target: ActiveWorkoutScrollTarget,
+        orderedCardioActivityIDsByRole: [WorkoutCardioRole: [UUID]],
+        isRestorable: (ActiveWorkoutScrollTarget) -> Bool
+    ) -> ActiveWorkoutScrollTarget? {
+        if case .cardio(let role, nil) = target {
+            return orderedCardioActivityIDsByRole[role, default: []]
+                .lazy
+                .map { ActiveWorkoutScrollTarget.cardio(role: role, activityID: $0) }
+                .first(where: isRestorable)
+        }
+
+        return isRestorable(target) ? target : nil
+    }
+
+    private static func lastRestorableCardioTarget(
+        role: WorkoutCardioRole,
+        orderedCardioActivityIDsByRole: [WorkoutCardioRole: [UUID]],
+        isRestorable: (ActiveWorkoutScrollTarget) -> Bool
+    ) -> ActiveWorkoutScrollTarget? {
+        orderedCardioActivityIDsByRole[role, default: []]
+            .reversed()
+            .lazy
+            .map { ActiveWorkoutScrollTarget.cardio(role: role, activityID: $0) }
+            .first(where: isRestorable)
     }
 }

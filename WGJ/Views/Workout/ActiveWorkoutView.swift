@@ -59,7 +59,12 @@ struct ActiveWorkoutView: View {
     @State private var pendingCompletionAfterTemplateReviewSheet = false
     @State private var exerciseSettingsDraft: ActiveWorkoutExerciseSettingsDraft?
     @State private var exerciseComponentPickerDraft: ActiveWorkoutExerciseComponentPickerDraft?
-    @State private var cardioSettingsDraft: WorkoutCardioSettingsDraft?
+    @State private var cardioPickerRequest: ActiveWorkoutCardioPickerRequest?
+    @State private var pendingCardioSelection: ActiveWorkoutCardioPendingSelection?
+    @State private var cardioSetupRequest: ActiveWorkoutCardioSetupRequest?
+    @State private var cardioConfirmation: ActiveWorkoutCardioConfirmation?
+    @State private var pendingFinishedCardioID: UUID?
+    @State private var pendingFinishedCardioResult: ActiveWorkoutPendingCardioResult?
     @State private var exerciseReorderRequest: ExerciseReorderRequest?
     @State private var pendingTemplateUpdatePreview: WorkoutTemplateSyncPreview?
     @State private var pendingTemplateUpdateAfterReviewSheetDismissal: WorkoutTemplateSyncPreview?
@@ -164,14 +169,26 @@ struct ActiveWorkoutView: View {
                 }
                 .wgjSheetSurface()
             }
-            .sheet(item: $cardioSettingsDraft) { draft in
-                WorkoutCardioSettingsSheet(draft: draft) { updatedDurationSeconds in
-                    saveCardioDuration(
-                        phase: draft.phase,
-                        targetDurationSeconds: updatedDurationSeconds
+            .sheet(item: $cardioPickerRequest, onDismiss: presentPendingCardioSetup) { request in
+                CardioActivityQuickPicker { selection in
+                    pendingCardioSelection = ActiveWorkoutCardioPendingSelection(
+                        pickerRequest: request,
+                        selection: selection
                     )
                 }
-                .wgjSheetSurface()
+            }
+            .sheet(item: $cardioSetupRequest) { request in
+                WorkoutCardioSetupSheet(
+                    activityName: request.selection.displayName,
+                    draft: request.setupDraft
+                ) { validatedSetup in
+                    applyCardioSetup(request: request, validatedSetup: validatedSetup)
+                }
+            }
+            .sheet(item: $pendingFinishedCardioResult, onDismiss: {
+                pendingFinishedCardioID = nil
+            }) { result in
+                ActiveWorkoutPendingCardioResultSheet(result: result)
             }
             .sheet(item: $exerciseReorderRequest) { request in
                 ExerciseReorderSheet(
@@ -235,6 +252,10 @@ struct ActiveWorkoutView: View {
                 pendingCompletionAfterSaveTemplateSheet = false
                 pendingCompletionAfterTemplateReviewSheet = false
                 pendingTemplateUpdateAfterReviewSheetDismissal = nil
+                pendingCardioSelection = nil
+                cardioConfirmation = nil
+                pendingFinishedCardioID = nil
+                pendingFinishedCardioResult = nil
                 deferredHydrationTask?.cancel()
                 deferredHydrationTask = nil
                 foregroundNonCriticalInteractionWorkTask?.cancel()
@@ -247,6 +268,16 @@ struct ActiveWorkoutView: View {
             } message: {
                 workoutErrorAlertMessage
             }
+            .confirmationDialog(
+                cardioConfirmation?.title ?? "Cardio",
+                isPresented: cardioConfirmationBinding,
+                titleVisibility: .visible,
+                presenting: cardioConfirmation
+            ) { confirmation in
+                cardioConfirmationActions(confirmation)
+            } message: { confirmation in
+                Text(confirmation.message)
+            }
         }
     }
 
@@ -254,6 +285,11 @@ struct ActiveWorkoutView: View {
     private var activeWorkoutScrollContent: some View {
         VStack(alignment: .leading, spacing: 16) {
             activeWorkoutHeaderContent
+            cardioRoleSection(for: .warmUp)
+            cardioRoleSection(for: .main)
+            if session != nil {
+                exercisesSectionHeader
+            }
             emptyWorkoutContent
 
             ForEach(exerciseDisplayGroups) { group in
@@ -265,9 +301,7 @@ struct ActiveWorkoutView: View {
                     .disabled(session == nil)
             }
 
-            if postWorkoutCardio != nil {
-                cardioSection(for: .postWorkout)
-            }
+            cardioRoleSection(for: .finisher)
 
             activeWorkoutCancelContent
         }
@@ -283,17 +317,12 @@ struct ActiveWorkoutView: View {
                 session: session,
                 exerciseCount: sessionExercises.count,
                 cardioCount: orderedCardioBlocks.count,
-                missingCardioPhases: missingCardioPhases,
                 onSubmit: {
                     persistCommittedUserEditSnapshot()
                 },
                 onAddCardio: showCardioPicker
             )
             .id(ActiveWorkoutScrollTarget.header)
-            if preWorkoutCardio != nil {
-                cardioSection(for: .preWorkout)
-            }
-            exercisesSectionHeader
         } else if isEndingSession || completedSessionID != nil {
             WGJEmptyStateCard(
                 title: "Wrapping up workout",
@@ -359,6 +388,46 @@ struct ActiveWorkoutView: View {
         Text(errorMessage)
     }
 
+    private var cardioConfirmationBinding: Binding<Bool> {
+        Binding(
+            get: { cardioConfirmation != nil },
+            set: { isPresented in
+                if !isPresented {
+                    cardioConfirmation = nil
+                }
+            }
+        )
+    }
+
+    @ViewBuilder
+    private func cardioConfirmationActions(
+        _ confirmation: ActiveWorkoutCardioConfirmation
+    ) -> some View {
+        switch confirmation {
+        case .timerConflict(let runningActivityID, let requestedActivityID):
+            Button("Finish current and start new") {
+                cardioConfirmation = nil
+                if finishCardioTimer(activityID: runningActivityID, presentsResult: false) {
+                    startCardioTimer(activityID: requestedActivityID)
+                }
+            }
+
+            Button("Keep current running", role: .cancel) {
+                cardioConfirmation = nil
+            }
+
+        case .remove(let activityID, _):
+            Button("Remove", role: .destructive) {
+                cardioConfirmation = nil
+                removeCardioActivity(activityID: activityID)
+            }
+
+            Button("Cancel", role: .cancel) {
+                cardioConfirmation = nil
+            }
+        }
+    }
+
     private func templateReviewSheet(for preview: WorkoutTemplateSyncPreview) -> some View {
         ActiveWorkoutTemplateSyncReviewSheet(
             preview: preview,
@@ -376,6 +445,10 @@ struct ActiveWorkoutView: View {
         renderProjection.session
     }
 
+    private var preferredDistanceUnit: WorkoutDistanceUnit {
+        profilePreferences.preferredDistanceUnit
+    }
+
     @MainActor
     private var sessionExercises: [ActiveWorkoutRuntimeExercise] {
         renderProjection.sessionExercises
@@ -387,23 +460,22 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
-    private var preWorkoutCardio: ActiveWorkoutRuntimeCardioBlock? {
-        renderProjection.preWorkoutCardio
-    }
-
-    @MainActor
-    private var postWorkoutCardio: ActiveWorkoutRuntimeCardioBlock? {
-        renderProjection.postWorkoutCardio
-    }
-
-    @MainActor
     private var hasWorkoutContent: Bool {
         renderProjection.hasWorkoutContent
     }
 
     @MainActor
-    private var missingCardioPhases: [WorkoutCardioPhase] {
-        renderProjection.missingCardioPhases
+    private func cardioBlocks(for role: WorkoutCardioRole) -> [ActiveWorkoutRuntimeCardioBlock] {
+        renderProjection.cardioByRole[role, default: []]
+    }
+
+    @MainActor
+    private var orderedCardioActivityIDsByRole: [WorkoutCardioRole: [UUID]] {
+        Dictionary(
+            uniqueKeysWithValues: WorkoutCardioRole.allCases.map { role in
+                (role, cardioBlocks(for: role).map(\.id))
+            }
+        )
     }
 
     @MainActor
@@ -491,81 +563,36 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     @ViewBuilder
-    private func cardioSection(
-        for phase: WorkoutCardioPhase
-    ) -> some View {
-        if let cardioBlock = cardioBlock(for: phase) {
-            ActiveWorkoutCardioPhaseCard(
-                phase: phase,
-                exerciseName: cardioBlock.exerciseNameSnapshot,
-                descriptor: cardioDescriptor(
-                    category: cardioBlock.categorySnapshot,
-                    muscleSummary: cardioBlock.muscleSummarySnapshot
-                ),
-                targetDurationSeconds: cardioBlock.targetDurationSeconds,
-                statusText: cardioStatusText(for: cardioBlock),
-                statusTint: cardioStatusTint(for: cardioBlock),
-                footnote: cardioFootnote(for: cardioBlock),
-                isCompleted: resolvedCardioCompletion(for: cardioBlock),
-                canComplete: true,
-                completionTitle: "Complete \(cardioBlock.phase.shortTitle)",
-                completionAccessibilityLabel: cardioCompletionAccessibilityLabel(for: cardioBlock),
-                undoAccessibilityLabel: cardioCompletionAccessibilityLabel(for: cardioBlock),
-                completionAccessibilityIdentifier: "active-workout-\(cardioBlock.phase.rawValue)-toggle-button",
-                accessibilityIdentifier: "active-workout-\(phase.rawValue)-card",
-                onToggleCompletion: {
-                    toggleCardioCompletion(for: cardioBlock)
+    private func cardioRoleSection(for role: WorkoutCardioRole) -> some View {
+        let activities = cardioBlocks(for: role)
+        if !activities.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                WGJActionHeader(role.title, subtitle: cardioSectionSubtitle(for: role)) {
+                    Button {
+                        showCardioPicker(for: role)
+                    } label: {
+                        Label("Add", systemImage: "plus")
+                    }
+                    .buttonStyle(WGJPrimaryButtonStyle())
+                    .accessibilityLabel("Add \(role.title) cardio")
                 }
-            ) {
-                cardioSectionActionsButton(for: cardioBlock)
+
+                ForEach(activities) { activity in
+                    ActiveWorkoutCardioActivityCard(
+                        presentation: .make(activity: activity),
+                        onStart: { startCardioTimer(activityID: activity.id) },
+                        onPause: { pauseCardioTimer(activityID: activity.id) },
+                        onResume: { resumeCardioTimer(activityID: activity.id) },
+                        onFinish: { finishCardioTimer(activityID: activity.id) },
+                        onEditResult: { presentCardioResult(activityID: activity.id) },
+                        onEditPlan: { presentCardioSetup(for: activity) },
+                        onChangeExercise: { showCardioReplacementPicker(for: activity) },
+                        onRemove: { requestCardioRemoval(for: activity) }
+                    )
+                    .id(cardioScrollTarget(for: activity))
+                }
             }
-            .id(cardioScrollTarget(for: phase))
         }
-    }
-
-    @MainActor
-    private func cardioSectionActionsButton(for cardioBlock: ActiveWorkoutRuntimeCardioBlock) -> some View {
-        let accessibilityIdentifier = "active-workout-\(cardioBlock.phase.rawValue)-actions-button"
-
-        return Menu {
-            Button("Edit Duration") {
-                cardioSettingsDraft = makeCardioSettingsDraft(from: cardioBlock)
-            }
-
-            Button("Change Exercise") {
-                showCardioPicker(for: cardioBlock.phase)
-            }
-
-            Button("Remove", role: .destructive) {
-                removeCardioBlock(phase: cardioBlock.phase)
-            }
-        } label: {
-            ActiveWorkoutCardioHeaderActionIcon(tint: cardioHeaderTint(for: cardioBlock))
-        }
-        .menuIndicator(.hidden)
-        .accessibilityLabel("Cardio Actions")
-        .accessibilityIdentifier(accessibilityIdentifier)
-    }
-
-    private func cardioHeaderTint(for cardioBlock: ActiveWorkoutRuntimeCardioBlock) -> Color {
-        if resolvedCardioCompletion(for: cardioBlock) {
-            return WGJTheme.success
-        }
-
-        switch cardioBlock.phase {
-        case .preWorkout:
-            return WGJTheme.accentBlue
-        case .postWorkout:
-            return WGJTheme.accentGold
-        }
-    }
-
-    private func cardioCompletionAccessibilityLabel(for cardioBlock: ActiveWorkoutRuntimeCardioBlock) -> String {
-        if resolvedCardioCompletion(for: cardioBlock) {
-            return "Mark \(cardioBlock.phase.shortTitle) Incomplete"
-        }
-
-        return "Complete \(cardioBlock.phase.shortTitle)"
     }
 
     @MainActor
@@ -819,9 +846,8 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
-    private func cardioBlock(for phase: WorkoutCardioPhase) -> ActiveWorkoutRuntimeCardioBlock? {
-        let role: WorkoutCardioRole = phase == .preWorkout ? .warmUp : .finisher
-        return renderProjection.cardioByRole[role]?.first
+    private func cardioBlock(activityID: UUID) -> ActiveWorkoutRuntimeCardioBlock? {
+        orderedCardioBlocks.first { $0.id == activityID }
     }
 
     @MainActor
@@ -945,8 +971,12 @@ struct ActiveWorkoutView: View {
     @MainActor
     private func restoreInitialScrollTargetIfNeeded(using scrollProxy: ScrollViewProxy) {
         guard !didRestoreInitialScrollTarget else { return }
-        guard let target = activeWorkoutPresentationState.preparedScrollTarget(for: sessionID) else { return }
-        guard isRestorableScrollTarget(target) else {
+        guard let preparedTarget = activeWorkoutPresentationState.preparedScrollTarget(for: sessionID) else { return }
+        guard let target = ActiveWorkoutScrollRestorePolicy.resolvedRestorableTarget(
+            preparedTarget,
+            orderedCardioActivityIDsByRole: orderedCardioActivityIDsByRole,
+            isRestorable: isRestorableScrollTarget
+        ) else {
             activeWorkoutPresentationState.stageScrollTarget(nil, for: sessionID)
             didRestoreInitialScrollTarget = true
             return
@@ -986,6 +1016,7 @@ struct ActiveWorkoutView: View {
 
         return ActiveWorkoutProfilePreferences(
             preferredLoadUnit: profile.preferredLoadUnit,
+            preferredDistanceUnit: profile.preferredDistanceUnit,
             automaticallyClosesCompletedExercises: profile.automaticallyClosesCompletedExercises
         )
     }
@@ -1284,14 +1315,60 @@ struct ActiveWorkoutView: View {
             return addExercise(item)
         case .replaceExercise(let exerciseID):
             return replaceExercise(exerciseID: exerciseID, with: item)
-        case .cardio(let phase):
-            return upsertCardioBlock(phase: phase, catalogItem: item)
         }
     }
 
-    private func showCardioPicker(for phase: WorkoutCardioPhase) {
+    private func showCardioPicker() {
+        showCardioPicker(
+            for: ActiveWorkoutCardioQuickAddPolicy.defaultRole(
+                hasStrengthExercises: !sessionExercises.isEmpty
+            )
+        )
+    }
+
+    private func showCardioPicker(for role: WorkoutCardioRole) {
         dismissKeyboard()
-        pickerTarget = .cardio(phase)
+        cardioPickerRequest = ActiveWorkoutCardioPickerRequest(
+            activityID: nil,
+            role: role,
+            resetsResult: false
+        )
+    }
+
+    private func showCardioReplacementPicker(for activity: ActiveWorkoutRuntimeCardioBlock) {
+        dismissKeyboard()
+        cardioPickerRequest = ActiveWorkoutCardioPickerRequest(
+            activityID: activity.id,
+            role: activity.role,
+            resetsResult: true
+        )
+    }
+
+    private func presentPendingCardioSetup() {
+        guard let pendingCardioSelection else { return }
+        self.pendingCardioSelection = nil
+        cardioSetupRequest = makeCardioSetupRequest(
+            activityID: pendingCardioSelection.pickerRequest.activityID,
+            role: pendingCardioSelection.pickerRequest.role,
+            selection: pendingCardioSelection.selection,
+            resetsResult: pendingCardioSelection.pickerRequest.resetsResult
+        )
+    }
+
+    private func presentCardioSetup(for activity: ActiveWorkoutRuntimeCardioBlock) {
+        cardioSetupRequest = makeCardioSetupRequest(
+            activityID: activity.id,
+            role: activity.role,
+            selection: ExerciseCatalogSelection(
+                remoteUUID: activity.catalogExerciseUUID,
+                displayName: activity.exerciseNameSnapshot,
+                categoryName: activity.categorySnapshot,
+                equipmentSummary: "",
+                primaryMuscleNames: activity.muscleSummarySnapshot,
+                cardioTrackingProfileRaw: activity.trackingProfile?.rawValue
+            ),
+            resetsResult: false
+        )
     }
 
     private func showExerciseReplacementPicker(for exerciseID: UUID) {
@@ -1427,76 +1504,207 @@ struct ActiveWorkoutView: View {
         persistCommittedUserEditSnapshot()
     }
 
-    private func upsertCardioBlock(
-        phase: WorkoutCardioPhase,
-        catalogItem: ExerciseCatalogSelection
-    ) -> ExercisePickerSelectionResult {
-        let existing = cardioBlock(for: phase)
-        let duplicateResult = ExerciseReplacementSelectionPolicy.result(
-            catalogExerciseUUID: catalogItem.remoteUUID,
-            exerciseName: catalogItem.displayName,
-            existingCatalogExerciseUUIDs: [existing?.catalogExerciseUUID].compactMap { $0 },
-            destination: .activeWorkout
+    private func makeCardioSetupRequest(
+        activityID: UUID?,
+        role: WorkoutCardioRole,
+        selection: ExerciseCatalogSelection,
+        resetsResult: Bool
+    ) -> ActiveWorkoutCardioSetupRequest {
+        let existing = activityID.flatMap(cardioBlock(activityID:))
+        let distanceUnit = existing?.preferredDistanceUnit ?? preferredDistanceUnit
+        let distanceText = existing?.targetDistanceMeters.map {
+            WorkoutCardioSetupNumericCodec.distanceText(meters: $0, unit: distanceUnit)
+        } ?? ""
+
+        return ActiveWorkoutCardioSetupRequest(
+            activityID: activityID ?? UUID(),
+            isNewActivity: activityID == nil,
+            selection: selection,
+            setupDraft: WorkoutCardioSetupDraft(
+                role: existing?.role ?? role,
+                goalKind: existing?.goalKind ?? .time,
+                durationMinutesText: WorkoutCardioSetupNumericCodec.durationMinutesText(
+                    seconds: existing?.targetDurationSeconds ?? 600
+                ),
+                distanceText: distanceText,
+                distanceUnit: distanceUnit,
+                trackingProfile: selection.cardioTrackingProfile
+                    ?? existing?.trackingProfile
+                    ?? .machineDistance
+            ),
+            resetsResult: resetsResult
         )
-        guard duplicateResult == .accepted else {
-            return duplicateResult
-        }
+    }
 
-        let updated = ActiveWorkoutRuntimeCardioBlock(
-            id: existing?.id ?? UUID(),
-            phase: phase,
-            catalogExerciseUUID: catalogItem.remoteUUID,
-            exerciseNameSnapshot: catalogItem.displayName,
-            categorySnapshot: catalogItem.categoryName,
-            muscleSummarySnapshot: catalogItem.primaryMuscleNames,
-            targetDurationSeconds: existing?.targetDurationSeconds ?? phase.defaultDurationSeconds,
-            isCompleted: false,
-            createdAt: existing?.createdAt ?? .now,
-            updatedAt: .now
+    private func applyCardioSetup(
+        request: ActiveWorkoutCardioSetupRequest,
+        validatedSetup: ValidatedWorkoutCardioSetup
+    ) {
+        let now = Date()
+        let existing = cardioBlock(activityID: request.activityID)
+        var updated = existing ?? ActiveWorkoutRuntimeCardioBlock(
+            id: request.activityID,
+            phase: TemplateCardioDraftReducer.legacyPhase(for: validatedSetup.role),
+            role: validatedSetup.role,
+            catalogExerciseUUID: request.selection.remoteUUID,
+            exerciseNameSnapshot: request.selection.displayName,
+            categorySnapshot: request.selection.categoryName,
+            muscleSummarySnapshot: request.selection.primaryMuscleNames,
+            trackingProfile: validatedSetup.trackingProfile,
+            goalKind: validatedSetup.goalKind,
+            targetDurationSeconds: validatedSetup.targetDurationSeconds,
+            targetDistanceMeters: validatedSetup.targetDistanceMeters,
+            preferredDistanceUnit: validatedSetup.preferredDistanceUnit,
+            createdAt: now,
+            updatedAt: now
         )
+
+        updated.phase = TemplateCardioDraftReducer.legacyPhase(for: validatedSetup.role)
+        updated.role = validatedSetup.role
+        updated.catalogExerciseUUID = request.selection.remoteUUID
+        updated.exerciseNameSnapshot = request.selection.displayName
+        updated.categorySnapshot = request.selection.categoryName
+        updated.muscleSummarySnapshot = request.selection.primaryMuscleNames
+        updated.trackingProfile = validatedSetup.trackingProfile
+        updated.goalKind = validatedSetup.goalKind
+        updated.targetDurationSeconds = validatedSetup.targetDurationSeconds
+        updated.targetDistanceMeters = validatedSetup.targetDistanceMeters
+        updated.preferredDistanceUnit = validatedSetup.preferredDistanceUnit
+        updated.updatedAt = now
+
+        if request.resetsResult {
+            updated.sourceTemplateCardioID = nil
+            updated.actualDurationSeconds = nil
+            updated.actualDistanceMeters = nil
+            updated.inclinePercent = nil
+            updated.resistanceLevel = nil
+            updated.cardioNotes = ""
+            updated.timerState = .idle
+            updated.timerSegmentStartedAt = nil
+            updated.timerAccumulatedSeconds = 0
+            updated.isCompleted = false
+        }
+
         updateRuntimeSession { session in
-            session.cardioBlocks.removeAll { $0.phase == phase }
-            session.cardioBlocks.append(updated)
+            session.cardioBlocks = request.isNewActivity
+                ? ActiveWorkoutRuntimeCardioPlanReducer.appending(updated, to: session.cardioBlocks)
+                : ActiveWorkoutRuntimeCardioPlanReducer.updating(updated, in: session.cardioBlocks)
         }
         persistCommittedUserEditSnapshot()
-        return .accepted
     }
 
-    private func removeCardioBlock(phase: WorkoutCardioPhase) {
-        let removedCardioIDs = runtimeSession?.cardioBlocks
-            .filter { $0.phase == phase }
-            .map(\.id) ?? []
+    private func requestCardioRemoval(for activity: ActiveWorkoutRuntimeCardioBlock) {
+        if ActiveWorkoutCardioRemovalPolicy.requiresConfirmation(activity: activity) {
+            cardioConfirmation = .remove(activityID: activity.id, activityName: activity.exerciseNameSnapshot)
+        } else {
+            removeCardioActivity(activityID: activity.id)
+        }
+    }
+
+    private func removeCardioActivity(activityID: UUID) {
         updateRuntimeSession { session in
-            session.cardioBlocks.removeAll { $0.phase == phase }
+            session.cardioBlocks = ActiveWorkoutRuntimeCardioPlanReducer.removing(
+                activityID: activityID,
+                from: session.cardioBlocks
+            )
         }
-        for removedCardioID in removedCardioIDs {
-            pendingCardioCompletionsByID[removedCardioID] = nil
+        pendingCardioCompletionsByID[activityID] = nil
+        if pendingFinishedCardioID == activityID {
+            pendingFinishedCardioID = nil
+            pendingFinishedCardioResult = nil
         }
-        refreshRenderProjection()
         persistCommittedUserEditSnapshot()
     }
 
-    private func saveCardioDuration(phase: WorkoutCardioPhase, targetDurationSeconds: Int) {
-        updateRuntimeSession { session in
-            guard let index = session.cardioBlocks.firstIndex(where: { $0.phase == phase }) else { return }
-            session.cardioBlocks[index].targetDurationSeconds = targetDurationSeconds
-            session.cardioBlocks[index].isCompleted = resolvedCardioCompletion(for: session.cardioBlocks[index])
-            session.cardioBlocks[index].updatedAt = .now
+    private func startCardioTimer(activityID: UUID) {
+        do {
+            try performCardioTimerTransition(activityID: activityID) { activityID, blocks, date in
+                try WorkoutCardioTimerCoordinator.start(activityID: activityID, blocks: &blocks, at: date)
+            }
+        } catch WorkoutCardioTimerError.anotherActivityRunning(let runningActivityID) {
+            cardioConfirmation = .timerConflict(
+                runningActivityID: runningActivityID,
+                requestedActivityID: activityID
+            )
+        } catch {
+            showError(error)
         }
-        persistCommittedUserEditSnapshot()
     }
 
-    @MainActor
-    private func toggleCardioCompletion(for cardioBlock: ActiveWorkoutRuntimeCardioBlock) {
-        let currentCompletion = resolvedCardioCompletion(for: cardioBlock)
-        let updatedCompletion = !currentCompletion
-        pendingCardioCompletionsByID[cardioBlock.id] = updatedCompletion
-        refreshRenderProjection()
+    private func pauseCardioTimer(activityID: UUID) {
+        do {
+            try performCardioTimerTransition(activityID: activityID) { activityID, blocks, date in
+                try WorkoutCardioTimerCoordinator.pause(activityID: activityID, blocks: &blocks, at: date)
+            }
+        } catch {
+            showError(error)
+        }
+    }
 
-        if updatedCompletion {
+    private func resumeCardioTimer(activityID: UUID) {
+        do {
+            try performCardioTimerTransition(activityID: activityID) { activityID, blocks, date in
+                try WorkoutCardioTimerCoordinator.resume(activityID: activityID, blocks: &blocks, at: date)
+            }
+        } catch WorkoutCardioTimerError.anotherActivityRunning(let runningActivityID) {
+            cardioConfirmation = .timerConflict(
+                runningActivityID: runningActivityID,
+                requestedActivityID: activityID
+            )
+        } catch {
+            showError(error)
+        }
+    }
+
+    @discardableResult
+    private func finishCardioTimer(
+        activityID: UUID,
+        presentsResult: Bool = true
+    ) -> Bool {
+        do {
+            try performCardioTimerTransition(activityID: activityID) { activityID, blocks, date in
+                try WorkoutCardioTimerCoordinator.finish(activityID: activityID, blocks: &blocks, at: date)
+            }
             WorkoutFeedbackCenter.shared.exerciseCompleted()
+            if presentsResult {
+                presentCardioResult(activityID: activityID)
+            }
+            return true
+        } catch {
+            showError(error)
+            return false
         }
+    }
+
+    private func performCardioTimerTransition(
+        activityID: UUID,
+        at date: Date = .now,
+        transition: (
+            UUID,
+            inout [ActiveWorkoutRuntimeCardioBlock],
+            Date
+        ) throws -> Void
+    ) throws {
+        guard var updatedSession = runtimeSession else {
+            throw WorkoutCardioTimerError.activityNotFound
+        }
+
+        try transition(activityID, &updatedSession.cardioBlocks, date)
+        guard let index = updatedSession.cardioBlocks.firstIndex(where: { $0.id == activityID }) else {
+            throw WorkoutCardioTimerError.activityNotFound
+        }
+        updatedSession.cardioBlocks[index].updatedAt = date
+        updatedSession.touch(date: date)
+        runtimeSession = updatedSession
+
+        // This existing committed boundary performs the one projection refresh and snapshot write.
         persistCommittedUserEditSnapshot()
+    }
+
+    private func presentCardioResult(activityID: UUID) {
+        guard let activity = cardioBlock(activityID: activityID) else { return }
+        pendingFinishedCardioID = activityID
+        pendingFinishedCardioResult = .make(activity: activity)
     }
 
     @MainActor
@@ -1948,6 +2156,7 @@ struct ActiveWorkoutView: View {
             trackedTarget: scrollPositionTracker.currentTarget,
             expandedExerciseIDs: cardStateController.expandedExerciseIDs(),
             orderedExerciseIDs: sessionExercises.map(\.id),
+            orderedCardioActivityIDsByRole: orderedCardioActivityIDsByRole,
             isRestorable: isRestorableScrollTarget,
             hasSession: session != nil
         )
@@ -1958,12 +2167,11 @@ struct ActiveWorkoutView: View {
         switch target {
         case .header:
             return session != nil
-        case .preWorkoutCardio:
-            return preWorkoutCardio != nil
+        case .cardio(let role, let activityID):
+            guard let activityID else { return false }
+            return cardioBlocks(for: role).contains { $0.id == activityID }
         case .exercise(let exerciseID):
             return sessionExercises.contains { $0.id == exerciseID }
-        case .postWorkoutCardio:
-            return postWorkoutCardio != nil
         case .cancelSection:
             return session != nil && !isEndingSession
         }
@@ -2577,13 +2785,10 @@ struct ActiveWorkoutView: View {
         }
     }
 
-    private func cardioScrollTarget(for phase: WorkoutCardioPhase) -> ActiveWorkoutScrollTarget {
-        switch phase {
-        case .preWorkout:
-            return .preWorkoutCardio
-        case .postWorkout:
-            return .postWorkoutCardio
-        }
+    private func cardioScrollTarget(
+        for activity: ActiveWorkoutRuntimeCardioBlock
+    ) -> ActiveWorkoutScrollTarget {
+        .cardio(role: activity.role, activityID: activity.id)
     }
 
     @MainActor
@@ -2611,75 +2816,39 @@ struct ActiveWorkoutView: View {
     private func resolvedCardioDraft(for cardioBlock: ActiveWorkoutRuntimeCardioBlock) -> WorkoutCardioBlockDraft {
         WorkoutCardioBlockDraft(
             id: cardioBlock.id,
+            sourceTemplateCardioID: cardioBlock.sourceTemplateCardioID,
             phase: cardioBlock.phase,
+            role: cardioBlock.role,
+            sortOrder: cardioBlock.sortOrder,
             catalogExerciseUUID: cardioBlock.catalogExerciseUUID,
             exerciseNameSnapshot: cardioBlock.exerciseNameSnapshot,
             categorySnapshot: cardioBlock.categorySnapshot,
             muscleSummarySnapshot: cardioBlock.muscleSummarySnapshot,
+            trackingProfile: cardioBlock.trackingProfile,
+            goalKind: cardioBlock.goalKind,
             targetDurationSeconds: cardioBlock.targetDurationSeconds,
+            targetDistanceMeters: cardioBlock.targetDistanceMeters,
+            actualDurationSeconds: cardioBlock.actualDurationSeconds,
+            actualDistanceMeters: cardioBlock.actualDistanceMeters,
+            preferredDistanceUnit: cardioBlock.preferredDistanceUnit,
+            inclinePercent: cardioBlock.inclinePercent,
+            resistanceLevel: cardioBlock.resistanceLevel,
+            cardioNotes: cardioBlock.cardioNotes,
+            timerState: cardioBlock.timerState,
+            timerSegmentStartedAt: cardioBlock.timerSegmentStartedAt,
+            timerAccumulatedSeconds: cardioBlock.timerAccumulatedSeconds,
             isCompleted: resolvedCardioCompletion(for: cardioBlock)
         )
     }
 
-    @MainActor
-    private func cardioStatusText(for cardioBlock: ActiveWorkoutRuntimeCardioBlock) -> String {
-        if resolvedCardioCompletion(for: cardioBlock) {
-            return "Complete"
-        }
-
-        switch cardioBlock.phase {
-        case .preWorkout:
-            return "Ready"
-        case .postWorkout:
-            return "Ready"
-        }
-    }
-
-    @MainActor
-    private func cardioStatusTint(for cardioBlock: ActiveWorkoutRuntimeCardioBlock) -> Color {
-        if resolvedCardioCompletion(for: cardioBlock) {
-            return WGJTheme.success
-        }
-
-        switch cardioBlock.phase {
-        case .preWorkout:
-            return WGJTheme.accentBlue
-        case .postWorkout:
-            return WGJTheme.accentGold
-        }
-    }
-
-    private func cardioSectionSubtitle(for phase: WorkoutCardioPhase) -> String {
-        switch phase {
-        case .preWorkout:
-            return "Optional warmup cardio you can complete whenever it fits the session."
-        case .postWorkout:
-            return "Optional cooldown cardio you can complete whenever it fits the session."
-        }
-    }
-
-    private func cardioEmptyStateMessage(for phase: WorkoutCardioPhase) -> String {
-        switch phase {
-        case .preWorkout:
-            return "Add a short low-effort warmup like bike, walk, or crosstrainer."
-        case .postWorkout:
-            return "Add a longer cooldown like incline treadmill or an easy bike finish."
-        }
-    }
-
-    @MainActor
-    private func cardioFootnote(for cardioBlock: ActiveWorkoutRuntimeCardioBlock) -> String {
-        switch cardioBlock.phase {
-        case .preWorkout:
-            return resolvedCardioCompletion(for: cardioBlock)
-                ? "Warmup complete."
-                : "You can log this before, during, or after the main sets."
-        case .postWorkout:
-            if resolvedCardioCompletion(for: cardioBlock) {
-                return "Cooldown complete. This workout is fully wrapped."
-            }
-
-            return "You can log this before, during, or after the main sets."
+    private func cardioSectionSubtitle(for role: WorkoutCardioRole) -> String {
+        switch role {
+        case .warmUp:
+            return "Cardio to prepare for the main work."
+        case .main:
+            return "Primary cardio for this workout."
+        case .finisher:
+            return "Cardio to close out the workout."
         }
     }
 
@@ -2692,28 +2861,6 @@ struct ActiveWorkoutView: View {
         )
     }
 
-    private func cardioDescriptor(category: String, muscleSummary: String) -> String? {
-        let trimmedMuscleSummary = muscleSummary.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedMuscleSummary.isEmpty {
-            return trimmedMuscleSummary
-        }
-
-        let trimmedCategory = category.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmedCategory.isEmpty ? nil : trimmedCategory
-    }
-
-    @MainActor
-    private func makeCardioSettingsDraft(from cardioBlock: ActiveWorkoutRuntimeCardioBlock) -> WorkoutCardioSettingsDraft {
-        WorkoutCardioSettingsDraft(
-            phase: cardioBlock.phase,
-            exerciseName: cardioBlock.exerciseNameSnapshot,
-            descriptor: cardioDescriptor(
-                category: cardioBlock.categorySnapshot,
-                muscleSummary: cardioBlock.muscleSummarySnapshot
-            ),
-            targetDurationSeconds: cardioBlock.targetDurationSeconds
-        )
-    }
 }
 
 private struct ActiveWorkoutHeaderCard: View {
@@ -2723,16 +2870,13 @@ private struct ActiveWorkoutHeaderCard: View {
     let session: ActiveWorkoutRuntimeSession
     let exerciseCount: Int
     let cardioCount: Int
-    let missingCardioPhases: [WorkoutCardioPhase]
     let onSubmit: () -> Void
-    let onAddCardio: (WorkoutCardioPhase) -> Void
+    let onAddCardio: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             WGJActionHeader("Session") {
-                if !missingCardioPhases.isEmpty {
-                    addCardioButton
-                }
+                addCardioButton
             }
 
             WGJResponsiveTextField(
@@ -2776,13 +2920,7 @@ private struct ActiveWorkoutHeaderCard: View {
     }
 
     private var addCardioButton: some View {
-        WGJActionMenuButton("Add Cardio", titleVisibility: .hidden) {
-            ForEach(missingCardioPhases) { phase in
-                Button("Add \(phase.title)") {
-                    onAddCardio(phase)
-                }
-            }
-        } label: {
+        Button(action: onAddCardio) {
             Label("Add Cardio", systemImage: "plus.circle.fill")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(WGJTheme.accentBlue)
@@ -2797,6 +2935,7 @@ private struct ActiveWorkoutHeaderCard: View {
                         )
                 )
         }
+        .buttonStyle(.plain)
         .accessibilityIdentifier("active-workout-add-cardio-button")
     }
 }
@@ -2990,10 +3129,12 @@ private struct ActiveWorkoutCancelSection: View {
 
 private struct ActiveWorkoutProfilePreferences: Equatable {
     let preferredLoadUnit: TemplateLoadUnit
+    let preferredDistanceUnit: WorkoutDistanceUnit
     let automaticallyClosesCompletedExercises: Bool
 
     nonisolated static let `default` = ActiveWorkoutProfilePreferences(
         preferredLoadUnit: .kg,
+        preferredDistanceUnit: .kilometers,
         automaticallyClosesCompletedExercises: true
     )
 }
@@ -3284,7 +3425,6 @@ private struct ActiveWorkoutSaveTemplateSheet: View {
 private enum ActiveWorkoutPickerTarget: Identifiable {
     case exercise
     case replaceExercise(UUID)
-    case cardio(WorkoutCardioPhase)
 
     var id: String {
         switch self {
@@ -3292,8 +3432,6 @@ private enum ActiveWorkoutPickerTarget: Identifiable {
             return "exercise"
         case .replaceExercise(let exerciseID):
             return "replace-exercise-\(exerciseID.uuidString.lowercased())"
-        case .cardio(let phase):
-            return "cardio-\(phase.rawValue)"
         }
     }
 
@@ -3303,8 +3441,6 @@ private enum ActiveWorkoutPickerTarget: Identifiable {
             return "Replace Exercise"
         case .exercise:
             return "Add Exercise"
-        case .cardio:
-            return "Choose Cardio"
         }
     }
 
@@ -3314,8 +3450,60 @@ private enum ActiveWorkoutPickerTarget: Identifiable {
             return "Replace Exercise"
         case .exercise:
             return "Add Exercise"
-        case .cardio:
-            return "Choose Exercise"
+        }
+    }
+}
+
+private struct ActiveWorkoutCardioPickerRequest: Identifiable {
+    let id = UUID()
+    let activityID: UUID?
+    let role: WorkoutCardioRole
+    let resetsResult: Bool
+}
+
+private struct ActiveWorkoutCardioPendingSelection {
+    let pickerRequest: ActiveWorkoutCardioPickerRequest
+    let selection: ExerciseCatalogSelection
+}
+
+private struct ActiveWorkoutCardioSetupRequest: Identifiable {
+    var id: UUID { activityID }
+
+    let activityID: UUID
+    let isNewActivity: Bool
+    let selection: ExerciseCatalogSelection
+    let setupDraft: WorkoutCardioSetupDraft
+    let resetsResult: Bool
+}
+
+private enum ActiveWorkoutCardioConfirmation: Identifiable {
+    case timerConflict(runningActivityID: UUID, requestedActivityID: UUID)
+    case remove(activityID: UUID, activityName: String)
+
+    var id: String {
+        switch self {
+        case .timerConflict(let runningActivityID, let requestedActivityID):
+            return "timer-conflict-\(runningActivityID)-\(requestedActivityID)"
+        case .remove(let activityID, _):
+            return "remove-\(activityID)"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .timerConflict:
+            return "Another cardio activity is running"
+        case .remove(_, let activityName):
+            return "Remove \(activityName)?"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .timerConflict:
+            return "Only one cardio timer can run at a time."
+        case .remove:
+            return "This activity contains saved progress or a result. Removing it cannot be undone."
         }
     }
 }

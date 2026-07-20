@@ -30,11 +30,11 @@ final class ActiveWorkoutScrollPositionTrackerTests: XCTestCase {
 
     func testBindingStoresLatestScrollTarget() {
         let tracker = ActiveWorkoutScrollPositionTracker()
-        let exerciseID = UUID()
+        let activityID = UUID()
 
-        tracker.binding.wrappedValue = .exercise(exerciseID)
+        tracker.binding.wrappedValue = .cardio(role: .main, activityID: activityID)
 
-        XCTAssertEqual(tracker.currentTarget, .exercise(exerciseID))
+        XCTAssertEqual(tracker.currentTarget, .cardio(role: .main, activityID: activityID))
     }
 
     func testRestorePolicyPrefersFocusedExercise() {
@@ -47,6 +47,7 @@ final class ActiveWorkoutScrollPositionTrackerTests: XCTestCase {
             trackedTarget: trackedTarget,
             expandedExerciseIDs: [],
             orderedExerciseIDs: [],
+            orderedCardioActivityIDsByRole: [:],
             isRestorable: { _ in true },
             hasSession: true
         )
@@ -62,6 +63,7 @@ final class ActiveWorkoutScrollPositionTrackerTests: XCTestCase {
             trackedTarget: nil,
             expandedExerciseIDs: [expandedID],
             orderedExerciseIDs: [UUID(), expandedID],
+            orderedCardioActivityIDsByRole: [:],
             isRestorable: { _ in true },
             hasSession: true
         )
@@ -71,6 +73,7 @@ final class ActiveWorkoutScrollPositionTrackerTests: XCTestCase {
             trackedTarget: nil,
             expandedExerciseIDs: [],
             orderedExerciseIDs: [],
+            orderedCardioActivityIDsByRole: [:],
             isRestorable: { _ in true },
             hasSession: true
         )
@@ -88,24 +91,94 @@ final class ActiveWorkoutScrollPositionTrackerTests: XCTestCase {
             trackedTarget: .cancelSection,
             expandedExerciseIDs: [],
             orderedExerciseIDs: [firstID, lastID],
-            isRestorable: { $0 != .postWorkoutCardio },
+            orderedCardioActivityIDsByRole: [:],
+            isRestorable: { _ in true },
             hasSession: true
         )
 
         XCTAssertEqual(target, .exercise(lastID))
     }
 
-    func testRestorePolicyMapsCancelSectionToPostWorkoutCardioWhenPresent() {
+    func testRestorePolicyMapsCancelSectionToLastFinisherActivityWhenPresent() {
+        let firstFinisherID = UUID()
+        let lastFinisherID = UUID()
         let target = ActiveWorkoutScrollRestorePolicy.target(
             focusedExerciseID: nil,
             keyboardExerciseID: nil,
             trackedTarget: .cancelSection,
             expandedExerciseIDs: [],
             orderedExerciseIDs: [UUID()],
-            isRestorable: { $0 == .postWorkoutCardio || $0 == .header },
+            orderedCardioActivityIDsByRole: [
+                .finisher: [firstFinisherID, lastFinisherID],
+            ],
+            isRestorable: {
+                $0 == .cardio(role: .finisher, activityID: firstFinisherID)
+                    || $0 == .cardio(role: .finisher, activityID: lastFinisherID)
+                    || $0 == .header
+            },
             hasSession: true
         )
 
-        XCTAssertEqual(target, .postWorkoutCardio)
+        XCTAssertEqual(target, .cardio(role: .finisher, activityID: lastFinisherID))
+    }
+
+    func testLegacyPreWorkoutTargetRestoresFirstAvailableWarmUpActivity() throws {
+        let unavailableID = UUID()
+        let firstRestorableID = UUID()
+        let decoded = try JSONDecoder().decode(
+            ActiveWorkoutScrollTarget.self,
+            from: Data(#"{"preWorkoutCardio":{}}"#.utf8)
+        )
+
+        let target = ActiveWorkoutScrollRestorePolicy.target(
+            focusedExerciseID: nil,
+            keyboardExerciseID: nil,
+            trackedTarget: decoded,
+            expandedExerciseIDs: [],
+            orderedExerciseIDs: [],
+            orderedCardioActivityIDsByRole: [
+                .warmUp: [unavailableID, firstRestorableID],
+            ],
+            isRestorable: {
+                $0 == .cardio(role: .warmUp, activityID: firstRestorableID)
+            },
+            hasSession: true
+        )
+
+        XCTAssertEqual(target, .cardio(role: .warmUp, activityID: firstRestorableID))
+    }
+
+    func testLegacyPostWorkoutTargetRestoresFirstAvailableFinisherActivity() throws {
+        let activityID = UUID()
+        let decoded = try JSONDecoder().decode(
+            ActiveWorkoutScrollTarget.self,
+            from: Data(#"{"postWorkoutCardio":{}}"#.utf8)
+        )
+
+        let target = ActiveWorkoutScrollRestorePolicy.target(
+            focusedExerciseID: nil,
+            keyboardExerciseID: nil,
+            trackedTarget: decoded,
+            expandedExerciseIDs: [],
+            orderedExerciseIDs: [],
+            orderedCardioActivityIDsByRole: [.finisher: [activityID]],
+            isRestorable: {
+                $0 == .cardio(role: .finisher, activityID: activityID)
+            },
+            hasSession: true
+        )
+
+        XCTAssertEqual(target, .cardio(role: .finisher, activityID: activityID))
+    }
+
+    func testRoleAndActivityScrollTargetRoundTripsThroughCodable() throws {
+        let original = ActiveWorkoutScrollTarget.cardio(role: .main, activityID: UUID())
+
+        let decoded = try JSONDecoder().decode(
+            ActiveWorkoutScrollTarget.self,
+            from: JSONEncoder().encode(original)
+        )
+
+        XCTAssertEqual(decoded, original)
     }
 }

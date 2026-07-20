@@ -11,10 +11,7 @@ nonisolated struct ActiveWorkoutRenderProjection: Sendable {
     var sessionExercises: [ActiveWorkoutRuntimeExercise]
     var orderedCardioBlocks: [ActiveWorkoutRuntimeCardioBlock]
     var exerciseDisplayGroups: [WorkoutExerciseDisplayGroup<ActiveWorkoutRuntimeExercise>]
-    var preWorkoutCardio: ActiveWorkoutRuntimeCardioBlock?
-    var postWorkoutCardio: ActiveWorkoutRuntimeCardioBlock?
     var cardioByRole: [WorkoutCardioRole: [ActiveWorkoutRuntimeCardioBlock]]
-    var missingCardioPhases: [WorkoutCardioPhase]
     var areAllMainExercisesCompleted: Bool
     var hasWorkoutContent: Bool
     var supersetContextByExerciseID: [UUID: ActiveWorkoutSupersetContext]
@@ -25,10 +22,7 @@ nonisolated struct ActiveWorkoutRenderProjection: Sendable {
         sessionExercises: [],
         orderedCardioBlocks: [],
         exerciseDisplayGroups: [],
-        preWorkoutCardio: nil,
-        postWorkoutCardio: nil,
         cardioByRole: [:],
-        missingCardioPhases: WorkoutCardioPhase.allCases,
         areAllMainExercisesCompleted: true,
         hasWorkoutContent: false,
         supersetContextByExerciseID: [:],
@@ -57,8 +51,6 @@ nonisolated enum ActiveWorkoutRenderProjectionBuilder {
             }
             .sorted(by: ActiveWorkoutRuntimeCardioBlock.areInIncreasingOrder)
         let cardioByRole = Dictionary(grouping: cardioBlocks, by: \.role)
-        let preWorkoutCardio = cardioByRole[.warmUp]?.first
-        let postWorkoutCardio = cardioByRole[.finisher]?.first
         let areAllMainExercisesCompleted = exercises.allSatisfy { exercise in
             let drafts = setDraftsByExerciseID[exercise.id] ?? exercise.setDrafts
             return isExerciseCompleted(drafts)
@@ -75,13 +67,7 @@ nonisolated enum ActiveWorkoutRenderProjectionBuilder {
             sessionExercises: exercises,
             orderedCardioBlocks: cardioBlocks,
             exerciseDisplayGroups: displayGroups,
-            preWorkoutCardio: preWorkoutCardio,
-            postWorkoutCardio: postWorkoutCardio,
             cardioByRole: cardioByRole,
-            missingCardioPhases: WorkoutCardioPhase.allCases.filter { phase in
-                let role: WorkoutCardioRole = phase == .preWorkout ? .warmUp : .finisher
-                return cardioByRole[role, default: []].isEmpty
-            },
             areAllMainExercisesCompleted: areAllMainExercisesCompleted,
             hasWorkoutContent: !exercises.isEmpty || !cardioBlocks.isEmpty,
             supersetContextByExerciseID: supersetContextByExerciseID(from: displayGroups),
@@ -137,6 +123,73 @@ nonisolated enum ActiveWorkoutRenderProjectionBuilder {
                 )
             }
         )
+    }
+}
+
+nonisolated enum ActiveWorkoutRuntimeCardioPlanReducer {
+    static func appending(
+        _ activity: ActiveWorkoutRuntimeCardioBlock,
+        to activities: [ActiveWorkoutRuntimeCardioBlock]
+    ) -> [ActiveWorkoutRuntimeCardioBlock] {
+        let existing = normalized(activities.filter { $0.id != activity.id })
+        var appended = activity
+        appended.sortOrder = existing.lazy.filter { $0.role == appended.role }.count
+        return normalized(existing + [appended])
+    }
+
+    static func updating(
+        _ activity: ActiveWorkoutRuntimeCardioBlock,
+        in activities: [ActiveWorkoutRuntimeCardioBlock]
+    ) -> [ActiveWorkoutRuntimeCardioBlock] {
+        var ordered = normalized(activities)
+        guard let previousIndex = ordered.firstIndex(where: { $0.id == activity.id }) else {
+            return appending(activity, to: activities)
+        }
+
+        let previous = ordered[previousIndex]
+        var updated = activity
+        if previous.role == updated.role {
+            updated.sortOrder = previous.sortOrder
+            ordered[previousIndex] = updated
+            return normalized(ordered)
+        }
+
+        let remaining = ordered.filter { $0.id != activity.id }
+        updated.sortOrder = remaining.lazy.filter { $0.role == updated.role }.count
+        return normalized(remaining + [updated])
+    }
+
+    static func removing(
+        activityID: UUID,
+        from activities: [ActiveWorkoutRuntimeCardioBlock]
+    ) -> [ActiveWorkoutRuntimeCardioBlock] {
+        normalized(activities.filter { $0.id != activityID })
+    }
+
+    static func normalized(
+        _ activities: [ActiveWorkoutRuntimeCardioBlock]
+    ) -> [ActiveWorkoutRuntimeCardioBlock] {
+        WorkoutCardioRole.allCases.flatMap { role in
+            activities.enumerated()
+                .filter { $0.element.role == role }
+                .sorted { lhs, rhs in
+                    if lhs.element.sortOrder != rhs.element.sortOrder {
+                        return lhs.element.sortOrder < rhs.element.sortOrder
+                    }
+                    if lhs.element.createdAt != rhs.element.createdAt {
+                        return lhs.element.createdAt < rhs.element.createdAt
+                    }
+                    return lhs.offset < rhs.offset
+                }
+                .enumerated()
+                .map { sortOrder, indexedActivity in
+                    var activity = indexedActivity.element
+                    activity.role = role
+                    activity.phase = TemplateCardioDraftReducer.legacyPhase(for: role)
+                    activity.sortOrder = sortOrder
+                    return activity
+                }
+        }
     }
 }
 
