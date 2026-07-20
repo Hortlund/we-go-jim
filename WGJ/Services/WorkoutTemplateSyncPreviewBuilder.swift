@@ -238,12 +238,20 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
 
     nonisolated private static func makeMutation(from cardioBlock: WorkoutSessionCardioBlock) -> WorkoutTemplateSyncCardioMutation {
         WorkoutTemplateSyncCardioMutation(
+            activityID: cardioBlock.id,
+            sourceTemplateCardioID: cardioBlock.sourceTemplateCardioID,
             phase: cardioBlock.phase,
+            role: cardioBlock.role,
+            sortOrder: cardioBlock.sortOrder,
             catalogExerciseUUID: cardioBlock.catalogExerciseUUID,
             exerciseNameSnapshot: cardioBlock.exerciseNameSnapshot,
             categorySnapshot: cardioBlock.categorySnapshot,
             muscleSummarySnapshot: cardioBlock.muscleSummarySnapshot,
-            targetDurationSeconds: normalizedCardioDuration(cardioBlock.targetDurationSeconds)
+            trackingProfile: cardioBlock.trackingProfile,
+            goalKind: cardioBlock.goalKind,
+            targetDurationSeconds: normalizedCardioDuration(cardioBlock.targetDurationSeconds),
+            targetDistanceMeters: cardioBlock.targetDistanceMeters,
+            preferredDistanceUnit: cardioBlock.preferredDistanceUnit
         )
     }
 

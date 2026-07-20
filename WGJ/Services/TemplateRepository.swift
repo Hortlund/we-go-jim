@@ -1379,20 +1379,36 @@ nonisolated final class TemplateRepository {
             throw TemplateRepositoryError.templateNotFound
         }
 
-        let existingCardioByPhase = Dictionary(
-            orderedCardioBlocks(for: template).map { ($0.phase, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
-        let desiredCardioDrafts = cardioDrafts ?? cardioMutations.map { mutation in
-            TemplateCardioBlockDraft(
-                id: existingCardioByPhase[mutation.phase]?.id ?? UUID(),
-                phase: mutation.phase,
-                catalogExerciseUUID: mutation.catalogExerciseUUID,
-                exerciseNameSnapshot: mutation.exerciseNameSnapshot,
-                categorySnapshot: mutation.categorySnapshot,
-                muscleSummarySnapshot: mutation.muscleSummarySnapshot,
-                targetDurationSeconds: mutation.targetDurationSeconds
-            )
+        let desiredCardioDrafts: [TemplateCardioBlockDraft]
+        if let cardioDrafts {
+            desiredCardioDrafts = cardioDrafts
+        } else {
+            let existingCardioIDs = Set(orderedCardioBlocks(for: template).map(\.id))
+            var claimedTemplateCardioIDs: Set<UUID> = []
+            desiredCardioDrafts = cardioMutations.map { mutation in
+                let matchedTemplateID: UUID? = mutation.sourceTemplateCardioID.flatMap { sourceID -> UUID? in
+                    guard existingCardioIDs.contains(sourceID),
+                          claimedTemplateCardioIDs.insert(sourceID).inserted else {
+                        return nil
+                    }
+                    return sourceID
+                }
+                return TemplateCardioBlockDraft(
+                    id: matchedTemplateID ?? UUID(),
+                    phase: mutation.phase,
+                    role: mutation.role,
+                    sortOrder: mutation.sortOrder,
+                    catalogExerciseUUID: mutation.catalogExerciseUUID,
+                    exerciseNameSnapshot: mutation.exerciseNameSnapshot,
+                    categorySnapshot: mutation.categorySnapshot,
+                    muscleSummarySnapshot: mutation.muscleSummarySnapshot,
+                    trackingProfile: mutation.trackingProfile,
+                    goalKind: mutation.goalKind,
+                    targetDurationSeconds: mutation.targetDurationSeconds,
+                    targetDistanceMeters: mutation.targetDistanceMeters,
+                    preferredDistanceUnit: mutation.preferredDistanceUnit
+                )
+            }
         }
 
         try validateUniqueComponentCatalogUUIDs(
@@ -2529,12 +2545,20 @@ nonisolated final class TemplateRepository {
         from draft: TemplateCardioBlockDraft
     ) -> WorkoutTemplateSyncCardioMutation {
         WorkoutTemplateSyncCardioMutation(
+            activityID: draft.id,
+            sourceTemplateCardioID: draft.id,
             phase: draft.phase,
+            role: draft.role,
+            sortOrder: draft.sortOrder,
             catalogExerciseUUID: draft.catalogExerciseUUID,
             exerciseNameSnapshot: draft.exerciseNameSnapshot,
             categorySnapshot: draft.categorySnapshot,
             muscleSummarySnapshot: draft.muscleSummarySnapshot,
-            targetDurationSeconds: draft.targetDurationSeconds
+            trackingProfile: draft.trackingProfile,
+            goalKind: draft.goalKind,
+            targetDurationSeconds: draft.targetDurationSeconds,
+            targetDistanceMeters: draft.targetDistanceMeters,
+            preferredDistanceUnit: draft.preferredDistanceUnit
         )
     }
 

@@ -282,6 +282,83 @@ final class WorkoutCardioPersistenceTests: XCTestCase {
         XCTAssertEqual(completedDrafts.map(\.timerAccumulatedSeconds), [0, 0])
     }
 
+    func testWorkoutTemplateSyncPreservesSameRoleActivityIdentityAndPlanFields() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let templateRepository = TemplateRepository(modelContext: context)
+        let sessionRepository = WorkoutSessionRepository(
+            modelContext: context,
+            weeklyGoalWidgetPublisher: nil
+        )
+        let template = try templateRepository.createTemplate(name: "Cardio Sync", notes: "Original")
+        let treadmill = TemplateCardioBlockDraft.fixture(
+            role: .main,
+            sortOrder: 0,
+            name: "Treadmill Walk",
+            trackingProfile: .treadmill,
+            goalKind: .distance,
+            targetDurationSeconds: 0,
+            targetDistanceMeters: 5_000,
+            preferredDistanceUnit: .kilometers
+        )
+        try templateRepository.setCardioActivities(templateID: template.id, drafts: [treadmill])
+        let session = try sessionRepository.createSessionFromTemplate(templateID: template.id)
+        let persistedTreadmill = try XCTUnwrap(
+            try sessionRepository.sessionCardioBlocks(sessionID: session.id).first
+        )
+        persistedTreadmill.actualDurationSeconds = 1_800
+        persistedTreadmill.actualDistanceMeters = 6_200
+
+        let sessionAddedID = UUID()
+        let bike = WorkoutSessionCardioBlock(
+            id: sessionAddedID,
+            sessionID: session.id,
+            phase: .preWorkout,
+            role: .main,
+            sortOrder: 1,
+            catalogExerciseUUID: "seed-bike",
+            exerciseNameSnapshot: "Bike",
+            categorySnapshot: "Cardio",
+            muscleSummarySnapshot: "Legs",
+            trackingProfile: .machineDistance,
+            goalKind: .time,
+            targetDurationSeconds: 1_200,
+            targetDistanceMeters: 8_000,
+            actualDurationSeconds: 1_100,
+            actualDistanceMeters: 9_000,
+            preferredDistanceUnit: .miles,
+            inclinePercent: 2,
+            resistanceLevel: 7,
+            cardioNotes: "Session-only result",
+            isCompleted: true,
+            session: session
+        )
+        context.insert(bike)
+        session.cardioBlocks = [persistedTreadmill, bike]
+        session.notes = "Updated"
+        try context.save()
+
+        let syncService = WorkoutTemplateSyncService(modelContext: context)
+        let preview = try XCTUnwrap(syncService.previewTemplateUpdate(forSessionID: session.id))
+        try syncService.applyTemplateUpdate(preview)
+
+        let synced = try templateRepository.cardioActivities(templateID: template.id)
+        XCTAssertEqual(synced.map(\.exerciseNameSnapshot), ["Treadmill Walk", "Bike"])
+        guard synced.count == 2 else {
+            return
+        }
+        XCTAssertEqual(synced.map(\.role), [.main, .main])
+        XCTAssertEqual(synced.map(\.sortOrder), [0, 1])
+        XCTAssertEqual(synced[0].id, treadmill.id)
+        XCTAssertNotEqual(synced[1].id, sessionAddedID)
+        XCTAssertEqual(synced.map(\.trackingProfile), [.treadmill, .machineDistance])
+        XCTAssertEqual(synced.map(\.goalKind), [.distance, .time])
+        XCTAssertEqual(synced.map(\.targetDurationSeconds), [0, 1_200])
+        XCTAssertEqual(synced.map(\.targetDistanceMeters), [5_000, 8_000])
+        XCTAssertEqual(synced.map(\.preferredDistanceUnit), [.kilometers, .miles])
+    }
+
     private func makeInMemoryContainer() throws -> ModelContainer {
         try AppSchema.makeInMemoryContainer(name: "WorkoutCardioPersistenceTests")
     }
