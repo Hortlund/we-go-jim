@@ -1756,25 +1756,22 @@ struct ActiveWorkoutView: View {
         result: ValidatedWorkoutCardioResult,
         at date: Date = .now
     ) throws {
-        guard var updatedSession = runtimeSession else {
+        guard let runtimeSession else {
             throw WorkoutCardioTimerError.activityNotFound
         }
-        guard let index = updatedSession.cardioBlocks.firstIndex(where: { $0.id == activityID }) else {
-            throw WorkoutCardioTimerError.activityNotFound
+        let plan = try ActiveWorkoutCardioResultSavePlan.make(
+            session: runtimeSession,
+            activityID: activityID,
+            result: result,
+            at: date
+        )
+        self.runtimeSession = plan.session
+
+        switch plan.persistenceBoundary {
+        case .committedSnapshot:
+            // Result Save is one explicit local-first active-workout snapshot boundary.
+            persistCommittedUserEditSnapshot()
         }
-
-        updatedSession.cardioBlocks[index].actualDurationSeconds = result.actualDurationSeconds
-        updatedSession.cardioBlocks[index].actualDistanceMeters = result.actualDistanceMeters
-        updatedSession.cardioBlocks[index].preferredDistanceUnit = result.preferredDistanceUnit
-        updatedSession.cardioBlocks[index].inclinePercent = result.inclinePercent
-        updatedSession.cardioBlocks[index].resistanceLevel = result.resistanceLevel
-        updatedSession.cardioBlocks[index].cardioNotes = result.notes
-        updatedSession.cardioBlocks[index].updatedAt = date
-        updatedSession.touch(date: date)
-        runtimeSession = updatedSession
-
-        // Result Save is one explicit local-first active-workout snapshot boundary.
-        persistCommittedUserEditSnapshot()
     }
 
     @MainActor

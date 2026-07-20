@@ -428,3 +428,53 @@ enum HistoryDetailSnapshotBuilder {
         return resolved
     }
 }
+
+nonisolated struct HistoryDetailPreservedExerciseEditState: Equatable, Sendable {
+    let baseline: HistoryDetailSnapshotBuilder.LocalState
+    let drafts: WorkoutExerciseDraftStateSnapshot
+}
+
+nonisolated enum HistoryDetailCardioRefreshPolicy {
+    static func preserveExerciseEdits(
+        baseline: HistoryDetailSnapshotBuilder.LocalState,
+        drafts: WorkoutExerciseDraftStateSnapshot,
+        keeping exerciseIDs: Set<UUID>
+    ) -> HistoryDetailPreservedExerciseEditState {
+        HistoryDetailPreservedExerciseEditState(
+            baseline: HistoryDetailSnapshotBuilder.LocalState(
+                setDraftsByExerciseID: baseline.setDraftsByExerciseID.filter {
+                    exerciseIDs.contains($0.key)
+                },
+                restByExerciseID: baseline.restByExerciseID.filter {
+                    exerciseIDs.contains($0.key)
+                },
+                notesByExerciseID: baseline.notesByExerciseID.filter {
+                    exerciseIDs.contains($0.key)
+                }
+            ),
+            drafts: WorkoutExerciseDraftStateSnapshot(
+                draftsByExerciseID: drafts.draftsByExerciseID.filter {
+                    exerciseIDs.contains($0.key)
+                },
+                restsByExerciseID: drafts.restsByExerciseID.filter {
+                    exerciseIDs.contains($0.key)
+                },
+                notesByExerciseID: drafts.notesByExerciseID.filter {
+                    exerciseIDs.contains($0.key)
+                }
+            )
+        )
+    }
+
+    static func isDirty(
+        exerciseID: UUID,
+        state: HistoryDetailPreservedExerciseEditState
+    ) -> Bool {
+        state.drafts.draftsByExerciseID[exerciseID]
+            != state.baseline.setDraftsByExerciseID[exerciseID]
+            || state.drafts.restsByExerciseID[exerciseID]
+                != state.baseline.restByExerciseID[exerciseID]
+            || state.drafts.notesByExerciseID[exerciseID]
+                != state.baseline.notesByExerciseID[exerciseID]
+    }
+}

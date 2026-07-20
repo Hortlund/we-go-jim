@@ -85,6 +85,41 @@ nonisolated struct ValidatedWorkoutCardioResult: Equatable, Sendable {
     let notes: String
 }
 
+nonisolated struct ActiveWorkoutCardioResultSavePlan: Equatable, Sendable {
+    nonisolated enum PersistenceBoundary: Equatable, Sendable {
+        case committedSnapshot
+    }
+
+    let session: ActiveWorkoutRuntimeSession
+    let persistenceBoundary: PersistenceBoundary
+
+    static func make(
+        session: ActiveWorkoutRuntimeSession,
+        activityID: UUID,
+        result: ValidatedWorkoutCardioResult,
+        at date: Date = .now
+    ) throws -> ActiveWorkoutCardioResultSavePlan {
+        var updatedSession = session
+        guard let index = updatedSession.cardioBlocks.firstIndex(where: { $0.id == activityID }) else {
+            throw WorkoutCardioTimerError.activityNotFound
+        }
+
+        updatedSession.cardioBlocks[index].actualDurationSeconds = result.actualDurationSeconds
+        updatedSession.cardioBlocks[index].actualDistanceMeters = result.actualDistanceMeters
+        updatedSession.cardioBlocks[index].preferredDistanceUnit = result.preferredDistanceUnit
+        updatedSession.cardioBlocks[index].inclinePercent = result.inclinePercent
+        updatedSession.cardioBlocks[index].resistanceLevel = result.resistanceLevel
+        updatedSession.cardioBlocks[index].cardioNotes = result.notes
+        updatedSession.cardioBlocks[index].updatedAt = date
+        updatedSession.touch(date: date)
+
+        return ActiveWorkoutCardioResultSavePlan(
+            session: updatedSession,
+            persistenceBoundary: .committedSnapshot
+        )
+    }
+}
+
 nonisolated enum WorkoutCardioResultValidationError: LocalizedError, Equatable, Sendable {
     case negativeDuration
     case invalidDistance
@@ -296,21 +331,6 @@ nonisolated enum WorkoutCardioResultSummaryFormatter {
         )
         var metrics: [WorkoutCardioResultSummary.Metric] = []
 
-        if let validDuration {
-            metrics.append(.init(
-                title: "Duration",
-                value: durationText(seconds: validDuration),
-                systemImage: "clock.fill"
-            ))
-        }
-        if let validDistance {
-            metrics.append(.init(
-                title: "Distance",
-                value: distanceText(meters: validDistance, unit: displayUnit),
-                systemImage: "point.topleft.down.to.point.bottomright.curvepath.fill"
-            ))
-        }
-
         switch profile {
         case .walkRun, .treadmill:
             if let pace = calculated.paceSecondsPerDisplayUnit {
@@ -318,13 +338,6 @@ nonisolated enum WorkoutCardioResultSummaryFormatter {
                     title: "Pace",
                     value: "\(paceText(seconds: pace)) /\(displayUnit.symbol)",
                     systemImage: "figure.run"
-                ))
-            }
-            if let speed = calculated.averageSpeedPerHour {
-                metrics.append(.init(
-                    title: "Avg Speed",
-                    value: speedText(speed, unit: displayUnit),
-                    systemImage: "speedometer"
                 ))
             }
         case .machineDistance:
@@ -347,6 +360,41 @@ nonisolated enum WorkoutCardioResultSummaryFormatter {
             break
         }
 
+        if profile == .stairClimber,
+           let resistanceLevel,
+           resistanceLevel.isFinite,
+           resistanceLevel >= 0 {
+            metrics.append(.init(
+                title: "Level",
+                value: numberText(resistanceLevel),
+                systemImage: "dial.medium.fill"
+            ))
+        }
+
+        if let validDuration {
+            metrics.append(.init(
+                title: "Duration",
+                value: durationText(seconds: validDuration),
+                systemImage: "clock.fill"
+            ))
+        }
+        if let validDistance {
+            metrics.append(.init(
+                title: "Distance",
+                value: distanceText(meters: validDistance, unit: displayUnit),
+                systemImage: "point.topleft.down.to.point.bottomright.curvepath.fill"
+            ))
+        }
+
+        if (profile == .walkRun || profile == .treadmill),
+           let speed = calculated.averageSpeedPerHour {
+            metrics.append(.init(
+                title: "Avg Speed",
+                value: speedText(speed, unit: displayUnit),
+                systemImage: "speedometer"
+            ))
+        }
+
         if profile.supportsIncline, let inclinePercent, inclinePercent.isFinite {
             metrics.append(.init(
                 title: "Incline",
@@ -355,11 +403,12 @@ nonisolated enum WorkoutCardioResultSummaryFormatter {
             ))
         }
         if profile.supportsResistanceOrLevel,
+           profile != .stairClimber,
            let resistanceLevel,
            resistanceLevel.isFinite,
            resistanceLevel >= 0 {
             metrics.append(.init(
-                title: profile == .stairClimber ? "Level" : "Resistance",
+                title: "Resistance",
                 value: numberText(resistanceLevel),
                 systemImage: "dial.medium.fill"
             ))

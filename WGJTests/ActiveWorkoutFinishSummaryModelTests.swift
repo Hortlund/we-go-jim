@@ -49,8 +49,9 @@ final class ActiveWorkoutFinishSummaryModelTests: XCTestCase {
             notes: "Steady"
         )
 
-        XCTAssertEqual(summary.metrics.map(\.title), ["Duration", "Distance", "Pace", "Avg Speed"])
-        XCTAssertEqual(summary.metrics.map(\.value), ["25 min", "5 km", "5:00 /km", "12 km/h"])
+        XCTAssertEqual(summary.metrics.map(\.title), ["Pace", "Duration", "Distance", "Avg Speed"])
+        XCTAssertEqual(summary.metrics.map(\.value), ["5:00 /km", "25 min", "5 km", "12 km/h"])
+        XCTAssertEqual(summary.metrics.first?.title, "Pace")
         XCTAssertEqual(summary.notes, "Steady")
     }
 
@@ -66,9 +67,9 @@ final class ActiveWorkoutFinishSummaryModelTests: XCTestCase {
         )
         XCTAssertEqual(
             machine.metrics.map(\.title),
-            ["Duration", "Distance", "Avg Speed", "Resistance"]
+            ["Avg Speed", "Duration", "Distance", "Resistance"]
         )
-        XCTAssertEqual(machine.metrics[2].value, "30 km/h")
+        XCTAssertEqual(machine.metrics.first?.value, "30 km/h")
 
         let rower = WorkoutCardioResultSummaryFormatter.summary(
             durationSeconds: 480,
@@ -81,9 +82,9 @@ final class ActiveWorkoutFinishSummaryModelTests: XCTestCase {
         )
         XCTAssertEqual(
             rower.metrics.map(\.title),
-            ["Duration", "Distance", "500 m Pace", "Resistance"]
+            ["500 m Pace", "Duration", "Distance", "Resistance"]
         )
-        XCTAssertEqual(rower.metrics[2].value, "2:00 /500 m")
+        XCTAssertEqual(rower.metrics.first?.value, "2:00 /500 m")
 
         let stairs = WorkoutCardioResultSummaryFormatter.summary(
             durationSeconds: 600,
@@ -94,8 +95,43 @@ final class ActiveWorkoutFinishSummaryModelTests: XCTestCase {
             resistanceLevel: 9,
             notes: ""
         )
-        XCTAssertEqual(stairs.metrics.map(\.title), ["Duration", "Level"])
-        XCTAssertEqual(stairs.metrics.map(\.value), ["10 min", "9"])
+        XCTAssertEqual(stairs.metrics.map(\.title), ["Level", "Duration"])
+        XCTAssertEqual(stairs.metrics.map(\.value), ["9", "10 min"])
+    }
+
+    func testActivityAwareSummaryFallsBackToAvailableRawMetrics() {
+        let durationOnlyWalk = WorkoutCardioResultSummaryFormatter.summary(
+            durationSeconds: 600,
+            distanceMeters: nil,
+            displayUnit: .kilometers,
+            profile: .walkRun,
+            inclinePercent: nil,
+            resistanceLevel: nil,
+            notes: ""
+        )
+        XCTAssertEqual(durationOnlyWalk.metrics.map(\.title), ["Duration"])
+
+        let distanceOnlyMachine = WorkoutCardioResultSummaryFormatter.summary(
+            durationSeconds: nil,
+            distanceMeters: 5_000,
+            displayUnit: .kilometers,
+            profile: .machineDistance,
+            inclinePercent: nil,
+            resistanceLevel: 4,
+            notes: ""
+        )
+        XCTAssertEqual(distanceOnlyMachine.metrics.map(\.title), ["Distance", "Resistance"])
+
+        let stairsWithoutLevel = WorkoutCardioResultSummaryFormatter.summary(
+            durationSeconds: 600,
+            distanceMeters: nil,
+            displayUnit: .kilometers,
+            profile: .stairClimber,
+            inclinePercent: nil,
+            resistanceLevel: nil,
+            notes: ""
+        )
+        XCTAssertEqual(stairsWithoutLevel.metrics.map(\.title), ["Duration"])
     }
 }
 

@@ -158,6 +158,49 @@ final class ActiveWorkoutCardioPresentationTests: XCTestCase {
         XCTAssertEqual(prefill.actualDistanceMeters, 2_500)
         XCTAssertTrue(prefill.isCompleted)
     }
+
+    func testResultSavePlanTargetsExactActivityAndRequiresOneCommittedSnapshotBoundary() throws {
+        let firstID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let secondID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        let unchanged = ActiveWorkoutRuntimeCardioBlock.fixture(
+            id: firstID,
+            actualDurationSeconds: 300,
+            actualDistanceMeters: 1_000
+        )
+        let target = ActiveWorkoutRuntimeCardioBlock.fixture(id: secondID)
+        let session = ActiveWorkoutRuntimeSession(
+            name: "Cardio",
+            cardioBlocks: [unchanged, target],
+            createdAt: Date(timeIntervalSince1970: 1),
+            updatedAt: Date(timeIntervalSince1970: 1)
+        )
+        let result = ValidatedWorkoutCardioResult(
+            actualDurationSeconds: 1_200,
+            actualDistanceMeters: 5_000,
+            preferredDistanceUnit: .kilometers,
+            inclinePercent: nil,
+            resistanceLevel: 7,
+            notes: "Intervals"
+        )
+        let savedAt = Date(timeIntervalSince1970: 2)
+
+        let plan = try ActiveWorkoutCardioResultSavePlan.make(
+            session: session,
+            activityID: secondID,
+            result: result,
+            at: savedAt
+        )
+
+        XCTAssertEqual(plan.session.cardioBlocks[0], unchanged)
+        XCTAssertEqual(plan.session.cardioBlocks[1].id, secondID)
+        XCTAssertEqual(plan.session.cardioBlocks[1].actualDurationSeconds, 1_200)
+        XCTAssertEqual(plan.session.cardioBlocks[1].actualDistanceMeters, 5_000)
+        XCTAssertEqual(plan.session.cardioBlocks[1].resistanceLevel, 7)
+        XCTAssertEqual(plan.session.cardioBlocks[1].cardioNotes, "Intervals")
+        XCTAssertEqual(plan.session.cardioBlocks[1].updatedAt, savedAt)
+        XCTAssertEqual(plan.session.updatedAt, savedAt)
+        XCTAssertEqual(plan.persistenceBoundary, .committedSnapshot)
+    }
 }
 
 private extension ActiveWorkoutRuntimeCardioBlock {
@@ -170,6 +213,7 @@ private extension ActiveWorkoutRuntimeCardioBlock {
     }
 
     static func fixture(
+        id: UUID = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!,
         timerState: WorkoutCardioTimerState = .idle,
         timerSegmentStartedAt: Date? = nil,
         timerAccumulatedSeconds: Int = 0,
@@ -181,7 +225,7 @@ private extension ActiveWorkoutRuntimeCardioBlock {
         isCompleted: Bool = false
     ) -> Self {
         ActiveWorkoutRuntimeCardioBlock(
-            id: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!,
+            id: id,
             phase: .preWorkout,
             role: .main,
             catalogExerciseUUID: "seed-treadmill-walk",
