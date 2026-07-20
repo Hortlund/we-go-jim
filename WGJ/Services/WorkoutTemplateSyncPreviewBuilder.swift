@@ -14,14 +14,20 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
             templateNotes: template.notes,
             sessionNotes: session.notes
         )
-        let templateCardioByPhase = Dictionary(
-            orderedTemplateCardioBlocks.map { ($0.phase, $0) },
+        let templateCardioByID = Dictionary(
+            orderedTemplateCardioBlocks.map { ($0.id, $0) },
             uniquingKeysWith: { first, _ in first }
         )
-        let sessionCardioByPhase = Dictionary(
-            orderedSessionCardioBlocks.map { ($0.phase, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
+        var matchedTemplateCardioIDs: Set<UUID> = []
+        var matchedTemplateCardioBySessionID: [UUID: TemplateCardioBlock] = [:]
+        for sessionCardioBlock in orderedSessionCardioBlocks {
+            guard let sourceTemplateCardioID = sessionCardioBlock.sourceTemplateCardioID,
+                  let templateCardioBlock = templateCardioByID[sourceTemplateCardioID],
+                  matchedTemplateCardioIDs.insert(sourceTemplateCardioID).inserted else {
+                continue
+            }
+            matchedTemplateCardioBySessionID[sessionCardioBlock.id] = templateCardioBlock
+        }
         let templateExercisesByUUID = Dictionary(
             orderedTemplateExercises.map { ($0.catalogExerciseUUID, $0) },
             uniquingKeysWith: { first, _ in first }
@@ -47,11 +53,12 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
         )
 
         let addedCardioBlocks = orderedSessionCardioBlocks.compactMap { cardioBlock -> WorkoutTemplateSyncAddedCardioBlock? in
-            guard templateCardioByPhase[cardioBlock.phase] == nil else {
+            guard matchedTemplateCardioBySessionID[cardioBlock.id] == nil else {
                 return nil
             }
 
             return WorkoutTemplateSyncAddedCardioBlock(
+                activityID: cardioBlock.id,
                 phase: cardioBlock.phase,
                 exerciseName: cardioBlock.exerciseNameSnapshot,
                 summary: cardioSummary(for: cardioBlock)
@@ -59,11 +66,12 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
         }
 
         let removedCardioBlocks = orderedTemplateCardioBlocks.compactMap { cardioBlock -> WorkoutTemplateSyncRemovedCardioBlock? in
-            guard sessionCardioByPhase[cardioBlock.phase] == nil else {
+            guard matchedTemplateCardioIDs.contains(cardioBlock.id) == false else {
                 return nil
             }
 
             return WorkoutTemplateSyncRemovedCardioBlock(
+                activityID: cardioBlock.id,
                 phase: cardioBlock.phase,
                 exerciseName: cardioBlock.exerciseNameSnapshot,
                 summary: cardioSummary(for: cardioBlock)
@@ -71,7 +79,7 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
         }
 
         let editedCardioBlocks = orderedSessionCardioBlocks.compactMap { cardioBlock -> WorkoutTemplateSyncEditedCardioBlock? in
-            guard let templateCardioBlock = templateCardioByPhase[cardioBlock.phase] else {
+            guard let templateCardioBlock = matchedTemplateCardioBySessionID[cardioBlock.id] else {
                 return nil
             }
 
@@ -84,6 +92,7 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
             }
 
             return WorkoutTemplateSyncEditedCardioBlock(
+                activityID: templateCardioBlock.id,
                 phase: cardioBlock.phase,
                 exerciseName: cardioBlock.exerciseNameSnapshot,
                 changes: changes
@@ -461,10 +470,32 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
     ) -> [String] {
         var changes: [String] = []
 
-        if templateCardioBlock.catalogExerciseUUID != sessionCardioBlock.catalogExerciseUUID {
+        if templateCardioBlock.role != sessionCardioBlock.role {
+            changes.append("Role updated")
+        }
+
+        if templateCardioBlock.sortOrder != sessionCardioBlock.sortOrder {
+            changes.append("Order \(templateCardioBlock.sortOrder + 1) -> \(sessionCardioBlock.sortOrder + 1)")
+        }
+
+        if templateCardioBlock.catalogExerciseUUID != sessionCardioBlock.catalogExerciseUUID
+            || templateCardioBlock.exerciseNameSnapshot != sessionCardioBlock.exerciseNameSnapshot {
             changes.append(
                 "Exercise \(templateCardioBlock.exerciseNameSnapshot) -> \(sessionCardioBlock.exerciseNameSnapshot)"
             )
+        }
+
+        if templateCardioBlock.categorySnapshot != sessionCardioBlock.categorySnapshot
+            || templateCardioBlock.muscleSummarySnapshot != sessionCardioBlock.muscleSummarySnapshot {
+            changes.append("Exercise details updated")
+        }
+
+        if templateCardioBlock.trackingProfile != sessionCardioBlock.trackingProfile {
+            changes.append("Tracking profile updated")
+        }
+
+        if templateCardioBlock.goalKind != sessionCardioBlock.goalKind {
+            changes.append("Goal updated")
         }
 
         let normalizedDuration = normalizedCardioDuration(sessionCardioBlock.targetDurationSeconds)
@@ -472,6 +503,14 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
             changes.append(
                 "Duration \(formattedDuration(templateCardioBlock.targetDurationSeconds)) -> \(formattedDuration(normalizedDuration))"
             )
+        }
+
+        if templateCardioBlock.targetDistanceMeters != sessionCardioBlock.targetDistanceMeters {
+            changes.append("Distance target updated")
+        }
+
+        if templateCardioBlock.preferredDistanceUnit != sessionCardioBlock.preferredDistanceUnit {
+            changes.append("Distance unit updated")
         }
 
         return changes
@@ -603,12 +642,34 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
 
     nonisolated private static func orderedCardioBlocks(for template: WorkoutTemplate) -> [TemplateCardioBlock] {
         (template.cardioBlocks ?? [])
-            .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
+            .sorted { lhs, rhs in
+                if lhs.role.sortOrder != rhs.role.sortOrder {
+                    return lhs.role.sortOrder < rhs.role.sortOrder
+                }
+                if lhs.sortOrder != rhs.sortOrder {
+                    return lhs.sortOrder < rhs.sortOrder
+                }
+                if lhs.createdAt != rhs.createdAt {
+                    return lhs.createdAt < rhs.createdAt
+                }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
     }
 
     nonisolated private static func orderedCardioBlocks(for session: WorkoutSession) -> [WorkoutSessionCardioBlock] {
         (session.cardioBlocks ?? [])
-            .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
+            .sorted { lhs, rhs in
+                if lhs.role.sortOrder != rhs.role.sortOrder {
+                    return lhs.role.sortOrder < rhs.role.sortOrder
+                }
+                if lhs.sortOrder != rhs.sortOrder {
+                    return lhs.sortOrder < rhs.sortOrder
+                }
+                if lhs.createdAt != rhs.createdAt {
+                    return lhs.createdAt < rhs.createdAt
+                }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
     }
 }
 

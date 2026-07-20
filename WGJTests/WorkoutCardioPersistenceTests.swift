@@ -336,11 +336,12 @@ final class WorkoutCardioPersistenceTests: XCTestCase {
         )
         context.insert(bike)
         session.cardioBlocks = [persistedTreadmill, bike]
-        session.notes = "Updated"
         try context.save()
 
         let syncService = WorkoutTemplateSyncService(modelContext: context)
         let preview = try XCTUnwrap(syncService.previewTemplateUpdate(forSessionID: session.id))
+        XCTAssertEqual(preview.addedCardioBlocks.map(\.exerciseName), ["Bike"])
+        XCTAssertTrue(preview.editedCardioBlocks.isEmpty)
         try syncService.applyTemplateUpdate(preview)
 
         let synced = try templateRepository.cardioActivities(templateID: template.id)
