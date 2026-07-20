@@ -36,33 +36,25 @@ nonisolated enum WorkoutCompletionConfettiOrigin {
             y: location.y - overlayFrameInGlobalSpace.minY
         )
     }
-
-    static func defaultOrigin(
-        containerFrameInGlobalSpace frame: CGRect,
-        fallbackContainerSize: CGSize
-    ) -> CGPoint {
-        if frame.width > 0, frame.height > 0 {
-            return CGPoint(x: frame.midX, y: frame.midY)
-        }
-
-        let width = max(fallbackContainerSize.width, 0)
-        if fallbackContainerSize.height > 0 {
-            return CGPoint(x: width / 2, y: fallbackContainerSize.height / 2)
-        }
-
-        return CGPoint(x: width / 2, y: 360)
-    }
 }
 
-nonisolated struct WorkoutCompletionContainerGeometry: Equatable, Sendable {
-    var globalFrame: CGRect = .zero
-    var localSize: CGSize = .zero
+nonisolated enum WorkoutCompletionConfettiLaunchOrigin: Equatable, Sendable {
+    case overlayCenter
+    case global(CGPoint)
 
-    var automaticConfettiOrigin: CGPoint {
-        WorkoutCompletionConfettiOrigin.defaultOrigin(
-            containerFrameInGlobalSpace: globalFrame,
-            fallbackContainerSize: localSize
-        )
+    func resolvedPoint(
+        overlaySize: CGSize,
+        overlayFrameInGlobalSpace: CGRect
+    ) -> CGPoint {
+        switch self {
+        case .overlayCenter:
+            return CGPoint(x: overlaySize.width / 2, y: overlaySize.height / 2)
+        case .global(let point):
+            return WorkoutCompletionConfettiOrigin.overlayOrigin(
+                locationInGlobalSpace: point,
+                overlayFrameInGlobalSpace: overlayFrameInGlobalSpace
+            )
+        }
     }
 }
 
@@ -76,7 +68,7 @@ nonisolated enum WorkoutCompletionConfettiBurstRole: Equatable, Sendable {
 }
 
 nonisolated struct WorkoutCompletionConfettiBurstDescriptor: Equatable, Sendable {
-    let origin: CGPoint
+    let origin: WorkoutCompletionConfettiLaunchOrigin
     let role: WorkoutCompletionConfettiBurstRole
     let pieceCount: Int
     let delay: Double
@@ -171,7 +163,7 @@ nonisolated enum WorkoutCompletionConfettiPolicy {
     }
 
     static func burstDescriptors(
-        origin: CGPoint,
+        origin: WorkoutCompletionConfettiLaunchOrigin,
         intensity: WorkoutCompletionConfettiIntensity,
         variant: WorkoutCompletionCelebrationVariant
     ) -> [WorkoutCompletionConfettiBurstDescriptor] {
@@ -231,7 +223,6 @@ struct WorkoutCompletionSummaryView: View {
     @State private var confettiDismissTasks: [UUID: Task<Void, Never>] = [:]
     @State private var automaticCelebrationTask: Task<Void, Never>?
     @State private var heroCardFrame: CGRect = .zero
-    @State private var completionContainerGeometry = WorkoutCompletionContainerGeometry()
 
     private var completionBackgroundStore: AppBackgroundStore {
         appBackgroundStore ?? AppBackgroundStore(container: modelContext.container)
@@ -270,7 +261,7 @@ struct WorkoutCompletionSummaryView: View {
                 ZStack {
                     ForEach(confettiBursts) { burst in
                         WorkoutCompletionConfettiOverlay(
-                            originInGlobalSpace: burst.origin,
+                            origin: burst.origin,
                             pieces: burst.pieces,
                             startDate: burst.startDate
                         )
@@ -283,19 +274,6 @@ struct WorkoutCompletionSummaryView: View {
             }
         }
         .coordinateSpace(name: "workout-completion-summary-space")
-        .background {
-            GeometryReader { geometry in
-                Color.clear.preference(
-                    key: WorkoutCompletionContainerSizePreferenceKey.self,
-                    value: geometry.size
-                )
-            }
-        }
-        .onPreferenceChange(WorkoutCompletionContainerSizePreferenceKey.self) { size in
-            guard completionContainerGeometry.localSize != size else { return }
-            completionContainerGeometry.localSize = size
-        }
-        .wgjTrackContainerFrame($completionContainerGeometry.globalFrame)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             bottomAction
         }
@@ -652,7 +630,7 @@ struct WorkoutCompletionSummaryView: View {
     }
 
     private func triggerCelebration(
-        origin: CGPoint,
+        origin: WorkoutCompletionConfettiLaunchOrigin,
         intensity: WorkoutCompletionConfettiIntensity,
         variant: WorkoutCompletionCelebrationVariant? = nil
     ) {
@@ -685,15 +663,15 @@ struct WorkoutCompletionSummaryView: View {
         confettiDismissTasks[id] = nil
     }
 
-    private func confettiOrigin(for location: CGPoint) -> CGPoint {
-        WorkoutCompletionConfettiOrigin.tapOrigin(
+    private func confettiOrigin(for location: CGPoint) -> WorkoutCompletionConfettiLaunchOrigin {
+        .global(WorkoutCompletionConfettiOrigin.tapOrigin(
             locationInGlobalSpace: location,
             heroFrame: heroCardFrame
-        )
+        ))
     }
 
-    private func defaultConfettiOrigin() -> CGPoint {
-        completionContainerGeometry.automaticConfettiOrigin
+    private func defaultConfettiOrigin() -> WorkoutCompletionConfettiLaunchOrigin {
+        .overlayCenter
     }
 
     private func continueToHistory() {
@@ -1089,17 +1067,9 @@ private struct WorkoutCompletionHeroFramePreferenceKey: PreferenceKey {
     }
 }
 
-private struct WorkoutCompletionContainerSizePreferenceKey: PreferenceKey {
-    static let defaultValue: CGSize = .zero
-
-    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
-        value = nextValue()
-    }
-}
-
 private struct WorkoutCompletionConfettiBurst: Identifiable {
     let id = UUID()
-    let origin: CGPoint
+    let origin: WorkoutCompletionConfettiLaunchOrigin
     let pieces: [WorkoutCompletionConfettiPiece]
     let startDate: Date
 
@@ -1116,15 +1086,15 @@ private struct WorkoutCompletionConfettiBurst: Identifiable {
 }
 
 private struct WorkoutCompletionConfettiOverlay: View {
-    let originInGlobalSpace: CGPoint
+    let origin: WorkoutCompletionConfettiLaunchOrigin
     let pieces: [WorkoutCompletionConfettiPiece]
     let startDate: Date
 
     var body: some View {
         GeometryReader { proxy in
             let overlayFrameInGlobal = proxy.frame(in: .global)
-            let origin = WorkoutCompletionConfettiOrigin.overlayOrigin(
-                locationInGlobalSpace: originInGlobalSpace,
+            let resolvedOrigin = origin.resolvedPoint(
+                overlaySize: proxy.size,
                 overlayFrameInGlobalSpace: overlayFrameInGlobal
             )
 
@@ -1140,10 +1110,10 @@ private struct WorkoutCompletionConfettiOverlay: View {
                         let progress = piece.progress(at: elapsed)
                         guard progress > 0 else { continue }
 
-                        let x = origin.x
+                        let x = resolvedOrigin.x
                             + (piece.originX * initialSpreadX)
                             + (piece.xOffset(progress: progress) * widthScale)
-                        let y = origin.y
+                        let y = resolvedOrigin.y
                             + (piece.originY * initialSpreadY)
                             + (piece.yOffset(progress: progress) * heightScale)
 

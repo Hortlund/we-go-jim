@@ -386,11 +386,11 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
     func testWorkoutCompletionBackupIsDeferredPastCompletionPresentation() {
         XCTAssertEqual(
             BoundaryCloudBackupScheduler.enqueueDelay(for: .workoutCompleted),
-            .seconds(2)
+            WorkoutCompletionBackgroundWorkPolicy.quiescenceDelay
         )
         XCTAssertEqual(
             BoundaryCloudBackupScheduler.enqueueDelay(for: .workoutCompletionTemplateSaved),
-            .seconds(2)
+            WorkoutCompletionBackgroundWorkPolicy.quiescenceDelay
         )
         XCTAssertEqual(
             BoundaryCloudBackupScheduler.enqueueDelay(for: .templateSaved),

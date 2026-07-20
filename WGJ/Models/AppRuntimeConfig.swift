@@ -655,6 +655,10 @@ final class WorkoutCompletionPresentationState {
     var presentedWorkout: WorkoutCompletionPresentation?
     @ObservationIgnored private var queuedWorkout: WorkoutCompletionPresentation?
 
+    var hasPendingOrPresentedWorkout: Bool {
+        presentedWorkout != nil || queuedWorkout != nil
+    }
+
     func present(sessionID: UUID) {
         queuedWorkout = nil
         presentedWorkout = WorkoutCompletionPresentation(sessionID: sessionID)

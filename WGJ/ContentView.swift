@@ -26,6 +26,7 @@ struct ContentView: View {
     @State private var resumeCriticalMaintenanceTask: Task<Void, Never>?
     @State private var enteredMainDeferredMaintenanceTask: Task<Void, Never>?
     @State private var enteredMainNoncriticalWorkTask: Task<Void, Never>?
+    @State private var postWorkoutBackgroundWorkTask: Task<Void, Never>?
     @State private var isPreparingMainPhase = false
     @State private var hasInstalledUITestPendingTemplate = false
     @State private var hasScheduledInitialDeferredMaintenance = false
@@ -101,8 +102,7 @@ struct ContentView: View {
             guard oldValue != nil, newValue == nil else { return }
             appWarmupState.invalidateProfile()
             requestNewDeferredMaintenanceRun()
-            scheduleWeeklyGoalWidgetPublish()
-            requestDeferredMaintenance(trigger: .activeWorkoutEnded)
+            schedulePostWorkoutBackgroundWork()
         }
         .onOpenURL { url in
             handleIncomingURL(url)
@@ -322,8 +322,29 @@ struct ContentView: View {
     private func handleWorkoutHistoryChanged() {
         guard appPhase == .main else { return }
         appWarmupState.invalidateProfile()
+        guard activeWorkoutPresentationState.activeSessionID == nil,
+              !workoutCompletionPresentationState.hasPendingOrPresentedWorkout
+        else {
+            return
+        }
         scheduleWeeklyGoalWidgetPublish()
         requestWarmups(trigger: .activeWorkoutEnded)
+    }
+
+    private func schedulePostWorkoutBackgroundWork() {
+        postWorkoutBackgroundWorkTask?.cancel()
+        postWorkoutBackgroundWorkTask = Task { @MainActor in
+            try? await Task.sleep(for: WorkoutCompletionBackgroundWorkPolicy.quiescenceDelay)
+            guard !Task.isCancelled,
+                  activeWorkoutPresentationState.activeSessionID == nil
+            else {
+                return
+            }
+
+            scheduleWeeklyGoalWidgetPublish()
+            requestDeferredMaintenance(trigger: .activeWorkoutEnded)
+            postWorkoutBackgroundWorkTask = nil
+        }
     }
 
     private func handleUserDataRestoreCompleted() {
@@ -526,6 +547,8 @@ struct ContentView: View {
         enteredMainDeferredMaintenanceTask = nil
         enteredMainNoncriticalWorkTask?.cancel()
         enteredMainNoncriticalWorkTask = nil
+        postWorkoutBackgroundWorkTask?.cancel()
+        postWorkoutBackgroundWorkTask = nil
         activeWorkoutCoordinator.clearInMemory()
         activeWorkoutPresentationState.clearActiveWorkout(restTimerState: restTimerState)
         clearWeeklyGoalWidgetSnapshot()

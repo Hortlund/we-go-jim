@@ -4,20 +4,15 @@ import XCTest
 @MainActor
 final class WorkoutCompletionConfettiTests: XCTestCase {
     func testStandardCompletionUsesOneCenteredBoundedBurst() {
-        let origin = WorkoutCompletionConfettiOrigin.defaultOrigin(
-            containerFrameInGlobalSpace: CGRect(x: 12, y: 48, width: 390, height: 780),
-            fallbackContainerSize: .zero
-        )
         let bursts = WorkoutCompletionConfettiPolicy.burstDescriptors(
-            origin: origin,
+            origin: .overlayCenter,
             intensity: .completedWorkout,
             variant: .standard
         )
 
-        XCTAssertEqual(origin, CGPoint(x: 207, y: 438))
         XCTAssertEqual(bursts.count, 1)
         XCTAssertEqual(bursts.first?.role, .centralThrow)
-        XCTAssertEqual(bursts.first?.origin, origin)
+        XCTAssertEqual(bursts.first?.origin, .overlayCenter)
         XCTAssertEqual(bursts.first?.pieceCount, 38)
         XCTAssertEqual(bursts.first?.variant, .standard)
         XCTAssertEqual(bursts.first?.delay, 0)
@@ -26,7 +21,7 @@ final class WorkoutCompletionConfettiTests: XCTestCase {
 
     func testPersonalRecordCompletionIsStrongerButBounded() {
         let bursts = WorkoutCompletionConfettiPolicy.burstDescriptors(
-            origin: CGPoint(x: 195, y: 390),
+            origin: .overlayCenter,
             intensity: .completedWorkout,
             variant: .personalRecord
         )
@@ -43,48 +38,40 @@ final class WorkoutCompletionConfettiTests: XCTestCase {
     func testManualReplayRetainsTapOriginAndLightCount() {
         let origin = CGPoint(x: 120, y: 220)
         let bursts = WorkoutCompletionConfettiPolicy.burstDescriptors(
-            origin: origin,
+            origin: .global(origin),
             intensity: .manualTap,
             variant: .personalRecord
         )
 
         XCTAssertEqual(bursts.count, 1)
         XCTAssertEqual(bursts.first?.role, .centralThrow)
-        XCTAssertEqual(bursts.first?.origin, origin)
+        XCTAssertEqual(bursts.first?.origin, .global(origin))
         XCTAssertEqual(bursts.first?.pieceCount, 18)
     }
 
-    func testAutomaticOriginUsesContainerCenterAndFallbacks() {
+    func testAutomaticOriginResolvesFromLiveOverlaySize() {
         XCTAssertEqual(
-            WorkoutCompletionConfettiOrigin.defaultOrigin(
-                containerFrameInGlobalSpace: CGRect(x: 0, y: 20, width: 440, height: 880),
-                fallbackContainerSize: .zero
+            WorkoutCompletionConfettiLaunchOrigin.overlayCenter.resolvedPoint(
+                overlaySize: CGSize(width: 440, height: 880),
+                overlayFrameInGlobalSpace: CGRect(x: 12, y: 48, width: 440, height: 880)
             ),
-            CGPoint(x: 220, y: 460)
+            CGPoint(x: 220, y: 440)
         )
         XCTAssertEqual(
-            WorkoutCompletionConfettiOrigin.defaultOrigin(
-                containerFrameInGlobalSpace: .zero,
-                fallbackContainerSize: CGSize(width: 320, height: 568)
+            WorkoutCompletionConfettiLaunchOrigin.global(CGPoint(x: 212, y: 448)).resolvedPoint(
+                overlaySize: CGSize(width: 390, height: 844),
+                overlayFrameInGlobalSpace: CGRect(x: 12, y: 26, width: 390, height: 844)
             ),
-            CGPoint(x: 160, y: 284)
-        )
-        XCTAssertEqual(
-            WorkoutCompletionConfettiOrigin.defaultOrigin(
-                containerFrameInGlobalSpace: .zero,
-                fallbackContainerSize: CGSize(width: 390, height: 0)
-            ),
-            CGPoint(x: 195, y: 360)
+            CGPoint(x: 200, y: 422)
         )
     }
 
-    func testContainerGeometryKeepsLocalSizeWhenGlobalFrameIsUnavailable() {
-        let geometry = WorkoutCompletionContainerGeometry(
-            globalFrame: .zero,
-            localSize: CGSize(width: 390, height: 780)
+    func testCompletionBackgroundWorkWaitsForCelebrationWindow() {
+        XCTAssertEqual(WorkoutCompletionBackgroundWorkPolicy.quiescenceDelay, .seconds(7))
+        XCTAssertEqual(
+            BoundaryCloudBackupScheduler.enqueueDelay(for: .workoutCompleted),
+            WorkoutCompletionBackgroundWorkPolicy.quiescenceDelay
         )
-
-        XCTAssertEqual(geometry.automaticConfettiOrigin, CGPoint(x: 195, y: 390))
     }
 
     func testReducedMotionUsesStaticPresentationWithoutParticles() {

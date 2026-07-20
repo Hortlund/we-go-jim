@@ -7,6 +7,10 @@ nonisolated enum AppMaintenanceTrigger: Equatable, Sendable {
     case activeWorkoutEnded
 }
 
+nonisolated enum WorkoutCompletionBackgroundWorkPolicy {
+    static let quiescenceDelay: Duration = .seconds(7)
+}
+
 nonisolated struct AppDeferredMaintenanceWork: Equatable, Sendable {
     let shouldPrimeCatalog: Bool
     let shouldBackfillHistoryProjection: Bool
