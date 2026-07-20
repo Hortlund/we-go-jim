@@ -760,6 +760,7 @@ final class UserProfile {
     var athleteTypeRaw: String?
     var avatarImageData: Data?
     var preferredWeightUnitRaw: String = PreferredWeightUnit.kg.rawValue
+    var preferredDistanceUnitRaw: String?
     var workoutNotificationStyleRaw: String = WorkoutNotificationStyle.timeSensitive.rawValue
     var weeklyWorkoutGoal: Int = 4
     var isTrainingGuidanceEnabled: Bool = true
@@ -784,6 +785,14 @@ final class UserProfile {
         set { preferredWeightUnitRaw = newValue.rawValue }
     }
 
+    var preferredDistanceUnit: WorkoutDistanceUnit {
+        get {
+            preferredDistanceUnitRaw.flatMap(WorkoutDistanceUnit.init(rawValue:))
+                ?? .regionalDefault(locale: .current)
+        }
+        set { preferredDistanceUnitRaw = newValue.rawValue }
+    }
+
     var workoutNotificationStyle: WorkoutNotificationStyle {
         get { WorkoutNotificationStyle(rawValue: workoutNotificationStyleRaw) ?? .timeSensitive }
         set { workoutNotificationStyleRaw = newValue.rawValue }
@@ -799,6 +808,7 @@ final class UserProfile {
         athleteType: ProfileAthleteType? = nil,
         avatarImageData: Data? = nil,
         preferredWeightUnit: PreferredWeightUnit = .kg,
+        preferredDistanceUnit: WorkoutDistanceUnit? = nil,
         workoutNotificationStyle: WorkoutNotificationStyle = .timeSensitive,
         weeklyWorkoutGoal: Int = 4,
         isTrainingGuidanceEnabled: Bool = true,
@@ -813,6 +823,7 @@ final class UserProfile {
         self.athleteTypeRaw = athleteType?.rawValue
         self.avatarImageData = avatarImageData
         self.preferredWeightUnitRaw = preferredWeightUnit.rawValue
+        self.preferredDistanceUnitRaw = preferredDistanceUnit?.rawValue
         self.workoutNotificationStyleRaw = workoutNotificationStyle.rawValue
         self.weeklyWorkoutGoal = max(1, min(14, weeklyWorkoutGoal))
         self.isTrainingGuidanceEnabled = isTrainingGuidanceEnabled

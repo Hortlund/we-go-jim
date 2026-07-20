@@ -6,6 +6,7 @@ nonisolated struct UserSettingsDraft: Equatable, Sendable {
     var isTrainingGuidanceEnabled: Bool
     var keepsScreenAwake: Bool
     var preferredWeightUnit: PreferredWeightUnit
+    var preferredDistanceUnit: WorkoutDistanceUnit
     var workoutNotificationStyle: WorkoutNotificationStyle
     var automaticallyClosesCompletedExercises: Bool
 
@@ -14,6 +15,7 @@ nonisolated struct UserSettingsDraft: Equatable, Sendable {
         isTrainingGuidanceEnabled: true,
         keepsScreenAwake: false,
         preferredWeightUnit: .kg,
+        preferredDistanceUnit: .regionalDefault(locale: .current),
         workoutNotificationStyle: .timeSensitive,
         automaticallyClosesCompletedExercises: true
     )
@@ -23,6 +25,7 @@ nonisolated struct UserSettingsDraft: Equatable, Sendable {
         isTrainingGuidanceEnabled: Bool,
         keepsScreenAwake: Bool,
         preferredWeightUnit: PreferredWeightUnit,
+        preferredDistanceUnit: WorkoutDistanceUnit = .regionalDefault(locale: .current),
         workoutNotificationStyle: WorkoutNotificationStyle,
         automaticallyClosesCompletedExercises: Bool = true
     ) {
@@ -30,6 +33,7 @@ nonisolated struct UserSettingsDraft: Equatable, Sendable {
         self.isTrainingGuidanceEnabled = isTrainingGuidanceEnabled
         self.keepsScreenAwake = keepsScreenAwake
         self.preferredWeightUnit = preferredWeightUnit
+        self.preferredDistanceUnit = preferredDistanceUnit
         self.workoutNotificationStyle = workoutNotificationStyle
         self.automaticallyClosesCompletedExercises = automaticallyClosesCompletedExercises
     }
@@ -40,6 +44,7 @@ nonisolated struct UserSettingsDraft: Equatable, Sendable {
             isTrainingGuidanceEnabled: profile.isTrainingGuidanceEnabled,
             keepsScreenAwake: profile.keepsScreenAwake,
             preferredWeightUnit: profile.preferredWeightUnit,
+            preferredDistanceUnit: profile.preferredDistanceUnit,
             workoutNotificationStyle: profile.workoutNotificationStyle,
             automaticallyClosesCompletedExercises: profile.automaticallyClosesCompletedExercises
         )
@@ -58,6 +63,9 @@ nonisolated struct UserSettingsDraft: Equatable, Sendable {
         if let value = patch.preferredWeightUnit {
             preferredWeightUnit = value
         }
+        if let value = patch.preferredDistanceUnit {
+            preferredDistanceUnit = value
+        }
         if let value = patch.workoutNotificationStyle {
             workoutNotificationStyle = value
         }
@@ -72,6 +80,7 @@ nonisolated struct UserSettingsPatch: Equatable, Sendable {
     var isTrainingGuidanceEnabled: Bool?
     var keepsScreenAwake: Bool?
     var preferredWeightUnit: PreferredWeightUnit?
+    var preferredDistanceUnit: WorkoutDistanceUnit?
     var workoutNotificationStyle: WorkoutNotificationStyle?
     var automaticallyClosesCompletedExercises: Bool?
 
@@ -80,6 +89,7 @@ nonisolated struct UserSettingsPatch: Equatable, Sendable {
         isTrainingGuidanceEnabled: Bool? = nil,
         keepsScreenAwake: Bool? = nil,
         preferredWeightUnit: PreferredWeightUnit? = nil,
+        preferredDistanceUnit: WorkoutDistanceUnit? = nil,
         workoutNotificationStyle: WorkoutNotificationStyle? = nil,
         automaticallyClosesCompletedExercises: Bool? = nil
     ) {
@@ -87,6 +97,7 @@ nonisolated struct UserSettingsPatch: Equatable, Sendable {
         self.isTrainingGuidanceEnabled = isTrainingGuidanceEnabled
         self.keepsScreenAwake = keepsScreenAwake
         self.preferredWeightUnit = preferredWeightUnit
+        self.preferredDistanceUnit = preferredDistanceUnit
         self.workoutNotificationStyle = workoutNotificationStyle
         self.automaticallyClosesCompletedExercises = automaticallyClosesCompletedExercises
     }
@@ -96,6 +107,7 @@ nonisolated struct UserSettingsPatch: Equatable, Sendable {
         if let value = newer.isTrainingGuidanceEnabled { isTrainingGuidanceEnabled = value }
         if let value = newer.keepsScreenAwake { keepsScreenAwake = value }
         if let value = newer.preferredWeightUnit { preferredWeightUnit = value }
+        if let value = newer.preferredDistanceUnit { preferredDistanceUnit = value }
         if let value = newer.workoutNotificationStyle { workoutNotificationStyle = value }
         if let value = newer.automaticallyClosesCompletedExercises {
             automaticallyClosesCompletedExercises = value

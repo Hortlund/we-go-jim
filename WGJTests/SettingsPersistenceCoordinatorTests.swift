@@ -2,6 +2,24 @@ import XCTest
 @testable import WGJ
 
 final class SettingsPersistenceCoordinatorTests: XCTestCase {
+    func testPreferredDistanceUnitDefaultsFromLocaleAndCopiesProfile() {
+        let fallback = WorkoutDistanceUnit.regionalDefault(locale: .current)
+        XCTAssertEqual(UserSettingsDraft.default.preferredDistanceUnit, fallback)
+
+        let profile = UserProfile(displayName: "Peter", preferredDistanceUnit: .miles)
+        XCTAssertEqual(UserSettingsDraft(profile: profile).preferredDistanceUnit, .miles)
+    }
+
+    func testPreferredDistanceUnitPatchChangesOnlyDistancePreference() {
+        var draft = UserSettingsDraft.default
+        let weightUnit = draft.preferredWeightUnit
+
+        draft.apply(.init(preferredDistanceUnit: .meters))
+
+        XCTAssertEqual(draft.preferredDistanceUnit, .meters)
+        XCTAssertEqual(draft.preferredWeightUnit, weightUnit)
+    }
+
     func testAutoCloseCompletedExercisesDefaultsOnAndCopiesProfileValue() {
         XCTAssertTrue(UserSettingsDraft.default.automaticallyClosesCompletedExercises)
 
