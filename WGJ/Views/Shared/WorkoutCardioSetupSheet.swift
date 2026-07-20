@@ -1,0 +1,269 @@
+import Foundation
+import SwiftUI
+
+nonisolated struct WorkoutCardioSetupDraft: Equatable, Sendable {
+    var role: WorkoutCardioRole
+    var goalKind: WorkoutCardioGoalKind
+    var durationMinutesText: String
+    var distanceText: String
+    var distanceUnit: WorkoutDistanceUnit
+    var trackingProfile: WorkoutCardioTrackingProfile
+}
+
+nonisolated struct ValidatedWorkoutCardioSetup: Equatable, Sendable {
+    let role: WorkoutCardioRole
+    let goalKind: WorkoutCardioGoalKind
+    let targetDurationSeconds: Int
+    let targetDistanceMeters: Double?
+    let preferredDistanceUnit: WorkoutDistanceUnit
+    let trackingProfile: WorkoutCardioTrackingProfile
+}
+
+nonisolated enum WorkoutCardioSetupValidationError: LocalizedError, Equatable, Sendable {
+    case durationMustBePositive
+    case distanceMustBePositive(unit: WorkoutDistanceUnit)
+
+    var errorDescription: String? {
+        switch self {
+        case .durationMustBePositive:
+            return "Enter a duration greater than 0 minutes."
+        case .distanceMustBePositive(let unit):
+            return "Enter a distance greater than 0 \(unit.validationName)."
+        }
+    }
+}
+
+nonisolated enum WorkoutCardioSetupValidator {
+    static func validated(_ draft: WorkoutCardioSetupDraft) throws -> ValidatedWorkoutCardioSetup {
+        let targetDurationSeconds: Int
+        let targetDistanceMeters: Double?
+
+        switch draft.goalKind {
+        case .time:
+            guard let minutes = positiveNumber(from: draft.durationMinutesText) else {
+                throw WorkoutCardioSetupValidationError.durationMustBePositive
+            }
+            let cappedMinutes = min(minutes, Double(24 * 60))
+            targetDurationSeconds = max(1, Int((cappedMinutes * 60).rounded()))
+            targetDistanceMeters = nil
+        case .distance:
+            guard let distance = positiveNumber(from: draft.distanceText) else {
+                throw WorkoutCardioSetupValidationError.distanceMustBePositive(unit: draft.distanceUnit)
+            }
+            let distanceMeters = draft.distanceUnit.meters(from: distance)
+            guard distanceMeters.isFinite, distanceMeters > 0 else {
+                throw WorkoutCardioSetupValidationError.distanceMustBePositive(unit: draft.distanceUnit)
+            }
+            targetDurationSeconds = 0
+            targetDistanceMeters = distanceMeters
+        case .open:
+            targetDurationSeconds = 0
+            targetDistanceMeters = nil
+        }
+
+        return ValidatedWorkoutCardioSetup(
+            role: draft.role,
+            goalKind: draft.goalKind,
+            targetDurationSeconds: targetDurationSeconds,
+            targetDistanceMeters: targetDistanceMeters,
+            preferredDistanceUnit: draft.distanceUnit,
+            trackingProfile: draft.trackingProfile
+        )
+    }
+
+    private static func positiveNumber(from text: String) -> Double? {
+        let normalized = text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: ",", with: ".")
+        guard let value = Double(normalized), value.isFinite, value > 0 else {
+            return nil
+        }
+        return value
+    }
+}
+
+struct WorkoutCardioSetupSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let activityName: String
+    let onSave: (ValidatedWorkoutCardioSetup) -> Void
+
+    @State private var draft: WorkoutCardioSetupDraft
+    @State private var validationMessage: String?
+
+    init(
+        activityName: String,
+        draft: WorkoutCardioSetupDraft,
+        onSave: @escaping (ValidatedWorkoutCardioSetup) -> Void
+    ) {
+        self.activityName = activityName
+        self.onSave = onSave
+        self._draft = State(initialValue: draft)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    setupCard
+
+                    if let validationMessage {
+                        Label(validationMessage, systemImage: "exclamationmark.circle.fill")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(WGJTheme.danger)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("cardio-setup-validation-error")
+                    }
+                }
+                .padding(16)
+            }
+            .wgjScreenBackground()
+            .navigationTitle("Cardio Setup")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        save()
+                    }
+                    .accessibilityIdentifier("cardio-setup-save-button")
+                }
+            }
+        }
+        .wgjSheetSurface()
+        .onChange(of: draft) { _, _ in
+            validationMessage = nil
+        }
+    }
+
+    private var setupCard: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            WGJSectionHeader("Plan \(activityName)", subtitle: "Choose where it fits and what to aim for.")
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Role")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(WGJTheme.textSecondary)
+
+                Picker("Role", selection: $draft.role) {
+                    ForEach(WorkoutCardioRole.allCases) { role in
+                        Text(role.compactTitle).tag(role)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("cardio-setup-role-picker")
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Goal")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(WGJTheme.textSecondary)
+
+                Picker("Goal", selection: $draft.goalKind) {
+                    ForEach(WorkoutCardioGoalKind.allCases) { goalKind in
+                        Text(goalKind.title).tag(goalKind)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("cardio-setup-goal-picker")
+            }
+
+            goalInput
+        }
+        .padding(16)
+        .wgjCardContainer(strong: true)
+    }
+
+    @ViewBuilder
+    private var goalInput: some View {
+        switch draft.goalKind {
+        case .time:
+            VStack(alignment: .leading, spacing: 10) {
+                TextField("Minutes", text: $draft.durationMinutesText)
+                    .keyboardType(.decimalPad)
+                    .wgjPillField()
+                    .accessibilityIdentifier("cardio-setup-duration-field")
+
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) {
+                        presetTimeButtons
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        presetTimeButtons
+                    }
+                }
+            }
+        case .distance:
+            HStack(spacing: 10) {
+                TextField("Distance", text: $draft.distanceText)
+                    .keyboardType(.decimalPad)
+                    .wgjPillField()
+                    .accessibilityIdentifier("cardio-setup-distance-field")
+
+                Picker("Unit", selection: $draft.distanceUnit) {
+                    ForEach(WorkoutDistanceUnit.allCases) { unit in
+                        Text(unit.shortTitle).tag(unit)
+                    }
+                }
+                .pickerStyle(.menu)
+                .buttonStyle(WGJGhostButtonStyle())
+                .accessibilityIdentifier("cardio-setup-distance-unit-picker")
+            }
+        case .open:
+            Label("No target. Track the activity freely when you work out.", systemImage: "scope")
+                .font(.subheadline)
+                .foregroundStyle(WGJTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private var presetTimeButtons: some View {
+        ForEach([5, 10, 20], id: \.self) { minutes in
+            Button("\(minutes) min") {
+                draft.durationMinutesText = String(minutes)
+            }
+            .buttonStyle(WGJGhostButtonStyle())
+        }
+    }
+
+    private func save() {
+        do {
+            let validated = try WorkoutCardioSetupValidator.validated(draft)
+            onSave(validated)
+            dismiss()
+        } catch {
+            validationMessage = error.localizedDescription
+        }
+    }
+}
+
+private extension WorkoutDistanceUnit {
+    nonisolated var validationName: String {
+        switch self {
+        case .kilometers:
+            return "kilometers"
+        case .miles:
+            return "miles"
+        case .meters:
+            return "meters"
+        }
+    }
+
+    nonisolated var shortTitle: String {
+        switch self {
+        case .kilometers:
+            return "km"
+        case .miles:
+            return "mi"
+        case .meters:
+            return "m"
+        }
+    }
+}

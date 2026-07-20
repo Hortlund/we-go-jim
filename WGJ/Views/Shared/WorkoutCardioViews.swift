@@ -27,6 +27,199 @@ enum WorkoutCardioDurationFormatter {
     }
 }
 
+extension WorkoutCardioRole {
+    nonisolated var title: String {
+        switch self {
+        case .warmUp:
+            return "Warm-up"
+        case .main:
+            return "Main Cardio"
+        case .finisher:
+            return "Finisher"
+        }
+    }
+
+    nonisolated var compactTitle: String {
+        switch self {
+        case .warmUp:
+            return "Warm-up"
+        case .main:
+            return "Main"
+        case .finisher:
+            return "Finisher"
+        }
+    }
+
+    nonisolated var systemImage: String {
+        switch self {
+        case .warmUp:
+            return "figure.walk"
+        case .main:
+            return "figure.run"
+        case .finisher:
+            return "flag.checkered"
+        }
+    }
+}
+
+extension WorkoutCardioGoalKind {
+    nonisolated var title: String {
+        switch self {
+        case .time:
+            return "Time"
+        case .distance:
+            return "Distance"
+        case .open:
+            return "No Target"
+        }
+    }
+}
+
+struct WorkoutCardioActivityPlanCard<Actions: View>: View {
+    let activityName: String
+    let role: WorkoutCardioRole
+    let descriptor: String?
+    let goalKind: WorkoutCardioGoalKind
+    let targetDurationSeconds: Int
+    let targetDistanceMeters: Double?
+    let preferredDistanceUnit: WorkoutDistanceUnit
+    let accessibilityIdentifier: String?
+    let actions: Actions
+
+    init(
+        activityName: String,
+        role: WorkoutCardioRole,
+        descriptor: String? = nil,
+        goalKind: WorkoutCardioGoalKind,
+        targetDurationSeconds: Int,
+        targetDistanceMeters: Double?,
+        preferredDistanceUnit: WorkoutDistanceUnit,
+        accessibilityIdentifier: String? = nil,
+        @ViewBuilder actions: () -> Actions
+    ) {
+        self.activityName = activityName
+        self.role = role
+        self.descriptor = descriptor
+        self.goalKind = goalKind
+        self.targetDurationSeconds = targetDurationSeconds
+        self.targetDistanceMeters = targetDistanceMeters
+        self.preferredDistanceUnit = preferredDistanceUnit
+        self.accessibilityIdentifier = accessibilityIdentifier
+        self.actions = actions()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: role.systemImage)
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(roleTint)
+                    .frame(width: 42, height: 42)
+                    .background {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(roleTint.opacity(0.12))
+                    }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(role.title)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(roleTint)
+                        .textCase(.uppercase)
+
+                    Text(activityName)
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(WGJTheme.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if let descriptor, !descriptor.isEmpty {
+                        Text(descriptor)
+                            .font(.subheadline)
+                            .foregroundStyle(WGJTheme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                Spacer(minLength: 8)
+            }
+
+            WGJMetricPill(
+                systemImage: goalSystemImage,
+                value: goalSummary,
+                tint: WGJTheme.accentCyan
+            )
+
+            actions
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .wgjCardContainer(strong: true)
+        .modifier(WorkoutCardioAccessibilityIdentifier(identifier: accessibilityIdentifier))
+    }
+
+    private var roleTint: Color {
+        switch role {
+        case .warmUp:
+            return WGJTheme.accentBlue
+        case .main:
+            return WGJTheme.accentCyan
+        case .finisher:
+            return WGJTheme.accentGold
+        }
+    }
+
+    private var goalSystemImage: String {
+        switch goalKind {
+        case .time:
+            return "clock.fill"
+        case .distance:
+            return "point.topleft.down.to.point.bottomright.curvepath.fill"
+        case .open:
+            return "scope"
+        }
+    }
+
+    private var goalSummary: String {
+        switch goalKind {
+        case .time:
+            return WorkoutCardioDurationFormatter.text(seconds: targetDurationSeconds)
+        case .distance:
+            guard let targetDistanceMeters, targetDistanceMeters > 0 else {
+                return "Distance"
+            }
+            let value = preferredDistanceUnit.value(fromMeters: targetDistanceMeters)
+            return "\(value.formatted(.number.precision(.fractionLength(0...2)))) \(preferredDistanceUnit.symbol)"
+        case .open:
+            return "No target"
+        }
+    }
+}
+
+extension WorkoutCardioActivityPlanCard where Actions == EmptyView {
+    init(
+        activityName: String,
+        role: WorkoutCardioRole,
+        descriptor: String? = nil,
+        goalKind: WorkoutCardioGoalKind,
+        targetDurationSeconds: Int,
+        targetDistanceMeters: Double?,
+        preferredDistanceUnit: WorkoutDistanceUnit,
+        accessibilityIdentifier: String? = nil
+    ) {
+        self.init(
+            activityName: activityName,
+            role: role,
+            descriptor: descriptor,
+            goalKind: goalKind,
+            targetDurationSeconds: targetDurationSeconds,
+            targetDistanceMeters: targetDistanceMeters,
+            preferredDistanceUnit: preferredDistanceUnit,
+            accessibilityIdentifier: accessibilityIdentifier
+        ) {
+            EmptyView()
+        }
+    }
+}
+
 struct WorkoutCardioSettingsDraft: Identifiable, Equatable {
     let id: UUID
     let phase: WorkoutCardioPhase
