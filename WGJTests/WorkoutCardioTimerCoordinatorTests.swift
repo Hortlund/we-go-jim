@@ -132,14 +132,164 @@ final class WorkoutCardioTimerCoordinatorTests: XCTestCase {
             XCTAssertEqual($0 as? WorkoutCardioTimerError, .activityNotFound)
         }
     }
+
+    func testStartRejectsCompletedActivityWithoutMutation() {
+        let activity = ActiveWorkoutRuntimeCardioBlock.fixture(
+            actualDurationSeconds: 75,
+            timerAccumulatedSeconds: 90,
+            isCompleted: true
+        )
+        var blocks = [activity]
+
+        XCTAssertThrowsError(
+            try WorkoutCardioTimerCoordinator.start(activityID: activity.id, blocks: &blocks, at: .now)
+        ) {
+            XCTAssertEqual($0 as? WorkoutCardioTimerError, .invalidTransition)
+        }
+        XCTAssertEqual(blocks, [activity])
+    }
+
+    func testFinishRejectsCompletedActivityWithoutMutation() {
+        let activity = ActiveWorkoutRuntimeCardioBlock.fixture(
+            actualDurationSeconds: 75,
+            timerAccumulatedSeconds: 90,
+            isCompleted: true
+        )
+        var blocks = [activity]
+
+        XCTAssertThrowsError(
+            try WorkoutCardioTimerCoordinator.finish(activityID: activity.id, blocks: &blocks, at: .now)
+        ) {
+            XCTAssertEqual($0 as? WorkoutCardioTimerError, .invalidTransition)
+        }
+        XCTAssertEqual(blocks, [activity])
+    }
+
+    func testPauseAndResumeRejectCompletedActivitiesWithoutMutation() {
+        let base = Date(timeIntervalSince1970: 1_000)
+        let running = ActiveWorkoutRuntimeCardioBlock.fixture(
+            timerState: .running,
+            timerSegmentStartedAt: base,
+            isCompleted: true
+        )
+        let paused = ActiveWorkoutRuntimeCardioBlock.fixture(
+            timerState: .paused,
+            timerAccumulatedSeconds: 30,
+            isCompleted: true
+        )
+        var blocks = [running, paused]
+
+        XCTAssertThrowsError(
+            try WorkoutCardioTimerCoordinator.pause(
+                activityID: running.id,
+                blocks: &blocks,
+                at: base.addingTimeInterval(30)
+            )
+        ) {
+            XCTAssertEqual($0 as? WorkoutCardioTimerError, .invalidTransition)
+        }
+        XCTAssertThrowsError(
+            try WorkoutCardioTimerCoordinator.resume(
+                activityID: paused.id,
+                blocks: &blocks,
+                at: base.addingTimeInterval(30)
+            )
+        ) {
+            XCTAssertEqual($0 as? WorkoutCardioTimerError, .invalidTransition)
+        }
+        XCTAssertEqual(blocks, [running, paused])
+    }
+
+    func testResumeRejectsConflictWithoutMutation() {
+        let base = Date(timeIntervalSince1970: 1_000)
+        let running = ActiveWorkoutRuntimeCardioBlock.fixture(
+            timerState: .running,
+            timerSegmentStartedAt: base
+        )
+        let paused = ActiveWorkoutRuntimeCardioBlock.fixture(
+            timerState: .paused,
+            timerAccumulatedSeconds: 30
+        )
+        var blocks = [running, paused]
+
+        XCTAssertThrowsError(
+            try WorkoutCardioTimerCoordinator.resume(
+                activityID: paused.id,
+                blocks: &blocks,
+                at: base.addingTimeInterval(60)
+            )
+        ) {
+            XCTAssertEqual($0 as? WorkoutCardioTimerError, .anotherActivityRunning(running.id))
+        }
+        XCTAssertEqual(blocks, [running, paused])
+    }
+
+    func testStartRejectsAlreadyRunningActivityWithoutMutation() throws {
+        let base = Date(timeIntervalSince1970: 1_000)
+        var blocks = [ActiveWorkoutRuntimeCardioBlock.fixture()]
+        try WorkoutCardioTimerCoordinator.start(activityID: blocks[0].id, blocks: &blocks, at: base)
+        let running = blocks[0]
+
+        XCTAssertThrowsError(
+            try WorkoutCardioTimerCoordinator.start(
+                activityID: running.id,
+                blocks: &blocks,
+                at: base.addingTimeInterval(30)
+            )
+        ) {
+            XCTAssertEqual($0 as? WorkoutCardioTimerError, .invalidTransition)
+        }
+        XCTAssertEqual(blocks, [running])
+    }
+
+    func testResumeRejectsIdleAndRunningActivitiesWithoutMutation() {
+        let base = Date(timeIntervalSince1970: 1_000)
+        let idle = ActiveWorkoutRuntimeCardioBlock.fixture()
+        let running = ActiveWorkoutRuntimeCardioBlock.fixture(
+            timerState: .running,
+            timerSegmentStartedAt: base
+        )
+        var blocks = [idle, running]
+
+        XCTAssertThrowsError(
+            try WorkoutCardioTimerCoordinator.resume(activityID: idle.id, blocks: &blocks, at: base)
+        ) {
+            XCTAssertEqual($0 as? WorkoutCardioTimerError, .invalidTransition)
+        }
+        XCTAssertThrowsError(
+            try WorkoutCardioTimerCoordinator.resume(activityID: running.id, blocks: &blocks, at: base)
+        ) {
+            XCTAssertEqual($0 as? WorkoutCardioTimerError, .invalidTransition)
+        }
+        XCTAssertEqual(blocks, [idle, running])
+    }
+
+    func testFinishFromPausedCopiesAccumulatedDuration() throws {
+        var blocks = [
+            ActiveWorkoutRuntimeCardioBlock.fixture(
+                timerState: .paused,
+                timerAccumulatedSeconds: 45
+            )
+        ]
+
+        try WorkoutCardioTimerCoordinator.finish(activityID: blocks[0].id, blocks: &blocks, at: .now)
+
+        XCTAssertEqual(blocks[0].timerState, .idle)
+        XCTAssertNil(blocks[0].timerSegmentStartedAt)
+        XCTAssertEqual(blocks[0].timerAccumulatedSeconds, 45)
+        XCTAssertEqual(blocks[0].actualDurationSeconds, 45)
+        XCTAssertTrue(blocks[0].isCompleted)
+    }
 }
 
 private extension ActiveWorkoutRuntimeCardioBlock {
     static func fixture(
         id: UUID = UUID(),
+        actualDurationSeconds: Int? = nil,
         timerState: WorkoutCardioTimerState = .idle,
         timerSegmentStartedAt: Date? = nil,
-        timerAccumulatedSeconds: Int = 0
+        timerAccumulatedSeconds: Int = 0,
+        isCompleted: Bool = false
     ) -> Self {
         ActiveWorkoutRuntimeCardioBlock(
             id: id,
@@ -150,9 +300,11 @@ private extension ActiveWorkoutRuntimeCardioBlock {
             categorySnapshot: "Cardio",
             muscleSummarySnapshot: "Legs",
             targetDurationSeconds: 1_200,
+            actualDurationSeconds: actualDurationSeconds,
             timerState: timerState,
             timerSegmentStartedAt: timerSegmentStartedAt,
             timerAccumulatedSeconds: timerAccumulatedSeconds,
+            isCompleted: isCompleted,
             createdAt: Date(timeIntervalSince1970: 100),
             updatedAt: Date(timeIntervalSince1970: 100)
         )

@@ -24,7 +24,8 @@ nonisolated enum WorkoutCardioTimerCoordinator {
         at date: Date
     ) throws {
         let activityIndex = try index(of: activityID, in: blocks)
-        guard blocks[activityIndex].timerState == .idle else {
+        guard !blocks[activityIndex].isCompleted,
+              blocks[activityIndex].timerState == .idle else {
             throw WorkoutCardioTimerError.invalidTransition
         }
         try ensureNoOtherActivityIsRunning(activityID: activityID, in: blocks)
@@ -39,7 +40,8 @@ nonisolated enum WorkoutCardioTimerCoordinator {
         at date: Date
     ) throws {
         let activityIndex = try index(of: activityID, in: blocks)
-        guard blocks[activityIndex].timerState == .running else {
+        guard !blocks[activityIndex].isCompleted,
+              blocks[activityIndex].timerState == .running else {
             throw WorkoutCardioTimerError.invalidTransition
         }
 
@@ -53,7 +55,8 @@ nonisolated enum WorkoutCardioTimerCoordinator {
         at date: Date
     ) throws {
         let activityIndex = try index(of: activityID, in: blocks)
-        guard blocks[activityIndex].timerState == .paused else {
+        guard !blocks[activityIndex].isCompleted,
+              blocks[activityIndex].timerState == .paused else {
             throw WorkoutCardioTimerError.invalidTransition
         }
         try ensureNoOtherActivityIsRunning(activityID: activityID, in: blocks)
@@ -68,6 +71,9 @@ nonisolated enum WorkoutCardioTimerCoordinator {
         at date: Date
     ) throws {
         let activityIndex = try index(of: activityID, in: blocks)
+        guard !blocks[activityIndex].isCompleted else {
+            throw WorkoutCardioTimerError.invalidTransition
+        }
 
         if blocks[activityIndex].timerState == .running {
             foldRunningSegment(at: activityIndex, in: &blocks, at: date)
