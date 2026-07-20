@@ -7,13 +7,15 @@ nonisolated struct UserSettingsDraft: Equatable, Sendable {
     var keepsScreenAwake: Bool
     var preferredWeightUnit: PreferredWeightUnit
     var workoutNotificationStyle: WorkoutNotificationStyle
+    var automaticallyClosesCompletedExercises: Bool
 
     static let `default` = UserSettingsDraft(
         weeklyWorkoutGoal: 4,
         isTrainingGuidanceEnabled: true,
         keepsScreenAwake: false,
         preferredWeightUnit: .kg,
-        workoutNotificationStyle: .timeSensitive
+        workoutNotificationStyle: .timeSensitive,
+        automaticallyClosesCompletedExercises: true
     )
 
     init(
@@ -21,13 +23,15 @@ nonisolated struct UserSettingsDraft: Equatable, Sendable {
         isTrainingGuidanceEnabled: Bool,
         keepsScreenAwake: Bool,
         preferredWeightUnit: PreferredWeightUnit,
-        workoutNotificationStyle: WorkoutNotificationStyle
+        workoutNotificationStyle: WorkoutNotificationStyle,
+        automaticallyClosesCompletedExercises: Bool = true
     ) {
         self.weeklyWorkoutGoal = weeklyWorkoutGoal
         self.isTrainingGuidanceEnabled = isTrainingGuidanceEnabled
         self.keepsScreenAwake = keepsScreenAwake
         self.preferredWeightUnit = preferredWeightUnit
         self.workoutNotificationStyle = workoutNotificationStyle
+        self.automaticallyClosesCompletedExercises = automaticallyClosesCompletedExercises
     }
 
     init(profile: UserProfile) {
@@ -36,7 +40,8 @@ nonisolated struct UserSettingsDraft: Equatable, Sendable {
             isTrainingGuidanceEnabled: profile.isTrainingGuidanceEnabled,
             keepsScreenAwake: profile.keepsScreenAwake,
             preferredWeightUnit: profile.preferredWeightUnit,
-            workoutNotificationStyle: profile.workoutNotificationStyle
+            workoutNotificationStyle: profile.workoutNotificationStyle,
+            automaticallyClosesCompletedExercises: profile.automaticallyClosesCompletedExercises
         )
     }
 
@@ -56,6 +61,9 @@ nonisolated struct UserSettingsDraft: Equatable, Sendable {
         if let value = patch.workoutNotificationStyle {
             workoutNotificationStyle = value
         }
+        if let value = patch.automaticallyClosesCompletedExercises {
+            automaticallyClosesCompletedExercises = value
+        }
     }
 }
 
@@ -65,19 +73,22 @@ nonisolated struct UserSettingsPatch: Equatable, Sendable {
     var keepsScreenAwake: Bool?
     var preferredWeightUnit: PreferredWeightUnit?
     var workoutNotificationStyle: WorkoutNotificationStyle?
+    var automaticallyClosesCompletedExercises: Bool?
 
     init(
         weeklyWorkoutGoal: Int? = nil,
         isTrainingGuidanceEnabled: Bool? = nil,
         keepsScreenAwake: Bool? = nil,
         preferredWeightUnit: PreferredWeightUnit? = nil,
-        workoutNotificationStyle: WorkoutNotificationStyle? = nil
+        workoutNotificationStyle: WorkoutNotificationStyle? = nil,
+        automaticallyClosesCompletedExercises: Bool? = nil
     ) {
         self.weeklyWorkoutGoal = weeklyWorkoutGoal
         self.isTrainingGuidanceEnabled = isTrainingGuidanceEnabled
         self.keepsScreenAwake = keepsScreenAwake
         self.preferredWeightUnit = preferredWeightUnit
         self.workoutNotificationStyle = workoutNotificationStyle
+        self.automaticallyClosesCompletedExercises = automaticallyClosesCompletedExercises
     }
 
     mutating func merge(_ newer: UserSettingsPatch) {
@@ -86,6 +97,9 @@ nonisolated struct UserSettingsPatch: Equatable, Sendable {
         if let value = newer.keepsScreenAwake { keepsScreenAwake = value }
         if let value = newer.preferredWeightUnit { preferredWeightUnit = value }
         if let value = newer.workoutNotificationStyle { workoutNotificationStyle = value }
+        if let value = newer.automaticallyClosesCompletedExercises {
+            automaticallyClosesCompletedExercises = value
+        }
     }
 }
 

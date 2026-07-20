@@ -4,13 +4,26 @@ import SwiftUI
 
 @MainActor
 final class ActiveWorkoutScrollPositionTrackerTests: XCTestCase {
-    func testCompletedExpandedExerciseCollapsesWithoutRepositioningViewport() {
+    func testCompletedExerciseCollapsesOnlyWhenEnabledAndExpanded() {
         XCTAssertEqual(
-            ActiveWorkoutCompletedExercisePresentationPolicy.effect(wasExpanded: true),
+            ActiveWorkoutCompletedExercisePresentationPolicy.effect(
+                wasExpanded: true,
+                automaticallyClosesCompletedExercises: true
+            ),
             .collapseCard
         )
         XCTAssertEqual(
-            ActiveWorkoutCompletedExercisePresentationPolicy.effect(wasExpanded: false),
+            ActiveWorkoutCompletedExercisePresentationPolicy.effect(
+                wasExpanded: false,
+                automaticallyClosesCompletedExercises: true
+            ),
+            .none
+        )
+        XCTAssertEqual(
+            ActiveWorkoutCompletedExercisePresentationPolicy.effect(
+                wasExpanded: true,
+                automaticallyClosesCompletedExercises: false
+            ),
             .none
         )
     }

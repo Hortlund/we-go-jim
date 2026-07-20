@@ -924,6 +924,7 @@ private struct Profile: Codable, BackupModel {
     var weeklyWorkoutGoal: Int
     var isTrainingGuidanceEnabled: Bool
     var keepsScreenAwake: Bool
+    var automaticallyClosesCompletedExercises: Bool?
     var isBozarModeEnabled: Bool?
     var createdAt: Date
     var updatedAt: Date
@@ -938,6 +939,7 @@ private struct Profile: Codable, BackupModel {
         weeklyWorkoutGoal = model.weeklyWorkoutGoal
         isTrainingGuidanceEnabled = model.isTrainingGuidanceEnabled
         keepsScreenAwake = model.keepsScreenAwake
+        automaticallyClosesCompletedExercises = model.automaticallyClosesCompletedExercises
         isBozarModeEnabled = model.isBozarModeEnabled
         createdAt = model.createdAt
         updatedAt = model.updatedAt
@@ -954,6 +956,7 @@ private struct Profile: Codable, BackupModel {
             weeklyWorkoutGoal: weeklyWorkoutGoal,
             isTrainingGuidanceEnabled: isTrainingGuidanceEnabled,
             keepsScreenAwake: keepsScreenAwake,
+            automaticallyClosesCompletedExercises: automaticallyClosesCompletedExercises ?? true,
             isBozarModeEnabled: isBozarModeEnabled ?? false,
             createdAt: createdAt,
             updatedAt: updatedAt
@@ -969,6 +972,7 @@ private struct Profile: Codable, BackupModel {
         model.weeklyWorkoutGoal = weeklyWorkoutGoal
         model.isTrainingGuidanceEnabled = isTrainingGuidanceEnabled
         model.keepsScreenAwake = keepsScreenAwake
+        model.automaticallyClosesCompletedExercises = automaticallyClosesCompletedExercises ?? true
         model.isBozarModeEnabled = isBozarModeEnabled ?? false
         model.createdAt = createdAt
         model.updatedAt = updatedAt

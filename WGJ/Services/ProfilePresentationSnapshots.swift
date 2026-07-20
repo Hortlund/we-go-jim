@@ -9,6 +9,7 @@ struct ProfileIdentitySnapshot: Identifiable, Equatable, Sendable {
     let weeklyWorkoutGoal: Int
     let isTrainingGuidanceEnabled: Bool
     let keepsScreenAwake: Bool
+    let automaticallyClosesCompletedExercises: Bool
     let preferredWeightUnit: PreferredWeightUnit
     let workoutNotificationStyle: WorkoutNotificationStyle
     let updatedAt: Date
@@ -21,6 +22,7 @@ struct ProfileIdentitySnapshot: Identifiable, Equatable, Sendable {
         weeklyWorkoutGoal = profile.weeklyWorkoutGoal
         isTrainingGuidanceEnabled = profile.isTrainingGuidanceEnabled
         keepsScreenAwake = profile.keepsScreenAwake
+        automaticallyClosesCompletedExercises = profile.automaticallyClosesCompletedExercises
         preferredWeightUnit = profile.preferredWeightUnit
         workoutNotificationStyle = profile.workoutNotificationStyle
         updatedAt = profile.updatedAt
