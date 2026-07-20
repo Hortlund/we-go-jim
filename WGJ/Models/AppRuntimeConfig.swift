@@ -546,29 +546,13 @@ nonisolated struct PendingTemplateFileOpen: Equatable, Identifiable {
 
 @Observable
 nonisolated final class AppTabState {
-    static let selectedTabDefaultsKey = "selectedMainTab"
-
-    var selectedTab: AppMainTab {
-        didSet {
-            defaults.set(selectedTab.rawValue, forKey: Self.selectedTabDefaultsKey)
-        }
-    }
-
-    @ObservationIgnored private let defaults: UserDefaults
+    var selectedTab: AppMainTab
 
     init(
-        defaults: UserDefaults = .standard,
-        arguments: [String] = ProcessInfo.processInfo.arguments
+        defaults _: UserDefaults = .standard,
+        arguments _: [String] = ProcessInfo.processInfo.arguments
     ) {
-        self.defaults = defaults
-        if arguments.contains("UITEST_IN_MEMORY_STORE") {
-            selectedTab = .startWorkout
-        } else if let rawValue = defaults.string(forKey: Self.selectedTabDefaultsKey),
-           let persistedTab = AppMainTab(rawValue: rawValue) {
-            selectedTab = persistedTab
-        } else {
-            selectedTab = .startWorkout
-        }
+        selectedTab = .startWorkout
     }
 }
 
@@ -740,6 +724,23 @@ nonisolated struct ActiveWorkoutRestoredPresentation: Equatable, Sendable {
     }
 }
 
+nonisolated enum ActiveWorkoutRestorationPresentationPolicy: Equatable, Sendable {
+    case preserveStored
+    case present
+
+    func resolvedMode(
+        storedMode: ActiveWorkoutStoredPresentationMode?,
+        currentIsPresented: Bool
+    ) -> ActiveWorkoutStoredPresentationMode {
+        switch self {
+        case .preserveStored:
+            storedMode ?? (currentIsPresented ? .presented : .collapsed)
+        case .present:
+            .presented
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class ActiveWorkoutPresentationState {
@@ -886,6 +887,7 @@ final class ActiveWorkoutPresentationState {
         modelContext: ModelContext,
         backgroundStore: AppBackgroundStore? = nil,
         allowsLegacyDraftImport: Bool = true,
+        presentationPolicy: ActiveWorkoutRestorationPresentationPolicy = .preserveStored,
         shouldApplyRestoredSession: @escaping @MainActor () -> Bool = { true }
     ) async {
         guard activeSessionID == nil else { return }
@@ -894,6 +896,7 @@ final class ActiveWorkoutPresentationState {
             modelContext: modelContext,
             backgroundStore: backgroundStore,
             allowsLegacyDraftImport: allowsLegacyDraftImport,
+            presentationPolicy: presentationPolicy,
             shouldApplyRestoredSession: shouldApplyRestoredSession
         )
     }
@@ -903,6 +906,7 @@ final class ActiveWorkoutPresentationState {
         modelContext: ModelContext,
         backgroundStore: AppBackgroundStore? = nil,
         allowsLegacyDraftImport: Bool = true,
+        presentationPolicy: ActiveWorkoutRestorationPresentationPolicy = .preserveStored,
         shouldApplyRestoredSession: @escaping @MainActor () -> Bool = { true }
     ) async {
         if coordinator.storedSnapshot == nil {
@@ -936,15 +940,17 @@ final class ActiveWorkoutPresentationState {
                 snapshot.expandedExerciseIDs,
                 for: snapshot.session.id
             )
-            switch snapshot.presentationMode {
-            case .some(.presented):
+            let resolvedMode = presentationPolicy.resolvedMode(
+                storedMode: snapshot.presentationMode,
+                currentIsPresented: isActiveWorkoutPresented
+            )
+            switch resolvedMode {
+            case .presented:
                 isActiveWorkoutPresented = true
                 isActiveWorkoutStripCollapsed = false
-            case .some(.collapsed):
+            case .collapsed:
                 isActiveWorkoutPresented = false
                 isActiveWorkoutStripCollapsed = true
-            case .none:
-                isActiveWorkoutStripCollapsed = !isActiveWorkoutPresented
             }
         } else {
             clearPresentation()
