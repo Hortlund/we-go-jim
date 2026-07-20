@@ -438,18 +438,11 @@ struct TemplateEditorView: View {
         validatedSetup: ValidatedWorkoutCardioSetup
     ) {
         let existingIndex = cardioDrafts.firstIndex(where: { $0.id == request.activityID })
-        let sortOrder: Int
-        if let existingIndex, cardioDrafts[existingIndex].role == validatedSetup.role {
-            sortOrder = cardioDrafts[existingIndex].sortOrder
-        } else {
-            sortOrder = cardioDrafts.lazy.filter { $0.role == validatedSetup.role }.count
-        }
-
         let updated = TemplateCardioBlockDraft(
             id: request.activityID,
-            phase: legacyPhase(for: validatedSetup.role),
+            phase: TemplateCardioDraftReducer.legacyPhase(for: validatedSetup.role),
             role: validatedSetup.role,
-            sortOrder: sortOrder,
+            sortOrder: 0,
             catalogExerciseUUID: request.selection.remoteUUID,
             exerciseNameSnapshot: request.selection.displayName,
             categorySnapshot: request.selection.categoryName,
@@ -461,39 +454,31 @@ struct TemplateEditorView: View {
             preferredDistanceUnit: validatedSetup.preferredDistanceUnit
         )
 
-        if let existingIndex {
-            cardioDrafts[existingIndex] = updated
+        if existingIndex != nil {
+            cardioDrafts = TemplateCardioDraftReducer.updating(updated, in: cardioDrafts)
         } else {
-            cardioDrafts.append(updated)
+            cardioDrafts = TemplateCardioDraftReducer.appending(updated, to: cardioDrafts)
         }
-        cardioDrafts = normalizedCardioDrafts(cardioDrafts)
     }
 
     private func moveCardioActivity(_ activityID: UUID, direction: Int) {
-        guard direction == -1 || direction == 1,
-              let activity = cardioDrafts.first(where: { $0.id == activityID }) else {
-            return
-        }
-
-        var roleDrafts = cardioDrafts(for: activity.role)
-        guard let currentIndex = roleDrafts.firstIndex(where: { $0.id == activityID }) else {
-            return
-        }
-        let destinationIndex = currentIndex + direction
-        guard roleDrafts.indices.contains(destinationIndex) else { return }
-
-        roleDrafts.swapAt(currentIndex, destinationIndex)
-        for index in roleDrafts.indices {
-            roleDrafts[index].sortOrder = index
-        }
-        cardioDrafts = normalizedCardioDrafts(
-            cardioDrafts.filter { $0.role != activity.role } + roleDrafts
+        guard let moveDirection: TemplateCardioDraftReducer.MoveDirection = switch direction {
+        case -1: .up
+        case 1: .down
+        default: nil
+        } else { return }
+        cardioDrafts = TemplateCardioDraftReducer.moving(
+            activityID: activityID,
+            direction: moveDirection,
+            in: cardioDrafts
         )
     }
 
     private func removeCardioActivity(_ activityID: UUID) {
-        cardioDrafts.removeAll { $0.id == activityID }
-        cardioDrafts = normalizedCardioDrafts(cardioDrafts)
+        cardioDrafts = TemplateCardioDraftReducer.removing(
+            activityID: activityID,
+            from: cardioDrafts
+        )
     }
 
     private func removeExercise(at index: Int) {
@@ -696,7 +681,7 @@ struct TemplateEditorView: View {
             name: templateName,
             notes: templateNotes,
             exerciseDrafts: exerciseDrafts.map(\.draft),
-            cardioDrafts: normalizedCardioDrafts(cardioDrafts)
+            cardioDrafts: TemplateCardioDraftReducer.normalized(cardioDrafts)
         )
         let backgroundStore = templateEditorBackgroundStore
 
@@ -798,7 +783,7 @@ struct TemplateEditorView: View {
         exerciseDrafts = template.exerciseDrafts.map {
             TemplateExerciseDraftStore(draft: $0)
         }
-        cardioDrafts = normalizedCardioDrafts(template.cardioDrafts)
+        cardioDrafts = TemplateCardioDraftReducer.normalized(template.cardioDrafts)
     }
 
     @MainActor
@@ -855,41 +840,7 @@ struct TemplateEditorView: View {
     }
 
     private func cardioDrafts(for role: WorkoutCardioRole) -> [TemplateCardioBlockDraft] {
-        cardioDrafts
-            .filter { $0.role == role }
-            .sorted { lhs, rhs in
-                if lhs.sortOrder != rhs.sortOrder {
-                    return lhs.sortOrder < rhs.sortOrder
-                }
-                return lhs.id.uuidString < rhs.id.uuidString
-            }
-    }
-
-    private func normalizedCardioDrafts(
-        _ drafts: [TemplateCardioBlockDraft]
-    ) -> [TemplateCardioBlockDraft] {
-        WorkoutCardioRole.allCases.flatMap { role in
-            drafts.enumerated()
-                .filter { $0.element.role == role }
-                .sorted { lhs, rhs in
-                    if lhs.element.sortOrder != rhs.element.sortOrder {
-                        return lhs.element.sortOrder < rhs.element.sortOrder
-                    }
-                    return lhs.offset < rhs.offset
-                }
-                .enumerated()
-                .map { sortOrder, indexedDraft in
-                    var draft = indexedDraft.element
-                    draft.role = role
-                    draft.phase = legacyPhase(for: role)
-                    draft.sortOrder = sortOrder
-                    return draft
-                }
-        }
-    }
-
-    private func legacyPhase(for role: WorkoutCardioRole) -> WorkoutCardioPhase {
-        role == .finisher ? .postWorkout : .preWorkout
+        TemplateCardioDraftReducer.drafts(for: role, in: cardioDrafts)
     }
 
     private func cardioSectionSubtitle(for role: WorkoutCardioRole) -> String {
@@ -930,9 +881,10 @@ struct TemplateEditorView: View {
         let distanceUnit = draft.preferredDistanceUnit ?? preferredDistanceUnit
         let distanceText: String
         if let targetDistanceMeters = draft.targetDistanceMeters {
-            distanceText = distanceUnit
-                .value(fromMeters: targetDistanceMeters)
-                .formatted(.number.precision(.fractionLength(0...2)))
+            distanceText = WorkoutCardioSetupNumericCodec.distanceText(
+                meters: targetDistanceMeters,
+                unit: distanceUnit
+            )
         } else {
             distanceText = ""
         }
@@ -950,7 +902,7 @@ struct TemplateEditorView: View {
             setupDraft: WorkoutCardioSetupDraft(
                 role: draft.role,
                 goalKind: draft.goalKind,
-                durationMinutesText: WorkoutCardioDurationFormatter.minutesText(
+                durationMinutesText: WorkoutCardioSetupNumericCodec.durationMinutesText(
                     seconds: draft.targetDurationSeconds
                 ),
                 distanceText: distanceText,

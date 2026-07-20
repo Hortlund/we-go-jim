@@ -34,24 +34,29 @@ nonisolated enum WorkoutCardioSetupValidationError: LocalizedError, Equatable, S
 }
 
 nonisolated enum WorkoutCardioSetupValidator {
-    static func validated(_ draft: WorkoutCardioSetupDraft) throws -> ValidatedWorkoutCardioSetup {
+    static func validated(
+        _ draft: WorkoutCardioSetupDraft,
+        locale: Locale = .current
+    ) throws -> ValidatedWorkoutCardioSetup {
         let targetDurationSeconds: Int
         let targetDistanceMeters: Double?
 
         switch draft.goalKind {
         case .time:
-            guard let minutes = positiveNumber(from: draft.durationMinutesText) else {
+            guard let durationSeconds = WorkoutCardioSetupNumericCodec.durationSeconds(
+                fromMinutesText: draft.durationMinutesText,
+                locale: locale
+            ) else {
                 throw WorkoutCardioSetupValidationError.durationMustBePositive
             }
-            let cappedMinutes = min(minutes, Double(24 * 60))
-            targetDurationSeconds = max(1, Int((cappedMinutes * 60).rounded()))
+            targetDurationSeconds = durationSeconds
             targetDistanceMeters = nil
         case .distance:
-            guard let distance = positiveNumber(from: draft.distanceText) else {
-                throw WorkoutCardioSetupValidationError.distanceMustBePositive(unit: draft.distanceUnit)
-            }
-            let distanceMeters = draft.distanceUnit.meters(from: distance)
-            guard distanceMeters.isFinite, distanceMeters > 0 else {
+            guard let distanceMeters = WorkoutCardioSetupNumericCodec.distanceMeters(
+                from: draft.distanceText,
+                unit: draft.distanceUnit,
+                locale: locale
+            ) else {
                 throw WorkoutCardioSetupValidationError.distanceMustBePositive(unit: draft.distanceUnit)
             }
             targetDurationSeconds = 0
@@ -69,16 +74,6 @@ nonisolated enum WorkoutCardioSetupValidator {
             preferredDistanceUnit: draft.distanceUnit,
             trackingProfile: draft.trackingProfile
         )
-    }
-
-    private static func positiveNumber(from text: String) -> Double? {
-        let normalized = text
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: ",", with: ".")
-        guard let value = Double(normalized), value.isFinite, value > 0 else {
-            return nil
-        }
-        return value
     }
 }
 
