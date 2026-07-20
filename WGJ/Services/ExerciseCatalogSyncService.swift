@@ -70,6 +70,7 @@ nonisolated final class ExerciseCatalogSyncService {
                     categoryName: seed.categoryName,
                     equipmentSummary: seed.equipmentSummary,
                     instructionText: normalizedInstructionText(seed.instructions),
+                    cardioTrackingProfileRaw: seed.cardioTrackingProfileRaw,
                     isCurated: seed.isCurated,
                     isHidden: false,
                     sourceName: "seed",
@@ -88,6 +89,7 @@ nonisolated final class ExerciseCatalogSyncService {
                 exercise.categoryName = seed.categoryName
                 exercise.equipmentSummary = seed.equipmentSummary
                 exercise.instructionText = normalizedInstructionText(seed.instructions)
+                exercise.cardioTrackingProfileRaw = seed.cardioTrackingProfileRaw
                 exercise.isCurated = seed.isCurated
                 exercise.isHidden = false
                 exercise.sourceName = "seed"

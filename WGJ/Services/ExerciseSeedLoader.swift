@@ -54,6 +54,7 @@ nonisolated struct SeedExercise: Decodable, Sendable {
     let categoryName: String
     let equipmentSummary: String
     let instructions: String?
+    let cardioTrackingProfileRaw: String?
     let primaryMuscleIDs: [Int]
     let secondaryMuscleIDs: [Int]
     let imageURL: String?
@@ -71,6 +72,7 @@ nonisolated struct SeedExercise: Decodable, Sendable {
         case categoryName = "category"
         case equipmentSummary = "equipment"
         case instructions
+        case cardioTrackingProfileRaw = "cardio_tracking_profile"
         case primaryMuscleIDs = "primary_muscles"
         case secondaryMuscleIDs = "secondary_muscles"
         case imageURL = "image_url"

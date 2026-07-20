@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 import UIKit
 
-enum ExerciseCatalogRepositoryError: LocalizedError {
+enum ExerciseCatalogRepositoryError: LocalizedError, Equatable {
     case emptyName
     case emptyCategory
     case missingPrimaryMuscles
@@ -71,6 +71,7 @@ nonisolated final class ExerciseCatalogRepository {
             categoryName: validated.categoryName,
             equipmentSummary: validated.equipmentSummary,
             instructionText: validated.instructionText,
+            cardioTrackingProfileRaw: validated.cardioTrackingProfileRaw,
             isCurated: false,
             isHidden: false,
             sourceName: "custom",
@@ -99,6 +100,7 @@ nonisolated final class ExerciseCatalogRepository {
         exercise.categoryName = validated.categoryName
         exercise.equipmentSummary = validated.equipmentSummary
         exercise.instructionText = validated.instructionText
+        exercise.cardioTrackingProfileRaw = validated.cardioTrackingProfileRaw
         exercise.primaryMuscles = validated.primaryMuscles
         exercise.secondaryMuscles = validated.secondaryMuscles
         exercise.updatedAt = .now
@@ -255,7 +257,8 @@ nonisolated final class ExerciseCatalogRepository {
         }
 
         let primaryMuscleIDs = Array(Set(draft.primaryMuscleIDs)).sorted()
-        guard !primaryMuscleIDs.isEmpty else {
+        let isCardio = categoryName.localizedCaseInsensitiveCompare("Cardio") == .orderedSame
+        guard isCardio || !primaryMuscleIDs.isEmpty else {
             throw ExerciseCatalogRepositoryError.missingPrimaryMuscles
         }
 
@@ -294,7 +297,10 @@ nonisolated final class ExerciseCatalogRepository {
             instructionText: instructionText.isEmpty ? nil : instructionText,
             aliases: draft.aliases,
             primaryMuscles: primaryMuscles,
-            secondaryMuscles: secondaryMuscles
+            secondaryMuscles: secondaryMuscles,
+            cardioTrackingProfileRaw: isCardio
+                ? (draft.cardioTrackingProfile ?? .machineDistance).rawValue
+                : nil
         )
     }
 
@@ -368,4 +374,5 @@ nonisolated private struct ValidatedCustomExerciseInput {
     let aliases: [String]
     let primaryMuscles: [MuscleGroup]
     let secondaryMuscles: [MuscleGroup]
+    let cardioTrackingProfileRaw: String?
 }
