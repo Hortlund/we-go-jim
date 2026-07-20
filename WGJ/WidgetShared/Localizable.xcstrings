@@ -192,6 +192,9 @@
     "Author: Melih Colpan" : {
 
     },
+    "Auto-close completed exercises" : {
+
+    },
     "Available Body Parts" : {
 
     },
@@ -268,6 +271,9 @@
 
     },
     "Close" : {
+
+    },
+    "Closes an exercise after all of its sets are complete." : {
 
     },
     "Cloud" : {
@@ -469,9 +475,6 @@
 
     },
     "Export / Share" : {
-
-    },
-    "Fill Last" : {
 
     },
     "Filter Body Part" : {
