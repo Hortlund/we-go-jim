@@ -95,11 +95,11 @@ struct ActiveWorkoutView: View {
             ScrollView {
                 // Exercise cards can change height aggressively as set rows update, and a
                 // non-lazy stack keeps the scroll position stable during active logging.
-                activeWorkoutScrollContent(scrollProxy: scrollProxy)
+                activeWorkoutScrollContent
                 .scrollTargetLayout()
                 .padding(16)
             }
-            .scrollPosition(id: scrollPositionTracker.binding, anchor: .top)
+            .scrollPosition(id: scrollPositionTracker.binding)
             .scrollDismissesKeyboard(.interactively)
             .wgjScreenBackground()
             .wgjNavigationChrome()
@@ -251,13 +251,13 @@ struct ActiveWorkoutView: View {
     }
 
     @MainActor
-    private func activeWorkoutScrollContent(scrollProxy: ScrollViewProxy) -> some View {
+    private var activeWorkoutScrollContent: some View {
         VStack(alignment: .leading, spacing: 16) {
             activeWorkoutHeaderContent
             emptyWorkoutContent
 
             ForEach(exerciseDisplayGroups) { group in
-                exerciseSection(for: group, scrollProxy: scrollProxy)
+                exerciseSection(for: group)
             }
 
             if session != nil && !sessionExercises.isEmpty {
@@ -269,7 +269,7 @@ struct ActiveWorkoutView: View {
                 cardioSection(for: .postWorkout)
             }
 
-            activeWorkoutCancelContent(scrollProxy: scrollProxy)
+            activeWorkoutCancelContent
         }
     }
 
@@ -331,7 +331,7 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     @ViewBuilder
-    private func activeWorkoutCancelContent(scrollProxy: ScrollViewProxy) -> some View {
+    private var activeWorkoutCancelContent: some View {
         if session != nil && !isEndingSession {
             ActiveWorkoutCancelSection(
                 isCancelArmed: isCancelArmed,
@@ -573,8 +573,7 @@ struct ActiveWorkoutView: View {
     private func exerciseRow(
         for exercise: ActiveWorkoutRuntimeExercise,
         index: Int,
-        displayTitle: String? = nil,
-        scrollProxy: ScrollViewProxy
+        displayTitle: String? = nil
     ) -> some View {
         let exerciseID = exercise.id
         let exerciseName = exercise.exerciseNameSnapshot
@@ -611,7 +610,7 @@ struct ActiveWorkoutView: View {
                         persistCommittedUserEditSnapshot()
                     },
                     onSetDraftsCommitted: { drafts in
-                        handleDraftsChanged(drafts, for: exercise, scrollProxy: scrollProxy)
+                        handleDraftsChanged(drafts, for: exercise)
                     },
                     onRestCommitted: { rest in
                         updateRestValue(rest, for: exerciseID)
@@ -688,15 +687,13 @@ struct ActiveWorkoutView: View {
     @MainActor
     @ViewBuilder
     private func exerciseSection(
-        for group: WorkoutExerciseDisplayGroup<ActiveWorkoutRuntimeExercise>,
-        scrollProxy: ScrollViewProxy
+        for group: WorkoutExerciseDisplayGroup<ActiveWorkoutRuntimeExercise>
     ) -> some View {
         switch group {
         case .single(let exercise, let index):
             exerciseRow(
                 for: exercise,
-                index: index,
-                scrollProxy: scrollProxy
+                index: index
             )
         case .superset(let superset):
             VStack(alignment: .leading, spacing: 12) {
@@ -707,15 +704,13 @@ struct ActiveWorkoutView: View {
                 exerciseRow(
                     for: superset.first,
                     index: superset.firstIndex,
-                    displayTitle: SupersetExercisePosition.first.label,
-                    scrollProxy: scrollProxy
+                    displayTitle: SupersetExercisePosition.first.label
                 )
 
                 exerciseRow(
                     for: superset.second,
                     index: superset.secondIndex,
-                    displayTitle: SupersetExercisePosition.second.label,
-                    scrollProxy: scrollProxy
+                    displayTitle: SupersetExercisePosition.second.label
                 )
             }
             .padding(14)
@@ -1500,8 +1495,7 @@ struct ActiveWorkoutView: View {
     @MainActor
     private func handleDraftsChanged(
         _ drafts: [WorkoutSessionSetDraft],
-        for exercise: ActiveWorkoutRuntimeExercise,
-        scrollProxy: ScrollViewProxy
+        for exercise: ActiveWorkoutRuntimeExercise
     ) {
         let previousDrafts = resolvedDrafts(for: exercise)
         let changeSummary = ActiveWorkoutSetDraftChangeSummary.compare(
@@ -1532,26 +1526,20 @@ struct ActiveWorkoutView: View {
         )
         if isCompleted {
             WorkoutFeedbackCenter.shared.exerciseCompleted()
-            collapseCompletedExerciseCard(exercise.id, using: scrollProxy)
+            collapseCompletedExerciseCard(exercise.id)
         }
     }
 
     @MainActor
-    private func collapseCompletedExerciseCard(
-        _ exerciseID: UUID,
-        using scrollProxy: ScrollViewProxy
-    ) {
+    private func collapseCompletedExerciseCard(_ exerciseID: UUID) {
         let wasExpanded = cardStateController.isExpanded(for: exerciseID)
-        guard wasExpanded else { return }
-
-        let target = ActiveWorkoutScrollTarget.exercise(exerciseID)
-        let animation = WGJMotion.cardAnimation(reduceMotion: reduceMotion)
-        withAnimation(animation) {
-            cardStateController.setExpanded(false, for: exerciseID)
-        }
-        Task { @MainActor in
-            await Task.yield()
-            scrollToTarget(target, using: scrollProxy, anchor: .top, animation: animation)
+        switch ActiveWorkoutCompletedExercisePresentationPolicy.effect(wasExpanded: wasExpanded) {
+        case .none:
+            return
+        case .collapseCard:
+            withAnimation(WGJMotion.cardAnimation(reduceMotion: reduceMotion)) {
+                cardStateController.setExpanded(false, for: exerciseID)
+            }
         }
     }
 

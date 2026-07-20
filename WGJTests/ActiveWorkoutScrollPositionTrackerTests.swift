@@ -4,6 +4,17 @@ import SwiftUI
 
 @MainActor
 final class ActiveWorkoutScrollPositionTrackerTests: XCTestCase {
+    func testCompletedExpandedExerciseCollapsesWithoutRepositioningViewport() {
+        XCTAssertEqual(
+            ActiveWorkoutCompletedExercisePresentationPolicy.effect(wasExpanded: true),
+            .collapseCard
+        )
+        XCTAssertEqual(
+            ActiveWorkoutCompletedExercisePresentationPolicy.effect(wasExpanded: false),
+            .none
+        )
+    }
+
     func testBindingStoresLatestScrollTarget() {
         let tracker = ActiveWorkoutScrollPositionTracker()
         let exerciseID = UUID()
@@ -53,5 +64,35 @@ final class ActiveWorkoutScrollPositionTrackerTests: XCTestCase {
 
         XCTAssertEqual(expandedTarget, .exercise(expandedID))
         XCTAssertEqual(headerTarget, .header)
+    }
+
+    func testRestorePolicyMapsCancelSectionToLastExercise() {
+        let firstID = UUID()
+        let lastID = UUID()
+        let target = ActiveWorkoutScrollRestorePolicy.target(
+            focusedExerciseID: nil,
+            keyboardExerciseID: nil,
+            trackedTarget: .cancelSection,
+            expandedExerciseIDs: [],
+            orderedExerciseIDs: [firstID, lastID],
+            isRestorable: { $0 != .postWorkoutCardio },
+            hasSession: true
+        )
+
+        XCTAssertEqual(target, .exercise(lastID))
+    }
+
+    func testRestorePolicyMapsCancelSectionToPostWorkoutCardioWhenPresent() {
+        let target = ActiveWorkoutScrollRestorePolicy.target(
+            focusedExerciseID: nil,
+            keyboardExerciseID: nil,
+            trackedTarget: .cancelSection,
+            expandedExerciseIDs: [],
+            orderedExerciseIDs: [UUID()],
+            isRestorable: { $0 == .postWorkoutCardio || $0 == .header },
+            hasSession: true
+        )
+
+        XCTAssertEqual(target, .postWorkoutCardio)
     }
 }
