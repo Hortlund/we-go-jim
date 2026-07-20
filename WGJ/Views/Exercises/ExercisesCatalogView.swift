@@ -1919,8 +1919,8 @@ struct CardioCustomExerciseCreationView: View {
             availableMuscles: [],
             suggestedCategories: ["Cardio"],
             creationMode: .cardio,
-            title: "Create Cardio",
-            subtitle: "Name the activity and choose how you want to track it.",
+            title: String(localized: "Create Cardio"),
+            subtitle: String(localized: "Name the activity and choose how you want to track it."),
             onCancel: {
                 dismiss()
             },
@@ -2186,17 +2186,17 @@ private struct CustomExerciseEditorView: View {
     private func cardioTrackingProfileTitle(_ profile: WorkoutCardioTrackingProfile) -> String {
         switch profile {
         case .walkRun:
-            return "Outdoor walk or run"
+            return String(localized: "Outdoor walk or run")
         case .treadmill:
-            return "Treadmill"
+            return String(localized: "Treadmill")
         case .machineDistance:
-            return "Machine distance"
+            return String(localized: "Machine distance")
         case .rower:
-            return "Rower"
+            return String(localized: "Rower")
         case .stairClimber:
-            return "Stair climber"
+            return String(localized: "Stair climber")
         case .timeOnly:
-            return "Time only"
+            return String(localized: "Time only")
         }
     }
 

@@ -154,7 +154,7 @@ struct TemplateDetailView: View {
                     if !orderedCardioActivities.isEmpty {
                         WGJMetricPill(
                             systemImage: "figure.run",
-                            value: "\(orderedCardioActivities.count) cardio",
+                            value: cardioActivityMetricText(orderedCardioActivities.count),
                             tint: WGJTheme.accentGold
                         )
                     }
@@ -182,8 +182,8 @@ struct TemplateDetailView: View {
         if !orderedCardioActivities.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 WGJActionHeader(
-                    "Cardio Plan",
-                    subtitle: "Ordered activities saved with this template."
+                    String(localized: "Cardio Plan"),
+                    subtitle: String(localized: "Ordered activities saved with this template.")
                 ) {
                     Button {
                         showingEditor = true
@@ -208,7 +208,7 @@ struct TemplateDetailView: View {
             VStack(alignment: .leading, spacing: 10) {
                 WGJSectionHeader(
                     role.title,
-                    subtitle: activities.count == 1 ? "1 activity" : "\(activities.count) activities"
+                    subtitle: cardioActivityCountText(activities.count)
                 )
 
                 ForEach(activities) { activity in
@@ -698,7 +698,22 @@ struct TemplateDetailView: View {
         }
 
         let trimmedCategory = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedCategory.caseInsensitiveCompare("Cardio") == .orderedSame {
+            return String(localized: "Cardio")
+        }
         return trimmedCategory.isEmpty ? nil : trimmedCategory
+    }
+
+    private func cardioActivityMetricText(_ count: Int) -> String {
+        count == 1
+            ? String(localized: "1 cardio activity")
+            : String(localized: "\(count) cardio activities")
+    }
+
+    private func cardioActivityCountText(_ count: Int) -> String {
+        count == 1
+            ? String(localized: "1 activity")
+            : String(localized: "\(count) activities")
     }
 
     private var exerciseRows: [TemplateExerciseRowData] {

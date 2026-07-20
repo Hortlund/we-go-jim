@@ -485,46 +485,54 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
         var changes: [String] = []
 
         if templateCardioBlock.role != sessionCardioBlock.role {
-            changes.append("Role updated")
+            changes.append(String(localized: "Role updated"))
         }
 
         if templateCardioBlock.sortOrder != sessionCardioBlock.sortOrder {
-            changes.append("Order \(templateCardioBlock.sortOrder + 1) -> \(sessionCardioBlock.sortOrder + 1)")
+            changes.append(
+                String(
+                    localized: "Order \(templateCardioBlock.sortOrder + 1) -> \(sessionCardioBlock.sortOrder + 1)"
+                )
+            )
         }
 
         if templateCardioBlock.catalogExerciseUUID != sessionCardioBlock.catalogExerciseUUID
             || templateCardioBlock.exerciseNameSnapshot != sessionCardioBlock.exerciseNameSnapshot {
             changes.append(
-                "Exercise \(templateCardioBlock.exerciseNameSnapshot) -> \(sessionCardioBlock.exerciseNameSnapshot)"
+                String(
+                    localized: "Exercise \(templateCardioBlock.exerciseNameSnapshot) -> \(sessionCardioBlock.exerciseNameSnapshot)"
+                )
             )
         }
 
         if templateCardioBlock.categorySnapshot != sessionCardioBlock.categorySnapshot
             || templateCardioBlock.muscleSummarySnapshot != sessionCardioBlock.muscleSummarySnapshot {
-            changes.append("Exercise details updated")
+            changes.append(String(localized: "Exercise details updated"))
         }
 
         if templateCardioBlock.trackingProfile != sessionCardioBlock.trackingProfile {
-            changes.append("Tracking profile updated")
+            changes.append(String(localized: "Tracking profile updated"))
         }
 
         if templateCardioBlock.goalKind != sessionCardioBlock.goalKind {
-            changes.append("Goal updated")
+            changes.append(String(localized: "Goal updated"))
         }
 
         let normalizedDuration = normalizedCardioDuration(sessionCardioBlock.targetDurationSeconds)
         if templateCardioBlock.targetDurationSeconds != normalizedDuration {
             changes.append(
-                "Duration \(formattedDuration(templateCardioBlock.targetDurationSeconds)) -> \(formattedDuration(normalizedDuration))"
+                String(
+                    localized: "Duration \(formattedDuration(templateCardioBlock.targetDurationSeconds)) -> \(formattedDuration(normalizedDuration))"
+                )
             )
         }
 
         if templateCardioBlock.targetDistanceMeters != sessionCardioBlock.targetDistanceMeters {
-            changes.append("Distance target updated")
+            changes.append(String(localized: "Distance target updated"))
         }
 
         if templateCardioBlock.preferredDistanceUnit != sessionCardioBlock.preferredDistanceUnit {
-            changes.append("Distance unit updated")
+            changes.append(String(localized: "Distance unit updated"))
         }
 
         return changes

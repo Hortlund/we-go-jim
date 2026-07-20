@@ -26,8 +26,8 @@ struct ActiveWorkoutTemplateSyncReviewSheet: View {
 
                     if !preview.addedCardioBlocks.isEmpty {
                         section(
-                            title: "Added Cardio",
-                            subtitle: "\(preview.addedCardioBlocks.count) cardio section" + (preview.addedCardioBlocks.count == 1 ? "" : "s") + " added to the workout"
+                            title: String(localized: "Added Cardio"),
+                            subtitle: addedCardioSubtitle(preview.addedCardioBlocks.count)
                         ) {
                             ForEach(preview.addedCardioBlocks) { addition in
                                 summaryRow(
@@ -41,8 +41,8 @@ struct ActiveWorkoutTemplateSyncReviewSheet: View {
 
                     if !preview.removedCardioBlocks.isEmpty {
                         section(
-                            title: "Removed Cardio",
-                            subtitle: "\(preview.removedCardioBlocks.count) cardio section" + (preview.removedCardioBlocks.count == 1 ? "" : "s") + " removed from the template"
+                            title: String(localized: "Removed Cardio"),
+                            subtitle: removedCardioSubtitle(preview.removedCardioBlocks.count)
                         ) {
                             ForEach(preview.removedCardioBlocks) { removal in
                                 summaryRow(
@@ -56,12 +56,14 @@ struct ActiveWorkoutTemplateSyncReviewSheet: View {
 
                     if !preview.editedCardioBlocks.isEmpty {
                         section(
-                            title: "Edited Cardio",
-                            subtitle: "Cardio phase settings that changed during the workout."
+                            title: String(localized: "Edited Cardio"),
+                            subtitle: String(
+                                localized: "Cardio phase settings that changed during the workout."
+                            )
                         ) {
                             ForEach(preview.editedCardioBlocks) { edited in
                                 summaryRow(
-                                    title: "\(edited.role.title) · \(edited.exerciseName)",
+                                    title: String(localized: "\(edited.role.title) · \(edited.exerciseName)"),
                                     details: edited.changes,
                                     tint: WGJTheme.accentGold
                                 )
@@ -213,6 +215,18 @@ struct ActiveWorkoutTemplateSyncReviewSheet: View {
                 content()
             }
         }
+    }
+
+    private func addedCardioSubtitle(_ count: Int) -> String {
+        count == 1
+            ? String(localized: "1 cardio section added to the workout")
+            : String(localized: "\(count) cardio sections added to the workout")
+    }
+
+    private func removedCardioSubtitle(_ count: Int) -> String {
+        count == 1
+            ? String(localized: "1 cardio section removed from the template")
+            : String(localized: "\(count) cardio sections removed from the template")
     }
 
     private func summaryRow(
