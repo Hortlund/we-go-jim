@@ -125,15 +125,21 @@ nonisolated struct ActiveWorkoutCardioPresentation: Identifiable, Equatable, Sen
     private static func goalText(for activity: ActiveWorkoutRuntimeCardioBlock) -> String {
         switch activity.goalKind {
         case .time:
-            return String(localized: "Goal · \(durationText(seconds: activity.targetDurationSeconds, alwaysShowsHours: false))")
+            return CardioLocalizedCopy.activeGoalSummary(
+                .time,
+                formattedValue: durationText(seconds: activity.targetDurationSeconds, alwaysShowsHours: false)
+            )
         case .distance:
             guard let meters = activity.targetDistanceMeters, meters > 0 else {
-                return String(localized: "Distance goal")
+                return CardioLocalizedCopy.activeGoalSummary(.distance, formattedValue: nil)
             }
             let unit = activity.preferredDistanceUnit ?? .kilometers
-            return String(localized: "Goal · \(distanceText(meters: meters, unit: unit))")
+            return CardioLocalizedCopy.activeGoalSummary(
+                .distance,
+                formattedValue: distanceText(meters: meters, unit: unit)
+            )
         case .open:
-            return String(localized: "No target")
+            return CardioLocalizedCopy.activeGoalSummary(.open, formattedValue: nil)
         }
     }
 
@@ -182,19 +188,25 @@ nonisolated struct ActiveWorkoutCardioPresentation: Identifiable, Equatable, Sen
 
         switch activity.goalKind {
         case .time:
-            return String(localized: "Goal, \(spokenDuration(seconds: activity.targetDurationSeconds))")
+            return CardioLocalizedCopy.activeGoalAccessibilitySummary(
+                .time,
+                formattedValue: spokenDuration(seconds: activity.targetDurationSeconds)
+            )
         case .distance:
             guard let meters = activity.targetDistanceMeters, meters > 0 else {
-                return String(localized: "Distance goal")
+                return CardioLocalizedCopy.activeGoalAccessibilitySummary(.distance, formattedValue: nil)
             }
             let unit = activity.preferredDistanceUnit ?? .kilometers
             let distance = WorkoutMetricAccessibilityPolicy.cardioMetricValue(
                 distanceValueText(meters: meters, unit: unit),
                 semantic: .distance(unit)
             )
-            return String(localized: "Goal, \(distance)")
+            return CardioLocalizedCopy.activeGoalAccessibilitySummary(
+                .distance,
+                formattedValue: distance
+            )
         case .open:
-            return String(localized: "No target")
+            return CardioLocalizedCopy.activeGoalAccessibilitySummary(.open, formattedValue: nil)
         }
     }
 
@@ -239,6 +251,18 @@ nonisolated struct ActiveWorkoutCardioPresentation: Identifiable, Equatable, Sen
     }
 }
 
+private extension ActiveWorkoutCardioPresentation.Action {
+    nonisolated var localizedCopyAction: CardioLocalizedCopy.Action {
+        switch self {
+        case .start: return .start
+        case .pause: return .pause
+        case .resume: return .resume
+        case .finish: return .finish
+        case .editResult: return .editResult
+        }
+    }
+}
+
 nonisolated enum ActiveWorkoutCardioQuickAddPolicy {
     static func defaultRole(hasStrengthExercises: Bool) -> WorkoutCardioRole {
         hasStrengthExercises ? .finisher : .main
@@ -272,7 +296,7 @@ nonisolated enum ActiveWorkoutCardioReplacementPolicy {
     }
 
     static var confirmationMessage: String {
-        String(localized: "Recorded cardio data will be cleared.")
+        CardioLocalizedCopy.replacementWarning
     }
 
     static func decision(activity: ActiveWorkoutRuntimeCardioBlock) -> Decision {
@@ -287,29 +311,27 @@ nonisolated enum ActiveWorkoutCardioReplacementPolicy {
 
 nonisolated enum ActiveWorkoutCardioConfirmationCopy {
     static var timerConflictTitle: String {
-        String(localized: "Another cardio activity is running")
+        CardioLocalizedCopy.confirmationTitle(.timerConflict, activityName: "")
     }
 
     static func replacementTitle(activityName: String) -> String {
-        String(localized: "Change \(activityName)?")
+        CardioLocalizedCopy.confirmationTitle(.replacement, activityName: activityName)
     }
 
     static func removalTitle(activityName: String) -> String {
-        String(localized: "Remove \(activityName)?")
+        CardioLocalizedCopy.confirmationTitle(.removal, activityName: activityName)
     }
 
     static var timerConflictMessage: String {
-        String(localized: "Only one cardio timer can run at a time.")
+        CardioLocalizedCopy.confirmationMessage(.timerConflict)
     }
 
     static var replacementMessage: String {
-        String(localized: "Recorded cardio data will be cleared. This cannot be undone.")
+        CardioLocalizedCopy.confirmationMessage(.replacement)
     }
 
     static var removalMessage: String {
-        String(
-            localized: "This activity contains saved progress or a result. Removing it cannot be undone."
-        )
+        CardioLocalizedCopy.confirmationMessage(.removal)
     }
 }
 
@@ -568,18 +590,7 @@ struct ActiveWorkoutCardioActivityCard: View {
     }
 
     private func actionTitle(for action: ActiveWorkoutCardioPresentation.Action) -> String {
-        switch action {
-        case .start:
-            return String(localized: "Start")
-        case .pause:
-            return String(localized: "Pause")
-        case .resume:
-            return String(localized: "Resume")
-        case .finish:
-            return String(localized: "Finish")
-        case .editResult:
-            return String(localized: "Edit Result")
-        }
+        CardioLocalizedCopy.actionTitle(action.localizedCopyAction)
     }
 
     private func callback(for action: ActiveWorkoutCardioPresentation.Action) -> () -> Void {
@@ -612,13 +623,13 @@ struct ActiveWorkoutCardioActivityCard: View {
     private var stateTitle: String {
         switch presentation.state {
         case .idle:
-            return String(localized: "Ready")
+            return CardioLocalizedCopy.stateTitle(.ready)
         case .running:
-            return String(localized: "Running")
+            return CardioLocalizedCopy.stateTitle(.running)
         case .paused:
-            return String(localized: "Paused")
+            return CardioLocalizedCopy.stateTitle(.paused)
         case .completed:
-            return String(localized: "Complete")
+            return CardioLocalizedCopy.stateTitle(.complete)
         }
     }
 

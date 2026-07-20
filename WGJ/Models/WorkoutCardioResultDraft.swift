@@ -129,20 +129,7 @@ nonisolated enum WorkoutCardioResultValidationError: LocalizedError, Equatable, 
     case negativeResistanceLevel
 
     var errorDescription: String? {
-        switch self {
-        case .negativeDuration:
-            return String(localized: "Duration cannot be negative.")
-        case .invalidDistance:
-            return String(localized: "Enter a valid distance, or leave it empty.")
-        case .missingDurationAndDistance:
-            return String(localized: "Enter a duration or distance.")
-        case .invalidIncline:
-            return String(localized: "Enter a valid incline percentage.")
-        case .invalidResistanceLevel:
-            return String(localized: "Enter a valid resistance or level.")
-        case .negativeResistanceLevel:
-            return String(localized: "Resistance or level cannot be negative.")
-        }
+        CardioLocalizedCopy.resultValidationMessage(self)
     }
 }
 

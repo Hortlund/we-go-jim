@@ -2922,14 +2922,7 @@ struct ActiveWorkoutView: View {
     }
 
     private func cardioSectionSubtitle(for role: WorkoutCardioRole) -> String {
-        switch role {
-        case .warmUp:
-            return String(localized: "Cardio to prepare for the main work.")
-        case .main:
-            return String(localized: "Primary cardio for this workout.")
-        case .finisher:
-            return String(localized: "Cardio to close out the workout.")
-        }
+        CardioLocalizedCopy.roleSubtitle(role)
     }
 
     private func duplicateExerciseRejectedResult(for item: ExerciseCatalogSelection) -> ExercisePickerSelectionResult {

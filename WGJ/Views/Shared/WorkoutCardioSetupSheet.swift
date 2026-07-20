@@ -75,27 +75,6 @@ nonisolated struct ValidatedWorkoutCardioSetup: Equatable, Sendable {
     let trackingProfile: WorkoutCardioTrackingProfile
 }
 
-nonisolated enum WorkoutCardioSetupValidationError: LocalizedError, Equatable, Sendable {
-    case durationMustBePositive
-    case distanceMustBePositive(unit: WorkoutDistanceUnit)
-
-    var errorDescription: String? {
-        switch self {
-        case .durationMustBePositive:
-            return String(localized: "Enter a duration greater than 0 minutes.")
-        case .distanceMustBePositive(let unit):
-            switch unit {
-            case .kilometers:
-                return String(localized: "Enter a distance greater than 0 kilometers.")
-            case .miles:
-                return String(localized: "Enter a distance greater than 0 miles.")
-            case .meters:
-                return String(localized: "Enter a distance greater than 0 meters.")
-            }
-        }
-    }
-}
-
 nonisolated enum WorkoutCardioSetupValidator {
     static func validated(
         _ draft: WorkoutCardioSetupDraft,

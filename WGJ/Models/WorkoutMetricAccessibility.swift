@@ -77,29 +77,7 @@ nonisolated enum WorkoutMetricAccessibilityPolicy {
     }
 
     static func cardioAction(_ action: CardioAction, activityName: String) -> String {
-        let trimmedName = activityName.trimmingCharacters(in: .whitespacesAndNewlines)
-        switch action {
-        case .start:
-            return trimmedName.isEmpty
-                ? String(localized: "Start")
-                : String(localized: "Start \(trimmedName)")
-        case .pause:
-            return trimmedName.isEmpty
-                ? String(localized: "Pause")
-                : String(localized: "Pause \(trimmedName)")
-        case .resume:
-            return trimmedName.isEmpty
-                ? String(localized: "Resume")
-                : String(localized: "Resume \(trimmedName)")
-        case .finish:
-            return trimmedName.isEmpty
-                ? String(localized: "Finish")
-                : String(localized: "Finish \(trimmedName)")
-        case .editResult:
-            return trimmedName.isEmpty
-                ? String(localized: "Edit Result")
-                : String(localized: "Edit Result \(trimmedName)")
-        }
+        CardioLocalizedCopy.actionAccessibilityLabel(action.localizedCopyAction, activityName: activityName)
     }
 
     /// Formats semantic cardio units for unambiguous, localized VoiceOver speech.
@@ -154,6 +132,18 @@ nonisolated enum WorkoutMetricAccessibilityPolicy {
             return "bodyweight"
         default:
             return unit
+        }
+    }
+}
+
+private extension WorkoutMetricAccessibilityPolicy.CardioAction {
+    nonisolated var localizedCopyAction: CardioLocalizedCopy.Action {
+        switch self {
+        case .start: return .start
+        case .pause: return .pause
+        case .resume: return .resume
+        case .finish: return .finish
+        case .editResult: return .editResult
         }
     }
 }

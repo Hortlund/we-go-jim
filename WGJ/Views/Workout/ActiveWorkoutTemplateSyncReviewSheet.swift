@@ -218,15 +218,11 @@ struct ActiveWorkoutTemplateSyncReviewSheet: View {
     }
 
     private func addedCardioSubtitle(_ count: Int) -> String {
-        count == 1
-            ? String(localized: "1 cardio section added to the workout")
-            : String(localized: "\(count) cardio sections added to the workout")
+        CardioLocalizedCopy.addedCardioSectionCount(count)
     }
 
     private func removedCardioSubtitle(_ count: Int) -> String {
-        count == 1
-            ? String(localized: "1 cardio section removed from the template")
-            : String(localized: "\(count) cardio sections removed from the template")
+        CardioLocalizedCopy.removedCardioSectionCount(count)
     }
 
     private func summaryRow(

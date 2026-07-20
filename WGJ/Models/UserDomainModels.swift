@@ -326,21 +326,11 @@ nonisolated enum WorkoutCardioPhase: String, Codable, CaseIterable, Equatable, I
     }
 
     var title: String {
-        switch self {
-        case .preWorkout:
-            return String(localized: "Pre-workout Cardio")
-        case .postWorkout:
-            return String(localized: "Post-workout Cardio")
-        }
+        CardioLocalizedCopy.phaseTitle(self)
     }
 
     var shortTitle: String {
-        switch self {
-        case .preWorkout:
-            return String(localized: "Pre Cardio")
-        case .postWorkout:
-            return String(localized: "Post Cardio")
-        }
+        CardioLocalizedCopy.compactPhaseTitle(self)
     }
 
     var systemImage: String {

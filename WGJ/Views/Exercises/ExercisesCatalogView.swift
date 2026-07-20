@@ -2184,20 +2184,7 @@ private struct CustomExerciseEditorView: View {
     }
 
     private func cardioTrackingProfileTitle(_ profile: WorkoutCardioTrackingProfile) -> String {
-        switch profile {
-        case .walkRun:
-            return String(localized: "Outdoor walk or run")
-        case .treadmill:
-            return String(localized: "Treadmill")
-        case .machineDistance:
-            return String(localized: "Machine distance")
-        case .rower:
-            return String(localized: "Rower")
-        case .stairClimber:
-            return String(localized: "Stair climber")
-        case .timeOnly:
-            return String(localized: "Time only")
-        }
+        CardioLocalizedCopy.trackingProfileTitle(profile)
     }
 
     private func selectionSummary(for muscleIDs: [Int], emptyTitle: String) -> String {

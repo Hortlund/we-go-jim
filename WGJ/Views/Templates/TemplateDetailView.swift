@@ -705,15 +705,11 @@ struct TemplateDetailView: View {
     }
 
     private func cardioActivityMetricText(_ count: Int) -> String {
-        count == 1
-            ? String(localized: "1 cardio activity")
-            : String(localized: "\(count) cardio activities")
+        CardioLocalizedCopy.cardioActivityCount(count)
     }
 
     private func cardioActivityCountText(_ count: Int) -> String {
-        count == 1
-            ? String(localized: "1 activity")
-            : String(localized: "\(count) activities")
+        CardioLocalizedCopy.activityCount(count)
     }
 
     private var exerciseRows: [TemplateExerciseRowData] {

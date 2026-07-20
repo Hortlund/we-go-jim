@@ -29,25 +29,11 @@ enum WorkoutCardioDurationFormatter {
 
 extension WorkoutCardioRole {
     nonisolated var title: String {
-        switch self {
-        case .warmUp:
-            return String(localized: "Warm-up")
-        case .main:
-            return String(localized: "Main Cardio")
-        case .finisher:
-            return String(localized: "Finisher")
-        }
+        CardioLocalizedCopy.roleTitle(self)
     }
 
     nonisolated var compactTitle: String {
-        switch self {
-        case .warmUp:
-            return String(localized: "Warm-up")
-        case .main:
-            return String(localized: "Main")
-        case .finisher:
-            return String(localized: "Finisher")
-        }
+        CardioLocalizedCopy.compactRoleTitle(self)
     }
 
     nonisolated var systemImage: String {
@@ -64,14 +50,7 @@ extension WorkoutCardioRole {
 
 extension WorkoutCardioGoalKind {
     nonisolated var title: String {
-        switch self {
-        case .time:
-            return String(localized: "Time")
-        case .distance:
-            return String(localized: "Distance")
-        case .open:
-            return String(localized: "No Target")
-        }
+        CardioLocalizedCopy.goalTitle(self)
     }
 }
 
