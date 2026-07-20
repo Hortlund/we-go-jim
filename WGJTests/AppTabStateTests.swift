@@ -30,4 +30,38 @@ final class AppTabStateTests: XCTestCase {
         XCTAssertEqual(state.selectedTab, .history)
         XCTAssertNil(defaults.string(forKey: legacySelectedTabDefaultsKey))
     }
+
+    func testColdLaunchPresentationPolicyAlwaysPresentsRestoredWorkout() {
+        XCTAssertEqual(
+            ActiveWorkoutRestorationPresentationPolicy.present.resolvedMode(
+                storedMode: .collapsed,
+                currentIsPresented: false
+            ),
+            .presented
+        )
+        XCTAssertEqual(
+            ActiveWorkoutRestorationPresentationPolicy.present.resolvedMode(
+                storedMode: .presented,
+                currentIsPresented: false
+            ),
+            .presented
+        )
+    }
+
+    func testResumePresentationPolicyPreservesStoredMode() {
+        XCTAssertEqual(
+            ActiveWorkoutRestorationPresentationPolicy.preserveStored.resolvedMode(
+                storedMode: .collapsed,
+                currentIsPresented: false
+            ),
+            .collapsed
+        )
+        XCTAssertEqual(
+            ActiveWorkoutRestorationPresentationPolicy.preserveStored.resolvedMode(
+                storedMode: .presented,
+                currentIsPresented: false
+            ),
+            .presented
+        )
+    }
 }

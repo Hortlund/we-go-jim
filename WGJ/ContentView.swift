@@ -188,7 +188,8 @@ struct ContentView: View {
             coordinator: activeWorkoutCoordinator,
             modelContext: modelContext,
             backgroundStore: rootBackgroundStore,
-            allowsLegacyDraftImport: true
+            allowsLegacyDraftImport: true,
+            presentationPolicy: .present
         )
         await restoreRestTimerFromStoredActiveWorkoutIfNeeded()
 
