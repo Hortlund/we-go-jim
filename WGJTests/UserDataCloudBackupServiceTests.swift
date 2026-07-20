@@ -689,6 +689,7 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
             weeklyWorkoutGoal: 5,
             isTrainingGuidanceEnabled: false,
             keepsScreenAwake: true,
+            automaticallyClosesCompletedExercises: false,
             isBozarModeEnabled: true
         ))
         try sourceContext.save()
@@ -715,6 +716,7 @@ final class UserDataCloudBackupServiceTests: XCTestCase {
         XCTAssertEqual(profiles.first?.weeklyWorkoutGoal, 5)
         XCTAssertEqual(profiles.first?.isTrainingGuidanceEnabled, false)
         XCTAssertEqual(profiles.first?.keepsScreenAwake, true)
+        XCTAssertEqual(profiles.first?.automaticallyClosesCompletedExercises, false)
         XCTAssertEqual(profiles.first?.isBozarModeEnabled, true)
     }
 

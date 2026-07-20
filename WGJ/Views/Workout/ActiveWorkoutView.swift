@@ -984,7 +984,8 @@ struct ActiveWorkoutView: View {
         }
 
         return ActiveWorkoutProfilePreferences(
-            preferredLoadUnit: profile.preferredLoadUnit
+            preferredLoadUnit: profile.preferredLoadUnit,
+            automaticallyClosesCompletedExercises: profile.automaticallyClosesCompletedExercises
         )
     }
 
@@ -1533,7 +1534,10 @@ struct ActiveWorkoutView: View {
     @MainActor
     private func collapseCompletedExerciseCard(_ exerciseID: UUID) {
         let wasExpanded = cardStateController.isExpanded(for: exerciseID)
-        switch ActiveWorkoutCompletedExercisePresentationPolicy.effect(wasExpanded: wasExpanded) {
+        switch ActiveWorkoutCompletedExercisePresentationPolicy.effect(
+            wasExpanded: wasExpanded,
+            automaticallyClosesCompletedExercises: profilePreferences.automaticallyClosesCompletedExercises
+        ) {
         case .none:
             return
         case .collapseCard:
@@ -2980,9 +2984,11 @@ private struct ActiveWorkoutCancelSection: View {
 
 private struct ActiveWorkoutProfilePreferences: Equatable {
     let preferredLoadUnit: TemplateLoadUnit
+    let automaticallyClosesCompletedExercises: Bool
 
     nonisolated static let `default` = ActiveWorkoutProfilePreferences(
-        preferredLoadUnit: .kg
+        preferredLoadUnit: .kg,
+        automaticallyClosesCompletedExercises: true
     )
 }
 

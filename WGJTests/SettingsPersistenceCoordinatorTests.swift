@@ -2,6 +2,26 @@ import XCTest
 @testable import WGJ
 
 final class SettingsPersistenceCoordinatorTests: XCTestCase {
+    func testAutoCloseCompletedExercisesDefaultsOnAndCopiesProfileValue() {
+        XCTAssertTrue(UserSettingsDraft.default.automaticallyClosesCompletedExercises)
+
+        let profile = UserProfile(
+            displayName: "Peter",
+            automaticallyClosesCompletedExercises: false
+        )
+
+        XCTAssertFalse(UserSettingsDraft(profile: profile).automaticallyClosesCompletedExercises)
+    }
+
+    func testAutoCloseCompletedExercisesPatchUpdatesDraft() {
+        var draft = UserSettingsDraft.default
+
+        draft.apply(.init(automaticallyClosesCompletedExercises: false))
+
+        XCTAssertFalse(draft.automaticallyClosesCompletedExercises)
+        XCTAssertEqual(draft.weeklyWorkoutGoal, 4)
+    }
+
     func testNewerRevisionPersistsAfterDelayedOlderWriteAndOwnsSideEffects() async throws {
         let store = SettingsTestStore(
             draft: UserSettingsDraft(

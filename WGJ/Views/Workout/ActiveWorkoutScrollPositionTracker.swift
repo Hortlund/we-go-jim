@@ -20,8 +20,11 @@ nonisolated enum ActiveWorkoutCompletedExercisePresentationEffect: Equatable, Se
 }
 
 nonisolated enum ActiveWorkoutCompletedExercisePresentationPolicy {
-    static func effect(wasExpanded: Bool) -> ActiveWorkoutCompletedExercisePresentationEffect {
-        wasExpanded ? .collapseCard : .none
+    static func effect(
+        wasExpanded: Bool,
+        automaticallyClosesCompletedExercises: Bool
+    ) -> ActiveWorkoutCompletedExercisePresentationEffect {
+        wasExpanded && automaticallyClosesCompletedExercises ? .collapseCard : .none
     }
 }
 

@@ -18,6 +18,7 @@ struct SettingsView: View {
     @State private var weeklyGoalSaveFeedbackTask: Task<Void, Never>?
     @State private var isTrainingGuidanceEnabled = true
     @State private var keepsScreenAwake = false
+    @State private var automaticallyClosesCompletedExercises = true
     @State private var preferredWeightUnit: PreferredWeightUnit = .kg
     @State private var workoutNotificationStyle: WorkoutNotificationStyle = .timeSensitive
     @State private var notificationPermissions: NotificationPermissionSnapshot?
@@ -103,6 +104,18 @@ struct SettingsView: View {
                                 .foregroundStyle(WGJTheme.textPrimary)
 
                             Text("Prevents dimming and auto-lock while a workout is active.")
+                                .font(.caption)
+                                .foregroundStyle(WGJTheme.textSecondary)
+                        }
+                    }
+                    .tint(WGJTheme.accentBlue)
+
+                    Toggle(isOn: $automaticallyClosesCompletedExercises) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Auto-close completed exercises")
+                                .foregroundStyle(WGJTheme.textPrimary)
+
+                            Text("Closes an exercise after all of its sets are complete.")
                                 .font(.caption)
                                 .foregroundStyle(WGJTheme.textSecondary)
                         }
@@ -289,6 +302,10 @@ struct SettingsView: View {
             guard hasLoadedProfile else { return }
             saveKeepsScreenAwakePreference(newValue)
         }
+        .onChange(of: automaticallyClosesCompletedExercises) { _, newValue in
+            guard hasLoadedProfile else { return }
+            saveAutomaticallyClosesCompletedExercisesPreference(newValue)
+        }
         .onChange(of: preferredWeightUnit) { _, newValue in
             guard hasLoadedProfile else { return }
             savePreferredWeightUnitPreference(newValue)
@@ -397,6 +414,7 @@ struct SettingsView: View {
         savedWeeklyGoal = snapshot.weeklyGoal
         isTrainingGuidanceEnabled = snapshot.isTrainingGuidanceEnabled
         keepsScreenAwake = snapshot.keepsScreenAwake
+        automaticallyClosesCompletedExercises = snapshot.automaticallyClosesCompletedExercises
         preferredWeightUnit = snapshot.preferredWeightUnit
         workoutNotificationStyle = snapshot.workoutNotificationStyle
         submittedSettingsDraft = UserSettingsDraft(
@@ -404,7 +422,8 @@ struct SettingsView: View {
             isTrainingGuidanceEnabled: snapshot.isTrainingGuidanceEnabled,
             keepsScreenAwake: snapshot.keepsScreenAwake,
             preferredWeightUnit: snapshot.preferredWeightUnit,
-            workoutNotificationStyle: snapshot.workoutNotificationStyle
+            workoutNotificationStyle: snapshot.workoutNotificationStyle,
+            automaticallyClosesCompletedExercises: snapshot.automaticallyClosesCompletedExercises
         )
     }
 
@@ -463,6 +482,14 @@ struct SettingsView: View {
         )
     }
 
+    private func saveAutomaticallyClosesCompletedExercisesPreference(_ isEnabled: Bool) {
+        guard isEnabled != submittedSettingsDraft.automaticallyClosesCompletedExercises else { return }
+        submittedSettingsDraft.automaticallyClosesCompletedExercises = isEnabled
+        settingsPersistenceCoordinator.submit(
+            UserSettingsPatch(automaticallyClosesCompletedExercises: isEnabled)
+        )
+    }
+
     private func savePreferredWeightUnitPreference(_ unit: PreferredWeightUnit) {
         guard unit != submittedSettingsDraft.preferredWeightUnit else { return }
         submittedSettingsDraft.preferredWeightUnit = unit
@@ -517,6 +544,7 @@ private struct SettingsProfileSnapshot: Sendable {
     let weeklyGoal: Int
     let isTrainingGuidanceEnabled: Bool
     let keepsScreenAwake: Bool
+    let automaticallyClosesCompletedExercises: Bool
     let preferredWeightUnit: PreferredWeightUnit
     let workoutNotificationStyle: WorkoutNotificationStyle
 
@@ -524,6 +552,7 @@ private struct SettingsProfileSnapshot: Sendable {
         weeklyGoal = profile.weeklyWorkoutGoal
         isTrainingGuidanceEnabled = profile.isTrainingGuidanceEnabled
         keepsScreenAwake = profile.keepsScreenAwake
+        automaticallyClosesCompletedExercises = profile.automaticallyClosesCompletedExercises
         preferredWeightUnit = profile.preferredWeightUnit
         workoutNotificationStyle = profile.workoutNotificationStyle
     }
@@ -532,6 +561,7 @@ private struct SettingsProfileSnapshot: Sendable {
         weeklyGoal = profile.weeklyWorkoutGoal
         isTrainingGuidanceEnabled = profile.isTrainingGuidanceEnabled
         keepsScreenAwake = profile.keepsScreenAwake
+        automaticallyClosesCompletedExercises = profile.automaticallyClosesCompletedExercises
         preferredWeightUnit = profile.preferredWeightUnit
         workoutNotificationStyle = profile.workoutNotificationStyle
     }

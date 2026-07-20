@@ -764,6 +764,7 @@ final class UserProfile {
     var weeklyWorkoutGoal: Int = 4
     var isTrainingGuidanceEnabled: Bool = true
     var keepsScreenAwake: Bool = false
+    var automaticallyClosesCompletedExercises: Bool = true
     var isBozarModeEnabled: Bool = false
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
@@ -802,6 +803,7 @@ final class UserProfile {
         weeklyWorkoutGoal: Int = 4,
         isTrainingGuidanceEnabled: Bool = true,
         keepsScreenAwake: Bool = false,
+        automaticallyClosesCompletedExercises: Bool = true,
         isBozarModeEnabled: Bool = false,
         createdAt: Date = .now,
         updatedAt: Date = .now
@@ -815,6 +817,7 @@ final class UserProfile {
         self.weeklyWorkoutGoal = max(1, min(14, weeklyWorkoutGoal))
         self.isTrainingGuidanceEnabled = isTrainingGuidanceEnabled
         self.keepsScreenAwake = keepsScreenAwake
+        self.automaticallyClosesCompletedExercises = automaticallyClosesCompletedExercises
         self.isBozarModeEnabled = isBozarModeEnabled
         self.createdAt = createdAt
         self.updatedAt = updatedAt

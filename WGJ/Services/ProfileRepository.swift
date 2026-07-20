@@ -213,6 +213,10 @@ nonisolated final class ProfileRepository {
             profile.workoutNotificationStyle = value
             changed = true
         }
+        if let value = patch.automaticallyClosesCompletedExercises {
+            profile.automaticallyClosesCompletedExercises = value
+            changed = true
+        }
 
         if changed {
             profile.updatedAt = .now
