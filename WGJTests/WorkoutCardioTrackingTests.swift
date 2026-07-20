@@ -12,6 +12,12 @@ final class WorkoutCardioTrackingTests: XCTestCase {
         XCTAssertEqual(WorkoutDistanceUnit.meters.value(fromMeters: 500), 500, accuracy: 0.001)
     }
 
+    func testRegionalDistanceDefaultsUseLocaleMeasurementSystems() {
+        XCTAssertEqual(WorkoutDistanceUnit.regionalDefault(locale: Locale(identifier: "en_US")), .miles)
+        XCTAssertEqual(WorkoutDistanceUnit.regionalDefault(locale: Locale(identifier: "en_GB")), .miles)
+        XCTAssertEqual(WorkoutDistanceUnit.regionalDefault(locale: Locale(identifier: "sv_SE")), .kilometers)
+    }
+
     func testWalkRunMetricsReturnPaceAndSpeed() throws {
         let result = WorkoutCardioMetricsCalculator.calculate(
             durationSeconds: 1_500,
