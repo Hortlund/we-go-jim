@@ -46,24 +46,70 @@ enum HistoryDetailSnapshotBuilder {
     nonisolated struct CardioBlockSnapshot: Identifiable, Equatable, Sendable {
         let id: UUID
         let phase: WorkoutCardioPhase
+        let role: WorkoutCardioRole
+        let sortOrder: Int
         let catalogExerciseUUID: String
         let exerciseNameSnapshot: String
         let categorySnapshot: String
         let muscleSummarySnapshot: String
+        let trackingProfile: WorkoutCardioTrackingProfile
         let targetDurationSeconds: Int
+        let actualDurationSeconds: Int?
+        let actualDistanceMeters: Double?
+        let preferredDistanceUnit: WorkoutDistanceUnit
+        let inclinePercent: Double?
+        let resistanceLevel: Double?
+        let notes: String
         let isCompleted: Bool
         let updatedAt: Date
 
         nonisolated init(model: WorkoutSessionCardioBlock) {
             id = model.id
             phase = model.phase
+            role = model.role
+            sortOrder = model.sortOrder
             catalogExerciseUUID = model.catalogExerciseUUID
             exerciseNameSnapshot = model.exerciseNameSnapshot
             categorySnapshot = model.categorySnapshot
             muscleSummarySnapshot = model.muscleSummarySnapshot
+            trackingProfile = WorkoutCardioTrackingProfileResolver.resolved(
+                storedProfile: model.trackingProfile,
+                identity: "\(model.catalogExerciseUUID) \(model.exerciseNameSnapshot)",
+                hasDistance: model.actualDistanceMeters != nil || model.targetDistanceMeters != nil
+            )
             targetDurationSeconds = model.targetDurationSeconds
+            actualDurationSeconds = model.actualDurationSeconds
+            actualDistanceMeters = model.actualDistanceMeters
+            preferredDistanceUnit = model.preferredDistanceUnit ?? .kilometers
+            inclinePercent = model.inclinePercent
+            resistanceLevel = model.resistanceLevel
+            notes = model.cardioNotes
             isCompleted = model.isCompleted
             updatedAt = model.updatedAt
+        }
+
+        var resultDraft: WorkoutCardioResultDraft {
+            WorkoutCardioResultDraft(
+                actualDurationSeconds: actualDurationSeconds,
+                actualDistanceMeters: actualDistanceMeters,
+                distanceUnit: preferredDistanceUnit,
+                inclinePercent: inclinePercent,
+                resistanceLevel: resistanceLevel,
+                notes: notes,
+                trackingProfile: trackingProfile
+            )
+        }
+
+        var resultSummary: WorkoutCardioResultSummary {
+            WorkoutCardioResultSummaryFormatter.summary(
+                durationSeconds: actualDurationSeconds,
+                distanceMeters: actualDistanceMeters,
+                displayUnit: preferredDistanceUnit,
+                profile: trackingProfile,
+                inclinePercent: inclinePercent,
+                resistanceLevel: resistanceLevel,
+                notes: notes
+            )
         }
     }
 

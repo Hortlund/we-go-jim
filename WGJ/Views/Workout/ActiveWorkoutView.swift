@@ -188,7 +188,29 @@ struct ActiveWorkoutView: View {
             .sheet(item: $pendingFinishedCardioResult, onDismiss: {
                 pendingFinishedCardioID = nil
             }) { result in
-                ActiveWorkoutPendingCardioResultSheet(result: result)
+                let trackingProfile = WorkoutCardioTrackingProfileResolver.resolved(
+                    storedProfile: result.trackingProfile,
+                    identity: result.activityName,
+                    hasDistance: result.actualDistanceMeters != nil
+                )
+                let distanceUnit = result.preferredDistanceUnit ?? preferredDistanceUnit
+                WorkoutCardioResultEditor(
+                    activityName: result.activityName,
+                    draft: WorkoutCardioResultDraft(
+                        actualDurationSeconds: result.actualDurationSeconds,
+                        actualDistanceMeters: result.actualDistanceMeters,
+                        distanceUnit: distanceUnit,
+                        inclinePercent: result.inclinePercent,
+                        resistanceLevel: result.resistanceLevel,
+                        notes: result.notes,
+                        trackingProfile: trackingProfile
+                    )
+                ) { validatedResult in
+                    try saveCardioResult(
+                        activityID: result.id,
+                        result: validatedResult
+                    )
+                }
             }
             .sheet(item: $exerciseReorderRequest) { request in
                 ExerciseReorderSheet(
@@ -1727,6 +1749,32 @@ struct ActiveWorkoutView: View {
         guard let activity = cardioBlock(activityID: activityID) else { return }
         pendingFinishedCardioID = activityID
         pendingFinishedCardioResult = .make(activity: activity)
+    }
+
+    private func saveCardioResult(
+        activityID: UUID,
+        result: ValidatedWorkoutCardioResult,
+        at date: Date = .now
+    ) throws {
+        guard var updatedSession = runtimeSession else {
+            throw WorkoutCardioTimerError.activityNotFound
+        }
+        guard let index = updatedSession.cardioBlocks.firstIndex(where: { $0.id == activityID }) else {
+            throw WorkoutCardioTimerError.activityNotFound
+        }
+
+        updatedSession.cardioBlocks[index].actualDurationSeconds = result.actualDurationSeconds
+        updatedSession.cardioBlocks[index].actualDistanceMeters = result.actualDistanceMeters
+        updatedSession.cardioBlocks[index].preferredDistanceUnit = result.preferredDistanceUnit
+        updatedSession.cardioBlocks[index].inclinePercent = result.inclinePercent
+        updatedSession.cardioBlocks[index].resistanceLevel = result.resistanceLevel
+        updatedSession.cardioBlocks[index].cardioNotes = result.notes
+        updatedSession.cardioBlocks[index].updatedAt = date
+        updatedSession.touch(date: date)
+        runtimeSession = updatedSession
+
+        // Result Save is one explicit local-first active-workout snapshot boundary.
+        persistCommittedUserEditSnapshot()
     }
 
     @MainActor

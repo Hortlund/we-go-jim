@@ -541,20 +541,33 @@ struct WorkoutCompletionSummaryView: View {
         if !snapshot.cardioRecap.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 WGJActionHeader(
-                    "Cardio Phases",
-                    subtitle: "The timed warmup and cooldown blocks tracked in this session."
+                    "Cardio Activities",
+                    subtitle: "Your saved results grouped by workout role."
                 )
 
-                ForEach(snapshot.cardioRecap) { cardio in
-                    WorkoutCardioPhaseCard(
-                        phase: cardio.phase,
-                        exerciseName: cardio.exerciseName,
-                        descriptor: cardio.descriptor,
-                        targetDurationSeconds: cardio.targetDurationSeconds,
-                        statusText: cardio.isCompleted ? "Complete" : "Not finished",
-                        statusTint: cardio.isCompleted ? WGJTheme.success : WGJTheme.warning,
-                        footnote: cardio.isCompleted ? nil : "This workout was finished before this cardio phase was completed."
-                    )
+                ForEach(WorkoutCardioRole.allCases) { role in
+                    let roleActivities = snapshot.cardioRecap.filter { $0.role == role }
+                    if !roleActivities.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(role.title)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(WGJTheme.textSecondary)
+
+                            ForEach(roleActivities) { cardio in
+                                WorkoutCardioResultSummaryCard(
+                                    role: cardio.role,
+                                    exerciseName: cardio.exerciseName,
+                                    descriptor: cardio.descriptor,
+                                    summary: cardio.summary,
+                                    statusText: cardio.isCompleted ? "Complete" : "Not finished",
+                                    isCompleted: cardio.isCompleted,
+                                    footnote: cardio.isCompleted
+                                        ? nil
+                                        : "This workout was finished before this activity was completed."
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -722,11 +735,11 @@ struct WorkoutCompletionExerciseRecap: Identifiable, Equatable, Sendable {
 }
 
 struct WorkoutCompletionCardioRecap: Identifiable, Equatable, Sendable {
-    let id: String
-    let phase: WorkoutCardioPhase
+    let id: UUID
+    let role: WorkoutCardioRole
     let exerciseName: String
     let descriptor: String?
-    let targetDurationSeconds: Int
+    let summary: WorkoutCardioResultSummary
     let isCompleted: Bool
 }
 
@@ -832,15 +845,28 @@ nonisolated enum WorkoutCompletionSnapshotBuilder {
     }
 
     private static func makeCardioRecap(_ cardioBlock: WorkoutSessionCardioBlock) -> WorkoutCompletionCardioRecap {
-        WorkoutCompletionCardioRecap(
-            id: cardioBlock.phase.rawValue,
-            phase: cardioBlock.phase,
+        let trackingProfile = WorkoutCardioTrackingProfileResolver.resolved(
+            storedProfile: cardioBlock.trackingProfile,
+            identity: "\(cardioBlock.catalogExerciseUUID) \(cardioBlock.exerciseNameSnapshot)",
+            hasDistance: cardioBlock.actualDistanceMeters != nil || cardioBlock.targetDistanceMeters != nil
+        )
+        return WorkoutCompletionCardioRecap(
+            id: cardioBlock.id,
+            role: cardioBlock.role,
             exerciseName: cardioBlock.exerciseNameSnapshot,
             descriptor: cardioDescriptor(
                 category: cardioBlock.categorySnapshot,
                 muscleSummary: cardioBlock.muscleSummarySnapshot
             ),
-            targetDurationSeconds: cardioBlock.targetDurationSeconds,
+            summary: WorkoutCardioResultSummaryFormatter.summary(
+                durationSeconds: cardioBlock.actualDurationSeconds,
+                distanceMeters: cardioBlock.actualDistanceMeters,
+                displayUnit: cardioBlock.preferredDistanceUnit ?? .kilometers,
+                profile: trackingProfile,
+                inclinePercent: cardioBlock.inclinePercent,
+                resistanceLevel: cardioBlock.resistanceLevel,
+                notes: cardioBlock.cardioNotes
+            ),
             isCompleted: cardioBlock.isCompleted
         )
     }

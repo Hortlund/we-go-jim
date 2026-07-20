@@ -28,6 +28,7 @@ struct HistoryDetailView: View {
     @State private var rowFlushCoordinator = WorkoutExerciseRowFlushCoordinator()
 
     @State private var showingExercisePicker = false
+    @State private var pendingCardioResultEdit: HistoryDetailSnapshotBuilder.CardioBlockSnapshot?
     @State private var showingArchiveConfirmation = false
     @State private var errorMessage = ""
     @State private var showingError = false
@@ -130,6 +131,17 @@ struct HistoryDetailView: View {
                 return .accepted
             }
             .wgjSheetSurface()
+        }
+        .sheet(item: $pendingCardioResultEdit) { cardioBlock in
+            WorkoutCardioResultEditor(
+                activityName: cardioBlock.exerciseNameSnapshot,
+                draft: cardioBlock.resultDraft
+            ) { result in
+                try await saveCardioResult(
+                    activityID: cardioBlock.id,
+                    result: result
+                )
+            }
         }
         .confirmationDialog("Hide workout?", isPresented: $showingArchiveConfirmation, titleVisibility: .visible) {
             Button("Hide Workout") {
@@ -304,26 +316,60 @@ struct HistoryDetailView: View {
         if !orderedCardioBlocks.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 WGJActionHeader(
-                    "Cardio Phases",
-                    subtitle: "Warmup and cooldown work from this session."
+                    "Cardio Activities",
+                    subtitle: "Saved results grouped by workout role."
                 )
 
-                ForEach(orderedCardioBlocks, id: \.id) { cardioBlock in
-                    WorkoutCardioPhaseCard(
-                        phase: cardioBlock.phase,
-                        exerciseName: cardioBlock.exerciseNameSnapshot,
-                        descriptor: cardioDescriptor(
-                            category: cardioBlock.categorySnapshot,
-                            muscleSummary: cardioBlock.muscleSummarySnapshot
-                        ),
-                        targetDurationSeconds: cardioBlock.targetDurationSeconds,
-                        statusText: cardioBlock.isCompleted ? "Complete" : "Not finished",
-                        statusTint: cardioBlock.isCompleted ? WGJTheme.success : WGJTheme.warning,
-                        footnote: cardioBlock.isCompleted ? nil : "This cardio block was not completed before the workout ended."
-                    )
+                ForEach(WorkoutCardioRole.allCases) { role in
+                    let roleActivities = orderedCardioBlocks.filter { $0.role == role }
+                    if !roleActivities.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(role.title)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(WGJTheme.textSecondary)
+
+                            ForEach(roleActivities) { cardioBlock in
+                                WorkoutCardioResultSummaryCard(
+                                    role: cardioBlock.role,
+                                    exerciseName: cardioBlock.exerciseNameSnapshot,
+                                    descriptor: cardioDescriptor(
+                                        category: cardioBlock.categorySnapshot,
+                                        muscleSummary: cardioBlock.muscleSummarySnapshot
+                                    ),
+                                    summary: cardioBlock.resultSummary,
+                                    statusText: cardioBlock.isCompleted ? "Complete" : "Not finished",
+                                    isCompleted: cardioBlock.isCompleted,
+                                    footnote: cardioBlock.isCompleted
+                                        ? nil
+                                        : "This activity was not completed before the workout ended."
+                                ) {
+                                    Button("Edit Result") {
+                                        pendingCardioResultEdit = cardioBlock
+                                    }
+                                    .buttonStyle(WGJGhostButtonStyle())
+                                    .accessibilityLabel("Edit Result \(cardioBlock.exerciseNameSnapshot)")
+                                    .accessibilityIdentifier("history-cardio-\(cardioBlock.id)-edit-result-button")
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
+    }
+
+    @MainActor
+    private func saveCardioResult(
+        activityID: UUID,
+        result: ValidatedWorkoutCardioResult
+    ) async throws {
+        let service = WorkoutHistoryMutationService(backgroundStore: historyBackgroundStore)
+        try await service.updateCardioResult(
+            sessionID: sessionID,
+            activityID: activityID,
+            result: result
+        )
+        await reloadSnapshot()
     }
 
     @MainActor

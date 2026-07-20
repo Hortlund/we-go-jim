@@ -12,6 +12,102 @@ final class WorkoutHistoryMutationServiceTests: XCTestCase {
     private let exerciseID = UUID(uuidString: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
     private let setID = UUID(uuidString: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")!
 
+    func testHistoryUpdateTargetsActivityIDNotRoleAndCommitsOnce() async throws {
+        let container = try makeCompletedCardioWorkoutContainer()
+        let beforeSaveCounter = HistoryMutationSaveCounter()
+        let service = WorkoutHistoryMutationService(
+            backgroundStore: AppBackgroundStore(container: container),
+            beforeSave: { beforeSaveCounter.increment() }
+        )
+        let context = ModelContext(container)
+        let repository = WorkoutSessionRepository(modelContext: context)
+        let activities = try repository.sessionCardioBlocks(sessionID: sessionID)
+        let firstMainActivity = try XCTUnwrap(activities.first)
+        let secondMainActivity = try XCTUnwrap(activities.last)
+        let result = try WorkoutCardioResultValidator.validated(
+            WorkoutCardioResultDraft(
+                actualDurationSeconds: 1_200,
+                distanceText: "5",
+                distanceUnit: .kilometers,
+                inclineText: "",
+                resistanceLevelText: "7",
+                notes: "Intervals",
+                trackingProfile: .machineDistance
+            )
+        )
+
+        try await service.updateCardioResult(
+            sessionID: sessionID,
+            activityID: secondMainActivity.id,
+            result: result
+        )
+
+        let verificationContext = ModelContext(container)
+        let verificationRepository = WorkoutSessionRepository(modelContext: verificationContext)
+        let persisted = try verificationRepository.sessionCardioBlocks(sessionID: sessionID)
+        XCTAssertNil(persisted[0].actualDistanceMeters)
+        XCTAssertEqual(persisted[1].actualDurationSeconds, 1_200)
+        XCTAssertEqual(persisted[1].actualDistanceMeters, 5_000)
+        XCTAssertEqual(persisted[1].resistanceLevel, 7)
+        XCTAssertEqual(persisted[1].cardioNotes, "Intervals")
+        XCTAssertEqual(persisted[1].targetDurationSeconds, 900)
+        XCTAssertEqual(beforeSaveCounter.value, 1)
+        XCTAssertGreaterThan(
+            try XCTUnwrap(verificationRepository.session(id: sessionID)).updatedAt,
+            Date(timeIntervalSince1970: 2_000)
+        )
+        XCTAssertNotEqual(firstMainActivity.id, secondMainActivity.id)
+    }
+
+    func testHistoryCardioUpdateFailureRollsBackResultAndTimestamp() async throws {
+        let container = try makeCompletedCardioWorkoutContainer()
+        let service = WorkoutHistoryMutationService(
+            backgroundStore: AppBackgroundStore(container: container),
+            beforeSave: { throw TestError.beforeSave }
+        )
+        let context = ModelContext(container)
+        let repository = WorkoutSessionRepository(modelContext: context)
+        let activityID = try XCTUnwrap(
+            try repository.sessionCardioBlocks(sessionID: sessionID).last?.id
+        )
+        let result = try WorkoutCardioResultValidator.validated(
+            WorkoutCardioResultDraft(
+                actualDurationSeconds: 600,
+                distanceText: "2",
+                distanceUnit: .kilometers,
+                inclineText: "",
+                resistanceLevelText: "",
+                notes: "Should roll back",
+                trackingProfile: .machineDistance
+            )
+        )
+
+        do {
+            try await service.updateCardioResult(
+                sessionID: sessionID,
+                activityID: activityID,
+                result: result
+            )
+            XCTFail("Expected the injected pre-save failure")
+        } catch TestError.beforeSave {
+            // Expected.
+        }
+
+        let verificationContext = ModelContext(container)
+        let verificationRepository = WorkoutSessionRepository(modelContext: verificationContext)
+        let persistedActivity = try XCTUnwrap(
+            try verificationRepository.sessionCardioBlocks(sessionID: sessionID)
+                .first(where: { $0.id == activityID })
+        )
+        XCTAssertNil(persistedActivity.actualDurationSeconds)
+        XCTAssertNil(persistedActivity.actualDistanceMeters)
+        XCTAssertEqual(persistedActivity.cardioNotes, "")
+        XCTAssertEqual(
+            try XCTUnwrap(verificationRepository.session(id: sessionID)).updatedAt,
+            Date(timeIntervalSince1970: 2_000)
+        )
+    }
+
     func testRemovingOnlyExerciseCommitsZeroSummaryAndNoFacts() async throws {
         let container = try makeCompletedWorkoutContainer()
         let service = WorkoutHistoryMutationService(
@@ -173,6 +269,62 @@ final class WorkoutHistoryMutationServiceTests: XCTestCase {
         return container
     }
 
+    private func makeCompletedCardioWorkoutContainer() throws -> ModelContainer {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let completedAt = Date(timeIntervalSince1970: 2_000)
+        let session = WorkoutSession(
+            id: sessionID,
+            name: "Cardio",
+            status: .completed,
+            startedAt: Date(timeIntervalSince1970: 1_000),
+            endedAt: completedAt,
+            durationSeconds: 1_000,
+            summaryMetricsVersion: WorkoutMetricsService.currentSummaryMetricsVersion,
+            updatedAt: completedAt
+        )
+        let activities = [
+            WorkoutSessionCardioBlock(
+                sessionID: sessionID,
+                phase: .preWorkout,
+                role: .main,
+                sortOrder: 0,
+                catalogExerciseUUID: "seed-bike",
+                exerciseNameSnapshot: "Bike",
+                categorySnapshot: "Cardio",
+                muscleSummarySnapshot: "Legs",
+                trackingProfile: .machineDistance,
+                goalKind: .time,
+                targetDurationSeconds: 600,
+                preferredDistanceUnit: .kilometers,
+                isCompleted: true,
+                session: session
+            ),
+            WorkoutSessionCardioBlock(
+                sessionID: sessionID,
+                phase: .preWorkout,
+                role: .main,
+                sortOrder: 1,
+                catalogExerciseUUID: "seed-crosstrainer",
+                exerciseNameSnapshot: "Crosstrainer",
+                categorySnapshot: "Cardio",
+                muscleSummarySnapshot: "Full Body",
+                trackingProfile: .machineDistance,
+                goalKind: .time,
+                targetDurationSeconds: 900,
+                preferredDistanceUnit: .kilometers,
+                isCompleted: true,
+                session: session
+            ),
+        ]
+        session.cardioBlocks = activities
+        context.insert(session)
+        activities.forEach(context.insert)
+        try context.save()
+        return container
+    }
+
     private func makeInMemoryContainer() throws -> ModelContainer {
         let schema = Schema([
             ExerciseCatalogItem.self,
@@ -216,5 +368,18 @@ final class WorkoutHistoryMutationServiceTests: XCTestCase {
             cloudKitDatabase: .none
         )
         return try ModelContainer(for: schema, configurations: [configuration])
+    }
+}
+
+private final class HistoryMutationSaveCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    var value: Int {
+        lock.withLock { count }
+    }
+
+    func increment() {
+        lock.withLock { count += 1 }
     }
 }
