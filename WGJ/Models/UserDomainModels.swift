@@ -582,90 +582,246 @@ nonisolated struct WorkoutSessionDropStageDraft: Identifiable, Equatable, Codabl
 nonisolated struct TemplateCardioBlockDraft: Identifiable, Equatable, Sendable {
     let id: UUID
     var phase: WorkoutCardioPhase
+    var roleRaw: String?
+    var sortOrder: Int
     var catalogExerciseUUID: String
     var exerciseNameSnapshot: String
     var categorySnapshot: String
     var muscleSummarySnapshot: String
+    var trackingProfileRaw: String?
+    var goalKindRaw: String?
     var targetDurationSeconds: Int
+    var targetDistanceMeters: Double?
+    var preferredDistanceUnitRaw: String?
+
+    var role: WorkoutCardioRole {
+        get {
+            roleRaw.flatMap(WorkoutCardioRole.init(rawValue:))
+                ?? (phase == .preWorkout ? .warmUp : .finisher)
+        }
+        set { roleRaw = newValue.rawValue }
+    }
+
+    var trackingProfile: WorkoutCardioTrackingProfile? {
+        get { trackingProfileRaw.flatMap(WorkoutCardioTrackingProfile.init(rawValue:)) }
+        set { trackingProfileRaw = newValue?.rawValue }
+    }
+
+    var goalKind: WorkoutCardioGoalKind {
+        get {
+            goalKindRaw.flatMap(WorkoutCardioGoalKind.init(rawValue:))
+                ?? (targetDurationSeconds > 0 ? .time : .open)
+        }
+        set { goalKindRaw = newValue.rawValue }
+    }
+
+    var preferredDistanceUnit: WorkoutDistanceUnit? {
+        get { preferredDistanceUnitRaw.flatMap(WorkoutDistanceUnit.init(rawValue:)) }
+        set { preferredDistanceUnitRaw = newValue?.rawValue }
+    }
 
     init(
         id: UUID = UUID(),
         phase: WorkoutCardioPhase,
+        role: WorkoutCardioRole? = nil,
+        sortOrder: Int = 0,
         catalogExerciseUUID: String,
         exerciseNameSnapshot: String,
         categorySnapshot: String,
         muscleSummarySnapshot: String,
-        targetDurationSeconds: Int
+        trackingProfile: WorkoutCardioTrackingProfile? = nil,
+        goalKind: WorkoutCardioGoalKind? = nil,
+        targetDurationSeconds: Int,
+        targetDistanceMeters: Double? = nil,
+        preferredDistanceUnit: WorkoutDistanceUnit? = nil
     ) {
         self.id = id
         self.phase = phase
+        self.roleRaw = role?.rawValue
+        self.sortOrder = sortOrder
         self.catalogExerciseUUID = catalogExerciseUUID
         self.exerciseNameSnapshot = exerciseNameSnapshot
         self.categorySnapshot = categorySnapshot
         self.muscleSummarySnapshot = muscleSummarySnapshot
-        self.targetDurationSeconds = targetDurationSeconds
+        self.trackingProfileRaw = trackingProfile?.rawValue
+        self.goalKindRaw = goalKind?.rawValue
+        self.targetDurationSeconds = min(24 * 60 * 60, max(0, targetDurationSeconds))
+        self.targetDistanceMeters = targetDistanceMeters
+        self.preferredDistanceUnitRaw = preferredDistanceUnit?.rawValue
     }
 
     nonisolated init(model: TemplateCardioBlock) {
         self.id = model.id
         self.phase = model.phase
+        self.roleRaw = model.roleRaw
+        self.sortOrder = model.sortOrder
         self.catalogExerciseUUID = model.catalogExerciseUUID
         self.exerciseNameSnapshot = model.exerciseNameSnapshot
         self.categorySnapshot = model.categorySnapshot
         self.muscleSummarySnapshot = model.muscleSummarySnapshot
+        self.trackingProfileRaw = model.trackingProfileRaw
+        self.goalKindRaw = model.goalKindRaw
         self.targetDurationSeconds = model.targetDurationSeconds
+        self.targetDistanceMeters = model.targetDistanceMeters
+        self.preferredDistanceUnitRaw = model.preferredDistanceUnitRaw
     }
 }
 
 nonisolated struct WorkoutCardioBlockDraft: Identifiable, Equatable, Sendable {
     let id: UUID
+    var sourceTemplateCardioID: UUID?
     var phase: WorkoutCardioPhase
+    var roleRaw: String?
+    var sortOrder: Int
     var catalogExerciseUUID: String
     var exerciseNameSnapshot: String
     var categorySnapshot: String
     var muscleSummarySnapshot: String
+    var trackingProfileRaw: String?
+    var goalKindRaw: String?
     var targetDurationSeconds: Int
+    var targetDistanceMeters: Double?
+    var actualDurationSeconds: Int?
+    var actualDistanceMeters: Double?
+    var preferredDistanceUnitRaw: String?
+    var inclinePercent: Double?
+    var resistanceLevel: Double?
+    var cardioNotes: String
+    var timerStateRaw: String?
+    var timerSegmentStartedAt: Date?
+    var timerAccumulatedSeconds: Int
     var isCompleted: Bool
+
+    var role: WorkoutCardioRole {
+        get {
+            roleRaw.flatMap(WorkoutCardioRole.init(rawValue:))
+                ?? (phase == .preWorkout ? .warmUp : .finisher)
+        }
+        set { roleRaw = newValue.rawValue }
+    }
+
+    var trackingProfile: WorkoutCardioTrackingProfile? {
+        get { trackingProfileRaw.flatMap(WorkoutCardioTrackingProfile.init(rawValue:)) }
+        set { trackingProfileRaw = newValue?.rawValue }
+    }
+
+    var goalKind: WorkoutCardioGoalKind {
+        get {
+            goalKindRaw.flatMap(WorkoutCardioGoalKind.init(rawValue:))
+                ?? (targetDurationSeconds > 0 ? .time : .open)
+        }
+        set { goalKindRaw = newValue.rawValue }
+    }
+
+    var preferredDistanceUnit: WorkoutDistanceUnit? {
+        get { preferredDistanceUnitRaw.flatMap(WorkoutDistanceUnit.init(rawValue:)) }
+        set { preferredDistanceUnitRaw = newValue?.rawValue }
+    }
+
+    var timerState: WorkoutCardioTimerState {
+        get { timerStateRaw.flatMap(WorkoutCardioTimerState.init(rawValue:)) ?? .idle }
+        set { timerStateRaw = newValue.rawValue }
+    }
 
     init(
         id: UUID = UUID(),
+        sourceTemplateCardioID: UUID? = nil,
         phase: WorkoutCardioPhase,
+        role: WorkoutCardioRole? = nil,
+        sortOrder: Int = 0,
         catalogExerciseUUID: String,
         exerciseNameSnapshot: String,
         categorySnapshot: String,
         muscleSummarySnapshot: String,
+        trackingProfile: WorkoutCardioTrackingProfile? = nil,
+        goalKind: WorkoutCardioGoalKind? = nil,
         targetDurationSeconds: Int,
+        targetDistanceMeters: Double? = nil,
+        actualDurationSeconds: Int? = nil,
+        actualDistanceMeters: Double? = nil,
+        preferredDistanceUnit: WorkoutDistanceUnit? = nil,
+        inclinePercent: Double? = nil,
+        resistanceLevel: Double? = nil,
+        cardioNotes: String = "",
+        timerState: WorkoutCardioTimerState = .idle,
+        timerSegmentStartedAt: Date? = nil,
+        timerAccumulatedSeconds: Int = 0,
         isCompleted: Bool = false
     ) {
         self.id = id
+        self.sourceTemplateCardioID = sourceTemplateCardioID
         self.phase = phase
+        self.roleRaw = role?.rawValue
+        self.sortOrder = sortOrder
         self.catalogExerciseUUID = catalogExerciseUUID
         self.exerciseNameSnapshot = exerciseNameSnapshot
         self.categorySnapshot = categorySnapshot
         self.muscleSummarySnapshot = muscleSummarySnapshot
-        self.targetDurationSeconds = targetDurationSeconds
+        self.trackingProfileRaw = trackingProfile?.rawValue
+        self.goalKindRaw = goalKind?.rawValue
+        self.targetDurationSeconds = min(24 * 60 * 60, max(0, targetDurationSeconds))
+        self.targetDistanceMeters = targetDistanceMeters
+        self.actualDurationSeconds = actualDurationSeconds
+        self.actualDistanceMeters = actualDistanceMeters
+        self.preferredDistanceUnitRaw = preferredDistanceUnit?.rawValue
+        self.inclinePercent = inclinePercent
+        self.resistanceLevel = resistanceLevel
+        self.cardioNotes = cardioNotes
+        self.timerStateRaw = timerState.rawValue
+        self.timerSegmentStartedAt = timerSegmentStartedAt
+        self.timerAccumulatedSeconds = max(0, timerAccumulatedSeconds)
         self.isCompleted = isCompleted
     }
 
     nonisolated init(model: ActiveWorkoutDraftCardioBlock) {
         self.id = model.id
+        self.sourceTemplateCardioID = model.sourceTemplateCardioID
         self.phase = model.phase
+        self.roleRaw = model.roleRaw
+        self.sortOrder = model.sortOrder
         self.catalogExerciseUUID = model.catalogExerciseUUID
         self.exerciseNameSnapshot = model.exerciseNameSnapshot
         self.categorySnapshot = model.categorySnapshot
         self.muscleSummarySnapshot = model.muscleSummarySnapshot
+        self.trackingProfileRaw = model.trackingProfileRaw
+        self.goalKindRaw = model.goalKindRaw
         self.targetDurationSeconds = model.targetDurationSeconds
+        self.targetDistanceMeters = model.targetDistanceMeters
+        self.actualDurationSeconds = model.actualDurationSeconds
+        self.actualDistanceMeters = model.actualDistanceMeters
+        self.preferredDistanceUnitRaw = model.preferredDistanceUnitRaw
+        self.inclinePercent = model.inclinePercent
+        self.resistanceLevel = model.resistanceLevel
+        self.cardioNotes = model.cardioNotes
+        self.timerStateRaw = model.timerStateRaw
+        self.timerSegmentStartedAt = model.timerSegmentStartedAt
+        self.timerAccumulatedSeconds = model.timerAccumulatedSeconds
         self.isCompleted = model.isCompleted
     }
 
     nonisolated init(model: WorkoutSessionCardioBlock) {
         self.id = model.id
+        self.sourceTemplateCardioID = model.sourceTemplateCardioID
         self.phase = model.phase
+        self.roleRaw = model.roleRaw
+        self.sortOrder = model.sortOrder
         self.catalogExerciseUUID = model.catalogExerciseUUID
         self.exerciseNameSnapshot = model.exerciseNameSnapshot
         self.categorySnapshot = model.categorySnapshot
         self.muscleSummarySnapshot = model.muscleSummarySnapshot
+        self.trackingProfileRaw = model.trackingProfileRaw
+        self.goalKindRaw = model.goalKindRaw
         self.targetDurationSeconds = model.targetDurationSeconds
+        self.targetDistanceMeters = model.targetDistanceMeters
+        self.actualDurationSeconds = model.actualDurationSeconds
+        self.actualDistanceMeters = model.actualDistanceMeters
+        self.preferredDistanceUnitRaw = model.preferredDistanceUnitRaw
+        self.inclinePercent = model.inclinePercent
+        self.resistanceLevel = model.resistanceLevel
+        self.cardioNotes = model.cardioNotes
+        self.timerStateRaw = nil
+        self.timerSegmentStartedAt = nil
+        self.timerAccumulatedSeconds = 0
         self.isCompleted = model.isCompleted
     }
 }
@@ -1055,11 +1211,17 @@ final class TemplateCardioBlock {
     var id: UUID = UUID()
     var templateID: UUID = UUID()
     var phaseRaw: String = WorkoutCardioPhase.preWorkout.rawValue
+    var roleRaw: String?
+    var sortOrder: Int = 0
     var catalogExerciseUUID: String = ""
     var exerciseNameSnapshot: String = ""
     var categorySnapshot: String = ""
     var muscleSummarySnapshot: String = ""
+    var trackingProfileRaw: String?
+    var goalKindRaw: String?
     var targetDurationSeconds: Int = WorkoutCardioPhase.preWorkout.defaultDurationSeconds
+    var targetDistanceMeters: Double?
+    var preferredDistanceUnitRaw: String?
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
 
@@ -1070,15 +1232,47 @@ final class TemplateCardioBlock {
         set { phaseRaw = newValue.rawValue }
     }
 
+    var role: WorkoutCardioRole {
+        get {
+            roleRaw.flatMap(WorkoutCardioRole.init(rawValue:))
+                ?? (phase == .preWorkout ? .warmUp : .finisher)
+        }
+        set { roleRaw = newValue.rawValue }
+    }
+
+    var trackingProfile: WorkoutCardioTrackingProfile? {
+        get { trackingProfileRaw.flatMap(WorkoutCardioTrackingProfile.init(rawValue:)) }
+        set { trackingProfileRaw = newValue?.rawValue }
+    }
+
+    var goalKind: WorkoutCardioGoalKind {
+        get {
+            goalKindRaw.flatMap(WorkoutCardioGoalKind.init(rawValue:))
+                ?? (targetDurationSeconds > 0 ? .time : .open)
+        }
+        set { goalKindRaw = newValue.rawValue }
+    }
+
+    var preferredDistanceUnit: WorkoutDistanceUnit? {
+        get { preferredDistanceUnitRaw.flatMap(WorkoutDistanceUnit.init(rawValue:)) }
+        set { preferredDistanceUnitRaw = newValue?.rawValue }
+    }
+
     init(
         id: UUID = UUID(),
         templateID: UUID,
         phase: WorkoutCardioPhase,
+        role: WorkoutCardioRole? = nil,
+        sortOrder: Int = 0,
         catalogExerciseUUID: String,
         exerciseNameSnapshot: String,
         categorySnapshot: String,
         muscleSummarySnapshot: String,
+        trackingProfile: WorkoutCardioTrackingProfile? = nil,
+        goalKind: WorkoutCardioGoalKind? = nil,
         targetDurationSeconds: Int,
+        targetDistanceMeters: Double? = nil,
+        preferredDistanceUnit: WorkoutDistanceUnit? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now,
         template: WorkoutTemplate? = nil
@@ -1086,11 +1280,17 @@ final class TemplateCardioBlock {
         self.id = id
         self.templateID = templateID
         self.phaseRaw = phase.rawValue
+        self.roleRaw = role?.rawValue
+        self.sortOrder = sortOrder
         self.catalogExerciseUUID = catalogExerciseUUID
         self.exerciseNameSnapshot = exerciseNameSnapshot
         self.categorySnapshot = categorySnapshot
         self.muscleSummarySnapshot = muscleSummarySnapshot
+        self.trackingProfileRaw = trackingProfile?.rawValue
+        self.goalKindRaw = goalKind?.rawValue
         self.targetDurationSeconds = min(24 * 60 * 60, max(0, targetDurationSeconds))
+        self.targetDistanceMeters = targetDistanceMeters
+        self.preferredDistanceUnitRaw = preferredDistanceUnit?.rawValue
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.template = template
@@ -1372,12 +1572,27 @@ final class ActiveWorkoutDraftSession {
 final class ActiveWorkoutDraftCardioBlock {
     var id: UUID = UUID()
     var sessionID: UUID = UUID()
+    var sourceTemplateCardioID: UUID?
     var phaseRaw: String = WorkoutCardioPhase.preWorkout.rawValue
+    var roleRaw: String?
+    var sortOrder: Int = 0
     var catalogExerciseUUID: String = ""
     var exerciseNameSnapshot: String = ""
     var categorySnapshot: String = ""
     var muscleSummarySnapshot: String = ""
+    var trackingProfileRaw: String?
+    var goalKindRaw: String?
     var targetDurationSeconds: Int = WorkoutCardioPhase.preWorkout.defaultDurationSeconds
+    var targetDistanceMeters: Double?
+    var actualDurationSeconds: Int?
+    var actualDistanceMeters: Double?
+    var preferredDistanceUnitRaw: String?
+    var inclinePercent: Double?
+    var resistanceLevel: Double?
+    var cardioNotes: String = ""
+    var timerStateRaw: String?
+    var timerSegmentStartedAt: Date?
+    var timerAccumulatedSeconds: Int = 0
     var isCompleted: Bool = false
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
@@ -1389,15 +1604,61 @@ final class ActiveWorkoutDraftCardioBlock {
         set { phaseRaw = newValue.rawValue }
     }
 
+    var role: WorkoutCardioRole {
+        get {
+            roleRaw.flatMap(WorkoutCardioRole.init(rawValue:))
+                ?? (phase == .preWorkout ? .warmUp : .finisher)
+        }
+        set { roleRaw = newValue.rawValue }
+    }
+
+    var trackingProfile: WorkoutCardioTrackingProfile? {
+        get { trackingProfileRaw.flatMap(WorkoutCardioTrackingProfile.init(rawValue:)) }
+        set { trackingProfileRaw = newValue?.rawValue }
+    }
+
+    var goalKind: WorkoutCardioGoalKind {
+        get {
+            goalKindRaw.flatMap(WorkoutCardioGoalKind.init(rawValue:))
+                ?? (targetDurationSeconds > 0 ? .time : .open)
+        }
+        set { goalKindRaw = newValue.rawValue }
+    }
+
+    var preferredDistanceUnit: WorkoutDistanceUnit? {
+        get { preferredDistanceUnitRaw.flatMap(WorkoutDistanceUnit.init(rawValue:)) }
+        set { preferredDistanceUnitRaw = newValue?.rawValue }
+    }
+
+    var timerState: WorkoutCardioTimerState {
+        get { timerStateRaw.flatMap(WorkoutCardioTimerState.init(rawValue:)) ?? .idle }
+        set { timerStateRaw = newValue.rawValue }
+    }
+
     init(
         id: UUID = UUID(),
         sessionID: UUID,
+        sourceTemplateCardioID: UUID? = nil,
         phase: WorkoutCardioPhase,
+        role: WorkoutCardioRole? = nil,
+        sortOrder: Int = 0,
         catalogExerciseUUID: String,
         exerciseNameSnapshot: String,
         categorySnapshot: String,
         muscleSummarySnapshot: String,
+        trackingProfile: WorkoutCardioTrackingProfile? = nil,
+        goalKind: WorkoutCardioGoalKind? = nil,
         targetDurationSeconds: Int,
+        targetDistanceMeters: Double? = nil,
+        actualDurationSeconds: Int? = nil,
+        actualDistanceMeters: Double? = nil,
+        preferredDistanceUnit: WorkoutDistanceUnit? = nil,
+        inclinePercent: Double? = nil,
+        resistanceLevel: Double? = nil,
+        cardioNotes: String = "",
+        timerState: WorkoutCardioTimerState = .idle,
+        timerSegmentStartedAt: Date? = nil,
+        timerAccumulatedSeconds: Int = 0,
         isCompleted: Bool = false,
         createdAt: Date = .now,
         updatedAt: Date = .now,
@@ -1405,12 +1666,27 @@ final class ActiveWorkoutDraftCardioBlock {
     ) {
         self.id = id
         self.sessionID = sessionID
+        self.sourceTemplateCardioID = sourceTemplateCardioID
         self.phaseRaw = phase.rawValue
+        self.roleRaw = role?.rawValue
+        self.sortOrder = sortOrder
         self.catalogExerciseUUID = catalogExerciseUUID
         self.exerciseNameSnapshot = exerciseNameSnapshot
         self.categorySnapshot = categorySnapshot
         self.muscleSummarySnapshot = muscleSummarySnapshot
+        self.trackingProfileRaw = trackingProfile?.rawValue
+        self.goalKindRaw = goalKind?.rawValue
         self.targetDurationSeconds = min(24 * 60 * 60, max(0, targetDurationSeconds))
+        self.targetDistanceMeters = targetDistanceMeters
+        self.actualDurationSeconds = actualDurationSeconds
+        self.actualDistanceMeters = actualDistanceMeters
+        self.preferredDistanceUnitRaw = preferredDistanceUnit?.rawValue
+        self.inclinePercent = inclinePercent
+        self.resistanceLevel = resistanceLevel
+        self.cardioNotes = cardioNotes
+        self.timerStateRaw = timerState.rawValue
+        self.timerSegmentStartedAt = timerSegmentStartedAt
+        self.timerAccumulatedSeconds = max(0, timerAccumulatedSeconds)
         self.isCompleted = isCompleted
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -1770,12 +2046,24 @@ final class WorkoutSession {
 final class WorkoutSessionCardioBlock {
     var id: UUID = UUID()
     var sessionID: UUID = UUID()
+    var sourceTemplateCardioID: UUID?
     var phaseRaw: String = WorkoutCardioPhase.preWorkout.rawValue
+    var roleRaw: String?
+    var sortOrder: Int = 0
     var catalogExerciseUUID: String = ""
     var exerciseNameSnapshot: String = ""
     var categorySnapshot: String = ""
     var muscleSummarySnapshot: String = ""
+    var trackingProfileRaw: String?
+    var goalKindRaw: String?
     var targetDurationSeconds: Int = WorkoutCardioPhase.preWorkout.defaultDurationSeconds
+    var targetDistanceMeters: Double?
+    var actualDurationSeconds: Int?
+    var actualDistanceMeters: Double?
+    var preferredDistanceUnitRaw: String?
+    var inclinePercent: Double?
+    var resistanceLevel: Double?
+    var cardioNotes: String = ""
     var isCompleted: Bool = false
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
@@ -1787,15 +2075,53 @@ final class WorkoutSessionCardioBlock {
         set { phaseRaw = newValue.rawValue }
     }
 
+    var role: WorkoutCardioRole {
+        get {
+            roleRaw.flatMap(WorkoutCardioRole.init(rawValue:))
+                ?? (phase == .preWorkout ? .warmUp : .finisher)
+        }
+        set { roleRaw = newValue.rawValue }
+    }
+
+    var trackingProfile: WorkoutCardioTrackingProfile? {
+        get { trackingProfileRaw.flatMap(WorkoutCardioTrackingProfile.init(rawValue:)) }
+        set { trackingProfileRaw = newValue?.rawValue }
+    }
+
+    var goalKind: WorkoutCardioGoalKind {
+        get {
+            goalKindRaw.flatMap(WorkoutCardioGoalKind.init(rawValue:))
+                ?? (targetDurationSeconds > 0 ? .time : .open)
+        }
+        set { goalKindRaw = newValue.rawValue }
+    }
+
+    var preferredDistanceUnit: WorkoutDistanceUnit? {
+        get { preferredDistanceUnitRaw.flatMap(WorkoutDistanceUnit.init(rawValue:)) }
+        set { preferredDistanceUnitRaw = newValue?.rawValue }
+    }
+
     init(
         id: UUID = UUID(),
         sessionID: UUID,
+        sourceTemplateCardioID: UUID? = nil,
         phase: WorkoutCardioPhase,
+        role: WorkoutCardioRole? = nil,
+        sortOrder: Int = 0,
         catalogExerciseUUID: String,
         exerciseNameSnapshot: String,
         categorySnapshot: String,
         muscleSummarySnapshot: String,
+        trackingProfile: WorkoutCardioTrackingProfile? = nil,
+        goalKind: WorkoutCardioGoalKind? = nil,
         targetDurationSeconds: Int,
+        targetDistanceMeters: Double? = nil,
+        actualDurationSeconds: Int? = nil,
+        actualDistanceMeters: Double? = nil,
+        preferredDistanceUnit: WorkoutDistanceUnit? = nil,
+        inclinePercent: Double? = nil,
+        resistanceLevel: Double? = nil,
+        cardioNotes: String = "",
         isCompleted: Bool = false,
         createdAt: Date = .now,
         updatedAt: Date = .now,
@@ -1803,12 +2129,24 @@ final class WorkoutSessionCardioBlock {
     ) {
         self.id = id
         self.sessionID = sessionID
+        self.sourceTemplateCardioID = sourceTemplateCardioID
         self.phaseRaw = phase.rawValue
+        self.roleRaw = role?.rawValue
+        self.sortOrder = sortOrder
         self.catalogExerciseUUID = catalogExerciseUUID
         self.exerciseNameSnapshot = exerciseNameSnapshot
         self.categorySnapshot = categorySnapshot
         self.muscleSummarySnapshot = muscleSummarySnapshot
+        self.trackingProfileRaw = trackingProfile?.rawValue
+        self.goalKindRaw = goalKind?.rawValue
         self.targetDurationSeconds = min(24 * 60 * 60, max(0, targetDurationSeconds))
+        self.targetDistanceMeters = targetDistanceMeters
+        self.actualDurationSeconds = actualDurationSeconds
+        self.actualDistanceMeters = actualDistanceMeters
+        self.preferredDistanceUnitRaw = preferredDistanceUnit?.rawValue
+        self.inclinePercent = inclinePercent
+        self.resistanceLevel = resistanceLevel
+        self.cardioNotes = cardioNotes
         self.isCompleted = isCompleted
         self.createdAt = createdAt
         self.updatedAt = updatedAt

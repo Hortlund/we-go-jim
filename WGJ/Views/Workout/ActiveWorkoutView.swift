@@ -26,7 +26,7 @@ struct ActiveWorkoutView: View {
     @State private var hasBootstrapped = false
     @State private var isBootstrapping = false
     @State private var draftStateStore = WorkoutExerciseDraftStateStore()
-    @State private var pendingCardioCompletionsByPhase: [WorkoutCardioPhase: Bool] = [:]
+    @State private var pendingCardioCompletionsByID: [UUID: Bool] = [:]
     @State private var rowFlushCoordinator = WorkoutExerciseRowFlushCoordinator()
 
     @State private var previousResolutionByExerciseID: [UUID: WorkoutPreviousPerformanceResolution] = [:]
@@ -797,7 +797,7 @@ struct ActiveWorkoutView: View {
         renderProjection = ActiveWorkoutRenderProjectionBuilder.build(
             session: runtimeSession,
             setDraftsByExerciseID: draftState.draftsByExerciseID,
-            pendingCardioCompletionsByPhase: pendingCardioCompletionsByPhase
+            pendingCardioCompletionsByID: pendingCardioCompletionsByID
         )
     }
 
@@ -809,7 +809,7 @@ struct ActiveWorkoutView: View {
         renderProjection = ActiveWorkoutRenderProjectionBuilder.build(
             session: runtimeSession,
             setDraftsByExerciseID: draftState.draftsByExerciseID,
-            pendingCardioCompletionsByPhase: pendingCardioCompletionsByPhase
+            pendingCardioCompletionsByID: pendingCardioCompletionsByID
         )
     }
 
@@ -820,7 +820,8 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func cardioBlock(for phase: WorkoutCardioPhase) -> ActiveWorkoutRuntimeCardioBlock? {
-        renderProjection.cardioByPhase[phase]
+        let role: WorkoutCardioRole = phase == .preWorkout ? .warmUp : .finisher
+        return renderProjection.cardioByRole[role]?.first
     }
 
     @MainActor
@@ -855,7 +856,7 @@ struct ActiveWorkoutView: View {
                 )
             )
         )
-        pendingCardioCompletionsByPhase = [:]
+        pendingCardioCompletionsByID = [:]
         refreshRenderProjection()
         syncExerciseCardState()
     }
@@ -890,7 +891,7 @@ struct ActiveWorkoutView: View {
         return runtimeSession?.snapshotForActiveWorkoutPersistence(
             sessionNameDraft: sessionNameDraft,
             notesDraft: notesDraft,
-            pendingCardioCompletionsByPhase: pendingCardioCompletionsByPhase,
+            pendingCardioCompletionsByID: pendingCardioCompletionsByID,
             setDraftsByExerciseID: draftState.draftsByExerciseID,
             restByExerciseID: draftState.restsByExerciseID,
             notesByExerciseID: draftState.notesByExerciseID
@@ -1462,10 +1463,15 @@ struct ActiveWorkoutView: View {
     }
 
     private func removeCardioBlock(phase: WorkoutCardioPhase) {
+        let removedCardioIDs = runtimeSession?.cardioBlocks
+            .filter { $0.phase == phase }
+            .map(\.id) ?? []
         updateRuntimeSession { session in
             session.cardioBlocks.removeAll { $0.phase == phase }
         }
-        pendingCardioCompletionsByPhase[phase] = nil
+        for removedCardioID in removedCardioIDs {
+            pendingCardioCompletionsByID[removedCardioID] = nil
+        }
         refreshRenderProjection()
         persistCommittedUserEditSnapshot()
     }
@@ -1484,7 +1490,7 @@ struct ActiveWorkoutView: View {
     private func toggleCardioCompletion(for cardioBlock: ActiveWorkoutRuntimeCardioBlock) {
         let currentCompletion = resolvedCardioCompletion(for: cardioBlock)
         let updatedCompletion = !currentCompletion
-        pendingCardioCompletionsByPhase[cardioBlock.phase] = updatedCompletion
+        pendingCardioCompletionsByID[cardioBlock.id] = updatedCompletion
         refreshRenderProjection()
 
         if updatedCompletion {
@@ -1901,7 +1907,7 @@ struct ActiveWorkoutView: View {
         rowFlushCoordinator.flushAll()
         guard let snapshot = currentRuntimeSnapshot() else { return }
         runtimeSession = snapshot
-        pendingCardioCompletionsByPhase = [:]
+        pendingCardioCompletionsByID = [:]
         refreshRenderProjection()
         activeWorkoutPresentationState.stagePreparedFirstRenderSnapshot(
             currentPreparedFirstRenderSnapshot(),
@@ -2322,12 +2328,12 @@ struct ActiveWorkoutView: View {
 
         if checkpoint == .sceneTransition {
             guard let snapshot = currentRuntimeSnapshot() else {
-                pendingCardioCompletionsByPhase = [:]
+                pendingCardioCompletionsByID = [:]
                 return true
             }
 
             runtimeSession = snapshot
-            pendingCardioCompletionsByPhase = [:]
+            pendingCardioCompletionsByID = [:]
             refreshRenderProjection()
             let scrollTarget = minimizedScrollRestoreTarget()
             let expandedExerciseIDs = cardStateController.expandedExerciseIDs()
@@ -2350,12 +2356,12 @@ struct ActiveWorkoutView: View {
         }
 
         guard let snapshot = currentRuntimeSnapshot() else {
-            pendingCardioCompletionsByPhase = [:]
+            pendingCardioCompletionsByID = [:]
             return true
         }
 
         runtimeSession = snapshot
-        pendingCardioCompletionsByPhase = [:]
+        pendingCardioCompletionsByID = [:]
         refreshRenderProjection()
         let scrollTarget = minimizedScrollRestoreTarget()
         let expandedExerciseIDs = cardStateController.expandedExerciseIDs()
@@ -2464,12 +2470,12 @@ struct ActiveWorkoutView: View {
     private func persistCommittedUserEditSnapshot(writeDurableSnapshot: Bool = true) {
         guard !isEndingSession else { return }
         guard let snapshot = currentRuntimeSnapshot() else {
-            pendingCardioCompletionsByPhase = [:]
+            pendingCardioCompletionsByID = [:]
             return
         }
 
         runtimeSession = snapshot
-        pendingCardioCompletionsByPhase = [:]
+        pendingCardioCompletionsByID = [:]
         refreshRenderProjection()
         let scrollTarget = minimizedScrollRestoreTarget()
         let expandedExerciseIDs = cardStateController.expandedExerciseIDs()
@@ -2598,7 +2604,7 @@ struct ActiveWorkoutView: View {
 
     @MainActor
     private func resolvedCardioCompletion(for cardioBlock: ActiveWorkoutRuntimeCardioBlock) -> Bool {
-        pendingCardioCompletionsByPhase[cardioBlock.phase] ?? cardioBlock.isCompleted
+        pendingCardioCompletionsByID[cardioBlock.id] ?? cardioBlock.isCompleted
     }
 
     @MainActor

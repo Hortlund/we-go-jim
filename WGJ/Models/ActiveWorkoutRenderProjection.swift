@@ -13,7 +13,7 @@ nonisolated struct ActiveWorkoutRenderProjection: Sendable {
     var exerciseDisplayGroups: [WorkoutExerciseDisplayGroup<ActiveWorkoutRuntimeExercise>]
     var preWorkoutCardio: ActiveWorkoutRuntimeCardioBlock?
     var postWorkoutCardio: ActiveWorkoutRuntimeCardioBlock?
-    var cardioByPhase: [WorkoutCardioPhase: ActiveWorkoutRuntimeCardioBlock]
+    var cardioByRole: [WorkoutCardioRole: [ActiveWorkoutRuntimeCardioBlock]]
     var missingCardioPhases: [WorkoutCardioPhase]
     var areAllMainExercisesCompleted: Bool
     var hasWorkoutContent: Bool
@@ -27,7 +27,7 @@ nonisolated struct ActiveWorkoutRenderProjection: Sendable {
         exerciseDisplayGroups: [],
         preWorkoutCardio: nil,
         postWorkoutCardio: nil,
-        cardioByPhase: [:],
+        cardioByRole: [:],
         missingCardioPhases: WorkoutCardioPhase.allCases,
         areAllMainExercisesCompleted: true,
         hasWorkoutContent: false,
@@ -40,7 +40,7 @@ nonisolated enum ActiveWorkoutRenderProjectionBuilder {
     static func build(
         session: ActiveWorkoutRuntimeSession?,
         setDraftsByExerciseID: [UUID: [WorkoutSessionSetDraft]],
-        pendingCardioCompletionsByPhase: [WorkoutCardioPhase: Bool]
+        pendingCardioCompletionsByID: [UUID: Bool]
     ) -> ActiveWorkoutRenderProjection {
         guard let session else {
             return .empty
@@ -50,18 +50,15 @@ nonisolated enum ActiveWorkoutRenderProjectionBuilder {
         let cardioBlocks = session.cardioBlocks
             .map { cardioBlock in
                 var updated = cardioBlock
-                if let completion = pendingCardioCompletionsByPhase[cardioBlock.phase] {
+                if let completion = pendingCardioCompletionsByID[cardioBlock.id] {
                     updated.isCompleted = completion
                 }
                 return updated
             }
-            .sorted { $0.phase.sortOrder < $1.phase.sortOrder }
-        let cardioByPhase = Dictionary(
-            cardioBlocks.map { ($0.phase, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
-        let preWorkoutCardio = cardioByPhase[.preWorkout]
-        let postWorkoutCardio = cardioByPhase[.postWorkout]
+            .sorted(by: ActiveWorkoutRuntimeCardioBlock.areInIncreasingOrder)
+        let cardioByRole = Dictionary(grouping: cardioBlocks, by: \.role)
+        let preWorkoutCardio = cardioByRole[.warmUp]?.first
+        let postWorkoutCardio = cardioByRole[.finisher]?.first
         let areAllMainExercisesCompleted = exercises.allSatisfy { exercise in
             let drafts = setDraftsByExerciseID[exercise.id] ?? exercise.setDrafts
             return isExerciseCompleted(drafts)
@@ -80,8 +77,11 @@ nonisolated enum ActiveWorkoutRenderProjectionBuilder {
             exerciseDisplayGroups: displayGroups,
             preWorkoutCardio: preWorkoutCardio,
             postWorkoutCardio: postWorkoutCardio,
-            cardioByPhase: cardioByPhase,
-            missingCardioPhases: WorkoutCardioPhase.allCases.filter { cardioByPhase[$0] == nil },
+            cardioByRole: cardioByRole,
+            missingCardioPhases: WorkoutCardioPhase.allCases.filter { phase in
+                let role: WorkoutCardioRole = phase == .preWorkout ? .warmUp : .finisher
+                return cardioByRole[role, default: []].isEmpty
+            },
             areAllMainExercisesCompleted: areAllMainExercisesCompleted,
             hasWorkoutContent: !exercises.isEmpty || !cardioBlocks.isEmpty,
             supersetContextByExerciseID: supersetContextByExerciseID(from: displayGroups),
