@@ -773,33 +773,46 @@ struct WorkoutSessionExerciseGridEditor: View {
                 HStack(alignment: .top, spacing: 10) {
                     VStack(alignment: .leading, spacing: 8) {
                         inlineHintAim(presentation.aimText)
-
-                        if let statusText = presentation.statusText {
-                            progressStatusChip(text: statusText, tone: presentation.statusTone)
-                        }
+                        inlineHintStatus(presentation)
                     }
 
                     Spacer(minLength: 8)
 
-                    if canApplyPrevious {
-                        applyPreviousButton(at: index)
-                            .fixedSize(horizontal: true, vertical: false)
-                    }
+                    applyPreviousButton(
+                        at: index,
+                        label: presentation.actionLayoutText
+                    )
+                    .fixedSize(horizontal: true, vertical: false)
+                    .opacity(canApplyPrevious ? 1 : 0)
+                    .allowsHitTesting(canApplyPrevious)
+                    .accessibilityHidden(!canApplyPrevious)
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
                     inlineHintAim(presentation.aimText)
+                    inlineHintStatus(presentation)
 
-                    if let statusText = presentation.statusText {
-                        progressStatusChip(text: statusText, tone: presentation.statusTone)
-                    }
-
-                    if canApplyPrevious {
-                        applyPreviousButton(at: index)
-                    }
+                    applyPreviousButton(
+                        at: index,
+                        label: presentation.actionLayoutText
+                    )
+                    .opacity(canApplyPrevious ? 1 : 0)
+                    .allowsHitTesting(canApplyPrevious)
+                    .accessibilityHidden(!canApplyPrevious)
                 }
             }
             .padding(.horizontal, 2)
+        }
+    }
+
+    @ViewBuilder
+    private func inlineHintStatus(_ presentation: WorkoutSetInlineHintPresentation) -> some View {
+        if let statusText = presentation.statusText {
+            progressStatusChip(text: statusText, tone: presentation.statusTone)
+        } else {
+            progressStatusChip(text: presentation.statusLayoutText, tone: .accent)
+                .hidden()
+                .accessibilityHidden(true)
         }
     }
 
@@ -837,11 +850,11 @@ struct WorkoutSessionExerciseGridEditor: View {
             .layoutPriority(1)
     }
 
-    private func applyPreviousButton(at index: Int) -> some View {
+    private func applyPreviousButton(at index: Int, label: String) -> some View {
         Button {
             applyPreviousPerformance(at: index)
         } label: {
-            Label("Fill Last", systemImage: "arrow.down.left.circle.fill")
+            Label(label, systemImage: "arrow.down.left.circle.fill")
                 .font(.caption.weight(.bold))
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
@@ -3235,6 +3248,14 @@ nonisolated struct WorkoutSetInlineHintPresentation: Equatable, Sendable {
     let statusText: String?
     let statusTone: WorkoutSetProgressTone
     let canApplyPrevious: Bool
+
+    var statusLayoutText: String {
+        statusText ?? "Matched last session"
+    }
+
+    var actionLayoutText: String {
+        "Fill Last"
+    }
 
     static func make(
         draft: WorkoutSessionSetDraft,
