@@ -31,7 +31,7 @@ struct ActiveWorkoutTemplateSyncReviewSheet: View {
                         ) {
                             ForEach(preview.addedCardioBlocks) { addition in
                                 summaryRow(
-                                    title: addition.phase.title,
+                                    title: addition.role.title,
                                     details: [addition.exerciseName, addition.summary],
                                     tint: WGJTheme.success
                                 )
@@ -46,7 +46,7 @@ struct ActiveWorkoutTemplateSyncReviewSheet: View {
                         ) {
                             ForEach(preview.removedCardioBlocks) { removal in
                                 summaryRow(
-                                    title: removal.phase.title,
+                                    title: removal.role.title,
                                     details: [removal.exerciseName, removal.summary],
                                     tint: WGJTheme.danger
                                 )
@@ -61,7 +61,7 @@ struct ActiveWorkoutTemplateSyncReviewSheet: View {
                         ) {
                             ForEach(preview.editedCardioBlocks) { edited in
                                 summaryRow(
-                                    title: "\(edited.phase.title) · \(edited.exerciseName)",
+                                    title: "\(edited.role.title) · \(edited.exerciseName)",
                                     details: edited.changes,
                                     tint: WGJTheme.accentGold
                                 )

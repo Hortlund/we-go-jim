@@ -878,17 +878,6 @@ struct TemplateEditorView: View {
     private func makeCardioSetupRequest(
         from draft: TemplateCardioBlockDraft
     ) -> TemplateCardioSetupRequest {
-        let distanceUnit = draft.preferredDistanceUnit ?? preferredDistanceUnit
-        let distanceText: String
-        if let targetDistanceMeters = draft.targetDistanceMeters {
-            distanceText = WorkoutCardioSetupNumericCodec.distanceText(
-                meters: targetDistanceMeters,
-                unit: distanceUnit
-            )
-        } else {
-            distanceText = ""
-        }
-
         return TemplateCardioSetupRequest(
             activityID: draft.id,
             selection: ExerciseCatalogSelection(
@@ -900,14 +889,8 @@ struct TemplateEditorView: View {
                 cardioTrackingProfileRaw: draft.trackingProfile?.rawValue
             ),
             setupDraft: WorkoutCardioSetupDraft(
-                role: draft.role,
-                goalKind: draft.goalKind,
-                durationMinutesText: WorkoutCardioSetupNumericCodec.durationMinutesText(
-                    seconds: draft.targetDurationSeconds
-                ),
-                distanceText: distanceText,
-                distanceUnit: distanceUnit,
-                trackingProfile: draft.trackingProfile ?? .machineDistance
+                templateCardio: draft,
+                fallbackDistanceUnit: preferredDistanceUnit
             )
         )
     }

@@ -28,6 +28,20 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
             }
             matchedTemplateCardioBySessionID[sessionCardioBlock.id] = templateCardioBlock
         }
+        for sessionCardioBlock in orderedSessionCardioBlocks
+        where sessionCardioBlock.sourceTemplateCardioID == nil
+            && matchedTemplateCardioBySessionID[sessionCardioBlock.id] == nil
+        {
+            guard let templateCardioBlock = orderedTemplateCardioBlocks.first(where: {
+                matchedTemplateCardioIDs.contains($0.id) == false
+                    && $0.role == sessionCardioBlock.role
+                    && $0.sortOrder == sessionCardioBlock.sortOrder
+            }) else {
+                continue
+            }
+            matchedTemplateCardioIDs.insert(templateCardioBlock.id)
+            matchedTemplateCardioBySessionID[sessionCardioBlock.id] = templateCardioBlock
+        }
         let templateExercisesByUUID = Dictionary(
             orderedTemplateExercises.map { ($0.catalogExerciseUUID, $0) },
             uniquingKeysWith: { first, _ in first }
@@ -59,7 +73,7 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
 
             return WorkoutTemplateSyncAddedCardioBlock(
                 activityID: cardioBlock.id,
-                phase: cardioBlock.phase,
+                role: cardioBlock.role,
                 exerciseName: cardioBlock.exerciseNameSnapshot,
                 summary: cardioSummary(for: cardioBlock)
             )
@@ -72,7 +86,7 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
 
             return WorkoutTemplateSyncRemovedCardioBlock(
                 activityID: cardioBlock.id,
-                phase: cardioBlock.phase,
+                role: cardioBlock.role,
                 exerciseName: cardioBlock.exerciseNameSnapshot,
                 summary: cardioSummary(for: cardioBlock)
             )
@@ -93,7 +107,7 @@ nonisolated enum WorkoutTemplateSyncPreviewBuilder {
 
             return WorkoutTemplateSyncEditedCardioBlock(
                 activityID: templateCardioBlock.id,
-                phase: cardioBlock.phase,
+                role: cardioBlock.role,
                 exerciseName: cardioBlock.exerciseNameSnapshot,
                 changes: changes
             )

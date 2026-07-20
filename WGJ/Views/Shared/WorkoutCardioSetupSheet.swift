@@ -8,6 +8,62 @@ nonisolated struct WorkoutCardioSetupDraft: Equatable, Sendable {
     var distanceText: String
     var distanceUnit: WorkoutDistanceUnit
     var trackingProfile: WorkoutCardioTrackingProfile
+
+    private let originalDistanceMeters: Double?
+    private let originalDistanceText: String?
+    private let originalDistanceUnit: WorkoutDistanceUnit?
+
+    init(
+        role: WorkoutCardioRole,
+        goalKind: WorkoutCardioGoalKind,
+        durationMinutesText: String,
+        distanceText: String,
+        distanceUnit: WorkoutDistanceUnit,
+        trackingProfile: WorkoutCardioTrackingProfile
+    ) {
+        self.role = role
+        self.goalKind = goalKind
+        self.durationMinutesText = durationMinutesText
+        self.distanceText = distanceText
+        self.distanceUnit = distanceUnit
+        self.trackingProfile = trackingProfile
+        self.originalDistanceMeters = nil
+        self.originalDistanceText = nil
+        self.originalDistanceUnit = nil
+    }
+
+    init(
+        templateCardio: TemplateCardioBlockDraft,
+        fallbackDistanceUnit: WorkoutDistanceUnit = .regionalDefault(locale: .current)
+    ) {
+        let distanceUnit = templateCardio.preferredDistanceUnit ?? fallbackDistanceUnit
+        let distanceText = templateCardio.targetDistanceMeters.map {
+            WorkoutCardioSetupNumericCodec.distanceText(meters: $0, unit: distanceUnit)
+        } ?? ""
+
+        self.role = templateCardio.role
+        self.goalKind = templateCardio.goalKind
+        self.durationMinutesText = WorkoutCardioSetupNumericCodec.durationMinutesText(
+            seconds: templateCardio.targetDurationSeconds
+        )
+        self.distanceText = distanceText
+        self.distanceUnit = distanceUnit
+        self.trackingProfile = templateCardio.trackingProfile ?? .machineDistance
+        self.originalDistanceMeters = templateCardio.targetDistanceMeters
+        self.originalDistanceText = distanceText
+        self.originalDistanceUnit = distanceUnit
+    }
+
+    fileprivate var unchangedOriginalDistanceMeters: Double? {
+        guard distanceText == originalDistanceText,
+              distanceUnit == originalDistanceUnit,
+              let originalDistanceMeters,
+              originalDistanceMeters.isFinite,
+              originalDistanceMeters > 0 else {
+            return nil
+        }
+        return originalDistanceMeters
+    }
 }
 
 nonisolated struct ValidatedWorkoutCardioSetup: Equatable, Sendable {
@@ -52,7 +108,7 @@ nonisolated enum WorkoutCardioSetupValidator {
             targetDurationSeconds = durationSeconds
             targetDistanceMeters = nil
         case .distance:
-            guard let distanceMeters = WorkoutCardioSetupNumericCodec.distanceMeters(
+            guard let parsedDistanceMeters = WorkoutCardioSetupNumericCodec.distanceMeters(
                 from: draft.distanceText,
                 unit: draft.distanceUnit,
                 locale: locale
@@ -60,7 +116,7 @@ nonisolated enum WorkoutCardioSetupValidator {
                 throw WorkoutCardioSetupValidationError.distanceMustBePositive(unit: draft.distanceUnit)
             }
             targetDurationSeconds = 0
-            targetDistanceMeters = distanceMeters
+            targetDistanceMeters = draft.unchangedOriginalDistanceMeters ?? parsedDistanceMeters
         case .open:
             targetDurationSeconds = 0
             targetDistanceMeters = nil

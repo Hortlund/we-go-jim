@@ -76,7 +76,7 @@ nonisolated struct WorkoutTemplateSyncEditedWorkoutNotes: Equatable, Sendable {
 
 nonisolated struct WorkoutTemplateSyncAddedCardioBlock: Identifiable, Equatable, Sendable {
     let activityID: UUID
-    let phase: WorkoutCardioPhase
+    let role: WorkoutCardioRole
     let exerciseName: String
     let summary: String
 
@@ -85,7 +85,7 @@ nonisolated struct WorkoutTemplateSyncAddedCardioBlock: Identifiable, Equatable,
 
 nonisolated struct WorkoutTemplateSyncRemovedCardioBlock: Identifiable, Equatable, Sendable {
     let activityID: UUID
-    let phase: WorkoutCardioPhase
+    let role: WorkoutCardioRole
     let exerciseName: String
     let summary: String
 
@@ -94,7 +94,7 @@ nonisolated struct WorkoutTemplateSyncRemovedCardioBlock: Identifiable, Equatabl
 
 nonisolated struct WorkoutTemplateSyncEditedCardioBlock: Identifiable, Equatable, Sendable {
     let activityID: UUID
-    let phase: WorkoutCardioPhase
+    let role: WorkoutCardioRole
     let exerciseName: String
     let changes: [String]
 

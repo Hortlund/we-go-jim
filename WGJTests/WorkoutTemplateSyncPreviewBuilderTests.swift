@@ -20,6 +20,7 @@ final class WorkoutTemplateSyncPreviewBuilderTests: XCTestCase {
         )
 
         XCTAssertEqual(preview.addedCardioBlocks.map(\.exerciseName), ["Treadmill Walk"])
+        XCTAssertEqual(preview.addedCardioBlocks.map(\.role), [.main])
         XCTAssertTrue(preview.removedCardioBlocks.isEmpty)
         XCTAssertTrue(preview.editedCardioBlocks.isEmpty)
         XCTAssertEqual(preview.mutation.cardioBlocks.count, 2)
@@ -57,12 +58,12 @@ final class WorkoutTemplateSyncPreviewBuilderTests: XCTestCase {
         fixture.template.cardioBlocks = [fixture.templateActivity, secondTemplateActivity]
         let firstAdded = makeSessionActivity(
             session: fixture.session,
-            sourceTemplateCardioID: nil,
+            sourceTemplateCardioID: UUID(),
             sortOrder: 0
         )
         let secondAdded = makeSessionActivity(
             session: fixture.session,
-            sourceTemplateCardioID: nil,
+            sourceTemplateCardioID: UUID(),
             sortOrder: 1
         )
         fixture.session.cardioBlocks = [firstAdded, secondAdded]
@@ -125,6 +126,33 @@ final class WorkoutTemplateSyncPreviewBuilderTests: XCTestCase {
                 session: fixture.session
             )
         )
+    }
+
+    func testLegacyActivityWithoutSourceIDMatchesByRoleAndOrder() throws {
+        let fixture = makeMatchedFixture()
+        fixture.sessionActivity.sourceTemplateCardioID = nil
+        fixture.sessionActivity.actualDurationSeconds = 1_500
+        fixture.sessionActivity.actualDistanceMeters = 6_200
+        fixture.sessionActivity.cardioNotes = "Result only"
+
+        XCTAssertNil(
+            WorkoutTemplateSyncPreviewBuilder.buildPreview(
+                template: fixture.template,
+                session: fixture.session
+            )
+        )
+
+        fixture.sessionActivity.targetDistanceMeters = 10_000
+        let preview = try XCTUnwrap(
+            WorkoutTemplateSyncPreviewBuilder.buildPreview(
+                template: fixture.template,
+                session: fixture.session
+            )
+        )
+        XCTAssertTrue(preview.addedCardioBlocks.isEmpty)
+        XCTAssertTrue(preview.removedCardioBlocks.isEmpty)
+        XCTAssertEqual(preview.editedCardioBlocks.map(\.activityID), [fixture.templateActivity.id])
+        XCTAssertNil(preview.mutation.cardioBlocks.first?.sourceTemplateCardioID)
     }
 
     private func makeMatchedFixture() -> (

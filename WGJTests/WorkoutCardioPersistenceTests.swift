@@ -360,6 +360,52 @@ final class WorkoutCardioPersistenceTests: XCTestCase {
         XCTAssertEqual(synced.map(\.preferredDistanceUnit), [.kilometers, .miles])
     }
 
+    func testWorkoutTemplateSyncUsesRoleOrderFallbackOnlyForMissingLegacySourceID() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let templateRepository = TemplateRepository(modelContext: context)
+        let sessionRepository = WorkoutSessionRepository(
+            modelContext: context,
+            weeklyGoalWidgetPublisher: nil
+        )
+        let template = try templateRepository.createTemplate(name: "Legacy Sync", notes: "")
+        let plan = TemplateCardioBlockDraft.fixture(
+            role: .main,
+            sortOrder: 0,
+            name: "Run",
+            trackingProfile: .walkRun,
+            goalKind: .distance,
+            targetDurationSeconds: 0,
+            targetDistanceMeters: 5_000,
+            preferredDistanceUnit: .kilometers
+        )
+        try templateRepository.setCardioActivities(templateID: template.id, drafts: [plan])
+        let session = try sessionRepository.createSessionFromTemplate(templateID: template.id)
+        let legacyActivity = try XCTUnwrap(
+            try sessionRepository.sessionCardioBlocks(sessionID: session.id).first
+        )
+        legacyActivity.sourceTemplateCardioID = nil
+        legacyActivity.targetDistanceMeters = 10_000
+        legacyActivity.actualDistanceMeters = 12_345
+        legacyActivity.cardioNotes = "Result must stay session-only"
+        try context.save()
+
+        let syncService = WorkoutTemplateSyncService(modelContext: context)
+        let preview = try XCTUnwrap(syncService.previewTemplateUpdate(forSessionID: session.id))
+        XCTAssertTrue(preview.addedCardioBlocks.isEmpty)
+        XCTAssertTrue(preview.removedCardioBlocks.isEmpty)
+        XCTAssertEqual(preview.editedCardioBlocks.map(\.activityID), [plan.id])
+        try syncService.applyTemplateUpdate(preview)
+
+        let synced = try XCTUnwrap(
+            try templateRepository.cardioActivities(templateID: template.id).first
+        )
+        XCTAssertEqual(synced.id, plan.id)
+        XCTAssertEqual(synced.targetDistanceMeters, 10_000)
+        XCTAssertNotEqual(synced.targetDistanceMeters, legacyActivity.actualDistanceMeters)
+    }
+
     private func makeInMemoryContainer() throws -> ModelContainer {
         try AppSchema.makeInMemoryContainer(name: "WorkoutCardioPersistenceTests")
     }

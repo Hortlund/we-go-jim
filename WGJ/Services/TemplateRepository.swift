@@ -1383,15 +1383,25 @@ nonisolated final class TemplateRepository {
         if let cardioDrafts {
             desiredCardioDrafts = cardioDrafts
         } else {
-            let existingCardioIDs = Set(orderedCardioBlocks(for: template).map(\.id))
+            let existingCardioActivities = orderedCardioBlocks(for: template)
+            let existingCardioIDs = Set(existingCardioActivities.map(\.id))
             var claimedTemplateCardioIDs: Set<UUID> = []
             desiredCardioDrafts = cardioMutations.map { mutation in
-                let matchedTemplateID: UUID? = mutation.sourceTemplateCardioID.flatMap { sourceID -> UUID? in
-                    guard existingCardioIDs.contains(sourceID),
-                          claimedTemplateCardioIDs.insert(sourceID).inserted else {
-                        return nil
+                let matchedTemplateID: UUID?
+                if let sourceID = mutation.sourceTemplateCardioID {
+                    matchedTemplateID = existingCardioIDs.contains(sourceID)
+                        && claimedTemplateCardioIDs.insert(sourceID).inserted
+                        ? sourceID
+                        : nil
+                } else {
+                    matchedTemplateID = existingCardioActivities.first(where: {
+                        claimedTemplateCardioIDs.contains($0.id) == false
+                            && $0.role == mutation.role
+                            && $0.sortOrder == mutation.sortOrder
+                    })?.id
+                    if let matchedTemplateID {
+                        claimedTemplateCardioIDs.insert(matchedTemplateID)
                     }
-                    return sourceID
                 }
                 return TemplateCardioBlockDraft(
                     id: matchedTemplateID ?? UUID(),
