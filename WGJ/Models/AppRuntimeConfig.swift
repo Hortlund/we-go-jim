@@ -546,29 +546,13 @@ nonisolated struct PendingTemplateFileOpen: Equatable, Identifiable {
 
 @Observable
 nonisolated final class AppTabState {
-    static let selectedTabDefaultsKey = "selectedMainTab"
-
-    var selectedTab: AppMainTab {
-        didSet {
-            defaults.set(selectedTab.rawValue, forKey: Self.selectedTabDefaultsKey)
-        }
-    }
-
-    @ObservationIgnored private let defaults: UserDefaults
+    var selectedTab: AppMainTab
 
     init(
-        defaults: UserDefaults = .standard,
-        arguments: [String] = ProcessInfo.processInfo.arguments
+        defaults _: UserDefaults = .standard,
+        arguments _: [String] = ProcessInfo.processInfo.arguments
     ) {
-        self.defaults = defaults
-        if arguments.contains("UITEST_IN_MEMORY_STORE") {
-            selectedTab = .startWorkout
-        } else if let rawValue = defaults.string(forKey: Self.selectedTabDefaultsKey),
-           let persistedTab = AppMainTab(rawValue: rawValue) {
-            selectedTab = persistedTab
-        } else {
-            selectedTab = .startWorkout
-        }
+        selectedTab = .startWorkout
     }
 }
 
