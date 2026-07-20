@@ -119,6 +119,13 @@ final class WorkoutCardioSetupTests: XCTestCase {
         try assertDurationEditRoundTrip(seconds: 61)
     }
 
+    func testDurationEditTextIsConciseForTimerResults() throws {
+        let text = WorkoutCardioSetupNumericCodec.durationMinutesText(seconds: 86)
+
+        XCTAssertEqual(text, "1.43")
+        try assertDurationEditRoundTrip(seconds: 86)
+    }
+
     func testDistanceEditTextIsUngroupedAndPreservesCanonicalMeters() throws {
         let locale = Locale(identifier: "en_US")
         let original = try WorkoutCardioSetupValidator.validated(

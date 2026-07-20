@@ -147,6 +147,9 @@ struct WorkoutCardioActivityPlanCard<Actions: View>: View {
                 value: goalSummary,
                 tint: WGJTheme.accentCyan
             )
+            .accessibilityLabel(
+                WorkoutMetricAccessibilityPolicy.cardioMetricValue(goalSummary)
+            )
 
             actions
         }

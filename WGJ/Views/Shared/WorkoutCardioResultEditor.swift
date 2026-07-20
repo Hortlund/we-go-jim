@@ -270,7 +270,12 @@ struct WorkoutCardioResultEditor: View {
                     value: metric.value,
                     tint: WGJTheme.accentCyan
                 )
-                .accessibilityLabel("\(metric.title), \(metric.value)")
+                .accessibilityLabel(
+                    WorkoutMetricAccessibilityPolicy.cardioMetric(
+                        label: metric.title,
+                        value: metric.value
+                    )
+                )
             }
         }
     }
@@ -381,7 +386,12 @@ struct WorkoutCardioResultSummaryCard<Actions: View>: View {
                             value: metric.value,
                             tint: metricTint(metric)
                         )
-                        .accessibilityLabel("\(metric.title), \(metric.value)")
+                        .accessibilityLabel(
+                            WorkoutMetricAccessibilityPolicy.cardioMetric(
+                                label: metric.title,
+                                value: metric.value
+                            )
+                        )
                     }
                 }
             }

@@ -22,6 +22,27 @@ final class ActiveWorkoutCardioPresentationTests: XCTestCase {
         XCTAssertNotEqual(first.elapsedText, second.elapsedText)
     }
 
+    func testTimerTickKeepsCardStructureAndOrderingInputsStable() {
+        let activity = ActiveWorkoutRuntimeCardioBlock.runningFixture()
+        let dates = (100...115).map { Date(timeIntervalSince1970: TimeInterval($0)) }
+        let presentations = dates.map {
+            ActiveWorkoutCardioPresentation.make(activity: activity, at: $0)
+        }
+
+        XCTAssertTrue(presentations.dropFirst().allSatisfy {
+            $0.layoutIdentity == presentations[0].layoutIdentity
+        })
+        XCTAssertEqual(Set(presentations.map(\.id)), [activity.id])
+        XCTAssertEqual(Set(presentations.map(\.role)), [activity.role])
+        XCTAssertEqual(Set(presentations.map(\.reservedTimerWidth)), [ActiveWorkoutCardioPresentation.timerWidth])
+        XCTAssertEqual(Set(presentations.map(\.activityName)), [activity.exerciseNameSnapshot])
+        XCTAssertEqual(Set(presentations.map(\.goalText)).count, 1)
+        XCTAssertTrue(presentations.dropFirst().allSatisfy {
+            $0.actionLayout == presentations[0].actionLayout
+        })
+        XCTAssertEqual(Set(presentations.map(\.elapsedText)).count, 16)
+    }
+
     func testCardStatesExposeStableExpectedActions() {
         let idle = ActiveWorkoutCardioPresentation.make(activity: .fixture(timerState: .idle))
         let running = ActiveWorkoutCardioPresentation.make(activity: .runningFixture())
@@ -40,6 +61,17 @@ final class ActiveWorkoutCardioPresentationTests: XCTestCase {
         XCTAssertEqual(paused.actionLayout, [.resume, .finish])
         XCTAssertEqual(completed.state, .completed)
         XCTAssertEqual(completed.actionLayout, [.editResult])
+    }
+
+    func testAccessibilityDynamicTypeStacksPrimaryActionsVertically() {
+        XCTAssertEqual(
+            ActiveWorkoutCardioControlLayout.direction(isAccessibilitySize: true),
+            .vertical
+        )
+        XCTAssertEqual(
+            ActiveWorkoutCardioControlLayout.direction(isAccessibilitySize: false),
+            .adaptive
+        )
     }
 
     func testQuickAddDefaultsToMainWithoutStrengthAndFinisherWithStrength() {

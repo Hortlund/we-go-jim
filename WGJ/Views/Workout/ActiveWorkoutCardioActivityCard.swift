@@ -216,6 +216,17 @@ nonisolated enum ActiveWorkoutCardioReplacementPolicy {
     }
 }
 
+nonisolated enum ActiveWorkoutCardioControlLayout {
+    enum Direction: Equatable, Sendable {
+        case adaptive
+        case vertical
+    }
+
+    static func direction(isAccessibilitySize: Bool) -> Direction {
+        isAccessibilitySize ? .vertical : .adaptive
+    }
+}
+
 nonisolated struct ActiveWorkoutPendingCardioResult: Identifiable, Equatable, Sendable {
     let id: UUID
     let activityName: String
@@ -245,6 +256,8 @@ nonisolated struct ActiveWorkoutPendingCardioResult: Identifiable, Equatable, Se
 }
 
 struct ActiveWorkoutCardioActivityCard: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     let presentation: ActiveWorkoutCardioPresentation
     let onStart: () -> Void
     let onPause: () -> Void
@@ -296,9 +309,13 @@ struct ActiveWorkoutCardioActivityCard: View {
 
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(presentation.resultText ?? presentation.goalText)
+                    let metricText = presentation.resultText ?? presentation.goalText
+                    Text(metricText)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(presentation.state == .completed ? WGJTheme.success : WGJTheme.textSecondary)
+                        .accessibilityLabel(
+                            WorkoutMetricAccessibilityPolicy.cardioMetricValue(metricText)
+                        )
 
                     if presentation.isRunning || presentation.isPaused {
                         timerDisplay
@@ -339,13 +356,23 @@ struct ActiveWorkoutCardioActivityCard: View {
     }
 
     private var actionControls: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 10) {
-                actionButtons
-            }
+        Group {
+            if ActiveWorkoutCardioControlLayout.direction(
+                isAccessibilitySize: dynamicTypeSize.isAccessibilitySize
+            ) == .vertical {
+                VStack(spacing: 10) {
+                    actionButtons
+                }
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) {
+                        actionButtons
+                    }
 
-            VStack(spacing: 10) {
-                actionButtons
+                    VStack(spacing: 10) {
+                        actionButtons
+                    }
+                }
             }
         }
     }
@@ -354,19 +381,42 @@ struct ActiveWorkoutCardioActivityCard: View {
     private var actionButtons: some View {
         ForEach(presentation.actionLayout, id: \.self) { action in
             actionButton(action)
+                .frame(maxWidth: .infinity)
         }
     }
 
     @ViewBuilder
     private func actionButton(_ action: ActiveWorkoutCardioPresentation.Action) -> some View {
         let button = Button(actionTitle(for: action), action: callback(for: action))
-            .accessibilityLabel("\(actionTitle(for: action)) \(presentation.activityName)")
+            .accessibilityLabel(
+                WorkoutMetricAccessibilityPolicy.cardioAction(
+                    accessibilityAction(for: action),
+                    activityName: presentation.activityName
+                )
+            )
             .accessibilityIdentifier("active-workout-cardio-\(presentation.id)-\(action.rawValue)-button")
 
         if action == .pause {
             button.buttonStyle(WGJGhostButtonStyle())
         } else {
             button.buttonStyle(WGJPrimaryButtonStyle())
+        }
+    }
+
+    private func accessibilityAction(
+        for action: ActiveWorkoutCardioPresentation.Action
+    ) -> WorkoutMetricAccessibilityPolicy.CardioAction {
+        switch action {
+        case .start:
+            return .start
+        case .pause:
+            return .pause
+        case .resume:
+            return .resume
+        case .finish:
+            return .finish
+        case .editResult:
+            return .editResult
         }
     }
 

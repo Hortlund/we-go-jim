@@ -138,10 +138,16 @@
     "Add %@" : {
 
     },
+    "Add %@ cardio" : {
+
+    },
     "Add another exercise metric card to your profile." : {
 
     },
     "Add Cardio" : {
+
+    },
+    "Add detail" : {
 
     },
     "Add Drop" : {
@@ -225,7 +231,16 @@
     "Cardio Actions" : {
 
     },
+    "Cardio Error" : {
+
+    },
+    "Cardio Result" : {
+
+    },
     "Cardio Settings" : {
+
+    },
+    "Cardio Setup" : {
 
     },
     "Catalog Credits" : {
@@ -255,10 +270,16 @@
     "Choose an exercise before enabling this graph." : {
 
     },
+    "Choose Cardio" : {
+
+    },
     "Choose exercise" : {
 
     },
     "Choose Exercise" : {
+
+    },
+    "Clear data and change exercise" : {
 
     },
     "Clear Disposable Storage" : {
@@ -316,6 +337,9 @@
 
     },
     "Create a template in this folder to keep it organized." : {
+
+    },
+    "Create Custom Cardio" : {
 
     },
     "Create Custom Exercise" : {
@@ -402,6 +426,15 @@
     "Dismiss rest timer" : {
 
     },
+    "Distance" : {
+
+    },
+    "Distance (optional)" : {
+
+    },
+    "Distance unit" : {
+
+    },
     "Done" : {
 
     },
@@ -420,22 +453,37 @@
     "Duplicate" : {
 
     },
-    "Edit" : {
+    "Duration" : {
 
     },
-    "Edit Duration" : {
+    "Duration in minutes" : {
+
+    },
+    "Edit" : {
 
     },
     "Edit Folder" : {
 
     },
+    "Edit Plan" : {
+
+    },
     "Edit Profile" : {
+
+    },
+    "Edit Result" : {
+
+    },
+    "Edit Result %@" : {
 
     },
     "Edit Template" : {
 
     },
     "Elapsed Time" : {
+
+    },
+    "Elapsed time %@" : {
 
     },
     "Enable training guidance" : {
@@ -528,6 +576,9 @@
     "Hide backup contents" : {
 
     },
+    "Hide detail" : {
+
+    },
     "Hide Workout" : {
 
     },
@@ -562,6 +613,9 @@
         }
       }
     },
+    "How did it feel?" : {
+
+    },
     "How to perform (optional)" : {
 
     },
@@ -580,6 +634,9 @@
     "Jump to %@" : {
 
     },
+    "Keep current running" : {
+
+    },
     "Keep logging sessions and your go-to lifts will rise here." : {
 
     },
@@ -590,6 +647,9 @@
 
     },
     "Keep Workout" : {
+
+    },
+    "Kilometers" : {
 
     },
     "Last logged %@" : {
@@ -676,7 +736,16 @@
     "Max" : {
 
     },
+    "Meters" : {
+
+    },
     "Metric" : {
+
+    },
+    "Miles" : {
+
+    },
+    "min" : {
 
     },
     "Min" : {
@@ -686,6 +755,9 @@
 
     },
     "Minutes" : {
+
+    },
+    "More Cardio" : {
 
     },
     "Most trained" : {
@@ -754,10 +826,16 @@
     "No files found." : {
 
     },
+    "No measured result." : {
+
+    },
     "No other folders" : {
 
     },
     "No sets yet." : {
+
+    },
+    "No target. Track the activity freely when you work out." : {
 
     },
     "No template needed. Log freeform or build the session as you go." : {
@@ -767,6 +845,9 @@
 
     },
     "No unfiled templates yet" : {
+
+    },
+    "Notes" : {
 
     },
     "notification.rest.body" : {
@@ -916,6 +997,9 @@
     "Reviewing your recent sessions…" : {
 
     },
+    "Role" : {
+
+    },
     "Round Rest" : {
 
     },
@@ -934,6 +1018,9 @@
     "Save Profile" : {
 
     },
+    "Save Result" : {
+
+    },
     "Save Weekly Goal" : {
 
     },
@@ -944,6 +1031,9 @@
 
     },
     "Saving the session and preparing your summary." : {
+
+    },
+    "Saving…" : {
 
     },
     "Schedule Reset" : {
@@ -1091,10 +1181,16 @@
     "Track this week's workout target." : {
 
     },
+    "Tracking" : {
+
+    },
     "Train a few days and your calendar will start to fill in." : {
 
     },
     "Unfiled" : {
+
+    },
+    "Unit" : {
 
     },
     "Unlock set" : {

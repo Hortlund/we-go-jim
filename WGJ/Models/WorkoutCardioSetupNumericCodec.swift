@@ -6,7 +6,8 @@ nonisolated enum WorkoutCardioSetupNumericCodec {
         guard safeSeconds % 60 != 0 else {
             return String(safeSeconds / 60)
         }
-        return canonicalText(Double(safeSeconds) / 60)
+        let roundedMinutes = (Double(safeSeconds) / 60 * 100).rounded() / 100
+        return canonicalText(roundedMinutes)
     }
 
     static func distanceText(meters: Double, unit: WorkoutDistanceUnit) -> String {

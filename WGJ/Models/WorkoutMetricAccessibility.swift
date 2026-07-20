@@ -7,6 +7,14 @@ nonisolated struct WorkoutMetricAccessibilityDescriptor: Equatable, Sendable {
 }
 
 nonisolated enum WorkoutMetricAccessibilityPolicy {
+    enum CardioAction: String, Equatable, Sendable {
+        case start = "Start"
+        case pause = "Pause"
+        case resume = "Resume"
+        case finish = "Finish"
+        case editResult = "Edit Result"
+    }
+
     static func field(
         exerciseName: String,
         setNumber: Int,
@@ -57,6 +65,42 @@ nonisolated enum WorkoutMetricAccessibilityPolicy {
             value: isWarmup ? "Warmup" : "Working set",
             hint: isWarmup ? "Double tap to mark as a working set." : "Double tap to mark as warmup."
         )
+    }
+
+    static func cardioAction(_ action: CardioAction, activityName: String) -> String {
+        let trimmedName = activityName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedName.isEmpty ? action.rawValue : "\(action.rawValue) \(trimmedName)"
+    }
+
+    /// Converts compact, visual cardio units into unambiguous VoiceOver speech.
+    /// Keep this policy centralized so cards, result editors, and history agree.
+    static func cardioMetricValue(_ value: String, metricTitle: String? = nil) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if metricTitle?.caseInsensitiveCompare("Incline") == .orderedSame,
+           trimmed.hasSuffix("%") {
+            return "\(trimmed.dropLast()) percent incline"
+        }
+
+        let suffixes: [(visual: String, spoken: String)] = [
+            (" /500 m", " per 500 meters"),
+            (" km/h", " kilometers per hour"),
+            (" mph", " miles per hour"),
+            (" /km", " per kilometer"),
+            (" /mi", " per mile"),
+            (" km", " kilometers"),
+            (" mi", " miles"),
+            (" m", " meters"),
+        ]
+
+        for suffix in suffixes where trimmed.hasSuffix(suffix.visual) {
+            return "\(trimmed.dropLast(suffix.visual.count))\(suffix.spoken)"
+        }
+        return trimmed
+    }
+
+    static func cardioMetric(label: String, value: String) -> String {
+        "\(label), \(cardioMetricValue(value, metricTitle: label))"
     }
 
     private static func spokenWeightUnit(_ unit: String?) -> String? {
