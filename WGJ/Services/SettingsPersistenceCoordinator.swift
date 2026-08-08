@@ -146,6 +146,7 @@ actor OrderedSettingsWriter {
     private var pendingWrite: RevisionedSettingsWrite?
     private var workerTask: Task<Void, Never>?
     private var lastFailedWrite: RevisionedSettingsWrite?
+    private var undeliveredPersistedPatch: UserSettingsPatch?
 
     init(
         persist: @escaping Persist,
@@ -198,7 +199,22 @@ actor OrderedSettingsWriter {
                 let draft = try await persist(write)
                 lastFailedWrite = nil
                 if write.revision == newestSubmittedRevision {
-                    await onCommit(write.revision, write, draft)
+                    var deliveredPatch = undeliveredPersistedPatch ?? UserSettingsPatch()
+                    deliveredPatch.merge(write.patch)
+                    undeliveredPersistedPatch = nil
+                    await onCommit(
+                        write.revision,
+                        RevisionedSettingsWrite(
+                            revision: write.revision,
+                            patch: deliveredPatch
+                        ),
+                        draft
+                    )
+                } else if var undeliveredPersistedPatch {
+                    undeliveredPersistedPatch.merge(write.patch)
+                    self.undeliveredPersistedPatch = undeliveredPersistedPatch
+                } else {
+                    undeliveredPersistedPatch = write.patch
                 }
             } catch {
                 lastFailedWrite = write

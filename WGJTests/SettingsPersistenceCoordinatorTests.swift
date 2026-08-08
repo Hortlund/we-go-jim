@@ -85,6 +85,7 @@ final class SettingsPersistenceCoordinatorTests: XCTestCase {
             revision: 1,
             patch: UserSettingsPatch(showsCalorieEstimates: false)
         ))
+        await store.waitUntilDelayedWriteStarts()
         await writer.submit(RevisionedSettingsWrite(
             revision: 2,
             patch: UserSettingsPatch(showsCalorieEstimates: true)
@@ -98,6 +99,92 @@ final class SettingsPersistenceCoordinatorTests: XCTestCase {
         XCTAssertEqual(persisted.showsCalorieEstimates, true)
         XCTAssertEqual(committedRevisions, [2])
         XCTAssertEqual(committedCaloriePreferences, [true])
+    }
+
+    func testDelayedCalorieDisableCarriesBroadcastIntoNewerUnrelatedCommit() async throws {
+        let store = SettingsTestStore(
+            draft: UserSettingsDraft(
+                weeklyWorkoutGoal: 4,
+                isTrainingGuidanceEnabled: true,
+                keepsScreenAwake: true,
+                preferredWeightUnit: .kg,
+                workoutNotificationStyle: .timeSensitive,
+                showsCalorieEstimates: true
+            ),
+            delayedRevision: 1
+        )
+        let commits = SettingsCommitRecorder()
+        let writer = OrderedSettingsWriter(
+            persist: { try await store.persist($0) },
+            onCommit: { revision, write, draft in
+                await commits.record(revision: revision, write: write, draft: draft)
+            },
+            onFailure: { _, _ in }
+        )
+
+        await writer.submit(.init(
+            revision: 1,
+            patch: .init(showsCalorieEstimates: false)
+        ))
+        await store.waitUntilDelayedWriteStarts()
+        await writer.submit(.init(
+            revision: 2,
+            patch: .init(keepsScreenAwake: false)
+        ))
+        await store.releaseDelayedWrite()
+        await writer.flush()
+
+        let persisted = await store.currentDraft()
+        let committedRevisions = await commits.revisions()
+        let effectCounts = await commits.calorieEffectCounts()
+        XCTAssertFalse(persisted.showsCalorieEstimates)
+        XCTAssertFalse(persisted.keepsScreenAwake)
+        XCTAssertEqual(committedRevisions, [2])
+        XCTAssertEqual(effectCounts.historyBroadcasts, 1)
+        XCTAssertEqual(effectCounts.backfillSchedules, 0)
+    }
+
+    func testDelayedCalorieEnableCarriesBroadcastAndBackfillIntoNewerUnrelatedCommit() async throws {
+        let store = SettingsTestStore(
+            draft: UserSettingsDraft(
+                weeklyWorkoutGoal: 4,
+                isTrainingGuidanceEnabled: true,
+                keepsScreenAwake: false,
+                preferredWeightUnit: .kg,
+                workoutNotificationStyle: .timeSensitive,
+                showsCalorieEstimates: false
+            ),
+            delayedRevision: 1
+        )
+        let commits = SettingsCommitRecorder()
+        let writer = OrderedSettingsWriter(
+            persist: { try await store.persist($0) },
+            onCommit: { revision, write, draft in
+                await commits.record(revision: revision, write: write, draft: draft)
+            },
+            onFailure: { _, _ in }
+        )
+
+        await writer.submit(.init(
+            revision: 1,
+            patch: .init(showsCalorieEstimates: true)
+        ))
+        await store.waitUntilDelayedWriteStarts()
+        await writer.submit(.init(
+            revision: 2,
+            patch: .init(keepsScreenAwake: true)
+        ))
+        await store.releaseDelayedWrite()
+        await writer.flush()
+
+        let persisted = await store.currentDraft()
+        let committedRevisions = await commits.revisions()
+        let effectCounts = await commits.calorieEffectCounts()
+        XCTAssertTrue(persisted.showsCalorieEstimates)
+        XCTAssertTrue(persisted.keepsScreenAwake)
+        XCTAssertEqual(committedRevisions, [2])
+        XCTAssertEqual(effectCounts.historyBroadcasts, 1)
+        XCTAssertEqual(effectCounts.backfillSchedules, 1)
     }
 
     func testRapidFalseTrueFalseEndsFalse() async throws {
@@ -148,6 +235,8 @@ private actor SettingsTestStore {
     private var draft: UserSettingsDraft
     private let delayedRevision: UInt64?
     private var delayedContinuation: CheckedContinuation<Void, Never>?
+    private var delayedStartContinuations: [CheckedContinuation<Void, Never>] = []
+    private var delayedWriteDidStart = false
     private var delayWasReleased = false
 
     init(draft: UserSettingsDraft, delayedRevision: UInt64? = nil) {
@@ -157,12 +246,22 @@ private actor SettingsTestStore {
 
     func persist(_ write: RevisionedSettingsWrite) async throws -> UserSettingsDraft {
         if write.revision == delayedRevision, !delayWasReleased {
+            delayedWriteDidStart = true
+            delayedStartContinuations.forEach { $0.resume() }
+            delayedStartContinuations.removeAll()
             await withCheckedContinuation { continuation in
                 delayedContinuation = continuation
             }
         }
         draft.apply(write.patch)
         return draft
+    }
+
+    func waitUntilDelayedWriteStarts() async {
+        guard !delayedWriteDidStart else { return }
+        await withCheckedContinuation { continuation in
+            delayedStartContinuations.append(continuation)
+        }
     }
 
     func releaseDelayedWrite() {
@@ -179,6 +278,8 @@ private actor SettingsTestStore {
 private actor SettingsCommitRecorder {
     private var committedRevisions: [UInt64] = []
     private var committedCaloriePreferences: [Bool] = []
+    private var historyBroadcastCount = 0
+    private var backfillScheduleCount = 0
 
     func record(
         revision: UInt64,
@@ -189,6 +290,10 @@ private actor SettingsCommitRecorder {
         committedRevisions.append(revision)
         if let showsCalorieEstimates = write.patch.showsCalorieEstimates {
             committedCaloriePreferences.append(showsCalorieEstimates)
+            historyBroadcastCount += 1
+            if showsCalorieEstimates {
+                backfillScheduleCount += 1
+            }
         }
     }
 
@@ -198,5 +303,9 @@ private actor SettingsCommitRecorder {
 
     func caloriePreferences() -> [Bool] {
         committedCaloriePreferences
+    }
+
+    func calorieEffectCounts() -> (historyBroadcasts: Int, backfillSchedules: Int) {
+        (historyBroadcastCount, backfillScheduleCount)
     }
 }
